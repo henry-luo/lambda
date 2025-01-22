@@ -28,18 +28,11 @@ OBJ = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRC))
 
 all: run
 
-# $(TARGET): transpile.o string_buffer.o
-# 	$(CC) -o $(TARGET) transpile.o string_buffer.o  -L. -lz
-
-# transpile.o: transpile.c
-# 	$(CC) $(CFLAGS) $(OBJFLAGS) -c transpile.c -o transpile.o
-
-# string_buffer.o: lib/string_buffer/string_buffer.c
-# 	$(CC) $(CFLAGS) $(OBJFLAGS) -c lib/string_buffer/string_buffer.c -o string_buffer.o
-
-# Linking target
-$(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $(OBJ) -L. -lz
+transpile: src/transpile.c
+	$(CC) $(CFLAGS) -I lambda-parser/tree-sitter/lib/include -o transpile src/transpile.c \
+		lambda-parser/lambda-parser.c lambda-parser/tree-sitter-lambda/src/parser.c \
+		lambda-parser/tree-sitter/libtree-sitter.a \
+		lib/string_buffer/string_buffer.c -L. -lz
 
 # Compile each .c file to .o
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
