@@ -2,3 +2,6 @@
 .DS_Store
 *.o
 transpile
+*.a
+*.dylib
+*.pc
