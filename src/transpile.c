@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "lib/string_buffer/string_buffer.h"
+#include "../lib/string_buffer/string_buffer.h"
 
 int main(void) {
     StrBuf* myBuff = strbuf_new(100);
