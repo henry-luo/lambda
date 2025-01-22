@@ -5,16 +5,16 @@
 #include <stdio.h>
 #include <tree_sitter/api.h>
 
-// Declare the `tree_sitter_json` function, which is
-// implemented by the `tree-sitter-json` library.
-const TSLanguage *tree_sitter_lambda_script(void);
+// Declare the `tree_sitter_lambda` function, which is
+// implemented by the `tree-sitter-lambda` library.
+const TSLanguage *tree_sitter_lambda(void);
 
 int main() {
   // Create a parser.
   TSParser *parser = ts_parser_new();
 
   // Set the parser's language (JSON in this case).
-  ts_parser_set_language(parser, tree_sitter_lambda_script());
+  ts_parser_set_language(parser, tree_sitter_lambda());
 
   // Build a syntax tree based on source code stored in a string.
   const char *source_code = "[1, true, null]";

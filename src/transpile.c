@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <string.h>
+#include <tree_sitter/api.h>
 #include "../lib/string_buffer/string_buffer.h"
 
 int main(void) {

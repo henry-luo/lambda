@@ -18,7 +18,7 @@ function commaSep(rule) {
 }
 
 module.exports = grammar({
-  name: "lambda_script",
+  name: "lambda",
 
   extras: $ => [
     /\s/,
