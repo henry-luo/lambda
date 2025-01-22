@@ -1,4 +1,4 @@
-CC = clang
+CC = zig cc
 
 PLATFORM := $(shell uname)
 COMPILER := $(shell ($(CC) -v 2>&1) | tr A-Z a-z )
@@ -18,7 +18,7 @@ CFLAGS = -Wall -Wextra -pedantic -std=c99 $(OPT)
 OBJFLAGS = -fPIC
 TARGET = transpile
 
-all: $(TARGET)
+all: run
 
 $(TARGET): transpile.o string_buffer.o
 	$(CC) -o $(TARGET) transpile.o string_buffer.o  -L. -lz
@@ -26,8 +26,11 @@ $(TARGET): transpile.o string_buffer.o
 transpile.o: transpile.c lib/string_buffer/string_buffer.h
 	$(CC) $(CFLAGS) $(OBJFLAGS) -c transpile.c -o transpile.o
 
-string_buffer.o: lib/string_buffer/string_buffer.c lib/string_buffer/string_buffer.h lib/string_buffer/stream_buffer.h
+string_buffer.o: lib/string_buffer/string_buffer.c
 	$(CC) $(CFLAGS) $(OBJFLAGS) -c lib/string_buffer/string_buffer.c -o string_buffer.o
+
+run: transpile
+	./transpile
 
 clean:
 	rm -rf *.o
