@@ -6,7 +6,7 @@
 #include "../lib/string_buffer/string_buffer.h"
 
 // Function to read and display the content of a text file
- StrBuf* readTextFile(const char *filename) {
+StrBuf* readTextFile(const char *filename) {
     FILE *file = fopen(filename, "r"); // open the file in read mode
     if (file == NULL) { // handle error when file cannot be opened
         perror("Error opening file"); 
@@ -38,32 +38,53 @@ TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 char* lambda_print_tree(TSTree* tree);
 
-// https://www.gnu.org/software/emacs/manual/html_node/elisp/Tree_002dsitter-C-API.html
+typedef struct {
+    TSSymbol ID_IF;
+    const char* source;
+    StrBuf* code_buf;
+} Transpiler;
 
-void transpile_fn(StrBuf* codeBuf, TSNode fn_node, const char* source) {
+void transpile_body(Transpiler* transpiler, TSNode body_node) {
+    // get the function name
+    TSSymbol child_symbol = ts_node_symbol(body_node);
+    printf("child symbol: %d\n", child_symbol);
+    if (child_symbol == transpiler->ID_IF) {
+        printf("if statement\n");
+    }
+}
+
+void transpile_fn(Transpiler* transpiler, TSNode fn_node) {
     // get the function name
     TSNode fn_name_node = ts_node_child_by_field_name(fn_node, "name", 4);
-    strbuf_append_str(codeBuf, "void ");
+    strbuf_append_str(transpiler->code_buf, "void ");
     int start_byte = ts_node_start_byte(fn_name_node);
-    strbuf_append_strn(codeBuf, source + start_byte, ts_node_end_byte(fn_name_node) - start_byte);
-    strbuf_append_str(codeBuf, " (){\n");
+    strbuf_append_strn(transpiler->code_buf, transpiler->source + start_byte, 
+        ts_node_end_byte(fn_name_node) - start_byte);
+    strbuf_append_str(transpiler->code_buf, " (){\n");
    
     // get the function body
     TSNode fn_body_node = ts_node_named_child(fn_node, 1);
     printf("body %s\n", ts_node_type(fn_body_node));
+    transpile_body(transpiler, fn_body_node);
     
-    strbuf_append_str(codeBuf, "}\n");
+    strbuf_append_str(transpiler->code_buf, "}\n");
 }
 
 int main(void) {
+    Transpiler transpiler;
+
     printf("Starting transpiler...\n");
 
     // Create a parser.
-    TSParser* parser = lambda_parser();
-
+    const TSParser* parser = lambda_parser();
+    if (parser == NULL) {
+        return 1;
+    }
     StrBuf* buf = readTextFile("hello-world.ls");
-    const char* source_code = buf->b;
-    TSTree* tree = lambda_parse_source(parser, source_code);
+    transpiler.source = buf->b;
+    TSTree* tree = lambda_parse_source(parser, transpiler.source);
+    transpiler.ID_IF = ts_language_symbol_for_name(ts_tree_language(tree), "if_expr", 7, true);
+    printf("ID_IF: %d\n", transpiler.ID_IF);
 
     // Print the syntax tree as an S-expression.
     char *string = lambda_print_tree(tree);
@@ -71,7 +92,7 @@ int main(void) {
     free(string);
 
     // transpile the AST 
-    StrBuf* codeBuf = strbuf_new(1024);
+    transpiler.code_buf = strbuf_new(1024);
     TSNode root_node = ts_tree_root_node(tree);
     assert(strcmp(ts_node_type(root_node), "document") == 0);
     TSNode main_node = ts_node_named_child(root_node, 0);
@@ -79,13 +100,14 @@ int main(void) {
     printf("main node: %s\n", main_node_type);
 
     if (strcmp(main_node_type, "fn")) {
-        transpile_fn(codeBuf, main_node, source_code);
+        transpile_fn(&transpiler, main_node);
     }
 
-    printf("transpiled code: %s\n", codeBuf->b);
+    printf("transpiled code: %s\n", transpiler.code_buf->b);
 
     // clean up
-    strbuf_free(codeBuf);
+    strbuf_free(buf);
+    strbuf_free(transpiler.code_buf);
     ts_tree_delete(tree);
     ts_parser_delete(parser);
     return 0;
