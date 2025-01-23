@@ -51,7 +51,7 @@ module.exports = grammar({
       'logical_or',
       'ternary',
       // $.sequence_expression,
-      // $.arrow_function,
+      $.let_expr,
     ],
     // ['assign', $.primary_expression],
     // ['member', 'template_call', 'new', 'call', $.expression],
@@ -63,7 +63,7 @@ module.exports = grammar({
     // [$.lexical_declaration, $.primary_expression],
   ],  
 
-  // conflicts: $ => [
+  conflicts: $ => [
   //   [$.primary_expression, $._property_name],
   //   [$.primary_expression, $._property_name, $.arrow_function],
   //   [$.primary_expression, $.arrow_function],
@@ -80,10 +80,10 @@ module.exports = grammar({
   //   [$.computed_property_name, $.array],
   //   [$.binary_expression, $._initializer],
   //   [$.class_static_block, $._property_name],
-  // ],
+  ],
 
   rules: {
-    document: $ => repeat($._value),
+    document: $ => repeat(choice($._value, $.fn_definition)),
 
     _value: $ => choice(
       $.object,
@@ -184,17 +184,8 @@ module.exports = grammar({
 
     // Expressions
     parenthesized_expression: $ => seq(
-      '(',
-      $.expression, // $._expressions,
-      ')',
+      '(', $.expression, ')',
     ),
-
-    // _expressions: $ => choice(
-    //   $.expression,
-    //   $.sequence_expression,
-    // ),
-
-    // sequence_expression: $ => prec.right(commaSep1($.expression)),
 
     expression: $ => choice(
       $.primary_expression,
@@ -208,6 +199,7 @@ module.exports = grammar({
       // $.update_expression,
       // $.new_expression,
       // $.yield_expression,
+      $.let_expr,
     ),
 
     primary_expression: $ => choice(
@@ -318,6 +310,14 @@ module.exports = grammar({
     //   const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
     //   return token(seq('#', alpha, repeat(alphanumeric)));
     // },
+
+    fn_definition: $ => seq(
+      'fn', $.identifier, '(', ')', '{', $.expression, '}',
+    ),
+
+    let_expr: $ => seq(
+      'let', '(', $.identifier, '=', $.expression, ')', $.expression,
+    ),
   },
 });
 

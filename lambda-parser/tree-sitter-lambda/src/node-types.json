@@ -164,6 +164,10 @@
         {
           "type": "_value",
           "named": true
+        },
+        {
+          "type": "fn_definition",
+          "named": true
         }
       ]
     }
@@ -181,11 +185,53 @@
           "named": true
         },
         {
+          "type": "let_expr",
+          "named": true
+        },
+        {
           "type": "primary_expression",
           "named": true
         },
         {
           "type": "unary_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "fn_definition",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "let_expr",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "expression",
+          "named": true
+        },
+        {
+          "type": "identifier",
           "named": true
         }
       ]
@@ -454,6 +500,10 @@
     "named": false
   },
   {
+    "type": "=",
+    "named": false
+  },
+  {
     "type": "==",
     "named": false
   },
@@ -490,11 +540,19 @@
     "named": true
   },
   {
+    "type": "fn",
+    "named": false
+  },
+  {
     "type": "identifier",
     "named": true
   },
   {
     "type": "in",
+    "named": false
+  },
+  {
+    "type": "let",
     "named": false
   },
   {

@@ -33,12 +33,3 @@ char* lambda_print_tree(TSTree* tree) {
   return string;
 }
 
-/* compile:
- clang                                   \
-   -I tree-sitter/lib/include            \
-   test-lambda-parser.c                  \
-   tree-sitter-lambda/src/parser.c       \
-   tree-sitter/libtree-sitter.a          \
-   -o test-lambda-parser
- ./test-lambda-parser
-*/
