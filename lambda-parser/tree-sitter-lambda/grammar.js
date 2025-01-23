@@ -60,34 +60,9 @@ module.exports = grammar({
       $.let_expr,
       $.if_expr,
     ],
-    // ['assign', $.primary_expression],
-    // ['member', 'template_call', 'new', 'call', $.expression],
-    // ['declaration', 'literal'],
-    // [$.primary_expression, $.statement_block, 'object'],
-    // [$.meta_property, $.import],
-    // [$.import_statement, $.import],
-    // [$.export_statement, $.primary_expression],
-    // [$.lexical_declaration, $.primary_expression],
   ],  
 
-  conflicts: $ => [
-  //   [$.primary_expression, $._property_name],
-  //   [$.primary_expression, $._property_name, $.arrow_function],
-  //   [$.primary_expression, $.arrow_function],
-  //   [$.primary_expression, $.method_definition],
-  //   [$.primary_expression, $.rest_pattern],
-  //   [$.primary_expression, $.pattern],
-  //   [$.primary_expression, $._for_header],
-  //   [$.variable_declarator, $._for_header],
-  //   [$.array, $.array_pattern],
-  //   [$.object, $.object_pattern],
-  //   [$.assignment_expression, $.pattern],
-  //   [$.assignment_expression, $.object_assignment_pattern],
-  //   [$.labeled_statement, $._property_name],
-  //   [$.computed_property_name, $.array],
-  //   [$.binary_expression, $._initializer],
-  //   [$.class_static_block, $._property_name],
-  ],
+  // conflicts: $ => [],
 
   rules: {
     document: $ => repeat(choice($._value, $.fn_definition)),
@@ -135,11 +110,11 @@ module.exports = grammar({
       $.escape_sequence,
     )),
 
-    // string can span multiple lines
+    // no empty string, and string can span multiple lines
     string_content: _ => token.immediate(prec(1, /[^\\"]+/)),
 
+    // no empty symbol under Mark/Lambda
     symbol: $ => seq("'", $._symbol_content, "'"),
-    // seq("'", "'"), - no empty symbol under Mark/Lambda
 
     _symbol_content: $ => repeat1(choice(
       $.symbol_content,
