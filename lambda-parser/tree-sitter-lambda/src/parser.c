@@ -11,9 +11,9 @@
 #define ALIAS_COUNT 0
 #define TOKEN_COUNT 42
 #define EXTERNAL_TOKEN_COUNT 0
-#define FIELD_COUNT 9
+#define FIELD_COUNT 11
 #define MAX_ALIAS_SEQUENCE_LENGTH 7
-#define PRODUCTION_ID_COUNT 6
+#define PRODUCTION_ID_COUNT 7
 
 enum ts_symbol_identifiers {
   sym_identifier = 1,
@@ -457,23 +457,27 @@ static const TSSymbolMetadata ts_symbol_metadata[] = {
 enum ts_field_identifiers {
   field_alternative = 1,
   field_argument = 2,
-  field_condition = 3,
-  field_consequence = 4,
-  field_key = 5,
-  field_left = 6,
-  field_operator = 7,
-  field_right = 8,
-  field_value = 9,
+  field_body = 3,
+  field_condition = 4,
+  field_consequence = 5,
+  field_key = 6,
+  field_left = 7,
+  field_name = 8,
+  field_operator = 9,
+  field_right = 10,
+  field_value = 11,
 };
 
 static const char * const ts_field_names[] = {
   [0] = NULL,
   [field_alternative] = "alternative",
   [field_argument] = "argument",
+  [field_body] = "body",
   [field_condition] = "condition",
   [field_consequence] = "consequence",
   [field_key] = "key",
   [field_left] = "left",
+  [field_name] = "name",
   [field_operator] = "operator",
   [field_right] = "right",
   [field_value] = "value",
@@ -485,6 +489,7 @@ static const TSFieldMapSlice ts_field_map_slices[PRODUCTION_ID_COUNT] = {
   [3] = {.index = 4, .length = 2},
   [4] = {.index = 6, .length = 3},
   [5] = {.index = 9, .length = 4},
+  [6] = {.index = 13, .length = 2},
 };
 
 static const TSFieldMapEntry ts_field_map_entries[] = {
@@ -506,6 +511,9 @@ static const TSFieldMapEntry ts_field_map_entries[] = {
     {field_alternative, 4},
     {field_condition, 1},
     {field_consequence, 2},
+  [13] =
+    {field_body, 5},
+    {field_name, 1},
 };
 
 static const TSSymbol ts_alias_sequences[PRODUCTION_ID_COUNT][MAX_ALIAS_SEQUENCE_LENGTH] = {
@@ -3721,7 +3729,7 @@ static const TSParseActionEntry ts_parse_actions[] = {
   [161] = {.entry = {.count = 1, .reusable = true}}, REDUCE(sym_document, 1, 0, 0),
   [163] = {.entry = {.count = 1, .reusable = true}}, SHIFT(49),
   [165] = {.entry = {.count = 1, .reusable = true}}, SHIFT(86),
-  [167] = {.entry = {.count = 1, .reusable = true}}, REDUCE(sym_fn_definition, 7, 0, 0),
+  [167] = {.entry = {.count = 1, .reusable = true}}, REDUCE(sym_fn_definition, 7, 0, 6),
   [169] = {.entry = {.count = 1, .reusable = true}}, SHIFT(90),
   [171] = {.entry = {.count = 1, .reusable = true}}, SHIFT(33),
   [173] = {.entry = {.count = 1, .reusable = true}}, SHIFT(55),

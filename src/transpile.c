@@ -38,6 +38,23 @@ TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 char* lambda_print_tree(TSTree* tree);
 
+// https://www.gnu.org/software/emacs/manual/html_node/elisp/Tree_002dsitter-C-API.html
+
+void transpile_fn(StrBuf* codeBuf, TSNode fn_node, const char* source) {
+    // get the function name
+    TSNode fn_name_node = ts_node_child_by_field_name(fn_node, "name", 4);
+    strbuf_append_str(codeBuf, "void ");
+    int start_byte = ts_node_start_byte(fn_name_node);
+    strbuf_append_strn(codeBuf, source + start_byte, ts_node_end_byte(fn_name_node) - start_byte);
+    strbuf_append_str(codeBuf, " (){\n");
+   
+    // get the function body
+    TSNode fn_body_node = ts_node_named_child(fn_node, 1);
+    printf("body %s\n", ts_node_type(fn_body_node));
+    
+    strbuf_append_str(codeBuf, "}\n");
+}
+
 int main(void) {
     printf("Starting transpiler...\n");
 
@@ -51,22 +68,26 @@ int main(void) {
     // Print the syntax tree as an S-expression.
     char *string = lambda_print_tree(tree);
     printf("Syntax tree: %s\n", string);
+    free(string);
 
     // transpile the AST 
+    StrBuf* codeBuf = strbuf_new(1024);
     TSNode root_node = ts_tree_root_node(tree);
     assert(strcmp(ts_node_type(root_node), "document") == 0);
-    // TSNode array_node = ts_node_named_child(root_node, 0);
+    TSNode main_node = ts_node_named_child(root_node, 0);
+    char* main_node_type = ts_node_type(main_node);
+    printf("main node: %s\n", main_node_type);
 
-    // StrBuf* myBuff = strbuf_new(100);
-    // strbuf_append_str(myBuff, "Hello, ");
-    // strbuf_sprintf(myBuff, "%s %i", "world", 42);
-    // printf("%s\n", myBuff->b);
+    if (strcmp(main_node_type, "fn")) {
+        transpile_fn(codeBuf, main_node, source_code);
+    }
 
-    // Free all of the heap-allocated memory.
-    free(string);
+    printf("transpiled code: %s\n", codeBuf->b);
+
+    // clean up
+    strbuf_free(codeBuf);
     ts_tree_delete(tree);
     ts_parser_delete(parser);
-
     return 0;
 }
 

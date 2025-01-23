@@ -255,7 +255,9 @@ module.exports = grammar({
     },  
 
     fn_definition: $ => seq(
-      'fn', $.identifier, '(', ')', '{', $.expression, '}',
+      'fn', 
+      field('name', $.identifier), '(', ')', '{', 
+      field('body', $.expression), '}',
     ),
 
     let_expr: $ => seq(
