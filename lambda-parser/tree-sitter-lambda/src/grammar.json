@@ -1,6 +1,7 @@
 {
   "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
   "name": "lambda",
+  "word": "identifier",
   "rules": {
     "document": {
       "type": "REPEAT",
@@ -28,10 +29,6 @@
         {
           "type": "SYMBOL",
           "name": "array"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "range"
         },
         {
           "type": "SYMBOL",
@@ -643,6 +640,10 @@
         {
           "type": "SYMBOL",
           "name": "let_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "if_expr"
         }
       ]
     },
@@ -655,7 +656,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "_identifier"
+          "name": "identifier"
         },
         {
           "type": "SYMBOL",
@@ -1262,15 +1263,6 @@
         ]
       }
     },
-    "_identifier": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "identifier"
-        }
-      ]
-    },
     "identifier": {
       "type": "TOKEN",
       "content": {
@@ -1289,35 +1281,6 @@
           }
         ]
       }
-    },
-    "_reserved_identifier": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "get"
-        },
-        {
-          "type": "STRING",
-          "value": "set"
-        },
-        {
-          "type": "STRING",
-          "value": "async"
-        },
-        {
-          "type": "STRING",
-          "value": "static"
-        },
-        {
-          "type": "STRING",
-          "value": "export"
-        },
-        {
-          "type": "STRING",
-          "value": "let"
-        }
-      ]
     },
     "fn_definition": {
       "type": "SEQ",
@@ -1384,6 +1347,60 @@
           "name": "expression"
         }
       ]
+    },
+    "if_expr": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "if"
+          },
+          {
+            "type": "FIELD",
+            "name": "condition",
+            "content": {
+              "type": "SYMBOL",
+              "name": "parenthesized_expression"
+            }
+          },
+          {
+            "type": "FIELD",
+            "name": "consequence",
+            "content": {
+              "type": "SYMBOL",
+              "name": "expression"
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "alternative",
+                "content": {
+                  "type": "SEQ",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": "else"
+                    },
+                    {
+                      "type": "SYMBOL",
+                      "name": "expression"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
     }
   },
   "extras": [
@@ -1470,12 +1487,18 @@
       {
         "type": "SYMBOL",
         "name": "let_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "if_expr"
       }
     ]
   ],
   "externals": [],
-  "inline": [],
-  "supertypes": [
+  "inline": [
     "_value"
+  ],
+  "supertypes": [
+    "expression"
   ]
 }

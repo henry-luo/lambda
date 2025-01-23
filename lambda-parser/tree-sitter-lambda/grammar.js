@@ -25,8 +25,14 @@ module.exports = grammar({
     $.comment,
   ],
 
-  //  an array of hidden rule names
+  word: $ => $.identifier,
+
+  // an array of hidden rule names
   supertypes: $ => [
+    $.expression,
+  ],
+
+  inline: $ => [
     $._value,
   ],
 
@@ -52,6 +58,7 @@ module.exports = grammar({
       'ternary',
       // $.sequence_expression,
       $.let_expr,
+      $.if_expr,
     ],
     // ['assign', $.primary_expression],
     // ['member', 'template_call', 'new', 'call', $.expression],
@@ -88,7 +95,7 @@ module.exports = grammar({
     _value: $ => choice(
       $.object,
       $.array,
-      $.range,
+      // $.range,
       $.number,
       $.string,
       $.symbol,      
@@ -200,13 +207,14 @@ module.exports = grammar({
       // $.new_expression,
       // $.yield_expression,
       $.let_expr,
+      $.if_expr,
     ),
 
     primary_expression: $ => choice(
       // $.subscript_expression,
       // $.member_expression,
       $.parenthesized_expression,
-      $._identifier,
+      $.identifier,
       // alias($._reserved_identifier, $.identifier),
       // $.this,
       // $.super,
@@ -226,32 +234,12 @@ module.exports = grammar({
       // $.class,
       // $.meta_property,
       // $.call_expression,
-    ),    
-
-    // member_expression: $ => prec('member', seq(
-    //   field('object', choice($.expression, $.primary_expression, $.import)),
-    //   choice('.', field('optional_chain', $.optional_chain)),
-    //   field('property', choice(
-    //     $.private_property_identifier,
-    //     alias($.identifier, $.property_identifier))),
-    // )),
-
-    // subscript_expression: $ => prec.right('member', seq(
-    //   field('object', choice($.expression, $.primary_expression)),
-    //   // optional(field('optional_chain', $.optional_chain)),
-    //   '[', field('index', $._expressions), ']',
-    // )),    
+    ),
 
     binary_expression: $ => choice(
       ...[
         ['and', 'logical_and'],
         ['or', 'logical_or'],
-        // ['>>', 'binary_shift'],
-        // ['>>>', 'binary_shift'],
-        // ['<<', 'binary_shift'],
-        // ['&', 'bitwise_and'],
-        // ['^', 'bitwise_xor'],
-        // ['|', 'bitwise_or'],
         ['+', 'binary_plus'],
         ['-', 'binary_plus'],
         ['*', 'binary_times'],
@@ -282,34 +270,14 @@ module.exports = grammar({
     unary_expression: $ => prec.left('unary_void', seq(
       field('operator', choice('not', '-', '+')), // 'typeof', 'void', 'delete', '~' bitwise_not
       field('argument', $.expression),
-    )),    
-
-    _identifier: $ => choice(
-      // $.undefined,
-      $.identifier,
-    ),
+    )),
 
     identifier: _ => {
       // copied from JS grammar
       const alpha = /[^\x00-\x1F\s\p{Zs}0-9:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       return token(seq(alpha, repeat(alphanumeric)));
-    },
-
-    _reserved_identifier: _ => choice(
-      'get',
-      'set',
-      'async',
-      'static',
-      'export',
-      'let',
-    ),    
-
-    // private_property_identifier: _ => {
-    //   const alpha = /[^\x00-\x1F\s\p{Zs}0-9:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
-    //   const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
-    //   return token(seq('#', alpha, repeat(alphanumeric)));
-    // },
+    },  
 
     fn_definition: $ => seq(
       'fn', $.identifier, '(', ')', '{', $.expression, '}',
@@ -318,6 +286,13 @@ module.exports = grammar({
     let_expr: $ => seq(
       'let', '(', $.identifier, '=', $.expression, ')', $.expression,
     ),
+
+    if_expr: $ => prec.right(seq(
+      'if', field('condition', $.parenthesized_expression),
+      field('consequence', $.expression),
+      optional(field('alternative', seq('else', $.expression))),
+    )),
+
   },
 });
 

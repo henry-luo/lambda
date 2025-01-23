@@ -43,10 +43,16 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
-run: transpile
+run:
 	./transpile
 
+generate:
+	cd lambda-parser/tree-sitter-lambda && tree-sitter generate
+
+build: generate clean transpile
+	echo 'done'
+
 clean:
-	rm -rf $(OBJ_DIR) $(TARGET)
+	rm $(TARGET)
 
 .PHONY: all clean

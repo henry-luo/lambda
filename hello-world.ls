@@ -1,3 +1,4 @@
 fn main() {
-    let (a = 10 + 5) a - 3
+    if (a > 123) 'ok' else
+        let (a = 10 + 5) a - 3
 }
