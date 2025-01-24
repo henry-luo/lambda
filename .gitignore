@@ -7,3 +7,5 @@ transpile
 *.pc
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
+hello
+hello-world.c

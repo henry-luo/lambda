@@ -1,4 +1,5 @@
 fn main() {
-    if (a > 123) 'ok' else
-        let (a = 10 + 5) a - 3
+    let (a = 10 + 5)
+        if (a > 12) "great" 
+        else "not great"
 }

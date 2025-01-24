@@ -605,7 +605,7 @@
         ]
       }
     },
-    "parenthesized_expression": {
+    "_parenthesized_expression": {
       "type": "SEQ",
       "members": [
         {
@@ -627,15 +627,15 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "primary_expression"
+          "name": "primary_expr"
         },
         {
           "type": "SYMBOL",
-          "name": "unary_expression"
+          "name": "unary_expr"
         },
         {
           "type": "SYMBOL",
-          "name": "binary_expression"
+          "name": "binary_expr"
         },
         {
           "type": "SYMBOL",
@@ -647,12 +647,12 @@
         }
       ]
     },
-    "primary_expression": {
+    "primary_expr": {
       "type": "CHOICE",
       "members": [
         {
           "type": "SYMBOL",
-          "name": "parenthesized_expression"
+          "name": "_parenthesized_expression"
         },
         {
           "type": "SYMBOL",
@@ -692,7 +692,7 @@
         }
       ]
     },
-    "binary_expression": {
+    "binary_expr": {
       "type": "CHOICE",
       "members": [
         {
@@ -1225,7 +1225,7 @@
         }
       ]
     },
-    "unary_expression": {
+    "unary_expr": {
       "type": "PREC_LEFT",
       "value": "unary_void",
       "content": {
@@ -1323,6 +1323,23 @@
         }
       ]
     },
+    "assignment_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "SYMBOL",
+          "name": "expression"
+        }
+      ]
+    },
     "let_expr": {
       "type": "SEQ",
       "members": [
@@ -1335,24 +1352,24 @@
           "value": "("
         },
         {
-          "type": "SYMBOL",
-          "name": "identifier"
-        },
-        {
-          "type": "STRING",
-          "value": "="
-        },
-        {
-          "type": "SYMBOL",
-          "name": "expression"
+          "type": "FIELD",
+          "name": "cond",
+          "content": {
+            "type": "SYMBOL",
+            "name": "assignment_expr"
+          }
         },
         {
           "type": "STRING",
           "value": ")"
         },
         {
-          "type": "SYMBOL",
-          "name": "expression"
+          "type": "FIELD",
+          "name": "then",
+          "content": {
+            "type": "SYMBOL",
+            "name": "expression"
+          }
         }
       ]
     },
@@ -1367,16 +1384,24 @@
             "value": "if"
           },
           {
-            "type": "FIELD",
-            "name": "condition",
-            "content": {
-              "type": "SYMBOL",
-              "name": "parenthesized_expression"
-            }
+            "type": "STRING",
+            "value": "("
           },
           {
             "type": "FIELD",
-            "name": "consequence",
+            "name": "cond",
+            "content": {
+              "type": "SYMBOL",
+              "name": "expression"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": ")"
+          },
+          {
+            "type": "FIELD",
+            "name": "then",
             "content": {
               "type": "SYMBOL",
               "name": "expression"
@@ -1386,21 +1411,21 @@
             "type": "CHOICE",
             "members": [
               {
-                "type": "FIELD",
-                "name": "alternative",
-                "content": {
-                  "type": "SEQ",
-                  "members": [
-                    {
-                      "type": "STRING",
-                      "value": "else"
-                    },
-                    {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "else"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "else",
+                    "content": {
                       "type": "SYMBOL",
                       "name": "expression"
                     }
-                  ]
-                }
+                  }
+                ]
               },
               {
                 "type": "BLANK"
@@ -1504,7 +1529,8 @@
   ],
   "externals": [],
   "inline": [
-    "_value"
+    "_value",
+    "_parenthesized_expression"
   ],
   "supertypes": [
     "expression"

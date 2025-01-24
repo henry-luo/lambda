@@ -34,6 +34,7 @@ module.exports = grammar({
 
   inline: $ => [
     $._value,
+    $._parenthesized_expression,
   ],
 
   precedences: $ => [
@@ -165,18 +166,18 @@ module.exports = grammar({
     )),
 
     // Expressions
-    parenthesized_expression: $ => seq(
+    _parenthesized_expression: $ => seq(
       '(', $.expression, ')',
     ),
 
     expression: $ => choice(
-      $.primary_expression,
+      $.primary_expr,
       // $._jsx_element,
       // $.assignment_expression,
       // $.augmented_assignment_expression,
       // $.await_expression,
-      $.unary_expression,
-      $.binary_expression,
+      $.unary_expr,
+      $.binary_expr,
       // $.ternary_expression,
       // $.update_expression,
       // $.new_expression,
@@ -185,10 +186,10 @@ module.exports = grammar({
       $.if_expr,
     ),
 
-    primary_expression: $ => choice(
+    primary_expr: $ => choice(
       // $.subscript_expression,
       // $.member_expression,
-      $.parenthesized_expression,
+      $._parenthesized_expression,
       $.identifier,
       // alias($._reserved_identifier, $.identifier),
       // $.this,
@@ -211,7 +212,7 @@ module.exports = grammar({
       // $.call_expression,
     ),
 
-    binary_expression: $ => choice(
+    binary_expr: $ => choice(
       ...[
         ['and', 'logical_and'],
         ['or', 'logical_or'],
@@ -242,7 +243,7 @@ module.exports = grammar({
       ),
     ),
 
-    unary_expression: $ => prec.left('unary_void', seq(
+    unary_expr: $ => prec.left('unary_void', seq(
       field('operator', choice('not', '-', '+')), // 'typeof', 'void', 'delete', '~' bitwise_not
       field('argument', $.expression),
     )),
@@ -260,14 +261,19 @@ module.exports = grammar({
       field('body', $.expression), '}',
     ),
 
+    assignment_expr: $ => seq(
+      $.identifier, '=', $.expression,
+    ),
+
     let_expr: $ => seq(
-      'let', '(', $.identifier, '=', $.expression, ')', $.expression,
+      'let', '(', field('cond', $.assignment_expr), ')', 
+      field('then', $.expression),
     ),
 
     if_expr: $ => prec.right(seq(
-      'if', field('condition', $.parenthesized_expression),
-      field('consequence', $.expression),
-      optional(field('alternative', seq('else', $.expression))),
+      'if', '(', field('cond', $.expression), ')',
+      field('then', $.expression),
+      optional(seq('else', field('else', $.expression))),
     )),
 
   },
