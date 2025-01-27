@@ -4,6 +4,10 @@
 #include <lexbor/css/parser.h>
 #include <stdio.h>
 
+int render_init();
+void render_text(const char* text);
+void render_clean_up();
+
 int main(void) {
     // Example HTML source with inline CSS
     const char *html_source = "<html><head><style>h1 { color: red; }</style></head><body><h1>Hello, World!</h1><p>This is a paragraph.</p></body></html>";
@@ -80,6 +84,9 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    printf("Body element found.\n");
+    render_init();
+
     // Iterate over the children of the body element
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(body));
     while (child != NULL) {
@@ -93,7 +100,9 @@ int main(void) {
             // If the element has text content, print it
             lxb_dom_node_t *text_node = lxb_dom_node_first_child(child);
             if (text_node != NULL && text_node->type == LXB_DOM_NODE_TYPE_TEXT) {
-                printf(" Text: %s\n", lxb_dom_interface_text(text_node)->char_data.data.data);
+                const char* text = lxb_dom_interface_text(text_node)->char_data.data.data;
+                printf(" Text: %s\n", text);
+                render_text(text);
             }
         }
 
@@ -103,7 +112,10 @@ int main(void) {
 
     // Clean up and destroy the document
     lxb_html_document_destroy(document);
+    render_clean_up();
     return EXIT_SUCCESS;
 }
 
-// clang -v layout.c -o layout -I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor
+// clang -v layout.c render.c -o layout \
+-I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor \
+-L/opt/homebrew/Cellar/freetype/2.13.3/lib -I/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2 -lfreetype
