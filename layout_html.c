@@ -1,6 +1,4 @@
 #include "layout.h"
-#include <lexbor/html/html.h>
-// #include <lexbor/css/value/res.h> 
 
 /* html tree >> style tree >> view tree */
 
@@ -30,33 +28,37 @@ Style Tree:
 - opt: build an entire style tree; // go with this first
 */
 
-ElementStyle* compute_style(StyleContext* context, lxb_dom_element_t *element) {
-    ElementStyle *style = calloc(1, sizeof(ElementStyle));
+void layout_style_tree(StyleElement* style_root);
+
+StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
+    StyleElement *style = calloc(1, sizeof(StyleElement));
     if (style == NULL) {
         fprintf(stderr, "Failed to allocate memory for style.\n");
         return NULL;
     }
 
     // should check ns as well 
-    if (element->node.local_name == LXB_TAG_H1 || element->node.local_name == LXB_TAG_P) {
-        style->display = LXB_CSS_VALUE_BLOCK;
+    if (element->node.local_name == LXB_TAG_H1 || element->node.local_name == LXB_TAG_P ||
+        element->node.local_name == LXB_TAG_BODY) {
+        style->n.display = LXB_CSS_VALUE_BLOCK;
     }
     else {
-        style->display = LXB_CSS_VALUE_INLINE;
+        style->n.display = LXB_CSS_VALUE_INLINE;
     }
     // Print the display property value
     // printf("display: %s\n", lxb_css_value_data(style->display).data);
 
     // link the elmt style to the style tree
-    style->parent = context->parent;  style->element = element;
+    style->parent = context->parent;  style->n.node = element;
     if (context->prev_node != NULL) { context->prev_node->next = style; }
+    else { context->parent->child = style; }
     
     // compute child style 
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(element));
     printf("child element: %d, %s\n", child->local_name, 
         (const char *)lxb_dom_element_local_name(child, NULL));
     if (child != NULL) {
-        ElementStyle* parent_style = context->parent;
+        StyleElement* parent_style = context->parent;
         context->parent = style;  context->prev_node = NULL;
         do {
             if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
@@ -68,10 +70,11 @@ ElementStyle* compute_style(StyleContext* context, lxb_dom_element_t *element) {
             else if (child->type == LXB_DOM_NODE_TYPE_TEXT) {
                 const char* text = lxb_dom_interface_text(child)->char_data.data.data;
                 printf(" Text: %s\n", text);
-                TextStyle* style = calloc(1, sizeof(TextStyle));
-                style->str = text;  style->node = lxb_dom_interface_text(child);
-                style->parent = context->parent;
-                if (context->prev_node != NULL) { context->prev_node->next = style; }
+                StyleText* style = calloc(1, sizeof(StyleText));
+                style->str = text;  style->n.node = child;
+                style->n.display = RDT_DISPLAY_TEXT;
+                if (context->prev_node) { context->prev_node->next = style; }
+                else { context->parent->child = style; }
                 context->prev_node = style;
             }
             child = lxb_dom_node_next(child);
@@ -85,9 +88,12 @@ ElementStyle* compute_style(StyleContext* context, lxb_dom_element_t *element) {
 void layout_html_doc(lxb_html_document_t *doc) {
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
     if (body != NULL) {
-        StyleContext* context = calloc(1, sizeof(StyleContext));
-        context->parent = body;
-        compute_style(context, body);
+        // html elmt tree >> computed style tree
+        StyleContext context;
+        context.parent = body;  context.prev_node = NULL;
+        StyleElement* style_tree = compute_style(&context, body);
+        // computed style tree >> layout view tree
+        layout_style_tree(style_tree);
     }
 }
 
@@ -114,5 +120,5 @@ int main(void) {
     layout_html_doc(document);
 }
 
-// zig cc layout_html.c -o layout_html \
+// zig cc layout_html.c layout_style_tree.c -o layout_html \
 -I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor 
