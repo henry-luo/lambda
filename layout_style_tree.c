@@ -44,3 +44,8 @@ View* layout_style_tree(StyleElement* style_root) {
     layout_block(&context, style_root);
     return root_view;
 }
+
+/* todo:
+- print view tree to console;
+- properly layout elements;
+*/
