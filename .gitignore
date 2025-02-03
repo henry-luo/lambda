@@ -12,3 +12,5 @@ hello-world.c
 output.pgm
 window
 sdl_app
+layout_html
+sample_lexbor.c
