@@ -14,12 +14,12 @@ typedef struct StyleNode {
 } StyleNode;
 
 typedef struct StyleText { 
-    StyleNode n; // extends StyleNode
+    StyleNode; // extends StyleNode
     char* str;  // text content
 } StyleText;
 
 typedef struct StyleElement {
-    StyleNode n; // extends StyleNode
+    StyleNode; // extends StyleNode
     // style tree pointers
     struct StyleNode* parent;
     struct StyleElement* child; // first child
@@ -55,14 +55,15 @@ typedef struct View {
     StyleNode* style;
 } View;
 typedef struct {
-    View v; // extends View
+    View; // extends View
     int x, y, width, height;  // bounds for the text, x, y relative to the parent block
 } ViewText;
 
 typedef struct {
-    View v; // extends View
-    struct ViewBlock* parent;  // parent block
+    View; // extends View
     int x, y, width, height;  // x, y relative to the parent block
+    struct ViewBlock* parent;  // parent block
+    struct View* child;  // first child view
 } ViewBlock;
 
 typedef struct {
@@ -80,4 +81,5 @@ typedef struct {
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     ViewBlock* parent;
+    View* prev_view;
 } LayoutContext;

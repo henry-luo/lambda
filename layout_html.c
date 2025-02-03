@@ -40,16 +40,16 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     // should check ns as well 
     if (element->node.local_name == LXB_TAG_H1 || element->node.local_name == LXB_TAG_P ||
         element->node.local_name == LXB_TAG_BODY) {
-        style->n.display = LXB_CSS_VALUE_BLOCK;
+        style->display = LXB_CSS_VALUE_BLOCK;
     }
     else {
-        style->n.display = LXB_CSS_VALUE_INLINE;
+        style->display = LXB_CSS_VALUE_INLINE;
     }
     // Print the display property value
     // printf("display: %s\n", lxb_css_value_data(style->display).data);
 
     // link the elmt style to the style tree
-    style->parent = context->parent;  style->n.node = element;
+    style->parent = context->parent;  style->node = element;
     if (context->prev_node != NULL) { context->prev_node->next = style; }
     else { context->parent->child = style; }
     
@@ -57,7 +57,7 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(element));
     printf("child element: %d, %s\n", child->local_name, 
         (const char *)lxb_dom_element_local_name(child, NULL));
-    if (child != NULL) {
+    if (child) {
         StyleElement* parent_style = context->parent;
         context->parent = style;  context->prev_node = NULL;
         do {
@@ -71,14 +71,14 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
                 const char* text = lxb_dom_interface_text(child)->char_data.data.data;
                 printf(" Text: %s\n", text);
                 StyleText* style = calloc(1, sizeof(StyleText));
-                style->str = text;  style->n.node = child;
-                style->n.display = RDT_DISPLAY_TEXT;
+                style->str = text;  style->node = child;
+                style->display = RDT_DISPLAY_TEXT;
                 if (context->prev_node) { context->prev_node->next = style; }
                 else { context->parent->child = style; }
                 context->prev_node = style;
             }
             child = lxb_dom_node_next(child);
-        } while (child != NULL);
+        } while (child);
         context->parent = parent_style;
     }
     context->prev_node = style;
@@ -87,7 +87,7 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
 
 void layout_html_doc(lxb_html_document_t *doc) {
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
-    if (body != NULL) {
+    if (body) {
         // html elmt tree >> computed style tree
         StyleContext context;
         context.parent = body;  context.prev_node = NULL;
@@ -104,7 +104,7 @@ int main(void) {
 
     // Create the HTML document object
     lxb_html_document_t *document = lxb_html_document_create();
-    if (document == NULL) {
+    if (!document) {
         fprintf(stderr, "Failed to create HTML document.\n");
         return EXIT_FAILURE;
     }
@@ -120,5 +120,9 @@ int main(void) {
     layout_html_doc(document);
 }
 
-// zig cc layout_html.c layout_style_tree.c -o layout_html \
+/*
+- anonymous structs are a Microsoft extension [-Wmicrosoft-anon-tag], and needs flag -fms-extensions to compile
+
+zig cc -fms-extensions layout_html.c layout_style_tree.c -o layout_html \
 -I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor 
+*/
