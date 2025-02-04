@@ -1,7 +1,5 @@
 #include "layout.h"
 
-/* html tree >> style tree >> view tree */
-
 /*
 1. loop through html tree >> body >> children - map to style node, and construct style tree;
     define style struct: BlockStyle; (style def: html elmt, html attr, inline style, CSS style)
@@ -10,22 +8,6 @@
 2. tag div >> block layout, span >> inline layout;
 3. inline: FreeType to get text metrics >> emit view node and construct view tree;
 4. render view tree;
-
-Reuse Lexbor HTML tag enum, attr enum, CSS property enum, and CSS value enum;
-https://github.com/lexbor/lexbor/blob/master/source/lexbor/dom/interfaces/attr_const.h
-
-https://www.ibm.com/docs/en/i/7.3?topic=extensions-standard-c-library-functions-table-by-name
-
-Naming convention:
-- struct, type names: CamelCase; // avoids clashing with C types;
-- function and struct field names: snake_case;
-- common types: String, ...;
-- common function prefix: mrk_, lmd_, rdt_; // mark, lambda, radiant
-
-Style Tree:
-- opt: extend elmt tree to include computed style;
-- opt: build a table that maps elmt to computed style;
-- opt: build an entire style tree; // go with this first
 */
 
 void layout_style_tree(StyleElement* style_root);
@@ -86,10 +68,10 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
 }
 
 void layout_html_doc(lxb_html_document_t *doc) {
+    StyleContext context;
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
     if (body) {
         // html elmt tree >> computed style tree
-        StyleContext context;
         context.parent = body;  context.prev_node = NULL;
         StyleElement* style_tree = compute_style(&context, body);
         // computed style tree >> layout view tree
@@ -124,5 +106,6 @@ int main(void) {
 - anonymous structs are a Microsoft extension [-Wmicrosoft-anon-tag], and needs flag -fms-extensions to compile
 
 zig cc -fms-extensions layout_html.c layout_style_tree.c -o layout_html \
--I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor 
+-I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor \
+-I/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2 -L/opt/homebrew/Cellar/freetype/2.13.3/lib -lfreetype
 */

@@ -1,4 +1,12 @@
+#pragma once
+#include <stdbool.h>
 #include <stdint.h>
+
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
+#include <ft2build.h>
+#include FT_FREETYPE_H
 #include <lexbor/html/html.h>
 // #include <lexbor/tag/const.h>           // html tag names
 // #include <lexbor/css/value/const.h>     // css property values
@@ -31,23 +39,25 @@ typedef struct {
 } StyleContext;
 
 typedef enum {
-    VIEW_BLOCK,
-    VIEW_INLINE,
-    VIEW_INLINE_BLOCK,
-    VIEW_FLEX,
-    VIEW_GRID,
-    VIEW_TABLE,
-    VIEW_TABLE_CELL,
-    VIEW_TABLE_ROW,
-    VIEW_TABLE_ROW_GROUP,
-    VIEW_TABLE_COLUMN,
-    VIEW_TABLE_COLUMN_GROUP,
-    VIEW_TABLE_CAPTION,
-    VIEW_TABLE_HEADER_GROUP,
-    VIEW_TABLE_FOOTER_GROUP,
-    VIEW_TABLE_BODY_GROUP,
-    VIEW_LIST_ITEM,
-    VIEW_NONE,
+    RDT_VIEW_BLOCK,
+    RDT_VIEW_TEXT,
+
+    RDT_VIEW_INLINE,
+    RDT_VIEW_INLINE_BLOCK,
+    RDT_VIEW_FLEX,
+    RDT_VIEW_GRID,
+    RDT_VIEW_TABLE,
+    RDT_VIEW_TABLE_CELL,
+    RDT_VIEW_TABLE_ROW,
+    RDT_VIEW_TABLE_ROW_GROUP,
+    RDT_VIEW_TABLE_COLUMN,
+    RDT_VIEW_TABLE_COLUMN_GROUP,
+    RDT_VIEW_TABLE_CAPTION,
+    RDT_VIEW_TABLE_HEADER_GROUP,
+    RDT_VIEW_TABLE_FOOTER_GROUP,
+    RDT_VIEW_TABLE_BODY_GROUP,
+    RDT_VIEW_LIST_ITEM,
+    RDT_VIEW_NONE,
 } ViewType;
 typedef struct View {
     ViewType type;
@@ -56,6 +66,7 @@ typedef struct View {
 } View;
 typedef struct {
     View; // extends View
+    int start_index, length;  // start and length of the text in the style node
     int x, y, width, height;  // bounds for the text, x, y relative to the parent block
 } ViewText;
 
@@ -67,12 +78,13 @@ typedef struct {
 } ViewBlock;
 
 typedef struct {
-    int width, height;  // given width and height
+    int width, height;  // given width and height of the block
     int advance_y;
     int max_width;
 } Blockbox;
 
 typedef struct {
+    int left, right;  // left and right bounds of the line
     int advance_x;
     int max_height;
 } Linebox;
@@ -82,4 +94,6 @@ typedef struct {
     Linebox line;  // current linebox
     ViewBlock* parent;
     View* prev_view;
+    FT_Library library;
+    FT_Face face;   // current font face    
 } LayoutContext;
