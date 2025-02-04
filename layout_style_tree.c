@@ -60,22 +60,26 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
         FT_GlyphSlot slot = lycon->face->glyph;  int wd = slot->advance.x >> 6;
         text->height = max(text->height, slot->metrics.height >> 6);
         printf("char: %c, width: %d, height: %d, right: %d\n", *str, wd, text->height, lycon->line.right);
+        text->width += wd;
         if (text->x + text->width >= lycon->line.right) { // line filled up
             printf("line filled up\n");
             if (can_break(*str)) {
                 // skip all spaces
                 while (is_space(*str)) { str++; }
+                text->length = str - style_text->str;
                 lycon->line.max_height = max(lycon->line.max_height, text->height);
                 lycon->block.advance_y += lycon->line.max_height;
                 // reset linebox
                 lycon->line.advance_x = 0;  lycon->line.max_height = 0;
-                break;
+                printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
+                if (*str) { str++;  goto LAYOUT_TEXT; }
+                else return;
             }
         }
-        text->width += wd;  str++;
+        str++;
     } while (*str);
     text->length = str - style_text->str;  lycon->line.advance_x += text->width;
-    if (*str) { str++;  goto LAYOUT_TEXT; }
+    printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
 }
 
 void layout_node(LayoutContext* lycon, StyleNode* style_node) {
