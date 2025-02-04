@@ -16,7 +16,7 @@ void set_pixel(int x, int y, unsigned char intensity) {
 
 // Function to draw a glyph bitmap into the image buffer
 void draw_bitmap(FT_Bitmap *bitmap, int x, int y) {
-    printf("draw bitmap: %d %d\n", x, y);
+    // printf("draw bitmap: %d %d\n", x, y);
     for (int i = 0; i < bitmap->rows; i++) {
         for (int j = 0; j < bitmap->width; j++) {
             unsigned char intensity = bitmap->buffer[i * bitmap->pitch + j];
@@ -52,7 +52,7 @@ int render_init(RenderContext* rdcon) {
         return EXIT_FAILURE;
     }
     // Set the font size
-    FT_Set_Pixel_Sizes(rdcon->face, 0, 48);    
+    FT_Set_Pixel_Sizes(rdcon->face, 0, 16);    // FT_Set_Char_Size for points
 }
 
 void render_clean_up(RenderContext* rdcon) {
@@ -71,9 +71,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             fprintf(stderr, "Could not load character '%c'\n", *p);
             continue;
         }
-        // draw the glyph to the image buffer
-        draw_bitmap(&rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
-            y - rdcon->face->glyph->bitmap_top);
+        if (!is_space(*p)) {
+            // draw the glyph to the image buffer
+            draw_bitmap(&rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
+                y + text->height - rdcon->face->glyph->bitmap_top);
+        }
         // advance to the next position
         x += rdcon->face->glyph->advance.x >> 6;
     }

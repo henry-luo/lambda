@@ -15,6 +15,8 @@ typedef struct {
     int left, right;  // left and right bounds of the line
     int advance_x;
     int max_height;
+    char* last_space;
+    bool is_line_start;
 } Linebox;
 
 typedef struct {

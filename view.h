@@ -15,6 +15,9 @@
 typedef unsigned short rdt_short_value;
 #define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
 
+extern bool can_break(char c);
+extern bool is_space(char c);
+
 typedef struct StyleNode {
     rdt_short_value display;  // computed display value
     lxb_dom_node_t* node;
