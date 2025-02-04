@@ -10,7 +10,8 @@
 4. render view tree;
 */
 
-void layout_style_tree(StyleElement* style_root);
+View* layout_style_tree(StyleElement* style_root);
+void render_html_doc(View* root_view);
 
 StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     StyleElement *style = calloc(1, sizeof(StyleElement));
@@ -67,16 +68,17 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     return style;
 }
 
-void layout_html_doc(lxb_html_document_t *doc) {
+View* layout_html_doc(lxb_html_document_t *doc) {
     StyleContext context;
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
     if (body) {
-        // html elmt tree >> computed style tree
+        // compute: html elmt tree >> computed style tree
         context.parent = body;  context.prev_node = NULL;
         StyleElement* style_tree = compute_style(&context, body);
-        // computed style tree >> layout view tree
-        layout_style_tree(style_tree);
+        // layout: computed style tree >> view tree
+        return layout_style_tree(style_tree);
     }
+    return NULL;
 }
 
 int main(void) {
@@ -99,6 +101,8 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    layout_html_doc(document);
+    View* root_view = layout_html_doc(document);
+
+    if (root_view) render_html_doc(root_view);
 }
 
