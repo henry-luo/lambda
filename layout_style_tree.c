@@ -1,4 +1,5 @@
 #include "layout.h"
+#include "./lib/string_buffer/string_buffer.h"
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -82,7 +83,7 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
         }
         FT_GlyphSlot slot = lycon->face->glyph;  int wd = slot->advance.x >> 6;
         text->height = max(text->height, slot->metrics.height >> 6);
-        printf("char: %c, width: %d, height: %d, right: %d\n", *str, wd, text->height, lycon->line.right);
+        // printf("char: %c, width: %d, height: %d, right: %d\n", *str, wd, text->height, lycon->line.right);
         text->width += wd;
         if (text->x + text->width >= lycon->line.right) { // line filled up
             printf("line filled up\n");
@@ -133,34 +134,31 @@ void layout_node(LayoutContext* lycon, StyleNode* style_node) {
     }
 }
 
-void print_view_tree(ViewBlock* view_block, char* indent) {
-    char buf[256];
+void print_view_tree(ViewBlock* view_block, StrBuf* buf, int indent) {
     View* view = view_block->child;
     if (view) {
-        char* nest_indent = malloc(strlen(indent) + 3);  
-        sprintf(nest_indent, "%s%s", indent, "  ");
         do {
+            strbuf_append_charn(buf, ' ', indent);
             if (view->type == RDT_VIEW_BLOCK) {
                 ViewBlock* block = (ViewText*)view;
-                printf("%sview block:%s, x:%d, y:%d, wd:%d, hg:%d\n", indent,
+                strbuf_sprintf(buf, "view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                     lxb_dom_element_local_name(block->style->node, NULL),
                     block->x, block->y, block->width, block->height);                
-                print_view_tree((ViewBlock*)view, nest_indent);
+                print_view_tree((ViewBlock*)view, buf, indent+2);
             }
             else {
                 ViewText* text = (ViewText*)view;
                 char* str = ((StyleText*)text->style)->str;
-                char *s = str + text->start_index, *end = s + text->length, *t = buf;
-                for (; s < end; s++, t++) { *t = *s; }  *t = '\0';
-                printf("%stext:'%s', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", nest_indent, 
-                    buf, text->start_index, text->length, text->x, text->y, text->width, text->height);
+                strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, str, text->length);
+                strbuf_sprintf(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
+                    text->start_index, text->length, text->x, text->y, text->width, text->height);
             }
             view = view->next;
         } while (view);
-        free(nest_indent);
     }
     else {
-        printf("%sview has no child\n", indent);
+        strbuf_append_charn(buf, ' ', indent);
+        strbuf_append_str(buf, "view has no child\n");
     }
 }
 
@@ -197,7 +195,11 @@ View* layout_style_tree(StyleElement* style_root) {
     layout_block(&lycon, style_root);
     layout_cleanup(&lycon);
 
-    printf("View tree:\n");
-    print_view_tree(root_view, "  ");
+    StrBuf* buf = strbuf_new(1024);
+    print_view_tree(root_view, buf, 0);
+    printf("=================\nView tree:\n");
+    printf("%s", buf->b);
+    printf("=================\n");
+
     return (View*)root_view;
 }
