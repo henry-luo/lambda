@@ -39,7 +39,7 @@ typedef struct {
 } StyleContext;
 
 typedef enum {
-    RDT_VIEW_BLOCK,
+    RDT_VIEW_BLOCK = 1,
     RDT_VIEW_TEXT,
 
     RDT_VIEW_INLINE,

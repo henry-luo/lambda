@@ -1,7 +1,5 @@
 #include "layout.h"
 
-void layout_node(LayoutContext* lycon, StyleNode* style_elmt);
-
 bool can_break(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
@@ -10,18 +8,21 @@ bool is_space(char c) {
     return c == ' ' || c == '\t';
 }
 
+void layout_node(LayoutContext* lycon, StyleNode* style_elmt);
+
 void layout_block(LayoutContext* lycon, StyleElement* style_elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(style_elmt->node, NULL));
-    Blockbox bbox = lycon->block;  Linebox lbox = lycon->line;
-    lycon->block.width = bbox.width;  lycon->block.height = bbox.height;  
+    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
+    lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
     lycon->line.right = lycon->block.width;
     ViewBlock* block = calloc(1, sizeof(ViewBlock));
-    block->type = RDT_VIEW_BLOCK;  block->style = style_elmt;  block->parent = lycon->parent;  
+    block->type = RDT_VIEW_BLOCK;  block->style = style_elmt;  block->parent = lycon->parent;
+    block->y = pa_block.advance_y;
     // link the block
     if (lycon->prev_view) { lycon->prev_view->next = block; }
-    else { lycon->parent->child = block; }
+    else { lycon->parent->child = block;  printf("link as first child\n"); }
     
     StyleNode* node = style_elmt->child;
     if (node) {
@@ -31,12 +32,16 @@ void layout_block(LayoutContext* lycon, StyleElement* style_elmt) {
             node = node->next;
         } while (node);
         lycon->parent = block->parent;
+        printf("block height: %d\n", lycon->block.advance_y);
     }
-    block->width = lycon->block.max_width;  block->height = lycon->block.advance_y;
-    lycon->block = bbox;  lycon->line = lbox;
+    block->width = max(lycon->block.width, lycon->block.max_width);  
+    block->height = lycon->block.advance_y;
+    pa_block.advance_y += block->height;
+    pa_block.max_width = max(pa_block.max_width, block->width);
+    lycon->block = pa_block;  lycon->line = pa_line;
     lycon->prev_view = block;
-    lycon->block.advance_y += block->height;
-    lycon->block.max_width = max(lycon->block.max_width, block->width);
+
+    printf("block view: %d, self %d, child %d\n", block->type, block, block->child);
 }
 
 void layout_text(LayoutContext* lycon, StyleText* style_text) {
@@ -47,9 +52,9 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
     text->type = RDT_VIEW_TEXT;  
     // link the text
     if (lycon->prev_view) { lycon->prev_view->next = (View*)text; }
-    else { lycon->parent->child = (View*)text; }
+    else { lycon->parent->child = (View*)text;  printf("link as first child\n"); }
     lycon->prev_view = (View*)text;    
-    text->style = style_text;  text->start_index = 0;
+    text->style = style_text;  text->start_index = str - style_text->str;
     text->x = lycon->line.advance_x; text->y = lycon->block.advance_y;
     // layout the text
     do {
@@ -66,7 +71,7 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
             if (can_break(*str)) {
                 // skip all spaces
                 while (is_space(*str)) { str++; }
-                text->length = str - style_text->str;
+                text->length = str - style_text->str + 1 - text->start_index;
                 lycon->line.max_height = max(lycon->line.max_height, text->height);
                 lycon->block.advance_y += lycon->line.max_height;
                 // reset linebox
@@ -78,7 +83,8 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
         }
         str++;
     } while (*str);
-    text->length = str - style_text->str;  lycon->line.advance_x += text->width;
+    text->length = str - style_text->str - text->start_index;  
+    lycon->line.advance_x += text->width;
     printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
 }
 
@@ -100,26 +106,34 @@ void layout_node(LayoutContext* lycon, StyleNode* style_node) {
 }
 
 void print_view_tree(ViewBlock* view_block, char* indent) {
-    printf("%sview: %s\n", indent, lxb_dom_element_local_name(view_block->style->node, NULL));
     View* view = view_block->child;
     if (view) {
-        printf("%s view block\n", indent);
         char* nest_indent = malloc(strlen(indent) + 3);  
         sprintf(nest_indent, "%s%s", indent, "  ");
         do {
             if (view->type == RDT_VIEW_BLOCK) {
+                ViewBlock* block = (ViewText*)view;
+                printf("%sview block:%s, x:%d, y:%d, wd:%d, hg:%d\n", indent,
+                    lxb_dom_element_local_name(block->style->node, NULL),
+                    block->x, block->y, block->width, block->height);                
                 print_view_tree((ViewBlock*)view, nest_indent);
             }
             else {
-                printf("%s%s\n", nest_indent, lxb_dom_element_local_name(view->style->node, NULL));
+                ViewText* text = (ViewText*)view;
+                printf("%stext:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", nest_indent, 
+                    ((StyleText*)text->style)->str, text->start_index, text->length, text->x, text->y, text->width, text->height);
             }
             view = view->next;
         } while (view);
         free(nest_indent);
     }
+    else {
+        printf("%sview has no child\n", indent);
+    }
 }
 
 int layout_init(LayoutContext* lycon) {
+    memset(lycon, 0, sizeof(LayoutContext));
     // Initialize FreeType
     if (FT_Init_FreeType(&lycon->library)) {
         fprintf(stderr, "Could not initialize FreeType library\n");
@@ -135,15 +149,21 @@ int layout_init(LayoutContext* lycon) {
     FT_Set_Pixel_Sizes(lycon->face, 0, 48);    
 }
 
+int layout_cleanup(LayoutContext* lycon) {
+    FT_Done_Face(lycon->face);
+    FT_Done_FreeType(lycon->library);
+}
+
 View* layout_style_tree(StyleElement* style_root) {
     LayoutContext lycon;
     layout_init(&lycon);
     ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
-    root_view->style = style_root;
+    root_view->type = RDT_VIEW_BLOCK;  root_view->style = style_root;
     lycon.parent = root_view;
     lycon.block.width = 50;  lycon.block.height = 600;
     lycon.block.advance_y = 0;  lycon.block.max_width = 800;
     layout_block(&lycon, style_root);
+    layout_cleanup(&lycon);
 
     printf("View tree:\n");
     print_view_tree(root_view, "  ");
