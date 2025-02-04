@@ -1,5 +1,6 @@
 #include "layout.h"
-
+#include <stdio.h>
+#include "./lib/string_buffer/string_buffer.h"
 /*
 1. loop through html tree >> body >> children - map to style node, and construct style tree;
     define style struct: BlockStyle; (style def: html elmt, html attr, inline style, CSS style)
@@ -81,28 +82,63 @@ View* layout_html_doc(lxb_html_document_t *doc) {
     return NULL;
 }
 
-int main(void) {
-    // Example HTML source with inline CSS
-    const char *html_source = "<html><head><style>h1 { color: red; }</style></head>\
-        <body><h1>Hello, World!</h1><p>This is a paragraph.</p>this is dangling text</body></html>";
-
+lxb_html_document_t* parse_html_doc(const char *html_source) {
     // Create the HTML document object
     lxb_html_document_t *document = lxb_html_document_create();
     if (!document) {
         fprintf(stderr, "Failed to create HTML document.\n");
-        return EXIT_FAILURE;
+        return NULL;
     }
-
-    // Parse the HTML source
+    // parse the HTML source
     lxb_status_t status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to parse HTML.\n");
         lxb_html_document_destroy(document);
-        return EXIT_FAILURE;
+        return NULL;
+    }
+    return document;
+}
+
+// Function to read and display the content of a text file
+StrBuf* readTextFile(const char *filename) {
+    FILE *file = fopen(filename, "r"); // open the file in read mode
+    if (file == NULL) { // handle error when file cannot be opened
+        perror("Error opening file"); 
+        return NULL;
     }
 
-    View* root_view = layout_html_doc(document);
+    fseek(file, 0, SEEK_END);  // move the file pointer to the end to determine file size
+    long fileSize = ftell(file);
+    rewind(file); // reset file pointer to the beginning
 
-    if (root_view) render_html_doc(root_view);
+    StrBuf* buf = strbuf_new(fileSize + 1);
+    if (buf == NULL) {
+        perror("Memory allocation failed");
+        fclose(file);
+        return NULL;
+    }
+
+    // read the file content into the buffer
+    size_t bytesRead = fread(buf->b, 1, fileSize, file);
+    buf->b[bytesRead] = '\0'; // Null-terminate the buffer
+
+    // clean up
+    fclose(file);
+    return buf;
+}
+
+int main(void) {
+    // load sample HTML source
+    StrBuf* source_buf = readTextFile("sample.html");
+
+    lxb_html_document_t* document = parse_html_doc(source_buf->b);
+    // layout html doc 
+    if (document) {
+        View* root_view = layout_html_doc(document);
+        // render html doc
+        if (root_view) render_html_doc(root_view);
+    }
+
+    strbuf_free(source_buf);
 }
 
