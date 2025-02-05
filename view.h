@@ -5,6 +5,7 @@
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
+#include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <lexbor/html/html.h>
@@ -76,3 +77,8 @@ typedef struct {
     struct ViewBlock* parent;  // parent block
     struct View* child;  // first child view
 } ViewBlock;
+
+typedef struct {
+    FcConfig *font_config;
+    FT_Library ft_library; 
+} UiContext;

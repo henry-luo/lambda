@@ -11,8 +11,8 @@
 4. render view tree;
 */
 
-View* layout_style_tree(StyleElement* style_root);
-void render_html_doc(View* root_view);
+View* layout_style_tree(UiContext* uicon, StyleElement* style_root);
+void render_html_doc(UiContext* uicon, View* root_view);
 
 StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     StyleElement *style = calloc(1, sizeof(StyleElement));
@@ -69,7 +69,7 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     return style;
 }
 
-View* layout_html_doc(lxb_html_document_t *doc) {
+View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
     StyleContext context;
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
     if (body) {
@@ -77,7 +77,7 @@ View* layout_html_doc(lxb_html_document_t *doc) {
         context.parent = body;  context.prev_node = NULL;
         StyleElement* style_tree = compute_style(&context, body);
         // layout: computed style tree >> view tree
-        return layout_style_tree(style_tree);
+        return layout_style_tree(uicon, style_tree);
     }
     return NULL;
 }
@@ -127,18 +127,40 @@ StrBuf* readTextFile(const char *filename) {
     return buf;
 }
 
+int ui_context_init(UiContext* uicon) {
+    // init FreeType
+    if (FT_Init_FreeType(&uicon->ft_library)) {
+        fprintf(stderr, "Could not initialize FreeType library\n");
+        return EXIT_FAILURE;
+    }
+    // init Fontconfig
+    uicon->font_config = FcInitLoadConfigAndFonts();
+    if (!uicon->font_config) {
+        fprintf(stderr, "Failed to initialize Fontconfig\n");
+        return EXIT_FAILURE;
+    }    
+}
+
+void ui_context_cleanup(UiContext* uicon) {
+    FT_Done_FreeType(uicon->ft_library);
+    FcConfigDestroy(uicon->font_config);
+}
+
 int main(void) {
+    UiContext uicon;
+    ui_context_init(&uicon);
+
     // load sample HTML source
     StrBuf* source_buf = readTextFile("sample.html");
-
     lxb_html_document_t* document = parse_html_doc(source_buf->b);
+    strbuf_free(source_buf);
     // layout html doc 
     if (document) {
-        View* root_view = layout_html_doc(document);
+        View* root_view = layout_html_doc(&uicon, document);
         // render html doc
-        if (root_view) render_html_doc(root_view);
+        if (root_view) render_html_doc(&uicon, root_view);
     }
-
-    strbuf_free(source_buf);
+    
+    ui_context_cleanup(&uicon);
 }
 

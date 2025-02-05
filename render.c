@@ -38,15 +38,11 @@ void save_to_pgm(const char *filename) {
     fclose(file);
 }
 
-int render_init(RenderContext* rdcon) {
+int render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
-    // Initialize FreeType
-    if (FT_Init_FreeType(&rdcon->library)) {
-        fprintf(stderr, "Could not initialize FreeType library\n");
-        return EXIT_FAILURE;
-    }
+    rdcon->ui_context = uicon;
     // Load a font face
-    if (FT_New_Face(rdcon->library, "./lato.ttf", 0, &rdcon->face)) {
+    if (FT_New_Face(uicon->ft_library, "./lato.ttf", 0, &rdcon->face)) {
         fprintf(stderr, "Could not load font\n");
         printf("Could not load font\n");
         return EXIT_FAILURE;
@@ -56,9 +52,7 @@ int render_init(RenderContext* rdcon) {
 }
 
 void render_clean_up(RenderContext* rdcon) {
-    // Clean up
     FT_Done_Face(rdcon->face);
-    FT_Done_FreeType(rdcon->library);
 }
 
 void render_text_view(RenderContext* rdcon, ViewText* text) {
@@ -110,9 +104,9 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     rdcon->block = pa_block;
 }
 
-void render_html_doc(View* root_view) {
+void render_html_doc(UiContext* uicon, View* root_view) {
     RenderContext rdcon;
-    render_init(&rdcon);
+    render_init(&rdcon, uicon);
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);

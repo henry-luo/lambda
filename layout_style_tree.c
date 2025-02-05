@@ -162,15 +162,11 @@ void print_view_tree(ViewBlock* view_block, StrBuf* buf, int indent) {
     }
 }
 
-int layout_init(LayoutContext* lycon) {
+int layout_init(LayoutContext* lycon, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
-    // Initialize FreeType
-    if (FT_Init_FreeType(&lycon->library)) {
-        fprintf(stderr, "Could not initialize FreeType library\n");
-        return EXIT_FAILURE;
-    }
+    lycon->ui_context = uicon;
     // Load a font face
-    if (FT_New_Face(lycon->library, "./lato.ttf", 0, &lycon->face)) {
+    if (FT_New_Face(uicon->ft_library, "./lato.ttf", 0, &lycon->face)) {
         fprintf(stderr, "Could not load font\n");
         printf("Could not load font\n");
         return EXIT_FAILURE;
@@ -181,12 +177,11 @@ int layout_init(LayoutContext* lycon) {
 
 int layout_cleanup(LayoutContext* lycon) {
     FT_Done_Face(lycon->face);
-    FT_Done_FreeType(lycon->library);
 }
 
-View* layout_style_tree(StyleElement* style_root) {
+View* layout_style_tree(UiContext* uicon, StyleElement* style_root) {
     LayoutContext lycon;
-    layout_init(&lycon);
+    layout_init(&lycon, uicon);
     ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
     root_view->type = RDT_VIEW_BLOCK;  root_view->style = style_root;
     lycon.parent = root_view;
