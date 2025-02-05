@@ -165,14 +165,10 @@ void print_view_tree(ViewBlock* view_block, StrBuf* buf, int indent) {
 int layout_init(LayoutContext* lycon, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->ui_context = uicon;
-    // Load a font face
-    if (FT_New_Face(uicon->ft_library, "./lato.ttf", 0, &lycon->face)) {
-        fprintf(stderr, "Could not load font\n");
-        printf("Could not load font\n");
-        return EXIT_FAILURE;
-    }
+    // most browsers use a generic sans-serif font as the default
+    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
-    FT_Set_Pixel_Sizes(lycon->face, 0, 16);    
+    lycon->face = load_font_face(uicon, "Arial", 16);
 }
 
 int layout_cleanup(LayoutContext* lycon) {

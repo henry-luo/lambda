@@ -82,3 +82,5 @@ typedef struct {
     FcConfig *font_config;
     FT_Library ft_library; 
 } UiContext;
+
+extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);

@@ -41,14 +41,8 @@ void save_to_pgm(const char *filename) {
 int render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
-    // Load a font face
-    if (FT_New_Face(uicon->ft_library, "./lato.ttf", 0, &rdcon->face)) {
-        fprintf(stderr, "Could not load font\n");
-        printf("Could not load font\n");
-        return EXIT_FAILURE;
-    }
-    // Set the font size
-    FT_Set_Pixel_Sizes(rdcon->face, 0, 16);    // FT_Set_Char_Size for points
+    // load default font Arial, size 16 px
+    rdcon->face = load_font_face(uicon, "Arial", 16);
 }
 
 void render_clean_up(RenderContext* rdcon) {

@@ -141,6 +141,41 @@ int ui_context_init(UiContext* uicon) {
     }    
 }
 
+FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
+    // todo: cache the fonts loaded
+    FT_Face face = NULL;
+    // search for font
+    FcPattern *pattern = FcNameParse((const FcChar8 *)font_name);
+    FcConfigSubstitute(uicon->font_config, pattern, FcMatchPattern);
+    FcDefaultSubstitute(pattern);
+
+    FcResult result;
+    FcPattern *match = FcFontMatch(uicon->font_config, pattern, &result);
+    if (!match) {
+        printf("Font not found\n");
+    }
+    else {
+        FcChar8 *file = NULL;
+        // get font file path
+        if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch) {
+            printf("Failed to get font file path\n");
+        } else {
+            printf("Found font at: %s\n", file);
+            // load the font
+            if (FT_New_Face(uicon->ft_library, (const char *)file, 0, &face)) {
+                printf("Could not load font\n");  
+                face = NULL;
+            } else {
+                // Set font size
+                FT_Set_Pixel_Sizes(face, 0, font_size);
+            }            
+        }
+        FcPatternDestroy(match);
+    }
+    FcPatternDestroy(pattern);
+    return face;
+}
+
 void ui_context_cleanup(UiContext* uicon) {
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
