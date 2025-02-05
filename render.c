@@ -106,7 +106,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
         render_block_view(&rdcon, (ViewBlock*)root_view);
     }
     else {
-        printf("Invalid root view\n");
+        fprintf(stderr, "Invalid root view\n");
     }
     // Save the image to a file
     save_to_pgm("output.pgm");
