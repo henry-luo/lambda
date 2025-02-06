@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include <assert.h>
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -13,16 +14,16 @@
 // #include <lexbor/css/value/const.h>     // css property values
 // #include <lexbor/dom/interface.h>
 
-typedef unsigned short rdt_short_value;
+typedef unsigned short PropValue;
 #define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
 
 extern bool can_break(char c);
 extern bool is_space(char c);
 
 typedef struct StyleNode {
-    rdt_short_value display;  // computed display value
     lxb_dom_node_t* node;
     struct StyleNode* next;
+    PropValue display;  // computed display value
 } StyleNode;
 
 typedef struct StyleText { 
@@ -30,11 +31,18 @@ typedef struct StyleText {
     char* str;  // text content
 } StyleText;
 
+typedef struct {
+    PropValue font_style;
+    PropValue font_weight;
+    PropValue text_deco; // CSS text decoration    
+} FontProp;
+
 typedef struct StyleElement {
     StyleNode; // extends StyleNode
     // style tree pointers
     struct StyleNode* parent;
     struct StyleElement* child; // first child
+    FontProp font;  // font style
 } StyleElement;
 
 typedef enum {
@@ -61,8 +69,9 @@ typedef enum {
 
 typedef struct View {
     ViewType type;
+    StyleNode* style;  // future optimization: use 32-bit pointer for style node
     struct View* next;
-    StyleNode* style;
+    struct ViewGroup* parent;
 } View;
 
 typedef struct {
@@ -73,9 +82,17 @@ typedef struct {
 
 typedef struct {
     View; // extends View
-    int x, y, width, height;  // x, y relative to the parent block
-    struct ViewBlock* parent;  // parent block
     struct View* child;  // first child view
+} ViewGroup;
+
+typedef struct {
+    ViewGroup;  // extends ViewGroup
+    FontProp font;  // font style
+} ViewSpan;
+
+typedef struct {
+    ViewGroup;  // extends ViewGroup
+    int x, y, width, height;  // x, y relative to the parent block    
 } ViewBlock;
 
 typedef struct {
@@ -84,3 +101,4 @@ typedef struct {
 } UiContext;
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);
+extern FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style);

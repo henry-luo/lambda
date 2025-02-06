@@ -5,12 +5,22 @@
 #define HEIGHT 600
 
 unsigned char image[HEIGHT][WIDTH];
+void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
+void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 
 // Function to set a pixel in the image buffer
 void set_pixel(int x, int y, unsigned char intensity) {
     if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
         if (intensity > image[y][x])
             image[y][x] = intensity; // use the grayscale intensity from the glyph
+    }
+}
+
+void fill_rect(int x, int y, int width, int height, unsigned char intensity) {
+    for (int i = y; i < y + height; i++) {
+        for (int j = x; j < x + width; j++) {
+            set_pixel(j, i, intensity);
+        }
     }
 }
 
@@ -65,8 +75,34 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
                 y + text->height - rdcon->face->glyph->bitmap_top);
         }
         // advance to the next position
-        x += rdcon->face->glyph->advance.x >> 6;
+        int wd = rdcon->face->glyph->advance.x >> 6;
+        x += wd;  printf("char: %c, width: %d\n", *p, wd);
     }
+}
+
+void render_children(RenderContext* rdcon, View* view) {
+    do {
+        if (view->type == RDT_VIEW_BLOCK) {
+            ViewBlock* block = (ViewText*)view;
+            printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
+                lxb_dom_element_local_name(block->style->node, NULL),
+                block->x, block->y, block->width, block->height);                
+            render_block_view(rdcon, (ViewBlock*)view);
+        }
+        else if (view->type == RDT_VIEW_INLINE) {
+            ViewSpan* span = (ViewSpan*)view;
+            printf("view inline:%s\n", lxb_dom_element_local_name(span->style->node, NULL));                
+            render_inline_view(rdcon, (ViewSpan*)view);
+        }
+        else {
+            ViewText* text = (ViewText*)view;
+            printf("text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
+                ((StyleText*)text->style)->str, text->start_index, text->length, 
+                text->x, text->y, text->width, text->height, rdcon->block.x);
+            render_text_view(rdcon, text);
+        }
+        view = view->next;
+    } while (view);
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
@@ -74,23 +110,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     View* view = view_block->child;
     if (view) {
         rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
-        do {
-            if (view->type == RDT_VIEW_BLOCK) {
-                ViewBlock* block = (ViewText*)view;
-                printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                    lxb_dom_element_local_name(block->style->node, NULL),
-                    block->x, block->y, block->width, block->height);                
-                render_block_view(rdcon, (ViewBlock*)view);
-            }
-            else {
-                ViewText* text = (ViewText*)view;
-                printf("text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
-                    ((StyleText*)text->style)->str, text->start_index, text->length, 
-                    text->x, text->y, text->width, text->height);
-                render_text_view(rdcon, text);
-            }
-            view = view->next;
-        } while (view);
+        render_children(rdcon, view);
     }
     else {
         printf("%sview has no child\n");
@@ -98,9 +118,25 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     rdcon->block = pa_block;
 }
 
+void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
+    FT_Face pa_face = rdcon->face;
+    View* view = view_span->child;
+    if (view) {
+        rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, &view_span->font);
+        render_children(rdcon, view);
+        // FT_Done_Face(rdcon->face);
+    }
+    else {
+        printf("%sview has no child\n");
+    }
+    rdcon->face = pa_face;
+}
+
 void render_html_doc(UiContext* uicon, View* root_view) {
     RenderContext rdcon;
+    printf("Render HTML doc\n");
     render_init(&rdcon, uicon);
+    fill_rect(0, 0, 200, 600, 100);
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);

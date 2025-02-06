@@ -15,8 +15,20 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     }
     else {
         style->display = LXB_CSS_VALUE_INLINE;
+        if (element->node.local_name == LXB_TAG_B) {
+            style->font.font_weight = LXB_CSS_VALUE_BOLD;
+        }
+        else if (element->node.local_name == LXB_TAG_I) {
+            style->font.font_style = LXB_CSS_VALUE_ITALIC;
+        }
+        else if (element->node.local_name == LXB_TAG_U) {
+            style->font.text_deco = LXB_CSS_VALUE_UNDERLINE;
+        }
+        else if (element->node.local_name == LXB_TAG_S) {
+            style->font.text_deco = LXB_CSS_VALUE_LINE_THROUGH;
+        }              
     }
-    // Print the display property value
+    // print the display property value
     // printf("display: %s\n", lxb_css_value_data(style->display).data);
 
     // link the elmt style to the style tree

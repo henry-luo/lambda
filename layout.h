@@ -20,10 +20,15 @@ typedef struct {
 } Linebox;
 
 typedef struct {
-    UiContext* ui_context;
-    Blockbox block;  // current blockbox
-    Linebox line;  // current linebox
+    FontProp style;  // current font style
+    FT_Face face;   // current font face
+} FontBox;
+
+typedef struct {
     ViewBlock* parent;
     View* prev_view;
-    FT_Face face;   // current font face
+    Blockbox block;  // current blockbox
+    Linebox line;  // current linebox
+    FontBox font;  // current font style
+    UiContext* ui_context;
 } LayoutContext;

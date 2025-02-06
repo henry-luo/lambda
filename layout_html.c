@@ -122,6 +122,23 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     return face;
 }
 
+FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style) {
+    StrBuf* name = strbuf_create(parent->family_name);
+    if (font_style->font_weight == LXB_CSS_VALUE_BOLD) {
+        strbuf_append_str(name, ":bold");
+        if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
+            strbuf_append_str(name, ":bolditalic");
+        }
+    }
+    else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
+        strbuf_append_str(name, ":italic");
+    }
+    printf("Loading font: %s, %d\n", name->b, parent->size->metrics.height);
+    FT_Face face = load_font_face(uicon, name->b, 16); // parent->size->metrics.height);
+    strbuf_free(name);
+    return face;
+}
+
 void ui_context_cleanup(UiContext* uicon) {
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
