@@ -45,6 +45,11 @@ typedef struct StyleElement {
     FontProp font;  // font style
 } StyleElement;
 
+typedef struct {
+    StyleElement; // extends StyleElement
+    PropValue text_align;
+} StyleBlock;
+
 typedef enum {
     RDT_VIEW_BLOCK = 1,
     RDT_VIEW_TEXT,

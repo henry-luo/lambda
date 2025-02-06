@@ -2,29 +2,28 @@
 #include <stdio.h>
 
 StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
-    StyleElement *style = calloc(1, sizeof(StyleElement));
-    if (style == NULL) {
-        fprintf(stderr, "Failed to allocate memory for style.\n");
-        return NULL;
-    }
-
+    StyleElement *style;
     // should check ns as well 
-    if (element->node.local_name == LXB_TAG_H1 || element->node.local_name == LXB_TAG_P ||
-        element->node.local_name == LXB_TAG_BODY) {
+    int name = element->node.local_name;
+    if (name == LXB_TAG_H1 || name == LXB_TAG_P || name == LXB_TAG_BODY || name == LXB_TAG_DIV ||
+        name == LXB_TAG_CENTER || name == LXB_TAG_UL || name == LXB_TAG_OL) {
+        StyleBlock *block = style = calloc(1, sizeof(StyleBlock));
         style->display = LXB_CSS_VALUE_BLOCK;
+        block->text_align = (name == LXB_TAG_CENTER) ? LXB_TAG_CENTER : LXB_CSS_VALUE_LEFT;
     }
     else {
+        style = calloc(1, sizeof(StyleElement));
         style->display = LXB_CSS_VALUE_INLINE;
-        if (element->node.local_name == LXB_TAG_B) {
+        if (name == LXB_TAG_B) {
             style->font.font_weight = LXB_CSS_VALUE_BOLD;
         }
-        else if (element->node.local_name == LXB_TAG_I) {
+        else if (name == LXB_TAG_I) {
             style->font.font_style = LXB_CSS_VALUE_ITALIC;
         }
-        else if (element->node.local_name == LXB_TAG_U) {
+        else if (name == LXB_TAG_U) {
             style->font.text_deco = LXB_CSS_VALUE_UNDERLINE;
         }
-        else if (element->node.local_name == LXB_TAG_S) {
+        else if (name == LXB_TAG_S) {
             style->font.text_deco = LXB_CSS_VALUE_LINE_THROUGH;
         }              
     }

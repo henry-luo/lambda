@@ -65,7 +65,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     // render each character
     char* p = ((StyleText*)text->style)->str + text->start_index;  char* end = p + text->length;
     for (; p < end; p++) {
-        if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER)) {
+        if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER | FT_LOAD_NO_AUTOHINT)) {
             fprintf(stderr, "Could not load character '%c'\n", *p);
             continue;
         }

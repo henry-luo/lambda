@@ -5,10 +5,13 @@ bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
 
+void line_break(LayoutContext* lycon);
 void layout_node(LayoutContext* lycon, StyleNode* style_elmt);
 
 void layout_block(LayoutContext* lycon, StyleElement* style_elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(style_elmt->node, NULL));
+    if (lycon->line.is_line_start) { line_break(lycon); }
+        
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
@@ -77,8 +80,7 @@ void layout_inline(LayoutContext* lycon, StyleElement* style_elmt) {
     printf("inline view: %d, self %d, child %d\n", span->type, span, span->child);
 }
 
-void line_break(LayoutContext* lycon, ViewText* text) {
-    lycon->line.max_height = max(lycon->line.max_height, text->height);
+void line_break(LayoutContext* lycon) {
     lycon->block.advance_y += lycon->line.max_height;
     // reset linebox
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
@@ -191,23 +193,25 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
                 printf("break on space\n");
                 // skip all spaces
                 do { str++; } while (is_space(*str));
+                lycon->line.max_height = max(lycon->line.max_height, text->height);
                 text->length = str - style_text->str - text->start_index;
                 assert(text->length > 0);
-                line_break(lycon, text);
+                line_break(lycon);
                 if (*str) { goto LAYOUT_TEXT; }
                 else return;
             }
             else if (lycon->line.last_space) { // break at the last space
                 printf("break at last space\n");
                 if (style_text->str <= lycon->line.last_space && lycon->line.last_space < str) {
-                    text->length = lycon->line.last_space - style_text->str - text->start_index + 1;
-                    assert(text->length > 0);
+                    lycon->line.max_height = max(lycon->line.max_height, text->height);
                     str = lycon->line.last_space + 1;
-                    line_break(lycon, text);  goto LAYOUT_TEXT;
+                    text->length = str - style_text->str - text->start_index;
+                    assert(text->length > 0);
+                    line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text, break at start of text
                     int advance_x = lycon->line.advance_x;
-                    line_break(lycon, text);
+                    line_break(lycon);
                     text->y = lycon->block.advance_y;
                     text->x = lycon->line.advance_x;  lycon->line.advance_x = advance_x;
                     // continue the text flow
@@ -226,14 +230,15 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
         int advance_x = lycon->line.advance_x;  lycon->line.advance_x += text->width;
         if (view_has_line_filled(lycon, (View*)text) == RDT_LINE_FILLED) {
             if (style_text->str <= lycon->line.last_space && lycon->line.last_space < str) {
-                text->length = lycon->line.last_space - style_text->str - text->start_index + 1;
-                assert(text->length > 0);
+                lycon->line.max_height = max(lycon->line.max_height, text->height);
                 str = lycon->line.last_space + 1;
-                line_break(lycon, text);  
+                text->length = str - style_text->str - text->start_index;
+                assert(text->length > 0);
+                line_break(lycon);  
                 goto LAYOUT_TEXT;
             }
             else { // last_space outside the text, break at start of text
-                line_break(lycon, text);
+                line_break(lycon);
                 text->x = lycon->line.advance_x;  text->y = lycon->block.advance_y;
                 // output the entire text
             }
