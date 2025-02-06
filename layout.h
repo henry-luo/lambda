@@ -9,6 +9,7 @@ typedef struct {
     int width, height;  // given width and height of the block
     int advance_y;
     int max_width;
+    PropValue text_align;
 } Blockbox;
 
 typedef struct {

@@ -11,17 +11,18 @@
 4. render view tree;
 */
 
-View* layout_style_tree(UiContext* uicon, StyleElement* style_root);
+View* layout_style_tree(UiContext* uicon, StyleBlock* style_root);
 void render_html_doc(UiContext* uicon, View* root_view);
-StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element);
+StyleBlock* compute_doc_style(StyleContext* context, lxb_dom_element_t *element);
 
 View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
     StyleContext context;
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
     if (body) {
         // compute: html elmt tree >> computed style tree
-        context.parent = body;  context.prev_node = NULL;
-        StyleElement* style_tree = compute_style(&context, body);
+        context.parent = NULL;  context.prev_node = NULL;
+        StyleBlock* style_tree = compute_doc_style(&context, body);
+        assert(style_tree->display == LXB_CSS_VALUE_BLOCK);
         // layout: computed style tree >> view tree
         return layout_style_tree(uicon, style_tree);
     }

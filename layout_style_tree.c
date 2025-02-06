@@ -8,13 +8,14 @@ bool is_space(char c) {
 void line_break(LayoutContext* lycon);
 void layout_node(LayoutContext* lycon, StyleNode* style_elmt);
 
-void layout_block(LayoutContext* lycon, StyleElement* style_elmt) {
+void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(style_elmt->node, NULL));
     if (lycon->line.is_line_start) { line_break(lycon); }
         
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
+    lycon->block.text_align = style_elmt->text_align;
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
     lycon->line.right = lycon->block.width;  
     lycon->line.is_line_start = true;  lycon->line.last_space = NULL;
@@ -258,7 +259,7 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
 void layout_node(LayoutContext* lycon, StyleNode* style_node) {
     printf("layout node %s\n", lxb_dom_element_local_name(style_node->node, NULL));
     if (style_node->display == LXB_CSS_VALUE_BLOCK) {
-        layout_block(lycon, (StyleElement*)style_node);
+        layout_block(lycon, (StyleBlock*)style_node);
     }
     else if (style_node->display == LXB_CSS_VALUE_INLINE) {
         layout_inline(lycon, (StyleElement*)style_node);
@@ -328,9 +329,10 @@ int layout_cleanup(LayoutContext* lycon) {
     FT_Done_Face(lycon->font.face);
 }
 
-View* layout_style_tree(UiContext* uicon, StyleElement* style_root) {
+View* layout_style_tree(UiContext* uicon, StyleBlock* style_root) {
     LayoutContext lycon;
     layout_init(&lycon, uicon);
+
     ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
     root_view->type = RDT_VIEW_BLOCK;  root_view->style = style_root;
     lycon.parent = root_view;
@@ -350,3 +352,6 @@ View* layout_style_tree(UiContext* uicon, StyleElement* style_root) {
 }
 
 // todo: implement tree allocator, and iterator?
+
+// text-align: line-break (if got available space, and has alignment, adjust the x position of views in the line)
+// linebox: start_view
