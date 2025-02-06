@@ -199,13 +199,21 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
             }
             else if (lycon->line.last_space) { // break at the last space
                 printf("break at last space\n");
-                text->length = lycon->line.last_space - style_text->str - text->start_index + 1;
-                assert(text->length > 0);
-                str = lycon->line.last_space + 1;
-                line_break(lycon, text);
-                goto LAYOUT_TEXT;
+                if (style_text->str <= lycon->line.last_space && lycon->line.last_space < str) {
+                    text->length = lycon->line.last_space - style_text->str - text->start_index + 1;
+                    assert(text->length > 0);
+                    str = lycon->line.last_space + 1;
+                    line_break(lycon, text);  goto LAYOUT_TEXT;
+                }
+                else { // last_space outside the text, break at start of text
+                    int advance_x = lycon->line.advance_x;
+                    line_break(lycon, text);
+                    text->y = lycon->block.advance_y;
+                    text->x = lycon->line.advance_x;  lycon->line.advance_x = advance_x;
+                    // continue the text flow
+                }
             }
-            // else cannot break, and got overflow
+            // else cannot break, continue the flow with overflow
         }
         if (is_space(*str)) {
             do { str++; } while (is_space(*str));
@@ -217,17 +225,28 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
     if (lycon->line.last_space) { // need to check if line will fill up
         int advance_x = lycon->line.advance_x;  lycon->line.advance_x += text->width;
         if (view_has_line_filled(lycon, (View*)text) == RDT_LINE_FILLED) {
-            text->length = lycon->line.last_space - style_text->str - text->start_index + 1;
-            assert(text->length > 0);
-            str = lycon->line.last_space + 1;
-            line_break(lycon, text);  goto LAYOUT_TEXT;
+            if (style_text->str <= lycon->line.last_space && lycon->line.last_space < str) {
+                text->length = lycon->line.last_space - style_text->str - text->start_index + 1;
+                assert(text->length > 0);
+                str = lycon->line.last_space + 1;
+                line_break(lycon, text);  
+                goto LAYOUT_TEXT;
+            }
+            else { // last_space outside the text, break at start of text
+                line_break(lycon, text);
+                text->x = lycon->line.advance_x;  text->y = lycon->block.advance_y;
+                // output the entire text
+            }
         }
-        lycon->line.advance_x = advance_x;
+        else {
+            lycon->line.advance_x = advance_x;
+            // output the entire text
+        }
     }
+    // else output the entire text
     text->length = str - style_text->str - text->start_index;  assert(text->length > 0);
     lycon->line.advance_x += text->width;
     lycon->line.max_height = max(lycon->line.max_height, text->height);
-    lycon->line.last_space = NULL;
     printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
 }
 
