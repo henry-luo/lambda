@@ -24,6 +24,7 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
         StyleBlock* style_tree = compute_doc_style(&context, body);
         assert(style_tree->display == LXB_CSS_VALUE_BLOCK);
         // layout: computed style tree >> view tree
+        printf("start to layout style tree\n");
         return layout_style_tree(uicon, style_tree);
     }
     return NULL;

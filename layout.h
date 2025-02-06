@@ -17,6 +17,7 @@ typedef struct {
     int advance_x;
     int max_height;
     char* last_space;
+    View* start_view;
     bool is_line_start;
 } Linebox;
 

@@ -41,7 +41,7 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
         name == LXB_TAG_CENTER || name == LXB_TAG_UL || name == LXB_TAG_OL) {
         StyleBlock *block = style = calloc(1, sizeof(StyleBlock));
         style->display = LXB_CSS_VALUE_BLOCK;
-        block->text_align = (name == LXB_TAG_CENTER) ? LXB_TAG_CENTER : LXB_CSS_VALUE_LEFT;
+        block->text_align = (name == LXB_TAG_CENTER) ? LXB_CSS_VALUE_CENTER : LXB_CSS_VALUE_LEFT;
     }
     else {
         style = calloc(1, sizeof(StyleElement));
@@ -76,7 +76,8 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
 StyleBlock* compute_doc_style(StyleContext* context, lxb_dom_element_t *element) {
     assert(element->node.local_name == LXB_TAG_BODY);
     StyleBlock* style = calloc(1, sizeof(StyleBlock));
-    style->display = LXB_CSS_VALUE_BLOCK;
+    style->display = LXB_CSS_VALUE_BLOCK;  style->node = element;
     context->parent = style;  
     compute_child(context, element);
+    return style;
 }

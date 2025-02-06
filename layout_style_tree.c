@@ -8,22 +8,68 @@ bool is_space(char c) {
 void line_break(LayoutContext* lycon);
 void layout_node(LayoutContext* lycon, StyleNode* style_elmt);
 
+View* alloc_view(LayoutContext* lycon, ViewType type, StyleNode* node) {
+    View* view;
+    switch (type) {
+        case RDT_VIEW_BLOCK: view = calloc(1, sizeof(ViewBlock)); break;
+        case RDT_VIEW_TEXT: view = calloc(1, sizeof(ViewText)); break;
+        case RDT_VIEW_INLINE:  default:
+            view = calloc(1, sizeof(ViewSpan)); break;
+    }
+    view->type = type;  view->style = node;  view->parent = lycon->parent;
+    // link the view
+    if (lycon->prev_view) { lycon->prev_view->next = view; }
+    else { lycon->parent->child = view; }
+    if (!lycon->line.start_view) lycon->line.start_view = view;
+    return view;
+}
+
+void line_align(LayoutContext* lycon) {
+    // align the views in the line
+    printf("line align\n");
+    if (lycon->block.text_align != LXB_CSS_VALUE_LEFT) {
+        View* view = lycon->line.start_view;
+        if (view) {
+            int line_width = lycon->line.advance_x;
+            int offset = 0;
+            if (lycon->block.text_align == LXB_CSS_VALUE_CENTER) {
+                offset = (lycon->block.width - line_width) / 2;
+            }
+            else if (lycon->block.text_align == LXB_CSS_VALUE_RIGHT) {
+                offset = lycon->block.width - line_width;
+            }
+            do {
+                if (view->type == RDT_VIEW_TEXT) {
+                    ViewText* text = (ViewText*)view;
+                    text->x += offset;
+                }
+                else if (view->type == RDT_VIEW_BLOCK) {
+                    ViewBlock* block = (ViewBlock*)view;
+                    block->x += offset;
+                }
+                else if (view->type == RDT_VIEW_INLINE) {
+                    // need to align the children
+                }
+                view = view->next;
+            } while (view);            
+        }
+    }
+    printf("end of line align\n");
+}
+
 void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(style_elmt->node, NULL));
     if (lycon->line.is_line_start) { line_break(lycon); }
         
+    ViewBlock* block = alloc_view(lycon, RDT_VIEW_BLOCK, style_elmt);
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     lycon->block.text_align = style_elmt->text_align;
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
     lycon->line.right = lycon->block.width;  
-    lycon->line.is_line_start = true;  lycon->line.last_space = NULL;
-    ViewBlock* block = calloc(1, sizeof(ViewBlock));
-    block->type = RDT_VIEW_BLOCK;  block->style = style_elmt;  block->parent = lycon->parent;
-    // link the block
-    if (lycon->prev_view) { lycon->prev_view->next = block; }
-    else { lycon->parent->child = block; }
+    lycon->line.is_line_start = true;  lycon->line.last_space = NULL;  
+    lycon->line.start_view = NULL;
     block->y = pa_block.advance_y;
     
     // layout block content
@@ -41,6 +87,7 @@ void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
         lycon->parent = block->parent;
         printf("block height: %d\n", lycon->block.advance_y);
     }
+    line_align(lycon);
 
     block->width = max(lycon->block.width, lycon->block.max_width);  
     block->height = lycon->block.advance_y;
@@ -56,12 +103,8 @@ void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
 
 void layout_inline(LayoutContext* lycon, StyleElement* style_elmt) {
     printf("layout inline %s\n", lxb_dom_element_local_name(style_elmt->node, NULL));
+    ViewSpan* span = alloc_view(lycon, RDT_VIEW_INLINE, style_elmt);
     FontBox pa_font = lycon->font;  lycon->font.style = style_elmt->font;
-    ViewSpan* span = calloc(1, sizeof(ViewSpan));
-    span->type = RDT_VIEW_INLINE;  span->style = style_elmt;  span->parent = lycon->parent;
-    // link the span
-    if (lycon->prev_view) { lycon->prev_view->next = (View*)span; }
-    else { lycon->parent->child = (View*)span; }
     span->font = style_elmt->font;  lycon->font.style = span->font;
     lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face, &span->font);
 
@@ -85,7 +128,9 @@ void line_break(LayoutContext* lycon) {
     lycon->block.advance_y += lycon->line.max_height;
     // reset linebox
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
-    lycon->line.is_line_start = true;  lycon->line.last_space = NULL;
+    lycon->line.is_line_start = true;  lycon->line.last_space = NULL;  
+    lycon->line.start_view = NULL;
+    line_align(lycon);
 }
 
 enum {
@@ -94,7 +139,6 @@ enum {
     RDT_LINE_FILLED = 2,
 };
 
-// 
 bool text_has_line_filled(LayoutContext* lycon, StyleText* text) {
     int text_width = 0;  char *str = text->str;
     do {
@@ -170,11 +214,7 @@ void layout_text(LayoutContext* lycon, StyleText* style_text) {
     }
     LAYOUT_TEXT:
     // assume style_text has at least one character
-    ViewText* text = calloc(1, sizeof(ViewText));
-    text->type = RDT_VIEW_TEXT;  text->parent = lycon->parent;  text->style = style_text;
-    // link the text
-    if (lycon->prev_view) { lycon->prev_view->next = (View*)text; }
-    else { lycon->parent->child = (View*)text;  printf("link as first child\n"); }
+    ViewText* text = alloc_view(lycon, RDT_VIEW_TEXT, style_text);
     lycon->prev_view = (View*)text;    
     text->start_index = str - style_text->str;
     text->x = lycon->line.advance_x;  text->y = lycon->block.advance_y;
@@ -340,7 +380,7 @@ View* layout_style_tree(UiContext* uicon, StyleBlock* style_root) {
     lycon.block.advance_y = 0;  lycon.block.max_width = 800;
     layout_block(&lycon, style_root);
     printf("end layout\n");
-    // layout_cleanup(&lycon);
+    layout_cleanup(&lycon);
 
     StrBuf* buf = strbuf_new(4096);
     print_view_tree(root_view, buf, 0);

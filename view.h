@@ -81,8 +81,8 @@ typedef struct View {
 
 typedef struct {
     View; // extends View
-    int start_index, length;  // start and length of the text in the style node
     int x, y, width, height;  // bounds for the text, x, y relative to the parent block
+    int start_index, length;  // start and length of the text in the style node
 } ViewText;
 
 typedef struct {
