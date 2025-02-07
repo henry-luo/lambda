@@ -6,7 +6,7 @@
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-#include <fontconfig/fontconfig.h>
+#include <fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <lexbor/html/html.h>

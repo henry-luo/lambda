@@ -27,8 +27,8 @@ void fill_rect(int x, int y, int width, int height, unsigned char intensity) {
 // Function to draw a glyph bitmap into the image buffer
 void draw_bitmap(FT_Bitmap *bitmap, int x, int y) {
     // printf("draw bitmap: %d %d\n", x, y);
-    for (int i = 0; i < bitmap->rows; i++) {
-        for (int j = 0; j < bitmap->width; j++) {
+    for (unsigned int i = 0; i < bitmap->rows; i++) {
+        for (unsigned int j = 0; j < bitmap->width; j++) {
             unsigned char intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0)
                 set_pixel(x + j, y + i, intensity);
@@ -48,7 +48,7 @@ void save_to_pgm(const char *filename) {
     fclose(file);
 }
 
-int render_init(RenderContext* rdcon, UiContext* uicon) {
+void render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
@@ -113,7 +113,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
         render_children(rdcon, view);
     }
     else {
-        printf("%sview has no child\n");
+        printf("view has no child\n");
     }
     rdcon->block = pa_block;
 }
@@ -127,7 +127,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         // FT_Done_Face(rdcon->face);
     }
     else {
-        printf("%sview has no child\n");
+        printf("view has no child\n");
     }
     rdcon->face = pa_face;
 }

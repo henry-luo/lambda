@@ -98,7 +98,7 @@ void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
     pa_line.advance_x = 0;  pa_line.max_height = 0;  
     pa_line.is_line_start = true;  pa_line.last_space = NULL;
     lycon->line = pa_line;  lycon->prev_view = block;
-    printf("block view: %d, self %d, child %d\n", block->type, block, block->child);
+    printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
 }
 
 void layout_inline(LayoutContext* lycon, StyleElement* style_elmt) {
@@ -121,7 +121,7 @@ void layout_inline(LayoutContext* lycon, StyleElement* style_elmt) {
 
     // FT_Done_Face(lycon->font.face);
     lycon->font = pa_font;  lycon->prev_view = span;
-    printf("inline view: %d, self %d, child %d\n", span->type, span, span->child);
+    printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
 }
 
 void line_break(LayoutContext* lycon) {
@@ -353,7 +353,7 @@ void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
     }
 }
 
-int layout_init(LayoutContext* lycon, UiContext* uicon) {
+void layout_init(LayoutContext* lycon, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->ui_context = uicon;
     // most browsers use a generic sans-serif font as the default
@@ -365,7 +365,7 @@ int layout_init(LayoutContext* lycon, UiContext* uicon) {
     lycon->font.style.text_deco = LXB_CSS_VALUE_NONE;
 }
 
-int layout_cleanup(LayoutContext* lycon) {
+void layout_cleanup(LayoutContext* lycon) {
     FT_Done_Face(lycon->font.face);
 }
 

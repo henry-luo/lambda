@@ -86,7 +86,8 @@ int ui_context_init(UiContext* uicon) {
     if (!uicon->font_config) {
         fprintf(stderr, "Failed to initialize Fontconfig\n");
         return EXIT_FAILURE;
-    }    
+    }
+    return EXIT_SUCCESS; 
 }
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
@@ -135,7 +136,7 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
     else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
         strbuf_append_str(name, ":italic");
     }
-    printf("Loading font: %s, %d\n", name->b, parent->size->metrics.height);
+    printf("Loading font: %s, %ld\n", name->b, parent->size->metrics.height);
     FT_Face face = load_font_face(uicon, name->b, 16); // parent->size->metrics.height);
     strbuf_free(name);
     return face;

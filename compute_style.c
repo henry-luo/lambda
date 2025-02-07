@@ -6,7 +6,7 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element);
 void compute_child(StyleContext* context, lxb_dom_element_t *element) {
     // compute child style 
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(element));
-    printf("child element: %d, %s\n", child->local_name, 
+    printf("child element: %lu, %s\n", child->local_name, 
         (const char *)lxb_dom_element_local_name(child, NULL));
     if (child) {
         context->prev_node = NULL;
@@ -18,7 +18,7 @@ void compute_child(StyleContext* context, lxb_dom_element_t *element) {
                 compute_style(context, child_elmt);
             }
             else if (child->type == LXB_DOM_NODE_TYPE_TEXT) {
-                const char* text = lxb_dom_interface_text(child)->char_data.data.data;
+                const unsigned char* text = lxb_dom_interface_text(child)->char_data.data.data;
                 printf(" Text: %s\n", text);
                 StyleText* style = calloc(1, sizeof(StyleText));
                 style->str = text;  style->node = child;

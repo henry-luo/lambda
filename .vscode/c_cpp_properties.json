@@ -1,0 +1,41 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "/opt/homebrew/opt/lexbor/include",
+                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                "/opt/homebrew/include/fontconfig",
+                "${workspaceFolder}/**",
+                "${default}"
+            ],
+            "defines": [
+                "${default}"
+            ],
+            "macFrameworkPath": [
+                "${default}",
+                "additional/paths"
+            ],
+            "forcedInclude": [
+                "${default}",
+                "additional/paths"
+            ],
+            "compileCommands": [
+                "${default}"
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": "${default}",
+                "path": [
+                    "${default}",
+                    "additional/paths"
+                ]
+            },
+            "intelliSenseMode": "${default}",
+            "cStandard": "${default}",
+            "cppStandard": "${default}",
+            "compilerPath": "${default}"
+        }
+    ],
+    "version": 4
+}
