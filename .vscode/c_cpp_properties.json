@@ -13,12 +13,10 @@
                 "${default}"
             ],
             "macFrameworkPath": [
-                "${default}",
-                "additional/paths"
+                "${default}"
             ],
             "forcedInclude": [
-                "${default}",
-                "additional/paths"
+                "${default}"
             ],
             "compileCommands": [
                 "${default}"
@@ -27,8 +25,7 @@
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${default}",
                 "path": [
-                    "${default}",
-                    "additional/paths"
+                    "${default}"
                 ]
             },
             "intelliSenseMode": "${default}",
