@@ -5,8 +5,9 @@ typedef struct {
 } BlockBlot;
 
 typedef struct {
-    UiContext* ui_context;
     BlockBlot block;
+    FT_Face face;   // current font face
     FT_Library library;
-    FT_Face face;   // current font face 
+    unsigned char* buffer;
+    UiContext* ui_context;
 } RenderContext;

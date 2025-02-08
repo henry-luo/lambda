@@ -38,6 +38,7 @@ void line_align(LayoutContext* lycon) {
             else if (lycon->block.text_align == LXB_CSS_VALUE_RIGHT) {
                 offset = lycon->block.width - line_width;
             }
+            if (offset <= 0) return;  // no need to adjust the views
             do {
                 if (view->type == RDT_VIEW_TEXT) {
                     ViewText* text = (ViewText*)view;

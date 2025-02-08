@@ -116,7 +116,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                 face = NULL;
             } else {
                 // Set font size
-                FT_Set_Pixel_Sizes(face, 0, font_size);
+                FT_Set_Pixel_Sizes(face, 0, 32); // font_size);
             }            
         }
         FcPatternDestroy(match);
@@ -147,6 +147,7 @@ void ui_context_cleanup(UiContext* uicon) {
     FcConfigDestroy(uicon->font_config);
 }
 
+/*
 int main(void) {
     UiContext uicon;
     ui_context_init(&uicon);
@@ -164,4 +165,4 @@ int main(void) {
     
     ui_context_cleanup(&uicon);
 }
-
+*/

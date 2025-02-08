@@ -10,7 +10,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 
 // Function to set a pixel in the image buffer
 void set_pixel(int x, int y, unsigned char intensity) {
-    if (x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT) {
+    if (0 <= x && x < WIDTH && 0 <= y && y < HEIGHT) {
         if (intensity > image[y][x])
             image[y][x] = intensity; // use the grayscale intensity from the glyph
     }
@@ -25,13 +25,19 @@ void fill_rect(int x, int y, int width, int height, unsigned char intensity) {
 }
 
 // Function to draw a glyph bitmap into the image buffer
-void draw_bitmap(FT_Bitmap *bitmap, int x, int y) {
+void draw_bitmap(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     // printf("draw bitmap: %d %d\n", x, y);
     for (unsigned int i = 0; i < bitmap->rows; i++) {
         for (unsigned int j = 0; j < bitmap->width; j++) {
             unsigned char intensity = bitmap->buffer[i * bitmap->pitch + j];
-            if (intensity > 0)
+            if (intensity > 0) {
                 set_pixel(x + j, y + i, intensity);
+                int index = ((y + i) * WIDTH + (x + j)) * 4;
+                rdcon->buffer[index] = 255; // Alpha
+                rdcon->buffer[index + 1] = intensity; // Blue
+                rdcon->buffer[index + 2] = intensity; // Green 
+                rdcon->buffer[index + 3] = intensity; // Red
+            }
         }
     }
 }
@@ -48,11 +54,12 @@ void save_to_pgm(const char *filename) {
     fclose(file);
 }
 
-void render_init(RenderContext* rdcon, UiContext* uicon) {
+void render_init(RenderContext* rdcon, UiContext* uicon, unsigned char* buffer) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
     rdcon->face = load_font_face(uicon, "Arial", 16);
+    rdcon->buffer = buffer;
 }
 
 void render_clean_up(RenderContext* rdcon) {
@@ -65,13 +72,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     // render each character
     char* p = ((StyleText*)text->style)->str + text->start_index;  char* end = p + text->length;
     for (; p < end; p++) {
-        if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER | FT_LOAD_NO_AUTOHINT)) {
+        if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER)) {
             fprintf(stderr, "Could not load character '%c'\n", *p);
             continue;
         }
         if (!is_space(*p)) {
             // draw the glyph to the image buffer
-            draw_bitmap(&rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
+            draw_bitmap(rdcon, &rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
                 y + text->height - rdcon->face->glyph->bitmap_top);
         }
         // advance to the next position
@@ -132,11 +139,12 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     rdcon->face = pa_face;
 }
 
-void render_html_doc(UiContext* uicon, View* root_view) {
+void render_html_doc(UiContext* uicon, View* root_view, unsigned char* buffer) {
     RenderContext rdcon;
     printf("Render HTML doc\n");
-    render_init(&rdcon, uicon);
-    fill_rect(0, 0, 200, 600, 100);
+    render_init(&rdcon, uicon, buffer);
+
+    fill_rect(0, 0, 200, 600, 40);
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);

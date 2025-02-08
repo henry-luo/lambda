@@ -52,12 +52,12 @@ int main(int argc, char *argv[]) {
     }
     memset(buffer, 0, WINDOW_WIDTH * WINDOW_HEIGHT * sizeof(uint32_t));    
 
-    tvg_engine_init(TVG_ENGINE_SW, 1);
-    Tvg_Canvas* canvas = tvg_swcanvas_create();
-    tvg_swcanvas_set_target(canvas, buffer, WINDOW_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, TVG_COLORSPACE_ARGB8888);
-    drawTriangle(canvas);
-    tvg_canvas_draw(canvas, true);
-    tvg_canvas_sync(canvas);
+    // tvg_engine_init(TVG_ENGINE_SW, 1);
+    // Tvg_Canvas* canvas = tvg_swcanvas_create();
+    // tvg_swcanvas_set_target(canvas, buffer, WINDOW_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, TVG_COLORSPACE_ARGB8888);
+    // drawTriangle(canvas);
+    // tvg_canvas_draw(canvas, true);
+    // tvg_canvas_sync(canvas);
 
     bool running = true;
     SDL_Event event;
@@ -70,13 +70,13 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
+        // SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        // SDL_RenderClear(renderer);
         
-        renderTriangle(renderer);
+        // renderTriangle(renderer);
         renderText(renderer, font, "Hello, SDL2!", 50, 50);
 
-        tvg_canvas_update(canvas);
+        // tvg_canvas_update(canvas);
         SDL_UpdateTexture(texture, NULL, buffer, WINDOW_WIDTH * sizeof(uint32_t));
         
         SDL_RenderCopy(renderer, texture, NULL, NULL);
@@ -84,7 +84,7 @@ int main(int argc, char *argv[]) {
     }
     
     free(buffer);
-    tvg_canvas_destroy(canvas);
+    // tvg_canvas_destroy(canvas);
     tvg_engine_term(TVG_ENGINE_SW);
     TTF_CloseFont(font);
     TTF_Quit();
