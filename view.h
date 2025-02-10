@@ -15,6 +15,7 @@
 // #include <lexbor/dom/interface.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <thorvg_capi.h>
 
 typedef unsigned short PropValue;
 #define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
@@ -104,6 +105,7 @@ typedef struct {
 
 typedef struct {
     SDL_Surface* surface;  // rendering surface of a window
+    Tvg_Canvas* canvas;    // ThorVG canvas
     FcConfig *font_config;
     FT_Library ft_library; 
 } UiContext;

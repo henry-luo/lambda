@@ -97,6 +97,16 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     rdcon->face = pa_face;
 }
 
+void drawTriangle(Tvg_Canvas* canvas) {
+    Tvg_Paint* shape = tvg_shape_new();
+    tvg_shape_move_to(shape, 400, 100);
+    tvg_shape_line_to(shape, 600, 300);
+    tvg_shape_line_to(shape, 100, 500);
+    tvg_shape_close(shape);
+    tvg_shape_set_fill_color(shape, 255, 100, 100, 150); // semi-transparent red color
+    tvg_canvas_push(canvas, shape);
+}
+
 void render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
@@ -122,10 +132,12 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     render_init(&rdcon, uicon);
 
     // fill the surface with a white background
-    SDL_FillRect(rdcon.ui_context->surface, NULL, 0xFFFFFF);
+    SDL_FillRect(rdcon.ui_context->surface, NULL, 
+        SDL_MapRGBA(rdcon.ui_context->surface->format, 255, 255, 255, 255));
 
     SDL_Rect rect = {0, 0, 200, 600};
-    SDL_FillRect(rdcon.ui_context->surface, &rect, 0x4F4F4F); // gray rect
+    SDL_FillRect(rdcon.ui_context->surface, &rect,
+        SDL_MapRGBA(rdcon.ui_context->surface->format, 64, 64, 64, 255)); // gray rect
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);
@@ -133,6 +145,9 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     else {
         fprintf(stderr, "Invalid root view\n");
     }
+    drawTriangle(rdcon.ui_context->canvas);
+    tvg_canvas_draw(rdcon.ui_context->canvas, false); // no clearing of the buffer
+    tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
     // SDL_SaveBMP(rdcon.ui_context->surface, "output.bmp");

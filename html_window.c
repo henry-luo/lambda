@@ -8,11 +8,56 @@
 
 View* layout_style_tree(UiContext* uicon, StyleBlock* style_root);
 void render_html_doc(UiContext* uicon, View* root_view);
-int ui_context_init(UiContext* uicon);
-void ui_context_cleanup(UiContext* uicon);
 StrBuf* readTextFile(const char *filename);
 lxb_html_document_t* parse_html_doc(const char *html_source);
 View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc);
+
+int ui_context_init(UiContext* uicon) {
+    // init SDL
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        printf("SDL_Init failed: %s", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+    // init SDL_image
+    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
+        printf("IMG_Init failed: %s", IMG_GetError());
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+
+    // init FreeType
+    if (FT_Init_FreeType(&uicon->ft_library)) {
+        fprintf(stderr, "Could not initialize FreeType library\n");
+        return EXIT_FAILURE;
+    }
+    // init Fontconfig
+    uicon->font_config = FcInitLoadConfigAndFonts();
+    if (!uicon->font_config) {
+        fprintf(stderr, "Failed to initialize Fontconfig\n");
+        return EXIT_FAILURE;
+    }
+
+    // init ThorVG engine
+    tvg_engine_init(TVG_ENGINE_SW, 1);
+
+    // creates the surface for rendering, 32-bits per pixel, RGBA format
+    // should be the size of the window/viewport
+    uicon->surface = SDL_CreateRGBSurfaceWithFormat(0, WINDOW_WIDTH, WINDOW_HEIGHT, 32, SDL_PIXELFORMAT_ARGB8888);
+    uicon->canvas = tvg_swcanvas_create();
+    tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
+        WINDOW_WIDTH, WINDOW_WIDTH, WINDOW_HEIGHT, TVG_COLORSPACE_ARGB8888);
+    return EXIT_SUCCESS; 
+}
+
+void ui_context_cleanup(UiContext* uicon) {
+    FT_Done_FreeType(uicon->ft_library);
+    FcConfigDestroy(uicon->font_config);
+    tvg_canvas_destroy(uicon->canvas);
+    tvg_engine_term(TVG_ENGINE_SW);
+    SDL_FreeSurface(uicon->surface);
+    IMG_Quit();
+    SDL_Quit();
+}
 
 int main(int argc, char *argv[]) {
     UiContext uicon;
