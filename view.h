@@ -13,6 +13,8 @@
 // #include <lexbor/tag/const.h>           // html tag names
 // #include <lexbor/css/value/const.h>     // css property values
 // #include <lexbor/dom/interface.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
 
 typedef unsigned short PropValue;
 #define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
@@ -101,6 +103,7 @@ typedef struct {
 } ViewBlock;
 
 typedef struct {
+    SDL_Surface* surface;  // rendering surface of a window
     FcConfig *font_config;
     FT_Library ft_library; 
 } UiContext;

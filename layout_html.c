@@ -75,21 +75,6 @@ StrBuf* readTextFile(const char *filename) {
     return buf;
 }
 
-int ui_context_init(UiContext* uicon) {
-    // init FreeType
-    if (FT_Init_FreeType(&uicon->ft_library)) {
-        fprintf(stderr, "Could not initialize FreeType library\n");
-        return EXIT_FAILURE;
-    }
-    // init Fontconfig
-    uicon->font_config = FcInitLoadConfigAndFonts();
-    if (!uicon->font_config) {
-        fprintf(stderr, "Failed to initialize Fontconfig\n");
-        return EXIT_FAILURE;
-    }
-    return EXIT_SUCCESS; 
-}
-
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // todo: cache the fonts loaded
     FT_Face face = NULL;
@@ -142,27 +127,41 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
     return face;
 }
 
+int ui_context_init(UiContext* uicon) {
+    // init SDL
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        printf("SDL_Init failed: %s", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+    // init SDL_image
+    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
+        printf("IMG_Init failed: %s", IMG_GetError());
+        SDL_Quit();
+        return EXIT_FAILURE;
+    }
+
+    // init FreeType
+    if (FT_Init_FreeType(&uicon->ft_library)) {
+        fprintf(stderr, "Could not initialize FreeType library\n");
+        return EXIT_FAILURE;
+    }
+    // init Fontconfig
+    uicon->font_config = FcInitLoadConfigAndFonts();
+    if (!uicon->font_config) {
+        fprintf(stderr, "Failed to initialize Fontconfig\n");
+        return EXIT_FAILURE;
+    }
+
+    // creates the surface for rendering, 32-bits per pixel, RGBA format
+    // should be the size of the window/viewport
+    uicon->surface = SDL_CreateRGBSurfaceWithFormat(0, 800, 600, 32, SDL_PIXELFORMAT_RGBA8888);
+    return EXIT_SUCCESS; 
+}
+
 void ui_context_cleanup(UiContext* uicon) {
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
+    SDL_FreeSurface(uicon->surface);
+    IMG_Quit();
+    SDL_Quit();
 }
-
-/*
-int main(void) {
-    UiContext uicon;
-    ui_context_init(&uicon);
-
-    // load sample HTML source
-    StrBuf* source_buf = readTextFile("sample.html");
-    lxb_html_document_t* document = parse_html_doc(source_buf->b);
-    strbuf_free(source_buf);
-    // layout html doc 
-    if (document) {
-        View* root_view = layout_html_doc(&uicon, document);
-        // render html doc
-        if (root_view) render_html_doc(&uicon, root_view);
-    }
-    
-    ui_context_cleanup(&uicon);
-}
-*/

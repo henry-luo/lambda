@@ -1,4 +1,3 @@
-#include <SDL2/SDL.h>
 #include "layout.h"
 #include "./lib/string_buffer/string_buffer.h"
 #include <stdio.h>
@@ -8,7 +7,7 @@
 #define WINDOW_HEIGHT 600
 
 View* layout_style_tree(UiContext* uicon, StyleBlock* style_root);
-void render_html_doc(UiContext* uicon, View* root_view, uint32_t* buffer);
+void render_html_doc(UiContext* uicon, View* root_view);
 int ui_context_init(UiContext* uicon);
 void ui_context_cleanup(UiContext* uicon);
 StrBuf* readTextFile(const char *filename);
@@ -17,7 +16,6 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc);
 
 int main(int argc, char *argv[]) {
     UiContext uicon;
-    SDL_Init(SDL_INIT_VIDEO);
     ui_context_init(&uicon);
     
     SDL_Window *window = SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
@@ -36,10 +34,6 @@ int main(int argc, char *argv[]) {
     // Scale rendering
     SDL_RenderSetScale(renderer, scale_x, scale_y);
 
-    
-    SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, 
-        SDL_TEXTUREACCESS_STREAMING, WINDOW_WIDTH, WINDOW_HEIGHT);
-
     // load sample HTML source
     View* root_view = NULL;
     StrBuf* source_buf = readTextFile("sample.html");
@@ -47,39 +41,28 @@ int main(int argc, char *argv[]) {
     strbuf_free(source_buf);
     // layout html doc 
     if (document) { root_view = layout_html_doc(&uicon, document); }
-    uint32_t *buffer = (uint32_t *)calloc(1, WINDOW_WIDTH * WINDOW_HEIGHT * sizeof(uint32_t));
     // render html doc
-    if (root_view) { render_html_doc(&uicon, root_view, buffer); }
+    if (root_view) { render_html_doc(&uicon, root_view); }
 
     bool running = true;
     SDL_Event event;
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, uicon.surface);
     while (running) {
-        while (SDL_PollEvent(&event)) {
+        while (SDL_PollEvent(&event)) {  // handles events
             if (event.type == SDL_QUIT || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) {
                 running = false;
             }
         }
-        
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
-
-        // copy from buffer to texture
-        SDL_UpdateTexture(texture, NULL, buffer, WINDOW_WIDTH * sizeof(uint32_t));
-        SDL_Rect textRect = {0, 0, 400, 300}; // Keep it scaled
-        SDL_RenderCopy(renderer, texture, NULL, &textRect);        
+        // render the texture to the screen
+        SDL_RenderCopy(renderer, texture, NULL, NULL);
         SDL_RenderPresent(renderer);
+
+        SDL_Delay(400);  // Pause for 400ms after each rendering
     }
     
-    ui_context_cleanup(&uicon);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
-    SDL_Quit();
+    ui_context_cleanup(&uicon);
     return 0;
 }
-
-
-/*
-zig cc sdl_window.c -o sdl_app $(sdl2-config --cflags --libs) \
--I/opt/homebrew/opt/sdl2/include -L/opt/homebrew/opt/sdl2/lib -lSDL2 \
--I/opt/homebrew/opt/sdl2_ttf/include -L/opt/homebrew/opt/sdl2_ttf/lib -lSDL2_ttf 
-*/

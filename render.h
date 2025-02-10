@@ -8,6 +8,5 @@ typedef struct {
     BlockBlot block;
     FT_Face face;   // current font face
     FT_Library library;
-    unsigned char* buffer;
     UiContext* ui_context;
 } RenderContext;
