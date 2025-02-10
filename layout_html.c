@@ -6,22 +6,17 @@
     define style struct: BlockStyle; (style def: html elmt, html attr, inline style, CSS style)
     defined style >> computed style -> layout;
     let html dom represent defined style, and we only store computed style in style tree;
-2. tag div >> block layout, span >> inline layout;
-3. inline: FreeType to get text metrics >> emit view node and construct view tree;
-4. render view tree;
 */
 
 View* layout_style_tree(UiContext* uicon, StyleBlock* style_root);
 void render_html_doc(UiContext* uicon, View* root_view);
-StyleBlock* compute_doc_style(StyleContext* context, lxb_dom_element_t *element);
+StyleBlock* compute_doc_style(lxb_dom_element_t *element);
 
 View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
-    StyleContext context;
     lxb_dom_element_t *body = lxb_html_document_body_element(doc);
     if (body) {
         // compute: html elmt tree >> computed style tree
-        context.parent = NULL;  context.prev_node = NULL;
-        StyleBlock* style_tree = compute_doc_style(&context, body);
+        StyleBlock* style_tree = compute_doc_style(body);
         assert(style_tree->display == LXB_CSS_VALUE_BLOCK);
         // layout: computed style tree >> view tree
         printf("start to layout style tree\n");
@@ -31,14 +26,21 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
 }
 
 lxb_html_document_t* parse_html_doc(const char *html_source) {
-    // Create the HTML document object
+    // create HTML document object
     lxb_html_document_t *document = lxb_html_document_create();
     if (!document) {
         fprintf(stderr, "Failed to create HTML document.\n");
         return NULL;
     }
+    // init CSS on document, otherwise CSS declarations will not be parsed
+    lxb_status_t status = lxb_html_document_css_init(document);
+    if (status != LXB_STATUS_OK) {
+        fprintf(stderr, "Failed to CSS initialization\n");
+        return NULL;
+    }
+
     // parse the HTML source
-    lxb_status_t status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
+    status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to parse HTML.\n");
         lxb_html_document_destroy(document);

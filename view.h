@@ -10,9 +10,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <lexbor/html/html.h>
-// #include <lexbor/tag/const.h>           // html tag names
-// #include <lexbor/css/value/const.h>     // css property values
-// #include <lexbor/dom/interface.h>
+#include <lexbor/css/css.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <thorvg_capi.h>
@@ -41,10 +39,11 @@ typedef struct {
 } FontProp;
 
 typedef struct StyleElement {
-    StyleNode; // extends StyleNode
+    StyleNode;  // extends StyleNode
     // style tree pointers
     struct StyleNode* parent;
-    struct StyleElement* child; // first child
+    struct StyleElement* child;  // first child
+    // lxb_css_declaration_t* inline_style;  // parsed inline style
     FontProp font;  // font style
 } StyleElement;
 

@@ -59,6 +59,21 @@ void ui_context_cleanup(UiContext* uicon) {
     SDL_Quit();
 }
 
+static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
+    // Append data to string buffer
+    lxb_char_t **output = (lxb_char_t **)ctx;
+    size_t old_len = *output ? strlen((char *)*output) : 0;
+    *output = realloc(*output, old_len + len + 1);
+    if (*output == NULL) {
+        return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
+    }
+    
+    memcpy(*output + old_len, data, len);
+    (*output)[old_len + len] = '\0';
+    
+    return LXB_STATUS_OK;
+}
+
 int main(int argc, char *argv[]) {
     UiContext uicon;
     ui_context_init(&uicon);
@@ -84,6 +99,20 @@ int main(int argc, char *argv[]) {
     StrBuf* source_buf = readTextFile("sample.html");
     lxb_html_document_t* document = parse_html_doc(source_buf->b);
     strbuf_free(source_buf);
+
+
+        // Serialize document to string
+        lxb_char_t *output = NULL;
+        lxb_dom_document_t *dom_document = &document->dom_document;
+        lxb_status_t status = lxb_html_serialize_tree_cb(dom_document, serialize_callback, &output);
+        if (status != LXB_STATUS_OK || output == NULL) {
+            fprintf(stderr, "Failed to serialize document\n");
+            return EXIT_FAILURE;
+        }
+        // Print serialized output
+        printf("Serialized HTML:\n%s\n", output);
+
+
     // layout html doc 
     if (document) { root_view = layout_html_doc(&uicon, document); }
     // render html doc

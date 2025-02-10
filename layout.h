@@ -3,6 +3,7 @@
 typedef struct {
     struct StyleElement* parent;
     struct StyleNode* prev_node;
+    lxb_css_parser_t *css_parser;
 } StyleContext;
 
 typedef struct {

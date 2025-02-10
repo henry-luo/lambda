@@ -1,12 +1,24 @@
 <html>
-<head><style>h1 { color: red; }</style></head>
+<head>
+    <style>
+    h1 { color: blue; }
+    .red { color: red; }
+    .bold { font-weight: bold; }
+    p { text-align: justify; }
+    p i { font-size: 20px; }
+    </style>
+</head>
 <body>
     <h1>Hello, <b>World</b>!</h1>
     <p>This is a paragraph with a long long line of text to test <i>text wrapping</i>.</p>
-    this is <u>dangling text</u> from sample file
+    this is <u class="red">dangling text</u> from sample file
     <center>centered text</center>
-    <font size="6" face="verdana" color="green">
+    <font style='color:green'>
         font with color
     </font>
+    <span class="red bold">
+        span with class
+    </span>
+    <div style="width:80px"> div with width</div>
 </body>
 </html>
