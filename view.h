@@ -95,7 +95,7 @@ typedef struct {
 
 typedef struct {
     ViewGroup;  // extends ViewGroup
-    FontProp font;  // font style
+    FontProp* font;  // font style
 } ViewSpan;
 
 typedef struct {

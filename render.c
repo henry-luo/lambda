@@ -43,6 +43,28 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         int wd = rdcon->face->glyph->advance.x >> 6;
         x += wd;  printf("char: %c, width: %d\n", *p, wd);
     }
+    // render text deco
+    if (rdcon->font && rdcon->font->text_deco != LXB_CSS_VALUE_NONE) {
+        int thinkness = max(rdcon->face->underline_thickness >> 6, 1);
+        SDL_Rect rect;
+        if (rdcon->font->text_deco == LXB_CSS_VALUE_UNDERLINE) {
+            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height - thinkness;      
+        }
+        else if (rdcon->font->text_deco == LXB_CSS_VALUE_OVERLINE) {
+            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y;
+        }
+        else if (rdcon->font->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
+            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height / 2;
+        }
+        else {
+            fprintf(stderr, "Invalid text decoration: %d\n", rdcon->font->text_deco);
+            return;
+        }
+        rect.w = text->width;  rect.h = thinkness;
+        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font->text_deco, rect.x, rect.y, rect.w, rect.h);
+        SDL_FillRect(rdcon->ui_context->surface, &rect, 
+            SDL_MapRGBA(rdcon->ui_context->surface->format, 255, 0, 0, 255));
+    }
 }
 
 void render_children(RenderContext* rdcon, View* view) {
@@ -84,17 +106,19 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
-    FT_Face pa_face = rdcon->face;
+    FT_Face pa_face = rdcon->face;  FontProp* pa_font = rdcon->font;
+    rdcon->font = view_span->font;
+    printf("render inline view, deco: %s\n", lxb_css_value_by_id(view_span->font->text_deco)->name);
     View* view = view_span->child;
     if (view) {
-        rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, &view_span->font);
+        rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, view_span->font);
         render_children(rdcon, view);
         // FT_Done_Face(rdcon->face);
     }
     else {
         printf("view has no child\n");
     }
-    rdcon->face = pa_face;
+    rdcon->face = pa_face;  rdcon->font = pa_font;
 }
 
 void drawTriangle(Tvg_Canvas* canvas) {

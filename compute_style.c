@@ -3,6 +3,8 @@
 
 StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element);
 
+FontProp default_font_prop = {LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
+
 void compute_child(StyleContext* context, lxb_dom_element_t *element) {
     // compute child style 
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(element));
@@ -46,6 +48,7 @@ StyleElement* compute_style(StyleContext* context, lxb_dom_element_t *element) {
     else {
         style = calloc(1, sizeof(StyleElement));
         style->display = LXB_CSS_VALUE_INLINE;
+        style->font = default_font_prop;
         if (name == LXB_TAG_B) {
             style->font.font_weight = LXB_CSS_VALUE_BOLD;
         }

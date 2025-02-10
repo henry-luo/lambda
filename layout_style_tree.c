@@ -105,9 +105,9 @@ void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
 void layout_inline(LayoutContext* lycon, StyleElement* style_elmt) {
     printf("layout inline %s\n", lxb_dom_element_local_name(style_elmt->node, NULL));
     ViewSpan* span = alloc_view(lycon, RDT_VIEW_INLINE, style_elmt);
+    span->font = &style_elmt->font;
     FontBox pa_font = lycon->font;  lycon->font.style = style_elmt->font;
-    span->font = style_elmt->font;  lycon->font.style = span->font;
-    lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face, &span->font);
+    lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face, span->font);
 
     // layout inline content
     StyleNode* node = style_elmt->child;
@@ -329,8 +329,11 @@ void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
             }
             else if (view->type == RDT_VIEW_INLINE) {
                 ViewSpan* span = (ViewSpan*)view;
-                strbuf_sprintf(buf, "view inline:%s\n",
-                    lxb_dom_element_local_name(span->style->node, NULL));
+                strbuf_sprintf(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
+                    lxb_dom_element_local_name(span->style->node, NULL), 
+                    lxb_css_value_by_id(span->font->text_deco)->name, 
+                    lxb_css_value_by_id(span->font->font_weight)->name,
+                    lxb_css_value_by_id(span->font->font_style)->name);
                 print_view_tree((ViewGroup*)view, buf, indent+2);
             }
             else if (view->type == RDT_VIEW_TEXT) {
@@ -391,8 +394,3 @@ View* layout_style_tree(UiContext* uicon, StyleBlock* style_root) {
 
     return (View*)root_view;
 }
-
-// todo: implement tree allocator, and iterator?
-
-// text-align: line-break (if got available space, and has alignment, adjust the x position of views in the line)
-// linebox: start_view
