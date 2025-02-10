@@ -238,7 +238,7 @@ int main() {
         glClear(GL_COLOR_BUFFER_BIT);
 
         // Render text to screen
-        render_text_to_screen(window, "Hello, FreeType!!!", "./lato.ttf", 48);
+        render_text_to_screen(window, "Hello, FreeType!!!", "../test/lato.ttf", 48);
 
         // Swap front and back buffers
         glfwSwapBuffers(window);
