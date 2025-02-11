@@ -28,7 +28,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     int x = rdcon->block.x + text->x;
     int y = rdcon->block.y + text->y;
     // render each character
-    char* p = ((StyleText*)text->style)->str + text->start_index;  char* end = p + text->length;
+    unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
+    unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
     for (; p < end; p++) {
         if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER)) {
             fprintf(stderr, "Could not load character '%c'\n", *p);
@@ -72,19 +73,20 @@ void render_children(RenderContext* rdcon, View* view) {
         if (view->type == RDT_VIEW_BLOCK) {
             ViewBlock* block = (ViewText*)view;
             printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                lxb_dom_element_local_name(block->style->node, NULL),
+                lxb_dom_element_local_name(block->node, NULL),
                 block->x, block->y, block->width, block->height);                
             render_block_view(rdcon, (ViewBlock*)view);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            printf("view inline:%s\n", lxb_dom_element_local_name(span->style->node, NULL));                
+            printf("view inline:%s\n", lxb_dom_element_local_name(span->node, NULL));                
             render_inline_view(rdcon, (ViewSpan*)view);
         }
         else {
             ViewText* text = (ViewText*)view;
+            unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data; 
             printf("text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
-                ((StyleText*)text->style)->str, text->start_index, text->length, 
+                str, text->start_index, text->length, 
                 text->x, text->y, text->width, text->height, rdcon->block.x);
             render_text_view(rdcon, text);
         }
@@ -107,11 +109,11 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FT_Face pa_face = rdcon->face;  FontProp* pa_font = rdcon->font;
-    rdcon->font = view_span->font;
-    printf("render inline view, deco: %s\n", lxb_css_value_by_id(view_span->font->text_deco)->name);
+    rdcon->font = &view_span->font;
+    printf("render inline view, deco: %s\n", lxb_css_value_by_id(view_span->font.text_deco)->name);
     View* view = view_span->child;
     if (view) {
-        rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, view_span->font);
+        rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, &view_span->font);
         render_children(rdcon, view);
         // FT_Done_Face(rdcon->face);
     }

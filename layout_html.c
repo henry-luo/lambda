@@ -1,29 +1,6 @@
 #include "layout.h"
 #include <stdio.h>
 #include "./lib/string_buffer/string_buffer.h"
-/*
-1. loop through html tree >> body >> children - map to style node, and construct style tree;
-    define style struct: BlockStyle; (style def: html elmt, html attr, inline style, CSS style)
-    defined style >> computed style -> layout;
-    let html dom represent defined style, and we only store computed style in style tree;
-*/
-
-View* layout_style_tree(UiContext* uicon, StyleBlock* style_root);
-void render_html_doc(UiContext* uicon, View* root_view);
-StyleBlock* compute_doc_style(lxb_dom_element_t *element);
-
-View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
-    lxb_dom_element_t *body = lxb_html_document_body_element(doc);
-    if (body) {
-        // compute: html elmt tree >> computed style tree
-        StyleBlock* style_tree = compute_doc_style(body);
-        assert(style_tree->display == LXB_CSS_VALUE_BLOCK);
-        // layout: computed style tree >> view tree
-        printf("start to layout style tree\n");
-        return layout_style_tree(uicon, style_tree);
-    }
-    return NULL;
-}
 
 lxb_html_document_t* parse_html_doc(const char *html_source) {
     // create HTML document object

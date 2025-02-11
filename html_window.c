@@ -6,7 +6,6 @@
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
 
-View* layout_style_tree(UiContext* uicon, StyleBlock* style_root);
 void render_html_doc(UiContext* uicon, View* root_view);
 StrBuf* readTextFile(const char *filename);
 lxb_html_document_t* parse_html_doc(const char *html_source);
@@ -100,18 +99,16 @@ int main(int argc, char *argv[]) {
     lxb_html_document_t* document = parse_html_doc(source_buf->b);
     strbuf_free(source_buf);
 
-
-        // Serialize document to string
-        lxb_char_t *output = NULL;
-        lxb_dom_document_t *dom_document = &document->dom_document;
-        lxb_status_t status = lxb_html_serialize_tree_cb(dom_document, serialize_callback, &output);
-        if (status != LXB_STATUS_OK || output == NULL) {
-            fprintf(stderr, "Failed to serialize document\n");
-            return EXIT_FAILURE;
-        }
-        // Print serialized output
-        printf("Serialized HTML:\n%s\n", output);
-
+    // Serialize document to string
+    lxb_char_t *output = NULL;
+    lxb_dom_document_t *dom_document = &document->dom_document;
+    lxb_status_t status = lxb_html_serialize_tree_cb(dom_document, serialize_callback, &output);
+    if (status != LXB_STATUS_OK || output == NULL) {
+        fprintf(stderr, "Failed to serialize document\n");
+        return EXIT_FAILURE;
+    }
+    // Print serialized output
+    printf("Serialized HTML:\n%s\n", output);
 
     // layout html doc 
     if (document) { root_view = layout_html_doc(&uicon, document); }

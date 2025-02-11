@@ -21,16 +21,16 @@ typedef unsigned short PropValue;
 extern bool can_break(char c);
 extern bool is_space(char c);
 
-typedef struct StyleNode {
-    lxb_dom_node_t* node;
-    struct StyleNode* next;
-    PropValue display;  // computed display value
-} StyleNode;
+// typedef struct StyleNode {
+//     lxb_dom_node_t* node;
+//     struct StyleNode* next;
+//     PropValue display;  // computed display value
+// } StyleNode;
 
-typedef struct StyleText { 
-    StyleNode; // extends StyleNode
-    char* str;  // text content
-} StyleText;
+// typedef struct StyleText { 
+//     StyleNode; // extends StyleNode
+//     char* str;  // text content
+// } StyleText;
 
 typedef struct {
     PropValue font_style;
@@ -38,19 +38,19 @@ typedef struct {
     PropValue text_deco; // CSS text decoration    
 } FontProp;
 
-typedef struct StyleElement {
-    StyleNode;  // extends StyleNode
-    // style tree pointers
-    struct StyleNode* parent;
-    struct StyleElement* child;  // first child
-    // lxb_css_declaration_t* inline_style;  // parsed inline style
-    FontProp font;  // font style
-} StyleElement;
+// typedef struct StyleElement {
+//     StyleNode;  // extends StyleNode
+//     // style tree pointers
+//     struct StyleNode* parent;
+//     struct StyleElement* child;  // first child
+//     // lxb_css_declaration_t* inline_style;  // parsed inline style
+//     FontProp font;  // font style
+// } StyleElement;
 
-typedef struct {
-    StyleElement; // extends StyleElement
-    PropValue text_align;
-} StyleBlock;
+// typedef struct {
+//     StyleElement; // extends StyleElement
+//     PropValue text_align;
+// } StyleBlock;
 
 typedef enum {
     RDT_VIEW_BLOCK = 1,
@@ -76,7 +76,7 @@ typedef enum {
 
 typedef struct View {
     ViewType type;
-    StyleNode* style;  // future optimization: use 32-bit pointer for style node
+    lxb_dom_node_t *node;  // future optimization: use 32-bit pointer for style node
     struct View* next;
     struct ViewGroup* parent;
 } View;
@@ -94,12 +94,13 @@ typedef struct {
 
 typedef struct {
     ViewGroup;  // extends ViewGroup
-    FontProp* font;  // font style
+    FontProp font;  // font style
 } ViewSpan;
 
 typedef struct {
     ViewGroup;  // extends ViewGroup
     int x, y, width, height;  // x, y relative to the parent block    
+    PropValue text_align;
 } ViewBlock;
 
 typedef struct {
