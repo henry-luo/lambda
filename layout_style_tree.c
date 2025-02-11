@@ -88,7 +88,7 @@ void layout_block(LayoutContext* lycon, StyleBlock* style_elmt) {
         lycon->parent = block->parent;
         printf("block height: %d\n", lycon->block.advance_y);
     }
-    line_align(lycon);
+    // line_align(lycon);
 
     block->width = max(lycon->block.width, lycon->block.max_width);  
     block->height = lycon->block.advance_y;

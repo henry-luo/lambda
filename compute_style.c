@@ -11,7 +11,7 @@ lxb_status_t callback(const lxb_char_t *data, size_t len, void *ctx) {
 }
 
 lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t **root,
-                               lexbor_avl_node_t *node, void *ctx) {
+    lexbor_avl_node_t *node, void *ctx) {
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
     printf("style entry: %ld\n", declr->type);
     lxb_css_rule_declaration_serialize(declr, callback, NULL);
@@ -49,18 +49,37 @@ void compute_child(StyleContext* sycon, lxb_dom_element_t *element) {
 
 StyleElement* compute_style(StyleContext* sycon, lxb_dom_element_t *element) {
     StyleElement *style;
-    // should check ns as well 
-    int name = element->node.local_name;
+    lxb_html_element_t *elmt = lxb_html_interface_element(element);
 
-    // compute the 'display' property value
-    // printf("display: %s\n", lxb_css_value_data(style->display).data);    
-    if (name == LXB_TAG_H1 || name == LXB_TAG_P || name == LXB_TAG_DIV ||
-        name == LXB_TAG_CENTER || name == LXB_TAG_UL || name == LXB_TAG_OL) {
+    PropValue outer_display, inner_display;
+    // get element default 'display'
+    int name = element->node.local_name;  // todo: should check ns as well 
+    switch (name) { 
+        case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3: case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
+        case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER: case LXB_TAG_UL: case LXB_TAG_OL:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;
+            break;
+        default:  // case LXB_TAG_B: case LXB_TAG_I: case LXB_TAG_U: case LXB_TAG_S: case LXB_TAG_FONT:
+            outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
+    }
+    // get CSS display if specified
+    if (elmt->style != NULL) {
+        const lxb_css_rule_declaration_t* display_decl = 
+            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_DISPLAY);
+        if (display_decl) {
+            // printf("display: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
+            //     lxb_css_value_by_id(display_decl->u.display->b)->name);
+            outer_display = display_decl->u.display->a;
+            inner_display = display_decl->u.display->b;
+        }
+    }
+
+    if (outer_display == LXB_CSS_VALUE_BLOCK) {
         StyleBlock *block = style = calloc(1, sizeof(StyleBlock));
         style->display = LXB_CSS_VALUE_BLOCK;
         block->text_align = (name == LXB_TAG_CENTER) ? LXB_CSS_VALUE_CENTER : LXB_CSS_VALUE_LEFT;
     }
-    else {
+    else { // inline element
         style = calloc(1, sizeof(StyleElement));
         style->display = LXB_CSS_VALUE_INLINE;
         style->font = default_font_prop;
@@ -87,16 +106,10 @@ StyleElement* compute_style(StyleContext* sycon, lxb_dom_element_t *element) {
     if (sycon->prev_node != NULL) { sycon->prev_node->next = style; }
     else { sycon->parent->child = style; }
 
-    // compute style property values
-    // handle lxb_dom_element_class 
-    // handle inline style
-    lxb_html_element_t *elmt = lxb_html_interface_element(element);
+    // compute style properties based on CSS rules, Lexor has already linked up the applicable style rules
     if (elmt->style != NULL) {
-        printf("got elmt '%s' computed style: %p\n", lxb_dom_element_local_name(&elmt->element.node, NULL), elmt->style);    
+        printf("elmt '%s' got CSS style: %p\n", lxb_dom_element_local_name(&elmt->element.node, NULL), elmt->style);    
         lexbor_avl_foreach(NULL, &elmt->style, lxb_html_element_style_print, sycon);
-    }
-    if (elmt->list != NULL) {
-        printf("got elmt '%s' inline style: %p\n", lxb_dom_element_local_name(&elmt->element.node, NULL), elmt->list);
     }
     
     // compute child style
