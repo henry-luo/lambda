@@ -331,7 +331,8 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                 text->length = str - text_start - text->start_index;
                 assert(text->length > 0);
                 line_break(lycon);  
-                goto LAYOUT_TEXT;
+                if (*str) goto LAYOUT_TEXT;
+                else return;
             }
             else { // last_space outside the text, break at start of text
                 line_break(lycon);
@@ -447,9 +448,13 @@ void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
                 ViewText* text = (ViewText*)view;
                 lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
                 unsigned char* str = node->char_data.data.data + text->start_index;
-                strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
-                strbuf_sprintf(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
-                    text->start_index, text->length, text->x, text->y, text->width, text->height);
+                if (!(*str) || text->length <= 0) {
+                    strbuf_sprintf(buf, "invalid text node: len:%d\n", text->length); 
+                } else {
+                    strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
+                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
+                        text->start_index, text->length, text->x, text->y, text->width, text->height);                    
+                }
             }
             else {
                 strbuf_sprintf(buf, "unknown view: %d\n", view->type);
