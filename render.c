@@ -6,7 +6,6 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 
 // Function to draw a glyph bitmap into the image buffer
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
-    printf("draw_glyph: %d %d\n", x, y);
     SDL_Surface* surface = rdcon->ui_context->surface;
     for (unsigned int i = 0; i < bitmap->rows; i++) {
         Uint32* row_pixels = ((Uint32*)surface->pixels) + (y + i) * surface->pitch / 4;
@@ -25,24 +24,34 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 }
 
 void render_text_view(RenderContext* rdcon, ViewText* text) {
-    int x = rdcon->block.x + text->x;
-    int y = rdcon->block.y + text->y;
-    // render each character
+    float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
+    printf("text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
+        str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
+    bool has_space = false;   
     for (; p < end; p++) {
+        if (is_space(*p)) { 
+            if (has_space) continue;  // skip consecutive spaces
+            else has_space = true;
+        }
+        else has_space = false;
         if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER)) {
             fprintf(stderr, "Could not load character '%c'\n", *p);
             continue;
         }
-        if (!is_space(*p)) {
+        //if (!is_space(*p)) {
             // draw the glyph to the image buffer
+            printf("draw_glyph: %c, x:%f, end:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6));
             draw_glyph(rdcon, &rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
                 y + text->height - rdcon->face->glyph->bitmap_top);
-        }
+        // }
+        // else {
+        //     printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6));
+        // }
         // advance to the next position
         int wd = rdcon->face->glyph->advance.x >> 6;
-        x += wd;  printf("char: %c, width: %d\n", *p, wd);
+        x += wd;
     }
     // render text deco
     if (rdcon->font && rdcon->font->text_deco != LXB_CSS_VALUE_NONE) {
@@ -84,10 +93,6 @@ void render_children(RenderContext* rdcon, View* view) {
         }
         else {
             ViewText* text = (ViewText*)view;
-            unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data; 
-            printf("text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
-                str, text->start_index, text->length, 
-                text->x, text->y, text->width, text->height, rdcon->block.x);
             render_text_view(rdcon, text);
         }
         view = view->next;

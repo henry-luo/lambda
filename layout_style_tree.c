@@ -96,7 +96,7 @@ void line_align(LayoutContext* lycon) {
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(elmt, NULL));
-    if (lycon->line.is_line_start) { line_break(lycon); }
+    if (!lycon->line.is_line_start) { line_break(lycon); }
         
     ViewBlock* block = alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
     if (elmt->element.node.local_name == LXB_TAG_CENTER) {
@@ -110,8 +110,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (block->props) lycon->block.text_align = block->props->text_align;
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
     lycon->line.right = lycon->block.width;  
-    lycon->line.is_line_start = true;  lycon->line.last_space = NULL;  
-    lycon->line.start_view = NULL;
+    lycon->line.is_line_start = true;  lycon->line.has_space = false;
+    lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     block->y = pa_block.advance_y;
     
     // layout block content
@@ -124,10 +124,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         } while (child);
         // handle last line
         if (lycon->line.max_height) {
-            lycon->block.advance_y += lycon->line.max_height;
+            lycon->block.advance_y += max(lycon->line.max_height, lycon->block.line_height);
         }
         lycon->parent = block->parent;
-        printf("block height: %d\n", lycon->block.advance_y);
+        printf("block height: %f\n", lycon->block.advance_y);
     }
     line_align(lycon);
 
@@ -184,11 +184,11 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
 }
 
 void line_break(LayoutContext* lycon) {
-    lycon->block.advance_y += lycon->line.max_height;
+    lycon->block.advance_y += max(lycon->line.max_height, lycon->block.line_height);
     // reset linebox
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
-    lycon->line.is_line_start = true;  lycon->line.last_space = NULL;  
-    lycon->line.start_view = NULL;
+    lycon->line.is_line_start = true;  lycon->line.has_space = false;
+    lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     line_align(lycon);
 }
 
@@ -246,7 +246,8 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span) 
 
 LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_node_t* node) {
     // note: this function navigates to parenets through laid out view tree, 
-    // and siblings through non-processed style nodes
+    // and siblings through non-processed html nodes
+    float current_advance_x = lycon->line.advance_x;
     node = lxb_dom_node_next(node);
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
@@ -265,10 +266,9 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_no
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     unsigned char* text_start = text_node->char_data.data.data;  
     unsigned char* str = text_start;  printf("layout text %s\n", str);
-    if (lycon->line.is_line_start && is_space(*str)) { // skip space at start of line
+    if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) { // skip space at start of line
         do { str++; } while (is_space(*str));
-        if (*str) { lycon->line.is_line_start = false; }
-        else return;
+        if (!*str) return;
     }
     LAYOUT_TEXT:
     // assume style_text has at least one character
@@ -320,9 +320,11 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         }
         if (is_space(*str)) {
             do { str++; } while (is_space(*str));
-            lycon->line.last_space = str - 1;
+            lycon->line.last_space = str - 1;  lycon->line.has_space = true;
         }
-        else { str++; }
+        else { 
+            str++;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
+        }
     } while (*str);
     // end of text
     if (lycon->line.last_space) { // need to check if line will fill up
@@ -379,7 +381,8 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
         layout_text(lycon, text);
     }
     else {
-        printf("layout unknown node\n");
+        printf("layout unknown node type: %d\n", node->type);
+        // skip the node
     }    
 }
 
@@ -411,6 +414,9 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
         lycon.parent = root_view;
         lycon.block.width = 400;  lycon.block.height = 600;
         lycon.block.advance_y = 0;  lycon.block.max_width = 800;
+        lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
+        lycon.block.text_align = LXB_CSS_VALUE_LEFT;
+        lycon.line.is_line_start = true;
         layout_block(&lycon, body);
         printf("end layout\n");
         layout_cleanup(&lycon);

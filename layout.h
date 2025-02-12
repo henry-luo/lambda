@@ -7,19 +7,21 @@ typedef struct {
 } StyleContext;
 
 typedef struct {
-    int width, height;  // given width and height of the block
-    int advance_y;
-    int max_width;
+    float width, height;  // given width and height of the block
+    float advance_y;
+    float max_width;
+    float line_height;
     PropValue text_align;
 } Blockbox;
 
 typedef struct {
-    int left, right;  // left and right bounds of the line
-    int advance_x;
-    int max_height;
-    unsigned char* last_space;
+    float left, right;  // left and right bounds of the line
+    float advance_x;
+    float max_height;
+    unsigned char* last_space; // last space character in the line
     View* start_view;
     bool is_line_start;
+    bool has_space; // whether last layout character is a space
 } Linebox;
 
 typedef struct {
