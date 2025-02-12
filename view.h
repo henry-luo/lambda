@@ -106,8 +106,10 @@ typedef struct {
 typedef struct {
     SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
+    SDL_Texture* texture;  // texture for rendering
     FcConfig *font_config;
     FT_Library ft_library; 
+    float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
 } UiContext;
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);

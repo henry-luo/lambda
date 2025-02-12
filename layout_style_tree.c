@@ -406,7 +406,7 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
         ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
         root_view->type = RDT_VIEW_BLOCK;  root_view->node = body;
         lycon.parent = root_view;
-        lycon.block.width = 200;  lycon.block.height = 600;
+        lycon.block.width = 400;  lycon.block.height = 600;
         lycon.block.advance_y = 0;  lycon.block.max_width = 800;
         layout_block(&lycon, body);
         printf("end layout\n");

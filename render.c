@@ -161,7 +161,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     SDL_FillRect(rdcon.ui_context->surface, NULL, 
         SDL_MapRGBA(rdcon.ui_context->surface->format, 255, 255, 255, 255));
 
-    SDL_Rect rect = {0, 0, 200, 600};
+    SDL_Rect rect = {0, 0, 400, 600};
     SDL_FillRect(rdcon.ui_context->surface, &rect,
         SDL_MapRGBA(rdcon.ui_context->surface->format, 64, 64, 64, 255)); // gray rect
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
@@ -176,12 +176,10 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
-    // SDL_SaveBMP(rdcon.ui_context->surface, "output.bmp");
-    // Save the surface as a PNG file
     if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
         fprintf(stderr, "Failed to save the surface to a PNG file\n");
     }    
-    printf("Rendered to output.bmp\n");
+    printf("Rendered to output.png\n");
 
     render_clean_up(&rdcon);
 }

@@ -2,6 +2,21 @@
 #include <stdio.h>
 #include "./lib/string_buffer/string_buffer.h"
 
+static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
+    // Append data to string buffer
+    lxb_char_t **output = (lxb_char_t **)ctx;
+    size_t old_len = *output ? strlen((char *)*output) : 0;
+    *output = realloc(*output, old_len + len + 1);
+    if (*output == NULL) {
+        return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
+    }
+    
+    memcpy(*output + old_len, data, len);
+    (*output)[old_len + len] = '\0';
+    
+    return LXB_STATUS_OK;
+}
+
 lxb_html_document_t* parse_html_doc(const char *html_source) {
     // create HTML document object
     lxb_html_document_t *document = lxb_html_document_create();
@@ -23,6 +38,17 @@ lxb_html_document_t* parse_html_doc(const char *html_source) {
         lxb_html_document_destroy(document);
         return NULL;
     }
+
+    // serialize document to string for debugging
+    lxb_char_t *output = NULL;
+    lxb_dom_document_t *dom_document = &document->dom_document;
+    status = lxb_html_serialize_tree_cb(dom_document, serialize_callback, &output);
+    if (status != LXB_STATUS_OK || output == NULL) {
+        fprintf(stderr, "Failed to serialize document\n");
+    } else {
+        printf("Serialized HTML:\n%s\n", output);
+    }
+
     return document;
 }
 
