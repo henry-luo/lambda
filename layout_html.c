@@ -107,6 +107,10 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
             } else {
                 // Set height of the font
                 FT_Set_Pixel_Sizes(face, 0, font_size * uicon->pixel_ratio);
+                printf("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d\n", 
+                    face->family_name, face->size->metrics.height >> 6,
+                    face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
+                    face->units_per_EM >> 6);
             }            
         }
         FcPatternDestroy(match);
@@ -126,8 +130,8 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
     else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
         strbuf_append_str(name, ":italic");
     }
-    printf("Loading font: %s, %ld\n", name->b, parent->size->metrics.height >> 6);
-    FT_Face face = load_font_face(uicon, name->b, (parent->size->metrics.height >> 6) / uicon->pixel_ratio);
+    printf("Loading font: %s, %d\n", name->b, parent->units_per_EM >> 6);
+    FT_Face face = load_font_face(uicon, name->b, (parent->units_per_EM >> 6) / uicon->pixel_ratio);
     strbuf_free(name);
     return face;
 }
