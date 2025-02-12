@@ -168,6 +168,12 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
 
     FontBox pa_font = lycon->font;  lycon->font.style = span->font;
     lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face, &span->font);
+    if (FT_Load_Char(lycon->font.face, ' ', FT_LOAD_RENDER)) {
+        fprintf(stderr, "could not load space character\n");
+        lycon->font.space_width = lycon->font.face->size->metrics.height >> 6;
+    } else {
+        lycon->font.space_width = lycon->font.face->glyph->advance.x >> 6;
+    }
     // layout inline content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
@@ -278,12 +284,20 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     text->x = lycon->line.advance_x;  text->y = lycon->block.advance_y;
     // layout the text
     do {
-        if (FT_Load_Char(lycon->font.face, *str, FT_LOAD_RENDER)) {
-            fprintf(stderr, "Could not load character '%c'\n", *str);
-            return;
+        int wd;
+        if (is_space(*str)) {
+            wd = lycon->font.space_width;
+            text->height = max(text->height, lycon->font.face->size->metrics.height >> 6);
         }
-        FT_GlyphSlot slot = lycon->font.face->glyph;  int wd = slot->advance.x >> 6;
-        text->height = max(text->height, slot->metrics.height >> 6);
+        else {
+            if (FT_Load_Char(lycon->font.face, *str, FT_LOAD_RENDER)) {
+                fprintf(stderr, "Could not load character '%c'\n", *str);
+                return;
+            }
+            FT_GlyphSlot slot = lycon->font.face->glyph;  
+            wd = slot->advance.x >> 6;
+            text->height = max(text->height, slot->metrics.height >> 6);
+        }
         printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
         if (text->x + text->width >= lycon->line.right) { // line filled up
@@ -393,6 +407,12 @@ void layout_init(LayoutContext* lycon, UiContext* uicon) {
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
     lycon->font.face = load_font_face(uicon, "Arial", 16);
+    if (FT_Load_Char(lycon->font.face, ' ', FT_LOAD_RENDER)) {
+        fprintf(stderr, "could not load space character\n");
+        lycon->font.space_width = lycon->font.face->size->metrics.height >> 6;
+    } else {
+        lycon->font.space_width = lycon->font.face->glyph->advance.x >> 6;
+    }
     lycon->font.style.font_style = LXB_CSS_VALUE_NORMAL;
     lycon->font.style.font_weight = LXB_CSS_VALUE_NORMAL;
     lycon->font.style.text_deco = LXB_CSS_VALUE_NONE;

@@ -34,24 +34,23 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         if (is_space(*p)) { 
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
+            printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->space_width);
+            x += rdcon->space_width;
         }
-        else has_space = false;
-        if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER)) {
-            fprintf(stderr, "Could not load character '%c'\n", *p);
-            continue;
-        }
-        //if (!is_space(*p)) {
+        else {
+            has_space = false;
+            if (FT_Load_Char(rdcon->face, *p, FT_LOAD_RENDER)) {
+                fprintf(stderr, "Could not load character '%c'\n", *p);
+                continue;
+            }
             // draw the glyph to the image buffer
             printf("draw_glyph: %c, x:%f, end:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6));
             draw_glyph(rdcon, &rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
                 y + text->height - rdcon->face->glyph->bitmap_top);
-        // }
-        // else {
-        //     printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6));
-        // }
-        // advance to the next position
-        int wd = rdcon->face->glyph->advance.x >> 6;
-        x += wd;
+            // advance to the next position
+            int wd = rdcon->face->glyph->advance.x >> 6;
+            x += wd;
+        }
     }
     // render text deco
     if (rdcon->font && rdcon->font->text_deco != LXB_CSS_VALUE_NONE) {
@@ -113,19 +112,25 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
-    FT_Face pa_face = rdcon->face;  FontProp* pa_font = rdcon->font;
+    FT_Face pa_face = rdcon->face;  FontProp* pa_font = rdcon->font;  float pa_space_width = rdcon->space_width;
     rdcon->font = &view_span->font;
     printf("render inline view, deco: %s\n", lxb_css_value_by_id(view_span->font.text_deco)->name);
     View* view = view_span->child;
     if (view) {
         rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, &view_span->font);
+        if (FT_Load_Char(rdcon->face, ' ', FT_LOAD_RENDER)) {
+            fprintf(stderr, "could not load space character\n");
+            rdcon->space_width = rdcon->face->size->metrics.height >> 6;
+        } else {
+            rdcon->space_width = rdcon->face->glyph->advance.x >> 6;
+        }        
         render_children(rdcon, view);
         // FT_Done_Face(rdcon->face);
     }
     else {
         printf("view has no child\n");
     }
-    rdcon->face = pa_face;  rdcon->font = pa_font;
+    rdcon->face = pa_face;  rdcon->font = pa_font;  rdcon->space_width = pa_space_width;
 }
 
 void drawTriangle(Tvg_Canvas* canvas) {
@@ -143,6 +148,12 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
     rdcon->face = load_font_face(uicon, "Arial", 16);
+    if (FT_Load_Char(rdcon->face, ' ', FT_LOAD_RENDER)) {
+        fprintf(stderr, "could not load space character\n");
+        rdcon->space_width = rdcon->face->size->metrics.height >> 6;
+    } else {
+        rdcon->space_width = rdcon->face->glyph->advance.x >> 6;
+    }    
     // Lock the surface for rendering
     if (SDL_MUSTLOCK(rdcon->ui_context->surface)) {
         SDL_LockSurface(rdcon->ui_context->surface);

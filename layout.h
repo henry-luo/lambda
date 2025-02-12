@@ -26,7 +26,8 @@ typedef struct {
 
 typedef struct {
     FontProp style;  // current font style
-    FT_Face face;   // current font face
+    FT_Face face;  // current font face
+    float space_width;  // width of a space character of the current font 
 } FontBox;
 
 typedef struct {
