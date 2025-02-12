@@ -72,7 +72,7 @@ void render_children(RenderContext* rdcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK) {
             ViewBlock* block = (ViewText*)view;
-            printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
+            printf("view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                 lxb_dom_element_local_name(block->node, NULL),
                 block->x, block->y, block->width, block->height);                
             render_block_view(rdcon, (ViewBlock*)view);
@@ -85,7 +85,7 @@ void render_children(RenderContext* rdcon, View* view) {
         else {
             ViewText* text = (ViewText*)view;
             unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data; 
-            printf("text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
+            printf("text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
                 str, text->start_index, text->length, 
                 text->x, text->y, text->width, text->height, rdcon->block.x);
             render_text_view(rdcon, text);

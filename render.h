@@ -1,7 +1,7 @@
 #include "view.h"
 
 typedef struct {
-    int x, y;  // abs x, y relative to entire canvas/screen
+    float x, y;  // abs x, y relative to entire canvas/screen
 } BlockBlot;
 
 typedef struct {

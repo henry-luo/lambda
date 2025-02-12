@@ -21,37 +21,6 @@ typedef unsigned short PropValue;
 extern bool can_break(char c);
 extern bool is_space(char c);
 
-// typedef struct StyleNode {
-//     lxb_dom_node_t* node;
-//     struct StyleNode* next;
-//     PropValue display;  // computed display value
-// } StyleNode;
-
-// typedef struct StyleText { 
-//     StyleNode; // extends StyleNode
-//     char* str;  // text content
-// } StyleText;
-
-typedef struct {
-    PropValue font_style;
-    PropValue font_weight;
-    PropValue text_deco; // CSS text decoration    
-} FontProp;
-
-// typedef struct StyleElement {
-//     StyleNode;  // extends StyleNode
-//     // style tree pointers
-//     struct StyleNode* parent;
-//     struct StyleElement* child;  // first child
-//     // lxb_css_declaration_t* inline_style;  // parsed inline style
-//     FontProp font;  // font style
-// } StyleElement;
-
-// typedef struct {
-//     StyleElement; // extends StyleElement
-//     PropValue text_align;
-// } StyleBlock;
-
 typedef enum {
     RDT_VIEW_BLOCK = 1,
     RDT_VIEW_TEXT,
@@ -74,6 +43,17 @@ typedef enum {
     RDT_VIEW_NONE,
 } ViewType;
 
+typedef struct {
+    PropValue font_style;
+    PropValue font_weight;
+    PropValue text_deco; // CSS text decoration    
+} FontProp;
+
+typedef struct {
+    PropValue text_align;
+    float line_height;
+} BlockProp;
+
 typedef struct View {
     ViewType type;
     lxb_dom_node_t *node;  // future optimization: use 32-bit pointer for style node
@@ -83,7 +63,7 @@ typedef struct View {
 
 typedef struct {
     View; // extends View
-    int x, y, width, height;  // bounds for the text, x, y relative to the parent block
+    float x, y, width, height;  // bounds for the text, x, y relative to the parent block
     int start_index, length;  // start and length of the text in the style node
 } ViewText;
 
@@ -99,8 +79,8 @@ typedef struct {
 
 typedef struct {
     ViewGroup;  // extends ViewGroup
-    int x, y, width, height;  // x, y relative to the parent block    
-    PropValue text_align;
+    float x, y, width, height;  // x, y relative to the parent block    
+    BlockProp* props;  // block style properties
 } ViewBlock;
 
 typedef struct {

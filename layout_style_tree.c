@@ -99,12 +99,15 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (lycon->line.is_line_start) { line_break(lycon); }
         
     ViewBlock* block = alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
-    block->text_align = (elmt->element.node.local_name == LXB_TAG_CENTER) ? LXB_CSS_VALUE_CENTER : LXB_CSS_VALUE_LEFT;
+    if (elmt->element.node.local_name == LXB_TAG_CENTER) {
+        block->props = calloc(1, sizeof(BlockProp));
+        block->props->text_align = LXB_CSS_VALUE_CENTER;
+    }
 
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
-    lycon->block.text_align = block->text_align;
+    if (block->props) lycon->block.text_align = block->props->text_align;
     lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
     lycon->line.right = lycon->block.width;  
     lycon->line.is_line_start = true;  lycon->line.last_space = NULL;  
@@ -349,7 +352,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     text->length = str - text_start - text->start_index;  assert(text->length > 0);
     lycon->line.advance_x += text->width;
     lycon->line.max_height = max(lycon->line.max_height, text->height);
-    printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
+    printf("text view: x %f, y %f, width %f, height %f\n", text->x, text->y, text->width, text->height);
 }
 
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
@@ -430,7 +433,7 @@ void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
             strbuf_append_charn(buf, ' ', indent);
             if (view->type == RDT_VIEW_BLOCK) {
                 ViewBlock* block = (ViewBlock*)view;
-                strbuf_sprintf(buf, "view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
+                strbuf_sprintf(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                     lxb_dom_element_local_name(block->node, NULL),
                     block->x, block->y, block->width, block->height);                
                 print_view_tree((ViewGroup*)view, buf, indent+2);
@@ -452,7 +455,7 @@ void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
                     strbuf_sprintf(buf, "invalid text node: len:%d\n", text->length); 
                 } else {
                     strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
-                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
+                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
                         text->start_index, text->length, text->x, text->y, text->width, text->height);                    
                 }
             }
