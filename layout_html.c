@@ -1,84 +1,8 @@
 #include "layout.h"
 #include <stdio.h>
-#include "./lib/string_buffer/string_buffer.h"
 
-static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
-    // Append data to string buffer
-    lxb_char_t **output = (lxb_char_t **)ctx;
-    size_t old_len = *output ? strlen((char *)*output) : 0;
-    *output = realloc(*output, old_len + len + 1);
-    if (*output == NULL) {
-        return LXB_STATUS_ERROR_MEMORY_ALLOCATION;
-    }
-    
-    memcpy(*output + old_len, data, len);
-    (*output)[old_len + len] = '\0';
-    
-    return LXB_STATUS_OK;
-}
-
-lxb_html_document_t* parse_html_doc(const char *html_source) {
-    // create HTML document object
-    lxb_html_document_t *document = lxb_html_document_create();
-    if (!document) {
-        fprintf(stderr, "Failed to create HTML document.\n");
-        return NULL;
-    }
-    // init CSS on document, otherwise CSS declarations will not be parsed
-    lxb_status_t status = lxb_html_document_css_init(document);
-    if (status != LXB_STATUS_OK) {
-        fprintf(stderr, "Failed to CSS initialization\n");
-        return NULL;
-    }
-
-    // parse the HTML source
-    status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
-    if (status != LXB_STATUS_OK) {
-        fprintf(stderr, "Failed to parse HTML.\n");
-        lxb_html_document_destroy(document);
-        return NULL;
-    }
-
-    // serialize document to string for debugging
-    lxb_char_t *output = NULL;
-    lxb_dom_document_t *dom_document = &document->dom_document;
-    status = lxb_html_serialize_tree_cb(dom_document, serialize_callback, &output);
-    if (status != LXB_STATUS_OK || output == NULL) {
-        fprintf(stderr, "Failed to serialize document\n");
-    } else {
-        printf("Serialized HTML:\n%s\n", output);
-    }
-
-    return document;
-}
-
-// Function to read and display the content of a text file
-StrBuf* readTextFile(const char *filename) {
-    FILE *file = fopen(filename, "r"); // open the file in read mode
-    if (file == NULL) { // handle error when file cannot be opened
-        perror("Error opening file"); 
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);  // move the file pointer to the end to determine file size
-    long fileSize = ftell(file);
-    rewind(file); // reset file pointer to the beginning
-
-    StrBuf* buf = strbuf_new(fileSize + 1);
-    if (buf == NULL) {
-        perror("Memory allocation failed");
-        fclose(file);
-        return NULL;
-    }
-
-    // read the file content into the buffer
-    size_t bytesRead = fread(buf->b, 1, fileSize, file);
-    buf->b[bytesRead] = '\0'; // Null-terminate the buffer
-
-    // clean up
-    fclose(file);
-    return buf;
-}
+void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt);
+void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent);
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // todo: cache the fonts loaded
@@ -136,3 +60,100 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
     return face;
 }
 
+void layout_init(LayoutContext* lycon, UiContext* uicon) {
+    memset(lycon, 0, sizeof(LayoutContext));
+    lycon->ui_context = uicon;
+    // most browsers use a generic sans-serif font as the default
+    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
+    // default font size in HTML is 16 px for most browsers
+    lycon->font.face = load_font_face(uicon, "Arial", 16);
+    if (FT_Load_Char(lycon->font.face, ' ', FT_LOAD_RENDER)) {
+        fprintf(stderr, "could not load space character\n");
+        lycon->font.space_width = lycon->font.face->size->metrics.height >> 6;
+    } else {
+        lycon->font.space_width = lycon->font.face->glyph->advance.x >> 6;
+    }
+    lycon->font.style.font_style = LXB_CSS_VALUE_NORMAL;
+    lycon->font.style.font_weight = LXB_CSS_VALUE_NORMAL;
+    lycon->font.style.text_deco = LXB_CSS_VALUE_NONE;
+}
+
+void layout_cleanup(LayoutContext* lycon) {
+    FT_Done_Face(lycon->font.face);
+}
+
+View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
+    lxb_dom_element_t *body = lxb_html_document_body_element(doc);
+    if (body) {
+        // layout: computed style tree >> view tree
+        printf("start to layout style tree\n");
+        LayoutContext lycon;
+        layout_init(&lycon, uicon);
+        ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
+        root_view->type = RDT_VIEW_BLOCK;  root_view->node = body;
+        lycon.parent = root_view;
+        lycon.block.width = 400;  lycon.block.height = 600;
+        lycon.block.advance_y = 0;  lycon.block.max_width = 800;
+        lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
+        lycon.block.text_align = LXB_CSS_VALUE_LEFT;
+        lycon.line.is_line_start = true;
+        layout_block(&lycon, body);
+        printf("end layout\n");
+        layout_cleanup(&lycon);
+    
+        StrBuf* buf = strbuf_new(4096);
+        print_view_tree(root_view, buf, 0);
+        printf("=================\nView tree:\n");
+        printf("%s", buf->b);
+        printf("=================\n");
+        return (View*)root_view;
+    }
+    return NULL;
+}
+
+void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
+    View* view = view_block->child;
+    if (view) {
+        do {
+            printf("view %s\n", lxb_dom_element_local_name(view->node, NULL));
+            strbuf_append_charn(buf, ' ', indent);
+            if (view->type == RDT_VIEW_BLOCK) {
+                ViewBlock* block = (ViewBlock*)view;
+                strbuf_sprintf(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+                    lxb_dom_element_local_name(block->node, NULL),
+                    block->x, block->y, block->width, block->height);                
+                print_view_tree((ViewGroup*)view, buf, indent+2);
+            }
+            else if (view->type == RDT_VIEW_INLINE) {
+                ViewSpan* span = (ViewSpan*)view;
+                strbuf_sprintf(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
+                    lxb_dom_element_local_name(span->node, NULL), 
+                    lxb_css_value_by_id(span->font.text_deco)->name, 
+                    lxb_css_value_by_id(span->font.font_weight)->name,
+                    lxb_css_value_by_id(span->font.font_style)->name);
+                print_view_tree((ViewGroup*)view, buf, indent+2);
+            }
+            else if (view->type == RDT_VIEW_TEXT) {
+                ViewText* text = (ViewText*)view;
+                lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
+                unsigned char* str = node->char_data.data.data + text->start_index;
+                if (!(*str) || text->length <= 0) {
+                    strbuf_sprintf(buf, "invalid text node: len:%d\n", text->length); 
+                } else {
+                    strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
+                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
+                        text->start_index, text->length, text->x, text->y, text->width, text->height);                    
+                }
+            }
+            else {
+                strbuf_sprintf(buf, "unknown view: %d\n", view->type);
+            }
+            if (view == view->next) { printf("invalid next view\n");  return; }
+            view = view->next;
+        } while (view);
+    }
+    else {
+        strbuf_append_charn(buf, ' ', indent);
+        strbuf_append_str(buf, "view has no child\n");
+    }
+}

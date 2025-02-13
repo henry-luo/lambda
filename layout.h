@@ -17,7 +17,8 @@ typedef struct {
 typedef struct {
     float left, right;  // left and right bounds of the line
     float advance_x;
-    float max_height;
+    float max_ascender;
+    float max_descender;
     unsigned char* last_space; // last space character in the line
     View* start_view;
     bool is_line_start;

@@ -44,7 +44,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
                 continue;
             }
             // draw the glyph to the image buffer
-            printf("draw_glyph: %c, x:%f, end:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6));
+            printf("draw_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6), y);
             draw_glyph(rdcon, &rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
                 y + text->height - rdcon->face->glyph->bitmap_top);
             // advance to the next position

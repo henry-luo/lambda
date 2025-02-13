@@ -1,17 +1,7 @@
-#pragma once
-#include <stdbool.h>
-#include <stdint.h>
-#include <assert.h>
-#include <math.h>
-
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define min(a, b) ((a) < (b) ? (a) : (b))
-
+#include "dom.h"
 #include <fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#include <lexbor/html/html.h>
-#include <lexbor/css/css.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <thorvg_capi.h>

@@ -15,7 +15,6 @@ bool is_space(char c) {
 
 void line_break(LayoutContext* lycon);
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node);
-void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent);
 LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
 
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
@@ -108,7 +107,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->props) lycon->block.text_align = block->props->text_align;
-    lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
+    lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
     lycon->line.right = lycon->block.width;  
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
@@ -123,8 +122,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
             child = lxb_dom_node_next(child);
         } while (child);
         // handle last line
-        if (lycon->line.max_height) {
-            lycon->block.advance_y += max(lycon->line.max_height, lycon->block.line_height);
+        if (lycon->line.max_ascender) {
+            lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
         }
         lycon->parent = block->parent;
         printf("block height: %f\n", lycon->block.advance_y);
@@ -137,7 +136,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     pa_block.max_width = max(pa_block.max_width, block->width);
     lycon->block = pa_block;
     // reset linebox
-    pa_line.advance_x = 0;  pa_line.max_height = 0;  
+    pa_line.advance_x = pa_line.max_ascender = pa_line.max_descender = 0;  
     pa_line.is_line_start = true;  pa_line.last_space = NULL;
     lycon->line = pa_line;  lycon->prev_view = block;
     printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
@@ -190,9 +189,9 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
 }
 
 void line_break(LayoutContext* lycon) {
-    lycon->block.advance_y += max(lycon->line.max_height, lycon->block.line_height);
+    lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
     // reset linebox
-    lycon->line.advance_x = 0;  lycon->line.max_height = 0;  
+    lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     line_align(lycon);
@@ -306,7 +305,6 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                 printf("break on space\n");
                 // skip all spaces
                 do { str++; } while (is_space(*str));
-                lycon->line.max_height = max(lycon->line.max_height, text->height);
                 text->length = str - text_start - text->start_index;
                 assert(text->length > 0);
                 line_break(lycon);
@@ -316,7 +314,6 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
             else if (lycon->line.last_space) { // break at the last space
                 printf("break at last space\n");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
-                    lycon->line.max_height = max(lycon->line.max_height, text->height);
                     str = lycon->line.last_space + 1;
                     text->length = str - text_start - text->start_index;
                     assert(text->length > 0);
@@ -345,7 +342,6 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         int advance_x = lycon->line.advance_x;  lycon->line.advance_x += text->width;
         if (view_has_line_filled(lycon, (View*)text, text->node) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
-                lycon->line.max_height = max(lycon->line.max_height, text->height);
                 str = lycon->line.last_space + 1;
                 text->length = str - text_start - text->start_index;
                 assert(text->length > 0);
@@ -367,7 +363,8 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     // else output the entire text
     text->length = str - text_start - text->start_index;  assert(text->length > 0);
     lycon->line.advance_x += text->width;
-    lycon->line.max_height = max(lycon->line.max_height, text->height);
+    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face->size->metrics.ascender >> 6);
+    lycon->line.max_descender = max(lycon->line.max_descender, lycon->font.face->size->metrics.descender >> 6);
     printf("text view: x %f, y %f, width %f, height %f\n", text->x, text->y, text->width, text->height);
 }
 
@@ -400,100 +397,3 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
     }    
 }
 
-void layout_init(LayoutContext* lycon, UiContext* uicon) {
-    memset(lycon, 0, sizeof(LayoutContext));
-    lycon->ui_context = uicon;
-    // most browsers use a generic sans-serif font as the default
-    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
-    // default font size in HTML is 16 px for most browsers
-    lycon->font.face = load_font_face(uicon, "Arial", 16);
-    if (FT_Load_Char(lycon->font.face, ' ', FT_LOAD_RENDER)) {
-        fprintf(stderr, "could not load space character\n");
-        lycon->font.space_width = lycon->font.face->size->metrics.height >> 6;
-    } else {
-        lycon->font.space_width = lycon->font.face->glyph->advance.x >> 6;
-    }
-    lycon->font.style.font_style = LXB_CSS_VALUE_NORMAL;
-    lycon->font.style.font_weight = LXB_CSS_VALUE_NORMAL;
-    lycon->font.style.text_deco = LXB_CSS_VALUE_NONE;
-}
-
-void layout_cleanup(LayoutContext* lycon) {
-    FT_Done_Face(lycon->font.face);
-}
-
-View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
-    lxb_dom_element_t *body = lxb_html_document_body_element(doc);
-    if (body) {
-        // layout: computed style tree >> view tree
-        printf("start to layout style tree\n");
-        LayoutContext lycon;
-        layout_init(&lycon, uicon);
-        ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
-        root_view->type = RDT_VIEW_BLOCK;  root_view->node = body;
-        lycon.parent = root_view;
-        lycon.block.width = 400;  lycon.block.height = 600;
-        lycon.block.advance_y = 0;  lycon.block.max_width = 800;
-        lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
-        lycon.block.text_align = LXB_CSS_VALUE_LEFT;
-        lycon.line.is_line_start = true;
-        layout_block(&lycon, body);
-        printf("end layout\n");
-        layout_cleanup(&lycon);
-    
-        StrBuf* buf = strbuf_new(4096);
-        print_view_tree(root_view, buf, 0);
-        printf("=================\nView tree:\n");
-        printf("%s", buf->b);
-        printf("=================\n");
-        return (View*)root_view;
-    }
-    return NULL;
-}
-
-void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
-    View* view = view_block->child;
-    if (view) {
-        do {
-            printf("view %s\n", lxb_dom_element_local_name(view->node, NULL));
-            strbuf_append_charn(buf, ' ', indent);
-            if (view->type == RDT_VIEW_BLOCK) {
-                ViewBlock* block = (ViewBlock*)view;
-                strbuf_sprintf(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
-                    lxb_dom_element_local_name(block->node, NULL),
-                    block->x, block->y, block->width, block->height);                
-                print_view_tree((ViewGroup*)view, buf, indent+2);
-            }
-            else if (view->type == RDT_VIEW_INLINE) {
-                ViewSpan* span = (ViewSpan*)view;
-                strbuf_sprintf(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
-                    lxb_dom_element_local_name(span->node, NULL), 
-                    lxb_css_value_by_id(span->font.text_deco)->name, 
-                    lxb_css_value_by_id(span->font.font_weight)->name,
-                    lxb_css_value_by_id(span->font.font_style)->name);
-                print_view_tree((ViewGroup*)view, buf, indent+2);
-            }
-            else if (view->type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)view;
-                lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
-                unsigned char* str = node->char_data.data.data + text->start_index;
-                if (!(*str) || text->length <= 0) {
-                    strbuf_sprintf(buf, "invalid text node: len:%d\n", text->length); 
-                } else {
-                    strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
-                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
-                        text->start_index, text->length, text->x, text->y, text->width, text->height);                    
-                }
-            }
-            else {
-                strbuf_sprintf(buf, "unknown view: %d\n", view->type);
-            }
-            if (view == view->next) { printf("invalid next view\n");  return; }
-            view = view->next;
-        } while (view);
-    }
-    else {
-        strbuf_append_charn(buf, ' ', indent);
-        strbuf_append_str(buf, "view has no child\n");
-    }
-}
