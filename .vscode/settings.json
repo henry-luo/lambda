@@ -15,6 +15,7 @@
         "unordered_map": "c",
         "vector": "c",
         "string_buffer.h": "c",
-        "locale": "c"
+        "locale": "c",
+        "ratio": "c"
     }
 }

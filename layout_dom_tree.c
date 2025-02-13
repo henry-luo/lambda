@@ -59,6 +59,83 @@ PropValue element_display(lxb_html_element_t* elmt) {
     return outer_display;
 }
 
+lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
+    printf("style rule: %.*s\n", (int) len, (const char *) data);
+    return LXB_STATUS_OK;
+}
+
+lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t **root,
+    lexbor_avl_node_t *node, void *ctx) {
+    lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
+    printf("style entry: %ld\n", declr->type);
+    lxb_css_rule_declaration_serialize(declr, style_print_callback, NULL);
+    return LXB_STATUS_OK;
+}
+
+lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t **root,
+    lexbor_avl_node_t *node, void *ctx) {
+    LayoutContext* lycon = (LayoutContext*) ctx;
+    lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
+    const lxb_css_entry_data_t *data = lxb_css_property_by_id(declr->type);
+    if (!data) { return LXB_STATUS_ERROR_NOT_EXISTS; }
+    printf("style entry: %ld %s\n", declr->type, data->name);
+    switch (declr->type) {
+    case LXB_CSS_PROPERTY_LINE_HEIGHT: 
+        printf("@@property line height\n");
+        lxb_css_property_line_height_t* line_height = declr->u.line_height;
+        switch (line_height->type) {
+        case LXB_CSS_VALUE__NUMBER: 
+            lycon->block.line_height = line_height->u.number.num;
+            printf("property number: %lf\n", line_height->u.number.num);
+            break;
+        case LXB_CSS_VALUE__LENGTH:      
+            lycon->block.line_height = line_height->u.length.num;
+            printf("property unit: %d\n", line_height->u.length.unit);
+            break;
+        case LXB_CSS_VALUE__PERCENTAGE:
+            lycon->block.line_height = line_height->u.percentage.num;
+            printf("property percentage: %lf\n", line_height->u.percentage.num);
+            break;
+        }
+        break;
+    }
+       /*
+        const lxb_css_rule_declaration_t* text_align_decl = 
+            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_TEXT_ALIGN);
+        if (text_align_decl) {
+            // printf("text align: %s\n", lxb_css_value_by_id(text_align_decl->u.text_align)->name);
+            block->props->text_align = text_align_decl->u.text_align;
+        }
+        const lxb_css_rule_declaration_t* font_size_decl = 
+            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_FONT_SIZE);
+        if (font_size_decl) {
+            // printf("font size: %s\n", lxb_css_value_by_id(font_size_decl->u.font_size)->name);
+            block->props->font_size = font_size_decl->u.font_size;
+        }
+        const lxb_css_rule_declaration_t* font_weight_decl = 
+            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_FONT_WEIGHT);
+        if (font_weight_decl) {
+            // printf("font weight: %s\n", lxb_css_value_by_id(font_weight_decl->u.font_weight)->name);
+            block->props->font_weight = font_weight_decl->u.font_weight;
+        }
+        const lxb_css_rule_declaration_t* font_style_decl = 
+            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_FONT_STYLE);
+        if (font_style_decl) {
+            // printf("font style: %s\n", lxb_css_value_by_id(font_style_decl->u.font_style)->name);
+            block->props->font_style = font_style_decl->u.font_style;
+        }
+        const lxb_css_rule_declaration_t* line_height_decl = 
+            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_LINE_HEIGHT);
+        if (line_height_decl) {
+            // printf("line height: %s\n", lxb_css_value_by
+            // id(line_height_decl->u.line_height)->name);  
+            block->props->line_height = line_height_decl->u.line_height;        
+        }
+        */
+
+    return LXB_STATUS_OK;
+}
+
 void line_align(LayoutContext* lycon) {
     // align the views in the line
     printf("line align\n");
@@ -98,9 +175,16 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (!lycon->line.is_line_start) { line_break(lycon); }
         
     ViewBlock* block = alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
+    // handle element default styles
     if (elmt->element.node.local_name == LXB_TAG_CENTER) {
         block->props = calloc(1, sizeof(BlockProp));
         block->props->text_align = LXB_CSS_VALUE_CENTER;
+    }
+    // resolve styles
+    if (elmt->style) {
+        lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
+        lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
+        lexbor_avl_foreach(doc->css.styles, &elmt->style, lxb_html_element_style_resolve, lycon);
     }
 
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
