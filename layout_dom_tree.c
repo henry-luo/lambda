@@ -347,11 +347,20 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     text->start_index = str - text_start;
     text->x = lycon->line.advance_x;  
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
-        printf("middle align text\n");
+        printf("middle aligned text\n");
         text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->font.face->units_per_EM >>6)) / 2;
     }
-    else {
+    else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
+        printf("bottom aligned text\n");
+        text->y = lycon->block.advance_y + lycon->block.line_height - (lycon->font.face->units_per_EM >>6);
+    }
+    else if (lycon->line.vertical_align == LXB_CSS_VALUE_TOP) {
+        printf("top aligned text\n");
         text->y = lycon->block.advance_y;
+    }
+    else { // baseline
+        printf("baseline aligned text\n");
+        text->y = lycon->block.advance_y; //  + (lycon->font.face->size->metrics.ascender >> 6);
     }
     // layout the text glyphs
     do {
@@ -436,7 +445,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     text->length = str - text_start - text->start_index;  assert(text->length > 0);
     lycon->line.advance_x += text->width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face->size->metrics.ascender >> 6);
-    lycon->line.max_descender = max(lycon->line.max_descender, lycon->font.face->size->metrics.descender >> 6);
+    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face->size->metrics.descender) >> 6);
     printf("text view: x %f, y %f, width %f, height %f\n", text->x, text->y, text->width, text->height);
 }
 

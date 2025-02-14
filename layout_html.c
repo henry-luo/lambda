@@ -54,8 +54,10 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
     else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
         strbuf_append_str(name, ":italic");
     }
-    printf("Loading font: %s, %d\n", name->b, parent->units_per_EM >> 6);
     FT_Face face = load_font_face(uicon, name->b, (parent->units_per_EM >> 6) / uicon->pixel_ratio);
+    printf("Loading font: %s, %d, pa ascd: %ld, ascd: %ld, pa desc: %ld, desc: %ld\n", 
+        name->b, parent->units_per_EM >> 6, parent->size->metrics.ascender >> 6, face->size->metrics.ascender >> 6,
+        parent->size->metrics.descender >> 6, face->size->metrics.descender >> 6);
     strbuf_free(name);
     return face;
 }

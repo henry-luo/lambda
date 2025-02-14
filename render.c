@@ -46,7 +46,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             // draw the glyph to the image buffer
             printf("draw_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (rdcon->face->glyph->advance.x >> 6), y);
             draw_glyph(rdcon, &rdcon->face->glyph->bitmap, x + rdcon->face->glyph->bitmap_left, 
-                y + text->height - rdcon->face->glyph->bitmap_top);
+                y + (rdcon->face->ascender>>6) - rdcon->face->glyph->bitmap_top);
             // advance to the next position
             int wd = rdcon->face->glyph->advance.x >> 6;
             x += wd;
@@ -135,9 +135,9 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 
 void drawTriangle(Tvg_Canvas* canvas) {
     Tvg_Paint* shape = tvg_shape_new();
-    tvg_shape_move_to(shape, 400, 100);
-    tvg_shape_line_to(shape, 600, 300);
-    tvg_shape_line_to(shape, 100, 500);
+    tvg_shape_move_to(shape, 400, 400);
+    tvg_shape_line_to(shape, 600, 500);
+    tvg_shape_line_to(shape, 100, 600);
     tvg_shape_close(shape);
     tvg_shape_set_fill_color(shape, 255, 100, 100, 150); // semi-transparent red color
     tvg_canvas_push(canvas, shape);
