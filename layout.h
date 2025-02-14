@@ -21,6 +21,7 @@ typedef struct {
     float max_descender;
     unsigned char* last_space; // last space character in the line
     View* start_view;
+    PropValue vertical_align;
     bool is_line_start;
     bool has_space; // whether last layout character is a space
 } Linebox;

@@ -37,8 +37,12 @@ typedef enum {
 typedef struct {
     PropValue font_style;
     PropValue font_weight;
-    PropValue text_deco; // CSS text decoration    
+    PropValue text_deco; // CSS text decoration
 } FontProp;
+
+// typedef struct {
+//     PropValue vertical_align;
+// } InlineProp;
 
 typedef struct {
     PropValue text_align;
@@ -66,6 +70,7 @@ typedef struct {
 typedef struct {
     ViewGroup;  // extends ViewGroup
     FontProp font;  // font style
+    // InlineProp inline;  // inline style properties
 } ViewSpan;
 
 typedef struct {
