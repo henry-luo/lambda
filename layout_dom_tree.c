@@ -106,6 +106,28 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
     return LXB_STATUS_OK;
 }
 
+void span_line_align(LayoutContext* lycon, int offset, ViewSpan* span) {
+    // align the views in the line
+    printf("span line align\n");
+    View* view = span->child;
+    while (view) {
+        if (view->type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)view;
+            text->x += offset;
+        }
+        else if (view->type == RDT_VIEW_BLOCK) {
+            ViewBlock* block = (ViewBlock*)view;
+            block->x += offset;
+        }
+        else if (view->type == RDT_VIEW_INLINE) {
+            ViewSpan* sp = (ViewSpan*)view;
+            span_line_align(lycon, offset, sp);
+        }
+        view = view->next;
+    }
+    printf("end of span line align\n");
+}
+
 void line_align(LayoutContext* lycon) {
     // align the views in the line
     printf("line align\n");
@@ -131,7 +153,8 @@ void line_align(LayoutContext* lycon) {
                     block->x += offset;
                 }
                 else if (view->type == RDT_VIEW_INLINE) {
-                    // need to align the children
+                    ViewSpan* span = (ViewSpan*)view;
+                    span_line_align(lycon, offset, span);
                 }
                 view = view->next;
             } while (view);            
