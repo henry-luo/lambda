@@ -345,7 +345,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     ViewText* text = alloc_view(lycon, RDT_VIEW_TEXT, text_node);
     lycon->prev_view = (View*)text;    
     text->start_index = str - text_start;
-    text->x = lycon->line.advance_x;  
+    text->x = lycon->line.advance_x;  text->height = lycon->font.face->units_per_EM >> 6;
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
         printf("middle aligned text\n");
         text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->font.face->units_per_EM >>6)) / 2;
@@ -367,7 +367,6 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         int wd;
         if (is_space(*str)) {
             wd = lycon->font.space_width;
-            text->height = max(text->height, lycon->font.face->size->metrics.height >> 6);
         }
         else {
             if (FT_Load_Char(lycon->font.face, *str, FT_LOAD_RENDER)) {
@@ -376,7 +375,6 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
             }
             FT_GlyphSlot slot = lycon->font.face->glyph;  
             wd = slot->advance.x >> 6;
-            text->height = max(text->height, slot->metrics.height >> 6);
         }
         printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
