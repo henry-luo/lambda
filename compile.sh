@@ -5,7 +5,7 @@ html_window.c parse_html.c layout_html.c layout_dom_tree.c render.c lib/string_b
 -I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor_static \
 -I/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2 /opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a \
 /opt/homebrew/lib/libpng.a /opt/homebrew/opt/bzip2/lib/libbz2.a \
--I/opt/homebrew/include/fontconfig -L/opt/homebrew/lib -lfontconfig \
+-I/opt/homebrew/include/fontconfig /opt/homebrew/lib/libfontconfig.a /opt/homebrew/opt/expat/lib/libexpat.a \
 -L/opt/homebrew/lib /opt/homebrew/lib/libSDL2.a -lm -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-weak_framework,CoreHaptics -Wl,-weak_framework,GameController -Wl,-framework,ForceFeedback -lobjc -Wl,-framework,CoreVideo -Wl,-framework,Cocoa -Wl,-framework,Carbon -Wl,-framework,IOKit -Wl,-weak_framework,QuartzCore -Wl,-weak_framework,Metal \
 -I/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include -L/opt/homebrew/opt/sdl2_image/lib -lSDL2_image \
 -I/opt/homebrew/include -L/opt/homebrew/lib -lThorVG \
