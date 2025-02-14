@@ -106,7 +106,7 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
     return LXB_STATUS_OK;
 }
 
-void span_line_align(LayoutContext* lycon, int offset, ViewSpan* span) {
+void span_line_align(LayoutContext* lycon, float offset, ViewSpan* span) {
     // align the views in the line
     printf("span line align\n");
     View* view = span->child;
@@ -134,8 +134,8 @@ void line_align(LayoutContext* lycon) {
     if (lycon->block.text_align != LXB_CSS_VALUE_LEFT) {
         View* view = lycon->line.start_view;
         if (view) {
-            int line_width = lycon->line.advance_x;
-            int offset = 0;
+            float line_width = lycon->line.advance_x;
+            float offset = 0;
             if (lycon->block.text_align == LXB_CSS_VALUE_CENTER) {
                 offset = (lycon->block.width - line_width) / 2;
             }
