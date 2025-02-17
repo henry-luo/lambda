@@ -3,8 +3,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-#define WINDOW_WIDTH 800
-#define WINDOW_HEIGHT 600
+UiContext ui_context;
 
 void render_html_doc(UiContext* uicon, View* root_view);
 StrBuf* readTextFile(const char *filename);
@@ -14,13 +13,30 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc);
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
         SDL_Window* win = (SDL_Window*)data;
-        int width = event->window.data1;  int height = event->window.data2;
-        printf("Window %d resized to %dx%d\n", event->window.windowID, width, height);
+        ui_context.window_width = event->window.data1; 
+        ui_context.window_height = event->window.data2;
+        printf("Window %d resized to %fx%f\n", event->window.windowID,  
+            ui_context.window_width, ui_context.window_height);
+
+        // layout html doc 
+        if (ui_context.document) { 
+            ui_context.root_view = layout_html_doc(&ui_context, ui_context.document);
+            // render html doc
+            if (ui_context.root_view) { 
+                render_html_doc(&ui_context, ui_context.root_view);
+                SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
+                // render the texture to the screen
+                SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
+                SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
+                SDL_RenderPresent(ui_context.renderer);                
+            }            
+        }        
     }
     return 0;
   }
 
 int ui_context_init(UiContext* uicon, int width, int height) {
+    memset(uicon, 0, sizeof(UiContext));
     // init SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL_Init failed: %s", SDL_GetError());
@@ -85,20 +101,19 @@ void ui_context_cleanup(UiContext* uicon) {
 }
 
 int main(int argc, char *argv[]) {
-    UiContext uicon;
-    ui_context_init(&uicon, WINDOW_WIDTH, WINDOW_HEIGHT);
+    ui_context_init(&ui_context, 400, 600);
     
     // load sample HTML source
-    View* root_view = NULL;
     StrBuf* source_buf = readTextFile("sample.html");
-    lxb_html_document_t* document = parse_html_doc(source_buf->b);
+    ui_context.document = parse_html_doc(source_buf->b);
     strbuf_free(source_buf);
 
     // layout html doc 
-    if (document) { root_view = layout_html_doc(&uicon, document); }
+    if (ui_context.document) { ui_context.root_view = layout_html_doc(&ui_context, ui_context.document); }
     // render html doc
-    if (root_view) { render_html_doc(&uicon, root_view); }
-    uicon.texture = SDL_CreateTextureFromSurface(uicon.renderer, uicon.surface); 
+    if (ui_context.root_view) { render_html_doc(&ui_context, ui_context.root_view); }
+    ui_context.texture = SDL_CreateTextureFromSurface(ui_context.renderer, ui_context.surface); 
+    SDL_RenderClear(ui_context.renderer);
 
     bool running = true;
     SDL_Event event;
@@ -113,7 +128,7 @@ int main(int argc, char *argv[]) {
                     int newHeight = event.window.data2;
                     char title[256];
                     snprintf(title, sizeof(title), "Window Size: %dx%d", newWidth, newHeight);
-                    SDL_SetWindowTitle(uicon.window, title);
+                    SDL_SetWindowTitle(ui_context.window, title);
                 }
                 else if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
                     printf("Window is being resized: %dx%d\n", event.window.data1, event.window.data2);
@@ -123,15 +138,15 @@ int main(int argc, char *argv[]) {
                 }      
             }
         }
-        SDL_RenderClear(uicon.renderer);
+
         // render the texture to the screen
-        SDL_Rect rect = {0, 0, uicon.surface->w, uicon.surface->h}; 
-        SDL_RenderCopy(uicon.renderer, uicon.texture, NULL, &rect);
-        SDL_RenderPresent(uicon.renderer);
+        SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
+        SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
+        SDL_RenderPresent(ui_context.renderer);
 
         SDL_Delay(300);  // Pause for 300ms after each rendering
     }
     
-    ui_context_cleanup(&uicon);
+    ui_context_cleanup(&ui_context);
     return 0;
 }

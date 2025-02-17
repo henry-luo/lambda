@@ -90,6 +90,8 @@ typedef struct {
     FcConfig *font_config;
     FT_Library ft_library; 
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
+    lxb_html_document_t* document;  // current HTML document
+    View* root_view;
 } UiContext;
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);
