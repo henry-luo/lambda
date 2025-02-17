@@ -11,6 +11,15 @@ StrBuf* readTextFile(const char *filename);
 lxb_html_document_t* parse_html_doc(const char *html_source);
 View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc);
 
+static int resizingEventWatcher(void* data, SDL_Event* event) {
+    if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
+        SDL_Window* win = (SDL_Window*)data;
+        int width = event->window.data1;  int height = event->window.data2;
+        printf("Window %d resized to %dx%d\n", event->window.windowID, width, height);
+    }
+    return 0;
+  }
+
 int ui_context_init(UiContext* uicon) {
     // init SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -64,6 +73,7 @@ int main(int argc, char *argv[]) {
     
     SDL_Window *window = SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
         WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_AddEventWatch(resizingEventWatcher, window);
     SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
@@ -94,6 +104,21 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&event)) {  // handles events
             if (event.type == SDL_QUIT || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) {
                 running = false;
+            }
+            else if (event.type == SDL_WINDOWEVENT) {
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    int newWidth = event.window.data1;
+                    int newHeight = event.window.data2;
+                    char title[256];
+                    snprintf(title, sizeof(title), "Window Size: %dx%d", newWidth, newHeight);
+                    SDL_SetWindowTitle(window, title);
+                }
+                else if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+                    printf("Window is being resized: %dx%d\n", event.window.data1, event.window.data2);
+                }
+                else if (event.window.event == SDL_WINDOWEVENT_MOVED) {
+                    printf("Window is being dragged.\n");
+                }      
             }
         }
         SDL_RenderClear(renderer);

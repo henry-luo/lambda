@@ -1,6 +1,6 @@
 # anonymous structs are a Microsoft extension [-Wmicrosoft-anon-tag], and needs flag -fms-extensions to compile
 
-zig cc -static -fms-extensions -o html_window \
+zig cc -fms-extensions -o window \
 html_window.c parse_html.c layout_html.c layout_dom_tree.c render.c lib/string_buffer/string_buffer.c \
 -I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor_static \
 -I/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2 /opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a \
