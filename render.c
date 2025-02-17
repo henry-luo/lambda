@@ -175,11 +175,11 @@ void render_html_doc(UiContext* uicon, View* root_view) {
 
     // fill the surface with a white background
     SDL_FillRect(rdcon.ui_context->surface, NULL, 
-        SDL_MapRGBA(rdcon.ui_context->surface->format, 255, 255, 255, 255));
+        SDL_MapRGBA(rdcon.ui_context->surface->format, 0, 0, 0, 255));
 
-    SDL_Rect rect = {0, 0, 400, 600};
-    SDL_FillRect(rdcon.ui_context->surface, &rect,
-        SDL_MapRGBA(rdcon.ui_context->surface->format, 64, 64, 64, 255)); // gray rect
+    // SDL_Rect rect = {0, 0, 400, 600};
+    // SDL_FillRect(rdcon.ui_context->surface, &rect,
+    //     SDL_MapRGBA(rdcon.ui_context->surface->format, 64, 64, 64, 255)); // gray rect
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);

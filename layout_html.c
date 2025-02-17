@@ -94,7 +94,8 @@ View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
         ViewBlock* root_view = calloc(1, sizeof(ViewBlock));
         root_view->type = RDT_VIEW_BLOCK;  root_view->node = body;
         lycon.parent = root_view;
-        lycon.block.width = 400;  lycon.block.height = 600;
+        lycon.block.width = uicon->window_width * uicon->pixel_ratio;  
+        lycon.block.height = uicon->window_width * uicon->pixel_ratio;
         lycon.block.advance_y = 0;  lycon.block.max_width = 800;
         lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
         lycon.block.text_align = LXB_CSS_VALUE_LEFT;

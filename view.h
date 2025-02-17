@@ -80,6 +80,10 @@ typedef struct {
 } ViewBlock;
 
 typedef struct {
+    SDL_Window *window;    // current window
+    SDL_Renderer *renderer;  // current window renderer
+    float window_width;    // logical window width
+    float window_height;   // logical window height
     SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
     SDL_Texture* texture;  // texture for rendering
