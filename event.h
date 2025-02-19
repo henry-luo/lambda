@@ -28,13 +28,19 @@
 //     RDT_EVENT_CHANGE,
 // } EventType;
 
-typedef struct RdtEvent {
-    Uint32 type;        // SDL_EventType
-    Uint32 timestamp;   /**< In milliseconds, populated using SDL_GetTicks() */
-    SDL_EventType event_type;
+typedef union RdtEvent {
+    struct {
+        Uint32 type;        // SDL_EventType
+        Uint32 timestamp;   /**< In milliseconds, populated using SDL_GetTicks() */
+    };
+    SDL_MouseMotionEvent mouse_motion;
+    SDL_MouseButtonEvent mouse_button;
+    SDL_MouseWheelEvent mouse_wheel;
+    SDL_KeyboardEvent key;
+    SDL_WindowEvent window;
+    SDL_TextEditingEvent text_edit;
+    SDL_TextInputEvent text_input;
 } RdtEvent;
-
-#define MouseMotionEvent SDL_MouseMotionEvent
 
 typedef struct {
     bool is_mouse_down;

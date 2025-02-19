@@ -9,6 +9,7 @@ void render_html_doc(UiContext* uicon, View* root_view);
 void parse_html_doc(Document* doc, const char* doc_path);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
+void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -98,7 +99,6 @@ void ui_context_cleanup(UiContext* uicon) {
         }
         free(uicon->document);
     }
-    if (uicon->event) free(uicon->event);
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
     tvg_canvas_destroy(uicon->canvas);
@@ -110,12 +110,6 @@ void ui_context_cleanup(UiContext* uicon) {
     IMG_Quit();
     SDL_Quit();
 }
-
-// void new_event(UiContext* uicon, SDL_EventType type) {
-//     if (uicon->event) free(uicon->event);
-//     uicon->event = calloc(1, sizeof(Event));
-//     uicon->event->type = type;
-// }
 
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
@@ -167,8 +161,7 @@ int main(int argc, char *argv[]) {
                     printf("Mouse dragging: (%f, %f) -> (%d, %d)\n", ui_context.mouse_state.down_x, 
                         ui_context.mouse_state.down_y, event.motion.x, event.motion.y);
                 }
-                // lastX = event.motion.x;
-                // lastY = event.motion.y;
+                handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
                 break;
             case SDL_MOUSEBUTTONDOWN:
                 if (event.button.button == SDL_BUTTON_LEFT) {
