@@ -28,6 +28,18 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     return view;
 }
 
+void free_view(LayoutContext* lycon, View* view) {
+    if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE) {
+        View* child = ((ViewGroup*)view)->child;
+        while (child) {
+            View* next = child->next;
+            free_view(lycon, child);
+            child = next;
+        }
+    }
+    pool_variable_free(lycon->ui_context->view_tree->pool, view);
+}
+
 void* alloc_prop(LayoutContext* lycon, size_t size) {
     void* prop;
     if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->ui_context->view_tree->pool, size, &prop)) {
