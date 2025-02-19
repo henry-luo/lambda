@@ -40,3 +40,6 @@ typedef struct {
     FontBox font;  // current font style
     UiContext* ui_context;
 } LayoutContext;
+
+void* alloc_prop(LayoutContext* lycon, size_t size);
+View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node);

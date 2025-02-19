@@ -13,25 +13,9 @@ bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
 
+LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
 void line_break(LayoutContext* lycon);
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node);
-LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
-
-View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
-    View* view;
-    switch (type) {
-        case RDT_VIEW_BLOCK: view = calloc(1, sizeof(ViewBlock)); break;
-        case RDT_VIEW_TEXT: view = calloc(1, sizeof(ViewText)); break;
-        case RDT_VIEW_INLINE:  default:
-            view = calloc(1, sizeof(ViewSpan)); break;
-    }
-    view->type = type;  view->node = node;  view->parent = lycon->parent;
-    // link the view
-    if (lycon->prev_view) { lycon->prev_view->next = view; }
-    else { if (lycon->parent) lycon->parent->child = view; }
-    if (!lycon->line.start_view) lycon->line.start_view = view;
-    return view;
-}
 
 PropValue element_display(lxb_html_element_t* elmt) {
     PropValue outer_display, inner_display;
@@ -172,7 +156,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     ViewBlock* block = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     // handle element default styles
     if (elmt->element.node.local_name == LXB_TAG_CENTER) {
-        block->props = calloc(1, sizeof(BlockProp));
+        block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
         block->props->text_align = LXB_CSS_VALUE_CENTER;
     }
     // resolve CSS styles
