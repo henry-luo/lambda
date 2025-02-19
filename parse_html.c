@@ -1,5 +1,7 @@
 #include "dom.h"
 
+StrBuf* readTextFile(const char *filename);
+
 static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
     // Append data to string buffer
     lxb_char_t **output = (lxb_char_t **)ctx;
@@ -15,28 +17,30 @@ static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void 
     return LXB_STATUS_OK;
 }
 
-lxb_html_document_t* parse_html_doc(const char *html_source) {
+void parse_html_doc(Document* doc, const char* doc_path) {
     // create HTML document object
     lxb_html_document_t *document = lxb_html_document_create();
     if (!document) {
         fprintf(stderr, "Failed to create HTML document.\n");
-        return NULL;
+        return;
     }
     // init CSS on document, otherwise CSS declarations will not be parsed
     lxb_status_t status = lxb_html_document_css_init(document);
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to CSS initialization\n");
-        return NULL;
+        return;
     }
 
     // parse the HTML source
+    StrBuf* source_buf = readTextFile(doc_path);
+    const char* html_source = source_buf->b;
     status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
+    strbuf_free(source_buf);
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to parse HTML.\n");
         lxb_html_document_destroy(document);
-        return NULL;
-    }
-
+        return;
+    } 
     // serialize document to string for debugging
     lxb_char_t *output = NULL;
     lxb_dom_document_t *dom_document = &document->dom_document;
@@ -46,8 +50,8 @@ lxb_html_document_t* parse_html_doc(const char *html_source) {
     } else {
         printf("Serialized HTML:\n%s\n", output);
     }
-
-    return document;
+    free(output);
+    doc->dom_tree = document;
 }
 
 // Function to read and display the content of a text file

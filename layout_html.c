@@ -85,23 +85,26 @@ void layout_cleanup(LayoutContext* lycon) {
     FT_Done_Face(lycon->font.face);
 }
 
-void layout_html_doc(UiContext* uicon, lxb_html_document_t *doc, bool is_reflow) {
+void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     LayoutContext lycon;
+    if (!doc) return;
     if (is_reflow) {
         // free existing view tree
-        if (uicon->view_tree->root) free_view(uicon, uicon->view_tree->root);
-        view_pool_destroy(uicon->view_tree);
+        if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
+        view_pool_destroy(doc->view_tree);
+    } else {
+        doc->view_tree = calloc(1, sizeof(ViewTree));
     }
-    view_pool_init(uicon->view_tree);
+    view_pool_init(doc->view_tree);
 
-    lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(doc);
+    lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(doc->dom_tree);
     if (body) {
         printf("start to layout DOM tree\n");
         
         layout_init(&lycon, uicon);
-        uicon->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
+        doc->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
         
-        lycon.parent = (ViewGroup*)uicon->view_tree->root;
+        lycon.parent = (ViewGroup*)doc->view_tree->root;
         lycon.block.width = uicon->window_width * uicon->pixel_ratio;  
         lycon.block.height = uicon->window_width * uicon->pixel_ratio;
         lycon.block.advance_y = 0;  lycon.block.max_width = 800;
@@ -114,10 +117,11 @@ void layout_html_doc(UiContext* uicon, lxb_html_document_t *doc, bool is_reflow)
 
         layout_cleanup(&lycon);
         StrBuf* buf = strbuf_new(4096);
-        print_view_tree((ViewGroup*)uicon->view_tree->root, buf, 0);
+        print_view_tree((ViewGroup*)doc->view_tree->root, buf, 0);
         printf("=================\nView tree:\n");
         printf("%s", buf->b);
         printf("=================\n");
+        strbuf_free(buf);
     }
 }
 

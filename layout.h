@@ -43,4 +43,4 @@ typedef struct {
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node);
-void free_view(UiContext* uicon, View* view);
+void free_view(ViewTree* tree, View* view);

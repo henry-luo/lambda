@@ -2,15 +2,16 @@
 
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
+    ViewTree* tree = lycon->ui_context->document->view_tree;
     switch (type) {
         case RDT_VIEW_BLOCK:
-            err = pool_variable_alloc(lycon->ui_context->view_tree->pool, sizeof(ViewBlock), (void **)&view);
+            err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
             break;
         case RDT_VIEW_INLINE:
-            err = pool_variable_alloc(lycon->ui_context->view_tree->pool, sizeof(ViewSpan), (void **)&view);
+            err = pool_variable_alloc(tree->pool, sizeof(ViewSpan), (void **)&view);
             break;
         case RDT_VIEW_TEXT:
-            err = pool_variable_alloc(lycon->ui_context->view_tree->pool, sizeof(ViewText), (void **)&view);
+            err = pool_variable_alloc(tree->pool, sizeof(ViewText), (void **)&view);
             break;            
         default:
             printf("Unknown view type\n");
@@ -28,21 +29,21 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     return view;
 }
 
-void free_view(UiContext* uicon, View* view) {
+void free_view(ViewTree* tree, View* view) {
     if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE) {
         View* child = ((ViewGroup*)view)->child;
         while (child) {
             View* next = child->next;
-            free_view(uicon, child);
+            free_view(tree, child);
             child = next;
         }
     }
-    pool_variable_free(uicon->view_tree->pool, view);
+    pool_variable_free(tree->pool, view);
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
     void* prop;
-    if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->ui_context->view_tree->pool, size, &prop)) {
+    if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->ui_context->document->view_tree->pool, size, &prop)) {
         return prop;
     }
     else {
@@ -64,7 +65,8 @@ void view_pool_init(ViewTree* tree) {
 }
 
 void view_pool_destroy(ViewTree* tree) {
-    pool_variable_destroy(tree->pool);
+    if (tree->pool) pool_variable_destroy(tree->pool);
+    tree->pool = NULL;
 }
 
 void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {

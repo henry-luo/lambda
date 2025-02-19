@@ -6,9 +6,8 @@
 UiContext ui_context;
 
 void render_html_doc(UiContext* uicon, View* root_view);
-StrBuf* readTextFile(const char *filename);
-lxb_html_document_t* parse_html_doc(const char *html_source);
-View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc, bool is_reflow);
+void parse_html_doc(Document* doc, const char* doc_path);
+View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
 
 static int resizingEventWatcher(void* data, SDL_Event* event) {
@@ -23,8 +22,8 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
         if (ui_context.document) {
             layout_html_doc(&ui_context, ui_context.document, true);
             // render html doc
-            if (ui_context.view_tree->root) {
-                render_html_doc(&ui_context, ui_context.view_tree->root);
+            if (ui_context.document->view_tree->root) {
+                render_html_doc(&ui_context, ui_context.document->view_tree->root);
                 SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
                 // render the texture to the screen
                 SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
@@ -89,8 +88,16 @@ int ui_context_init(UiContext* uicon, int width, int height) {
 }
 
 void ui_context_cleanup(UiContext* uicon) {
-    view_pool_destroy(uicon->view_tree);
-    free(uicon->view_tree);
+    if (uicon->document) {
+        if (uicon->document->dom_tree) {
+            lxb_html_document_destroy(uicon->document->dom_tree);
+        }
+        if (uicon->document->view_tree) {
+            view_pool_destroy(uicon->document->view_tree);
+            free(uicon->document->view_tree);
+        }
+        free(uicon->document);
+    }
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
     tvg_canvas_destroy(uicon->canvas);
@@ -106,18 +113,18 @@ void ui_context_cleanup(UiContext* uicon) {
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
     
-    // load sample HTML source
-    StrBuf* source_buf = readTextFile("sample.html");
-    ui_context.document = parse_html_doc(source_buf->b);
-    strbuf_free(source_buf);
+    Document* doc = calloc(1, sizeof(Document));
+    parse_html_doc(doc, "sample.html");
+    ui_context.document = doc;
 
     // layout html doc 
-    if (ui_context.document) {
-        ui_context.view_tree = calloc(1, sizeof(ViewTree));
+    if (doc->dom_tree) {
         layout_html_doc(&ui_context, ui_context.document, false);
     }
     // render html doc
-    if (ui_context.view_tree->root) { render_html_doc(&ui_context, ui_context.view_tree->root); }
+    if (ui_context.document->view_tree->root) { 
+        render_html_doc(&ui_context, ui_context.document->view_tree->root); 
+    }
     ui_context.texture = SDL_CreateTextureFromSurface(ui_context.renderer, ui_context.surface); 
     SDL_RenderClear(ui_context.renderer);
 
