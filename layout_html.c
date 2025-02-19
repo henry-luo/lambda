@@ -1,10 +1,9 @@
 #include "layout.h"
-#include <stdio.h>
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt);
 void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent);
 void view_pool_init(ViewTree* tree);
-View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node);
+void view_pool_destroy(ViewTree* tree);
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // todo: cache the fonts loaded
@@ -86,14 +85,20 @@ void layout_cleanup(LayoutContext* lycon) {
     FT_Done_Face(lycon->font.face);
 }
 
-void layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
+void layout_html_doc(UiContext* uicon, lxb_html_document_t *doc, bool is_reflow) {
+    LayoutContext lycon;
+    if (is_reflow) {
+        // free existing view tree
+        if (uicon->view_tree->root) free_view(uicon, uicon->view_tree->root);
+        view_pool_destroy(uicon->view_tree);
+    }
+    view_pool_init(uicon->view_tree);
+
     lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(doc);
     if (body) {
         printf("start to layout DOM tree\n");
-        LayoutContext lycon;
+        
         layout_init(&lycon, uicon);
-
-        view_pool_init(uicon->view_tree);
         uicon->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
         
         lycon.parent = (ViewGroup*)uicon->view_tree->root;
@@ -116,48 +121,3 @@ void layout_html_doc(UiContext* uicon, lxb_html_document_t *doc) {
     }
 }
 
-void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
-    View* view = view_block->child;
-    if (view) {
-        do {
-            strbuf_append_charn(buf, ' ', indent);
-            if (view->type == RDT_VIEW_BLOCK) {
-                ViewBlock* block = (ViewBlock*)view;
-                strbuf_sprintf(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
-                    lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
-                    block->x, block->y, block->width, block->height);                
-                print_view_tree((ViewGroup*)view, buf, indent+2);
-            }
-            else if (view->type == RDT_VIEW_INLINE) {
-                ViewSpan* span = (ViewSpan*)view;
-                strbuf_sprintf(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
-                    lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), 
-                    lxb_css_value_by_id(span->font.text_deco)->name, 
-                    lxb_css_value_by_id(span->font.font_weight)->name,
-                    lxb_css_value_by_id(span->font.font_style)->name);
-                print_view_tree((ViewGroup*)view, buf, indent+2);
-            }
-            else if (view->type == RDT_VIEW_TEXT) {
-                ViewText* text = (ViewText*)view;
-                lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
-                unsigned char* str = node->char_data.data.data + text->start_index;
-                if (!(*str) || text->length <= 0) {
-                    strbuf_sprintf(buf, "invalid text node: len:%d\n", text->length); 
-                } else {
-                    strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
-                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
-                        text->start_index, text->length, text->x, text->y, text->width, text->height);                    
-                }
-            }
-            else {
-                strbuf_sprintf(buf, "unknown view: %d\n", view->type);
-            }
-            if (view == view->next) { printf("invalid next view\n");  return; }
-            view = view->next;
-        } while (view);
-    }
-    else {
-        strbuf_append_charn(buf, ' ', indent);
-        strbuf_append_str(buf, "view has no child\n");
-    }
-}

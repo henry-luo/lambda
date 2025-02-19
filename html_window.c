@@ -8,7 +8,7 @@ UiContext ui_context;
 void render_html_doc(UiContext* uicon, View* root_view);
 StrBuf* readTextFile(const char *filename);
 lxb_html_document_t* parse_html_doc(const char *html_source);
-View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc);
+View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
 
 static int resizingEventWatcher(void* data, SDL_Event* event) {
@@ -21,8 +21,7 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
 
         // layout html doc 
         if (ui_context.document) {
-            view_pool_destroy(ui_context.view_tree);
-            layout_html_doc(&ui_context, ui_context.document);
+            layout_html_doc(&ui_context, ui_context.document, true);
             // render html doc
             if (ui_context.view_tree->root) {
                 render_html_doc(&ui_context, ui_context.view_tree->root);
@@ -115,7 +114,7 @@ int main(int argc, char *argv[]) {
     // layout html doc 
     if (ui_context.document) {
         ui_context.view_tree = calloc(1, sizeof(ViewTree));
-        layout_html_doc(&ui_context, ui_context.document);
+        layout_html_doc(&ui_context, ui_context.document, false);
     }
     // render html doc
     if (ui_context.view_tree->root) { render_html_doc(&ui_context, ui_context.view_tree->root); }

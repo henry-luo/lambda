@@ -28,16 +28,16 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     return view;
 }
 
-void free_view(LayoutContext* lycon, View* view) {
+void free_view(UiContext* uicon, View* view) {
     if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE) {
         View* child = ((ViewGroup*)view)->child;
         while (child) {
             View* next = child->next;
-            free_view(lycon, child);
+            free_view(uicon, child);
             child = next;
         }
     }
-    pool_variable_free(lycon->ui_context->view_tree->pool, view);
+    pool_variable_free(uicon->view_tree->pool, view);
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
@@ -65,4 +65,50 @@ void view_pool_init(ViewTree* tree) {
 
 void view_pool_destroy(ViewTree* tree) {
     pool_variable_destroy(tree->pool);
+}
+
+void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent) {
+    View* view = view_block->child;
+    if (view) {
+        do {
+            strbuf_append_charn(buf, ' ', indent);
+            if (view->type == RDT_VIEW_BLOCK) {
+                ViewBlock* block = (ViewBlock*)view;
+                strbuf_sprintf(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+                    lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
+                    block->x, block->y, block->width, block->height);                
+                print_view_tree((ViewGroup*)view, buf, indent+2);
+            }
+            else if (view->type == RDT_VIEW_INLINE) {
+                ViewSpan* span = (ViewSpan*)view;
+                strbuf_sprintf(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
+                    lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), 
+                    lxb_css_value_by_id(span->font.text_deco)->name, 
+                    lxb_css_value_by_id(span->font.font_weight)->name,
+                    lxb_css_value_by_id(span->font.font_style)->name);
+                print_view_tree((ViewGroup*)view, buf, indent+2);
+            }
+            else if (view->type == RDT_VIEW_TEXT) {
+                ViewText* text = (ViewText*)view;
+                lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
+                unsigned char* str = node->char_data.data.data + text->start_index;
+                if (!(*str) || text->length <= 0) {
+                    strbuf_sprintf(buf, "invalid text node: len:%d\n", text->length); 
+                } else {
+                    strbuf_append_str(buf, "text:'");  strbuf_append_strn(buf, (char*)str, text->length);
+                    strbuf_sprintf(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
+                        text->start_index, text->length, text->x, text->y, text->width, text->height);                    
+                }
+            }
+            else {
+                strbuf_sprintf(buf, "unknown view: %d\n", view->type);
+            }
+            if (view == view->next) { printf("invalid next view\n");  return; }
+            view = view->next;
+        } while (view);
+    }
+    else {
+        strbuf_append_charn(buf, ' ', indent);
+        strbuf_append_str(buf, "view has no child\n");
+    }
 }
