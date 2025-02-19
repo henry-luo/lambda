@@ -106,6 +106,10 @@ typedef struct StateTree {
 } StateTree;
 
 typedef struct {
+    float x, y;  // abs x, y relative to entire canvas/screen
+} BlockBlot;
+
+typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
     float window_width;    // logical window width

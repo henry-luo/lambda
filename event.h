@@ -31,12 +31,10 @@
 typedef struct RdtEvent {
     Uint32 type;        // SDL_EventType
     Uint32 timestamp;   /**< In milliseconds, populated using SDL_GetTicks() */
+    SDL_EventType event_type;
 } RdtEvent;
 
-// typedef struct MouseEvent {
-//     Event;  // extends Event
-//     float x, y;  // mouse position
-// } MouseEvent;
+#define MouseMotionEvent SDL_MouseMotionEvent
 
 typedef struct {
     bool is_mouse_down;
