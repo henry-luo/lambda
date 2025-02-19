@@ -5,6 +5,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <thorvg_capi.h>
+#include "./lib/mem-pool/include/mem_pool.h"
 
 typedef unsigned short PropValue;
 #define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
@@ -62,9 +63,9 @@ typedef struct {
     int start_index, length;  // start and length of the text in the style node
 } ViewText;
 
-typedef struct {
+typedef struct ViewGroup {
     View; // extends View
-    struct View* child;  // first child view
+    View* child;  // first child view
 } ViewGroup;
 
 typedef struct {
@@ -80,6 +81,11 @@ typedef struct {
 } ViewBlock;
 
 typedef struct {
+    VariableMemPool *pool;
+    View* root;
+} ViewTree;
+
+typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
     float window_width;    // logical window width
@@ -88,10 +94,10 @@ typedef struct {
     Tvg_Canvas* canvas;    // ThorVG canvas
     SDL_Texture* texture;  // texture for rendering
     FcConfig *font_config;
-    FT_Library ft_library; 
+    FT_Library ft_library;
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     lxb_html_document_t* document;  // current HTML document
-    View* root_view;
+    ViewTree* view_tree;
 } UiContext;
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);

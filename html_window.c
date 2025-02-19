@@ -9,6 +9,7 @@ void render_html_doc(UiContext* uicon, View* root_view);
 StrBuf* readTextFile(const char *filename);
 lxb_html_document_t* parse_html_doc(const char *html_source);
 View* layout_html_doc(UiContext* uicon, lxb_html_document_t *doc);
+void view_pool_destroy(ViewTree* tree);
 
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -19,11 +20,12 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
             ui_context.window_width, ui_context.window_height);
 
         // layout html doc 
-        if (ui_context.document) { 
-            ui_context.root_view = layout_html_doc(&ui_context, ui_context.document);
+        if (ui_context.document) {
+            view_pool_destroy(ui_context.view_tree);
+            layout_html_doc(&ui_context, ui_context.document);
             // render html doc
-            if (ui_context.root_view) { 
-                render_html_doc(&ui_context, ui_context.root_view);
+            if (ui_context.view_tree->root) {
+                render_html_doc(&ui_context, ui_context.view_tree->root);
                 SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
                 // render the texture to the screen
                 SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
@@ -88,6 +90,8 @@ int ui_context_init(UiContext* uicon, int width, int height) {
 }
 
 void ui_context_cleanup(UiContext* uicon) {
+    view_pool_destroy(uicon->view_tree);
+    free(uicon->view_tree);
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
     tvg_canvas_destroy(uicon->canvas);
@@ -109,9 +113,12 @@ int main(int argc, char *argv[]) {
     strbuf_free(source_buf);
 
     // layout html doc 
-    if (ui_context.document) { ui_context.root_view = layout_html_doc(&ui_context, ui_context.document); }
+    if (ui_context.document) {
+        ui_context.view_tree = calloc(1, sizeof(ViewTree));
+        layout_html_doc(&ui_context, ui_context.document);
+    }
     // render html doc
-    if (ui_context.root_view) { render_html_doc(&ui_context, ui_context.root_view); }
+    if (ui_context.view_tree->root) { render_html_doc(&ui_context, ui_context.view_tree->root); }
     ui_context.texture = SDL_CreateTextureFromSurface(ui_context.renderer, ui_context.surface); 
     SDL_RenderClear(ui_context.renderer);
 

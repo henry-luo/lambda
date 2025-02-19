@@ -79,15 +79,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
 void render_children(RenderContext* rdcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK) {
-            ViewBlock* block = (ViewText*)view;
+            ViewBlock* block = (ViewBlock*)view;
             printf("view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
-                lxb_dom_element_local_name(block->node, NULL),
+                lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                 block->x, block->y, block->width, block->height);                
             render_block_view(rdcon, (ViewBlock*)view);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            printf("view inline:%s\n", lxb_dom_element_local_name(span->node, NULL));                
+            printf("view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
             render_inline_view(rdcon, (ViewSpan*)view);
         }
         else {

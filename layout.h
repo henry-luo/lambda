@@ -33,7 +33,7 @@ typedef struct {
 } FontBox;
 
 typedef struct {
-    ViewBlock* parent;
+    ViewGroup* parent;
     View* prev_view;
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox

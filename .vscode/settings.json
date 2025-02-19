@@ -16,6 +16,8 @@
         "vector": "c",
         "string_buffer.h": "c",
         "locale": "c",
-        "ratio": "c"
+        "ratio": "c",
+        "view.h": "c",
+        "sdl_image.h": "c"
     }
 }

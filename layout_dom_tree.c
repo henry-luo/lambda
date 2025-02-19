@@ -28,7 +28,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     view->type = type;  view->node = node;  view->parent = lycon->parent;
     // link the view
     if (lycon->prev_view) { lycon->prev_view->next = view; }
-    else { lycon->parent->child = view; }
+    else { if (lycon->parent) lycon->parent->child = view; }
     if (!lycon->line.start_view) lycon->line.start_view = view;
     return view;
 }
@@ -164,12 +164,12 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
-    printf("layout block %s\n", lxb_dom_element_local_name(elmt, NULL));
+    printf("layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (!lycon->line.is_line_start) { line_break(lycon); }
     // save parent context
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;    
 
-    ViewBlock* block = alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
+    ViewBlock* block = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     // handle element default styles
     if (elmt->element.node.local_name == LXB_TAG_CENTER) {
         block->props = calloc(1, sizeof(BlockProp));
@@ -194,7 +194,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     // layout block content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
-        lycon->parent = block;  lycon->prev_view = NULL;
+        lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
         do {
             layout_node(lycon, child);
             child = lxb_dom_node_next(child);
@@ -217,16 +217,16 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     pa_line.advance_x = pa_line.max_ascender = pa_line.max_descender = 0;  
     pa_line.is_line_start = true;  pa_line.last_space = NULL;
     lycon->line = pa_line;  
-    lycon->prev_view = block;
+    lycon->prev_view = (View*)block;
     printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
 }
 
 void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
-    printf("layout inline %s\n", lxb_dom_element_local_name(elmt, NULL));
+    printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     // save parent context
     FontBox pa_font = lycon->font;  PropValue pa_line_align = lycon->line.vertical_align;
 
-    ViewSpan* span = alloc_view(lycon, RDT_VIEW_INLINE, elmt);
+    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
     span->font = default_font_prop;
     int name = elmt->element.node.local_name;
     if (name == LXB_TAG_B) {
@@ -264,7 +264,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     // layout inline content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
-        lycon->parent = span;  lycon->prev_view = NULL;
+        lycon->parent = (ViewGroup*)span;  lycon->prev_view = NULL;
         do {
             layout_node(lycon, child);
             child = lxb_dom_node_next(child);
@@ -272,7 +272,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
         lycon->parent = span->parent;
     }
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
-    lycon->prev_view = span;
+    lycon->prev_view = (View*)span;
     printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
 }
 
@@ -307,7 +307,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, lxb_dom_text_t *text_n
 LineFillStatus node_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* node) {
     do {
         if (node->type == LXB_DOM_NODE_TYPE_TEXT) {
-            LineFillStatus result = text_has_line_filled(lycon, node);
+            LineFillStatus result = text_has_line_filled(lycon, (lxb_dom_text_t *)node);
             if (result) { return result; }        
         }
         else if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
@@ -347,7 +347,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_no
         if (result) { return result; }        
     }
     // check at parent level
-    view = view->parent;
+    view = (View*)view->parent;
     if (view->type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
     else if (view->type == RDT_VIEW_INLINE) {
         return view_has_line_filled(lycon, view, view->node);
@@ -365,7 +365,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     }
     LAYOUT_TEXT:
     // assume style_text has at least one character
-    ViewText* text = alloc_view(lycon, RDT_VIEW_TEXT, text_node);
+    ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, (lxb_dom_node_t*)text_node);
     lycon->prev_view = (View*)text;    
     text->start_index = str - text_start;
     text->x = lycon->line.advance_x;  text->height = lycon->font.face->units_per_EM >> 6;
@@ -471,9 +471,9 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
 }
 
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
-    printf("layout node %s\n", lxb_dom_element_local_name(node, NULL));
+    printf("layout node %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
     if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        printf("Element: %s\n", lxb_dom_element_local_name(node, NULL));
+        printf("Element: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
         lxb_html_element_t *elmt = lxb_html_interface_element(node);
         PropValue outer_display = element_display(elmt);
         if (outer_display == LXB_CSS_VALUE_BLOCK) {

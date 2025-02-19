@@ -40,7 +40,7 @@ lxb_html_document_t* parse_html_doc(const char *html_source) {
     // serialize document to string for debugging
     lxb_char_t *output = NULL;
     lxb_dom_document_t *dom_document = &document->dom_document;
-    status = lxb_html_serialize_tree_cb(dom_document, serialize_callback, &output);
+    status = lxb_html_serialize_tree_cb((lxb_dom_node_t *)dom_document, serialize_callback, &output);
     if (status != LXB_STATUS_OK || output == NULL) {
         fprintf(stderr, "Failed to serialize document\n");
     } else {

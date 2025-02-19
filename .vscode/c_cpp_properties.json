@@ -6,6 +6,10 @@
                 "/opt/homebrew/opt/lexbor/include",
                 "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
                 "/opt/homebrew/include/fontconfig",
+                "/opt/homebrew/opt/sdl2/include",
+                "/opt/homebrew/opt/sdl2/include/SDL2",
+                "/opt/homebrew/opt/sdl2_image/include",
+                "/opt/homebrew/include",
                 "${workspaceFolder}/**",
                 "${default}"
             ],
