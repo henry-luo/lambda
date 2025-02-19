@@ -1,3 +1,4 @@
+#pragma once
 #include "dom.h"
 #include <fontconfig.h>
 #include <ft2build.h>
@@ -6,6 +7,7 @@
 #include <SDL2/SDL_image.h>
 #include <thorvg_capi.h>
 #include "./lib/mem-pool/include/mem_pool.h"
+#include "event.h"
 
 typedef unsigned short PropValue;
 #define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
@@ -50,12 +52,15 @@ typedef struct {
     float line_height;
 } BlockProp;
 
-typedef struct View {
+typedef struct View View;
+typedef struct ViewGroup ViewGroup;
+
+struct View {
     ViewType type;
     lxb_dom_node_t *node;  // future optimization: use 32-bit pointer for style node
-    struct View* next;
-    struct ViewGroup* parent;
-} View;
+    View* next;
+    ViewGroup* parent;  // corrected the type to ViewGroup
+};
 
 typedef struct {
     View; // extends View
@@ -63,10 +68,10 @@ typedef struct {
     int start_index, length;  // start and length of the text in the style node
 } ViewText;
 
-typedef struct ViewGroup {
+struct ViewGroup {
     View; // extends View
     View* child;  // first child view
-} ViewGroup;
+};
 
 typedef struct {
     ViewGroup;  // extends ViewGroup
@@ -85,6 +90,21 @@ struct ViewTree {
     View* root;
 };
 
+typedef struct CursorState {
+    View* view;
+    float x, y;
+} CursorState;
+
+typedef struct CaretState {
+    View* view;
+    float x_offset;
+} CaretState;
+
+typedef struct StateTree {
+    CaretState* caret;
+    CursorState* cursor;
+} StateTree;
+
 typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
@@ -97,6 +117,8 @@ typedef struct {
     FT_Library ft_library;
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     Document* document;     // current document
+    RdtEvent* event;        // current event
+    MouseState mouse_state; // current mouse state
 } UiContext;
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);

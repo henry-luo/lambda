@@ -98,6 +98,7 @@ void ui_context_cleanup(UiContext* uicon) {
         }
         free(uicon->document);
     }
+    if (uicon->event) free(uicon->event);
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
     tvg_canvas_destroy(uicon->canvas);
@@ -109,6 +110,12 @@ void ui_context_cleanup(UiContext* uicon) {
     IMG_Quit();
     SDL_Quit();
 }
+
+// void new_event(UiContext* uicon, SDL_EventType type) {
+//     if (uicon->event) free(uicon->event);
+//     uicon->event = calloc(1, sizeof(Event));
+//     uicon->event->type = type;
+// }
 
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
@@ -132,10 +139,14 @@ int main(int argc, char *argv[]) {
     SDL_Event event;
     while (running) {
         while (SDL_PollEvent(&event)) {  // handles events
-            if (event.type == SDL_QUIT || (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE)) {
-                running = false;
-            }
-            else if (event.type == SDL_WINDOWEVENT) {
+            switch (event.type) {
+            case SDL_QUIT:  running = false;  break;
+            case SDL_KEYDOWN:
+                if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    running = false;
+                }
+                break;
+            case SDL_WINDOWEVENT:
                 if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
                     int newWidth = event.window.data1;
                     int newHeight = event.window.data2;
@@ -149,6 +160,30 @@ int main(int argc, char *argv[]) {
                 else if (event.window.event == SDL_WINDOWEVENT_MOVED) {
                     printf("Window is being dragged.\n");
                 }      
+                break;
+            case SDL_MOUSEMOTION:
+                printf("Mouse moved to (%d, %d)\n", event.motion.x, event.motion.y);
+                if (ui_context.mouse_state.is_mouse_down) {
+                    printf("Mouse dragging: (%f, %f) -> (%d, %d)\n", ui_context.mouse_state.down_x, 
+                        ui_context.mouse_state.down_y, event.motion.x, event.motion.y);
+                }
+                // lastX = event.motion.x;
+                // lastY = event.motion.y;
+                break;
+            case SDL_MOUSEBUTTONDOWN:
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    ui_context.mouse_state.is_mouse_down = 1;
+                    ui_context.mouse_state.down_x = event.button.x;
+                    ui_context.mouse_state.down_y = event.button.y;
+                    printf("Mouse button down at (%d, %d)\n", event.button.x, event.button.y);
+                }
+                break;
+            case SDL_MOUSEBUTTONUP:
+                if (event.button.button == SDL_BUTTON_LEFT) {
+                    ui_context.mouse_state.is_mouse_down = 0;
+                    printf("Mouse button up at (%d, %d)\n", event.button.x, event.button.y);
+                }
+                break;
             }
         }
 
