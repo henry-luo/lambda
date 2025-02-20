@@ -1,6 +1,5 @@
 
 #include "view.h"
-#include "./lib/hashmap.h"
 
 typedef struct FontfaceEntry {
     char* name;
@@ -21,13 +20,13 @@ uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // check the hashmap first
-    if (uicon->fontfaces.zig_hash_map == NULL) {
+    if (uicon->fontface_map == NULL) {
         // create a new hash map. 2nd argument is the initial capacity. 
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->fontfaces.zig_hash_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0, 
+        uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0, 
             fontface_hash, fontface_compare, NULL, NULL);
     }
-    FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontfaces.zig_hash_map, 
+    FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, 
         &(FontfaceEntry){.name = (char*)font_name});
     if (entry) {
         printf("Fontface loaded from cache: %s\n", font_name);
@@ -68,11 +67,11 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                     face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
                     face->units_per_EM >> 6);
                 // put the font face into the hashmap
-                if (uicon->fontfaces.zig_hash_map) {
+                if (uicon->fontface_map) {
                     // copy the font name
                     int slen = strlen(font_name);
                     char* name = (char*)malloc(slen + 1);  strcpy(name, font_name);
-                    hashmap_set(uicon->fontfaces.zig_hash_map, &(FontfaceEntry){.name=name, .face=face});   
+                    hashmap_set(uicon->fontface_map, &(FontfaceEntry){.name=name, .face=face});   
                 }
             }            
         }
@@ -110,10 +109,12 @@ bool fontface_entry_free(const void *item, void *udata) {
 
 void fontface_cleanup(UiContext* uicon) {
     // loop through the hashmap and free the font faces
-    if (uicon->fontfaces.zig_hash_map) {
+    if (uicon->fontface_map) {
         printf("Cleaning up font faces\n");
-        hashmap_scan(uicon->fontfaces.zig_hash_map, fontface_entry_free, NULL);
-        hashmap_free(uicon->fontfaces.zig_hash_map);
-        uicon->fontfaces.zig_hash_map = NULL;
+        hashmap_scan(uicon->fontface_map, fontface_entry_free, NULL);
+        hashmap_free(uicon->fontface_map);
+        uicon->fontface_map = NULL;
     }
 }
+
+// todo: cache glyph advvance_x

@@ -109,10 +109,6 @@ typedef struct {
     float x, y;  // abs x, y relative to entire canvas/screen
 } BlockBlot;
 
-typedef struct HashMap {
-    void* zig_hash_map;
-} HashMap;
-
 typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
@@ -125,7 +121,7 @@ typedef struct {
     // font handling
     FcConfig *font_config;
     FT_Library ft_library;
-    HashMap fontfaces; // font faces loaded
+    struct hashmap* fontface_map;  // font faces loaded
 
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     Document* document;     // current document
