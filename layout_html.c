@@ -24,7 +24,7 @@ void layout_init(LayoutContext* lycon, UiContext* uicon) {
 }
 
 void layout_cleanup(LayoutContext* lycon) {
-    FT_Done_Face(lycon->font.face);
+   
 }
 
 void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {

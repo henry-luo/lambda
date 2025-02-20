@@ -1,17 +1,51 @@
 
 #include "view.h"
-
-struct HashTable {
-    int count;
-    // table fields
-};
+#include "./lib/hashmap.h"
 
 typedef struct FontfaceEntry {
+    char* name;
     FT_Face face;
-} FontfaceHash;
+} FontfaceEntry;
 
+// int fontface_compare(const void *a, const void *b, void *udata) {
+//     const FontfaceEntry *fa = a;
+//     const FontfaceEntry *fb = b;
+//     return strcmp(fa->name, fb->name);
+// }
+
+// bool fontface_iter(const void *item, void *udata) {
+//     const FontfaceEntry *fontface = item;
+//     printf("Font face name: %s\n", fontface->name);
+//     return true;
+// }
+
+// uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+//     const FontfaceEntry *fontface = item;
+//     return hashmap_sip(fontface->name, strlen(fontface->name), seed0, seed1);
+// }
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
+    // check the hashmap first
+    if (uicon->fontfaces.zig_hash_map == NULL) {
+        const unsigned initial_size = 10;
+        struct hashmap_s* hashmap = calloc(1, sizeof(struct hashmap_s));
+        if (hashmap_create(initial_size, hashmap)) {  // error
+            printf("Failed to create fontface hashmap\n");
+            return NULL;
+        }
+        else {
+            uicon->fontfaces.zig_hash_map = hashmap;
+        }
+    }
+    FontfaceEntry* entry = hashmap_get(uicon->fontfaces.zig_hash_map, font_name, strlen(font_name));
+    if (entry) {
+        printf("Fontface loaded from cache: %s\n", font_name);
+        return entry->face;
+    }
+    else {
+        printf("Fontface not found in cache: %s\n", font_name);
+    }
+
     // todo: cache the fonts loaded
     FT_Face face = NULL;
     // search for font
@@ -42,6 +76,15 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                     face->family_name, face->size->metrics.height >> 6,
                     face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
                     face->units_per_EM >> 6);
+                // put the font face into the hashmap
+                if (uicon->fontfaces.zig_hash_map) {
+                    entry = malloc(sizeof(FontfaceEntry));
+                    entry->face = face;
+                    // copy the font name
+                    int slen = strlen(font_name);
+                    entry->name = (char*)malloc(slen + 1);  strcpy(entry->name, font_name);
+                    hashmap_put(uicon->fontfaces.zig_hash_map, font_name, slen, entry);   
+                }
             }            
         }
         FcPatternDestroy(match);
@@ -67,4 +110,23 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
         parent->size->metrics.descender >> 6, face->size->metrics.descender >> 6);
     strbuf_free(name);
     return face;
+}
+
+int iterate(void* const context, void* const value) {
+    FontfaceEntry* entry = value;
+    free(entry->name);
+    FT_Done_Face(entry->face);
+    free(entry);
+    return 0;
+}
+
+void fontface_cleanup(UiContext* uicon) {
+    // loop through the hashmap and free the font faces
+    if (uicon->fontfaces.zig_hash_map) {
+        printf("Cleaning up font faces\n");
+        hashmap_iterate(uicon->fontfaces.zig_hash_map, iterate, NULL);
+        hashmap_destroy(uicon->fontfaces.zig_hash_map);
+        free(uicon->fontfaces.zig_hash_map);
+        uicon->fontfaces.zig_hash_map = NULL;
+    }
 }

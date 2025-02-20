@@ -142,8 +142,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 }
 
 void event_context_cleanup(EventContext* evcon) {
-    // free cursor and caret states
-    FT_Done_Face(evcon->face);
+
 }
 
 void build_view_stack(EventContext* evcon, View* view, View** stack, int* stack_size) {

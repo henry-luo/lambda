@@ -10,6 +10,7 @@ void parse_html_doc(Document* doc, const char* doc_path);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
+void fontface_cleanup(UiContext* uicon);
 
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
@@ -99,6 +100,7 @@ void ui_context_cleanup(UiContext* uicon) {
         }
         free(uicon->document);
     }
+    fontface_cleanup(uicon);
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
     tvg_canvas_destroy(uicon->canvas);

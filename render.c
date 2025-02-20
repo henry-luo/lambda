@@ -125,7 +125,6 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
             rdcon->space_width = rdcon->face->glyph->advance.x >> 6;
         }        
         render_children(rdcon, view);
-        // FT_Done_Face(rdcon->face);
     }
     else {
         printf("view has no child\n");
@@ -161,7 +160,6 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
 }
 
 void render_clean_up(RenderContext* rdcon) {
-    FT_Done_Face(rdcon->face);
     // unlock the surface so that the pixel data can be used elsewhere (e.g., converting to a texture).
     if (SDL_MUSTLOCK(rdcon->ui_context->surface)) {
         SDL_UnlockSurface(rdcon->ui_context->surface);
