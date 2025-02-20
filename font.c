@@ -7,37 +7,28 @@ typedef struct FontfaceEntry {
     FT_Face face;
 } FontfaceEntry;
 
-// int fontface_compare(const void *a, const void *b, void *udata) {
-//     const FontfaceEntry *fa = a;
-//     const FontfaceEntry *fb = b;
-//     return strcmp(fa->name, fb->name);
-// }
+int fontface_compare(const void *a, const void *b, void *udata) {
+    const FontfaceEntry *fa = a;
+    const FontfaceEntry *fb = b;
+    return strcmp(fa->name, fb->name);
+}
 
-// bool fontface_iter(const void *item, void *udata) {
-//     const FontfaceEntry *fontface = item;
-//     printf("Font face name: %s\n", fontface->name);
-//     return true;
-// }
-
-// uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-//     const FontfaceEntry *fontface = item;
-//     return hashmap_sip(fontface->name, strlen(fontface->name), seed0, seed1);
-// }
+uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const FontfaceEntry *fontface = item;
+    // xxhash3 is a fast hash function
+    return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
+}
 
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // check the hashmap first
     if (uicon->fontfaces.zig_hash_map == NULL) {
-        const unsigned initial_size = 10;
-        struct hashmap_s* hashmap = calloc(1, sizeof(struct hashmap_s));
-        if (hashmap_create(initial_size, hashmap)) {  // error
-            printf("Failed to create fontface hashmap\n");
-            return NULL;
-        }
-        else {
-            uicon->fontfaces.zig_hash_map = hashmap;
-        }
+        // create a new hash map. 2nd argument is the initial capacity. 
+        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
+        uicon->fontfaces.zig_hash_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0, 
+            fontface_hash, fontface_compare, NULL, NULL);
     }
-    FontfaceEntry* entry = hashmap_get(uicon->fontfaces.zig_hash_map, font_name, strlen(font_name));
+    FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontfaces.zig_hash_map, 
+        &(FontfaceEntry){.name = (char*)font_name});
     if (entry) {
         printf("Fontface loaded from cache: %s\n", font_name);
         return entry->face;
@@ -78,12 +69,10 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                     face->units_per_EM >> 6);
                 // put the font face into the hashmap
                 if (uicon->fontfaces.zig_hash_map) {
-                    entry = malloc(sizeof(FontfaceEntry));
-                    entry->face = face;
                     // copy the font name
                     int slen = strlen(font_name);
-                    entry->name = (char*)malloc(slen + 1);  strcpy(entry->name, font_name);
-                    hashmap_put(uicon->fontfaces.zig_hash_map, font_name, slen, entry);   
+                    char* name = (char*)malloc(slen + 1);  strcpy(name, font_name);
+                    hashmap_set(uicon->fontfaces.zig_hash_map, &(FontfaceEntry){.name=name, .face=face});   
                 }
             }            
         }
@@ -112,23 +101,19 @@ FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style)
     return face;
 }
 
-int iterate(void* const context, void* const value) {
-    FontfaceEntry* entry = value;
+bool fontface_entry_free(const void *item, void *udata) {
+    FontfaceEntry* entry = (FontfaceEntry*)item;
     free(entry->name);
     FT_Done_Face(entry->face);
-    free(entry);
-    return 0;
+    return true;
 }
 
 void fontface_cleanup(UiContext* uicon) {
     // loop through the hashmap and free the font faces
     if (uicon->fontfaces.zig_hash_map) {
         printf("Cleaning up font faces\n");
-        hashmap_iterate(uicon->fontfaces.zig_hash_map, iterate, NULL);
-        hashmap_destroy(uicon->fontfaces.zig_hash_map);
-        free(uicon->fontfaces.zig_hash_map);
+        hashmap_scan(uicon->fontfaces.zig_hash_map, fontface_entry_free, NULL);
+        hashmap_free(uicon->fontfaces.zig_hash_map);
         uicon->fontfaces.zig_hash_map = NULL;
     }
 }
-
-// todo: switch to SipHash

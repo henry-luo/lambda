@@ -2,7 +2,8 @@
 
 zig cc -fms-extensions -o window \
 html_window.c parse_html.c layout_html.c layout_dom_tree.c render.c view_pool.c event.c font.c \
-lib/string_buffer/string_buffer.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
+lib/string_buffer/string_buffer.c lib/hashmap.c \
+lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
 -I/opt/homebrew/opt/lexbor/include -L/opt/homebrew/opt/lexbor/lib -llexbor_static \
 -I/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2 /opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a \
 /opt/homebrew/lib/libpng.a /opt/homebrew/opt/bzip2/lib/libbz2.a \
