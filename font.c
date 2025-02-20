@@ -130,3 +130,5 @@ void fontface_cleanup(UiContext* uicon) {
         uicon->fontfaces.zig_hash_map = NULL;
     }
 }
+
+// todo: switch to SipHash
