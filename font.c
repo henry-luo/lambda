@@ -1,6 +1,16 @@
 
 #include "view.h"
 
+struct HashTable {
+    int count;
+    // table fields
+};
+
+typedef struct FontfaceEntry {
+    FT_Face face;
+} FontfaceHash;
+
+
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // todo: cache the fonts loaded
     FT_Face face = NULL;

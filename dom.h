@@ -7,6 +7,11 @@
 #include <lexbor/css/css.h>
 #include "./lib/string_buffer/string_buffer.h"
 
+// #define ZPL_IMPLEMENTATION
+// #define ZPL_PICO
+// #include "./lib/zpl/zpl.h"
+// #include <mln_hash.h>
+
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 

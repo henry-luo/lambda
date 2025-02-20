@@ -10,6 +10,7 @@
                 "/opt/homebrew/opt/sdl2/include/SDL2",
                 "/opt/homebrew/opt/sdl2_image/include",
                 "/opt/homebrew/include",
+                "/usr/local/melon/include",
                 "${workspaceFolder}/**",
                 "${default}"
             ],

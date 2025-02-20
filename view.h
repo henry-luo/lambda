@@ -109,6 +109,8 @@ typedef struct {
     float x, y;  // abs x, y relative to entire canvas/screen
 } BlockBlot;
 
+// typedef struct HashTable HashTable;
+
 typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
@@ -117,8 +119,12 @@ typedef struct {
     SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
     SDL_Texture* texture;  // texture for rendering
+
+    // font handling
     FcConfig *font_config;
     FT_Library ft_library;
+    // HashTable* fontfaces; // font faces loaded
+
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     Document* document;     // current document
     MouseState mouse_state; // current mouse state
