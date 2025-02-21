@@ -129,11 +129,13 @@ void target_html_doc(EventContext* evcon, View* root_view) {
     }
 }
 
-void build_view_stack(EventContext* evcon, View* view, View** stack, int* stack_size) {
+ArrayList* build_view_stack(EventContext* evcon, View* view) {
+    ArrayList* list = arraylist_new(100);  	
     while (view) {
-        stack[(*stack_size)++] = view;
+        arraylist_prepend(list, view);
         view = (View*)view->parent;
     }
+    return list;
 }
 
 void fire_text_event(EventContext* evcon, ViewText* text) {
@@ -158,9 +160,10 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     fire_inline_event(evcon, (ViewSpan*)block);
 }
 
-void fire_events(EventContext* evcon, View** stack, int stack_size) {
-    for (int i = stack_size - 1; i >= 0; i--) {
-        View* view = stack[i];
+void fire_events(EventContext* evcon, ArrayList* target_list) {
+    int stack_size = target_list->length;
+    for (int i = 0; i < stack_size; i++) {
+        View* view = (View*)target_list->data[i];
         if (view->type == RDT_VIEW_BLOCK) {
             fire_block_event(evcon, (ViewBlock*)view);
         } else if (view->type == RDT_VIEW_INLINE) {
@@ -207,12 +210,11 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
             printf("Target view found at position (%f, %f)\n", mouse_x, mouse_y);
-            View* stack[100];  int stack_size = 0;
             // build stack of views from root to target view
-            build_view_stack(&evcon, evcon.target, stack, &stack_size);
+            ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
             // fire event to views in the stack
-            fire_events(&evcon, stack, stack_size);
+            fire_events(&evcon, target_list);
         } else {
             printf("No target view found at position (%f, %f)\n", mouse_x, mouse_y);
         }

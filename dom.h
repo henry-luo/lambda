@@ -7,6 +7,7 @@
 #include <lexbor/css/css.h>
 #include "./lib/string_buffer/string_buffer.h"
 #include "./lib/hashmap.h"
+#include "./lib/arraylist.h"
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
