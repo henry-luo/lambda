@@ -1,5 +1,6 @@
 
 #include "view.h"
+#include <tbox/string/string.h>
 
 typedef struct FontfaceEntry {
     char* name;
@@ -82,21 +83,23 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
 }
 
 FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style) {
-    StrBuf* name = strbuf_create(parent->family_name);
+    tb_string_t name;
+    tb_string_init(&name);  tb_string_cstrcpy(&name, parent->family_name);
     if (font_style->font_weight == LXB_CSS_VALUE_BOLD) {
-        strbuf_append_str(name, ":bold");
         if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
-            strbuf_append_str(name, ":bolditalic");
+            tb_string_cstrcat(&name, ":bolditalic");
+        } else {
+            tb_string_cstrcat(&name, ":bold");
         }
     }
     else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
-        strbuf_append_str(name, ":italic");
+        tb_string_cstrcat(&name, ":italic");
     }
-    FT_Face face = load_font_face(uicon, name->b, (parent->units_per_EM >> 6) / uicon->pixel_ratio);
+    FT_Face face = load_font_face(uicon, tb_string_cstr(&name), (parent->units_per_EM >> 6) / uicon->pixel_ratio);
     printf("Loading font: %s, %d, pa ascd: %ld, ascd: %ld, pa desc: %ld, desc: %ld\n", 
-        name->b, parent->units_per_EM >> 6, parent->size->metrics.ascender >> 6, face->size->metrics.ascender >> 6,
+        tb_string_cstr(&name), parent->units_per_EM >> 6, parent->size->metrics.ascender >> 6, face->size->metrics.ascender >> 6,
         parent->size->metrics.descender >> 6, face->size->metrics.descender >> 6);
-    strbuf_free(name);
+    tb_string_exit(&name);
     return face;
 }
 

@@ -11,6 +11,8 @@ lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
 -L/opt/homebrew/lib /opt/homebrew/lib/libSDL2.a -lm -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-weak_framework,CoreHaptics -Wl,-weak_framework,GameController -Wl,-framework,ForceFeedback -lobjc -Wl,-framework,CoreVideo -Wl,-framework,Cocoa -Wl,-framework,Carbon -Wl,-framework,IOKit -Wl,-weak_framework,QuartzCore -Wl,-weak_framework,Metal \
 -I/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include -L/opt/homebrew/opt/sdl2_image/lib -lSDL2_image \
 -I/opt/homebrew/include -L/opt/homebrew/lib -lThorVG \
+-L/opt/homebrew/lib -lThorVG \
+-I/opt/homebrew/Cellar/tbox/1.7.6/include /opt/homebrew/Cellar/tbox/1.7.6/lib/libtbox.a \
 /opt/homebrew/opt/zlib/lib/libz.a \
 -Werror=incompatible-pointer-types \
 -Werror=undef -Werror=no-common -Werror=uninitialized -Werror=sign-compare -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type \
