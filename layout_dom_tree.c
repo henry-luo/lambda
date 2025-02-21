@@ -90,17 +90,6 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
-        // StrBuf* buf = strbuf_new(128);
-        // strbuf_append_strn(buf, (char*)custom->name.data, custom->name.length);
-        // strbuf_append_str(buf, ": ");
-        // if (custom->value.data) {
-        //     strbuf_append_strn(buf, (char*)custom->value.data, custom->value.length);
-        // }
-        // else {
-        //     strbuf_append_str(buf, "null");
-        // }
-        // printf("custom property: %s\n", buf->b);
-        // strbuf_free(buf);
         String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);
         if (sv_eq(custom_name, sv_from_cstr("cursor"))) {
             ViewSpan* span = (ViewSpan*)lycon->view;

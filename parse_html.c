@@ -1,6 +1,6 @@
 #include "dom.h"
 
-StrBuf* readTextFile(const char *filename);
+char* readTextFile(const char *filename);
 
 static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
     // Append data to string buffer
@@ -32,10 +32,9 @@ void parse_html_doc(Document* doc, const char* doc_path) {
     }
 
     // parse the HTML source
-    StrBuf* source_buf = readTextFile(doc_path);
-    const char* html_source = source_buf->b;
+    char* html_source = readTextFile(doc_path);       
     status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
-    strbuf_free(source_buf);
+    free(html_source);
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to parse HTML.\n");
         lxb_html_document_destroy(document);
@@ -55,7 +54,7 @@ void parse_html_doc(Document* doc, const char* doc_path) {
 }
 
 // Function to read and display the content of a text file
-StrBuf* readTextFile(const char *filename) {
+char* readTextFile(const char *filename) {
     FILE *file = fopen(filename, "r"); // open the file in read mode
     if (file == NULL) { // handle error when file cannot be opened
         perror("Error opening file"); 
@@ -66,16 +65,16 @@ StrBuf* readTextFile(const char *filename) {
     long fileSize = ftell(file);
     rewind(file); // reset file pointer to the beginning
 
-    StrBuf* buf = strbuf_new(fileSize + 1);
-    if (buf == NULL) {
+    char* buf = (char*)malloc(fileSize + 1); // allocate memory for the file content
+    if (!buf) {
         perror("Memory allocation failed");
         fclose(file);
         return NULL;
     }
 
     // read the file content into the buffer
-    size_t bytesRead = fread(buf->b, 1, fileSize, file);
-    buf->b[bytesRead] = '\0'; // Null-terminate the buffer
+    size_t bytesRead = fread(buf, 1, fileSize, file);
+    buf[bytesRead] = '\0'; // Null-terminate the buffer
 
     // clean up
     fclose(file);

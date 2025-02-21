@@ -18,6 +18,7 @@
         "locale": "c",
         "ratio": "c",
         "view.h": "c",
-        "sdl_image.h": "c"
+        "sdl_image.h": "c",
+        "typeinfo": "c"
     }
 }

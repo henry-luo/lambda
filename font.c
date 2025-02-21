@@ -1,6 +1,5 @@
 
 #include "view.h"
-#include <tbox/string/string.h>
 
 typedef struct FontfaceEntry {
     char* name;

@@ -1,7 +1,7 @@
 #include "layout.h"
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt);
-void print_view_tree(ViewGroup* view_block, StrBuf* buf, int indent);
+void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 
@@ -58,12 +58,8 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         printf("end layout\n");
 
         layout_cleanup(&lycon);
-        StrBuf* buf = strbuf_new(4096);
-        print_view_tree((ViewGroup*)doc->view_tree->root, buf, 0);
-        printf("=================\nView tree:\n");
-        printf("%s", buf->b);
-        printf("=================\n");
-        strbuf_free(buf);
+        
+        print_view_tree((ViewGroup*)doc->view_tree->root);
     }
 }
 
