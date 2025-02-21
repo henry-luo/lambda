@@ -192,7 +192,7 @@ int main(int argc, char *argv[]) {
         SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
         SDL_RenderPresent(ui_context.renderer);
 
-        SDL_Delay(300);  // Pause for 300ms after each rendering
+        // SDL_Delay(300);  // Pause for 300ms after each rendering
     }
     
     ui_context_cleanup(&ui_context);
