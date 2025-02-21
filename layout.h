@@ -35,6 +35,7 @@ typedef struct {
 typedef struct {
     ViewGroup* parent;
     View* prev_view;
+    View* view;  // current view
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style

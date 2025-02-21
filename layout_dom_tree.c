@@ -1,5 +1,7 @@
 #include "layout.h"
 #include "./lib/string_buffer/string_buffer.h"
+#define SV_IMPLEMENTATION
+#include "./lib/sv.h"
 
 typedef enum LineFillStatus {
     RDT_NOT_SURE = 0,
@@ -86,6 +88,34 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         lycon->line.vertical_align = vertical_align->alignment.type;
         printf("vertical align: %d, %d\n", vertical_align->alignment.type, LXB_CSS_VALUE_MIDDLE);
         break;
+    case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
+        const lxb_css_property__custom_t *custom = declr->u.custom;
+        // StrBuf* buf = strbuf_new(128);
+        // strbuf_append_strn(buf, (char*)custom->name.data, custom->name.length);
+        // strbuf_append_str(buf, ": ");
+        // if (custom->value.data) {
+        //     strbuf_append_strn(buf, (char*)custom->value.data, custom->value.length);
+        // }
+        // else {
+        //     strbuf_append_str(buf, "null");
+        // }
+        // printf("custom property: %s\n", buf->b);
+        // strbuf_free(buf);
+        String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);
+        if (sv_eq(custom_name, sv_from_cstr("cursor"))) {
+            ViewSpan* span = (ViewSpan*)lycon->view;
+            if (!span->in_line) {
+                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+            }
+            String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
+            if (sv_eq(custom_value, sv_from_cstr("pointer"))) {
+                printf("got cursor: pointer\n");
+                span->in_line->cursor = LXB_CSS_VALUE_POINTER;
+            }
+        }
+        break;
+    default:
+        printf("unhandled property: %s\n", data->name);
     }
     return LXB_STATUS_OK;
 }
@@ -229,6 +259,13 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
         // parse font style
         // lxb_dom_attr_t* color = lxb_dom_element_attr_by_id(element, LXB_DOM_ATTR_COLOR);
         // if (color) { printf("font color: %s\n", color->value->data); }
+    }
+    else if (name == LXB_TAG_A) {
+        // parse anchor style
+        // lxb_dom_attr_t* href = lxb_dom_element_attr_by_id(elmt, LXB_DOM_ATTR_HREF);
+        // if (href) { printf("anchor href: %s\n", href->value->data); }
+        span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+        span->in_line->cursor = LXB_CSS_VALUE_POINTER;
     }
     // resolve CSS styles
     if (elmt->style) {
@@ -383,7 +420,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
             FT_GlyphSlot slot = lycon->font.face->glyph;  
             wd = slot->advance.x >> 6;
         }
-        printf("char: %c, width: %d\n", *str, wd);
+        // printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
         if (text->x + text->width >= lycon->line.right) { // line filled up
             printf("line filled up\n");

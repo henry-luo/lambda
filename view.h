@@ -9,8 +9,10 @@
 #include "./lib/mem-pool/include/mem_pool.h"
 #include "event.h"
 
-typedef unsigned short PropValue;
-#define RDT_DISPLAY_TEXT    (LXB_CSS_VALUE__LAST_ENTRY + 10)
+// extended Lexbor CSS values
+#define LXB_CSS_VALUE_POINTER   LXB_CSS_VALUE__LAST_ENTRY + 1
+#define LXB_CSS_VALUE_TEXT      LXB_CSS_VALUE__LAST_ENTRY + 2
+#define RDT_DISPLAY_TEXT        (LXB_CSS_VALUE__LAST_ENTRY + 10)
 
 extern bool can_break(char c);
 extern bool is_space(char c);
@@ -43,9 +45,9 @@ typedef struct {
     PropValue text_deco; // CSS text decoration
 } FontProp;
 
-// typedef struct {
-//     PropValue vertical_align;
-// } InlineProp;
+typedef struct {
+    PropValue cursor;
+} InlineProp;
 
 typedef struct {
     PropValue text_align;
@@ -75,12 +77,14 @@ struct ViewGroup {
 
 typedef struct {
     ViewGroup;  // extends ViewGroup
+    // todo: convert FontProp to pointer
     FontProp font;  // font style
-    // InlineProp inline;  // inline style properties
+    InlineProp* in_line;  // inline style properties
+    // prop: vertical_align - fully resolved during layout, not stored in view tree
 } ViewSpan;
 
 typedef struct {
-    ViewGroup;  // extends ViewGroup
+    ViewSpan;  // extends ViewSpan
     float x, y, width, height;  // x, y relative to the parent block    
     BlockProp* props;  // block style properties
 } ViewBlock;

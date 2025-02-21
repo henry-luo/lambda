@@ -45,4 +45,6 @@ typedef union RdtEvent {
 typedef struct {
     bool is_mouse_down;
     float down_x, down_y;  // mouse position when mouse down
+    PropValue cursor;  // current cursor style
+    SDL_Cursor* sdl_cursor;
 } MouseState;

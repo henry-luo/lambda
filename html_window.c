@@ -103,11 +103,16 @@ void ui_context_cleanup(UiContext* uicon) {
     fontface_cleanup(uicon);
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
+
     tvg_canvas_destroy(uicon->canvas);
     tvg_engine_term(TVG_ENGINE_SW);
     SDL_FreeSurface(uicon->surface);
     SDL_DestroyTexture(uicon->texture);
     SDL_DestroyRenderer(uicon->renderer);
+
+    if (uicon->mouse_state.sdl_cursor) {
+        SDL_FreeCursor(uicon->mouse_state.sdl_cursor);
+    }
     SDL_DestroyWindow(uicon->window);
     IMG_Quit();
     SDL_Quit();

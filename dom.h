@@ -19,3 +19,5 @@ typedef struct {
     ViewTree* view_tree;
     StateTree* state_tree;
 } Document;
+
+typedef unsigned short PropValue;

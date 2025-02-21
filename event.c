@@ -8,6 +8,8 @@ typedef struct EventContext {
     FontProp* font; // current font style
     FT_Face face;   // current font face
     float space_width;
+
+    PropValue new_cursor;
     
     UiContext* ui_context;
 } EventContext;
@@ -20,15 +22,15 @@ void target_children(EventContext* evcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK) {
             ViewBlock* block = (ViewBlock*)view;
-            printf("fire view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+            printf("target view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                 block->x, block->y, block->width, block->height);                
             target_block_view(evcon, block);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            printf("fire view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
-            target_inline_view(evcon, (ViewSpan*)view);
+            printf("target view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
+            target_inline_view(evcon, span);
         }
         else {
             ViewText* text = (ViewText*)view;
@@ -138,11 +140,11 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
         evcon->space_width = evcon->face->size->metrics.height >> 6;
     } else {
         evcon->space_width = evcon->face->glyph->advance.x >> 6;
-    }    
+    }
+    evcon->new_cursor = LXB_CSS_VALUE_AUTO;
 }
 
 void event_context_cleanup(EventContext* evcon) {
-
 }
 
 void build_view_stack(EventContext* evcon, View* view, View** stack, int* stack_size) {
@@ -152,16 +154,38 @@ void build_view_stack(EventContext* evcon, View* view, View** stack, int* stack_
     }
 }
 
-void fire_mouse_events(EventContext* evcon, View** stack, int stack_size) {
+void fire_text_event(EventContext* evcon, ViewText* text) {
+    printf("fire text event\n");
+    if (evcon->new_cursor == LXB_CSS_VALUE_AUTO) {
+        printf("set text cursor\n");
+        evcon->new_cursor = LXB_CSS_VALUE_TEXT;
+    }
+}
+
+void fire_inline_event(EventContext* evcon, ViewSpan* span) {
+    printf("fire inline event\n");
+    if (span->in_line && span->in_line->cursor) {
+        printf("changing to new cursor\n");
+        evcon->new_cursor = span->in_line->cursor;
+    }
+}
+
+void fire_block_event(EventContext* evcon, ViewBlock* block) {
+    printf("fire block event\n");
+    // fire as inline view first
+    fire_inline_event(evcon, (ViewSpan*)block);
+}
+
+void fire_events(EventContext* evcon, View** stack, int stack_size) {
     for (int i = stack_size - 1; i >= 0; i--) {
         View* view = stack[i];
-        // if (view->type == RDT_VIEW_BLOCK) {
-        //     fire_block_mouse_event(evcon, (ViewBlock*)view, event);
-        // } else if (view->type == RDT_VIEW_INLINE) {
-        //     fire_inline_mouse_event(evcon, (ViewSpan*)view, event);
-        // } else {
-        //     fire_text_mouse_event(evcon, (ViewText*)view, event);
-        // }
+        if (view->type == RDT_VIEW_BLOCK) {
+            fire_block_event(evcon, (ViewBlock*)view);
+        } else if (view->type == RDT_VIEW_INLINE) {
+            fire_inline_event(evcon, (ViewSpan*)view);
+        } else if (view->type == RDT_VIEW_TEXT) {
+            fire_text_event(evcon, (ViewText*)view);
+        }
     }
 }
 
@@ -182,8 +206,28 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             View* stack[100];  int stack_size = 0;
             // build stack of views from root to target view
             build_view_stack(&evcon, evcon.target, stack, &stack_size);
+
             // fire event to views in the stack
-            fire_mouse_events(&evcon, stack, stack_size);
+            fire_events(&evcon, stack, stack_size);
+
+            if (uicon->mouse_state.cursor != evcon.new_cursor) {
+                printf("Change cursor to %d\n", evcon.new_cursor);
+                uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
+                SDL_SystemCursor cursor;
+                switch (evcon.new_cursor) {
+                case LXB_CSS_VALUE_TEXT: cursor = SDL_SYSTEM_CURSOR_IBEAM; break;
+                case LXB_CSS_VALUE_POINTER: cursor = SDL_SYSTEM_CURSOR_HAND; break;
+                default: cursor = SDL_SYSTEM_CURSOR_ARROW; break;
+                }
+                SDL_Cursor* sdl_cursor = SDL_CreateSystemCursor(cursor);
+                if (sdl_cursor) {
+                    if (uicon->mouse_state.sdl_cursor) {
+                        SDL_FreeCursor(uicon->mouse_state.sdl_cursor);
+                    }
+                    uicon->mouse_state.sdl_cursor = sdl_cursor;
+                    SDL_SetCursor(sdl_cursor);
+                }
+            }
         } else {
             printf("No target view found at position (%f, %f)\n", mouse_x, mouse_y);
         }
@@ -197,6 +241,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     default:
         break;
     }
+    printf("end of event %d\n", event->type);
 
     event_context_cleanup(&evcon);
 }
