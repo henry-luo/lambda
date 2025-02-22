@@ -70,9 +70,9 @@ void view_pool_destroy(ViewTree* tree) {
     tree->pool = NULL;
 }
 
-void print_inline_prop(ViewSpan* span, tb_string_ref_t buf, int indent) {
+void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->in_line) {
-        tb_string_chrncat(buf, ' ', indent);
+        strbuf_append_char_n(buf, ' ', indent);
         if (span->in_line->cursor) {
             char* cursor;
             switch (span->in_line->cursor) {
@@ -83,19 +83,19 @@ void print_inline_prop(ViewSpan* span, tb_string_ref_t buf, int indent) {
             default:
                 cursor = (char*)lxb_css_value_by_id(span->in_line->cursor)->name;
             }
-            tb_string_cstrfcpy(buf, "prop {cursor:%s}\n", cursor);
+            strbuf_append_format(buf, "prop {cursor:%s}\n", cursor);
         }
     }
 }
 
-void print_view_group(ViewGroup* view_group, tb_string_ref_t buf, int indent) {
+void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     View* view = view_group->child;
     if (view) {
         do {
-            tb_string_chrncat(buf, ' ', indent);
+            strbuf_append_char_n(buf, ' ', indent);
             if (view->type == RDT_VIEW_BLOCK) {
                 ViewBlock* block = (ViewBlock*)view;
-                tb_string_cstrfcpy(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+                strbuf_append_format(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                     block->x, block->y, block->width, block->height);
                 print_inline_prop((ViewSpan*)block, buf, indent+2);              
@@ -103,7 +103,7 @@ void print_view_group(ViewGroup* view_group, tb_string_ref_t buf, int indent) {
             }
             else if (view->type == RDT_VIEW_INLINE) {
                 ViewSpan* span = (ViewSpan*)view;
-                tb_string_cstrfcpy(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
+                strbuf_append_format(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), 
                     lxb_css_value_by_id(span->font.text_deco)->name, 
                     lxb_css_value_by_id(span->font.font_weight)->name,
@@ -116,31 +116,31 @@ void print_view_group(ViewGroup* view_group, tb_string_ref_t buf, int indent) {
                 lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
                 unsigned char* str = node->char_data.data.data + text->start_index;
                 if (!(*str) || text->length <= 0) {
-                    tb_string_cstrfcpy(buf, "invalid text node: len:%d\n", text->length); 
+                    strbuf_append_format(buf, "invalid text node: len:%d\n", text->length); 
                 } else {
-                    tb_string_cstrcat(buf, "text:'");  tb_string_cstrncpy(buf, (char*)str, text->length);
-                    tb_string_cstrfcpy(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
+                    strbuf_append_str(buf, "text:'");  strbuf_append_str_n(buf, (char*)str, text->length);
+                    strbuf_append_format(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
                         text->start_index, text->length, text->x, text->y, text->width, text->height);                    
                 }
             }
             else {
-                tb_string_cstrfcpy(buf, "unknown view: %d\n", view->type);
+                strbuf_append_format(buf, "unknown view: %d\n", view->type);
             }
             if (view == view->next) { printf("invalid next view\n");  return; }
             view = view->next;
         } while (view);
     }
     else {
-        tb_string_chrncat(buf, ' ', indent);
-        tb_string_cstrcat(buf, "view has no child\n");
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "view has no child\n");
     }
 }
 
 void print_view_tree(ViewGroup* view_root) {
-    tb_string_t buf;  tb_string_init(&buf);
-    print_view_group(view_root, &buf, 0);
+    StrBuf* buf = strbuf_new_cap(1024);
+    print_view_group(view_root, buf, 0);
     printf("=================\nView tree:\n");
-    printf("%s", tb_string_cstr(&buf));
+    printf("%s", buf->s);
     printf("=================\n");
-    tb_string_exit(&buf);
+    strbuf_free(buf);
 }

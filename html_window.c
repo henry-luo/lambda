@@ -1,5 +1,4 @@
 #include "layout.h"
-#include "./lib/string_buffer/string_buffer.h"
 #include <stdio.h>
 #include <stdbool.h>
 

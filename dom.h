@@ -5,10 +5,10 @@
 #include <math.h>
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
-#include "./lib/string_buffer/string_buffer.h"
+#include "./lib/strbuf.h"
 #include "./lib/hashmap.h"
 #include "./lib/arraylist.h"
-#include <tbox/string/string.h>
+// #include <tbox/string/string.h>
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
