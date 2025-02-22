@@ -19,6 +19,7 @@
         "ratio": "c",
         "view.h": "c",
         "sdl_image.h": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "stdio.h": "c"
     }
 }
