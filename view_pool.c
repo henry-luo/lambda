@@ -2,7 +2,7 @@
 
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
-    ViewTree* tree = lycon->ui_context->document->view_tree;
+    ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
         case RDT_VIEW_BLOCK:
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
@@ -44,7 +44,7 @@ void free_view(ViewTree* tree, View* view) {
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
     void* prop;
-    if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->ui_context->document->view_tree->pool, size, &prop)) {
+    if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->doc->view_tree->pool, size, &prop)) {
         return prop;
     }
     else {

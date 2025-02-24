@@ -11,6 +11,34 @@ void view_pool_destroy(ViewTree* tree);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 void fontface_cleanup(UiContext* uicon);
 
+Document* load_html_doc(char* doc_filename) {
+    Document* doc = calloc(1, sizeof(Document));
+    parse_html_doc(doc, doc_filename);
+    
+    // layout html doc 
+    if (doc->dom_tree) {
+        layout_html_doc(&ui_context, doc, false);
+    }
+    // render html doc
+    if (doc->view_tree && doc->view_tree->root) { 
+        render_html_doc(&ui_context, doc->view_tree->root); 
+    }
+    return doc;
+}
+
+void reflow_html_doc(Document* doc) {
+    layout_html_doc(&ui_context, doc, true);
+    // render html doc
+    if (doc->view_tree->root) {
+        render_html_doc(&ui_context, doc->view_tree->root);
+        SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
+        // to render immediately to the screen, otherwise the change will only be rendered when mouse is released
+        SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
+        SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
+        SDL_RenderPresent(ui_context.renderer);        
+    }
+}
+
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
         SDL_Window* win = (SDL_Window*)data;
@@ -18,20 +46,9 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
         ui_context.window_height = event->window.data2;
         printf("Window %d resized to %fx%f\n", event->window.windowID,  
             ui_context.window_width, ui_context.window_height);
-
-        // layout html doc 
         if (ui_context.document) {
-            layout_html_doc(&ui_context, ui_context.document, true);
-            // render html doc
-            if (ui_context.document->view_tree->root) {
-                render_html_doc(&ui_context, ui_context.document->view_tree->root);
-                SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
-                // render the texture to the screen
-                SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
-                SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
-                SDL_RenderPresent(ui_context.renderer);                
-            }            
-        }        
+            reflow_html_doc(ui_context.document);      
+        }   
     }
     return 0;
   }
@@ -119,19 +136,8 @@ void ui_context_cleanup(UiContext* uicon) {
 
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
-    
-    Document* doc = calloc(1, sizeof(Document));
-    parse_html_doc(doc, "sample.html");
-    ui_context.document = doc;
+    ui_context.document = load_html_doc("test/sample.html");
 
-    // layout html doc 
-    if (doc->dom_tree) {
-        layout_html_doc(&ui_context, ui_context.document, false);
-    }
-    // render html doc
-    if (ui_context.document->view_tree->root) { 
-        render_html_doc(&ui_context, ui_context.document->view_tree->root); 
-    }
     ui_context.texture = SDL_CreateTextureFromSurface(ui_context.renderer, ui_context.surface); 
     SDL_RenderClear(ui_context.renderer);
 

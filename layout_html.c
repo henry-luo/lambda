@@ -5,9 +5,9 @@ void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 
-void layout_init(LayoutContext* lycon, UiContext* uicon) {
+void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
-    lycon->ui_context = uicon;
+    lycon->doc = doc;  lycon->ui_context = uicon;
     // most browsers use a generic sans-serif font as the default
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
@@ -43,7 +43,7 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     if (body) {
         printf("start to layout DOM tree\n");
         
-        layout_init(&lycon, uicon);
+        layout_init(&lycon, doc, uicon);
         doc->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
         
         lycon.parent = (ViewGroup*)doc->view_tree->root;

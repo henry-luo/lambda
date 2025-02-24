@@ -39,6 +39,7 @@ typedef struct {
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style
+    Document* doc;
     UiContext* ui_context;
 } LayoutContext;
 
