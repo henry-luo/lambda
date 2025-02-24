@@ -11,7 +11,7 @@ void view_pool_destroy(ViewTree* tree);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 void fontface_cleanup(UiContext* uicon);
 
-Document* load_html_doc(char* doc_filename) {
+Document* show_html_doc(char* doc_filename) {
     Document* doc = calloc(1, sizeof(Document));
     parse_html_doc(doc, doc_filename);
     
@@ -26,16 +26,28 @@ Document* load_html_doc(char* doc_filename) {
     return doc;
 }
 
+void paint_window() {
+    SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
+    SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
+    SDL_RenderPresent(ui_context.renderer);  
+}
+
+void repaint_window() {
+    SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
+    paint_window();
+}
+
 void reflow_html_doc(Document* doc) {
+    if (!doc || !doc->dom_tree) {
+        printf("No document to reflow\n");
+        return;
+    }
     layout_html_doc(&ui_context, doc, true);
     // render html doc
     if (doc->view_tree->root) {
         render_html_doc(&ui_context, doc->view_tree->root);
-        SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
         // to render immediately to the screen, otherwise the change will only be rendered when mouse is released
-        SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
-        SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
-        SDL_RenderPresent(ui_context.renderer);        
+        repaint_window();
     }
 }
 
@@ -106,6 +118,7 @@ int ui_context_init(UiContext* uicon, int width, int height) {
 }
 
 void ui_context_cleanup(UiContext* uicon) {
+    printf("Cleaning up UI context\n");
     if (uicon->document) {
         if (uicon->document->dom_tree) {
             lxb_html_document_destroy(uicon->document->dom_tree);
@@ -116,6 +129,7 @@ void ui_context_cleanup(UiContext* uicon) {
         }
         free(uicon->document);
     }
+    printf("Cleaning up fonts\n");
     fontface_cleanup(uicon);
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
@@ -136,10 +150,10 @@ void ui_context_cleanup(UiContext* uicon) {
 
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
-    ui_context.document = load_html_doc("test/sample.html");
-
     ui_context.texture = SDL_CreateTextureFromSurface(ui_context.renderer, ui_context.surface); 
     SDL_RenderClear(ui_context.renderer);
+
+    ui_context.document = show_html_doc("test/sample.html");
 
     bool running = true;
     SDL_Event event;
@@ -182,21 +196,20 @@ int main(int argc, char *argv[]) {
                     ui_context.mouse_state.down_y = event.button.y;
                     printf("Mouse button down at (%d, %d)\n", event.button.x, event.button.y);
                 }
+                handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
                 break;
             case SDL_MOUSEBUTTONUP:
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     ui_context.mouse_state.is_mouse_down = 0;
                     printf("Mouse button up at (%d, %d)\n", event.button.x, event.button.y);
                 }
+                // handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
                 break;
             }
         }
 
         // render the texture to the screen
-        SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
-        SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
-        SDL_RenderPresent(ui_context.renderer);
-
+        repaint_window();
         // SDL_Delay(300);  // Pause for 300ms after each rendering
     }
     

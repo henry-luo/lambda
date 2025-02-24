@@ -254,6 +254,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
         // if (href) { printf("anchor href: %s\n", href->value->data); }
         span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         span->in_line->cursor = LXB_CSS_VALUE_POINTER;
+        span->font.text_deco = LXB_CSS_VALUE_UNDERLINE;
     }
     // resolve CSS styles
     if (elmt->style) {

@@ -32,7 +32,12 @@ void parse_html_doc(Document* doc, const char* doc_path) {
     }
 
     // parse the HTML source
-    char* html_source = readTextFile(doc_path);       
+    char* html_source = readTextFile(doc_path);
+    if (!html_source) {
+        fprintf(stderr, "Failed to read HTML file\n");
+        lxb_html_document_destroy(document);
+        return;
+    }
     status = lxb_html_document_parse(document, (const lxb_char_t *)html_source, strlen(html_source));
     free(html_source);
     if (status != LXB_STATUS_OK) {

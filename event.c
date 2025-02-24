@@ -1,5 +1,8 @@
 #include "view.h"
 
+Document* show_html_doc(char* doc_filename);
+void repaint_window();
+
 typedef struct EventContext {
     RdtEvent event;
     View* target;
@@ -10,6 +13,7 @@ typedef struct EventContext {
     float space_width;
 
     PropValue new_cursor;
+    char* new_uri; 
     
     UiContext* ui_context;
 } EventContext;
@@ -152,6 +156,20 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         printf("changing to new cursor\n");
         evcon->new_cursor = span->in_line->cursor;
     }
+    int name = ((lxb_html_element_t*)span->node)->element.node.local_name;
+    printf("fired at inline view %s, %d, %d\n", 
+        lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), name, LXB_TAG_A);
+    if (name == LXB_TAG_A) {
+        printf("fired at anchor tag\n");
+        if (evcon->event.type == SDL_MOUSEBUTTONDOWN) {
+            printf("mouse down at anchor tag\n");
+            lxb_dom_attr_t *href = lxb_dom_element_attr_by_id(lxb_dom_interface_element(span->node), LXB_DOM_ATTR_HREF);
+            if (href) {
+                printf("got anchor href: %s\n", href->value->data);
+                evcon->new_uri = (char*)href->value->data;
+            }
+        }
+    }
 }
 
 void fire_block_event(EventContext* evcon, ViewBlock* block) {
@@ -182,6 +200,10 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
         evcon->event.mouse_motion.x *= uicon->pixel_ratio;
         evcon->event.mouse_motion.y *= uicon->pixel_ratio;
     }
+    else if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP) {
+        evcon->event.mouse_button.x *= uicon->pixel_ratio;
+        evcon->event.mouse_button.y *= uicon->pixel_ratio;
+    }
     // load default font Arial, size 16 px
     evcon->face = load_font_face(uicon, "Arial", 16);
     if (FT_Load_Char(evcon->face, ' ', FT_LOAD_RENDER)) {
@@ -199,14 +221,19 @@ void event_context_cleanup(EventContext* evcon) {
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     EventContext evcon;
     printf("Handling event %d\n", event->type);
+    if (!doc || !doc->dom_tree) {
+        printf("No document to handle event\n");
+        return;
+    }
     event_context_init(&evcon, uicon, event);
 
     // find target view based on mouse position
+    float mouse_x, mouse_y;
     switch (event->type) {
     case SDL_MOUSEMOTION:  
         SDL_MouseMotionEvent* motion = &event->mouse_motion;
         printf("Mouse event at (%d, %d)\n", motion->x, motion->y);
-        float mouse_x = motion->x, mouse_y = motion->y;
+        mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
             printf("Target view found at position (%f, %f)\n", mouse_x, mouse_y);
@@ -215,6 +242,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
 
             // fire event to views in the stack
             fire_events(&evcon, target_list);
+            arraylist_free(target_list);
         } else {
             printf("No target view found at position (%f, %f)\n", mouse_x, mouse_y);
         }
@@ -238,7 +266,27 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         }        
         break;
     case SDL_MOUSEBUTTONDOWN:   case SDL_MOUSEBUTTONUP:
-        printf("Mouse button event\n");
+        SDL_MouseButtonEvent* btn_event = &event->mouse_button;
+        printf("Mouse button event %d, %d\n", btn_event->x, btn_event->y);
+        mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
+        target_html_doc(&evcon, doc->view_tree->root);
+        if (evcon.target) {
+            printf("Target view found at position (%f, %f)\n", mouse_x, mouse_y);
+            // build stack of views from root to target view
+            ArrayList* target_list = build_view_stack(&evcon, evcon.target);
+
+            // fire event to views in the stack
+            fire_events(&evcon, target_list);
+            arraylist_free(target_list);
+        } else {
+            printf("No target view found at position (%f, %f)\n", mouse_x, mouse_y);
+        }
+        if (evcon.new_uri) {
+            printf("Opening URI: %s\n", evcon.new_uri);
+            // open the URI
+            evcon.ui_context->document = show_html_doc(evcon.new_uri);
+            repaint_window();
+        }
         break;
     case SDL_MOUSEWHEEL:
         printf("Mouse wheel event\n");
