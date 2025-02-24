@@ -19,8 +19,10 @@
     "libraries": [
         {
             "name": "lexbor",
-            "include": "/opt/homebrew/opt/lexbor/include",
-            "lib": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
+            "include_original": "/opt/homebrew/opt/lexbor/include",
+            "lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
+            "include: ": "/usr/local/include",
+            "lib": "/usr/local/lib/liblexbor_static.a",            
             "link": "static"
         },
         {
