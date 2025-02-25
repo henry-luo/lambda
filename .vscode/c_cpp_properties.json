@@ -3,7 +3,6 @@
         {
             "name": "Win32",
             "includePath": [
-                "/opt/homebrew/opt/lexbor/include",
                 "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
                 "/opt/homebrew/include/fontconfig",
                 "/opt/homebrew/opt/sdl2/include",
@@ -12,6 +11,7 @@
                 "/opt/homebrew/include",
                 "/opt/homebrew/Cellar/tbox/1.7.6/include",
                 "/usr/local/melon/include",
+                "/usr/local/include",
                 "${workspaceFolder}/**",
                 "${default}"
             ],

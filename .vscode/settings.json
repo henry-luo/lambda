@@ -20,6 +20,7 @@
         "view.h": "c",
         "sdl_image.h": "c",
         "typeinfo": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "html.h": "c"
     }
 }

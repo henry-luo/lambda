@@ -1,4 +1,30 @@
 #include <lexbor/html/html.h>
+#include <lexbor/style/dom/interfaces/document.h>
+#include <lexbor/css/css.h>
+
+#define _GNU_SOURCE
+#include <execinfo.h>   // For backtrace() and backtrace_symbols()
+#include <signal.h>     // For signal handling
+#include <stdio.h>      // For printf()
+#include <stdlib.h>     // For exit()
+#include <unistd.h> 
+
+// Signal handler for segmentation fault
+void segfault_handler(int sig) {
+    void *array[10];
+    size_t size;
+
+    // Get stack trace
+    size = backtrace(array, 10);
+
+    // Print error message
+    fprintf(stderr, "Error: signal %d: Segmentation fault detected!\n", sig);
+
+    // Print stack trace
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+    exit(1); // Exit program
+}
 
 lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
     printf("style rule: %.*s\n", (int) len, (const char *) data);
@@ -7,6 +33,7 @@ lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx)
 
 lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx) {
+    printf("style print\n");
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
     printf("style entry: %ld\n", declr->type);
     lxb_css_rule_declaration_serialize(declr, style_print_callback, NULL);
@@ -18,7 +45,10 @@ int main(int argc, const char *argv[]) {
     const lxb_char_t *tag_name;
     lxb_html_document_t *document;
 
-    static const lxb_char_t html[] = "<html><body><div style='color:red;'>Works fine!</div></body></html>";
+    // Register the SIGSEGV handler
+    signal(SIGSEGV, segfault_handler);
+
+    static const lxb_char_t html[] = "<html><body><div style='color:red; cursor: hand'>Works fine!</div></body></html>";
     size_t html_len = sizeof(html) - 1;
 
     document = lxb_html_document_create();
@@ -26,7 +56,7 @@ int main(int argc, const char *argv[]) {
         exit(EXIT_FAILURE);
     }
     // init CSS on document, otherwise CSS declarations will not be parsed
-    status = lxb_html_document_css_init(document);
+    status = lxb_dom_document_css_init(document, true);
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to CSS initialization\n");
         return EXIT_FAILURE;
@@ -56,12 +86,11 @@ int main(int argc, const char *argv[]) {
         }
 
         // resolve CSS styles
-        lxb_html_element_t *elmt = lxb_html_interface_element(child);
-        if (elmt->style) {
+        if (child_element->style) {
             printf("printing CSS styles\n");
-            lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
-            lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
-            lexbor_avl_foreach(doc->css.styles, elmt->style, lxb_html_element_style_print, NULL);
+            lxb_dom_document_t *ddoc = child->owner_document;
+            printf("looping CSS styles %p\n", ddoc);
+            lexbor_avl_foreach_recursion(NULL, child_element->style, lxb_html_element_style_print, NULL);
         }  
         else {
             printf("No CSS styles found\n");
