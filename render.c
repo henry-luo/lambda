@@ -113,17 +113,19 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FT_Face pa_face = rdcon->face;  FontProp* pa_font = rdcon->font;  float pa_space_width = rdcon->space_width;
-    rdcon->font = &view_span->font;
-    printf("render inline view, deco: %s\n", lxb_css_value_by_id(view_span->font.text_deco)->name);
+    printf("render inline view\n");
     View* view = view_span->child;
     if (view) {
-        rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, &view_span->font);
-        if (FT_Load_Char(rdcon->face, ' ', FT_LOAD_RENDER)) {
-            fprintf(stderr, "could not load space character\n");
-            rdcon->space_width = rdcon->face->size->metrics.height >> 6;
-        } else {
-            rdcon->space_width = rdcon->face->glyph->advance.x >> 6;
-        }        
+        if (view_span->font) {
+            rdcon->font = view_span->font;
+            rdcon->face = load_styled_font(rdcon->ui_context, rdcon->face, view_span->font);
+            if (FT_Load_Char(rdcon->face, ' ', FT_LOAD_RENDER)) {
+                fprintf(stderr, "could not load space character\n");
+                rdcon->space_width = rdcon->face->size->metrics.height >> 6;
+            } else {
+                rdcon->space_width = rdcon->face->glyph->advance.x >> 6;
+            }
+        }
         render_children(rdcon, view);
     }
     else {

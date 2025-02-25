@@ -82,16 +82,18 @@ void target_text_view(EventContext* evcon, ViewText* text) {
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     FT_Face pa_face = evcon->face;  FontProp* pa_font = evcon->font;  float pa_space_width = evcon->space_width;
-    evcon->font = &view_span->font;
     View* view = view_span->child;
     if (view) {
-        evcon->face = load_styled_font(evcon->ui_context, evcon->face, &view_span->font);
-        if (FT_Load_Char(evcon->face, ' ', FT_LOAD_RENDER)) {
-            fprintf(stderr, "could not load space character\n");
-            evcon->space_width = evcon->face->size->metrics.height >> 6;
-        } else {
-            evcon->space_width = evcon->face->glyph->advance.x >> 6;
-        }        
+        if (view_span->font) {
+            evcon->font = view_span->font;
+            evcon->face = load_styled_font(evcon->ui_context, evcon->face, view_span->font);
+            if (FT_Load_Char(evcon->face, ' ', FT_LOAD_RENDER)) {
+                fprintf(stderr, "could not load space character\n");
+                evcon->space_width = evcon->face->size->metrics.height >> 6;
+            } else {
+                evcon->space_width = evcon->face->glyph->advance.x >> 6;
+            }   
+        }
         target_children(evcon, view);
     }
     else {

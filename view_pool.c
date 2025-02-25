@@ -1,5 +1,7 @@
 #include "layout.h"
 
+FontProp default_font_prop = {0, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
+
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
     ViewTree* tree = lycon->doc->view_tree;
@@ -51,6 +53,13 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
         printf("Failed to allocate property\n");
         return NULL;
     }
+}
+
+FontProp* alloc_font_prop(LayoutContext* lycon) {
+    FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+    *prop = default_font_prop;
+    prop->font_size = lycon->font.style.font_size;
+    return prop;
 }
 
 void view_pool_init(ViewTree* tree) {
@@ -105,9 +114,9 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 ViewSpan* span = (ViewSpan*)view;
                 strbuf_append_format(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), 
-                    lxb_css_value_by_id(span->font.text_deco)->name, 
-                    lxb_css_value_by_id(span->font.font_weight)->name,
-                    lxb_css_value_by_id(span->font.font_style)->name);
+                    span->font ? lxb_css_value_by_id(span->font->text_deco)->name: "none", 
+                    span->font ? lxb_css_value_by_id(span->font->font_weight)->name : "normal",
+                    span->font ? lxb_css_value_by_id(span->font->font_style)->name : "normal");
                 print_inline_prop(span, buf, indent+2);
                 print_view_group((ViewGroup*)view, buf, indent+2);
             }

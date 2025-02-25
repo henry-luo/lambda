@@ -37,6 +37,7 @@ typedef enum {
 } ViewType;
 
 typedef struct {
+    float font_size;
     PropValue font_style;
     PropValue font_weight;
     PropValue text_deco; // CSS text decoration
@@ -75,7 +76,7 @@ struct ViewGroup {
 typedef struct {
     ViewGroup;  // extends ViewGroup
     // todo: convert FontProp to pointer
-    FontProp font;  // font style
+    FontProp* font;  // font style
     InlineProp* in_line;  // inline style properties
     // prop: vertical_align - fully resolved during layout, not stored in view tree
 } ViewSpan;
