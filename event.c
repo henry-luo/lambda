@@ -8,9 +8,10 @@ typedef struct EventContext {
     View* target;
 
     BlockBlot block;
-    FontProp* font; // current font style
-    FT_Face face;   // current font face
-    float space_width;
+    // FontProp* font; // current font style
+    // FT_Face face;   // current font face
+    // float space_width;
+    FontBox font;  // current font style
 
     PropValue new_cursor;
     char* new_uri; 
@@ -56,20 +57,20 @@ void target_text_view(EventContext* evcon, ViewText* text) {
         if (is_space(*p)) { 
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
-            printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->space_width);
-            wd = evcon->space_width;
+            printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->font.space_width);
+            wd = evcon->font.space_width;
         }
         else {
             has_space = false;
-            if (FT_Load_Char(evcon->face, *p, FT_LOAD_RENDER)) {
+            if (FT_Load_Char(evcon->font.face, *p, FT_LOAD_RENDER)) {
                 fprintf(stderr, "Could not load character '%c'\n", *p);
                 continue;
             }
             // draw the glyph to the image buffer
-            printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->face->glyph->advance.x >> 6), y);
-            wd = evcon->face->glyph->advance.x >> 6;  // changed from rdcon to evcon
+            printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->font.face->glyph->advance.x >> 6), y);
+            wd = evcon->font.face->glyph->advance.x >> 6;  // changed from rdcon to evcon
         }
-        float char_right = x + wd;  float char_bottom = y + (evcon->face->height >> 6);
+        float char_right = x + wd;  float char_bottom = y + (evcon->font.face->height >> 6);
         SDL_MouseMotionEvent* event = &evcon->event.mouse_motion;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             printf("@@ hit on text: %c\n", *p);
@@ -81,17 +82,17 @@ void target_text_view(EventContext* evcon, ViewText* text) {
 }
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
-    FT_Face pa_face = evcon->face;  FontProp* pa_font = evcon->font;  float pa_space_width = evcon->space_width;
+    FontBox pa_font = evcon->font;
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            evcon->font = view_span->font;
-            evcon->face = load_styled_font(evcon->ui_context, evcon->face, view_span->font);
-            if (FT_Load_Char(evcon->face, ' ', FT_LOAD_RENDER)) {
+            evcon->font.style = *view_span->font;
+            evcon->font.face = load_styled_font(evcon->ui_context, evcon->font.face, view_span->font);
+            if (FT_Load_Char(evcon->font.face, ' ', FT_LOAD_RENDER)) {
                 fprintf(stderr, "could not load space character\n");
-                evcon->space_width = evcon->face->size->metrics.height >> 6;
+                evcon->font.space_width = evcon->font.face->size->metrics.height >> 6;
             } else {
-                evcon->space_width = evcon->face->glyph->advance.x >> 6;
+                evcon->font.space_width = evcon->font.face->glyph->advance.x >> 6;
             }   
         }
         target_children(evcon, view);
@@ -99,7 +100,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     else {
         printf("view has no child\n");
     }
-    evcon->face = pa_face;  evcon->font = pa_font;  evcon->space_width = pa_space_width;
+    evcon->font = pa_font;
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* view_block) {
@@ -207,12 +208,13 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
         evcon->event.mouse_button.y *= uicon->pixel_ratio;
     }
     // load default font Arial, size 16 px
-    evcon->face = load_font_face(uicon, "Arial", 16);
-    if (FT_Load_Char(evcon->face, ' ', FT_LOAD_RENDER)) {
+    evcon->font.style = default_font_prop;
+    evcon->font.face = load_font_face(uicon, "Arial", 16);
+    if (FT_Load_Char(evcon->font.face, ' ', FT_LOAD_RENDER)) {
         fprintf(stderr, "could not load space character\n");
-        evcon->space_width = evcon->face->size->metrics.height >> 6;
+        evcon->font.space_width = evcon->font.face->size->metrics.height >> 6;
     } else {
-        evcon->space_width = evcon->face->glyph->advance.x >> 6;
+        evcon->font.space_width = evcon->font.face->glyph->advance.x >> 6;
     }
     evcon->new_cursor = LXB_CSS_VALUE_AUTO;
 }

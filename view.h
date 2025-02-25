@@ -112,6 +112,12 @@ typedef struct {
 } BlockBlot;
 
 typedef struct {
+    FontProp style;  // current font style
+    FT_Face face;  // current font face
+    float space_width;  // width of a space character of the current font 
+} FontBox;
+
+typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
     float window_width;    // logical window width
@@ -132,3 +138,4 @@ typedef struct {
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);
 extern FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style);
+extern FontProp default_font_prop;

@@ -1,33 +1,9 @@
-view block:body, x:0.000000, y:0.000000, wd:534.000000, hg:304.000000
-  view block:h1, x:0.000000, y:0.000000, wd:534.000000, hg:38.000000
-    text:'Hello, ', start:0, len:7, x:0.000000, y:0.000000, wd:91.000000, hg:32.000000
-    view inline:b, font deco: none, weight: bold, style: normal
-      text:'World', start:0, len:5, x:91.000000, y:0.000000, wd:3.000000, hg:32.000000
-    text:'!!!', start:0, len:3, x:94.000000, y:0.000000, wd:27.000000, hg:32.000000
-  view block:p, x:0.000000, y:38.000000, wd:534.000000, hg:76.000000
-    text:'This is a paragraph with a long long ', start:0, len:37, x:0.000000, y:0.000000, wd:551.000000, hg:32.000000
-    text:'line of text to test ', start:37, len:21, x:0.000000, y:38.000000, wd:253.000000, hg:32.000000
-    view inline:i, font deco: none, weight: normal, style: italic
-      text:'text wrapping', start:0, len:13, x:253.000000, y:38.000000, wd:8.000000, hg:32.000000
-    text:'.', start:0, len:1, x:261.000000, y:38.000000, wd:9.000000, hg:32.000000
-  text:'this is ', start:5, len:8, x:0.000000, y:114.000000, wd:91.000000, hg:32.000000
-  view inline:u, font deco: underline, weight: normal, style: normal
-    text:'dangling text', start:0, len:13, x:91.000000, y:114.000000, wd:183.000000, hg:32.000000
-  text:' from sample file
-    ', start:0, len:22, x:274.000000, y:114.000000, wd:246.000000, hg:32.000000
-  view block:center, x:0.000000, y:152.000000, wd:534.000000, hg:38.000000
-    view inline:span, font deco: none, weight: normal, style: normal
-      text:'centered text', start:0, len:13, x:173.500000, y:0.000000, wd:187.000000, hg:32.000000
-  view inline:font, font deco: none, weight: normal, style: normal
-    text:'font with color
-    ', start:9, len:20, x:0.000000, y:190.000000, wd:208.000000, hg:32.000000
-  view inline:span, font deco: none, weight: normal, style: normal
-    text:'span with class
-    ', start:9, len:20, x:208.000000, y:190.000000, wd:227.000000, hg:32.000000
-  view block:custom-elmt, x:0.000000, y:228.000000, wd:534.000000, hg:38.000000
-    prop {cursor:pointer}
-    text:'div with width & color', start:0, len:22, x:0.000000, y:0.000000, wd:300.000000, hg:32.000000
-  view block:div, x:0.000000, y:266.000000, wd:534.000000, hg:38.000000
+view block:body, x:0.000000, y:0.000000, wd:678.000000, hg:114.000000
+  view block:h1, x:0.000000, y:0.000000, wd:678.000000, hg:38.000000
+    text:'Sample 2!!!', start:0, len:11, x:0.000000, y:0.000000, wd:163.000000, hg:32.000000
+  view block:p, x:0.000000, y:38.000000, wd:678.000000, hg:38.000000
+    text:'Another sample doc.', start:0, len:19, x:0.000000, y:0.000000, wd:296.000000, hg:32.000000
+  view block:div, x:0.000000, y:76.000000, wd:678.000000, hg:38.000000
     view inline:a, font deco: underline, weight: normal, style: normal
       prop {cursor:pointer}
-      text:'Next', start:0, len:4, x:0.000000, y:0.000000, wd:66.000000, hg:32.000000
+      text:'To Sample', start:0, len:9, x:0.000000, y:0.000000, wd:156.000000, hg:32.000000

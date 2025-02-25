@@ -27,12 +27,6 @@ typedef struct {
 } Linebox;
 
 typedef struct {
-    FontProp style;  // current font style
-    FT_Face face;  // current font face
-    float space_width;  // width of a space character of the current font 
-} FontBox;
-
-typedef struct {
     ViewGroup* parent;
     View* prev_view;
     View* view;  // current view

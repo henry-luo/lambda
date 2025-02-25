@@ -107,7 +107,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     case LXB_TAG_H6:
         em_size = 0.67;  // 0.67em
         HEADING_PROP:
-        block->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+        block->font = alloc_font_prop(lycon);
         block->font->font_size = lycon->font.style.font_size * em_size;
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
