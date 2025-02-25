@@ -31,9 +31,9 @@ PropValue element_display(lxb_html_element_t* elmt) {
             outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
     }
     // get CSS display if specified
-    if (elmt->style != NULL) {
+    if (elmt->element.style != NULL) {
         const lxb_css_rule_declaration_t* display_decl = 
-            lxb_html_element_style_by_id(elmt, LXB_CSS_PROPERTY_DISPLAY);
+            lxb_dom_element_style_by_id((lxb_dom_element_t*)elmt, LXB_CSS_PROPERTY_DISPLAY);
         if (display_decl) {
             // printf("display: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
             //     lxb_css_value_by_id(display_decl->u.display->b)->name);
@@ -178,10 +178,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         block->props->text_align = LXB_CSS_VALUE_CENTER;
     }
     // resolve CSS styles
-    if (elmt->style) {
-        lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
-        lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
-        lexbor_avl_foreach(doc->css.styles, &elmt->style, lxb_html_element_style_resolve, lycon);
+    if (elmt->element.style) {
+        // lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
+        // lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
+        lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
     }
 
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
@@ -257,10 +257,10 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
         span->font.text_deco = LXB_CSS_VALUE_UNDERLINE;
     }
     // resolve CSS styles
-    if (elmt->style) {
-        lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
-        lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
-        lexbor_avl_foreach(doc->css.styles, &elmt->style, lxb_html_element_style_resolve, lycon);
+    if (elmt->element.style) {
+        // lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
+        // lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
+        lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
     }
 
     lycon->font.style = span->font;

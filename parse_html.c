@@ -25,7 +25,7 @@ void parse_html_doc(Document* doc, const char* doc_path) {
         return;
     }
     // init CSS on document, otherwise CSS declarations will not be parsed
-    lxb_status_t status = lxb_html_document_css_init(document);
+    lxb_status_t status = lxb_dom_document_css_init((lxb_dom_document_t*) document, true);
     if (status != LXB_STATUS_OK) {
         fprintf(stderr, "Failed to CSS initialization\n");
         return;
