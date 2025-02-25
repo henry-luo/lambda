@@ -136,11 +136,25 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     }
 }
 
+#include <stdio.h>
+#include <stdlib.h>
+
+void write_string_to_file(const char *filename, const char *text) {
+    FILE *file = fopen(filename, "w"); // Open file in write mode
+    if (file == NULL) {
+        perror("Error opening file");
+        return;
+    }
+    fprintf(file, "%s", text); // Write string to file
+    fclose(file); // Close file
+}
+
 void print_view_tree(ViewGroup* view_root) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_view_group(view_root, buf, 0);
     printf("=================\nView tree:\n");
     printf("%s", buf->s);
     printf("=================\n");
+    write_string_to_file("view_tree.txt", buf->s);
     strbuf_free(buf);
 }

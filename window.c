@@ -51,6 +51,20 @@ void reflow_html_doc(Document* doc) {
     }
 }
 
+void ui_context_create_surface(UiContext* uicon, int width, int height) {
+    // re-create the surface
+    if (uicon->surface) SDL_FreeSurface(uicon->surface);
+    // creates the surface for rendering, 32-bits per pixel, RGBA format
+    uicon->surface = SDL_CreateRGBSurfaceWithFormat(0, 
+        width * uicon->pixel_ratio, height * uicon->pixel_ratio, 32, SDL_PIXELFORMAT_ARGB8888);
+    tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
+        width * uicon->pixel_ratio, width * uicon->pixel_ratio, height * uicon->pixel_ratio, TVG_COLORSPACE_ARGB8888);
+        
+    // re-create the texture
+    if (uicon->texture) SDL_DestroyTexture(uicon->texture);
+    uicon->texture = SDL_CreateTextureFromSurface(uicon->renderer, uicon->surface); 
+}
+
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
         SDL_Window* win = (SDL_Window*)data;
@@ -58,6 +72,9 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
         ui_context.window_height = event->window.data2;
         printf("Window %d resized to %fx%f\n", event->window.windowID,  
             ui_context.window_width, ui_context.window_height);
+        // resize the surface
+        ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
+        // reflow the document
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);      
         }   
@@ -106,14 +123,12 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     // SDL_RenderSetScale(renderer, scale_x, scale_y);
     uicon->pixel_ratio = scale_x;
 
-    // creates the surface for rendering, 32-bits per pixel, RGBA format
-    // should be the size of the window/viewport
-    uicon->surface = SDL_CreateRGBSurfaceWithFormat(0, width * scale_x, height * scale_x, 32, SDL_PIXELFORMAT_ARGB8888);   
     // init ThorVG engine
     tvg_engine_init(TVG_ENGINE_SW, 1);    
     uicon->canvas = tvg_swcanvas_create();
-    tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
-        width * scale_x, width * scale_x, height * scale_x, TVG_COLORSPACE_ARGB8888);
+
+    // creates the surface for rendering, 32-bits per pixel, RGBA format
+    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
     return EXIT_SUCCESS; 
 }
 
@@ -150,7 +165,6 @@ void ui_context_cleanup(UiContext* uicon) {
 
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
-    ui_context.texture = SDL_CreateTextureFromSurface(ui_context.renderer, ui_context.surface); 
     SDL_RenderClear(ui_context.renderer);
 
     ui_context.document = show_html_doc("test/sample.html");
