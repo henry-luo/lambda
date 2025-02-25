@@ -86,7 +86,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(evcon->ui_context, &evcon->font, view_span->font); 
+            setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, view_span->font);
         }
         target_children(evcon, view);
     }
@@ -97,10 +97,13 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* view_block) {
-    BlockBlot pa_block = evcon->block;
+    BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     View* view = view_block->child;
     if (view) {
         evcon->block.x = pa_block.x + view_block->x;  evcon->block.y = pa_block.y + view_block->y;
+        if (view_block->font) {
+            setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, view_block->font); 
+        }        
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself
             float x = evcon->block.x, y = evcon->block.y;
@@ -115,7 +118,7 @@ void target_block_view(EventContext* evcon, ViewBlock* view_block) {
     else {
         printf("view has no child\n");
     }
-    evcon->block = pa_block;
+    evcon->block = pa_block;  evcon->font = pa_font;
 }
 
 void target_html_doc(EventContext* evcon, View* root_view) {
@@ -201,14 +204,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
         evcon->event.mouse_button.y *= uicon->pixel_ratio;
     }
     // load default font Arial, size 16 px
-    evcon->font.style = default_font_prop;
-    evcon->font.face = load_font_face(uicon, "Arial", 16);
-    if (FT_Load_Char(evcon->font.face, ' ', FT_LOAD_RENDER)) {
-        fprintf(stderr, "could not load space character\n");
-        evcon->font.space_width = evcon->font.face->size->metrics.height >> 6;
-    } else {
-        evcon->font.space_width = evcon->font.face->glyph->advance.x >> 6;
-    }
+    setup_font(uicon, &evcon->font, "Arial", &default_font_prop);
     evcon->new_cursor = LXB_CSS_VALUE_AUTO;
 }
 

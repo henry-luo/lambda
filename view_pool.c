@@ -8,12 +8,15 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     switch (type) {
         case RDT_VIEW_BLOCK:
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
+            memset(view, 0, sizeof(ViewBlock));
             break;
         case RDT_VIEW_INLINE:
             err = pool_variable_alloc(tree->pool, sizeof(ViewSpan), (void **)&view);
+            memset(view, 0, sizeof(ViewSpan));
             break;
         case RDT_VIEW_TEXT:
             err = pool_variable_alloc(tree->pool, sizeof(ViewText), (void **)&view);
+            memset(view, 0, sizeof(ViewText));
             break;            
         default:
             printf("Unknown view type\n");
@@ -47,6 +50,7 @@ void free_view(ViewTree* tree, View* view) {
 void* alloc_prop(LayoutContext* lycon, size_t size) {
     void* prop;
     if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->doc->view_tree->pool, size, &prop)) {
+        memset(prop, 0, size);
         return prop;
     }
     else {
@@ -95,6 +99,12 @@ void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
             strbuf_append_format(buf, "prop {cursor:%s}\n", cursor);
         }
     }
+    else if (span->font) {
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_format(buf, "prop {font-size:%f, font-style:%s, font-weight:%s, text-decoration:%s}\n",
+            span->font->font_size, lxb_css_value_by_id(span->font->font_style)->name,
+            lxb_css_value_by_id(span->font->font_weight)->name, lxb_css_value_by_id(span->font->text_deco)->name);
+    }    
 }
 
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {

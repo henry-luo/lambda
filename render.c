@@ -27,10 +27,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
+    printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
-    bool has_space = false;   
+    bool has_space = false;
     for (; p < end; p++) {
+        printf("draw character '%c'\n", *p);
         if (is_space(*p)) { 
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
@@ -39,11 +40,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
         else {
             has_space = false;
+            if (!rdcon->font.face) {
+                printf("font face is null\n");
+                return;
+            }
             if (FT_Load_Char(rdcon->font.face, *p, FT_LOAD_RENDER)) {
-                fprintf(stderr, "Could not load character '%c'\n", *p);
+                printf("Could not load character '%c'\n", *p);
                 continue;
             }
+            if (!rdcon->font.face->glyph) {
+                printf("font glyph is null\n");
+                return;
+            }            
             // draw the glyph to the image buffer
+            printf("draw_glyph: %c, x:%f, y:%f\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
+                y + (rdcon->font.face->ascender>>6) - rdcon->font.face->glyph->bitmap_top);
             draw_glyph(rdcon, &rdcon->font.face->glyph->bitmap, x + rdcon->font.face->glyph->bitmap_left, 
                 y + (rdcon->font.face->ascender>>6) - rdcon->font.face->glyph->bitmap_top);
             // advance to the next position
@@ -53,6 +64,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
     }
     // render text deco
+    printf("before text deco");
     if (rdcon->font.style.text_deco != LXB_CSS_VALUE_NONE) {
         int thinkness = max(rdcon->font.face->underline_thickness >> 6, 1);
         SDL_Rect rect;
@@ -70,6 +82,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         SDL_FillRect(rdcon->ui_context->surface, &rect, 
             SDL_MapRGBA(rdcon->ui_context->surface->format, 255, 0, 0, 255));
     }
+    printf("end of text view\n");
 }
 
 void render_children(RenderContext* rdcon, View* view) {
@@ -95,16 +108,19 @@ void render_children(RenderContext* rdcon, View* view) {
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
-    BlockBlot pa_block = rdcon->block;
+    BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;
     View* view = view_block->child;
     if (view) {
+        if (view_block->font) {
+            setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_block->font);
+        }        
         rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
         render_children(rdcon, view);
     }
     else {
         printf("view has no child\n");
     }
-    rdcon->block = pa_block;
+    rdcon->block = pa_block;  rdcon->font = pa_font;
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
@@ -113,7 +129,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
+            setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_span->font);
         }
         render_children(rdcon, view);
     }
@@ -137,13 +153,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
-    rdcon->font.face = load_font_face(uicon, "Arial", 16);
-    if (FT_Load_Char(rdcon->font.face, ' ', FT_LOAD_RENDER)) {
-        fprintf(stderr, "could not load space character\n");
-        rdcon->font.space_width = rdcon->font.face->size->metrics.height >> 6;
-    } else {
-        rdcon->font.space_width = rdcon->font.face->glyph->advance.x >> 6;
-    }    
+    setup_font(uicon, &rdcon->font, "Arial", &default_font_prop); 
     // Lock the surface for rendering
     if (SDL_MUSTLOCK(rdcon->ui_context->surface)) {
         SDL_LockSurface(rdcon->ui_context->surface);

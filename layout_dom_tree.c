@@ -75,9 +75,9 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
-void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
+void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
     fbox->style = *fprop;
-    fbox->face = load_styled_font(uicon, fbox->face, fprop);
+    fbox->face = load_styled_font(uicon, font_name, fprop);
     if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
         fprintf(stderr, "could not load space character\n");
         fbox->space_width = fbox->face->size->metrics.height >> 6;
@@ -90,11 +90,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (!lycon->line.is_line_start) { line_break(lycon); }
     // save parent context
-    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;    
+    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   FontBox pa_font = lycon->font;
 
     ViewBlock* block = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     // handle element default styles
-    int em_size = 0;
+    float em_size = 0;
     switch (elmt->element.node.local_name) {
     case LXB_TAG_CENTER:
         block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
@@ -139,6 +139,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     block->y = pa_block.advance_y;
     
+    if (block->font) {
+        // setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
+    }
+    lycon->block.line_height = lycon->font.style.font_size * 1.2;
+
     // layout block content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
@@ -164,7 +169,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     // reset linebox
     pa_line.advance_x = pa_line.max_ascender = pa_line.max_descender = 0;  
     pa_line.is_line_start = true;  pa_line.last_space = NULL;
-    lycon->line = pa_line;  
+    lycon->line = pa_line;
+    lycon->font = pa_font;
     lycon->prev_view = (View*)block;
     printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
 }
@@ -213,7 +219,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     }
 
     if (span->font) {
-        setup_font(lycon->ui_context, &lycon->font, span->font);
+        setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, span->font);
     }
     // layout inline content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
