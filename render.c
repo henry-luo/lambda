@@ -113,14 +113,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            rdcon->font.style = *view_span->font;
-            rdcon->font.face = load_styled_font(rdcon->ui_context, pa_font.face, view_span->font);
-            if (FT_Load_Char(rdcon->font.face, ' ', FT_LOAD_RENDER)) {
-                fprintf(stderr, "could not load space character\n");
-                rdcon->font.space_width = rdcon->font.face->size->metrics.height >> 6;
-            } else {
-                rdcon->font.space_width = rdcon->font.face->glyph->advance.x >> 6;
-            }
+            setup_font(rdcon->ui_context, &rdcon->font, view_span->font);
         }
         render_children(rdcon, view);
     }

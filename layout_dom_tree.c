@@ -75,6 +75,17 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
+void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
+    fbox->style = *fprop;
+    fbox->face = load_styled_font(uicon, fbox->face, fprop);
+    if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
+        fprintf(stderr, "could not load space character\n");
+        fbox->space_width = fbox->face->size->metrics.height >> 6;
+    } else {
+        fbox->space_width = fbox->face->glyph->advance.x >> 6;
+    }
+}
+
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (!lycon->line.is_line_start) { line_break(lycon); }
@@ -202,14 +213,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     }
 
     if (span->font) {
-        lycon->font.style = *span->font;
-        lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face, span->font);
-        if (FT_Load_Char(lycon->font.face, ' ', FT_LOAD_RENDER)) {
-            fprintf(stderr, "could not load space character\n");
-            lycon->font.space_width = lycon->font.face->size->metrics.height >> 6;
-        } else {
-            lycon->font.space_width = lycon->font.face->glyph->advance.x >> 6;
-        }
+        setup_font(lycon->ui_context, &lycon->font, span->font);
     }
     // layout inline content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));

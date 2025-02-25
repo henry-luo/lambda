@@ -86,14 +86,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            evcon->font.style = *view_span->font;
-            evcon->font.face = load_styled_font(evcon->ui_context, evcon->font.face, view_span->font);
-            if (FT_Load_Char(evcon->font.face, ' ', FT_LOAD_RENDER)) {
-                fprintf(stderr, "could not load space character\n");
-                evcon->font.space_width = evcon->font.face->size->metrics.height >> 6;
-            } else {
-                evcon->font.space_width = evcon->font.face->glyph->advance.x >> 6;
-            }   
+            setup_font(evcon->ui_context, &evcon->font, view_span->font); 
         }
         target_children(evcon, view);
     }

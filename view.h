@@ -138,4 +138,5 @@ typedef struct {
 
 extern FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size);
 extern FT_Face load_styled_font(UiContext* uicon, FT_Face parent, FontProp* font_style);
+extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern FontProp default_font_prop;
