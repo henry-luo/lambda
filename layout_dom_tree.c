@@ -87,20 +87,30 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         lycon->line.vertical_align = vertical_align->alignment.type;
         printf("vertical align: %d, %d\n", vertical_align->alignment.type, LXB_CSS_VALUE_MIDDLE);
         break;
+    case LXB_CSS_PROPERTY_CURSOR:
+        const lxb_css_property_cursor_t *cursor = declr->u.cursor;
+        printf("cursor property: %d\n", cursor->type);
+        ViewSpan* span = (ViewSpan*)lycon->view;
+        if (!span->in_line) {
+            span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+        }
+        span->in_line->cursor = cursor->type;
+        break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);
-        if (sv_eq(custom_name, sv_from_cstr("cursor"))) {
-            ViewSpan* span = (ViewSpan*)lycon->view;
-            if (!span->in_line) {
-                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
-            }
-            String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
-            if (sv_eq(custom_value, sv_from_cstr("pointer"))) {
-                printf("got cursor: pointer\n");
-                span->in_line->cursor = LXB_CSS_VALUE_POINTER;
-            }
-        }
+        // if (sv_eq(custom_name, sv_from_cstr("cursor"))) {
+        //     ViewSpan* span = (ViewSpan*)lycon->view;
+        //     if (!span->in_line) {
+        //         span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+        //     }
+        //     String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
+        //     if (sv_eq(custom_value, sv_from_cstr("pointer"))) {
+        //         printf("got cursor: pointer\n");
+        //         span->in_line->cursor = LXB_CSS_VALUE_POINTER;
+        //     }
+        // }
+        printf("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
         break;
     default:
         printf("unhandled property: %s\n", data->name);

@@ -9,9 +9,6 @@
 #include "./lib/mem-pool/include/mem_pool.h"
 #include "event.h"
 
-// extended Lexbor CSS values
-#define LXB_CSS_VALUE_POINTER   LXB_CSS_VALUE__LAST_ENTRY + 1
-#define LXB_CSS_VALUE_TEXT      LXB_CSS_VALUE__LAST_ENTRY + 2
 #define RDT_DISPLAY_TEXT        (LXB_CSS_VALUE__LAST_ENTRY + 10)
 
 extern bool can_break(char c);
