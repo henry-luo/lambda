@@ -9,7 +9,7 @@
 
 typedef struct {
     char *s;
-    size_t length;
+    size_t length;  // length of the string in the buffer, excluding the null terminator
     size_t capacity;
 } StrBuf;
 
@@ -36,13 +36,15 @@ void strbuf_append_str_n(StrBuf *sb, const char *str, size_t n);
 void strbuf_append_char(StrBuf *sb, char c);
 // append character c n times
 void strbuf_append_char_n(StrBuf *sb, char c, size_t n);
+void strbuf_append_int(StrBuf *buf, int value);
+void strbuf_append_long(StrBuf *buf, long value);
+void strbuf_append_ulong(StrBuf *buf, unsigned long value);
 void strbuf_append_all(StrBuf *sb, int num_args, ...);
 void strbuf_vappend(StrBuf *sb, int num_args, va_list args);
 void strbuf_append_format(StrBuf *sb, const char *format, ...);
 void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args);
 void strbuf_trim_to_length(StrBuf *sb);
 void strbuf_copy(StrBuf *dst, const StrBuf *src);
-void strbuf_chomp(StrBuf *sb);
 bool strbuf_append_file(StrBuf *sb, FILE *file);
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n);
 

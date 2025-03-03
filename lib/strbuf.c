@@ -172,15 +172,96 @@ StrBuf* strbuf_dup(const StrBuf *sb) {
     return new_sb;
 }
 
-void strbuf_chomp(StrBuf *sb) {
-    if (!sb->s || sb->length == 0) return;
-    int removed = 0;
-    while (sb->length > 0) {
-        char last = sb->s[sb->length - 1];
-        if (last != '\n' && last != '\r') break;
-        sb->s[--sb->length] = '\0';
-        removed++;
+/*
+ * Integer to string functions adapted from:
+ *   https://www.facebook.com/notes/facebook-engineering/three-optimization-tips-for-c/10151361643253920
+ */
+
+ #define P01 10
+ #define P02 100
+ #define P03 1000
+ #define P04 10000
+ #define P05 100000
+ #define P06 1000000
+ #define P07 10000000
+ #define P08 100000000
+ #define P09 1000000000
+ #define P10 10000000000
+ #define P11 100000000000
+ #define P12 1000000000000
+
+/**
+ * Return number of digits required to represent `num` in base 10.
+ * Uses binary search to find number.
+ * Examples:
+ *   num_of_digits(0)   = 1
+ *   num_of_digits(1)   = 1
+ *   num_of_digits(10)  = 2
+ *   num_of_digits(123) = 3
+ */
+static inline size_t num_of_digits(unsigned long v) {
+  if(v < P01) return 1;
+  if(v < P02) return 2;
+  if(v < P03) return 3;
+  if(v < P12) {
+    if(v < P08) {
+      if(v < P06) {
+        if(v < P04) return 4;
+        return 5 + (v >= P05);
+      }
+      return 7 + (v >= P07);
     }
+    if(v < P10) {
+      return 9 + (v >= P09);
+    }
+    return 11 + (v >= P11);
+  }
+  return 12 + num_of_digits(v / P12);
+}
+
+void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
+    // Append two digits at a time
+    static const char digits[201] =
+        "0001020304050607080910111213141516171819"
+        "2021222324252627282930313233343536373839"
+        "4041424344454647484950515253545556575859"
+        "6061626364656667686970717273747576777879"
+        "8081828384858687888990919293949596979899";
+
+    size_t num_digits = num_of_digits(value);
+    size_t pos = num_digits - 1;
+
+    strbuf_ensure_cap(buf, buf->length + num_digits);
+    char *dst = buf->s + buf->length; // Updated to use buf->s instead of buf->b
+
+    while(value >= 100) {
+        size_t v = value % 100;
+        value /= 100;
+        dst[pos] = digits[v * 2 + 1];
+        dst[pos - 1] = digits[v * 2];
+        pos -= 2;
+    }
+
+    // Handle last 1-2 digits
+    if (value < 10) {
+        dst[pos] = '0' + value;
+    } else {
+        dst[pos] = digits[value * 2 + 1];
+        dst[pos - 1] = digits[value * 2];
+    }
+    buf->length += num_digits;
+    buf->s[buf->length] = '\0'; // Updated to use buf->s instead of buf->b
+}
+
+void strbuf_append_int(StrBuf *buf, int value) {
+    // strbuf_sprintf(buf, "%i", value);
+    strbuf_append_long(buf, value);
+}
+
+void strbuf_append_long(StrBuf *buf, long value) {
+    // strbuf_sprintf(buf, "%li", value);
+    if (value < 0) { strbuf_append_char(buf, '-'); value = -value; }
+    strbuf_append_ulong(buf, value);
 }
 
 bool strbuf_append_file(StrBuf *sb, FILE *file) {

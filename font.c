@@ -26,14 +26,18 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
         uicon->fontface_map = hashmap_new(sizeof(FontfaceEntry), 10, 0, 0, 
             fontface_hash, fontface_compare, NULL, NULL);
     }
+    StrBuf* name_and_size = strbuf_create(font_name);
+    strbuf_append_str(name_and_size, ":");  
+    strbuf_append_int(name_and_size, font_size);
     FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, 
-        &(FontfaceEntry){.name = (char*)font_name});
+        &(FontfaceEntry){.name = name_and_size->s});
     if (entry) {
-        printf("Fontface loaded from cache: %s\n", font_name);
+        printf("Fontface loaded from cache: %s\n", name_and_size->s);
+        strbuf_free(name_and_size);
         return entry->face;
     }
     else {
-        printf("Fontface not found in cache: %s\n", font_name);
+        printf("Fontface not found in cache: %s\n", name_and_size->s);
     }
 
     // todo: cache the fonts loaded
@@ -69,8 +73,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                 // put the font face into the hashmap
                 if (uicon->fontface_map) {
                     // copy the font name
-                    int slen = strlen(font_name);
-                    char* name = (char*)malloc(slen + 1);  strcpy(name, font_name);
+                    char* name = (char*)malloc(name_and_size->length + 1);  strcpy(name, name_and_size->s);
                     hashmap_set(uicon->fontface_map, &(FontfaceEntry){.name=name, .face=face});   
                 }
             }            
@@ -78,6 +81,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
         FcPatternDestroy(match);
     }
     FcPatternDestroy(pattern);
+    strbuf_free(name_and_size);
     return face;
 }
 

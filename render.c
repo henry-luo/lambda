@@ -51,12 +51,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             if (!rdcon->font.face->glyph) {
                 printf("font glyph is null\n");
                 return;
-            }            
+            }
             // draw the glyph to the image buffer
-            int ascend = ((int)(rdcon->font.face->ascender * (rdcon->font.face->size->metrics.y_scale / 65536.0))) >> 6;
-            printf("draw_glyph: %c, x:%f, y:%f, asc:%d, hg:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
+            int ascend = rdcon->font.face->size->metrics.ascender >> 6;
+            printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
                 y + ascend - rdcon->font.face->glyph->bitmap_top,
-                ascend, rdcon->font.face->height >> 6, rdcon->font.face->glyph->bitmap_top);
+                ascend, rdcon->font.face->glyph->bitmap_top);
             draw_glyph(rdcon, &rdcon->font.face->glyph->bitmap, x + rdcon->font.face->glyph->bitmap_left, 
                 y + ascend - rdcon->font.face->glyph->bitmap_top);
             // advance to the next position
