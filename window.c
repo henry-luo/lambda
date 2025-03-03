@@ -122,6 +122,7 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     // Scale rendering
     // SDL_RenderSetScale(renderer, scale_x, scale_y);
     uicon->pixel_ratio = scale_x;
+    default_font_prop.font_size = 16 * uicon->pixel_ratio;
 
     // init ThorVG engine
     tvg_engine_init(TVG_ENGINE_SW, 1);    

@@ -65,7 +65,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                 face = NULL;
             } else {
                 // Set height of the font
-                FT_Set_Pixel_Sizes(face, 0, font_size * uicon->pixel_ratio);
+                FT_Set_Pixel_Sizes(face, 0, font_size);
                 printf("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d\n", 
                     face->family_name, face->size->metrics.height >> 6,
                     face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,

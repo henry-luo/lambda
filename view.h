@@ -37,7 +37,7 @@ typedef enum {
 } ViewType;
 
 typedef struct {
-    float font_size;
+    float font_size;  // font size in pixels, scaled by pixel_ratio
     PropValue font_style;
     PropValue font_weight;
     PropValue text_deco; // CSS text decoration

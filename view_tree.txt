@@ -1,10 +1,10 @@
-view block:body, x:0.000000, y:0.000000, wd:800.000000, hg:113.000000
-  view block:h3, x:0.000000, y:0.000000, wd:800.000000, hg:41.000000
-    prop {font-size:18.719999, font-style:normal, font-weight:bold, text-decoration:none}
-    text:'Heading 1', start:0, len:9, x:0.000000, y:0.000000, wd:172.000000, hg:32.000000
-  view block:p, x:0.000000, y:41.000000, wd:800.000000, hg:36.000000
+view block:body, x:0.000000, y:0.000000, wd:800.000000, hg:121.728004
+  view block:h3, x:0.000000, y:0.000000, wd:800.000000, hg:44.927998
+    prop {font-size:37.439999, font-style:normal, font-weight:bold, text-decoration:none}
+    text:'Heading 1', start:0, len:9, x:0.000000, y:0.000000, wd:179.000000, hg:32.000000
+  view block:p, x:0.000000, y:44.927998, wd:800.000000, hg:38.400002
     text:'Another sample doc.', start:0, len:19, x:0.000000, y:0.000000, wd:296.000000, hg:32.000000
-  view block:div, x:0.000000, y:77.000000, wd:800.000000, hg:36.000000
+  view block:div, x:0.000000, y:83.328003, wd:800.000000, hg:38.400002
     view inline:a, font deco: underline, weight: normal, style: normal
       prop {cursor:pointer}
       text:'To Sample', start:0, len:9, x:0.000000, y:0.000000, wd:156.000000, hg:32.000000
