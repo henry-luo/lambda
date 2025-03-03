@@ -246,6 +246,8 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             switch (evcon.new_cursor) {
             case LXB_CSS_VALUE_TEXT: cursor = SDL_SYSTEM_CURSOR_IBEAM; break;
             case LXB_CSS_VALUE_POINTER: cursor = SDL_SYSTEM_CURSOR_HAND; break;
+            case LXB_CSS_VALUE_WAIT: cursor = SDL_SYSTEM_CURSOR_WAIT; break;
+            case LXB_CSS_VALUE_PROGRESS: cursor = SDL_SYSTEM_CURSOR_WAITARROW; break;
             default: cursor = SDL_SYSTEM_CURSOR_ARROW; break;
             }
             SDL_Cursor* sdl_cursor = SDL_CreateSystemCursor(cursor);

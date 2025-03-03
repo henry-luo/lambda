@@ -20,7 +20,7 @@ view block:body, x:0.000000, y:0.000000, wd:800.000000, hg:388.799988
     ', start:0, len:22, x:274.000000, y:148.800003, wd:246.000000, hg:32.000000
   view block:center, x:0.000000, y:187.200012, wd:800.000000, hg:86.400002
     view inline:span, font deco: none, weight: normal, style: normal
-      prop {cursor:pointer}
+      prop {cursor:wait}
       text:'centered text', start:0, len:13, x:306.500000, y:27.200001, wd:187.000000, hg:32.000000
   view inline:font, font deco: none, weight: normal, style: normal
     text:'font with color
