@@ -24,7 +24,7 @@ view block:body, x:0.000000, y:0.000000, wd:800.000000, hg:452.799988
       text:'centered text', start:0, len:13, x:306.500000, y:24.700001, wd:187.000000, hg:37.000000
   view block:div, x:0.000000, y:273.600006, wd:800.000000, hg:64.000000
     view inline:span, font deco: none, weight: normal, style: normal
-      text:'div with text bottom aligned', start:0, len:28, x:0.000000, y:0.000000, wd:389.000000, hg:37.000000
+      text:'div with text bottom aligned', start:0, len:28, x:0.000000, y:27.000000, wd:389.000000, hg:37.000000
     text:'
     ', start:0, len:5, x:389.000000, y:0.000000, wd:9.000000, hg:37.000000
   view inline:s, font deco: line-through, weight: normal, style: normal

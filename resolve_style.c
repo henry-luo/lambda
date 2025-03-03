@@ -68,8 +68,11 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         break;
     case LXB_CSS_PROPERTY_VERTICAL_ALIGN:
         lxb_css_property_vertical_align_t* vertical_align = declr->u.vertical_align;
-        lycon->line.vertical_align = vertical_align->alignment.type;
-        printf("vertical align: %d, %d, %d\n", vertical_align->alignment.type, LXB_CSS_VALUE_MIDDLE, LXB_CSS_VALUE_BOTTOM);
+        lycon->line.vertical_align = vertical_align->alignment.type ? 
+            vertical_align->alignment.type : vertical_align->shift.type;
+        printf("vertical align: %d, %d, %d, %d, %d\n", 
+            vertical_align->type, vertical_align->alignment.type, vertical_align->shift.type, 
+            LXB_CSS_VALUE_MIDDLE, LXB_CSS_VALUE_BOTTOM);
         break;
     case LXB_CSS_PROPERTY_CURSOR:
         const lxb_css_property_cursor_t *cursor = declr->u.cursor;
