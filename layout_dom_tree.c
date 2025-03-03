@@ -127,14 +127,9 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
 
     // resolve CSS styles
     if (elmt->element.style) {
-        // lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
-        // lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
+        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt);
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
-        printf("### got element style\n");
-    }
-    if (elmt->element.list) {
-        lxb_css_rule_declaration_list_t* list = (lxb_css_rule_declaration_list_t*)elmt->element.list;
-        printf("@@@ got element list: cnt:%d\n", (int)list->count);
+        printf("### got element style: %p\n", elmt->element.style);
     }
 
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
@@ -218,8 +213,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     }
     // resolve CSS styles
     if (elmt->element.style) {
-        // lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
-        // lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
+        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
     }
 
