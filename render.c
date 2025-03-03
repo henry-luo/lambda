@@ -13,7 +13,8 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
             unsigned char intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0) {
                 // todo: clip the pixel, if (0 <= x && x < WIDTH && 0 <= y && y < HEIGHT) 
-                row_pixels[x + j] = SDL_MapRGBA(surface->format, 255, 255, 255, intensity);
+                int v = 255 - intensity;
+                row_pixels[x + j] = SDL_MapRGBA(surface->format, v, v, v, 255);
                 // rdcon->buffer[index] = 255; // Alpha
                 // rdcon->buffer[index + 1] = intensity; // Blue
                 // rdcon->buffer[index + 2] = intensity; // Green 
@@ -174,7 +175,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
 
     // fill the surface with a white background
     SDL_FillRect(rdcon.ui_context->surface, NULL, 
-        SDL_MapRGBA(rdcon.ui_context->surface->format, 0, 0, 0, 255));
+        SDL_MapRGBA(rdcon.ui_context->surface->format, 255, 255, 255, 255));
 
     // SDL_Rect rect = {0, 0, 400, 600};
     // SDL_FillRect(rdcon.ui_context->surface, &rect,
