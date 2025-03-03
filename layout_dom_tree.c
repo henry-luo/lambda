@@ -317,7 +317,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_no
 
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     unsigned char* text_start = text_node->char_data.data.data;  
-    unsigned char* str = text_start;  printf("layout text %s\n", str);
+    unsigned char* str = text_start;  printf("layout text: %s\n", str);
     if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) { // skip space at start of line
         do { str++; } while (is_space(*str));
         if (!*str) return;
@@ -327,14 +327,15 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, (lxb_dom_node_t*)text_node);
     lycon->prev_view = (View*)text;    
     text->start_index = str - text_start;
-    text->x = lycon->line.advance_x;  text->height = lycon->font.face->units_per_EM >> 6;
+    int font_height = lycon->font.face->size->metrics.height >> 6;
+    text->x = lycon->line.advance_x;  text->height = font_height;
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
         printf("middle aligned text\n");
-        text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->font.face->units_per_EM >>6)) / 2;
+        text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
         printf("bottom aligned text\n");
-        text->y = lycon->block.advance_y + lycon->block.line_height - (lycon->font.face->units_per_EM >>6);
+        text->y = lycon->block.advance_y + lycon->block.line_height - font_height;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_TOP) {
         printf("top aligned text\n");

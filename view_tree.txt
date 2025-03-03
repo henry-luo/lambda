@@ -1,37 +1,43 @@
-view block:body, x:0.000000, y:0.000000, wd:800.000000, hg:388.799988
+view block:body, x:0.000000, y:0.000000, wd:800.000000, hg:452.799988
   view block:h1, x:0.000000, y:0.000000, wd:800.000000, hg:72.000000
     prop {font-size:64.000000, font-style:normal, font-weight:bold, text-decoration:none}
-    text:'Hello, World!!!', start:0, len:15, x:0.000000, y:0.000000, wd:437.000000, hg:32.000000
+    text:'Hello, World!!!', start:0, len:15, x:0.000000, y:0.000000, wd:437.000000, hg:74.000000
   view block:p, x:0.000000, y:72.000000, wd:800.000000, hg:76.800003
-    text:'This is a paragraph with a ', start:0, len:27, x:0.000000, y:0.000000, wd:379.000000, hg:32.000000
+    text:'This is a paragraph with a ', start:0, len:27, x:0.000000, y:0.000000, wd:379.000000, hg:37.000000
     view inline:b, font deco: none, weight: bold, style: normal
       prop {font-size:32.000000, font-style:normal, font-weight:bold, text-decoration:none}
-      text:'long long line', start:0, len:14, x:379.000000, y:0.000000, wd:212.000000, hg:32.000000
-    text:' of text to test ', start:0, len:17, x:591.000000, y:0.000000, wd:203.000000, hg:32.000000
+      text:'long long line', start:0, len:14, x:379.000000, y:0.000000, wd:212.000000, hg:37.000000
+    text:' of text to test ', start:0, len:17, x:591.000000, y:0.000000, wd:203.000000, hg:37.000000
     view inline:i, font deco: none, weight: normal, style: italic
       prop {font-size:32.000000, font-style:italic, font-weight:normal, text-decoration:none}
-      text:'text wrapping', start:0, len:13, x:0.000000, y:38.400002, wd:192.000000, hg:32.000000
-    text:'.', start:0, len:1, x:192.000000, y:38.400002, wd:9.000000, hg:32.000000
-  text:'this is ', start:5, len:8, x:0.000000, y:148.800003, wd:91.000000, hg:32.000000
+      text:'text wrapping', start:0, len:13, x:0.000000, y:38.400002, wd:192.000000, hg:37.000000
+    text:'.', start:0, len:1, x:192.000000, y:38.400002, wd:9.000000, hg:37.000000
+  text:'this is ', start:5, len:8, x:0.000000, y:148.800003, wd:91.000000, hg:37.000000
   view inline:u, font deco: underline, weight: normal, style: normal
     prop {font-size:32.000000, font-style:normal, font-weight:normal, text-decoration:underline}
-    text:'dangling text', start:0, len:13, x:91.000000, y:148.800003, wd:183.000000, hg:32.000000
+    text:'dangling text', start:0, len:13, x:91.000000, y:148.800003, wd:183.000000, hg:37.000000
   text:' from sample file
-    ', start:0, len:22, x:274.000000, y:148.800003, wd:246.000000, hg:32.000000
+    ', start:0, len:22, x:274.000000, y:148.800003, wd:246.000000, hg:37.000000
   view block:center, x:0.000000, y:187.200012, wd:800.000000, hg:86.400002
     view inline:span, font deco: none, weight: normal, style: normal
       prop {cursor:wait}
-      text:'centered text', start:0, len:13, x:306.500000, y:27.200001, wd:187.000000, hg:32.000000
-  view inline:font, font deco: none, weight: normal, style: normal
-    text:'font with color
-    ', start:9, len:20, x:0.000000, y:273.600006, wd:208.000000, hg:32.000000
+      text:'centered text', start:0, len:13, x:306.500000, y:24.700001, wd:187.000000, hg:37.000000
+  view block:div, x:0.000000, y:273.600006, wd:800.000000, hg:64.000000
+    view inline:span, font deco: none, weight: normal, style: normal
+      text:'div with text bottom aligned', start:0, len:28, x:0.000000, y:0.000000, wd:389.000000, hg:37.000000
+    text:'
+    ', start:0, len:5, x:389.000000, y:0.000000, wd:9.000000, hg:37.000000
+  view inline:s, font deco: line-through, weight: normal, style: normal
+    prop {font-size:32.000000, font-style:normal, font-weight:normal, text-decoration:line-through}
+    text:'font with color and line-through
+    ', start:9, len:37, x:0.000000, y:337.600006, wd:451.000000, hg:37.000000
   view inline:span, font deco: none, weight: normal, style: normal
     text:'span with class
-    ', start:9, len:20, x:208.000000, y:273.600006, wd:227.000000, hg:32.000000
-  view block:custom-elmt, x:0.000000, y:312.000000, wd:800.000000, hg:38.400002
+    ', start:9, len:20, x:451.000000, y:337.600006, wd:227.000000, hg:37.000000
+  view block:custom-elmt, x:0.000000, y:376.000000, wd:800.000000, hg:38.400002
     prop {cursor:pointer}
-    text:'div with width & color', start:0, len:22, x:0.000000, y:0.000000, wd:300.000000, hg:32.000000
-  view block:div, x:0.000000, y:350.399994, wd:800.000000, hg:38.400002
+    text:'div with width & color', start:0, len:22, x:0.000000, y:0.000000, wd:300.000000, hg:37.000000
+  view block:div, x:0.000000, y:414.399994, wd:800.000000, hg:38.400002
     view inline:a, font deco: underline, weight: normal, style: normal
       prop {cursor:pointer}
-      text:'Next', start:0, len:4, x:0.000000, y:0.000000, wd:66.000000, hg:32.000000
+      text:'Next', start:0, len:4, x:0.000000, y:0.000000, wd:66.000000, hg:37.000000
