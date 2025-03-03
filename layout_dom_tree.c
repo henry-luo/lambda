@@ -177,9 +177,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
 
 void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
+    if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
+
     // save parent context
     FontBox pa_font = lycon->font;  PropValue pa_line_align = lycon->line.vertical_align;
-
     ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
     switch (elmt->element.node.local_name) {
     case LXB_TAG_B:
