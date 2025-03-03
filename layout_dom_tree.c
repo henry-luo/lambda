@@ -140,7 +140,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     block->y = pa_block.advance_y;
     
     if (block->font) {
-        // setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
+        setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
     lycon->block.line_height = lycon->font.style.font_size * 1.2;
 
