@@ -27,11 +27,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
-        str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
+    // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
+    //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
     bool has_space = false;
     for (; p < end; p++) {
-        printf("draw character '%c'\n", *p);
+        // printf("draw character '%c'\n", *p);
         if (is_space(*p)) { 
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
@@ -54,9 +54,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             }
             // draw the glyph to the image buffer
             int ascend = rdcon->font.face->size->metrics.ascender >> 6;
-            printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
-                y + ascend - rdcon->font.face->glyph->bitmap_top,
-                ascend, rdcon->font.face->glyph->bitmap_top);
+            // printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
+            //     y + ascend - rdcon->font.face->glyph->bitmap_top, ascend, rdcon->font.face->glyph->bitmap_top);
             draw_glyph(rdcon, &rdcon->font.face->glyph->bitmap, x + rdcon->font.face->glyph->bitmap_left, 
                 y + ascend - rdcon->font.face->glyph->bitmap_top);
             // advance to the next position

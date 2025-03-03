@@ -53,7 +53,7 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
         case LXB_CSS_VALUE__NUMBER: 
-            lycon->block.line_height = line_height->u.number.num * (lycon->font.face->units_per_EM >> 6);
+            lycon->block.line_height = line_height->u.number.num * lycon->font.style.font_size;
             printf("property number: %lf\n", line_height->u.number.num);
             break;
         case LXB_CSS_VALUE__LENGTH:      
@@ -61,7 +61,7 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
             printf("property unit: %d\n", line_height->u.length.unit);
             break;
         case LXB_CSS_VALUE__PERCENTAGE:
-            lycon->block.line_height = line_height->u.percentage.num * (lycon->font.face->units_per_EM >> 6);
+            lycon->block.line_height = line_height->u.percentage.num * lycon->font.style.font_size;
             printf("property percentage: %lf\n", line_height->u.percentage.num);
             break;
         }

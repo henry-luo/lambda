@@ -123,11 +123,18 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
     }
+    lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
+
     // resolve CSS styles
     if (elmt->element.style) {
         // lxb_dom_document_t *ddoc = lxb_dom_interface_node(elmt)->owner_document;
         // lxb_html_document_t *doc = lxb_html_interface_document(ddoc);
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
+        printf("### got element style\n");
+    }
+    if (elmt->element.list) {
+        lxb_css_rule_declaration_list_t* list = (lxb_css_rule_declaration_list_t*)elmt->element.list;
+        printf("@@@ got element list: cnt:%d\n", (int)list->count);
     }
 
     lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
@@ -142,8 +149,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
-    lycon->block.line_height = lycon->font.style.font_size * 1.2;
-
     // layout block content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
