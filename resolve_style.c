@@ -246,6 +246,17 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         }
         span->in_line->color.c = color_name_to_rgb(color->type);
         break;
+    case LXB_CSS_PROPERTY_BACKGROUND_COLOR:
+        const lxb_css_property_background_color_t *background_color = declr->u.background_color;
+        printf("background color property: %d\n", background_color->type);
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->background) {
+            span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+        }
+        span->bound->background->background_color.c = color_name_to_rgb(background_color->type);
+        break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);

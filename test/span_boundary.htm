@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Span Styling Demo</title>
+    <style>
+        /* Optional: Adding some basic styling for clarity */
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        span {
+            /* Just to make the examples visible */
+            background-color: lightgray;
+        }
+    </style>
+</head>
+<body>
+    <h2>Span Styling Examples</h2>
+
+    <!-- 1. Inline Span (Default Behavior) -->
+    <p>
+        This is an <span style="background-color: yellow; border: 2px solid red; padding: 5px; margin: 10px;">inline span</span> 
+        with background, border, padding, and margin. Notice that vertical margins don’t affect spacing.
+    </p>
+
+    <!-- 2. Inline Span with Only Horizontal Margin -->
+    <p>
+        Here’s a <span style="background-color: lightblue; border: 1px dashed blue; padding: 3px; margin-left: 15px; margin-right: 15px;">span</span> 
+        with horizontal margins only. Vertical margins are ignored.
+    </p>
+
+    <!-- 3. Inline-Block Span -->
+    <p>
+        This <span style="display: inline-block; background-color: pink; border: 3px solid purple; padding: 8px; margin: 10px;">inline-block span</span> 
+        respects all margins (top, right, bottom, left) and stays in the flow.
+    </p>
+
+    <!-- 4. Block Span -->
+    <p>
+        A <span style="display: block; background-color: lightgreen; border: 1px solid green; padding: 10px; margin: 15px;">block span</span> 
+        takes up the full width and respects all properties fully.
+    </p>
+
+</body>
+</html>

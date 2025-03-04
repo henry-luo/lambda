@@ -116,6 +116,14 @@ void render_children(RenderContext* rdcon, View* view) {
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
+    if (view_block->bound && view_block->bound->background) {
+        SDL_Rect rect;  
+        rect.x = pa_block.x + view_block->x;  rect.y = pa_block.y + view_block->y;
+        rect.w = view_block->width;  rect.h = view_block->height;
+        printf("bg: x:%d, y:%d, wd:%d, hg:%d\n", rect.x, rect.y, rect.w, rect.h);
+        SDL_FillRect(rdcon->ui_context->surface, &rect, view_block->bound->background->background_color.c);
+    }
+
     View* view = view_block->child;
     if (view) {
         if (view_block->font) {

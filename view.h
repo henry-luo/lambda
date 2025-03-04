@@ -59,8 +59,35 @@ typedef struct {
 } InlineProp;
 
 typedef struct {
+    float top, right, bottom, left;
+} Spacing;
+
+typedef struct {
+    Spacing s;
+    PropValue border_style;
+    Color border_color;
+    float border_radius;    
+} BorderProp;
+
+typedef struct {
+    Color background_color; // background color
+    char* background_image; // background image path
+    char* background_repeat; // repeat behavior
+    char* background_position; // positioning of background image
+} BackgroundProp;
+
+typedef struct {
+    Spacing margin;
+    Spacing padding;
+    BorderProp* border;
+    BackgroundProp* background;
+} BoundaryProp;
+
+typedef struct {
     PropValue text_align;
     float line_height;
+    float text_indent;
+    // float letter_spacing;
 } BlockProp;
 
 typedef struct View View;
@@ -87,14 +114,15 @@ struct ViewGroup {
 typedef struct {
     ViewGroup;  // extends ViewGroup
     FontProp* font;  // font style
-    InlineProp* in_line;  // inline style properties
+    BoundaryProp* bound;  // block boundary properties
+    InlineProp* in_line;  // inline specific style properties
     // prop: vertical_align - fully resolved during layout, not stored in view tree
 } ViewSpan;
 
 typedef struct {
     ViewSpan;  // extends ViewSpan
     float x, y, width, height;  // x, y relative to the parent block    
-    BlockProp* props;  // block style properties
+    BlockProp* props;  // block specific style properties
 } ViewBlock;
 
 struct ViewTree {
