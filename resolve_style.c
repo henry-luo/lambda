@@ -345,7 +345,7 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         if (!span->bound->background) {
             span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
         }
-        span->bound->background->background_color.c = color_name_to_rgb(background_color->type);
+        span->bound->background->color.c = color_name_to_rgb(background_color->type);
         break;
     case LXB_CSS_PROPERTY_MARGIN:
         const lxb_css_property_margin_t *margin = declr->u.margin;
@@ -361,6 +361,21 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         resolve_length_prop(lycon, (lxb_css_property_margin_t*)padding, &span->bound->padding);
+        break;
+    case LXB_CSS_PROPERTY_BORDER:
+        const lxb_css_property_border_t *border = declr->u.border;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        span->bound->border->color.c = color_name_to_rgb(border->color.type);
+        span->bound->border->width.top = resolve_length_value(lycon, 
+            (lxb_css_value_length_percentage_t*)&border->width);
+        span->bound->border->width.bottom = span->bound->border->width.left 
+            = span->bound->border->width.right = span->bound->border->width.top;
+        span->bound->border->style = border->style;
         break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;

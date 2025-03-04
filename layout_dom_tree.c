@@ -150,8 +150,15 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         lycon->block.height = block->height - (block->bound->padding.top + block->bound->padding.bottom);
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
-        lycon->line.left = lycon->line.advance_x += block->bound->padding.left;
+        lycon->line.advance_x += block->bound->padding.left;
         lycon->block.advance_y += block->bound->padding.top;
+        if (block->bound->border) {
+            lycon->block.width -= block->bound->border->width.left + block->bound->border->width.right;
+            lycon->block.height -= block->bound->border->width.top + block->bound->border->width.bottom;
+            lycon->line.advance_x += block->bound->border->width.left;
+            lycon->block.advance_y += block->bound->border->width.top;
+        }
+        lycon->line.left = lycon->line.advance_x;
     } 
     else {
         lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height; 
@@ -177,9 +184,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
 
     if (block->bound) {
         block->width = max(block->width, lycon->block.max_width 
-            + block->bound->padding.left + block->bound->padding.right);  
-        block->height = lycon->block.advance_y + block->bound->padding.bottom;  
-        pa_block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom; 
+            + block->bound->padding.left + block->bound->padding.right +
+            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0));  
+        block->height = lycon->block.advance_y + block->bound->padding.bottom 
+            + (block->bound->border ? block->bound->border->width.bottom : 0);  
+        pa_block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
         pa_block.max_width = max(pa_block.max_width, block->width 
             + block->bound->margin.left + block->bound->margin.right);              
     } 

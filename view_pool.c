@@ -114,13 +114,17 @@ void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "prop {");
         if (span->bound->background) {
-            strbuf_append_format(buf, "bgcolor:#%x", span->bound->background->background_color.c);
+            strbuf_append_format(buf, "bgcolor:#%x", span->bound->background->color.c);
         }
         strbuf_append_format(buf, " margin {left:%f, right:%f, top:%f, bottom:%f}",
             span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
         strbuf_append_format(buf, " padding {left:%f, right:%f, top:%f, bottom:%f}",
             span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
             strbuf_append_str(buf, "}\n");
+        if (span->bound->border) {
+            strbuf_append_format(buf, "border {color:#%x, width:%f, style:%d}\n",
+                span->bound->border->color.c, span->bound->border->width.top, span->bound->border->style);
+        }
     }  
 }
 

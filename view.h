@@ -65,17 +65,17 @@ typedef struct {
 } Spacing;
 
 typedef struct {
-    Spacing s;
-    PropValue border_style;
-    Color border_color;
-    float border_radius;    
+    Spacing width;
+    PropValue style;
+    Color color;
+    Spacing radius;    
 } BorderProp;
 
 typedef struct {
-    Color background_color; // background color
-    char* background_image; // background image path
-    char* background_repeat; // repeat behavior
-    char* background_position; // positioning of background image
+    Color color; // background color
+    char* image; // background image path
+    char* repeat; // repeat behavior
+    char* position; // positioning of background image
 } BackgroundProp;
 
 typedef struct {

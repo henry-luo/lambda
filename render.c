@@ -122,7 +122,22 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
         rect.x = pa_block.x + view_block->x;  rect.y = pa_block.y + view_block->y;
         rect.w = view_block->width;  rect.h = view_block->height;
         if (view_block->bound->background) {
-            SDL_FillRect(rdcon->ui_context->surface, &rect, view_block->bound->background->background_color.c);
+            SDL_FillRect(rdcon->ui_context->surface, &rect, view_block->bound->background->color.c);
+        }
+        if (view_block->bound->border) {
+            printf("@@@ render border\n");
+            SDL_Rect border_rect = rect;
+            border_rect.w = view_block->bound->border->width.left;
+            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
+            border_rect.x = rect.x + rect.w - view_block->bound->border->width.right;
+            border_rect.w = view_block->bound->border->width.right;
+            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
+            border_rect = rect;
+            border_rect.h = view_block->bound->border->width.top;
+            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
+            border_rect.y = rect.y + rect.h - view_block->bound->border->width.bottom;
+            border_rect.h = view_block->bound->border->width.bottom;
+            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
         }
     }
 
