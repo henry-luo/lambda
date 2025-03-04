@@ -165,27 +165,29 @@ float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_perc
     case LXB_CSS_VALUE__LENGTH:      
         result = value->u.length.num;
         switch (value->u.length.unit) {
+        // absolute units
         case LXB_CSS_UNIT_Q:  // 1Q = 1cm / 40
-            result = value->u.length.num * (96 / 2.54 / 40);
+            result = value->u.length.num * (96 / 2.54 / 40) * lycon->ui_context->pixel_ratio;
             break;            
         case LXB_CSS_UNIT_CM:  // 96px / 2.54
-            result = value->u.length.num * (96 / 2.54);
+            result = value->u.length.num * (96 / 2.54) * lycon->ui_context->pixel_ratio;
             break;
         case LXB_CSS_UNIT_IN:  // 96px
-            result = value->u.length.num * 96;
+            result = value->u.length.num * 96 * lycon->ui_context->pixel_ratio;
             break;
         case LXB_CSS_UNIT_MM:  // 1mm = 1cm / 10
-            result = value->u.length.num * (96 / 25.4);
+            result = value->u.length.num * (96 / 25.4) * lycon->ui_context->pixel_ratio;
             break;
         case LXB_CSS_UNIT_PC:  // 1pc = 12pt = 1in / 6.
-            result = value->u.length.num * 16;
+            result = value->u.length.num * 16 * lycon->ui_context->pixel_ratio;
             break;
         case LXB_CSS_UNIT_PT:  // 1pt = 1in / 72
-            result = value->u.length.num * 4 / 3;
+            result = value->u.length.num * 4 / 3 * lycon->ui_context->pixel_ratio;
             break;
         case LXB_CSS_UNIT_PX:
-            result = value->u.length.num;  printf("got px length: %f\n", result);
+            result = value->u.length.num * lycon->ui_context->pixel_ratio;
             break;
+        // relative units
         // case LXB_CSS_UNIT_CAP:
         //     result = value->u.length.num * lycon->font.style.font_size;
         //     break;
@@ -204,7 +206,6 @@ float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_perc
     default:
         result = 0;
     }
-    result *= lycon->ui_context->pixel_ratio;
     return result;
 }
 
@@ -251,10 +252,11 @@ PropValue element_display(lxb_html_element_t* elmt) {
     int name = elmt->element.node.local_name;  // todo: should check ns as well 
     switch (name) { 
         case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3: case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
-        case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER: case LXB_TAG_UL: case LXB_TAG_OL:
+        case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER: 
+        case LXB_TAG_UL: case LXB_TAG_OL: case LXB_TAG_LI:
             outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
-        default:  // case LXB_TAG_B: case LXB_TAG_I: case LXB_TAG_U: case LXB_TAG_S: case LXB_TAG_FONT:
+        default:  // inline elements, like span, b, i, u, a, img, input
             outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
     }
     // get CSS display if specified

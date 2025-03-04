@@ -10,6 +10,10 @@
 #include "event.h"
 
 #define RDT_DISPLAY_TEXT        (LXB_CSS_VALUE__LAST_ENTRY + 10)
+#define LXB_CSS_VALUE_DISC      LXB_CSS_VALUE__LAST_ENTRY + 11
+#define LXB_CSS_VALUE_CIRCLE    LXB_CSS_VALUE__LAST_ENTRY + 12
+#define LXB_CSS_VALUE_SQUARE    LXB_CSS_VALUE__LAST_ENTRY + 13
+#define LXB_CSS_VALUE_DECIMAL   LXB_CSS_VALUE__LAST_ENTRY + 14
 
 // black color is 0xFF000000, not 0x000000
 // 0x0 is reserved for transparent color
@@ -90,6 +94,7 @@ typedef struct {
     float line_height;
     float text_indent;
     // float letter_spacing;
+    PropValue list_style_type;
 } BlockProp;
 
 typedef struct View View;

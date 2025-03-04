@@ -122,6 +122,19 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         block->font->font_size = lycon->font.style.font_size * em_size;
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
+    case LXB_TAG_UL:  case LXB_TAG_OL: 
+        if (!block->props) {
+            block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        }
+        block->props->list_style_type = elmt->element.node.local_name == LXB_TAG_UL ?
+            LXB_CSS_VALUE_DISC : LXB_CSS_VALUE_DECIMAL;
+        if (!block->bound) {
+            block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        // margin: 1em 0; padding: 0 0 0 40px;
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
+        block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
+        break;
     }
     lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
 
@@ -137,7 +150,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->line.left = lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
-    block->y = pa_block.advance_y;
+    block->x = pa_line.left;  block->y = pa_block.advance_y;
     block->width = pa_block.width;  block->height = pa_block.height;
     
     if (block->font) {
