@@ -131,27 +131,33 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
         printf("### got element style: %p\n", elmt->element.style);
     }
-
-    lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height;  
+ 
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->props) lycon->block.text_align = block->props->text_align;
     lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
-    lycon->line.right = lycon->block.width;  
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     block->y = pa_block.advance_y;
+    block->width = pa_block.width;  block->height = pa_block.height;
     
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
     if (block->bound) {
-        lycon->block.width -= block->bound->margin.left + block->bound->margin.right;
-        lycon->block.height -= block->bound->margin.top + block->bound->margin.bottom;
-        lycon->block.width -= block->bound->padding.left + block->bound->padding.right;
-        lycon->block.height -= block->bound->padding.top + block->bound->padding.bottom;
-        block->x += block->bound->margin.left + block->bound->padding.left;
-        block->y += block->bound->margin.top + block->bound->padding.top;
+        block->width -= block->bound->margin.left + block->bound->margin.right;
+        block->height -= block->bound->margin.top + block->bound->margin.bottom;
+        lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
+        lycon->block.height = block->height - (block->bound->padding.top + block->bound->padding.bottom);
+        block->x += block->bound->margin.left;
+        block->y += block->bound->margin.top;
+        lycon->line.advance_x += block->bound->padding.left;
+        lycon->block.advance_y += block->bound->padding.top;
+    } 
+    else {
+        lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height; 
     }
+    lycon->line.right = lycon->block.width;  
+
     // layout block content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
@@ -170,15 +176,15 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     line_align(lycon);
 
     if (block->bound) {
-        block->width = max(lycon->block.width, lycon->block.max_width 
+        block->width = max(block->width, lycon->block.max_width 
             + block->bound->padding.left + block->bound->padding.right);  
-        block->height = lycon->block.advance_y 
-            + block->bound->padding.top + block->bound->padding.bottom;  
+        block->height = lycon->block.advance_y + block->bound->padding.bottom;  
         pa_block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom; 
         pa_block.max_width = max(pa_block.max_width, block->width 
             + block->bound->margin.left + block->bound->margin.right);              
-    } else {
-        block->width = max(lycon->block.width, lycon->block.max_width);  
+    } 
+    else {
+        block->width = max(block->width, lycon->block.max_width);  
         block->height = lycon->block.advance_y;    
         pa_block.advance_y += block->height;
         pa_block.max_width = max(pa_block.max_width, block->width);        

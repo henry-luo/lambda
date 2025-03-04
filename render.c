@@ -206,9 +206,10 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     else {
         fprintf(stderr, "Invalid root view\n");
     }
-    drawTriangle(rdcon.ui_context->canvas);
-    tvg_canvas_draw(rdcon.ui_context->canvas, false); // no clearing of the buffer
-    tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
+
+    // drawTriangle(rdcon.ui_context->canvas);
+    // tvg_canvas_draw(rdcon.ui_context->canvas, false); // no clearing of the buffer
+    // tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
     if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
