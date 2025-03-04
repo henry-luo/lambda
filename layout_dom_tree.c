@@ -220,6 +220,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
 }
 
+void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt) {
+    layout_block(lycon, elmt);
+    lycon->prev_view->type = RDT_VIEW_LIST_ITEM;
+}
+
 void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
@@ -488,6 +493,9 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
         }
         else if (outer_display == LXB_CSS_VALUE_INLINE) {
             layout_inline(lycon, elmt);
+        }
+        else if (outer_display == LXB_CSS_VALUE_LIST_ITEM) {
+            layout_list_item(lycon, elmt);
         }
         else {
             printf("unknown display type\n");

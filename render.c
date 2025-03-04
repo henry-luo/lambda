@@ -100,12 +100,24 @@ void render_children(RenderContext* rdcon, View* view) {
             printf("view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                 block->x, block->y, block->width, block->height);                
-            render_block_view(rdcon, (ViewBlock*)view);
+            render_block_view(rdcon, block);
+        }
+        else if (view->type == RDT_VIEW_LIST_ITEM) {
+            ViewBlock* list_item = (ViewBlock*)view;
+            printf("view list item:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list_item->node), NULL));                
+            render_block_view(rdcon, list_item);
+            // render list bullet
+            SDL_Rect rect;
+            float ratio = rdcon->ui_context->pixel_ratio;
+            rect.x = rdcon->block.x + list_item->x - 20 * ratio;  
+            rect.y = rdcon->block.y + list_item->y + list_item->height / 2 - 2.5 * ratio;
+            rect.w = rect.h = 5 * ratio;
+            SDL_FillRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
             printf("view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
-            render_inline_view(rdcon, (ViewSpan*)view);
+            render_inline_view(rdcon, span);
         }
         else {
             ViewText* text = (ViewText*)view;
