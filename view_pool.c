@@ -109,7 +109,19 @@ void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_format(buf, "prop {font-size:%f, font-style:%s, font-weight:%s, text-decoration:%s}\n",
             span->font->font_size, lxb_css_value_by_id(span->font->font_style)->name,
             lxb_css_value_by_id(span->font->font_weight)->name, lxb_css_value_by_id(span->font->text_deco)->name);
-    }    
+    }
+    else if (span->bound) {
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "prop {");
+        if (span->bound->background) {
+            strbuf_append_format(buf, "bgcolor:#%x", span->bound->background->background_color.c);
+        }
+        strbuf_append_format(buf, " margin {left:%f, right:%f, top:%f, bottom:%f}",
+            span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
+        strbuf_append_format(buf, " padding {left:%f, right:%f, top:%f, bottom:%f}",
+            span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
+            strbuf_append_str(buf, "}\n");
+    }  
 }
 
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {

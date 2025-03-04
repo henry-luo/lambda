@@ -156,6 +156,95 @@ Uint32 color_name_to_rgb(PropValue color_name) {
     }
 }
 
+float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_percentage_t *value) {
+    float result = 0;
+    switch (value->type) {
+    case LXB_CSS_VALUE__NUMBER:  // keep it as it is
+        result = value->u.length.num;
+        break;
+    case LXB_CSS_VALUE__LENGTH:      
+        result = value->u.length.num;
+        switch (value->u.length.unit) {
+        case LXB_CSS_UNIT_Q:  // 1Q = 1cm / 40
+            result = value->u.length.num * (96 / 2.54 / 40);
+            break;            
+        case LXB_CSS_UNIT_CM:  // 96px / 2.54
+            result = value->u.length.num * (96 / 2.54);
+            break;
+        case LXB_CSS_UNIT_IN:  // 96px
+            result = value->u.length.num * 96;
+            break;
+        case LXB_CSS_UNIT_MM:  // 1mm = 1cm / 10
+            result = value->u.length.num * (96 / 25.4);
+            break;
+        case LXB_CSS_UNIT_PC:  // 1pc = 12pt = 1in / 6.
+            result = value->u.length.num * 16;
+            break;
+        case LXB_CSS_UNIT_PT:  // 1pt = 1in / 72
+            result = value->u.length.num * 4 / 3;
+            break;
+        case LXB_CSS_UNIT_PX:
+            result = value->u.length.num;  printf("got px length: %f\n", result);
+            break;
+        // case LXB_CSS_UNIT_CAP:
+        //     result = value->u.length.num * lycon->font.style.font_size;
+        //     break;
+        case LXB_CSS_UNIT_EM:
+            result = value->u.length.num * lycon->font.style.font_size;
+            break;
+        default:
+            result = 0;
+            printf("Unknown unit: %d\n", value->u.length.unit);    
+        }
+        break;
+    case LXB_CSS_VALUE__PERCENTAGE:
+        // todo: fix this
+        result = value->u.percentage.num * lycon->block.width;
+        break;
+    default:
+        result = 0;
+    }
+    result *= lycon->ui_context->pixel_ratio;
+    return result;
+}
+
+void resolve_length_prop(LayoutContext* lycon, const lxb_css_property_margin_t *margin, Spacing* spacing) {
+    printf("margin property: t %d, r %d, b %d, l %d, t %f, r %f, b %f, l %f\n", 
+        margin->top.u.length.unit, margin->right.u.length.unit, margin->bottom.u.length.unit, margin->left.u.length.unit,
+        margin->top.u.length.num, margin->right.u.length.num, margin->bottom.u.length.num, margin->left.u.length.num);
+    int value_cnt = 0;
+    if (margin->top.u.length.unit) {
+        spacing->top = resolve_length_value(lycon, &margin->top);
+        value_cnt++;
+    }
+    if (margin->right.u.length.unit) {
+        spacing->right = resolve_length_value(lycon, &margin->right);
+        value_cnt++;
+    }
+    if (margin->bottom.u.length.unit) {
+        spacing->bottom = resolve_length_value(lycon, &margin->bottom);
+        value_cnt++;
+    }
+    if (margin->left.u.length.unit) {
+        spacing->left = resolve_length_value(lycon, &margin->left);
+        value_cnt++;
+    }
+    switch (value_cnt) {
+    case 1:  // all sides
+        spacing->right = spacing->left = spacing->bottom = spacing->top;
+        break;
+    case 2:  // top-bottom, left-right
+        spacing->left = spacing->right;
+        spacing->bottom = spacing->top;
+        break;      
+    case 3:  // top, left-right, bottom
+        spacing->left = spacing->right;
+        break;
+    // case 4:  // top, right, bottom, left
+    //    break;
+    }
+}
+
 PropValue element_display(lxb_html_element_t* elmt) {
     PropValue outer_display, inner_display;
     // determine element 'display'
@@ -244,7 +333,8 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         if (!span->in_line) {
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         }
-        span->in_line->color.c = color_name_to_rgb(color->type);
+        // black color is 0xFF000000, not 0x000000
+        span->in_line->color.c = color_name_to_rgb(color->type) | 0xFF000000;
         break;
     case LXB_CSS_PROPERTY_BACKGROUND_COLOR:
         const lxb_css_property_background_color_t *background_color = declr->u.background_color;
@@ -256,6 +346,21 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
             span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
         }
         span->bound->background->background_color.c = color_name_to_rgb(background_color->type);
+        break;
+    case LXB_CSS_PROPERTY_MARGIN:
+        const lxb_css_property_margin_t *margin = declr->u.margin;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        printf("@@margin prop: %lf, unit: %d\n", margin->top.u.length.num, margin->top.u.length.unit);
+        resolve_length_prop(lycon, margin, &span->bound->margin);
+        break;
+    case LXB_CSS_PROPERTY_PADDING:
+        const lxb_css_property_padding_t *padding = declr->u.padding;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        resolve_length_prop(lycon, (lxb_css_property_margin_t*)padding, &span->bound->padding);
         break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;

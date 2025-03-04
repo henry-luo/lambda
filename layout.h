@@ -7,7 +7,7 @@ typedef struct {
 } StyleContext;
 
 typedef struct {
-    float width, height;  // given width and height of the block
+    float width, height;  // given width and height for the inner content of the block
     float advance_y;
     float max_width;
     float line_height;

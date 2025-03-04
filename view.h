@@ -11,6 +11,8 @@
 
 #define RDT_DISPLAY_TEXT        (LXB_CSS_VALUE__LAST_ENTRY + 10)
 
+// black color is 0xFF000000, not 0x000000
+// 0x0 is reserved for transparent color
 typedef union {
     Uint32 c;  // 32-bit ARGB color format
     struct {

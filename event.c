@@ -57,7 +57,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
         if (is_space(*p)) { 
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
-            printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->font.space_width);
+            // printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->font.space_width);
             wd = evcon->font.space_width;
         }
         else {

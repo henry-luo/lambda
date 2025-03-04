@@ -144,6 +144,12 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
+    if (block->bound) {
+        block->width -= block->bound->margin.left + block->bound->margin.right;
+        block->height -= block->bound->margin.top + block->bound->margin.bottom;
+        block->width -= block->bound->padding.left + block->bound->padding.right;
+        block->height -= block->bound->padding.top + block->bound->padding.bottom;
+    }
     // layout block content
     lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
     if (child) {
