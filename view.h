@@ -123,6 +123,7 @@ typedef struct {
 
 typedef struct {
     ViewSpan;  // extends ViewSpan
+    // x, y, width, height forms the content box of the block
     float x, y, width, height;  // x, y relative to the parent block    
     BlockProp* props;  // block specific style properties
 } ViewBlock;

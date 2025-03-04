@@ -119,10 +119,8 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (view_block->bound) {
         SDL_Rect rect;  
-        rect.x = pa_block.x + view_block->x + view_block->bound->margin.left;  
-        rect.y = pa_block.y + view_block->y + view_block->bound->margin.top;
-        rect.w = view_block->width - (view_block->bound->margin.left + view_block->bound->margin.right);  
-        rect.h = view_block->height - (view_block->bound->margin.top + view_block->bound->margin.bottom);
+        rect.x = pa_block.x + view_block->x;  rect.y = pa_block.y + view_block->y;
+        rect.w = view_block->width;  rect.h = view_block->height;
         if (view_block->bound->background) {
             SDL_FillRect(rdcon->ui_context->surface, &rect, view_block->bound->background->background_color.c);
         }
