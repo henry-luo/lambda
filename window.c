@@ -55,8 +55,9 @@ void ui_context_create_surface(UiContext* uicon, int width, int height) {
     // re-create the surface
     if (uicon->surface) SDL_FreeSurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
+    // have problem working with SDL alpha color formats ARGB8888 or RGBA8888
     uicon->surface = SDL_CreateRGBSurfaceWithFormat(0, 
-        width * uicon->pixel_ratio, height * uicon->pixel_ratio, 32, SDL_PIXELFORMAT_ARGB8888);
+        width * uicon->pixel_ratio, height * uicon->pixel_ratio, 32, SDL_PIXELFORMAT_RGB888);
     tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
         width * uicon->pixel_ratio, width * uicon->pixel_ratio, height * uicon->pixel_ratio, TVG_COLORSPACE_ARGB8888);
         

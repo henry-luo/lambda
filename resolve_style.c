@@ -83,6 +83,10 @@ lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t
         }
         span->in_line->cursor = cursor->type;
         break;
+    // case LXB_CSS_PROPERTY_COLOR:
+        // const lxb_css_property_color_t *color = declr->u.color;
+        // printf("color property: %d, red: %d\n", color->type, LXB_CSS_VALUE_RED);
+        // break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);

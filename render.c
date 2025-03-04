@@ -7,18 +7,19 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 // Function to draw a glyph bitmap into the image buffer
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     SDL_Surface* surface = rdcon->ui_context->surface;
-    for (unsigned int i = 0; i < bitmap->rows; i++) {
+    for (Uint32 i = 0; i < bitmap->rows; i++) {
         Uint32* row_pixels = ((Uint32*)surface->pixels) + (y + i) * surface->pitch / 4;
-        for (unsigned int j = 0; j < bitmap->width; j++) {
-            unsigned char intensity = bitmap->buffer[i * bitmap->pitch + j];
+        for (Uint32 j = 0; j < bitmap->width; j++) {
+            Uint32 intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0) {
-                // todo: clip the pixel, if (0 <= x && x < WIDTH && 0 <= y && y < HEIGHT) 
-                int v = 255 - intensity;
-                row_pixels[x + j] = SDL_MapRGBA(surface->format, v, v, v, 255);
-                // rdcon->buffer[index] = 255; // Alpha
-                // rdcon->buffer[index + 1] = intensity; // Blue
-                // rdcon->buffer[index + 2] = intensity; // Green 
-                // rdcon->buffer[index + 3] = intensity; // Red
+                // todo: clip the pixel, if (0 <= x && x < WIDTH && 0 <= y && y < HEIGHT)
+                // blend the pixel with the background
+                unsigned char* p = (unsigned char*)(row_pixels + (x + j));
+                Uint32 v = 255 - intensity;
+                p[0] = p[0] * v / 255;  
+                p[1] = p[1] * v / 255;
+                p[2] = p[2] * v / 255;
+                // row_pixels[x + j] = RDT_PIXELFORMAT_RGB(v, v, v);
             }
         }
     }
@@ -65,7 +66,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
     }
     // render text deco
-    printf("before text deco");
+    printf("before text deco\n");
     if (rdcon->font.style.text_deco != LXB_CSS_VALUE_NONE) {
         int thinkness = max(rdcon->font.face->underline_thickness >> 6, 1);
         SDL_Rect rect;
@@ -80,8 +81,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
         rect.w = text->width;  rect.h = thinkness;
         printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, rect.x, rect.y, rect.w, rect.h);
-        SDL_FillRect(rdcon->ui_context->surface, &rect, 
-            SDL_MapRGBA(rdcon->ui_context->surface->format, 255, 0, 0, 255));
+        SDL_FillRect(rdcon->ui_context->surface, &rect, 0); // black line
     }
     printf("end of text view\n");
 }
@@ -177,9 +177,6 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     SDL_FillRect(rdcon.ui_context->surface, NULL, 
         SDL_MapRGBA(rdcon.ui_context->surface->format, 255, 255, 255, 255));
 
-    // SDL_Rect rect = {0, 0, 400, 600};
-    // SDL_FillRect(rdcon.ui_context->surface, &rect,
-    //     SDL_MapRGBA(rdcon.ui_context->surface->format, 64, 64, 64, 255)); // gray rect
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);
