@@ -87,7 +87,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
         rect.w = text->width;  rect.h = thinkness;
         printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, rect.x, rect.y, rect.w, rect.h);
-        SDL_FillRect(rdcon->ui_context->surface, &rect, 0); // black line
+        SDL_FillRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     printf("end of text view\n");
 }
