@@ -11,6 +11,16 @@
 
 #define RDT_DISPLAY_TEXT        (LXB_CSS_VALUE__LAST_ENTRY + 10)
 
+typedef union {
+    Uint32 c;  // 32-bit ARGB color format
+    struct {
+        unsigned char b;
+        unsigned char g;
+        unsigned char r;
+        unsigned char a;
+    };
+} Color;  
+
 extern bool can_break(char c);
 extern bool is_space(char c);
 
@@ -45,6 +55,7 @@ typedef struct {
 
 typedef struct {
     PropValue cursor;
+    Color color;
 } InlineProp;
 
 typedef struct {

@@ -9,6 +9,7 @@ typedef struct {
     // FT_Face face;   // current font face
     // float space_width;
     FontBox font;  // current font style
+    Color color; 
 
     UiContext* ui_context;
 } RenderContext;

@@ -16,10 +16,16 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                 // blend the pixel with the background
                 unsigned char* p = (unsigned char*)(row_pixels + (x + j));
                 Uint32 v = 255 - intensity;
-                p[0] = p[0] * v / 255;  
-                p[1] = p[1] * v / 255;
-                p[2] = p[2] * v / 255;
-                // row_pixels[x + j] = RDT_PIXELFORMAT_RGB(v, v, v);
+                if (rdcon->color.c) {
+                    p[0] = (p[0] * v + rdcon->color.b * intensity) / 255;  
+                    p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;
+                    p[2] = (p[2] * v + rdcon->color.r * intensity) / 255;
+                }
+                else { // black text color
+                    p[0] = p[0] * v / 255;  
+                    p[1] = p[1] * v / 255;
+                    p[2] = p[2] * v / 255;
+                }
             }
         }
     }
@@ -109,35 +115,41 @@ void render_children(RenderContext* rdcon, View* view) {
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
-    BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;
+    BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     View* view = view_block->child;
     if (view) {
         if (view_block->font) {
             setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_block->font);
-        }        
+        }
+        if (view_block->in_line && view_block->in_line->color.c) {
+            rdcon->color = view_block->in_line->color;
+        }
         rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
         render_children(rdcon, view);
     }
     else {
         printf("view has no child\n");
     }
-    rdcon->block = pa_block;  rdcon->font = pa_font;
+    rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
-    FontBox pa_font = rdcon->font;
+    FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     printf("render inline view\n");
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
             setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_span->font);
         }
+        if (view_span->in_line && view_span->in_line->color.c) {
+            rdcon->color = view_span->in_line->color;
+        }
         render_children(rdcon, view);
     }
     else {
         printf("view has no child\n");
     }
-    rdcon->font = pa_font;
+    rdcon->font = pa_font;  rdcon->color = pa_color; 
 }
 
 void drawTriangle(Tvg_Canvas* canvas) {

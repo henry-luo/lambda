@@ -67,13 +67,13 @@ void target_text_view(EventContext* evcon, ViewText* text) {
                 continue;
             }
             // draw the glyph to the image buffer
-            printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->font.face->glyph->advance.x >> 6), y);
+            // printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->font.face->glyph->advance.x >> 6), y);
             wd = evcon->font.face->glyph->advance.x >> 6;  // changed from rdcon to evcon
         }
         float char_right = x + wd;  float char_bottom = y + (evcon->font.face->height >> 6);
         SDL_MouseMotionEvent* event = &evcon->event.mouse_motion;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
-            printf("@@ hit on text: %c\n", *p);
+            printf("hit on text: %c\n", *p);
             evcon->target = (View*)text;  return;
         }
         // advance to the next position

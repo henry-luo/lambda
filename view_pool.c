@@ -86,6 +86,7 @@ void view_pool_destroy(ViewTree* tree) {
 void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->in_line) {
         strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "prop {");
         if (span->in_line->cursor) {
             char* cursor;
             switch (span->in_line->cursor) {
@@ -96,8 +97,12 @@ void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
             default:
                 cursor = (char*)lxb_css_value_by_id(span->in_line->cursor)->name;
             }
-            strbuf_append_format(buf, "prop {cursor:%s}\n", cursor);
+            strbuf_append_format(buf, "cursor:%s", cursor);
         }
+        if (span->in_line->color.c) {
+            strbuf_append_format(buf, " color:#%x", span->in_line->color.c);
+        }
+        strbuf_append_str(buf, "}\n");
     }
     else if (span->font) {
         strbuf_append_char_n(buf, ' ', indent);
@@ -122,13 +127,10 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             }
             else if (view->type == RDT_VIEW_INLINE) {
                 ViewSpan* span = (ViewSpan*)view;
-                strbuf_append_format(buf, "view inline:%s, font deco: %s, weight: %s, style: %s\n",
-                    lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), 
-                    span->font ? lxb_css_value_by_id(span->font->text_deco)->name: "none", 
-                    span->font ? lxb_css_value_by_id(span->font->font_weight)->name : "normal",
-                    span->font ? lxb_css_value_by_id(span->font->font_style)->name : "normal");
-                print_inline_prop(span, buf, indent+2);
-                print_view_group((ViewGroup*)view, buf, indent+2);
+                strbuf_append_format(buf, "view inline:%s\n",
+                    lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
+                print_inline_prop(span, buf, indent + 2);
+                print_view_group((ViewGroup*)view, buf, indent + 2);
             }
             else if (view->type == RDT_VIEW_TEXT) {
                 ViewText* text = (ViewText*)view;
