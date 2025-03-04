@@ -134,7 +134,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->props) lycon->block.text_align = block->props->text_align;
-    lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
+    lycon->line.left = lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     block->y = pa_block.advance_y;
@@ -150,7 +150,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         lycon->block.height = block->height - (block->bound->padding.top + block->bound->padding.bottom);
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
-        lycon->line.advance_x += block->bound->padding.left;
+        lycon->line.left = lycon->line.advance_x += block->bound->padding.left;
         lycon->block.advance_y += block->bound->padding.top;
     } 
     else {
@@ -262,7 +262,8 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
 void line_break(LayoutContext* lycon) {
     lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
     // reset linebox
-    lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
+    lycon->line.max_ascender = lycon->line.max_descender = 0;
+    lycon->line.advance_x = lycon->line.left;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     line_align(lycon);
