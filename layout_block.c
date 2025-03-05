@@ -1,5 +1,8 @@
 #include "layout.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "lib/stb_image.h"
+
 int strToInt(const char* str, int len) {
     int result = 0, sign = 1;
     if (len <= 0 || str[0] == '\0') {
@@ -24,6 +27,24 @@ int strToInt(const char* str, int len) {
     return sign * result;
 }
 
+SDL_Surface *loadImage(const char *filePath) {
+    int width, height, channels;
+    unsigned char *data = stbi_load(filePath, &width, &height, &channels, 4);
+    if (!data) {
+        printf("Failed to load image: %s\n", filePath);
+        return NULL;
+    }
+
+    SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(
+        data, width, height, 32, width * 4,
+        0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
+    );
+    if (!surface) {
+        free(data);
+    }
+    return surface;
+}
+
 // get image dimensions using SDL_image
 bool get_image_dimensions(LayoutContext* lycon, const char *filename, SDL_Rect *dims) {
     bool result = false;
@@ -31,9 +52,7 @@ bool get_image_dimensions(LayoutContext* lycon, const char *filename, SDL_Rect *
 
     // Load the image
     printf("Image load: %s\n", filename);
-    SDL_LockMutex(lycon->ui_context->imageMutex);  // Lock before loading
-    SDL_Surface *image = IMG_Load(filename);
-    SDL_UnlockMutex(lycon->ui_context->imageMutex);  // Unlock after loading
+    SDL_Surface *image = loadImage(filename);
     if (!image) {
         printf("IMG_Load Error: %s\n", IMG_GetError());
         return result;
