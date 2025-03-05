@@ -97,6 +97,8 @@ int ui_context_init(UiContext* uicon, int width, int height) {
         SDL_Quit();
         return EXIT_FAILURE;
     }
+    uicon->imageMutex = SDL_CreateMutex(); 
+    
     // init FreeType
     if (FT_Init_FreeType(&uicon->ft_library)) {
         fprintf(stderr, "Could not initialize FreeType library\n");
@@ -162,6 +164,7 @@ void ui_context_cleanup(UiContext* uicon) {
         SDL_FreeCursor(uicon->mouse_state.sdl_cursor);
     }
     SDL_DestroyWindow(uicon->window);
+    SDL_DestroyMutex(uicon->imageMutex); 
     IMG_Quit();
     SDL_Quit();
 }

@@ -36,6 +36,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
 }
 
 void free_view(ViewTree* tree, View* view) {
+    printf("free view %p, type %d\n", view, view->type);
     if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE) {
         View* child = ((ViewGroup*)view)->child;
         while (child) {

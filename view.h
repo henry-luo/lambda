@@ -184,6 +184,7 @@ typedef struct {
     SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
     SDL_Texture* texture;  // texture for rendering
+    SDL_mutex *imageMutex;  // mutex for image loading
 
     // font handling
     FcConfig *font_config;

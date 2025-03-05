@@ -25,12 +25,15 @@ int strToInt(const char* str, int len) {
 }
 
 // get image dimensions using SDL_image
-bool get_image_dimensions(const char *filename, SDL_Rect *dims) {
+bool get_image_dimensions(LayoutContext* lycon, const char *filename, SDL_Rect *dims) {
     bool result = false;
     if (!filename || !dims) { return result; }
 
     // Load the image
+    printf("Image load: %s\n", filename);
+    SDL_LockMutex(lycon->ui_context->imageMutex);  // Lock before loading
     SDL_Surface *image = IMG_Load(filename);
+    SDL_UnlockMutex(lycon->ui_context->imageMutex);  // Unlock after loading
     if (!image) {
         printf("IMG_Load Error: %s\n", IMG_GetError());
         return result;
@@ -139,12 +142,12 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         if (lycon->block.width < 0 || lycon->block.height < 0) {
             printf("loading image dimensions\n");
             value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"src", 3, &value_len);
-            if (value) {
+            if (value && value_len) {
                 StrBuf* src = strbuf_new_cap(value_len);
                 strbuf_append_str_n(src, (const char*)value, value_len);
                 printf("image src: %s\n", src->s);
                 SDL_Rect dims;
-                if (get_image_dimensions(src->s, &dims)) {
+                if (get_image_dimensions(lycon, src->s, &dims)) {
                     printf("image dims: %d x %d, %f x %f\n", dims.w, dims.h, lycon->block.width, lycon->block.height);
                     if (lycon->block.width >= 0) {
                         lycon->block.height = lycon->block.width * dims.h / dims.w;
