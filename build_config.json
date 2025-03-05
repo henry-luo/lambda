@@ -5,6 +5,7 @@
         "parse_html.c",
         "layout_html.c",
         "layout_dom_tree.c",
+        "layout_block.c",
         "resolve_style.c",
         "render.c",
         "view_pool.c",

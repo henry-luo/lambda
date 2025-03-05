@@ -246,7 +246,7 @@ void resolve_length_prop(LayoutContext* lycon, const lxb_css_property_margin_t *
     }
 }
 
-PropValue element_display(lxb_html_element_t* elmt) {
+PropValue resolve_element_display(lxb_html_element_t* elmt) {
     PropValue outer_display, inner_display;
     // determine element 'display'
     int name = elmt->element.node.local_name;  // todo: should check ns as well 
@@ -292,7 +292,7 @@ lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t *
     return LXB_STATUS_OK;
 }
 
-lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t **root,
+lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx) {
     LayoutContext* lycon = (LayoutContext*) ctx;
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;

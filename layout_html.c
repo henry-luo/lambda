@@ -1,6 +1,5 @@
 #include "layout.h"
 
-void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt);
 void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
@@ -15,7 +14,6 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
 }
 
 void layout_cleanup(LayoutContext* lycon) {
-   
 }
 
 void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
@@ -45,7 +43,7 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         lycon.block.text_align = LXB_CSS_VALUE_LEFT;
         lycon.line.is_line_start = true;
         printf("start to layout body\n");
-        layout_block(&lycon, (lxb_html_element_t*)body);
+        layout_block(&lycon, (lxb_html_element_t*)body, LXB_CSS_VALUE_BLOCK);
         printf("end layout\n");
 
         layout_cleanup(&lycon);

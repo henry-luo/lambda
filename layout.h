@@ -38,5 +38,13 @@ typedef struct {
 } LayoutContext;
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
+FontProp* alloc_font_prop(LayoutContext* lycon);
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node);
 void free_view(ViewTree* tree, View* view);
+
+void line_break(LayoutContext* lycon);
+void line_align(LayoutContext* lycon);
+void layout_node(LayoutContext* lycon, lxb_dom_node_t *node);
+void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display);
+lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
+    lexbor_avl_node_t *node, void *ctx);
