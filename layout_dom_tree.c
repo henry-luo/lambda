@@ -18,6 +18,53 @@ PropValue element_display(lxb_html_element_t* elmt);
 lxb_status_t lxb_html_element_style_resolve(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx);
 
+/*
+int strToInt(const char* str, int len) {
+    int result = 0, sign = 1;
+    if (len <= 0 || str[0] == '\0') {
+        return 0;
+    }
+    // handle sign
+    if (*str == '-') {
+        sign = -1;  str++;
+    } else if (*str == '+') {
+        str++;
+    }
+    // process digits
+    const char* end = str + len;
+    while (str < end) {
+        if (*str >= '0' && *str <= '9') {
+            result = result * 10 + (*str - '0');
+        } else {
+            break;
+        }
+        str++;
+    }
+    return sign * result;
+}
+*/
+
+// Function to get image dimensions using SDL_image
+bool get_image_dimensions(const char *filename, SDL_Rect *dims) {
+    bool result = false;
+    if (!filename || !dims) { return result; }
+
+    // Load the image
+    SDL_Surface *image = IMG_Load(filename);
+    if (!image) {
+        printf("IMG_Load Error: %s\n", IMG_GetError());
+        return result;
+    }
+    // Get dimensions
+    dims->w = image->w;  dims->h = image->h;
+    printf("Image size: %d x %d\n", dims->w, dims->h);
+    result = true;
+
+    // Cleanup
+    SDL_FreeSurface(image);
+    return result;
+}
+
 void span_line_align(LayoutContext* lycon, float offset, ViewSpan* span) {
     // align the views in the line
     printf("span line align\n");
@@ -98,7 +145,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
 
     ViewBlock* block = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     // handle element default styles
-    float em_size = 0;
+    float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     uintptr_t elmt_name = elmt->element.node.local_name;
     switch (elmt_name) {
     case LXB_TAG_CENTER:
@@ -140,18 +187,18 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         break;
-    case LXB_TAG_IMG:
-        size_t value_len;
-        const lxb_char_t *value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
+    case LXB_TAG_IMG:  // get html width and height (before the css styles)
+        value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
         if (value) {
-            // todo: atoi based on value_len
             int width = atoi((const char*)value);
-            if (width >= 0) lycon->block.width = width * lycon->ui_context->pixel_ratio;
+            if (width > 0) lycon->block.width = width * lycon->ui_context->pixel_ratio;
+            // else width attr ignored
         }
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"height", 6, &value_len);
         if (value) {
             int height = atoi((const char*)value);
-            if (height >= 0) lycon->block.height = height * lycon->ui_context->pixel_ratio;
+            if (height > 0) lycon->block.height = height * lycon->ui_context->pixel_ratio;
+            // else height attr ignored
         }
         break;        
     }
@@ -175,6 +222,33 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
     block->x = pa_line.left;  block->y = pa_block.advance_y;
+
+    if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
+        if (lycon->block.width < 0 || lycon->block.height < 0) {
+            printf("loading image dimensions\n");
+            value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"src", 3, &value_len);
+            if (value) {
+                StrBuf* src = strbuf_new_cap(value_len);
+                strbuf_append_str_n(src, (const char*)value, value_len);
+                printf("image src: %s\n", src->s);
+                SDL_Rect dims;
+                if (get_image_dimensions(src->s, &dims)) {
+                    printf("image dims: %d x %d, %f x %f\n", dims.w, dims.h, lycon->block.width, lycon->block.height);
+                    if (lycon->block.width >= 0) {
+                        lycon->block.height = lycon->block.width * dims.h / dims.w;
+                    }
+                    if (lycon->block.height >= 0) {
+                        lycon->block.width = lycon->block.height * dims.w / dims.h;
+                    }
+                    else {
+                        lycon->block.height = dims.h;  lycon->block.width = dims.w;
+                    }
+                }
+                strbuf_free(src);
+                printf("image dimensions: %f x %f\n", lycon->block.width, lycon->block.height);
+            }
+        }
+    }
     
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
@@ -219,10 +293,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     }
     lycon->line.right = lycon->block.width;  
 
-    if (elmt_name == LXB_TAG_IMG) {
-        // determin the (intrinsic) width and height of the image
-    } 
-    else {
+    if (elmt_name != LXB_TAG_IMG) {
         // layout block content
         lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
         if (child) {
@@ -239,109 +310,45 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             printf("block height: %f\n", lycon->block.advance_y);
         }
         line_align(lycon);
-    }
 
-    if (block->bound) {
-        block->width = max(block->width, lycon->block.max_width 
-            + block->bound->padding.left + block->bound->padding.right +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0));  
-        block->height = lycon->block.advance_y + block->bound->padding.bottom 
-            + (block->bound->border ? block->bound->border->width.bottom : 0);  
-        pa_block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
-        pa_block.max_width = max(pa_block.max_width, block->width 
-            + block->bound->margin.left + block->bound->margin.right);              
-    } 
-    else {
-        block->width = max(block->width, lycon->block.max_width);  
-        block->height = lycon->block.advance_y;    
-        pa_block.advance_y += block->height;
-        pa_block.max_width = max(pa_block.max_width, block->width);        
-    }
-    lycon->block = pa_block;
-    // reset linebox
-    pa_line.advance_x = pa_line.max_ascender = pa_line.max_descender = 0;  
-    pa_line.is_line_start = true;  pa_line.last_space = NULL;
-    lycon->line = pa_line;  lycon->font = pa_font;
-    lycon->prev_view = (View*)block;
-    printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
-}
-
-void layout_inline_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
-    printf("layout inline block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
-    // save parent context
-    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   FontBox pa_font = lycon->font;
-
-    ViewBlock* block = (ViewBlock*)alloc_view(lycon, RDT_VIEW_INLINE_BLOCK, (lxb_dom_node_t*)elmt);
-    // handle element default styles
-    switch (elmt->element.node.local_name) {
-
-    }
-    // resolve CSS styles
-    if (elmt->element.style) {
-        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt);
-        lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
-        printf("### got element style: %p\n", elmt->element.style);
-    }
- 
-    lycon->block.advance_y = 0;  lycon->block.max_width = 0;
-    if (block->props) lycon->block.text_align = block->props->text_align;
-    lycon->line.left = lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
-    lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
-    block->x = pa_line.left;  block->y = pa_block.advance_y;
-    block->width = pa_block.width;  block->height = pa_block.height;
-    
-    if (block->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
-    }
-    if (block->bound) {
-        block->width -= block->bound->margin.left + block->bound->margin.right;
-        block->height -= block->bound->margin.top + block->bound->margin.bottom;
-        lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
-        lycon->block.height = block->height - (block->bound->padding.top + block->bound->padding.bottom);
-        block->x += block->bound->margin.left;
-        block->y += block->bound->margin.top;
-        lycon->line.advance_x += block->bound->padding.left;
-        lycon->block.advance_y += block->bound->padding.top;
-        if (block->bound->border) {
-            lycon->block.width -= block->bound->border->width.left + block->bound->border->width.right;
-            lycon->block.height -= block->bound->border->width.top + block->bound->border->width.bottom;
-            lycon->line.advance_x += block->bound->border->width.left;
-            lycon->block.advance_y += block->bound->border->width.top;
+        // finalize the block size
+        if (block->bound) {
+            block->width = max(block->width, lycon->block.max_width 
+                + block->bound->padding.left + block->bound->padding.right +
+                (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0));              
+            block->height = lycon->block.advance_y + block->bound->padding.bottom 
+                + (block->bound->border ? block->bound->border->width.bottom : 0);
+        } 
+        else {
+            block->width = max(block->width, lycon->block.max_width);  
+            block->height = lycon->block.advance_y;
         }
-        lycon->line.left = lycon->line.advance_x;
-    } 
-    else {
-        lycon->block.width = pa_block.width;  lycon->block.height = pa_block.height; 
-    }
-    lycon->line.right = lycon->block.width;  
-
-    // determine block (intrinsic) width and height
-    if (elmt->element.node.local_name == LXB_TAG_IMG) {
-
     }
 
-    if (block->bound) {
-        block->width = max(block->width, lycon->block.max_width 
-            + block->bound->padding.left + block->bound->padding.right +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0));  
-        block->height = lycon->block.advance_y + block->bound->padding.bottom 
-            + (block->bound->border ? block->bound->border->width.bottom : 0);  
-        pa_block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
-        pa_block.max_width = max(pa_block.max_width, block->width 
-            + block->bound->margin.left + block->bound->margin.right);              
-    } 
-    else {
-        block->width = max(block->width, lycon->block.max_width);  
-        block->height = lycon->block.advance_y;    
-        pa_block.advance_y += block->height;
-        pa_block.max_width = max(pa_block.max_width, block->width);        
+    // flow the block in parent context
+    lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+    if (display == LXB_CSS_VALUE_INLINE_BLOCK) {
+        if (lycon->line.advance_x + block->width >= lycon->line.right) { 
+            line_break(lycon);
+            block->x = lycon->line.left;
+        } else {
+            block->x = lycon->line.advance_x;  
+        }
+        block->y = lycon->block.advance_y;
+        lycon->line.advance_x += block->width;  
+        lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);  // inline block aligned at baseline
+    } else {
+        if (block->bound) {
+            lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
+            lycon->block.max_width = max(lycon->block.max_width, block->width 
+                + block->bound->margin.left + block->bound->margin.right);
+        } else {
+            lycon->block.advance_y += block->height;
+            lycon->block.max_width = max(lycon->block.max_width, block->width);        
+        }
+        // line_start(lycon);
+        assert(lycon->line.is_line_start);
     }
-    lycon->block = pa_block;
-    // reset linebox
-    pa_line.advance_x = pa_line.max_ascender = pa_line.max_descender = 0;  
-    pa_line.is_line_start = true;  pa_line.last_space = NULL;
-    lycon->line = pa_line;  lycon->font = pa_font;
     lycon->prev_view = (View*)block;
     printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
 }
@@ -412,13 +419,17 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
 }
 
-void line_break(LayoutContext* lycon) {
-    lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
-    // reset linebox
+void line_start(LayoutContext* lycon) {
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.advance_x = lycon->line.left;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
+}
+
+void line_break(LayoutContext* lycon) {
+    lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
+    // reset linebox
+    line_start(lycon);
     line_align(lycon);
 }
 

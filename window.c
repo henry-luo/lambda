@@ -91,7 +91,8 @@ int ui_context_init(UiContext* uicon, int width, int height) {
         return EXIT_FAILURE;
     }
     // init SDL_image
-    if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG)) {
+    int flags = IMG_INIT_JPG | IMG_INIT_PNG;
+    if ((IMG_Init(flags) & flags) != flags) {
         printf("IMG_Init failed: %s", IMG_GetError());
         SDL_Quit();
         return EXIT_FAILURE;
