@@ -40,7 +40,7 @@ SDL_Surface *loadImage(const char *filePath) {
         0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
     );
     if (!surface) {
-        free(data);
+        stbi_image_free(data); 
     }
     return surface;
 }
@@ -63,6 +63,7 @@ bool get_image_dimensions(LayoutContext* lycon, const char *filename, SDL_Rect *
     result = true;
 
     // Cleanup
+    stbi_image_free(image->pixels);
     SDL_FreeSurface(image);
     return result;
 }
