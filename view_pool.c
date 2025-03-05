@@ -43,6 +43,19 @@ void free_view(ViewTree* tree, View* view) {
             free_view(tree, child);
             child = next;
         }
+        // free props
+        ViewSpan* span = (ViewSpan*)view;
+        if (span->font) pool_variable_free(tree->pool, span->font);
+        if (span->in_line) pool_variable_free(tree->pool, span->in_line);
+        if (span->bound) {
+            if (span->bound->background) pool_variable_free(tree->pool, span->bound->background);
+            if (span->bound->border) pool_variable_free(tree->pool, span->bound->border);
+            pool_variable_free(tree->pool, span->bound);
+        }
+        if (view->type == RDT_VIEW_BLOCK) {
+            ViewBlock* block = (ViewBlock*)view;
+            if (block->props) pool_variable_free(tree->pool, block->props);
+        }
     }
     pool_variable_free(tree->pool, view);
 }
