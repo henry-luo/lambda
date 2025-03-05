@@ -259,6 +259,9 @@ PropValue element_display(lxb_html_element_t* elmt) {
         case LXB_TAG_LI:
             outer_display = LXB_CSS_VALUE_LIST_ITEM;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
+        case LXB_TAG_IMG:
+            outer_display = LXB_CSS_VALUE_INLINE_BLOCK;  inner_display = LXB_CSS_VALUE_REPLACED;
+            break;
         default:  // inline elements, like span, b, i, u, a, img, input
             outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
     }

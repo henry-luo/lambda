@@ -21,6 +21,7 @@
         "sdl_image.h": "c",
         "typeinfo": "c",
         "stdio.h": "c",
-        "html.h": "c"
+        "html.h": "c",
+        "__locale": "c"
     }
 }

@@ -94,6 +94,57 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     printf("end of text view\n");
 }
 
+// Function to convert integer to Roman numeral
+/*
+static void toRoman(int num, char* result, int uppercase) {
+    if (num <= 0 || num >= 4000) {
+        strcpy(result, "invalid");
+        return;
+    }
+    const int values[] = {1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1};
+    const char* symbols_lower[] = {"m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"};
+    const char* symbols_upper[] = {"M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"};
+    const char** symbols = uppercase ? symbols_upper : symbols_lower;
+    result[0] = '\0';
+    int i = 0;
+    while (num > 0) {
+        while (num >= values[i]) {
+            strcat(result, symbols[i]);
+            num -= values[i];
+        }
+        i++;
+    }
+}
+
+// list bullet formatting function
+void formatListNumber(StrBuf* buf, int num, PropValue list_style) {
+    if (num <= 0) { return; }
+    switch (list_style) {
+        case LXB_CSS_VALUE_LOWER_ROMAN:
+            toRoman(num, buf, 0);
+            break;
+        case LXB_CSS_VALUE_UPPER_ROMAN:
+            toRoman(num, buf, 1);
+            break;
+        case LXB_CSS_VALUE_UPPER_ALPHA:
+            if (num > 26) {
+                strcpy(result, "invalid");
+            } else {
+                result[0] = 'A' + (num - 1);
+                result[1] = '\0';
+            }
+            break;
+        case LXB_CSS_VALUE_LOWER_ALPHA:
+            if (num > 26) {
+                strcpy(result, "invalid");
+            } else {
+                result[0] = 'a' + (num - 1);
+                result[1] = '\0';
+            }
+            break;
+    }
+}
+*/
 void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
@@ -106,17 +157,19 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
         printf("render list decimal\n");
-        char num[100];  sprintf(num, "%d.", rdcon->list.item_index);
+        StrBuf* num = strbuf_new_cap(10);
+        strbuf_append_format(num, "%d.", rdcon->list.item_index);
         lxb_dom_text_t node;  ViewText text;
         text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
-        text.start_index = 0;  text.length = strlen(num);
-        node.char_data.data.data = (lxb_char_t *)num;  node.char_data.data.length = text.length;
+        text.start_index = 0;  text.length = num->length;
+        node.char_data.data.data = (lxb_char_t *)num->s;  node.char_data.data.length = text.length;
         text.node = (lxb_dom_node_t *)&node;
         int font_size = rdcon->font.face->size->metrics.y_ppem >> 6;
         text.x = list_item->x - 20 * ratio;
         text.y = list_item->y;  // align at top the list item
         text.width = text.length * font_size;  text.height = font_size;
         render_text_view(rdcon, &text);
+        strbuf_free(num);
     }
     else {
         printf("unknown list style type\n");
