@@ -4,11 +4,9 @@
 #define RDT_PIXELFORMAT_RGB(r, g, b)    ((uint32_t)((r << 16) | (g << 8) | b))
 
 typedef struct {
-    BlockBlot block;
-    // FontProp* font; // current font style
-    // FT_Face face;   // current font face
-    // float space_width;
     FontBox font;  // current font style
+    BlockBlot block;
+    ListBlot list;
     Color color; 
 
     UiContext* ui_context;

@@ -3,6 +3,7 @@
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
+void render_children(RenderContext* rdcon, View* view);
 
 // Function to draw a glyph bitmap into the image buffer
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
@@ -36,8 +37,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
-    //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
+    printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
+        str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
     bool has_space = false;
     for (; p < end; p++) {
         // printf("draw character '%c'\n", *p);
@@ -93,71 +94,88 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     printf("end of text view\n");
 }
 
-void render_children(RenderContext* rdcon, View* view) {
-    do {
-        if (view->type == RDT_VIEW_BLOCK) {
-            ViewBlock* block = (ViewBlock*)view;
-            printf("view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
-                lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
-                block->x, block->y, block->width, block->height);                
-            render_block_view(rdcon, block);
-        }
-        else if (view->type == RDT_VIEW_LIST_ITEM) {
-            ViewBlock* list_item = (ViewBlock*)view;
-            printf("view list item:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list_item->node), NULL));                
-            render_block_view(rdcon, list_item);
-            // render list bullet
-            SDL_Rect rect;
-            float ratio = rdcon->ui_context->pixel_ratio;
-            rect.x = rdcon->block.x + list_item->x - 20 * ratio;  
-            rect.y = rdcon->block.y + list_item->y + list_item->height / 2 - 2.5 * ratio;
-            rect.w = rect.h = 5 * ratio;
-            SDL_FillRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
-        }
-        else if (view->type == RDT_VIEW_INLINE) {
-            ViewSpan* span = (ViewSpan*)view;
-            printf("view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
-            render_inline_view(rdcon, span);
-        }
-        else {
-            ViewText* text = (ViewText*)view;
-            render_text_view(rdcon, text);
-        }
-        view = view->next;
-    } while (view);
+void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
+    // bullets are aligned to the top and right side of the list item
+    float ratio = rdcon->ui_context->pixel_ratio;
+    if (rdcon->list.list_style_type == LXB_CSS_VALUE_DISC) {
+        SDL_Rect rect;
+        rect.x = rdcon->block.x + list_item->x - 15 * ratio;  
+        rect.y = rdcon->block.y + list_item->y + 7 * ratio;
+        rect.w = rect.h = 5 * ratio;
+        SDL_FillRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+    }
+    else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
+        printf("render list decimal\n");
+        char num[100];  sprintf(num, "%d.", rdcon->list.item_index);
+        lxb_dom_text_t node;  ViewText text;
+        text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
+        text.start_index = 0;  text.length = strlen(num);
+        node.char_data.data.data = (lxb_char_t *)num;  node.char_data.data.length = text.length;
+        text.node = (lxb_dom_node_t *)&node;
+        int font_size = rdcon->font.face->size->metrics.y_ppem >> 6;
+        text.x = list_item->x - 20 * ratio;
+        text.y = list_item->y;  // align at top the list item
+        text.width = text.length * font_size;  text.height = font_size;
+        render_text_view(rdcon, &text);
+    }
+    else {
+        printf("unknown list style type\n");
+    }
+}
+
+void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
+    printf("view list item:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list_item->node), NULL)); 
+    rdcon->list.item_index++;
+    render_block_view(rdcon, list_item);
+}
+
+void render_list_view(RenderContext* rdcon, ViewBlock* view) {
+    ViewBlock* list_item = (ViewBlock*)view;
+    printf("view list item:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list_item->node), NULL)); 
+    ListBlot pa_list = rdcon->list;  BlockBlot pa_block = rdcon->block;
+    rdcon->list.item_index = 0;  rdcon->list.list_style_type = list_item->props->list_style_type;
+    render_block_view(rdcon, list_item);
+    rdcon->list = pa_list;
+}
+
+void render_bound(RenderContext* rdcon, ViewBlock* view) {
+    SDL_Rect rect;  
+    rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
+    rect.w = view->width;  rect.h = view->height;
+    if (view->bound->background) {
+        SDL_FillRect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
+    }
+    if (view->bound->border) {
+        SDL_Rect border_rect = rect;
+        border_rect.w = view->bound->border->width.left;
+        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        border_rect.x = rect.x + rect.w - view->bound->border->width.right;
+        border_rect.w = view->bound->border->width.right;
+        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        border_rect = rect;
+        border_rect.h = view->bound->border->width.top;
+        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        border_rect.y = rect.y + rect.h - view->bound->border->width.bottom;
+        border_rect.h = view->bound->border->width.bottom;
+        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+    }
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
+    if (view_block->font) {
+        setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_block->font);
+    }
+    // render bullet after setting the font, as bullet is rendered using the same font as the list item
+    if (view_block->type == RDT_VIEW_LIST_ITEM) {
+        render_list_bullet(rdcon, view_block);
+    }
     if (view_block->bound) {
-        SDL_Rect rect;  
-        rect.x = pa_block.x + view_block->x;  rect.y = pa_block.y + view_block->y;
-        rect.w = view_block->width;  rect.h = view_block->height;
-        if (view_block->bound->background) {
-            SDL_FillRect(rdcon->ui_context->surface, &rect, view_block->bound->background->color.c);
-        }
-        if (view_block->bound->border) {
-            printf("@@@ render border\n");
-            SDL_Rect border_rect = rect;
-            border_rect.w = view_block->bound->border->width.left;
-            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
-            border_rect.x = rect.x + rect.w - view_block->bound->border->width.right;
-            border_rect.w = view_block->bound->border->width.right;
-            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
-            border_rect = rect;
-            border_rect.h = view_block->bound->border->width.top;
-            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
-            border_rect.y = rect.y + rect.h - view_block->bound->border->width.bottom;
-            border_rect.h = view_block->bound->border->width.bottom;
-            SDL_FillRect(rdcon->ui_context->surface, &border_rect, view_block->bound->border->color.c);
-        }
+        render_bound(rdcon, view_block);
     }
 
     View* view = view_block->child;
     if (view) {
-        if (view_block->font) {
-            setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_block->font);
-        }
         if (view_block->in_line && view_block->in_line->color.c) {
             rdcon->color = view_block->in_line->color;
         }
@@ -187,6 +205,34 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         printf("view has no child\n");
     }
     rdcon->font = pa_font;  rdcon->color = pa_color; 
+}
+
+void render_children(RenderContext* rdcon, View* view) {
+    do {
+        if (view->type == RDT_VIEW_BLOCK) {
+            ViewBlock* block = (ViewBlock*)view;
+            printf("view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+                lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
+                block->x, block->y, block->width, block->height);                
+            render_block_view(rdcon, block);
+        }
+        else if (view->type == RDT_VIEW_LIST) {               
+            render_list_view(rdcon, (ViewBlock*)view);
+        }
+        else if (view->type == RDT_VIEW_LIST_ITEM) {
+            render_litem_view(rdcon, (ViewBlock*)view);
+        }
+        else if (view->type == RDT_VIEW_INLINE) {
+            ViewSpan* span = (ViewSpan*)view;
+            printf("view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
+            render_inline_view(rdcon, span);
+        }
+        else {
+            ViewText* text = (ViewText*)view;
+            render_text_view(rdcon, text);
+        }
+        view = view->next;
+    } while (view);
 }
 
 void drawTriangle(Tvg_Canvas* canvas) {

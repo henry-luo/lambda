@@ -80,7 +80,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp
     fbox->face = load_styled_font(uicon, font_name, fprop);
     if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
         fprintf(stderr, "could not load space character\n");
-        fbox->space_width = fbox->face->size->metrics.height >> 6;
+        fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
     } else {
         fbox->space_width = fbox->face->glyph->advance.x >> 6;
     }
@@ -143,6 +143,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt);
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, lxb_html_element_style_resolve, lycon);
         printf("### got element style: %p\n", elmt->element.style);
+    }
+    // switch block to list
+    if (block->props && block->props->list_style_type) {
+        block->type = RDT_VIEW_LIST;
     }
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;

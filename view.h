@@ -31,11 +31,13 @@ extern bool can_break(char c);
 extern bool is_space(char c);
 
 typedef enum {
-    RDT_VIEW_BLOCK = 1,
+    RDT_VIEW_NONE = 0,
     RDT_VIEW_TEXT,
-
     RDT_VIEW_INLINE,
     RDT_VIEW_INLINE_BLOCK,
+    RDT_VIEW_BLOCK,
+    RDT_VIEW_LIST,
+    RDT_VIEW_LIST_ITEM,    
     RDT_VIEW_FLEX,
     RDT_VIEW_GRID,
     RDT_VIEW_TABLE,
@@ -48,8 +50,6 @@ typedef enum {
     RDT_VIEW_TABLE_HEADER_GROUP,
     RDT_VIEW_TABLE_FOOTER_GROUP,
     RDT_VIEW_TABLE_BODY_GROUP,
-    RDT_VIEW_LIST_ITEM,
-    RDT_VIEW_NONE,
 } ViewType;
 
 typedef struct {
@@ -153,15 +153,22 @@ typedef struct StateTree {
     CursorState* cursor;
 } StateTree;
 
-typedef struct {
-    float x, y;  // abs x, y relative to entire canvas/screen
-} BlockBlot;
-
+// layout, rendering context structs
 typedef struct {
     FontProp style;  // current font style
     FT_Face face;  // current font face
     float space_width;  // width of a space character of the current font 
 } FontBox;
+
+// rendering context structs
+typedef struct {
+    float x, y;  // abs x, y relative to entire canvas/screen
+} BlockBlot;
+
+typedef struct {
+    PropValue list_style_type;
+    int item_index;
+} ListBlot;
 
 typedef struct {
     SDL_Window *window;    // current window
