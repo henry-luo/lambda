@@ -8,25 +8,28 @@ void render_children(RenderContext* rdcon, View* view);
 // Function to draw a glyph bitmap into the image buffer
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     SDL_Surface* surface = rdcon->ui_context->surface;
-    for (Uint32 i = 0; i < bitmap->rows; i++) {
-        Uint32* row_pixels = ((Uint32*)surface->pixels) + (y + i) * surface->pitch / 4;
-        for (Uint32 j = 0; j < bitmap->width; j++) {
-            Uint32 intensity = bitmap->buffer[i * bitmap->pitch + j];
+    for (uint32_t i = 0; i < bitmap->rows; i++) {
+        uint32_t* row_pixels = ((uint32_t*)surface->pixels) + (y + i) * surface->pitch / 4;
+        for (uint32_t j = 0; j < bitmap->width; j++) {
+            uint32_t intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0) {
                 // todo: clip the pixel, if (0 <= x && x < WIDTH && 0 <= y && y < HEIGHT)
+
                 // blend the pixel with the background
-                unsigned char* p = (unsigned char*)(row_pixels + (x + j));
-                Uint32 v = 255 - intensity;
-                // todo: to further handle alpha channel
-                if (rdcon->color.c) {
-                    p[0] = (p[0] * v + rdcon->color.b * intensity) / 255;  
-                    p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;
-                    p[2] = (p[2] * v + rdcon->color.r * intensity) / 255;
+                uint8_t* p = (uint8_t*)(row_pixels + (x + j));
+                // important to use 32bit int for computation below
+                uint32_t v = 255 - intensity;  
+                if (rdcon->color.c) { // non-black text color
+                    p[0] = 0x00;  // alpha channel
+                    p[1] = (p[1] * v + rdcon->color.b * intensity) / 255;  
+                    p[2] = (p[2] * v + rdcon->color.g * intensity) / 255;
+                    p[3] = (p[3] * v + rdcon->color.r * intensity) / 255;
                 }
                 else { // black text color
-                    p[0] = p[0] * v / 255;  
-                    p[1] = p[1] * v / 255;
+                    p[0] = 0xFF;
+                    p[1] = p[1] * v / 255;  
                     p[2] = p[2] * v / 255;
+                    p[3] = p[3] * v / 255;
                 }
             }
         }
@@ -322,8 +325,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     render_init(&rdcon, uicon);
 
     // fill the surface with a white background
-    SDL_FillRect(rdcon.ui_context->surface, NULL, 
-        SDL_MapRGBA(rdcon.ui_context->surface->format, 255, 255, 255, 255));
+    SDL_FillRect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF);
 
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");

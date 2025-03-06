@@ -2,159 +2,225 @@
 #define SV_IMPLEMENTATION
 #include "./lib/sv.h"
 
-Uint32 color_name_to_rgb(PropValue color_name) {
+// CSS4 has a total of 148 colors
+Color color_name_to_rgb(PropValue color_name) {
+    uint32_t c;
     switch (color_name) {
-        case LXB_CSS_VALUE_ALICEBLUE: return 0xF0F8FF;
-        case LXB_CSS_VALUE_ANTIQUEWHITE: return 0xFAEBD7;
-        case LXB_CSS_VALUE_AQUA: return 0x00FFFF;
-        case LXB_CSS_VALUE_AQUAMARINE: return 0x7FFFD4;
-        case LXB_CSS_VALUE_AZURE: return 0xF0FFFF;
-        case LXB_CSS_VALUE_BEIGE: return 0xF5F5DC;
-        case LXB_CSS_VALUE_BISQUE: return 0xFFE4C4;
-        case LXB_CSS_VALUE_BLACK: return 0x000000;
-        case LXB_CSS_VALUE_BLANCHEDALMOND: return 0xFFEBCD;
-        case LXB_CSS_VALUE_BLUE: return 0x0000FF;
-        case LXB_CSS_VALUE_BLUEVIOLET: return 0x8A2BE2;
-        case LXB_CSS_VALUE_BROWN: return 0xA52A2A;
-        case LXB_CSS_VALUE_BURLYWOOD: return 0xDEB887;
-        case LXB_CSS_VALUE_CADETBLUE: return 0x5F9EA0;
-        case LXB_CSS_VALUE_CHARTREUSE: return 0x7FFF00;
-        case LXB_CSS_VALUE_CHOCOLATE: return 0xD2691E;
-        case LXB_CSS_VALUE_CORAL: return 0xFF7F50;
-        case LXB_CSS_VALUE_CORNFLOWERBLUE: return 0x6495ED;
-        case LXB_CSS_VALUE_CORNSILK: return 0xFFF8DC;
-        case LXB_CSS_VALUE_CRIMSON: return 0xDC143C;
-        case LXB_CSS_VALUE_CYAN: return 0x00FFFF;
-        case LXB_CSS_VALUE_DARKBLUE: return 0x00008B;
-        case LXB_CSS_VALUE_DARKCYAN: return 0x008B8B;
-        case LXB_CSS_VALUE_DARKGOLDENROD: return 0xB8860B;
-        case LXB_CSS_VALUE_DARKGRAY: return 0xA9A9A9;
-        case LXB_CSS_VALUE_DARKGREEN: return 0x006400;
-        case LXB_CSS_VALUE_DARKGREY: return 0xA9A9A9;
-        case LXB_CSS_VALUE_DARKKHAKI: return 0xBDB76B;
-        case LXB_CSS_VALUE_DARKMAGENTA: return 0x8B008B;
-        case LXB_CSS_VALUE_DARKOLIVEGREEN: return 0x556B2F;
-        case LXB_CSS_VALUE_DARKORANGE: return 0xFF8C00;
-        case LXB_CSS_VALUE_DARKORCHID: return 0x9932CC;
-        case LXB_CSS_VALUE_DARKRED: return 0x8B0000;
-        case LXB_CSS_VALUE_DARKSALMON: return 0xE9967A;
-        case LXB_CSS_VALUE_DARKSEAGREEN: return 0x8FBC8F;
-        case LXB_CSS_VALUE_DARKSLATEBLUE: return 0x483D8B;
-        case LXB_CSS_VALUE_DARKSLATEGRAY: return 0x2F4F4F;
-        case LXB_CSS_VALUE_DARKSLATEGREY: return 0x2F4F4F;
-        case LXB_CSS_VALUE_DARKTURQUOISE: return 0x00CED1;
-        case LXB_CSS_VALUE_DARKVIOLET: return 0x9400D3;
-        case LXB_CSS_VALUE_DEEPPINK: return 0xFF1493;
-        case LXB_CSS_VALUE_DEEPSKYBLUE: return 0x00BFFF;
-        case LXB_CSS_VALUE_DIMGRAY: return 0x696969;
-        case LXB_CSS_VALUE_DIMGREY: return 0x696969;
-        case LXB_CSS_VALUE_DODGERBLUE: return 0x1E90FF;
-        case LXB_CSS_VALUE_FIREBRICK: return 0xB22222;
-        case LXB_CSS_VALUE_FLORALWHITE: return 0xFFFAF0;
-        case LXB_CSS_VALUE_FORESTGREEN: return 0x228B22;
-        case LXB_CSS_VALUE_FUCHSIA: return 0xFF00FF;
-        case LXB_CSS_VALUE_GAINSBORO: return 0xDCDCDC;
-        case LXB_CSS_VALUE_GHOSTWHITE: return 0xF8F8FF;
-        case LXB_CSS_VALUE_GOLD: return 0xFFD700;
-        case LXB_CSS_VALUE_GOLDENROD: return 0xDAA520;
-        case LXB_CSS_VALUE_GRAY: return 0x808080;
-        case LXB_CSS_VALUE_GREEN: return 0x008000;
-        case LXB_CSS_VALUE_GREENYELLOW: return 0xADFF2F;
-        case LXB_CSS_VALUE_GREY: return 0x808080;
-        case LXB_CSS_VALUE_HONEYDEW: return 0xF0FFF0;
-        case LXB_CSS_VALUE_HOTPINK: return 0xFF69B4;
-        case LXB_CSS_VALUE_INDIANRED: return 0xCD5C5C;
-        case LXB_CSS_VALUE_INDIGO: return 0x4B0082;
-        case LXB_CSS_VALUE_IVORY: return 0xFFFFF0;
-        case LXB_CSS_VALUE_KHAKI: return 0xF0E68C;
-        case LXB_CSS_VALUE_LAVENDER: return 0xE6E6FA;
-        case LXB_CSS_VALUE_LAVENDERBLUSH: return 0xFFF0F5;
-        case LXB_CSS_VALUE_LAWNGREEN: return 0x7CFC00;
-        case LXB_CSS_VALUE_LEMONCHIFFON: return 0xFFFACD;
-        case LXB_CSS_VALUE_LIGHTBLUE: return 0xADD8E6;
-        case LXB_CSS_VALUE_LIGHTCORAL: return 0xF08080;
-        case LXB_CSS_VALUE_LIGHTCYAN: return 0xE0FFFF;
-        case LXB_CSS_VALUE_LIGHTGOLDENRODYELLOW: return 0xFAFAD2;
-        case LXB_CSS_VALUE_LIGHTGRAY: return 0xD3D3D3;
-        case LXB_CSS_VALUE_LIGHTGREEN: return 0x90EE90;
-        case LXB_CSS_VALUE_LIGHTGREY: return 0xD3D3D3;
-        case LXB_CSS_VALUE_LIGHTPINK: return 0xFFB6C1;
-        case LXB_CSS_VALUE_LIGHTSALMON: return 0xFFA07A;
-        case LXB_CSS_VALUE_LIGHTSEAGREEN: return 0x20B2AA;
-        case LXB_CSS_VALUE_LIGHTSKYBLUE: return 0x87CEFA;
-        case LXB_CSS_VALUE_LIGHTSLATEGRAY: return 0x778899;
-        case LXB_CSS_VALUE_LIGHTSLATEGREY: return 0x778899;
-        case LXB_CSS_VALUE_LIGHTSTEELBLUE: return 0xB0C4DE;
-        case LXB_CSS_VALUE_LIGHTYELLOW: return 0xFFFFE0;
-        case LXB_CSS_VALUE_LIME: return 0x00FF00;
-        case LXB_CSS_VALUE_LIMEGREEN: return 0x32CD32;
-        case LXB_CSS_VALUE_LINEN: return 0xFAF0E6;
-        case LXB_CSS_VALUE_MAGENTA: return 0xFF00FF;
-        case LXB_CSS_VALUE_MAROON: return 0x800000;
-        case LXB_CSS_VALUE_MEDIUMAQUAMARINE: return 0x66CDAA;
-        case LXB_CSS_VALUE_MEDIUMBLUE: return 0x0000CD;
-        case LXB_CSS_VALUE_MEDIUMORCHID: return 0xBA55D3;
-        case LXB_CSS_VALUE_MEDIUMPURPLE: return 0x9370DB;
-        case LXB_CSS_VALUE_MEDIUMSEAGREEN: return 0x3CB371;
-        case LXB_CSS_VALUE_MEDIUMSLATEBLUE: return 0x7B68EE;
-        case LXB_CSS_VALUE_MEDIUMSPRINGGREEN: return 0x00FA9A;
-        case LXB_CSS_VALUE_MEDIUMTURQUOISE: return 0x48D1CC;
-        case LXB_CSS_VALUE_MEDIUMVIOLETRED: return 0xC71585;
-        case LXB_CSS_VALUE_MIDNIGHTBLUE: return 0x191970;
-        case LXB_CSS_VALUE_MINTCREAM: return 0xF5FFFA;
-        case LXB_CSS_VALUE_MISTYROSE: return 0xFFE4E1;
-        case LXB_CSS_VALUE_MOCCASIN: return 0xFFE4B5;
-        case LXB_CSS_VALUE_NAVAJOWHITE: return 0xFFDEAD;
-        case LXB_CSS_VALUE_NAVY: return 0x000080;
-        case LXB_CSS_VALUE_OLDLACE: return 0xFDF5E6;
-        case LXB_CSS_VALUE_OLIVE: return 0x808000;
-        case LXB_CSS_VALUE_OLIVEDRAB: return 0x6B8E23;
-        case LXB_CSS_VALUE_ORANGE: return 0xFFA500;
-        case LXB_CSS_VALUE_ORANGERED: return 0xFF4500;
-        case LXB_CSS_VALUE_ORCHID: return 0xDA70D6;
-        case LXB_CSS_VALUE_PALEGOLDENROD: return 0xEEE8AA;
-        case LXB_CSS_VALUE_PALEGREEN: return 0x98FB98;
-        case LXB_CSS_VALUE_PALETURQUOISE: return 0xAFEEEE;
-        case LXB_CSS_VALUE_PALEVIOLETRED: return 0xDB7093;
-        case LXB_CSS_VALUE_PAPAYAWHIP: return 0xFFEFD5;
-        case LXB_CSS_VALUE_PEACHPUFF: return 0xFFDAB9;
-        case LXB_CSS_VALUE_PERU: return 0xCD853F;
-        case LXB_CSS_VALUE_PINK: return 0xFFC1CC;
-        case LXB_CSS_VALUE_PLUM: return 0xDDA0DD;
-        case LXB_CSS_VALUE_POWDERBLUE: return 0xB0E0E6;
-        case LXB_CSS_VALUE_PURPLE: return 0x800080;
-        case LXB_CSS_VALUE_REBECCAPURPLE: return 0x663399;
-        case LXB_CSS_VALUE_RED: return 0xFF0000;
-        case LXB_CSS_VALUE_ROSYBROWN: return 0xBC8F8F;
-        case LXB_CSS_VALUE_ROYALBLUE: return 0x4169E1;
-        case LXB_CSS_VALUE_SADDLEBROWN: return 0x8B4513;
-        case LXB_CSS_VALUE_SALMON: return 0xFA8072;
-        case LXB_CSS_VALUE_SANDYBROWN: return 0xF4A460;
-        case LXB_CSS_VALUE_SEAGREEN: return 0x2E8B57;
-        case LXB_CSS_VALUE_SEASHELL: return 0xFFF5EE;
-        case LXB_CSS_VALUE_SIENNA: return 0xA0522D;
-        case LXB_CSS_VALUE_SILVER: return 0xC0C0C0;
-        case LXB_CSS_VALUE_SKYBLUE: return 0x87CEEB;
-        case LXB_CSS_VALUE_SLATEBLUE: return 0x6A5ACD;
-        case LXB_CSS_VALUE_SLATEGRAY: return 0x708090;
-        case LXB_CSS_VALUE_SLATEGREY: return 0x708090;
-        case LXB_CSS_VALUE_SNOW: return 0xFFFAFA;
-        case LXB_CSS_VALUE_SPRINGGREEN: return 0x00FF7F;
-        case LXB_CSS_VALUE_STEELBLUE: return 0x4682B4;
-        case LXB_CSS_VALUE_TAN: return 0xD2B48C;
-        case LXB_CSS_VALUE_TEAL: return 0x008080;
-        case LXB_CSS_VALUE_THISTLE: return 0xD8BFD8;
-        case LXB_CSS_VALUE_TOMATO: return 0xFF6347;
-        case LXB_CSS_VALUE_TURQUOISE: return 0x40E0D0;
-        case LXB_CSS_VALUE_VIOLET: return 0xEE82EE;
-        case LXB_CSS_VALUE_WHEAT: return 0xF5DEB3;
-        case LXB_CSS_VALUE_WHITE: return 0xFFFFFF;
-        case LXB_CSS_VALUE_WHITESMOKE: return 0xF5F5F5;
-        case LXB_CSS_VALUE_YELLOW: return 0xFFFF00;
-        case LXB_CSS_VALUE_YELLOWGREEN: return 0x9ACD32;
-        default: return 0x000000; // Default to black
+        case LXB_CSS_VALUE_ALICEBLUE: c = 0xF0F8FF;  break;
+        case LXB_CSS_VALUE_ANTIQUEWHITE: c = 0xFAEBD7;  break;
+        case LXB_CSS_VALUE_AQUA: c = 0x00FFFF;  break;
+        case LXB_CSS_VALUE_AQUAMARINE: c = 0x7FFFD4;  break;
+        case LXB_CSS_VALUE_AZURE: c = 0xF0FFFF;  break;
+        case LXB_CSS_VALUE_BEIGE: c = 0xF5F5DC;  break;
+        case LXB_CSS_VALUE_BISQUE: c = 0xFFE4C4;  break;
+        case LXB_CSS_VALUE_BLACK: c = 0x000000;  break;
+        case LXB_CSS_VALUE_BLANCHEDALMOND: c = 0xFFEBCD;  break;
+        case LXB_CSS_VALUE_BLUE: c = 0x0000FF;  break;
+        case LXB_CSS_VALUE_BLUEVIOLET: c = 0x8A2BE2;  break;
+        case LXB_CSS_VALUE_BROWN: c = 0xA52A2A;  break;
+        case LXB_CSS_VALUE_BURLYWOOD: c = 0xDEB887;  break;
+        case LXB_CSS_VALUE_CADETBLUE: c = 0x5F9EA0;  break;
+        case LXB_CSS_VALUE_CHARTREUSE: c = 0x7FFF00;  break;
+        case LXB_CSS_VALUE_CHOCOLATE: c = 0xD2691E;  break;
+        case LXB_CSS_VALUE_CORAL: c = 0xFF7F50;  break;
+        case LXB_CSS_VALUE_CORNFLOWERBLUE: c = 0x6495ED;  break;
+        case LXB_CSS_VALUE_CORNSILK: c = 0xFFF8DC;  break;
+        case LXB_CSS_VALUE_CRIMSON: c = 0xDC143C;  break;
+        case LXB_CSS_VALUE_CYAN: c = 0x00FFFF;  break;
+        case LXB_CSS_VALUE_DARKBLUE: c = 0x00008B;  break;
+        case LXB_CSS_VALUE_DARKCYAN: c = 0x008B8B;  break;
+        case LXB_CSS_VALUE_DARKGOLDENROD: c = 0xB8860B;  break;
+        case LXB_CSS_VALUE_DARKGRAY: c = 0xA9A9A9;  break;
+        case LXB_CSS_VALUE_DARKGREEN: c = 0x006400;  break;
+        case LXB_CSS_VALUE_DARKGREY: c = 0xA9A9A9;  break;
+        case LXB_CSS_VALUE_DARKKHAKI: c = 0xBDB76B;  break;
+        case LXB_CSS_VALUE_DARKMAGENTA: c = 0x8B008B;  break;
+        case LXB_CSS_VALUE_DARKOLIVEGREEN: c = 0x556B2F;  break;
+        case LXB_CSS_VALUE_DARKORANGE: c = 0xFF8C00;  break;
+        case LXB_CSS_VALUE_DARKORCHID: c = 0x9932CC;  break;
+        case LXB_CSS_VALUE_DARKRED: c = 0x8B0000;  break;   
+        case LXB_CSS_VALUE_DARKSALMON: c = 0xE9967A;  break;
+        case LXB_CSS_VALUE_DARKSEAGREEN: c = 0x8FBC8F;  break;
+        case LXB_CSS_VALUE_DARKSLATEBLUE: c = 0x483D8B;  break;
+        case LXB_CSS_VALUE_DARKSLATEGRAY: c = 0x2F4F4F;  break;
+        case LXB_CSS_VALUE_DARKSLATEGREY: c = 0x2F4F4F;  break;
+        case LXB_CSS_VALUE_DARKTURQUOISE: c = 0x00CED1;  break;
+        case LXB_CSS_VALUE_DARKVIOLET: c = 0x9400D3;  break;
+        case LXB_CSS_VALUE_DEEPPINK: c = 0xFF1493;  break;
+        case LXB_CSS_VALUE_DEEPSKYBLUE: c = 0x00BFFF;  break;
+        case LXB_CSS_VALUE_DIMGRAY: c = 0x696969;  break;
+        case LXB_CSS_VALUE_DIMGREY: c = 0x696969;  break;
+        case LXB_CSS_VALUE_DODGERBLUE: c = 0x1E90FF;  break;
+        case LXB_CSS_VALUE_FIREBRICK: c = 0xB22222;  break;
+        case LXB_CSS_VALUE_FLORALWHITE: c = 0xFFFAF0;  break;
+        case LXB_CSS_VALUE_FORESTGREEN: c = 0x228B22;  break;
+        case LXB_CSS_VALUE_FUCHSIA: c = 0xFF00FF;  break;
+        case LXB_CSS_VALUE_GAINSBORO: c = 0xDCDCDC;  break;
+        case LXB_CSS_VALUE_GHOSTWHITE: c = 0xF8F8FF;  break;
+        case LXB_CSS_VALUE_GOLD: c = 0xFFD700;  break;  
+        case LXB_CSS_VALUE_GOLDENROD: c = 0xDAA520;  break;
+        case LXB_CSS_VALUE_GRAY: c = 0x808080;  break;
+        case LXB_CSS_VALUE_GREEN: c = 0x008000;  break;
+        case LXB_CSS_VALUE_GREENYELLOW: c = 0xADFF2F;  break;
+        case LXB_CSS_VALUE_GREY: c = 0x808080;  break;
+        case LXB_CSS_VALUE_HONEYDEW: c = 0xF0FFF0;  break;
+        case LXB_CSS_VALUE_HOTPINK: c = 0xFF69B4;  break;
+        case LXB_CSS_VALUE_INDIANRED: c = 0xCD5C5C;  break;
+        case LXB_CSS_VALUE_INDIGO: c = 0x4B0082;  break;
+        case LXB_CSS_VALUE_IVORY: c = 0xFFFFF0;  break;
+        case LXB_CSS_VALUE_KHAKI: c = 0xF0E68C;  break;
+        case LXB_CSS_VALUE_LAVENDER: c = 0xE6E6FA;  break;
+        case LXB_CSS_VALUE_LAVENDERBLUSH: c = 0xFFF0F5;  break;
+        case LXB_CSS_VALUE_LAWNGREEN: c = 0x7CFC00;  break;
+        case LXB_CSS_VALUE_LEMONCHIFFON: c = 0xFFFACD;  break;
+        case LXB_CSS_VALUE_LIGHTBLUE: c = 0xADD8E6;  break;
+        case LXB_CSS_VALUE_LIGHTCORAL: c = 0xF08080;  break;
+        case LXB_CSS_VALUE_LIGHTCYAN: c = 0xE0FFFF;  break;
+        case LXB_CSS_VALUE_LIGHTGOLDENRODYELLOW: c = 0xFAFAD2;  break;
+        case LXB_CSS_VALUE_LIGHTGRAY: c = 0xD3D3D3;  break;
+        case LXB_CSS_VALUE_LIGHTGREEN: c = 0x90EE90;  break;
+        case LXB_CSS_VALUE_LIGHTGREY: c = 0xD3D3D3;  break;
+        case LXB_CSS_VALUE_LIGHTPINK: c = 0xFFB6C1;  break;
+        case LXB_CSS_VALUE_LIGHTSALMON: c = 0xFFA07A;  break;
+        case LXB_CSS_VALUE_LIGHTSEAGREEN: c = 0x20B2AA;  break;
+        case LXB_CSS_VALUE_LIGHTSKYBLUE: c = 0x87CEFA;  break;
+        case LXB_CSS_VALUE_LIGHTSLATEGRAY: c = 0x778899;  break;
+        case LXB_CSS_VALUE_LIGHTSLATEGREY: c = 0x778899;  break;
+        case LXB_CSS_VALUE_LIGHTSTEELBLUE: c = 0xB0C4DE;  break;
+        case LXB_CSS_VALUE_LIGHTYELLOW: c = 0xFFFFE0;  break;
+        case LXB_CSS_VALUE_LIME: c = 0x00FF00;  break;
+        case LXB_CSS_VALUE_LIMEGREEN: c = 0x32CD32;  break;
+        case LXB_CSS_VALUE_LINEN: c = 0xFAF0E6;  break;
+        case LXB_CSS_VALUE_MAGENTA: c = 0xFF00FF;  break;
+        case LXB_CSS_VALUE_MAROON: c = 0x800000;  break;
+        case LXB_CSS_VALUE_MEDIUMAQUAMARINE: c = 0x66CDAA;  break;
+        case LXB_CSS_VALUE_MEDIUMBLUE: c = 0x0000CD;  break;
+        case LXB_CSS_VALUE_MEDIUMORCHID: c = 0xBA55D3;  break;
+        case LXB_CSS_VALUE_MEDIUMPURPLE: c = 0x9370DB;  break;
+        case LXB_CSS_VALUE_MEDIUMSEAGREEN: c = 0x3CB371;  break;
+        case LXB_CSS_VALUE_MEDIUMSLATEBLUE: c = 0x7B68EE;  break;
+        case LXB_CSS_VALUE_MEDIUMSPRINGGREEN: c = 0x00FA9A;  break;
+        case LXB_CSS_VALUE_MEDIUMTURQUOISE: c = 0x48D1CC;  break;
+        case LXB_CSS_VALUE_MEDIUMVIOLETRED: c = 0xC71585;  break;
+        case LXB_CSS_VALUE_MIDNIGHTBLUE: c = 0x191970;  break;
+        case LXB_CSS_VALUE_MINTCREAM: c = 0xF5FFFA;  break;
+        case LXB_CSS_VALUE_MISTYROSE: c = 0xFFE4E1;  break;
+        case LXB_CSS_VALUE_MOCCASIN: c = 0xFFE4B5;  break;
+        case LXB_CSS_VALUE_NAVAJOWHITE: c = 0xFFDEAD;  break;
+        case LXB_CSS_VALUE_NAVY: c = 0x000080;  break;
+        case LXB_CSS_VALUE_OLDLACE: c = 0xFDF5E6;  break;
+        case LXB_CSS_VALUE_OLIVE: c = 0x808000;  break;
+        case LXB_CSS_VALUE_OLIVEDRAB: c = 0x6B8E23;  break;
+        case LXB_CSS_VALUE_ORANGE: c = 0xFFA500;  break;
+        case LXB_CSS_VALUE_ORANGERED: c = 0xFF4500;  break;
+        case LXB_CSS_VALUE_ORCHID: c = 0xDA70D6;  break;
+        case LXB_CSS_VALUE_PALEGOLDENROD: c = 0xEEE8AA;  break;
+        case LXB_CSS_VALUE_PALEGREEN: c = 0x98FB98;  break;
+        case LXB_CSS_VALUE_PALETURQUOISE: c = 0xAFEEEE;  break;
+        case LXB_CSS_VALUE_PALEVIOLETRED: c = 0xDB7093;  break;
+        case LXB_CSS_VALUE_PAPAYAWHIP: c = 0xFFEFD5;  break;
+        case LXB_CSS_VALUE_PEACHPUFF: c = 0xFFDAB9;  break;
+        case LXB_CSS_VALUE_PERU: c = 0xCD853F;  break;
+        case LXB_CSS_VALUE_PINK: c = 0xFFC0CB;  break;
+        case LXB_CSS_VALUE_PLUM: c = 0xDDA0DD;  break;
+        case LXB_CSS_VALUE_POWDERBLUE: c = 0xB0E0E6;  break;
+        case LXB_CSS_VALUE_PURPLE: c = 0x800080;  break;
+        case LXB_CSS_VALUE_REBECCAPURPLE: c = 0x663399;  break;
+        case LXB_CSS_VALUE_RED: c = 0xFF0000;  break;
+        case LXB_CSS_VALUE_ROSYBROWN: c = 0xBC8F8F;  break;
+        case LXB_CSS_VALUE_ROYALBLUE: c = 0x4169E1;  break;
+        case LXB_CSS_VALUE_SADDLEBROWN: c = 0x8B4513;  break;
+        case LXB_CSS_VALUE_SALMON: c = 0xFA8072;  break;
+        case LXB_CSS_VALUE_SANDYBROWN: c = 0xF4A460;  break;
+        case LXB_CSS_VALUE_SEAGREEN: c = 0x2E8B57;  break;
+        case LXB_CSS_VALUE_SEASHELL: c = 0xFFF5EE;  break;
+        case LXB_CSS_VALUE_SIENNA: c = 0xA0522D;  break;
+        case LXB_CSS_VALUE_SILVER: c = 0xC0C0C0;  break;
+        case LXB_CSS_VALUE_SKYBLUE: c = 0x87CEEB;  break;
+        case LXB_CSS_VALUE_SLATEBLUE: c = 0x6A5ACD;  break;
+        case LXB_CSS_VALUE_SLATEGRAY: c = 0x708090;  break;
+        case LXB_CSS_VALUE_SLATEGREY: c = 0x708090;  break;
+        case LXB_CSS_VALUE_SNOW: c = 0xFFFAFA;  break;
+        case LXB_CSS_VALUE_SPRINGGREEN: c = 0x00FF7F;  break;
+        case LXB_CSS_VALUE_STEELBLUE: c = 0x4682B4;  break;
+        case LXB_CSS_VALUE_TAN: c = 0xD2B48C;  break;
+        case LXB_CSS_VALUE_TEAL: c = 0x008080;  break;
+        case LXB_CSS_VALUE_THISTLE: c = 0xD8BFD8;  break;
+        case LXB_CSS_VALUE_TOMATO: c = 0xFF6347;  break;
+        case LXB_CSS_VALUE_TURQUOISE: c = 0x40E0D0;  break;
+        case LXB_CSS_VALUE_VIOLET: c = 0xEE82EE;  break;
+        case LXB_CSS_VALUE_WHEAT: c = 0xF5DEB3;  break;
+        case LXB_CSS_VALUE_WHITE: c = 0xFFFFFF;  break;
+        case LXB_CSS_VALUE_WHITESMOKE: c = 0xF5F5F5;  break;
+        case LXB_CSS_VALUE_YELLOW: c = 0xFFFF00;  break;
+        case LXB_CSS_VALUE_YELLOWGREEN: c = 0x9ACD32;  break;
+        default: c = 0x000000;  break;
     }
+    return (Color){(c << 8) | 0xFF};
 }
+
+// Color resolve_color_value(const lxb_css_value_color_t *color) {
+//     switch (color->type) {
+//     case LXB_CSS_COLOR_HEX:
+//         const lxb_css_value_color_hex_t *hex = &color->u.hex;
+//         const lxb_css_value_color_hex_rgba_t *rgba = &hex->rgba;
+//         switch (hex->type) {
+//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_3:
+//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_4:
+//                 lexbor_serialize_write(cb, &hmo[rgba->r], 1, ctx, status);
+//                 lexbor_serialize_write(cb, &hmo[rgba->g], 1, ctx, status);
+//                 lexbor_serialize_write(cb, &hmo[rgba->b], 1, ctx, status);
+    
+//                 if (hex->type == LXB_CSS_PROPERTY_COLOR_HEX_TYPE_4) {
+//                     lexbor_serialize_write(cb, &hmo[rgba->a], 1, ctx, status);
+//                 }
+    
+//                 break;
+    
+//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_6:
+//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8:
+//                 lexbor_serialize_write(cb, hmt[rgba->r], 2, ctx, status);
+//                 lexbor_serialize_write(cb, hmt[rgba->g], 2, ctx, status);
+//                 lexbor_serialize_write(cb, hmt[rgba->b], 2, ctx, status);
+    
+//                 if (hex->type == LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8) {
+//                     lexbor_serialize_write(cb, hmt[rgba->a], 2, ctx, status);
+//                 }
+    
+//                 break;
+    
+//             default:
+//                 break;
+//         }
+
+//         case LXB_CSS_COLOR_RGB:
+//         case LXB_CSS_COLOR_RGBA:
+//             return lxb_css_value_color_rgb_sr(&color->u.rgb, cb, ctx,
+//                                               color->type);
+
+//         case LXB_CSS_COLOR_HSL:
+//         case LXB_CSS_COLOR_HSLA:
+//         case LXB_CSS_COLOR_HWB:
+//             return lxb_css_value_color_hsl_sr(&color->u.hsl, cb, ctx,
+//                                               color->type);
+
+//         case LXB_CSS_COLOR_LAB:
+//         case LXB_CSS_COLOR_OKLAB:
+//             return lxb_css_value_color_lab_sr(&color->u.lab, cb, ctx,
+//                                               color->type);
+
+//         case LXB_CSS_COLOR_LCH:
+//         case LXB_CSS_COLOR_OKLCH:
+//             return lxb_css_value_color_lch_sr(&color->u.lch, cb, ctx,
+//                                               color->type);
+
+//         case LXB_CSS_VALUE__UNDEF:
+//             break;
+
+//         default:
+//             return lxb_css_value_serialize(color->type, cb, ctx);
+//     }
+// }
 
 float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_percentage_t *value) {
     float result = 0;
@@ -341,8 +407,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->in_line) {
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         }
-        // black color is 0xFF000000, not 0x000000
-        span->in_line->color.c = color_name_to_rgb(color->type) | 0xFF000000;
+        // black color is 0x000000FF, not 0x00
+        span->in_line->color = color_name_to_rgb(color->type);
         break;
     case LXB_CSS_PROPERTY_BACKGROUND_COLOR:
         const lxb_css_property_background_color_t *background_color = declr->u.background_color;
@@ -353,7 +419,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->background) {
             span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
         }
-        span->bound->background->color.c = color_name_to_rgb(background_color->type);
+        span->bound->background->color = color_name_to_rgb(background_color->type);
         break;
     case LXB_CSS_PROPERTY_MARGIN:
         const lxb_css_property_margin_t *margin = declr->u.margin;
@@ -378,7 +444,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        span->bound->border->color.c = color_name_to_rgb(border->color.type);
+        span->bound->border->color = color_name_to_rgb(border->color.type);
         span->bound->border->width.top = resolve_length_value(lycon, 
             (lxb_css_value_length_percentage_t*)&border->width);
         span->bound->border->width.bottom = span->bound->border->width.left 

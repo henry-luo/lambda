@@ -24,12 +24,12 @@
 // black color is 0xFF000000, not 0x000000
 // 0x0 is reserved for transparent color
 typedef union {
-    Uint32 c;  // 32-bit ARGB color format
+    uint32_t c;  // 32-bit ARGB color format, 
     struct {
-        unsigned char b;
-        unsigned char g;
-        unsigned char r;
-        unsigned char a;
+        uint8_t a;
+        uint8_t b;
+        uint8_t g;
+        uint8_t r;
     };
 } Color;  
 
