@@ -30,6 +30,8 @@ Document* show_html_doc(char* doc_filename) {
 void repaint_window() {
     SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
     // render the texture to the screen
+    assert(ui_context.window_width * ui_context.pixel_ratio == ui_context.surface->w && 
+        ui_context.window_height * ui_context.pixel_ratio == ui_context.surface->h);
     SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
     SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
     SDL_RenderPresent(ui_context.renderer);     
@@ -79,11 +81,14 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
         SDL_Window* win = (SDL_Window*)data;
         if (ui_context.window_width == event->window.data1 && ui_context.window_height == event->window.data2) {
-            printf("No change in size\n");  return 0;
+            printf("No change in size\n");  return 0;  // 0 stops the event from being processed further
         }
         ui_context.window_width = event->window.data1; 
         ui_context.window_height = event->window.data2;
-        strbuf_append_format(wnd_msg_buf, "Window %d resized to %fx%f\n", event->window.windowID, 
+        SDL_Rect viewport = {0, 0, ui_context.window_width * ui_context.pixel_ratio, 
+            ui_context.window_height * ui_context.pixel_ratio};
+        SDL_RenderSetViewport(ui_context.renderer, &viewport);
+        strbuf_append_format(wnd_msg_buf, "Window %d resized to %dx%d\n", event->window.windowID, 
             ui_context.window_width, ui_context.window_height);
         char title[256];
         snprintf(title, sizeof(title), "Window Size: %dx%d", (int)ui_context.window_width, (int)ui_context.window_height);
@@ -95,8 +100,9 @@ static int resizingEventWatcher(void* data, SDL_Event* event) {
             reflow_html_doc(ui_context.document);      
         }
         printf("%s", wnd_msg_buf->s);
+        return 0;  // 0 stops the event from being processed further
     }
-    return 0;
+    return 1;  // 1 means continue processing the event
   }
 
 int ui_context_init(UiContext* uicon, int width, int height) {
@@ -107,7 +113,8 @@ int ui_context_init(UiContext* uicon, int width, int height) {
         printf("SDL_Init failed: %s", SDL_GetError());
         return EXIT_FAILURE;
     }
-    
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0"); // Disable filtering for pixel-perfect scaling
+
     // init FreeType
     if (FT_Init_FreeType(&uicon->ft_library)) {
         fprintf(stderr, "Could not initialize FreeType library\n");
@@ -122,8 +129,10 @@ int ui_context_init(UiContext* uicon, int width, int height) {
 
     uicon->window = SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
         width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    SDL_AddEventWatch(resizingEventWatcher, uicon->window);
+    // switched from SDL_AddEventWatch to SDL_SetEventFilter, to enable consuming of the event
+    SDL_SetEventFilter(resizingEventWatcher, uicon->window);
     uicon->renderer = SDL_CreateRenderer(uicon->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_RenderSetIntegerScale(uicon->renderer, SDL_TRUE);
     // fill the window initially with white color
     SDL_SetRenderDrawColor(uicon->renderer, 255, 255, 255, 255); // white background
     SDL_RenderClear(uicon->renderer);    
