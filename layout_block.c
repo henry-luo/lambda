@@ -76,27 +76,21 @@ SDL_Surface *loadImage(UiContext* uicon, const char *file_path) {
     return surface;
 }
 
-// get image dimensions using SDL_image
-bool get_image_dimensions(LayoutContext* lycon, const char *filename, SDL_Rect *dims) {
-    bool result = false;
-    if (!filename || !dims) { return result; }
+bool image_entry_free(const void *item, void *udata) {
+    ImageEntry* entry = (ImageEntry*)item;
+    free((char*)entry->path);
+    SDL_FreeSurface(entry->image);
+    return true;
+}
 
-    // Load the image
-    printf("Image load: %s\n", filename);
-    SDL_Surface *image = loadImage(lycon->ui_context, filename);
-    if (!image) {
-        printf("IMG_Load Error: %s\n", IMG_GetError());
-        return result;
+void image_cache_cleanup(UiContext* uicon) {
+    // loop through the hashmap and free the images
+    if (uicon->image_cache) {
+        printf("Cleaning up cached images\n");
+        hashmap_scan(uicon->image_cache, image_entry_free, NULL);
+        hashmap_free(uicon->image_cache);
+        uicon->image_cache = NULL;
     }
-    // Get dimensions
-    dims->w = image->w;  dims->h = image->h;
-    printf("Image size: %d x %d\n", dims->w, dims->h);
-    result = true;
-
-    // Cleanup
-    stbi_image_free(image->pixels);
-    SDL_FreeSurface(image);
-    return result;
 }
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display) {

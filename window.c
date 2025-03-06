@@ -10,6 +10,7 @@ View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void view_pool_destroy(ViewTree* tree);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 void fontface_cleanup(UiContext* uicon);
+void image_cache_cleanup(UiContext* uicon);
 
 Document* show_html_doc(char* doc_filename) {
     Document* doc = calloc(1, sizeof(Document));
@@ -150,7 +151,7 @@ void ui_context_cleanup(UiContext* uicon) {
     fontface_cleanup(uicon);  // free font cache
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
-    hashmap_free(uicon->image_cache);  // free image cache
+    image_cache_cleanup(uicon);  // cleanup image cache
     
     tvg_canvas_destroy(uicon->canvas);
     tvg_engine_term(TVG_ENGINE_SW);
