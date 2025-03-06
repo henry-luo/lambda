@@ -244,6 +244,17 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
 }
 
+void render_image_view(RenderContext* rdcon, ViewImage* view) {
+    render_block_view(rdcon, (ViewBlock*)view);
+    // render the image
+    if (view->img) {
+        SDL_Rect rect;
+        rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
+        rect.w = view->width;  rect.h = view->height; 
+        SDL_BlitScaled(view->img, NULL, rdcon->ui_context->surface, &rect);
+    }
+}
+
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     printf("render inline view\n");
@@ -277,6 +288,9 @@ void render_children(RenderContext* rdcon, View* view) {
         }
         else if (view->type == RDT_VIEW_LIST_ITEM) {
             render_litem_view(rdcon, (ViewBlock*)view);
+        }
+        else if (view->type == RDT_VIEW_IMAGE) {
+            render_image_view(rdcon, (ViewImage*)view);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;

@@ -34,14 +34,10 @@ SDL_Surface *loadImage(const char *filePath) {
         printf("Failed to load image: %s\n", filePath);
         return NULL;
     }
-
     SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(
-        data, width, height, 32, width * 4,
-        0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
+        data, width, height, 32, width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
     );
-    if (!surface) {
-        stbi_image_free(data); 
-    }
+    if (!surface) { stbi_image_free(data); }
     return surface;
 }
 
@@ -78,10 +74,13 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   FontBox pa_font = lycon->font;
     lycon->block.width = -1;  lycon->block.height = -1;
 
-    ViewBlock* block = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
+    uintptr_t elmt_name = elmt->element.node.local_name;
+    ViewBlock* block = elmt_name == LXB_TAG_IMG ? 
+        (ViewBlock*)alloc_view(lycon, RDT_VIEW_IMAGE, (lxb_dom_node_t*)elmt) :
+        (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
-    uintptr_t elmt_name = elmt->element.node.local_name;
+    
     switch (elmt_name) {
     case LXB_TAG_CENTER:
         block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
@@ -159,30 +158,33 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     block->x = pa_line.left;  block->y = pa_block.advance_y;
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
-        if (lycon->block.width < 0 || lycon->block.height < 0) {
-            printf("loading image dimensions\n");
-            value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"src", 3, &value_len);
-            if (value && value_len) {
-                StrBuf* src = strbuf_new_cap(value_len);
-                strbuf_append_str_n(src, (const char*)value, value_len);
-                printf("image src: %s\n", src->s);
-                SDL_Rect dims;
-                if (get_image_dimensions(lycon, src->s, &dims)) {
-                    printf("image dims: %d x %d, %f x %f\n", dims.w, dims.h, lycon->block.width, lycon->block.height);
-                    if (lycon->block.width >= 0) {
-                        lycon->block.height = lycon->block.width * dims.h / dims.w;
-                    }
-                    if (lycon->block.height >= 0) {
-                        lycon->block.width = lycon->block.height * dims.w / dims.h;
-                    }
-                    else {
-                        lycon->block.height = dims.h;  lycon->block.width = dims.w;
-                    }
-                }
-                strbuf_free(src);
-                printf("image dimensions: %f x %f\n", lycon->block.width, lycon->block.height);
-            }
+        value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"src", 3, &value_len);
+        ViewImage* image = (ViewImage*)block;
+        if (value && value_len) {
+            StrBuf* src = strbuf_new_cap(value_len);
+            strbuf_append_str_n(src, (const char*)value, value_len);
+            printf("image src: %s\n", src->s);
+            image->img = loadImage(src->s);
+            strbuf_free(src);
         }
+        if (lycon->block.width < 0 || lycon->block.height < 0) {
+            if (image->img) {
+                int w = image->img->w, h = image->img->h;
+                printf("image dims: %d x %d, %f x %f\n", w, h, lycon->block.width, lycon->block.height);
+                if (lycon->block.width >= 0) { // scale unspecified height
+                    lycon->block.height = lycon->block.width * h / w;
+                }
+                if (lycon->block.height >= 0) { // scale unspecified width
+                    lycon->block.width = lycon->block.height * w / h;
+                }
+                else { // both width and height unspecified
+                    lycon->block.width = w;  lycon->block.height = h;
+                }
+            }
+            // todo: use a placeholder
+            printf("image dimensions: %f x %f\n", lycon->block.width, lycon->block.height);
+        }
+        // else width & height both specified
     }
     
     if (block->font) {

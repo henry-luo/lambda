@@ -25,7 +25,8 @@ void target_text_view(EventContext* evcon, ViewText* text);
 
 void target_children(EventContext* evcon, View* view) {
     do {
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM) {
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
+            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
             ViewBlock* block = (ViewBlock*)view;
             printf("target view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
@@ -181,7 +182,8 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
     int stack_size = target_list->length;
     for (int i = 0; i < stack_size; i++) {
         View* view = (View*)target_list->data[i];
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM) {
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
+            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
             fire_block_event(evcon, (ViewBlock*)view);
         } else if (view->type == RDT_VIEW_INLINE) {
             fire_inline_event(evcon, (ViewSpan*)view);

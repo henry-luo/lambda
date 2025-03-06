@@ -41,7 +41,8 @@ typedef enum {
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,
     RDT_VIEW_LIST,
-    RDT_VIEW_LIST_ITEM,    
+    RDT_VIEW_LIST_ITEM,
+    RDT_VIEW_IMAGE, 
     RDT_VIEW_FLEX,
     RDT_VIEW_GRID,
     RDT_VIEW_TABLE,
@@ -136,6 +137,12 @@ typedef struct {
     float x, y, width, height;  // x, y relative to the parent block    
     BlockProp* props;  // block specific style properties
 } ViewBlock;
+
+typedef struct {
+    ViewBlock;  // extends ViewBlock
+    // const char* src;  // image src; should be in URL format
+    SDL_Surface* img;  // image surface
+} ViewImage;
 
 struct ViewTree {
     VariableMemPool *pool;

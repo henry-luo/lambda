@@ -6,9 +6,13 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
-        case RDT_VIEW_BLOCK:
+        case RDT_VIEW_BLOCK:  case RDT_VIEW_LIST:  case RDT_VIEW_LIST_ITEM:
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
             memset(view, 0, sizeof(ViewBlock));
+            break;
+        case RDT_VIEW_IMAGE:
+            err = pool_variable_alloc(tree->pool, sizeof(ViewImage), (void **)&view);
+            memset(view, 0, sizeof(ViewImage));
             break;
         case RDT_VIEW_INLINE:
             err = pool_variable_alloc(tree->pool, sizeof(ViewSpan), (void **)&view);
@@ -147,7 +151,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     if (view) {
         do {
             strbuf_append_char_n(buf, ' ', indent);
-            if (view->type == RDT_VIEW_BLOCK) {
+            if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
+                view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
                 ViewBlock* block = (ViewBlock*)view;
                 strbuf_append_format(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
