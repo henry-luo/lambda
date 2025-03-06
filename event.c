@@ -28,7 +28,7 @@ void target_children(EventContext* evcon, View* view) {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
             view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
             ViewBlock* block = (ViewBlock*)view;
-            printf("target view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+            printf("target view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                 block->x, block->y, block->width, block->height);                
             target_block_view(evcon, block);
@@ -50,7 +50,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
+    printf("text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
     bool has_space = false;   
     for (; p < end; p++) {

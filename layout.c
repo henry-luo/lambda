@@ -344,7 +344,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     lycon->line.advance_x += text->width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face->size->metrics.ascender >> 6);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face->size->metrics.descender) >> 6);
-    printf("text view: x %f, y %f, width %f, height %f\n", text->x, text->y, text->width, text->height);
+    printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
 }
 
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {

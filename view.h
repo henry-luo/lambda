@@ -58,7 +58,7 @@ typedef enum {
 } ViewType;
 
 typedef struct {
-    float font_size;  // font size in pixels, scaled by pixel_ratio
+    int font_size;  // font size in pixels, scaled by pixel_ratio
     PropValue font_style;
     PropValue font_weight;
     PropValue text_deco; // CSS text decoration
@@ -70,7 +70,7 @@ typedef struct {
 } InlineProp;
 
 typedef struct {
-    float top, right, bottom, left;
+    int top, right, bottom, left;
 } Spacing;
 
 typedef struct {
@@ -114,7 +114,7 @@ struct View {
 
 typedef struct {
     View; // extends View
-    float x, y, width, height;  // bounds for the text, x, y relative to the parent block
+    int x, y, width, height;  // bounds for the text, x, y relative to the parent block
     int start_index, length;  // start and length of the text in the style node
 } ViewText;
 
@@ -134,7 +134,7 @@ typedef struct {
 typedef struct {
     ViewSpan;  // extends ViewSpan
     // x, y, width, height forms the content box of the block
-    float x, y, width, height;  // x, y relative to the parent block    
+    int x, y, width, height;  // x, y relative to the parent block    
     BlockProp* props;  // block specific style properties
 } ViewBlock;
 
@@ -151,12 +151,12 @@ struct ViewTree {
 
 typedef struct CursorState {
     View* view;
-    float x, y;
+    int x, y;
 } CursorState;
 
 typedef struct CaretState {
     View* view;
-    float x_offset;
+    int x_offset;
 } CaretState;
 
 typedef struct StateTree {
@@ -173,7 +173,7 @@ typedef struct {
 
 // rendering context structs
 typedef struct {
-    float x, y;  // abs x, y relative to entire canvas/screen
+    int x, y;  // abs x, y relative to entire canvas/screen
 } BlockBlot;
 
 typedef struct {
@@ -184,8 +184,8 @@ typedef struct {
 typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
-    float window_width;    // logical window width
-    float window_height;   // logical window height
+    int window_width;    // logical window width
+    int window_height;   // logical window height
     SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
     SDL_Texture* texture;  // texture for rendering

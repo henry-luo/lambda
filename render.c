@@ -281,7 +281,7 @@ void render_children(RenderContext* rdcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK) {
             ViewBlock* block = (ViewBlock*)view;
-            printf("view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+            printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                 block->x, block->y, block->width, block->height);                
             render_block_view(rdcon, block);

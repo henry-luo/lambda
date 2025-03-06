@@ -47,7 +47,7 @@ void reflow_html_doc(Document* doc) {
         // to render immediately to the screen, otherwise the change will only be rendered when mouse is released
         SDL_Point size;
         SDL_QueryTexture(ui_context.texture, NULL, NULL, &size.x, &size.y);  
-        printf("Repaint window: %f, %f, %d, %d, %d, %d\n", ui_context.window_width, ui_context.window_height, 
+        printf("Repaint window: %d, %d, %d, %d, %d, %d\n", ui_context.window_width, ui_context.window_height, 
             ui_context.surface->w, ui_context.surface->h, size.x, size.y);        
         repaint_window();
     }
