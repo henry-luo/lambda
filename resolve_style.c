@@ -159,68 +159,46 @@ Color color_name_to_rgb(PropValue color_name) {
     return (Color){(c << 8) | 0xFF};
 }
 
-// Color resolve_color_value(const lxb_css_value_color_t *color) {
-//     switch (color->type) {
-//     case LXB_CSS_COLOR_HEX:
-//         const lxb_css_value_color_hex_t *hex = &color->u.hex;
-//         const lxb_css_value_color_hex_rgba_t *rgba = &hex->rgba;
-//         switch (hex->type) {
-//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_3:
-//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_4:
-//                 lexbor_serialize_write(cb, &hmo[rgba->r], 1, ctx, status);
-//                 lexbor_serialize_write(cb, &hmo[rgba->g], 1, ctx, status);
-//                 lexbor_serialize_write(cb, &hmo[rgba->b], 1, ctx, status);
-    
-//                 if (hex->type == LXB_CSS_PROPERTY_COLOR_HEX_TYPE_4) {
-//                     lexbor_serialize_write(cb, &hmo[rgba->a], 1, ctx, status);
-//                 }
-    
-//                 break;
-    
-//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_6:
-//             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8:
-//                 lexbor_serialize_write(cb, hmt[rgba->r], 2, ctx, status);
-//                 lexbor_serialize_write(cb, hmt[rgba->g], 2, ctx, status);
-//                 lexbor_serialize_write(cb, hmt[rgba->b], 2, ctx, status);
-    
-//                 if (hex->type == LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8) {
-//                     lexbor_serialize_write(cb, hmt[rgba->a], 2, ctx, status);
-//                 }
-    
-//                 break;
-    
-//             default:
-//                 break;
-//         }
-
-//         case LXB_CSS_COLOR_RGB:
-//         case LXB_CSS_COLOR_RGBA:
-//             return lxb_css_value_color_rgb_sr(&color->u.rgb, cb, ctx,
-//                                               color->type);
-
-//         case LXB_CSS_COLOR_HSL:
-//         case LXB_CSS_COLOR_HSLA:
-//         case LXB_CSS_COLOR_HWB:
-//             return lxb_css_value_color_hsl_sr(&color->u.hsl, cb, ctx,
-//                                               color->type);
-
-//         case LXB_CSS_COLOR_LAB:
-//         case LXB_CSS_COLOR_OKLAB:
-//             return lxb_css_value_color_lab_sr(&color->u.lab, cb, ctx,
-//                                               color->type);
-
-//         case LXB_CSS_COLOR_LCH:
-//         case LXB_CSS_COLOR_OKLCH:
-//             return lxb_css_value_color_lch_sr(&color->u.lch, cb, ctx,
-//                                               color->type);
-
-//         case LXB_CSS_VALUE__UNDEF:
-//             break;
-
-//         default:
-//             return lxb_css_value_serialize(color->type, cb, ctx);
-//     }
-// }
+Color resolve_color_value(const lxb_css_value_color_t *color) {
+    uint32_t r, g, b, a;  Color c;
+    switch (color->type) {
+    case LXB_CSS_COLOR_HEX:
+        const lxb_css_value_color_hex_t *hex = &color->u.hex;
+        const lxb_css_value_color_hex_rgba_t *rgba = &hex->rgba;
+        switch (hex->type) {
+            case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_4:
+            case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_3:
+                printf("color 3/4 hex: %d, %d, %d, %d\n", rgba->r, rgba->g, rgba->b, rgba->a);
+                r = (rgba->r << 4) | rgba->r;
+                g = (rgba->g << 4) | rgba->g;
+                b = (rgba->b << 4) | rgba->b;
+                a = (rgba->a << 4) | rgba->a;
+                c.c = (r << 24) | (g << 16) | (b << 8) | a;  printf("c: %d\n", c.c);
+                return c;
+            case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8:
+            case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_6:
+                printf("color 6 hex: %d, %d, %d\n", rgba->r, rgba->g, rgba->b);
+                r = rgba->r;  g = rgba->g;  b = rgba->b;  a = rgba->a;
+                c.c = (r << 24) | (g << 16) | (b << 8) | a;  printf("c: %d\n", c.c);
+                return c;
+        }
+        break;
+        // case LXB_CSS_COLOR_RGB:
+        // case LXB_CSS_COLOR_RGBA:
+        // case LXB_CSS_COLOR_HSL:
+        // case LXB_CSS_COLOR_HSLA:
+        // case LXB_CSS_COLOR_HWB:
+        // case LXB_CSS_COLOR_LAB:
+        // case LXB_CSS_COLOR_OKLAB:
+        // case LXB_CSS_COLOR_LCH:
+        // case LXB_CSS_COLOR_OKLCH:
+        // case LXB_CSS_VALUE__UNDEF:
+        //     break;
+    default:
+        return color_name_to_rgb(color->type);
+    }
+    return (Color){0};
+}
 
 float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_percentage_t *value) {
     float result = 0;
@@ -408,7 +386,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         }
         // black color is 0x000000FF, not 0x00
-        span->in_line->color = color_name_to_rgb(color->type);
+        span->in_line->color = resolve_color_value(color);
         break;
     case LXB_CSS_PROPERTY_BACKGROUND_COLOR:
         const lxb_css_property_background_color_t *background_color = declr->u.background_color;
@@ -419,7 +397,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->background) {
             span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
         }
-        span->bound->background->color = color_name_to_rgb(background_color->type);
+        span->bound->background->color = resolve_color_value(background_color);
         break;
     case LXB_CSS_PROPERTY_MARGIN:
         const lxb_css_property_margin_t *margin = declr->u.margin;
@@ -444,7 +422,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        span->bound->border->color = color_name_to_rgb(border->color.type);
+        span->bound->border->color = resolve_color_value(&border->color);
         span->bound->border->width.top = resolve_length_value(lycon, 
             (lxb_css_value_length_percentage_t*)&border->width);
         span->bound->border->width.bottom = span->bound->border->width.left 

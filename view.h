@@ -21,8 +21,6 @@
 #define LXB_CSS_VALUE_LOWER_ALPHA   (LXB_CSS_VALUE__LAST_ENTRY + 18)
 #define LXB_CSS_VALUE_UPPER_ALPHA   (LXB_CSS_VALUE__LAST_ENTRY + 19)
 
-// black color is 0xFF000000, not 0x000000
-// 0x0 is reserved for transparent color
 typedef union {
     uint32_t c;  // 32-bit ARGB color format, 
     struct {
