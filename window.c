@@ -27,15 +27,12 @@ Document* show_html_doc(char* doc_filename) {
     return doc;
 }
 
-void paint_window() {
-    SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
-    SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
-    SDL_RenderPresent(ui_context.renderer);  
-}
-
 void repaint_window() {
     SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
-    paint_window();
+    // render the texture to the screen
+    SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
+    SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
+    SDL_RenderPresent(ui_context.renderer);     
 }
 
 void reflow_html_doc(Document* doc) {
@@ -48,6 +45,10 @@ void reflow_html_doc(Document* doc) {
     if (doc->view_tree->root) {
         render_html_doc(&ui_context, doc->view_tree->root);
         // to render immediately to the screen, otherwise the change will only be rendered when mouse is released
+        SDL_Point size;
+        SDL_QueryTexture(ui_context.texture, NULL, NULL, &size.x, &size.y);  
+        printf("Repaint window: %f, %f, %d, %d, %d, %d\n", ui_context.window_width, ui_context.window_height, 
+            ui_context.surface->w, ui_context.surface->h, size.x, size.y);        
         repaint_window();
     }
 }
@@ -73,25 +74,34 @@ void ui_context_create_surface(UiContext* uicon, int width, int height) {
     }
 }
 
+StrBuf* wnd_msg_buf;
 static int resizingEventWatcher(void* data, SDL_Event* event) {
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
         SDL_Window* win = (SDL_Window*)data;
+        if (ui_context.window_width == event->window.data1 && ui_context.window_height == event->window.data2) {
+            printf("No change in size\n");  return 0;
+        }
         ui_context.window_width = event->window.data1; 
         ui_context.window_height = event->window.data2;
-        printf("Window %d resized to %fx%f\n", event->window.windowID,  
+        strbuf_append_format(wnd_msg_buf, "Window %d resized to %fx%f\n", event->window.windowID, 
             ui_context.window_width, ui_context.window_height);
+        char title[256];
+        snprintf(title, sizeof(title), "Window Size: %dx%d", (int)ui_context.window_width, (int)ui_context.window_height);
+        SDL_SetWindowTitle(ui_context.window, title);            
         // resize the surface
         ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
         // reflow the document
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);      
-        }   
+        }
+        printf("%s", wnd_msg_buf->s);
     }
     return 0;
   }
 
 int ui_context_init(UiContext* uicon, int width, int height) {
     memset(uicon, 0, sizeof(UiContext));
+    wnd_msg_buf = strbuf_new(256);
     // init SDL
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         printf("SDL_Init failed: %s", SDL_GetError());
@@ -113,7 +123,10 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     uicon->window = SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
         width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_AddEventWatch(resizingEventWatcher, uicon->window);
-    uicon->renderer = SDL_CreateRenderer(uicon->window, -1, SDL_RENDERER_ACCELERATED);
+    uicon->renderer = SDL_CreateRenderer(uicon->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    // fill the window initially with white color
+    SDL_SetRenderDrawColor(uicon->renderer, 255, 255, 255, 255); // white background
+    SDL_RenderClear(uicon->renderer);    
 
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
@@ -168,11 +181,12 @@ void ui_context_cleanup(UiContext* uicon) {
 
 int main(int argc, char *argv[]) {
     ui_context_init(&ui_context, 400, 600);
-    SDL_RenderClear(ui_context.renderer);
 
     ui_context.document = show_html_doc("test/sample.html");
 
     bool running = true;
+    uint32_t frameStart = SDL_GetTicks();
+    uint32_t frameDelay = 1000 / 60;  // 60 fps
     SDL_Event event;
     while (running) {
         while (SDL_PollEvent(&event)) {  // handles events
@@ -196,7 +210,10 @@ int main(int argc, char *argv[]) {
                 }
                 else if (event.window.event == SDL_WINDOWEVENT_MOVED) {
                     printf("Window is being dragged.\n");
-                }      
+                }   
+                else if (event.window.event == SDL_WINDOWEVENT_EXPOSED) {
+                    SDL_RenderPresent(ui_context.renderer);  // refresh the screen
+                }   
                 break;
             case SDL_MOUSEMOTION:
                 printf("Mouse moved to (%d, %d)\n", event.motion.x, event.motion.y);
@@ -225,8 +242,15 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        // render the texture to the screen
-        repaint_window();
+        // repaint with a given frame rate
+        uint32_t frameTime = SDL_GetTicks();
+        if (frameTime - frameStart < frameDelay) {
+            SDL_Delay(frameDelay - (frameTime - frameStart));
+        } else {
+            frameStart = frameTime;
+            // render the texture to the screen
+            repaint_window();
+        }
     }
     
     ui_context_cleanup(&ui_context);

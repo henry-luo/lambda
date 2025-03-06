@@ -42,8 +42,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n", 
-        str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
+    // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n", 
+    //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
     bool has_space = false;
     for (; p < end; p++) {
         // printf("draw character '%c'\n", *p);
@@ -69,8 +69,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             }
             // draw the glyph to the image buffer
             int ascend = rdcon->font.face->size->metrics.ascender >> 6;
-            printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
-                y + ascend - rdcon->font.face->glyph->bitmap_top, ascend, rdcon->font.face->glyph->bitmap_top);
+            // printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
+            //     y + ascend - rdcon->font.face->glyph->bitmap_top, ascend, rdcon->font.face->glyph->bitmap_top);
             draw_glyph(rdcon, &rdcon->font.face->glyph->bitmap, x + rdcon->font.face->glyph->bitmap_left, 
                 y + ascend - rdcon->font.face->glyph->bitmap_top);
             // advance to the next position
@@ -369,11 +369,11 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     // save the modified surface to a PNG file
     // save_surface_to_png(rdcon.ui_context->surface, "output.png");
     // stb_image_write very slow, so still have to use SDL_image to write image
-    if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
-        fprintf(stderr, "Failed to save the surface to a PNG file\n");
-    } else {
-        printf("Rendered to output.png\n");
-    }
+    // if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
+    //     fprintf(stderr, "Failed to save the surface to a PNG file\n");
+    // } else {
+    //     printf("Rendered to output.png\n");
+    // }
 
     render_clean_up(&rdcon);
 }
