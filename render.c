@@ -1,5 +1,7 @@
 
 #include "render.h"
+// #define STB_IMAGE_WRITE_IMPLEMENTATION
+// #include "lib/stb_image_write.h"
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -26,7 +28,7 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                     p[3] = p[3] * v / 255;                    
                 }
                 else { // non-black text color
-                    p[0] = 0x00;  // alpha channel
+                    p[0] = 0xFF;  // alpha channel
                     p[1] = (p[1] * v + rdcon->color.b * intensity) / 255;  
                     p[2] = (p[2] * v + rdcon->color.g * intensity) / 255;
                     p[3] = (p[3] * v + rdcon->color.r * intensity) / 255;
@@ -334,6 +336,16 @@ void render_clean_up(RenderContext* rdcon) {
     }
 }
 
+// void save_surface_to_png(SDL_Surface* surface, const char* filename) {
+//     int width = surface->w, height = surface->h;
+//     int channels = surface->format->BytesPerPixel;
+//     if (stbi_write_png(filename, width, height, channels, surface->pixels, width * channels)) {
+//         printf("Successfully saved PNG: %s\n", filename);
+//     } else {
+//         printf("Error: Failed to save PNG\n");
+//     }
+// }
+
 void render_html_doc(UiContext* uicon, View* root_view) {
     RenderContext rdcon;
     printf("Render HTML doc\n");
@@ -355,10 +367,13 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     // tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
-    // if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
-    //     fprintf(stderr, "Failed to save the surface to a PNG file\n");
-    // }    
-    printf("Rendered to output.png\n");
+    // save_surface_to_png(rdcon.ui_context->surface, "output.png");
+    // stb_image_write very slow, so still have to use SDL_image to write image
+    if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
+        fprintf(stderr, "Failed to save the surface to a PNG file\n");
+    } else {
+        printf("Rendered to output.png\n");
+    }
 
     render_clean_up(&rdcon);
 }

@@ -64,10 +64,10 @@
             "link": "static"
         },
         {
-            "_name_obsolete": "SDL2_image",
-            "_include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
-            "_lib": "/opt/homebrew/opt/sdl2_image/lib",
-            "_link": "dynamic"
+            "name": "SDL2_image",
+            "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
+            "lib": "/opt/homebrew/opt/sdl2_image/lib/",
+            "link": "dynamic"
         },
         {
             "name": "ThorVG",
