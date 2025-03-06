@@ -112,7 +112,8 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     uicon->window = SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
         width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     SDL_AddEventWatch(resizingEventWatcher, uicon->window);
-    uicon->renderer = SDL_CreateRenderer(uicon->window, -1, SDL_RENDERER_ACCELERATED);   
+    uicon->renderer = SDL_CreateRenderer(uicon->window, -1, SDL_RENDERER_ACCELERATED);
+
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
     SDL_GetWindowSize(uicon->window, &logical_w, &logical_h);       // Logical size
@@ -121,8 +122,6 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     float scale_x = (float)pixel_w / logical_w;
     float scale_y = (float)pixel_h / logical_h;
     printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
-    // Scale rendering
-    // SDL_RenderSetScale(renderer, scale_x, scale_y);
     uicon->pixel_ratio = scale_x;
     default_font_prop.font_size = 16 * uicon->pixel_ratio;
 
@@ -130,7 +129,7 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     tvg_engine_init(TVG_ENGINE_SW, 1);    
     uicon->canvas = tvg_swcanvas_create();
 
-    // creates the surface for rendering, 32-bits per pixel, RGBA format
+    // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
     return EXIT_SUCCESS; 
 }
@@ -148,10 +147,11 @@ void ui_context_cleanup(UiContext* uicon) {
         free(uicon->document);
     }
     printf("Cleaning up fonts\n");
-    fontface_cleanup(uicon);
+    fontface_cleanup(uicon);  // free font cache
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
-
+    hashmap_free(uicon->image_cache);  // free image cache
+    
     tvg_canvas_destroy(uicon->canvas);
     tvg_engine_term(TVG_ENGINE_SW);
     SDL_FreeSurface(uicon->surface);
@@ -226,7 +226,6 @@ int main(int argc, char *argv[]) {
 
         // render the texture to the screen
         repaint_window();
-        // SDL_Delay(300);  // Pause for 300ms after each rendering
     }
     
     ui_context_cleanup(&ui_context);

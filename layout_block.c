@@ -27,17 +27,52 @@ int strToInt(const char* str, int len) {
     return sign * result;
 }
 
-SDL_Surface *loadImage(const char *filePath) {
+typedef struct ImageEntry {
+    const char* path;  // todo: change to URL
+    SDL_Surface *image;
+} ImageEntry;
+
+int image_compare(const void *a, const void *b, void *udata) {
+    const ImageEntry *fa = a;
+    const ImageEntry *fb = b;
+    return strcmp(fa->path, fb->path);
+}
+
+uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const ImageEntry *image = item;
+    // xxhash3 is a fast hash function
+    return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
+}
+
+SDL_Surface *loadImage(UiContext* uicon, const char *file_path) {
+    if (uicon->image_cache == NULL) {
+        // create a new hash map. 2nd argument is the initial capacity. 
+        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
+        uicon->image_cache = hashmap_new(sizeof(ImageEntry), 10, 0, 0, 
+            image_hash, image_compare, NULL, NULL);
+    }
+    ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &(ImageEntry){.path = file_path});
+    if (entry) {
+        printf("Image loaded from cache: %s\n", file_path);
+        return entry->image;
+    }
+    else {
+        printf("Image not found in cache: %s\n", file_path);
+    }
     int width, height, channels;
-    unsigned char *data = stbi_load(filePath, &width, &height, &channels, 4);
+    unsigned char *data = stbi_load(file_path, &width, &height, &channels, 4);
     if (!data) {
-        printf("Failed to load image: %s\n", filePath);
+        printf("Failed to load image: %s\n", file_path);
         return NULL;
     }
     SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(
         data, width, height, 32, width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
     );
     if (!surface) { stbi_image_free(data); }
+
+    // copy the font name
+    char* path = (char*)malloc(strlen(file_path) + 1);  strcpy(path, file_path);
+    hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
     return surface;
 }
 
@@ -48,7 +83,7 @@ bool get_image_dimensions(LayoutContext* lycon, const char *filename, SDL_Rect *
 
     // Load the image
     printf("Image load: %s\n", filename);
-    SDL_Surface *image = loadImage(filename);
+    SDL_Surface *image = loadImage(lycon->ui_context, filename);
     if (!image) {
         printf("IMG_Load Error: %s\n", IMG_GetError());
         return result;
@@ -164,7 +199,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);
             printf("image src: %s\n", src->s);
-            image->img = loadImage(src->s);
+            image->img = loadImage(lycon->ui_context, src->s);
             strbuf_free(src);
         }
         if (lycon->block.width < 0 || lycon->block.height < 0) {

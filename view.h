@@ -193,7 +193,10 @@ typedef struct {
     // font handling
     FcConfig *font_config;
     FT_Library ft_library;
-    struct hashmap* fontface_map;  // font faces loaded
+    struct hashmap* fontface_map;  // cache of font faces loaded
+
+    // image cache
+    struct hashmap* image_cache;  // cache for images loaded
 
     float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
     Document* document;     // current document
