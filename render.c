@@ -5,31 +5,31 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 
-// Function to draw a glyph bitmap into the image buffer
+// draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     SDL_Surface* surface = rdcon->ui_context->surface;
-    for (uint32_t i = 0; i < bitmap->rows; i++) {
-        uint32_t* row_pixels = ((uint32_t*)surface->pixels) + (y + i) * surface->pitch / 4;
-        for (uint32_t j = 0; j < bitmap->width; j++) {
+    for (int i = 0; i < (int)bitmap->rows; i++) {
+        if (y + i < 0 || y + i >= surface->h) continue;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
+        for (int j = 0; j < (int)bitmap->width; j++) {
+            if (x + j < 0 || x + j >= surface->w) continue;
             uint32_t intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0) {
-                // todo: clip the pixel, if (0 <= x && x < WIDTH && 0 <= y && y < HEIGHT)
-
                 // blend the pixel with the background
-                uint8_t* p = (uint8_t*)(row_pixels + (x + j));
+                uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
                 // important to use 32bit int for computation below
                 uint32_t v = 255 - intensity;  
-                if (rdcon->color.c) { // non-black text color
+                if (rdcon->color.c == 0xFF) { // black text color
+                    p[0] = 0xFF;
+                    p[1] = p[1] * v / 255;  
+                    p[2] = p[2] * v / 255;
+                    p[3] = p[3] * v / 255;                    
+                }
+                else { // non-black text color
                     p[0] = 0x00;  // alpha channel
                     p[1] = (p[1] * v + rdcon->color.b * intensity) / 255;  
                     p[2] = (p[2] * v + rdcon->color.g * intensity) / 255;
                     p[3] = (p[3] * v + rdcon->color.r * intensity) / 255;
-                }
-                else { // black text color
-                    p[0] = 0xFF;
-                    p[1] = p[1] * v / 255;  
-                    p[2] = p[2] * v / 255;
-                    p[3] = p[3] * v / 255;
                 }
             }
         }
@@ -40,15 +40,15 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, blk_x:%f\n", 
-        str, text->start_index, text->length, text->x, text->y, text->width, text->height, rdcon->block.x);
+    printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n", 
+        str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
     bool has_space = false;
     for (; p < end; p++) {
         // printf("draw character '%c'\n", *p);
         if (is_space(*p)) { 
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
-            printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
+            // printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
             x += rdcon->font.space_width;
         }
         else {
@@ -67,8 +67,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             }
             // draw the glyph to the image buffer
             int ascend = rdcon->font.face->size->metrics.ascender >> 6;
-            // printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
-            //     y + ascend - rdcon->font.face->glyph->bitmap_top, ascend, rdcon->font.face->glyph->bitmap_top);
+            printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
+                y + ascend - rdcon->font.face->glyph->bitmap_top, ascend, rdcon->font.face->glyph->bitmap_top);
             draw_glyph(rdcon, &rdcon->font.face->glyph->bitmap, x + rdcon->font.face->glyph->bitmap_left, 
                 y + ascend - rdcon->font.face->glyph->bitmap_top);
             // advance to the next position
@@ -245,6 +245,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
 }
 
 void render_image_view(RenderContext* rdcon, ViewImage* view) {
+    printf("render image view\n");
     render_block_view(rdcon, (ViewBlock*)view);
     // render the image
     if (view->img) {
@@ -354,9 +355,9 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     // tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
-    if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
-        fprintf(stderr, "Failed to save the surface to a PNG file\n");
-    }    
+    // if (IMG_SavePNG(rdcon.ui_context->surface, "output.png") != 0) {
+    //     fprintf(stderr, "Failed to save the surface to a PNG file\n");
+    // }    
     printf("Rendered to output.png\n");
 
     render_clean_up(&rdcon);

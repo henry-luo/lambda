@@ -96,13 +96,6 @@ int ui_context_init(UiContext* uicon, int width, int height) {
         printf("SDL_Init failed: %s", SDL_GetError());
         return EXIT_FAILURE;
     }
-    // init SDL_image
-    // int flags = IMG_INIT_JPG | IMG_INIT_PNG;
-    // if ((IMG_Init(flags) & flags) != flags) {
-    //     printf("IMG_Init failed: %s", IMG_GetError());
-    //     SDL_Quit();
-    //     return EXIT_FAILURE;
-    // }
     
     // init FreeType
     if (FT_Init_FreeType(&uicon->ft_library)) {
@@ -169,7 +162,6 @@ void ui_context_cleanup(UiContext* uicon) {
         SDL_FreeCursor(uicon->mouse_state.sdl_cursor);
     }
     SDL_DestroyWindow(uicon->window);
-    IMG_Quit();
     SDL_Quit();
 }
 
