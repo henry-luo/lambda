@@ -69,6 +69,7 @@ void reflow_html_doc(Document* doc) {
 }
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
+    pixel_width = 2048;  pixel_height = 1536;
     // re-create the surface
     if (uicon->surface) SDL_DestroySurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
@@ -181,10 +182,18 @@ void gl_render() {
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, gl_texture);
     glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f, -1.0f); // Bottom-left
-        glTexCoord2f(1.0f, 1.0f); glVertex2f(1.0f, -1.0f);  // Bottom-right
-        glTexCoord2f(1.0f, 0.0f); glVertex2f(1.0f, 1.0f);   // Top-right
-        glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, 1.0f);  // Top-left
+        // glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f, -1.0f); // Bottom-left
+        // glTexCoord2f(1.0f, 1.0f); glVertex2f(1.0f, -1.0f);  // Bottom-right
+        // glTexCoord2f(1.0f, 0.0f); glVertex2f(1.0f, 1.0f);   // Top-right
+        // glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, 1.0f);  // Top-left
+		int w, h;
+        SDL_GetWindowSize(ui_context.window, &w, &h);
+        float x_percent = w / 2048.0, y_percent = h / 1536.0;
+        // the order of the vertices is important
+        glTexCoord2f(0.0f, y_percent); glVertex2f(-1.0f, -1.0f); // Bottom-left
+        glTexCoord2f(x_percent, y_percent); glVertex2f(1.0f, -1.0f);  // Bottom-right
+        glTexCoord2f(x_percent, 0.0f); glVertex2f(1.0f, 1.0f);   // Top-right
+        glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, 1.0f);  // Top-left 
     glEnd();
     glDisable(GL_TEXTURE_2D);
 
@@ -255,7 +264,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         if (w != ui_context.window_width || h != ui_context.window_height) {
             ui_context.window_width = w;  ui_context.window_height = h;
             // resize the surface
-            ui_context_create_surface(&ui_context, w, h);
+            // ui_context_create_surface(&ui_context, w, h);
             // reflow the document
             if (ui_context.document) {
                 reflow_html_doc(ui_context.document);   
@@ -265,7 +274,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         gl_render();
 		state->redraw = false;
 	}
-	SDL_Delay(5);  // 5ms delay
+    else {
+        // 1ms delay
+        SDL_Delay(1);  // Note: longer delay like 5ms, could cause more flickering when resizing
+    }
 	return SDL_APP_CONTINUE;
 }
 
