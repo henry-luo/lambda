@@ -103,7 +103,7 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     }
 
     state->window = uicon->window = SDL_CreateWindow("SDL2 Window", 
-        width, height, SDL_WINDOW_RESIZABLE);
+        width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     state->renderer = uicon->renderer = SDL_CreateRenderer(state->window, NULL);
 
     // get logical and actual pixel ratio
@@ -179,9 +179,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     state->iterations++;
 
     // Render
-    SDL_SetRenderDrawColor(state->renderer, 0, 100, 0, 255);
-    SDL_RenderClear(state->renderer);
-    
+    // SDL_SetRenderDrawColor(state->renderer, 0, 100, 0, 255);
+    // SDL_RenderClear(state->renderer);
+
     // SDL_RenderPresent(state->renderer);
 
     repaint_window();
