@@ -162,7 +162,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     AppState *state = (AppState *)malloc(sizeof(AppState));
     *appstate = state;  state->iterations = 0;
     ui_context_init(state, &ui_context, 400, 600);
-
+    ui_context.document = show_html_doc("test/sample.html");
     return state->window && state->renderer ? SDL_APP_CONTINUE : SDL_APP_FAILURE;
 }
 
@@ -181,7 +181,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // Render
     SDL_SetRenderDrawColor(state->renderer, 0, 100, 0, 255);
     SDL_RenderClear(state->renderer);
-    SDL_RenderPresent(state->renderer);
+    
+    // SDL_RenderPresent(state->renderer);
+
+    repaint_window();
 
     return SDL_APP_CONTINUE;
 }

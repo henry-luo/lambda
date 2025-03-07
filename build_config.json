@@ -1,5 +1,5 @@
 {
-    "output": "window",
+    "output": "window3",
     "source_files": [
         "window3.c",
         "parse_html.c",
