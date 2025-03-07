@@ -94,7 +94,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
         rect.w = text->width;  rect.h = thinkness;
         printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, rect.x, rect.y, rect.w, rect.h);
-        SDL_FillRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     printf("end of text view\n");
 }
@@ -158,7 +158,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         rect.x = rdcon->block.x + list_item->x - 15 * ratio;  
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
         rect.w = rect.h = 5 * ratio;
-        SDL_FillRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
         printf("render list decimal\n");
@@ -201,21 +201,21 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.w = view->width;  rect.h = view->height;
     if (view->bound->background) {
-        SDL_FillRect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
     }
     if (view->bound->border) {
         SDL_Rect border_rect = rect;
         border_rect.w = view->bound->border->width.left;
-        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect.x = rect.x + rect.w - view->bound->border->width.right;
         border_rect.w = view->bound->border->width.right;
-        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect = rect;
         border_rect.h = view->bound->border->width.top;
-        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect.y = rect.y + rect.h - view->bound->border->width.bottom;
         border_rect.h = view->bound->border->width.bottom;
-        SDL_FillRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
     }
 }
 
@@ -254,7 +254,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
         SDL_Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.w = view->width;  rect.h = view->height; 
-        SDL_BlitScaled(view->img, NULL, rdcon->ui_context->surface, &rect);
+        SDL_BlitSurfaceScaled(view->img, NULL, rdcon->ui_context->surface, &rect, SDL_SCALEMODE_LINEAR);
     }
 }
 
@@ -352,7 +352,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     render_init(&rdcon, uicon);
 
     // fill the surface with a white background
-    SDL_FillRect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF);
+    SDL_FillSurfaceRect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF);
 
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");

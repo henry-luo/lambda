@@ -23,6 +23,8 @@
         "stdio.h": "c",
         "html.h": "c",
         "__locale": "c",
-        "stb_image_write.h": "c"
+        "stb_image_write.h": "c",
+        "queue": "c",
+        "stack": "c"
     }
 }

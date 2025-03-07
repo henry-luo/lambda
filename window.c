@@ -30,11 +30,17 @@ Document* show_html_doc(char* doc_filename) {
 void repaint_window() {
     SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
     // render the texture to the screen
-    assert(ui_context.window_width * ui_context.pixel_ratio == ui_context.surface->w && 
-        ui_context.window_height * ui_context.pixel_ratio == ui_context.surface->h);
+    assert(ui_context.window_width == ui_context.surface->w && ui_context.window_height == ui_context.surface->h);
+
+    int logical_w, logical_h, pixel_w, pixel_h;
+    SDL_GetWindowSize(ui_context.window, &logical_w, &logical_h);       // Logical size
+    SDL_GetRendererOutputSize(ui_context.renderer, &pixel_w, &pixel_h); // Actual clear pixel size
+
     SDL_Rect rect = {0, 0, ui_context.surface->w, ui_context.surface->h}; 
-    SDL_RenderCopy(ui_context.renderer, ui_context.texture, NULL, &rect);
-    SDL_RenderPresent(ui_context.renderer);     
+    printf("Repainting window: %dx%d, logic: %dx%d, actual: %dx%d\n", 
+        ui_context.window_width, ui_context.window_height, logical_w, logical_h, pixel_w, pixel_h);
+    SDL_RenderCopy(ui_context.renderer, ui_context.texture, &rect, &rect);
+    SDL_RenderPresent(ui_context.renderer);
 }
 
 void reflow_html_doc(Document* doc) {
@@ -46,31 +52,26 @@ void reflow_html_doc(Document* doc) {
     // render html doc
     if (doc->view_tree->root) {
         render_html_doc(&ui_context, doc->view_tree->root);
-        // to render immediately to the screen, otherwise the change will only be rendered when mouse is released
-        SDL_Point size;
-        SDL_QueryTexture(ui_context.texture, NULL, NULL, &size.x, &size.y);  
-        printf("Repaint window: %d, %d, %d, %d, %d, %d\n", ui_context.window_width, ui_context.window_height, 
-            ui_context.surface->w, ui_context.surface->h, size.x, size.y);        
-        repaint_window();
     }
 }
 
-void ui_context_create_surface(UiContext* uicon, int width, int height) {
+void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     // re-create the surface
     if (uicon->surface) SDL_FreeSurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
     // SDL_PIXELFORMAT_RGBA8888 pack order is SDL_PACKEDORDER_RGBA, high bit -> low bit
     uicon->surface = SDL_CreateRGBSurfaceWithFormat(0, 
-        width * uicon->pixel_ratio, height * uicon->pixel_ratio, 32, SDL_PIXELFORMAT_RGBA8888);
+        pixel_width, pixel_height, 32, SDL_PIXELFORMAT_RGBA8888);
     tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
-        width * uicon->pixel_ratio, width * uicon->pixel_ratio, height * uicon->pixel_ratio, TVG_COLORSPACE_ABGR8888);
+        pixel_width, pixel_width, pixel_height, TVG_COLORSPACE_ABGR8888);
         
     // re-create the texture
     if (uicon->texture) SDL_DestroyTexture(uicon->texture);
     // don't know why SDL_CreateTextureFromSurface failed to create the texture following the same pixel format as the surface
     // have to manually create the texture with explicit pixel format
     // uicon->texture = SDL_CreateTextureFromSurface(uicon->renderer, uicon->surface); 
-    uicon->texture = SDL_CreateTexture(uicon->renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
+    uicon->texture = SDL_CreateTexture(uicon->renderer, SDL_PIXELFORMAT_RGBA8888, 
+        SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
     if (uicon->texture == NULL) {
         printf("Error creating texture: %s\n", SDL_GetError());
     }
@@ -78,31 +79,49 @@ void ui_context_create_surface(UiContext* uicon, int width, int height) {
 
 StrBuf* wnd_msg_buf;
 static int resizingEventWatcher(void* data, SDL_Event* event) {
-    if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_RESIZED) {
+    if (event->type == SDL_WINDOWEVENT && (event->window.event == SDL_WINDOWEVENT_RESIZED || 
+        event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED)) {
         SDL_Window* win = (SDL_Window*)data;
-        if (ui_context.window_width == event->window.data1 && ui_context.window_height == event->window.data2) {
-            printf("No change in size\n");  return 0;  // 0 stops the event from being processed further
+        if (ui_context.window_width == event->window.data1 * ui_context.pixel_ratio && 
+            ui_context.window_height == event->window.data2 * ui_context.pixel_ratio) {
+            printf("No change in size\n");  return 0;  // consumes the event
         }
-        ui_context.window_width = event->window.data1; 
-        ui_context.window_height = event->window.data2;
-        SDL_Rect viewport = {0, 0, ui_context.window_width * ui_context.pixel_ratio, 
-            ui_context.window_height * ui_context.pixel_ratio};
-        SDL_RenderSetViewport(ui_context.renderer, &viewport);
+        // just update ui_context.window size here and let the main loop to handle the rest
+        ui_context.window_width = event->window.data1 * ui_context.pixel_ratio; 
+        ui_context.window_height = event->window.data2 * ui_context.pixel_ratio;
+
+        // SDL_Renderer needs to be destroyed and recreated on window resize 
+        SDL_DestroyRenderer(ui_context.renderer);
+        SDL_SetWindowSize(ui_context.window, event->window.data1, event->window.data2);
+        ui_context.renderer = SDL_CreateRenderer(ui_context.window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+        SDL_RenderSetIntegerScale(ui_context.renderer, SDL_TRUE);
+        // fill the window initially with white color
+        SDL_SetRenderDrawColor(ui_context.renderer, 255, 255, 255, 255); // white background
+        SDL_RenderClear(ui_context.renderer);
+        // SDL_Rect viewport = {0, 0, ui_context.window_width, ui_context.window_height};
+        // SDL_RenderSetLogicalSize(ui_context.renderer, event->window.data1, event->window.data2);
+        // SDL_RenderSetViewport(ui_context.renderer, &viewport);
+
         strbuf_append_format(wnd_msg_buf, "Window %d resized to %dx%d\n", event->window.windowID, 
             ui_context.window_width, ui_context.window_height);
         char title[256];
         snprintf(title, sizeof(title), "Window Size: %dx%d", (int)ui_context.window_width, (int)ui_context.window_height);
-        SDL_SetWindowTitle(ui_context.window, title);            
+        SDL_SetWindowTitle(ui_context.window, title);
+
         // resize the surface
         ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
         // reflow the document
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);      
         }
-        printf("%s", wnd_msg_buf->s);
-        return 0;  // 0 stops the event from being processed further
+        // render the texture to the screen
+        repaint_window(); 
+
+        // printf("%s", wnd_msg_buf->s);
+        // return event->window.event == SDL_WINDOWEVENT_SIZE_CHANGED ? 1 : 0;
+        return 0;  // consume the event
     }
-    return 1;  // 1 means continue processing the event
+    return 1;  // continue to process the event
   }
 
 int ui_context_init(UiContext* uicon, int width, int height) {
@@ -129,7 +148,7 @@ int ui_context_init(UiContext* uicon, int width, int height) {
 
     uicon->window = SDL_CreateWindow("SDL2 Window", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
         width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    // switched from SDL_AddEventWatch to SDL_SetEventFilter, to enable consuming of the event
+    // switched from SDL_AddEventWatch to SDL_SetEventFilter for event handling
     SDL_SetEventFilter(resizingEventWatcher, uicon->window);
     uicon->renderer = SDL_CreateRenderer(uicon->window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     SDL_RenderSetIntegerScale(uicon->renderer, SDL_TRUE);
@@ -140,12 +159,12 @@ int ui_context_init(UiContext* uicon, int width, int height) {
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
     SDL_GetWindowSize(uicon->window, &logical_w, &logical_h);       // Logical size
-    uicon->window_width = logical_w;  uicon->window_height = logical_h;
-    SDL_GetRendererOutputSize(uicon->renderer, &pixel_w, &pixel_h); // Actualclear pixel size
+    SDL_GetRendererOutputSize(uicon->renderer, &pixel_w, &pixel_h); // Actual clear pixel size
     float scale_x = (float)pixel_w / logical_w;
     float scale_y = (float)pixel_h / logical_h;
     printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
-    uicon->pixel_ratio = scale_x;
+    uicon->pixel_ratio = scale_x;   
+    uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
     default_font_prop.font_size = 16 * uicon->pixel_ratio;
 
     // init ThorVG engine

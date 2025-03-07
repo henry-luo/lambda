@@ -3,8 +3,9 @@
 #include <fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_image.h>
+// #include <SDL2/SDL.h>
+// #include <SDL2/SDL_image.h>
+#include <SDL3/SDL.h>
 #include <thorvg_capi.h>
 #include "./lib/mem-pool/include/mem_pool.h"
 #include "event.h"
@@ -184,8 +185,8 @@ typedef struct {
 typedef struct {
     SDL_Window *window;    // current window
     SDL_Renderer *renderer;  // current window renderer
-    int window_width;    // logical window width
-    int window_height;   // logical window height
+    int window_width;    // window pixel width
+    int window_height;   // window pixel height
     SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
     SDL_Texture* texture;  // texture for rendering

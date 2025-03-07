@@ -65,8 +65,8 @@ SDL_Surface *loadImage(UiContext* uicon, const char *file_path) {
         printf("Failed to load image: %s\n", file_path);
         return NULL;
     }
-    SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(
-        data, width, height, 32, width * 4, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000
+    SDL_Surface *surface = SDL_CreateSurfaceFrom(
+        width, height, SDL_PIXELFORMAT_ABGR8888, data, width * 4
     );
     if (!surface) { stbi_image_free(data); }
 
@@ -79,7 +79,7 @@ SDL_Surface *loadImage(UiContext* uicon, const char *file_path) {
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
     free((char*)entry->path);
-    SDL_FreeSurface(entry->image);
+    SDL_DestroySurface(entry->image);
     return true;
 }
 

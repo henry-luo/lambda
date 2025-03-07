@@ -161,7 +161,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), name, LXB_TAG_A);
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
-        if (evcon->event.type == SDL_MOUSEBUTTONDOWN) {
+        if (evcon->event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
             printf("mouse down at anchor tag\n");
             lxb_dom_attr_t *href = lxb_dom_element_attr_by_id(lxb_dom_interface_element(span->node), LXB_DOM_ATTR_HREF);
             if (href) {
@@ -197,11 +197,11 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     memset(evcon, 0, sizeof(EventContext));
     evcon->ui_context = uicon;
     evcon->event = *event;
-    if (event->type == SDL_MOUSEMOTION) {
+    if (event->type == SDL_EVENT_MOUSE_MOTION) {
         evcon->event.mouse_motion.x *= uicon->pixel_ratio;
         evcon->event.mouse_motion.y *= uicon->pixel_ratio;
     }
-    else if (event->type == SDL_MOUSEBUTTONDOWN || event->type == SDL_MOUSEBUTTONUP) {
+    else if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN || event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
         evcon->event.mouse_button.x *= uicon->pixel_ratio;
         evcon->event.mouse_button.y *= uicon->pixel_ratio;
     }
@@ -225,9 +225,9 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     // find target view based on mouse position
     float mouse_x, mouse_y;
     switch (event->type) {
-    case SDL_MOUSEMOTION:  
+    case SDL_EVENT_MOUSE_MOTION:  
         SDL_MouseMotionEvent* motion = &event->mouse_motion;
-        printf("Mouse event at (%d, %d)\n", motion->x, motion->y);
+        printf("Mouse event at (%f, %f)\n", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
@@ -246,25 +246,25 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
             SDL_SystemCursor cursor;
             switch (evcon.new_cursor) {
-            case LXB_CSS_VALUE_TEXT: cursor = SDL_SYSTEM_CURSOR_IBEAM; break;
-            case LXB_CSS_VALUE_POINTER: cursor = SDL_SYSTEM_CURSOR_HAND; break;
+            case LXB_CSS_VALUE_TEXT: cursor = SDL_SYSTEM_CURSOR_TEXT; break;
+            case LXB_CSS_VALUE_POINTER: cursor = SDL_SYSTEM_CURSOR_POINTER; break;
             case LXB_CSS_VALUE_WAIT: cursor = SDL_SYSTEM_CURSOR_WAIT; break;
-            case LXB_CSS_VALUE_PROGRESS: cursor = SDL_SYSTEM_CURSOR_WAITARROW; break;
-            default: cursor = SDL_SYSTEM_CURSOR_ARROW; break;
+            case LXB_CSS_VALUE_PROGRESS: cursor = SDL_SYSTEM_CURSOR_PROGRESS; break;
+            default: cursor = SDL_SYSTEM_CURSOR_DEFAULT; break;
             }
             SDL_Cursor* sdl_cursor = SDL_CreateSystemCursor(cursor);
             if (sdl_cursor) {
                 if (uicon->mouse_state.sdl_cursor) {
-                    SDL_FreeCursor(uicon->mouse_state.sdl_cursor);
+                    SDL_DestroyCursor(uicon->mouse_state.sdl_cursor);
                 }
                 uicon->mouse_state.sdl_cursor = sdl_cursor;
                 SDL_SetCursor(sdl_cursor);
             }
         }        
         break;
-    case SDL_MOUSEBUTTONDOWN:   case SDL_MOUSEBUTTONUP:
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:   case SDL_EVENT_MOUSE_BUTTON_UP:
         SDL_MouseButtonEvent* btn_event = &event->mouse_button;
-        printf("Mouse button event %d, %d\n", btn_event->x, btn_event->y);
+        printf("Mouse button event (%f, %f)\n", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
@@ -285,7 +285,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             repaint_window();
         }
         break;
-    case SDL_MOUSEWHEEL:
+    case SDL_EVENT_MOUSE_WHEEL:
         printf("Mouse wheel event\n");
         break;
     default:

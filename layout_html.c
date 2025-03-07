@@ -36,8 +36,8 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         doc->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
         
         lycon.parent = (ViewGroup*)doc->view_tree->root;
-        lycon.block.width = uicon->window_width * uicon->pixel_ratio;  
-        lycon.block.height = uicon->window_width * uicon->pixel_ratio;
+        lycon.block.width = uicon->window_width;  
+        lycon.block.height = uicon->window_height;
         lycon.block.advance_y = 0;  lycon.block.max_width = 800;
         lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
         lycon.block.text_align = LXB_CSS_VALUE_LEFT;
