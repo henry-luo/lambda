@@ -10,6 +10,7 @@ typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     int iterations;
+    bool redraw;
 } AppState;
 
 UiContext ui_context;
@@ -102,9 +103,10 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
         return EXIT_FAILURE;
     }
 
-    state->window = uicon->window = SDL_CreateWindow("SDL2 Window", 
+    state->window = uicon->window = SDL_CreateWindow("SDL3 Window", 
         width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     state->renderer = uicon->renderer = SDL_CreateRenderer(state->window, NULL);
+    SDL_SetRenderVSync(state->renderer, 1);
 
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
@@ -160,7 +162,7 @@ void ui_context_cleanup(UiContext* uicon) {
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     SDL_Init(SDL_INIT_VIDEO);
     AppState *state = (AppState *)malloc(sizeof(AppState));
-    *appstate = state;  state->iterations = 0;
+    *appstate = state;  state->iterations = 0;  state->redraw = true;
     ui_context_init(state, &ui_context, 400, 600);
     ui_context.document = show_html_doc("test/sample.html");
     return state->window && state->renderer ? SDL_APP_CONTINUE : SDL_APP_FAILURE;
@@ -168,31 +170,49 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     AppState *state = (AppState *)appstate;
-    if (event->type == SDL_EVENT_QUIT) {
-        return SDL_APP_SUCCESS; // Signal to quit
-    }
-    return SDL_APP_CONTINUE;
+	switch (event->type) {
+	case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+		state->redraw = true;
+		break;
+	case SDL_EVENT_QUIT:
+		return SDL_APP_SUCCESS;
+	}
+	return SDL_APP_CONTINUE;
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
     AppState *state = (AppState *)appstate;
     state->iterations++;
+	if (state->redraw) {
+		int x, y;
+		SDL_GetRenderOutputSize(state->renderer, &x, &y);
+        ui_context.window_width = x;  ui_context.window_height = y;
 
-    // Render
-    // SDL_SetRenderDrawColor(state->renderer, 0, 100, 0, 255);
-    // SDL_RenderClear(state->renderer);
+        // resize the surface
+        ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
+        // reflow the document
+        if (ui_context.document) {
+            reflow_html_doc(ui_context.document);      
+        }
+        // render the texture to the screen
+        repaint_window();
 
-    // SDL_RenderPresent(state->renderer);
+		// SDL_SetRenderDrawColor(state->renderer, 16, 16, 16, SDL_ALPHA_OPAQUE);
+		// SDL_RenderClear(state->renderer);
 
-    repaint_window();
-
-    return SDL_APP_CONTINUE;
+		// SDL_SetRenderDrawColor(state->renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
+		// SDL_RenderDebugTextFormat(state->renderer, 5, 5, "Window size %d x %d", x, y);
+		// SDL_RenderPresent(state->renderer);
+		state->redraw = false;
+	}
+	SDL_Delay(5);  // 5ms delay
+	return SDL_APP_CONTINUE;
 }
 
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     ui_context_cleanup(&ui_context);
     AppState *state = (AppState *)appstate;
+	if (result == SDL_APP_FAILURE)
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Error", SDL_GetError(), appstate ? state->window : NULL);
     free(state);
 }
-
-// clang -o window3 window3.c -lSDL3 -I/opt/homebrew/Cellar/sdl3/3.2.8/include -L/opt/homebrew/Cellar/sdl3/3.2.8/lib
