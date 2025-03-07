@@ -134,6 +134,8 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
         SDL_Quit();
         return 1;
     }
+    SDL_GL_MakeCurrent(state->window, gl_context);
+    SDL_GL_SetSwapInterval(1); // enable VSync for smoother resizing
     // Set up OpenGL attributes
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -150,7 +152,7 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     // Clear screen
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    // Set up projection
+    // Set up orthographic projection
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
@@ -262,6 +264,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 		// SDL_GetRenderOutputSize(state->renderer, &w, &h);
         SDL_GetWindowSize(ui_context.window, &w, &h);         
         if (w != ui_context.window_width || h != ui_context.window_height) {
+            uint32_t start_time = SDL_GetTicks();
             ui_context.window_width = w;  ui_context.window_height = h;
             // resize the surface
             // ui_context_create_surface(&ui_context, w, h);
@@ -269,6 +272,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             if (ui_context.document) {
                 reflow_html_doc(ui_context.document);   
             }
+            printf("Reflow time: %llu ms\n", SDL_GetTicks() - start_time);
         }
 
         gl_render();
