@@ -25,6 +25,7 @@
         "__locale": "c",
         "stb_image_write.h": "c",
         "queue": "c",
-        "stack": "c"
+        "stack": "c",
+        "sdl_opengl.h": "c"
     }
 }

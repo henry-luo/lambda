@@ -82,17 +82,23 @@
             "link": "dynamic"
         },
         {
-            "name": "tbox",
-            "include": "/opt/homebrew/Cellar/tbox/1.7.6/include",
-            "lib": "/opt/homebrew/Cellar/tbox/1.7.6/lib/libtbox.a",
-            "link": "static"
+            "_name": "tbox",
+            "_include": "/opt/homebrew/Cellar/tbox/1.7.6/include",
+            "_lib": "/opt/homebrew/Cellar/tbox/1.7.6/lib/libtbox.a",
+            "_link": "static"
         },
         {
             "name": "zlib",
             "include": null,
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
-        }
+        },
+        {
+            "name": "GL",
+            "include": null,
+            "lib": "-framework OpenGL",
+            "link": "static"
+        }        
     ],
     "warnings": [
         "incompatible-pointer-types",

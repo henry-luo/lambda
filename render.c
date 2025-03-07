@@ -323,6 +323,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
     setup_font(uicon, &rdcon->font, "Arial", &default_font_prop); 
+    printf("before locking surface\n");
     // Lock the surface for rendering
     if (SDL_MUSTLOCK(rdcon->ui_context->surface)) {
         SDL_LockSurface(rdcon->ui_context->surface);

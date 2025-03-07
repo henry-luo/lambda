@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "layout.h"
+#include <SDL3/SDL_opengl.h>
 
 typedef struct {
     SDL_Window *window;
@@ -14,6 +15,7 @@ typedef struct {
 } AppState;
 
 UiContext ui_context;
+GLuint gl_texture;
 
 void render_html_doc(UiContext* uicon, View* root_view);
 void parse_html_doc(Document* doc, const char* doc_path);
@@ -80,12 +82,14 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     // don't know why SDL_CreateTextureFromSurface failed to create the texture following the same pixel format as the surface
     // have to manually create the texture with explicit pixel format
     // uicon->texture = SDL_CreateTextureFromSurface(uicon->renderer, uicon->surface); 
-    uicon->texture = SDL_CreateTexture(uicon->renderer, SDL_PIXELFORMAT_RGBA8888, 
-        SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
-    if (uicon->texture == NULL) {
-        printf("Error creating texture: %s\n", SDL_GetError());
-    }
+    // uicon->texture = SDL_CreateTexture(uicon->renderer, SDL_PIXELFORMAT_RGBA8888, 
+    //     SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
+    // if (uicon->texture == NULL) {
+    //     printf("Error creating texture: %s\n", SDL_GetError());
+    // }
 }
+
+Uint32 pixel_buffer[32 * 32];
 
 int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     memset(uicon, 0, sizeof(UiContext));
@@ -104,14 +108,28 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     }
 
     state->window = uicon->window = SDL_CreateWindow("SDL3 Window", 
-        width, height, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    state->renderer = uicon->renderer = SDL_CreateRenderer(state->window, NULL);
-    SDL_SetRenderVSync(state->renderer, 1);
+        width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY); 
+    // state->renderer = uicon->renderer = SDL_CreateRenderer(state->window, NULL);
+    // SDL_SetRenderVSync(state->renderer, 1);
+
+    // Create OpenGL context
+    SDL_GLContext gl_context = SDL_GL_CreateContext(state->window);
+    if (!gl_context) {
+        SDL_Log("GL context creation failed: %s", SDL_GetError());
+        SDL_DestroyWindow(state->window);
+        SDL_Quit();
+        return 1;
+    }
+    // Set up OpenGL attributes
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);    
 
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
     SDL_GetWindowSize(uicon->window, &logical_w, &logical_h);       // Logical size
-    SDL_GetCurrentRenderOutputSize(uicon->renderer, &pixel_w, &pixel_h); // Actual clear pixel size
+    pixel_w = logical_w;  pixel_h = logical_h;
+    // SDL_GetCurrentRenderOutputSize(uicon->renderer, &pixel_w, &pixel_h); // Actual clear pixel size
     float scale_x = (float)pixel_w / logical_w;
     float scale_y = (float)pixel_h / logical_h;
     printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
@@ -125,7 +143,45 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
 
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
+
+    // Create OpenGL texture
+    printf("Creating OpenGL texture\n");
+    glGenTextures(1, &gl_texture);
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+
     return EXIT_SUCCESS; 
+}
+
+void gl_render() {
+    // Clear screen
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Set up projection
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.window_width, ui_context.window_height, 
+        0, GL_RGBA, GL_UNSIGNED_BYTE, ui_context.surface->pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // Render texture
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+
+    glBegin(GL_QUADS);
+        glTexCoord2f(0.0f, 0.0f); glVertex2f(-0.5f, -0.5f);
+        glTexCoord2f(1.0f, 0.0f); glVertex2f(0.5f, -0.5f);
+        glTexCoord2f(1.0f, 1.0f); glVertex2f(0.5f, 0.5f);
+        glTexCoord2f(0.0f, 1.0f); glVertex2f(-0.5f, 0.5f);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+
+    // Swap buffers
+    SDL_GL_SwapWindow(ui_context.window);
 }
 
 void ui_context_cleanup(UiContext* uicon) {
@@ -150,7 +206,7 @@ void ui_context_cleanup(UiContext* uicon) {
     tvg_engine_term(TVG_ENGINE_SW);
     SDL_DestroySurface(uicon->surface);
     SDL_DestroyTexture(uicon->texture);
-    SDL_DestroyRenderer(uicon->renderer);
+    // SDL_DestroyRenderer(uicon->renderer);
 
     if (uicon->mouse_state.sdl_cursor) {
         SDL_DestroyCursor(uicon->mouse_state.sdl_cursor);
@@ -165,13 +221,14 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     *appstate = state;  state->iterations = 0;  state->redraw = true;
     ui_context_init(state, &ui_context, 400, 600);
     ui_context.document = show_html_doc("test/sample.html");
-    return state->window && state->renderer ? SDL_APP_CONTINUE : SDL_APP_FAILURE;
+    // repaint_window();
+    return state->window ? SDL_APP_CONTINUE : SDL_APP_FAILURE;
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     AppState *state = (AppState *)appstate;
 	switch (event->type) {
-	case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+	case SDL_EVENT_WINDOW_RESIZED:
 		state->redraw = true;
 		break;
 	case SDL_EVENT_QUIT:
@@ -184,25 +241,22 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     AppState *state = (AppState *)appstate;
     state->iterations++;
 	if (state->redraw) {
-		int x, y;
-		SDL_GetRenderOutputSize(state->renderer, &x, &y);
-        ui_context.window_width = x;  ui_context.window_height = y;
+		// int w, h;
+		// SDL_GetRenderOutputSize(state->renderer, &w, &h);
+        // if (w != ui_context.window_width || h != ui_context.window_height) {
+        //     ui_context.window_width = w;  ui_context.window_height = h;
+        //     // resize the surface
+        //     ui_context_create_surface(&ui_context, w, h); // use updated height as well
+        //     // reflow the document
+        //     if (ui_context.document) {
+        //         reflow_html_doc(ui_context.document);      
+        //     }
+        // }
+        // // render the texture to the screen
+        // repaint_window();
 
-        // resize the surface
-        ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
-        // reflow the document
-        if (ui_context.document) {
-            reflow_html_doc(ui_context.document);      
-        }
-        // render the texture to the screen
-        repaint_window();
+        gl_render();
 
-		// SDL_SetRenderDrawColor(state->renderer, 16, 16, 16, SDL_ALPHA_OPAQUE);
-		// SDL_RenderClear(state->renderer);
-
-		// SDL_SetRenderDrawColor(state->renderer, 0, 255, 0, SDL_ALPHA_OPAQUE);
-		// SDL_RenderDebugTextFormat(state->renderer, 5, 5, "Window size %d x %d", x, y);
-		// SDL_RenderPresent(state->renderer);
 		state->redraw = false;
 	}
 	SDL_Delay(5);  // 5ms delay
