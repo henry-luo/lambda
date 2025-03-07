@@ -73,7 +73,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     if (uicon->surface) SDL_DestroySurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
     // SDL_PIXELFORMAT_RGBA8888 pack order is SDL_PACKEDORDER_RGBA, high bit -> low bit
-    uicon->surface = SDL_CreateSurface(pixel_width, pixel_height, SDL_PIXELFORMAT_ABGR8888);  // SDL_PIXELFORMAT_RGBA8888
+    uicon->surface = SDL_CreateSurface(pixel_width, pixel_height, SDL_PIXELFORMAT_RGBA8888);
     tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
         pixel_width, pixel_width, pixel_height, TVG_COLORSPACE_ABGR8888);
         
@@ -101,7 +101,7 @@ void update_gl_texture() {
     // update the texture when surface changes
     glBindTexture(GL_TEXTURE_2D, gl_texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->w, ui_context.surface->h, 0, 
-        GL_RGBA, GL_UNSIGNED_BYTE, ui_context.surface->pixels);        
+        GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, ui_context.surface->pixels);        
 }
 
 int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {

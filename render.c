@@ -310,11 +310,11 @@ void render_children(RenderContext* rdcon, View* view) {
 
 void drawTriangle(Tvg_Canvas* canvas) {
     Tvg_Paint* shape = tvg_shape_new();
-    tvg_shape_move_to(shape, 400, 400);
-    tvg_shape_line_to(shape, 600, 500);
-    tvg_shape_line_to(shape, 100, 600);
+    tvg_shape_move_to(shape, 200, 500);
+    tvg_shape_line_to(shape, 300, 550);
+    tvg_shape_line_to(shape, 50, 600);
     tvg_shape_close(shape);
-    tvg_shape_set_fill_color(shape, 255, 100, 100, 150); // semi-transparent red color
+    tvg_shape_set_fill_color(shape, 255, 10, 10, 200); // semi-transparent red color
     tvg_canvas_push(canvas, shape);
 }
 
@@ -363,9 +363,9 @@ void render_html_doc(UiContext* uicon, View* root_view) {
         fprintf(stderr, "Invalid root view\n");
     }
 
-    // drawTriangle(rdcon.ui_context->canvas);
-    // tvg_canvas_draw(rdcon.ui_context->canvas, false); // no clearing of the buffer
-    // tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
+    drawTriangle(rdcon.ui_context->canvas);
+    tvg_canvas_draw(rdcon.ui_context->canvas, false); // no clearing of the buffer
+    tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
     // save_surface_to_png(rdcon.ui_context->surface, "output.png");
