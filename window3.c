@@ -73,7 +73,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     if (uicon->surface) SDL_DestroySurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
     // SDL_PIXELFORMAT_RGBA8888 pack order is SDL_PACKEDORDER_RGBA, high bit -> low bit
-    uicon->surface = SDL_CreateSurface(pixel_width, pixel_height, SDL_PIXELFORMAT_RGBA8888);
+    uicon->surface = SDL_CreateSurface(pixel_width, pixel_height, SDL_PIXELFORMAT_ABGR8888);  // SDL_PIXELFORMAT_RGBA8888
     tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
         pixel_width, pixel_width, pixel_height, TVG_COLORSPACE_ABGR8888);
         
@@ -86,10 +86,23 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     //     SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
     // if (uicon->texture == NULL) {
     //     printf("Error creating texture: %s\n", SDL_GetError());
-    // }
+    // }      
+
+    // bind the surface pixels to the OpenGL texture
+    // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->w, ui_context.surface->h, 0, 
+    //     GL_RGBA, GL_UNSIGNED_BYTE, ui_context.surface->pixels);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);        
 }
 
-Uint32 pixel_buffer[32 * 32];
+void update_gl_texture() {
+    // update the texture when surface changes
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->w, ui_context.surface->h, 0, 
+        GL_RGBA, GL_UNSIGNED_BYTE, ui_context.surface->pixels);        
+}
 
 int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     memset(uicon, 0, sizeof(UiContext));
@@ -124,6 +137,22 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);    
+    // Create OpenGL texture
+    printf("Creating OpenGL texture\n");
+    glGenTextures(1, &gl_texture);
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Clear screen
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    // Set up projection
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
 
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
@@ -142,42 +171,21 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     uicon->canvas = tvg_swcanvas_create();
 
     // creates the surface for rendering
-    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
-
-    // Create OpenGL texture
-    printf("Creating OpenGL texture\n");
-    glGenTextures(1, &gl_texture);
-    glBindTexture(GL_TEXTURE_2D, gl_texture);
-
+    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);  
     return EXIT_SUCCESS; 
 }
 
 void gl_render() {
-    // Clear screen
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    // Set up projection
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.window_width, ui_context.window_height, 
-        0, GL_RGBA, GL_UNSIGNED_BYTE, ui_context.surface->pixels);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
+    update_gl_texture();
     // Render texture
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, gl_texture);
-
     glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 0.0f); glVertex2f(-0.5f, -0.5f);
-        glTexCoord2f(1.0f, 0.0f); glVertex2f(0.5f, -0.5f);
-        glTexCoord2f(1.0f, 1.0f); glVertex2f(0.5f, 0.5f);
-        glTexCoord2f(0.0f, 1.0f); glVertex2f(-0.5f, 0.5f);
+        glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f, -1.0f); // Bottom-left
+        glTexCoord2f(1.0f, 1.0f); glVertex2f(1.0f, -1.0f);  // Bottom-right
+        glTexCoord2f(1.0f, 0.0f); glVertex2f(1.0f, 1.0f);   // Top-right
+        glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, 1.0f);  // Top-left
     glEnd();
-
     glDisable(GL_TEXTURE_2D);
 
     // Swap buffers
@@ -241,22 +249,20 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     AppState *state = (AppState *)appstate;
     state->iterations++;
 	if (state->redraw) {
-		// int w, h;
+		int w, h;
 		// SDL_GetRenderOutputSize(state->renderer, &w, &h);
-        // if (w != ui_context.window_width || h != ui_context.window_height) {
-        //     ui_context.window_width = w;  ui_context.window_height = h;
-        //     // resize the surface
-        //     ui_context_create_surface(&ui_context, w, h); // use updated height as well
-        //     // reflow the document
-        //     if (ui_context.document) {
-        //         reflow_html_doc(ui_context.document);      
-        //     }
-        // }
-        // // render the texture to the screen
-        // repaint_window();
+        SDL_GetWindowSize(ui_context.window, &w, &h);         
+        if (w != ui_context.window_width || h != ui_context.window_height) {
+            ui_context.window_width = w;  ui_context.window_height = h;
+            // resize the surface
+            ui_context_create_surface(&ui_context, w, h);
+            // reflow the document
+            if (ui_context.document) {
+                reflow_html_doc(ui_context.document);   
+            }
+        }
 
         gl_render();
-
 		state->redraw = false;
 	}
 	SDL_Delay(5);  // 5ms delay
