@@ -51,7 +51,7 @@ void repaint_window() {
     printf("Repainting window: %dx%d, logic: %dx%d, actual: %dx%d\n", 
         ui_context.window_width, ui_context.window_height, logical_w, logical_h, pixel_w, pixel_h);
 
-    SDL_FRect rect = {0, 0, ui_context.surface->w * 2, ui_context.surface->h * 2};
+    SDL_FRect rect = {0, 0, ui_context.surface->w, ui_context.surface->h};
     SDL_RenderTexture(ui_context.renderer, ui_context.texture, &rect, &rect);
     SDL_RenderPresent(ui_context.renderer);
 }
@@ -69,7 +69,7 @@ void reflow_html_doc(Document* doc) {
 }
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
-    // pixel_width = 2048;  pixel_height = 1536;
+    pixel_width = 2048;  pixel_height = 1536;
     // re-create the surface
     if (uicon->surface) SDL_DestroySurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
@@ -82,12 +82,40 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     if (uicon->texture) SDL_DestroyTexture(uicon->texture);
     // don't know why SDL_CreateTextureFromSurface failed to create the texture following the same pixel format as the surface
     // have to manually create the texture with explicit pixel format
-    uicon->texture = SDL_CreateTextureFromSurface(uicon->renderer, uicon->surface); 
-    uicon->texture = SDL_CreateTexture(uicon->renderer, SDL_PIXELFORMAT_RGBA8888, 
-        SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
-    if (uicon->texture == NULL) {
-        printf("Error creating texture: %s\n", SDL_GetError());
-    }            
+    // uicon->texture = SDL_CreateTextureFromSurface(uicon->renderer, uicon->surface); 
+    // uicon->texture = SDL_CreateTexture(uicon->renderer, SDL_PIXELFORMAT_RGBA8888, 
+    //     SDL_TEXTUREACCESS_STATIC, uicon->surface->w, uicon->surface->h);
+    // if (uicon->texture == NULL) {
+    //     printf("Error creating texture: %s\n", SDL_GetError());
+    // }            
+}
+
+void update_gl_texture() {
+    // update the texture when surface changes
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->w, ui_context.surface->h, 0, 
+        GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, ui_context.surface->pixels);        
+}
+
+void handle_resize(int width, int height) {
+    // Set the new viewport to match the window size
+    glViewport(0, 0, width, height);
+    
+    // Switch to projection matrix
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    
+    // Maintain aspect ratio for orthographic projection
+    if (width > height) {
+        // Width is greater than height, adjust horizontal
+        glOrtho(-1.0 * (float)width / (float)height, 1.0 * (float)width / (float)height, -1.0, 1.0, -1.0, 1.0);
+    } else {
+        // Height is greater than width, adjust vertical
+        glOrtho(-1.0, 1.0, -1.0 * (float)height / (float)width, 1.0 * (float)height / (float)width, -1.0, 1.0);
+    }
+
+    // Switch back to modelview matrix
+    glMatrixMode(GL_MODELVIEW);
 }
 
 int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
@@ -108,8 +136,41 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
 
     state->window = uicon->window = SDL_CreateWindow("SDL3 Window", 
         width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY); 
-    state->renderer = uicon->renderer = SDL_CreateRenderer(state->window, NULL);
-    SDL_SetRenderVSync(state->renderer, 1);
+    // state->renderer = uicon->renderer = SDL_CreateRenderer(state->window, NULL);
+    // SDL_SetRenderVSync(state->renderer, 1);
+
+    // create OpenGL context
+    SDL_GLContext gl_context = SDL_GL_CreateContext(state->window);
+    if (!gl_context) {
+        SDL_Log("GL context creation failed: %s", SDL_GetError());
+        SDL_DestroyWindow(state->window);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_GL_MakeCurrent(state->window, gl_context);
+    SDL_GL_SetSwapInterval(1); // enable VSync for smoother resizing
+    // set up OpenGL attributes
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);    
+    // create OpenGL texture
+    printf("Creating OpenGL texture\n");
+    glGenTextures(1, &gl_texture);
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // clear screen
+    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    // set up orthographic projection
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0);
+    // glViewport(0, 0, width, height);
+    // handle_resize(width, height);
 
     // get logical and actual pixel ratio
     int logical_w, logical_h, pixel_w, pixel_h;
@@ -130,6 +191,34 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);  
     return EXIT_SUCCESS; 
+}
+
+void gl_render() {
+    // Clear the screen
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    update_gl_texture();
+    // Render texture
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, gl_texture);
+    glBegin(GL_QUADS);
+        // glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f, -1.0f); // Bottom-left
+        // glTexCoord2f(1.0f, 1.0f); glVertex2f(1.0f, -1.0f);  // Bottom-right
+        // glTexCoord2f(1.0f, 0.0f); glVertex2f(1.0f, 1.0f);   // Top-right
+        // glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, 1.0f);  // Top-left
+		int w, h;
+        SDL_GetWindowSize(ui_context.window, &w, &h);
+        float x_percent = w / 2048.0, y_percent = h / 1536.0;
+        // the order of the vertices is important
+        glTexCoord2f(0.0f, y_percent); glVertex2f(-1.0f, -1.0f); // Bottom-left
+        glTexCoord2f(x_percent, y_percent); glVertex2f(1.0f, -1.0f);  // Bottom-right
+        glTexCoord2f(x_percent, 0.0f); glVertex2f(1.0f, 1.0f);   // Top-right
+        glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, 1.0f);  // Top-left 
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+
+    // Swap buffers
+    SDL_GL_SwapWindow(ui_context.window);
 }
 
 void ui_context_cleanup(UiContext* uicon) {
@@ -179,12 +268,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 	switch (event->type) {
 	case SDL_EVENT_WINDOW_RESIZED:  case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
 		state->redraw = true;
-        // SDL_Rect viewport = { 0, 0, event->window.data1, event->window.data2 };
-        // SDL_SetRenderViewport(state->renderer, &viewport);
-
-        // Clear the screen and set new viewport dimensions
-        SDL_RenderClear(state->renderer);
-        SDL_SetRenderViewport(state->renderer, NULL);        
+        // int new_width = event->window.data1;
+        // int new_height = event->window.data2;
+        // handle_resize(new_width, new_height);
 		break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         state->redraw = true;
@@ -223,9 +309,7 @@ void render_rectangles(SDL_Surface *surface, int width) {
 SDL_AppResult SDL_AppIterate(void *appstate) {
     AppState *state = (AppState *)appstate;
     state->iterations++;
-	if (state->redraw) {
-        SDL_RenderClear(state->renderer);
-
+	// if (state->redraw) {
 		int w, h;
 		// SDL_GetRenderOutputSize(state->renderer, &w, &h);
         SDL_GetWindowSize(ui_context.window, &w, &h);         
@@ -242,14 +326,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         // }
 
         render_rectangles(ui_context.surface, w);
-        SDL_Rect viewport = { 0, 0, w, h };
-        SDL_SetRenderViewport(state->renderer, &viewport);        
-        repaint_window();
+
+        gl_render();
 		state->redraw = false;
-	}
-    else {
-        SDL_Delay(1);  // 1ms delay
-    }
+	//}
+    //else {
+        // 1ms delay
+        SDL_Delay(1);  // Note: longer delay like 5ms, could cause more flickering when resizing
+    //}
 	return SDL_APP_CONTINUE;
 }
 

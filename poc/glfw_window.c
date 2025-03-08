@@ -5,9 +5,16 @@
 #include FT_FREETYPE_H
 #include <wchar.h>
 #include <locale.h>
-#include <resvg.h>
+// #include <resvg.h>
 
-void render_svg(unsigned char* surface_data, int bmp_width, int bmp_height);
+// Window dimensions
+int WINDOW_WIDTH = 800;
+int WINDOW_HEIGHT = 600;
+GLFWwindow *window;
+
+void render();
+
+// void render_svg(unsigned char* surface_data, int bmp_width, int bmp_height);
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
@@ -43,15 +50,51 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     printf("Scroll offset: (%.2f, %.2f)\n", xoffset, yoffset);
 }
 
-// Window dimensions
-const int WINDOW_WIDTH = 800;
-const int WINDOW_HEIGHT = 600;
-resvg_options *resvg_opt;
-resvg_render_tree *tree;
-bool is_svg_dirty = true;
+// Callback function to handle window resize
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    // Set the new viewport size
+    glViewport(0, 0, width, height);
+    printf("Window resized to: %d x %d\n", width, height);
+    WINDOW_WIDTH = width;
+    WINDOW_HEIGHT = height;
+    render();
+}
+
+// resvg_options *resvg_opt;
+// resvg_render_tree *tree;
+// bool is_svg_dirty = true;
+
+void fill_rect(int x, int y, int width, int height) {
+    glBegin(GL_QUADS);
+    glVertex2f(x, y);
+    glVertex2f(x + width, y);
+    glVertex2f(x + width, y + height);
+    glVertex2f(x, y + height);
+    glEnd();
+}
+
+#define RECT_WIDTH 30
+#define RECT_HEIGHT 15
+#define GAP 15
+#define NUM_RECTANGLES 50
+
+void render_rectangles(int width) {
+    int x = GAP, y = GAP;
+    // set gl color to red
+    glColor3f(1.0f, 0.0f, 0.0f);
+
+    for (int i = 0; i < NUM_RECTANGLES; i++) {
+        if (x + RECT_WIDTH > width) { // Wrap to next row if out of bounds using width parameter
+            x = GAP;
+            y += RECT_HEIGHT + GAP;
+        }
+        fill_rect(x, y, RECT_WIDTH, RECT_HEIGHT);
+        x += RECT_WIDTH + GAP;
+    }
+}
 
 void render_text_to_screen(GLFWwindow *window, const char *text, const char *font_path, int font_size) {
-    int canvas_width = 400, canvas_height = 400;
+    int canvas_width = WINDOW_WIDTH, canvas_height = WINDOW_HEIGHT;
 
     // Initialize FreeType
     FT_Library ft;
@@ -67,25 +110,8 @@ void render_text_to_screen(GLFWwindow *window, const char *text, const char *fon
         FT_Done_FreeType(ft);
         return;
     }
-
     // Set font size
     FT_Set_Pixel_Sizes(face, 0, font_size);
-
-    // Determine the size of the big bitmap
-    int total_width = 0;
-    int max_height = 0;
-
-    for (const char *p = text; *p; p++) {
-        if (FT_Load_Char(face, *p, FT_LOAD_RENDER)) {
-            fprintf(stderr, "Error: Could not load glyph for character '%c'.\n", *p);
-            continue;
-        }
-
-        total_width += face->glyph->bitmap.width;
-        if (face->glyph->bitmap.rows > max_height) {
-            max_height = face->glyph->bitmap.rows;
-        }
-    }
 
     // Create a large buffer for the bitmap
     unsigned char *big_bitmap = (unsigned char *)calloc(canvas_width * canvas_height * 4, sizeof(unsigned char));
@@ -120,15 +146,13 @@ void render_text_to_screen(GLFWwindow *window, const char *text, const char *fon
         x_offset += bitmap.width;
     }
 
-    render_svg(big_bitmap, canvas_width, canvas_height);
+    // render_svg(big_bitmap, canvas_width, canvas_height);
 
     // Generate a texture for the big bitmap
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexImage2D(
-        // GL_TEXTURE_2D, 0, GL_RED, total_width, max_height, 0, GL_RED, GL_UNSIGNED_BYTE, big_bitmap
-        // GL_TEXTURE_2D, 0, GL_RGB, total_width, max_height, 0, GL_RGB, GL_UNSIGNED_BYTE, big_bitmap
         GL_TEXTURE_2D, 0, GL_RGBA, canvas_width, canvas_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, big_bitmap
     );
 
@@ -143,8 +167,8 @@ void render_text_to_screen(GLFWwindow *window, const char *text, const char *fon
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    float x_ratio = canvas_width / (float)WINDOW_WIDTH / 2;
-    float y_ratio = canvas_height / (float)WINDOW_HEIGHT / 2;
+    float x_ratio = canvas_width / (float)WINDOW_WIDTH;
+    float y_ratio = canvas_height / (float)WINDOW_HEIGHT;
 
     glBegin(GL_QUADS);
     glTexCoord2f(0.0f, 0.0f); glVertex2f(-x_ratio, -y_ratio);
@@ -163,48 +187,60 @@ void render_text_to_screen(GLFWwindow *window, const char *text, const char *fon
     FT_Done_FreeType(ft);
 }
 
-void render_svg(unsigned char* surface_data, int bmp_width, int bmp_height) {
-    if (is_svg_dirty) {
-        printf("Rendering SVG\n");
-    } else {
-        printf("skip SVG rendering\n");
-        return;
-    }
+// void render_svg(unsigned char* surface_data, int bmp_width, int bmp_height) {
+//     if (is_svg_dirty) {
+//         printf("Rendering SVG\n");
+//     } else {
+//         printf("skip SVG rendering\n");
+//         return;
+//     }
 
-    resvg_size size = resvg_get_image_size(tree);
-    int width = (int)size.width;
-    int height = (int)size.height;
-    printf("SVG width: %d, height: %d\n", width, height);
+//     resvg_size size = resvg_get_image_size(tree);
+//     int width = (int)size.width;
+//     int height = (int)size.height;
+//     printf("SVG width: %d, height: %d\n", width, height);
 
-    resvg_render(tree, resvg_transform_identity(), bmp_width, bmp_height, (char*)surface_data);    
+//     resvg_render(tree, resvg_transform_identity(), bmp_width, bmp_height, (char*)surface_data);    
 
-    // De-initialize the allocated memory
-    // resvg_tree_destroy(tree);
-    is_svg_dirty = false;
-    printf("SVG rendered\n");
-}
+//     // De-initialize the allocated memory
+//     // resvg_tree_destroy(tree);
+//     is_svg_dirty = false;
+//     printf("SVG rendered\n");
+// }
 
-resvg_options* resvg_lib_init() {
-    // Initialize the resvg library
-    resvg_init_log();  // Initialize resvg's library logging system
-    resvg_opt = resvg_options_create();
-    resvg_options_load_system_fonts(resvg_opt);
-    // Optionally, you can add some CSS to control the SVG rendering.
-    resvg_options_set_stylesheet(resvg_opt, "svg { fill: black; }");
+// resvg_options* resvg_lib_init() {
+//     // Initialize the resvg library
+//     resvg_init_log();  // Initialize resvg's library logging system
+//     resvg_opt = resvg_options_create();
+//     resvg_options_load_system_fonts(resvg_opt);
+//     // Optionally, you can add some CSS to control the SVG rendering.
+//     resvg_options_set_stylesheet(resvg_opt, "svg { fill: black; }");
 
-    // Construct a tree from the svg file and pass in some options
-    int err = resvg_parse_tree_from_file("./tiger.svg", resvg_opt, &tree);
-    // resvg_options_destroy(opt);
-    if (err != RESVG_OK) {
-        printf("Error id: %i\n", err);
-        abort();
-    }    
+//     // Construct a tree from the svg file and pass in some options
+//     int err = resvg_parse_tree_from_file("./tiger.svg", resvg_opt, &tree);
+//     // resvg_options_destroy(opt);
+//     if (err != RESVG_OK) {
+//         printf("Error id: %i\n", err);
+//         abort();
+//     }    
+// }
+
+void render() {
+    // Clear the screen
+    glClear(GL_COLOR_BUFFER_BIT);
+    // Render text to screen
+    render_text_to_screen(window, "Hello, FreeType in GLFW window!!!", "../test/lato.ttf", 40);
+
+    render_rectangles(WINDOW_WIDTH / 2);
+
+    // Swap front and back buffers
+    glfwSwapBuffers(window);
 }
 
 int main() {
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
-    resvg_lib_init();
+    // resvg_lib_init();
 
     // Initialize GLFW
     if (!glfwInit()) {
@@ -213,7 +249,7 @@ int main() {
     }
 
     // Create a windowed mode window and its OpenGL context
-    GLFWwindow *window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "FreeType and GLFW Text Rendering", NULL, NULL);
+    window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "FreeType and GLFW Text Rendering", NULL, NULL);
     if (!window) {
         fprintf(stderr, "Error: Could not create GLFW window.\n");
         glfwTerminate();
@@ -231,17 +267,19 @@ int main() {
     // glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor position
     glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
     glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input    
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
+    glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
 
     // Main loop
     while (!glfwWindowShouldClose(window)) {
-        // Clear the screen
-        glClear(GL_COLOR_BUFFER_BIT);
+        // int width, height;
+        // glfwGetWindowSize(window, &width, &height);  // Get current window size
+        // if (width != WINDOW_WIDTH || height != WINDOW_HEIGHT) { // window resized
+        //     WINDOW_WIDTH = width;  WINDOW_HEIGHT = height;
+        // }
 
-        // Render text to screen
-        render_text_to_screen(window, "Hello, FreeType!!!", "../test/lato.ttf", 48);
-
-        // Swap front and back buffers
-        glfwSwapBuffers(window);
+        render();
 
         // Poll for and process events
         glfwPollEvents();
@@ -254,7 +292,7 @@ int main() {
 }
 
 /*
-clang window.c -o window  -framework OpenGL \
+clang glfw_window.c -o window  -framework OpenGL \
 -lfreetype -L/opt/homebrew/Cellar/freetype/2.13.3/lib -I/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2 \
 -lglfw -I/opt/homebrew/include -L/opt/homebrew/lib \
 -lresvg -I./lib/resvg/crates/c-api -L./lib/resvg/target/release 

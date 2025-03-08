@@ -1,7 +1,7 @@
 {
     "output": "window3",
     "source_files": [
-        "window3.c",
+        "window_gl.c",
         "parse_html.c",
         "layout_html.c",
         "layout.c",
