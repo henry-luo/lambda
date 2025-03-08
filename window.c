@@ -6,10 +6,12 @@
 #include <wchar.h>
 #include <locale.h>
 #include <assert.h>
+#include <stdbool.h>
 
 // Window dimensions
 int WINDOW_WIDTH = 800;
 int WINDOW_HEIGHT = 600;
+bool do_redraw = false;
 
 void render(GLFWwindow* window);
 
@@ -52,10 +54,14 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 // Callback function to handle window resize
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     printf("Window resized to: %d x %d\n", width, height);
-    WINDOW_WIDTH = width / 2;  // width in pixel value to logical value
-    WINDOW_HEIGHT = height / 2;  // height in pixel value to logical value
-    glViewport(0, 0, width, height);
+    WINDOW_WIDTH = width / 2;
+    WINDOW_HEIGHT = height / 2;
+    do_redraw = 1;
+}
+
+void window_refresh_callback(GLFWwindow *window) {
     render(window);
+    do_redraw = 0;
 }
 
 void fill_rect(unsigned char *bitmap, int x, int y, int width, int height) {
@@ -71,7 +77,7 @@ void fill_rect(unsigned char *bitmap, int x, int y, int width, int height) {
     }
 }
 
-#define RECT_WIDTH 60
+#define RECT_WIDTH 120
 #define RECT_HEIGHT 30
 #define GAP 15
 #define NUM_RECTANGLES 50
@@ -128,16 +134,26 @@ void render_to_screen(GLFWwindow *window) {
 }
 
 void render(GLFWwindow* window) {
+    double start = glfwGetTime();
+
+    // get window size
+    int width, height;
+    glfwGetWindowSize(window, &width, &height);
+    assert(width == WINDOW_WIDTH && height == WINDOW_HEIGHT);
+
     render_to_screen(window);
+
+    double end = glfwGetTime();
+    // printf("Render time: %.4f ms\n", (end - start) * 1000);
 
     // Swap front and back buffers
     glfwSwapBuffers(window);
+    glFinish(); // important, this waits until rendering result is actually visible, thus making resizing less ugly
 }
 
 int main() {
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
-    // Initialize GLFW
     if (!glfwInit()) {
         fprintf(stderr, "Error: Could not initialize GLFW.\n");
         return -1;
@@ -151,11 +167,9 @@ int main() {
         return -1;
     }
 
-    // Make the window's context current
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);  // enable vsync
-    // Set up OpenGL
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // Disable byte-alignment restriction
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
 
     glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);  // receive the state of the Caps Lock and Num Lock keys
     glfwSetKeyCallback(window, key_callback);  // receive raw keyboard input
@@ -164,21 +178,39 @@ int main() {
     glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
     glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input    
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetWindowRefreshCallback(window, window_refresh_callback);
 
     glClearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light grey color
 
-    // Main loop
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+    framebuffer_size_callback(window, width, height);
+
+    // set up the FPS
+    double lastTime = glfwGetTime();
+    double deltaTime = 0.0;
+    int frames = 0;
+
+    // main loop
     while (!glfwWindowShouldClose(window)) {
-        // get window size
-        int width, height;
-        glfwGetWindowSize(window, &width, &height);
-        assert(width == WINDOW_WIDTH && height == WINDOW_HEIGHT);
+        // calculate deltaTime
+        double currentTime = glfwGetTime();
+        deltaTime = currentTime - lastTime;
+        lastTime = currentTime;
 
-        // render
-        render(window);
+        // Only redraw if we need to
+        if (do_redraw) {
+            window_refresh_callback(window);
+        }
 
-        // poll and process events
+        // poll for new events
         glfwPollEvents();
+
+        // limit to 60 FPS
+        if (deltaTime < (1.0 / 60.0)) {
+            glfwWaitEventsTimeout((1.0 / 60.0) - deltaTime);
+        }
+        frames++;
     }
 
     glfwDestroyWindow(window);
