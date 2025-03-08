@@ -30,21 +30,21 @@
 
 typedef union RdtEvent {
     struct {
-        Uint32 type;        // SDL_EventType
-        Uint32 timestamp;   /**< In milliseconds, populated using SDL_GetTicks() */
+        uint32_t type;        // SDL_EventType
+        uint32_t timestamp;   /**< In milliseconds, populated using SDL_GetTicks() */
     };
-    SDL_MouseMotionEvent mouse_motion;
-    SDL_MouseButtonEvent mouse_button;
-    SDL_MouseWheelEvent mouse_wheel;
-    SDL_KeyboardEvent key;
-    SDL_WindowEvent window;
-    SDL_TextEditingEvent text_edit;
-    SDL_TextInputEvent text_input;
+    // SDL_MouseMotionEvent mouse_motion;
+    // SDL_MouseButtonEvent mouse_button;
+    // SDL_MouseWheelEvent mouse_wheel;
+    // SDL_KeyboardEvent key;
+    // SDL_WindowEvent window;
+    // SDL_TextEditingEvent text_edit;
+    // SDL_TextInputEvent text_input;
 } RdtEvent;
 
 typedef struct {
     bool is_mouse_down;
     float down_x, down_y;  // mouse position when mouse down
     PropValue cursor;  // current cursor style
-    SDL_Cursor* sdl_cursor;
+    // SDL_Cursor* sdl_cursor;
 } MouseState;

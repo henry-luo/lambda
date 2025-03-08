@@ -9,12 +9,12 @@ void render_children(RenderContext* rdcon, View* view);
 
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
-    SDL_Surface* surface = rdcon->ui_context->surface;
+    ImageSurface* surface = rdcon->ui_context->surface;
     for (int i = 0; i < (int)bitmap->rows; i++) {
-        if (y + i < 0 || y + i >= surface->h) continue;
+        if (y + i < 0 || y + i >= surface->height) continue;
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
         for (int j = 0; j < (int)bitmap->width; j++) {
-            if (x + j < 0 || x + j >= surface->w) continue;
+            if (x + j < 0 || x + j >= surface->width) continue;
             uint32_t intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0) {
                 // blend the pixel with the background
@@ -34,6 +34,41 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                     p[3] = (p[3] * v + rdcon->color.r * intensity) / 255;
                 }
             }
+        }
+    }
+}
+
+void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color) {
+    if (!surface || !rect) return;
+    for (int i = 0; i < rect->h; i++) {
+        if (rect->y + i < 0 || rect->y + i >= surface->height) continue;
+        uint8_t* row_pixels = (uint8_t*)surface->pixels + (rect->y + i) * surface->pitch;
+        if (0 <= rect->x && rect->x + rect->w <= surface->width) {
+            memset(row_pixels + (rect->x * 4), color, rect->w * 4);
+        }
+    }
+}
+
+// a primitive blit function to copy pixels from src to dst
+void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect) {
+    Rect rect;
+    if (!src || !dst || !dst_rect) return;
+    if (!src_rect) {
+        rect = (Rect){0, 0, src->width, src->height};
+        src_rect = &rect;
+    }
+    float x_ratio = (float)src_rect->w / dst_rect->w;
+    float y_ratio = (float)src_rect->h / dst_rect->h;
+    for (int i = 0; i < dst_rect->h; i++) {
+        if (dst_rect->y + i < 0 || dst_rect->y + i >= dst->height) continue;
+        uint8_t* row_pixels = (uint8_t*)dst->pixels + (dst_rect->y + i) * dst->pitch;
+        for (int j = 0; j < dst_rect->w; j++) {
+            if (dst_rect->x + j < 0 || dst_rect->x + j >= dst->width) continue;
+            int src_x = src_rect->x + j * x_ratio;
+            int src_y = src_rect->y + i * y_ratio;
+            uint8_t* src_pixel = (uint8_t*)src->pixels + (src_y * src->pitch) + (src_x * 4);
+            uint8_t* dst_pixel = (uint8_t*)row_pixels + (dst_rect->x + j) * 4;
+            memcpy(dst_pixel, src_pixel, 4);
         }
     }
 }
@@ -82,7 +117,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     printf("before text deco\n");
     if (rdcon->font.style.text_deco != LXB_CSS_VALUE_NONE) {
         int thinkness = max(rdcon->font.face->underline_thickness >> 6, 1);
-        SDL_Rect rect;
+        Rect rect;
         if (rdcon->font.style.text_deco == LXB_CSS_VALUE_UNDERLINE) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height - thinkness;      
         }
@@ -94,7 +129,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
         rect.w = text->width;  rect.h = thinkness;
         printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, rect.x, rect.y, rect.w, rect.h);
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     printf("end of text view\n");
 }
@@ -154,11 +189,11 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     // bullets are aligned to the top and right side of the list item
     float ratio = rdcon->ui_context->pixel_ratio;
     if (rdcon->list.list_style_type == LXB_CSS_VALUE_DISC) {
-        SDL_Rect rect;
+        Rect rect;
         rect.x = rdcon->block.x + list_item->x - 15 * ratio;  
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
         rect.w = rect.h = 5 * ratio;
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
         printf("render list decimal\n");
@@ -197,25 +232,25 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
 }
 
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
-    SDL_Rect rect;  
+    Rect rect;  
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.w = view->width;  rect.h = view->height;
     if (view->bound->background) {
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
     }
     if (view->bound->border) {
-        SDL_Rect border_rect = rect;
+        Rect border_rect = rect;
         border_rect.w = view->bound->border->width.left;
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect.x = rect.x + rect.w - view->bound->border->width.right;
         border_rect.w = view->bound->border->width.right;
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect = rect;
         border_rect.h = view->bound->border->width.top;
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect.y = rect.y + rect.h - view->bound->border->width.bottom;
         border_rect.h = view->bound->border->width.bottom;
-        SDL_FillSurfaceRect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
     }
 }
 
@@ -251,10 +286,11 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
     render_block_view(rdcon, (ViewBlock*)view);
     // render the image
     if (view->img) {
-        SDL_Rect rect;
+        Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.w = view->width;  rect.h = view->height; 
-        SDL_BlitSurfaceScaled(view->img, NULL, rdcon->ui_context->surface, &rect, SDL_SCALEMODE_LINEAR);
+        // SDL_SCALEMODE_LINEAR
+        blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect);
     }
 }
 
@@ -323,18 +359,10 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
     setup_font(uicon, &rdcon->font, "Arial", &default_font_prop); 
-    printf("before locking surface\n");
-    // Lock the surface for rendering
-    if (SDL_MUSTLOCK(rdcon->ui_context->surface)) {
-        SDL_LockSurface(rdcon->ui_context->surface);
-    }    
+    printf("before locking surface\n");   
 }
 
 void render_clean_up(RenderContext* rdcon) {
-    // unlock the surface so that the pixel data can be used elsewhere (e.g., converting to a texture).
-    if (SDL_MUSTLOCK(rdcon->ui_context->surface)) {
-        SDL_UnlockSurface(rdcon->ui_context->surface);
-    }
 }
 
 // void save_surface_to_png(SDL_Surface* surface, const char* filename) {
@@ -353,7 +381,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     render_init(&rdcon, uicon);
 
     // fill the surface with a white background
-    SDL_FillSurfaceRect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF);
+    fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF);
 
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");

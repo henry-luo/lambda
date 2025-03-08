@@ -1,21 +1,89 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <GLFW/glfw3.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <wchar.h>
 #include <locale.h>
 #include <assert.h>
 #include <stdbool.h>
+#include "layout.h"
+
+void render(GLFWwindow* window);
+void render_html_doc(UiContext* uicon, View* root_view);
+void parse_html_doc(Document* doc, const char* doc_path);
+View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
+void view_pool_destroy(ViewTree* tree);
+void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
+void fontface_cleanup(UiContext* uicon);
+void image_cache_cleanup(UiContext* uicon);
 
 // Window dimensions
 int WINDOW_WIDTH = 800;
 int WINDOW_HEIGHT = 600;
 bool do_redraw = false;
+UiContext ui_context;
 
-void render(GLFWwindow* window);
+Document* show_html_doc(char* doc_filename) {
+    Document* doc = calloc(1, sizeof(Document));
+    parse_html_doc(doc, doc_filename);
+    
+    // layout html doc 
+    if (doc->dom_tree) {
+        layout_html_doc(&ui_context, doc, false);
+    }
+    // render html doc
+    if (doc->view_tree && doc->view_tree->root) { 
+        render_html_doc(&ui_context, doc->view_tree->root); 
+    }
+    return doc;
+}
 
-// void render_svg(unsigned char* surface_data, int bmp_width, int bmp_height);
+void reflow_html_doc(Document* doc) {
+    if (!doc || !doc->dom_tree) {
+        printf("No document to reflow\n");
+        return;
+    }
+    layout_html_doc(&ui_context, doc, true);
+    // render html doc
+    if (doc->view_tree->root) {
+        render_html_doc(&ui_context, doc->view_tree->root);
+    }
+}
+
+ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
+    if (pixel_width <= 0 || pixel_height <= 0) {
+        fprintf(stderr, "Error: Invalid image surface dimensions.\n");
+        return NULL;
+    }
+    ImageSurface* img_surface = calloc(1, sizeof(ImageSurface));
+    img_surface->width = pixel_width;  img_surface->height = pixel_height;
+    img_surface->pixels = calloc(pixel_width * pixel_height * 4, sizeof(uint32_t));
+    if (!img_surface->pixels) {
+        fprintf(stderr, "Error: Could not allocate memory for the image surface.\n");
+        free(img_surface);
+        return NULL;
+    }
+    return img_surface;
+}
+
+void image_surface_destroy(ImageSurface* img_surface) {
+    if (img_surface) {
+        if (img_surface->pixels) free(img_surface->pixels);
+        free(img_surface);
+    }
+}
+
+void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
+    // re-creates the surface for rendering, 32-bits per pixel, RGBA format
+    if (uicon->surface) image_surface_destroy(uicon->surface);
+    uicon->surface = image_surface_create(pixel_width, pixel_height);
+    if (!uicon->surface) {
+        fprintf(stderr, "Error: Could not create image surface.\n");
+        return;
+    }
+    tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
+        pixel_width, pixel_width, pixel_height, TVG_COLORSPACE_ABGR8888);          
+}
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)

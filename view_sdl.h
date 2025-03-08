@@ -1,9 +1,11 @@
 #pragma once
 #include "dom.h"
-#include <GLFW/glfw3.h>
 #include <fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+// #include <SDL2/SDL.h>
+// #include <SDL2/SDL_image.h>
+#include <SDL3/SDL.h>
 #include <thorvg_capi.h>
 #include "./lib/mem-pool/include/mem_pool.h"
 #include "event.h"
@@ -28,25 +30,7 @@ typedef union {
         uint8_t g;
         uint8_t r;
     };
-} Color;  
-
-typedef struct Rect {
-    int x, y;
-    int w, h;
-} Rect;
-
-typedef struct ImageSurface {
-    // SDL_SurfaceFlags flags;     /**< The flags of the surface, read-only */
-    // SDL_PixelFormat format;     /**< The format of the surface, read-only */
-    int width;                      /**< The width of the surface, read-only. */
-    int height;                      /**< The height of the surface, read-only. */
-    int pitch;                  /**< The distance in bytes between rows of pixels, read-only */
-    // image pixels, 32-bits per pixel, RGBA format
-    // pack order is [R] [G] [B] [A], high bit -> low bit    
-    void *pixels;               /**< A pointer to the pixels of the surface, the pixels are writeable if non-NULL */
-    // int refcount;               /**< Application reference count, used when freeing surface */
-    // void *reserved;             /**< Reserved for internal use */
-} ImageSurface;
+} Color;
 
 extern bool can_break(char c);
 extern bool is_space(char c);
@@ -158,7 +142,7 @@ typedef struct {
 typedef struct {
     ViewBlock;  // extends ViewBlock
     // const char* src;  // image src; should be in URL format
-    ImageSurface* img;  // image surface
+    SDL_Surface* img;  // image surface
 } ViewImage;
 
 struct ViewTree {
@@ -199,11 +183,13 @@ typedef struct {
 } ListBlot;
 
 typedef struct {
-    GLFWwindow *window;    // current window
+    SDL_Window *window;    // current window
+    SDL_Renderer *renderer;  // current window renderer
     int window_width;    // window pixel width
     int window_height;   // window pixel height
-    ImageSurface* surface;  // rendering surface of a window
+    SDL_Surface* surface;  // rendering surface of a window
     Tvg_Canvas* canvas;    // ThorVG canvas
+    SDL_Texture* texture;  // texture for rendering
 
     // font handling
     FcConfig *font_config;

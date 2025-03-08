@@ -1,5 +1,5 @@
 {
-   "_tmp":["render.c", "event.c"],
+   "_tmp":["event.c"],
     "output": "window",
     "source_files": [
         "window.c",
@@ -10,6 +10,7 @@
         "resolve_style.c",
         "view_pool.c",
         "font.c",
+        "render.c",
         "lib/strbuf.c",
         "lib/hashmap.c",
         "lib/arraylist.c",

@@ -29,7 +29,7 @@ int strToInt(const char* str, int len) {
 
 typedef struct ImageEntry {
     const char* path;  // todo: change to URL
-    SDL_Surface *image;
+    ImageSurface *image;
 } ImageEntry;
 
 int image_compare(const void *a, const void *b, void *udata) {
@@ -198,7 +198,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         }
         if (lycon->block.width < 0 || lycon->block.height < 0) {
             if (image->img) {
-                int w = image->img->w, h = image->img->h;
+                int w = image->img->width, h = image->img->height;
                 printf("image dims: %d x %d, %f x %f\n", w, h, lycon->block.width, lycon->block.height);
                 if (lycon->block.width >= 0) { // scale unspecified height
                     lycon->block.height = lycon->block.width * h / w;
