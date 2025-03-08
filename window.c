@@ -198,13 +198,13 @@ int main() {
         deltaTime = currentTime - lastTime;
         lastTime = currentTime;
 
-        // Only redraw if we need to
+        // poll for new events
+        glfwPollEvents();
+
+        // only redraw if we need to
         if (do_redraw) {
             window_refresh_callback(window);
         }
-
-        // poll for new events
-        glfwPollEvents();
 
         // limit to 60 FPS
         if (deltaTime < (1.0 / 60.0)) {
