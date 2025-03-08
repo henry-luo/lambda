@@ -189,6 +189,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         state->redraw = true;
         break;
+    case SDL_EVENT_WINDOW_EXPOSED:
+        state->redraw = true;
+        break;
 	case SDL_EVENT_QUIT:
 		return SDL_APP_SUCCESS;
 	}
