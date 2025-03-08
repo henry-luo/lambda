@@ -44,7 +44,7 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
 }
 
-SDL_Surface *loadImage(UiContext* uicon, const char *file_path) {
+void *loadImage(UiContext* uicon, const char *file_path) {
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity. 
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
@@ -65,21 +65,21 @@ SDL_Surface *loadImage(UiContext* uicon, const char *file_path) {
         printf("Failed to load image: %s\n", file_path);
         return NULL;
     }
-    SDL_Surface *surface = SDL_CreateSurfaceFrom(
-        width, height, SDL_PIXELFORMAT_ABGR8888, data, width * 4
-    );
-    if (!surface) { stbi_image_free(data); }
+    // SDL_Surface *surface = SDL_CreateSurfaceFrom(
+    //     width, height, SDL_PIXELFORMAT_ABGR8888, data, width * 4
+    // );
+    // if (!surface) { stbi_image_free(data); }
 
     // copy the font name
     char* path = (char*)malloc(strlen(file_path) + 1);  strcpy(path, file_path);
-    hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
-    return surface;
+    // hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
+    return NULL; // surface;
 }
 
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
     free((char*)entry->path);
-    SDL_DestroySurface(entry->image);
+    // SDL_DestroySurface(entry->image);
     return true;
 }
 

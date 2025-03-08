@@ -1,14 +1,15 @@
 {
-   "_tmp":["render.c", "event.c"],
-    "output": "window",
+    "output": "window3",
     "source_files": [
-        "window.c",
+        "window_gl.c",
         "parse_html.c",
         "layout_html.c",
         "layout.c",
         "layout_block.c",
         "resolve_style.c",
+        "render.c",
         "view_pool.c",
+        "event.c",
         "font.c",
         "lib/strbuf.c",
         "lib/hashmap.c",
@@ -55,7 +56,19 @@
             "include": null,
             "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
             "link": "static"
-        },      
+        },
+        {
+            "_name": "sdl2",
+            "_include": "/opt/homebrew/lib",
+            "_lib": "/opt/homebrew/lib/libSDL2.a -lm -Wl,-framework,CoreAudio -Wl,-framework,AudioToolbox -Wl,-weak_framework,CoreHaptics -Wl,-weak_framework,GameController -Wl,-framework,ForceFeedback -lobjc -Wl,-framework,CoreVideo -Wl,-framework,Cocoa -Wl,-framework,Carbon -Wl,-framework,IOKit -Wl,-weak_framework,QuartzCore -Wl,-weak_framework,Metal",
+            "_link": "static"
+        },
+        {
+            "name": "sdl3",
+            "include": "/opt/homebrew/Cellar/sdl3/3.2.8/include",
+            "lib": "/opt/homebrew/Cellar/sdl3/3.2.8/lib",
+            "link": "dynamic"
+        },        
         {
             "name": "SDL2_image",
             "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
@@ -79,12 +92,6 @@
             "include": null,
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
             "link": "static"
-        },
-        {
-            "name": "glfw",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib",
-            "link": "dynamic"
         },
         {
             "name": "GL",
