@@ -5,6 +5,7 @@
 #include FT_FREETYPE_H
 #include <wchar.h>
 #include <locale.h>
+#include <assert.h>
 
 // Window dimensions
 int WINDOW_WIDTH = 800;
@@ -152,6 +153,7 @@ int main() {
 
     // Make the window's context current
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);  // enable vsync
     // Set up OpenGL
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // Disable byte-alignment restriction
 
@@ -167,9 +169,15 @@ int main() {
 
     // Main loop
     while (!glfwWindowShouldClose(window)) {
+        // get window size
+        int width, height;
+        glfwGetWindowSize(window, &width, &height);
+        assert(width == WINDOW_WIDTH && height == WINDOW_HEIGHT);
+
+        // render
         render(window);
 
-        // Poll for and process events
+        // poll and process events
         glfwPollEvents();
     }
 
