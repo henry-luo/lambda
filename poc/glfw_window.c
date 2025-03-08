@@ -64,13 +64,17 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
 // resvg_render_tree *tree;
 // bool is_svg_dirty = true;
 
-void fill_rect(int x, int y, int width, int height) {
-    glBegin(GL_QUADS);
-    glVertex2f(x, y);
-    glVertex2f(x + width, y);
-    glVertex2f(x + width, y + height);
-    glVertex2f(x, y + height);
-    glEnd();
+void fill_rect(unsigned char *bitmap, int x, int y, int width, int height) {
+    // file a rect in the bitmap at x, y with width and height
+    for (int i = y; i < y + height; i++) {
+        for (int j = x; j < x + width; j++) {
+            int index = (i * WINDOW_WIDTH + j) * 4;
+            bitmap[index + 0] = x; // Red
+            bitmap[index + 1] = y; // Green
+            bitmap[index + 2] = 0; // Blue
+            bitmap[index + 3] = 255; // Alpha
+        }
+    }
 }
 
 #define RECT_WIDTH 30
@@ -78,7 +82,7 @@ void fill_rect(int x, int y, int width, int height) {
 #define GAP 15
 #define NUM_RECTANGLES 50
 
-void render_rectangles(int width) {
+void render_rectangles(unsigned char *bitmap, int width) {
     int x = GAP, y = GAP;
     // set gl color to red
     glColor3f(1.0f, 0.0f, 0.0f);
@@ -88,7 +92,7 @@ void render_rectangles(int width) {
             x = GAP;
             y += RECT_HEIGHT + GAP;
         }
-        fill_rect(x, y, RECT_WIDTH, RECT_HEIGHT);
+        fill_rect(bitmap, x, y, RECT_WIDTH, RECT_HEIGHT);
         x += RECT_WIDTH + GAP;
     }
 }
@@ -145,6 +149,8 @@ void render_text_to_screen(GLFWwindow *window, const char *text, const char *fon
         }
         x_offset += bitmap.width;
     }
+
+    render_rectangles(big_bitmap, WINDOW_WIDTH / 2);
 
     // render_svg(big_bitmap, canvas_width, canvas_height);
 
@@ -230,8 +236,6 @@ void render() {
     glClear(GL_COLOR_BUFFER_BIT);
     // Render text to screen
     render_text_to_screen(window, "Hello, FreeType in GLFW window!!!", "../test/lato.ttf", 40);
-
-    render_rectangles(WINDOW_WIDTH / 2);
 
     // Swap front and back buffers
     glfwSwapBuffers(window);
