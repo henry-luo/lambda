@@ -47,6 +47,11 @@ typedef struct ImageSurface {
     // int refcount;               /**< Application reference count, used when freeing surface */
     // void *reserved;             /**< Reserved for internal use */
 } ImageSurface;
+extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
+extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
+extern void image_surface_destroy(ImageSurface* img_surface);
+extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color);
+extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect);
 
 extern bool can_break(char c);
 extern bool is_space(char c);

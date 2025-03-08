@@ -68,6 +68,22 @@ void reflow_html_doc(Document* doc) {
     }
 }
 
+void repaint_window() {
+    SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
+    // render the texture to the screen
+    assert(ui_context.window_width == ui_context.surface->w && ui_context.window_height == ui_context.surface->h);
+
+    int logical_w, logical_h, pixel_w, pixel_h;
+    SDL_GetWindowSize(ui_context.window, &logical_w, &logical_h);       // Logical size
+    SDL_GetCurrentRenderOutputSize(ui_context.renderer, &pixel_w, &pixel_h); // Actual clear pixel size
+    printf("Repainting window: %dx%d, logic: %dx%d, actual: %dx%d\n", 
+        ui_context.window_width, ui_context.window_height, logical_w, logical_h, pixel_w, pixel_h);
+
+    SDL_FRect rect = {0, 0, ui_context.surface->w, ui_context.surface->h};
+    SDL_RenderTexture(ui_context.renderer, ui_context.texture, &rect, &rect);
+    SDL_RenderPresent(ui_context.renderer);
+}
+
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     // pixel_width = 2048;  pixel_height = 1536;
     // re-create the surface

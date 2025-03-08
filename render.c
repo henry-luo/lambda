@@ -38,13 +38,21 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     }
 }
 
+void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
+    uint32_t* pixel = (uint32_t*)pixels + x;  uint32_t* end = pixel + wd;
+    while (pixel < end) { *pixel++ = color; }
+}
+
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color) {
-    if (!surface || !rect) return;
+    Rect r;
+    if (!surface) return;
+    if (!rect) { r = (Rect){0, 0, surface->width, surface->height};  rect = &r; }
+    printf("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x\n", rect->x, rect->y, rect->w, rect->h, color);
     for (int i = 0; i < rect->h; i++) {
         if (rect->y + i < 0 || rect->y + i >= surface->height) continue;
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (rect->y + i) * surface->pitch;
         if (0 <= rect->x && rect->x + rect->w <= surface->width) {
-            memset(row_pixels + (rect->x * 4), color, rect->w * 4);
+            _fill_row(row_pixels, rect->x, rect->w, color);
         }
     }
 }
@@ -57,6 +65,8 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
         rect = (Rect){0, 0, src->width, src->height};
         src_rect = &rect;
     }
+    printf("blit surface: src(%d, %d, %d, %d) to dst(%d, %d, %d, %d)\n", 
+        src_rect->x, src_rect->y, src_rect->w, src_rect->h, dst_rect->x, dst_rect->y, dst_rect->w, dst_rect->h);
     float x_ratio = (float)src_rect->w / dst_rect->w;
     float y_ratio = (float)src_rect->h / dst_rect->h;
     for (int i = 0; i < dst_rect->h; i++) {
@@ -64,11 +74,16 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
         uint8_t* row_pixels = (uint8_t*)dst->pixels + (dst_rect->y + i) * dst->pitch;
         for (int j = 0; j < dst_rect->w; j++) {
             if (dst_rect->x + j < 0 || dst_rect->x + j >= dst->width) continue;
+            // todo: support different scale mode, like SDL_SCALEMODE_LINEAR
             int src_x = src_rect->x + j * x_ratio;
             int src_y = src_rect->y + i * y_ratio;
             uint8_t* src_pixel = (uint8_t*)src->pixels + (src_y * src->pitch) + (src_x * 4);
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (dst_rect->x + j) * 4;
-            memcpy(dst_pixel, src_pixel, 4);
+            // hardcoded for ABGR to RGBA conversion
+            dst_pixel[0] = src_pixel[3];  // dst alpha channel
+            dst_pixel[1] = src_pixel[2];  // dst blue channel
+            dst_pixel[2] = src_pixel[1];  // dst green channel
+            dst_pixel[3] = src_pixel[0];  // dst red channel
         }
     }
 }
@@ -289,8 +304,10 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.w = view->width;  rect.h = view->height; 
-        // SDL_SCALEMODE_LINEAR
         blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect);
+    }
+    else {
+        printf("image view has no image surface\n");
     }
 }
 
@@ -346,9 +363,9 @@ void render_children(RenderContext* rdcon, View* view) {
 
 void drawTriangle(Tvg_Canvas* canvas) {
     Tvg_Paint* shape = tvg_shape_new();
-    tvg_shape_move_to(shape, 200, 500);
-    tvg_shape_line_to(shape, 300, 550);
-    tvg_shape_line_to(shape, 50, 600);
+    tvg_shape_move_to(shape, 200, 1000);
+    tvg_shape_line_to(shape, 300, 1100);
+    tvg_shape_line_to(shape, 50, 1200);
     tvg_shape_close(shape);
     tvg_shape_set_fill_color(shape, 255, 10, 10, 200); // semi-transparent red color
     tvg_canvas_push(canvas, shape);
@@ -358,8 +375,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     // load default font Arial, size 16 px
-    setup_font(uicon, &rdcon->font, "Arial", &default_font_prop); 
-    printf("before locking surface\n");   
+    setup_font(uicon, &rdcon->font, "Arial", &default_font_prop);   
 }
 
 void render_clean_up(RenderContext* rdcon) {

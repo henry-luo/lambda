@@ -65,21 +65,19 @@ void *loadImage(UiContext* uicon, const char *file_path) {
         printf("Failed to load image: %s\n", file_path);
         return NULL;
     }
-    // SDL_Surface *surface = SDL_CreateSurfaceFrom(
-    //     width, height, SDL_PIXELFORMAT_ABGR8888, data, width * 4
-    // );
-    // if (!surface) { stbi_image_free(data); }
+    ImageSurface *surface = image_surface_create_from(width, height, data);
+    if (!surface) { stbi_image_free(data);  return NULL; }
 
     // copy the font name
     char* path = (char*)malloc(strlen(file_path) + 1);  strcpy(path, file_path);
-    // hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
-    return NULL; // surface;
+    hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
+    return surface;
 }
 
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
     free((char*)entry->path);
-    // SDL_DestroySurface(entry->image);
+    image_surface_destroy(entry->image);
     return true;
 }
 

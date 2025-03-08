@@ -134,13 +134,13 @@ void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
         if (span->bound->background) {
             strbuf_append_format(buf, "bgcolor:#%x", span->bound->background->color.c);
         }
-        strbuf_append_format(buf, " margin {left:%f, right:%f, top:%f, bottom:%f}",
+        strbuf_append_format(buf, " margin {left:%d, right:%d, top:%d, bottom:%d}",
             span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
-        strbuf_append_format(buf, " padding {left:%f, right:%f, top:%f, bottom:%f}",
+        strbuf_append_format(buf, " padding {left:%d, right:%d, top:%d, bottom:%d}",
             span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
             strbuf_append_str(buf, "}\n");
         if (span->bound->border) {
-            strbuf_append_format(buf, "border {color:#%x, width:%f, style:%d}\n",
+            strbuf_append_format(buf, "border {color:#%x, width:%d, style:%d}\n",
                 span->bound->border->color.c, span->bound->border->width.top, span->bound->border->style);
         }
     }  
@@ -154,7 +154,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
                 view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
                 ViewBlock* block = (ViewBlock*)view;
-                strbuf_append_format(buf, "view block:%s, x:%f, y:%f, wd:%f, hg:%f\n",
+                strbuf_append_format(buf, "view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                     block->x, block->y, block->width, block->height);
                 print_inline_prop((ViewSpan*)block, buf, indent+2);              
@@ -175,7 +175,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                     strbuf_append_format(buf, "invalid text node: len:%d\n", text->length); 
                 } else {
                     strbuf_append_str(buf, "text:'");  strbuf_append_str_n(buf, (char*)str, text->length);
-                    strbuf_append_format(buf, "', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f\n", 
+                    strbuf_append_format(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
                         text->start_index, text->length, text->x, text->y, text->width, text->height);                    
                 }
             }
