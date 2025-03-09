@@ -8,9 +8,6 @@ typedef struct EventContext {
     View* target;
 
     BlockBlot block;
-    // FontProp* font; // current font style
-    // FT_Face face;   // current font face
-    // float space_width;
     FontBox font;  // current font style
 
     PropValue new_cursor;
@@ -72,7 +69,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
             wd = evcon->font.face->glyph->advance.x >> 6;  // changed from rdcon to evcon
         }
         float char_right = x + wd;  float char_bottom = y + (evcon->font.face->height >> 6);
-        SDL_MouseMotionEvent* event = &evcon->event.mouse_motion;
+        MouseMotionEvent* event = &evcon->event.mouse_motion;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             printf("hit on text: %c\n", *p);
             evcon->target = (View*)text;  return;
@@ -108,7 +105,7 @@ void target_block_view(EventContext* evcon, ViewBlock* view_block) {
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself
             float x = evcon->block.x, y = evcon->block.y;
-            SDL_MouseMotionEvent* event = &evcon->event.mouse_motion;
+            MouseMotionEvent* event = &evcon->event.mouse_motion;
             if (x <= event->x && event->x < x + view_block->width &&
                 y <= event->y && event->y < y + view_block->height) {
                 printf("@@ hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
@@ -148,6 +145,9 @@ void fire_text_event(EventContext* evcon, ViewText* text) {
         printf("set text cursor\n");
         evcon->new_cursor = LXB_CSS_VALUE_TEXT;
     }
+    else {
+        printf("cursor already set as %d\n", evcon->new_cursor);
+    }
 }
 
 void fire_inline_event(EventContext* evcon, ViewSpan* span) {
@@ -161,7 +161,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), name, LXB_TAG_A);
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
-        if (evcon->event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+        if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             printf("mouse down at anchor tag\n");
             lxb_dom_attr_t *href = lxb_dom_element_attr_by_id(lxb_dom_interface_element(span->node), LXB_DOM_ATTR_HREF);
             if (href) {
@@ -197,14 +197,6 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     memset(evcon, 0, sizeof(EventContext));
     evcon->ui_context = uicon;
     evcon->event = *event;
-    if (event->type == SDL_EVENT_MOUSE_MOTION) {
-        evcon->event.mouse_motion.x *= uicon->pixel_ratio;
-        evcon->event.mouse_motion.y *= uicon->pixel_ratio;
-    }
-    else if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN || event->type == SDL_EVENT_MOUSE_BUTTON_UP) {
-        evcon->event.mouse_button.x *= uicon->pixel_ratio;
-        evcon->event.mouse_button.y *= uicon->pixel_ratio;
-    }
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, "Arial", &default_font_prop);
     evcon->new_cursor = LXB_CSS_VALUE_AUTO;
@@ -223,15 +215,15 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     event_context_init(&evcon, uicon, event);
 
     // find target view based on mouse position
-    float mouse_x, mouse_y;
+    int mouse_x, mouse_y;
     switch (event->type) {
-    case SDL_EVENT_MOUSE_MOTION:  
-        SDL_MouseMotionEvent* motion = &event->mouse_motion;
-        printf("Mouse event at (%f, %f)\n", motion->x, motion->y);
+    case RDT_EVENT_MOUSE_MOVE:  
+        MouseMotionEvent* motion = &event->mouse_motion;
+        printf("Mouse event at (%d, %d)\n", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
-            printf("Target view found at position (%f, %f)\n", mouse_x, mouse_y);
+            printf("Target view found at position (%d, %d)\n", mouse_x, mouse_y);
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -239,36 +231,34 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            printf("No target view found at position (%f, %f)\n", mouse_x, mouse_y);
+            printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
         }
         if (uicon->mouse_state.cursor != evcon.new_cursor) {
             printf("Change cursor to %d\n", evcon.new_cursor);
             uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
-            SDL_SystemCursor cursor;
+            int cursor_type;
             switch (evcon.new_cursor) {
-            case LXB_CSS_VALUE_TEXT: cursor = SDL_SYSTEM_CURSOR_TEXT; break;
-            case LXB_CSS_VALUE_POINTER: cursor = SDL_SYSTEM_CURSOR_POINTER; break;
-            case LXB_CSS_VALUE_WAIT: cursor = SDL_SYSTEM_CURSOR_WAIT; break;
-            case LXB_CSS_VALUE_PROGRESS: cursor = SDL_SYSTEM_CURSOR_PROGRESS; break;
-            default: cursor = SDL_SYSTEM_CURSOR_DEFAULT; break;
+            case LXB_CSS_VALUE_TEXT: cursor_type = GLFW_IBEAM_CURSOR; break;
+            case LXB_CSS_VALUE_POINTER: cursor_type = GLFW_HAND_CURSOR; break;
+            default: cursor_type = GLFW_ARROW_CURSOR; break;
             }
-            SDL_Cursor* sdl_cursor = SDL_CreateSystemCursor(cursor);
-            if (sdl_cursor) {
-                if (uicon->mouse_state.sdl_cursor) {
-                    SDL_DestroyCursor(uicon->mouse_state.sdl_cursor);
+            GLFWcursor* cursor = glfwCreateStandardCursor(cursor_type);
+            if (cursor) {
+                if (uicon->mouse_state.sys_cursor) {
+                    glfwDestroyCursor(uicon->mouse_state.sys_cursor);
                 }
-                uicon->mouse_state.sdl_cursor = sdl_cursor;
-                SDL_SetCursor(sdl_cursor);
+                uicon->mouse_state.sys_cursor = cursor;
+                glfwSetCursor(uicon->window, cursor);
             }
         }        
         break;
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:   case SDL_EVENT_MOUSE_BUTTON_UP:
-        SDL_MouseButtonEvent* btn_event = &event->mouse_button;
-        printf("Mouse button event (%f, %f)\n", btn_event->x, btn_event->y);
+    case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP:
+        MouseButtonEvent* btn_event = &event->mouse_button;
+        printf("Mouse button event (%d, %d)\n", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
-            printf("Target view found at position (%f, %f)\n", mouse_x, mouse_y);
+            printf("Target view found at position (%d, %d)\n", mouse_x, mouse_y);
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -276,7 +266,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            printf("No target view found at position (%f, %f)\n", mouse_x, mouse_y);
+            printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
         }
         if (evcon.new_uri) {
             printf("Opening URI: %s\n", evcon.new_uri);
@@ -285,8 +275,8 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             repaint_window();
         }
         break;
-    case SDL_EVENT_MOUSE_WHEEL:
-        printf("Mouse wheel event\n");
+    case RDT_EVENT_MOUSE_SCROLL:
+        printf("Mouse scroll event\n");
         break;
     default:
         break;

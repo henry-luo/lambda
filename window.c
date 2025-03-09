@@ -50,44 +50,6 @@ void reflow_html_doc(Document* doc) {
     }
 }
 
-ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
-    if (pixel_width <= 0 || pixel_height <= 0) {
-        fprintf(stderr, "Error: Invalid image surface dimensions.\n");
-        return NULL;
-    }
-    ImageSurface* img_surface = calloc(1, sizeof(ImageSurface));
-    img_surface->width = pixel_width;  img_surface->height = pixel_height;
-    img_surface->pitch = pixel_width * 4;
-    img_surface->pixels = calloc(pixel_width * pixel_height * 4, sizeof(uint32_t));
-    if (!img_surface->pixels) {
-        fprintf(stderr, "Error: Could not allocate memory for the image surface.\n");
-        free(img_surface);
-        return NULL;
-    }
-    return img_surface;
-}
-
-ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels) {
-    if (pixel_width <= 0 || pixel_height <= 0 || !pixels) {
-        fprintf(stderr, "Error: Invalid image surface dimensions or pixels.\n");
-        return NULL;
-    }
-    ImageSurface* img_surface = calloc(1, sizeof(ImageSurface));
-    if (img_surface) {
-        img_surface->width = pixel_width;  img_surface->height = pixel_height;
-        img_surface->pitch = pixel_width * 4;
-        img_surface->pixels = pixels;
-    }
-    return img_surface;
-}
-
-void image_surface_destroy(ImageSurface* img_surface) {
-    if (img_surface) {
-        if (img_surface->pixels) free(img_surface->pixels);
-        free(img_surface);
-    }
-}
-
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
     if (uicon->surface) image_surface_destroy(uicon->surface);
@@ -170,9 +132,9 @@ void ui_context_cleanup(UiContext* uicon) {
     tvg_engine_term(TVG_ENGINE_SW);
     image_surface_destroy(uicon->surface);
 
-    //if (uicon->mouse_state.sdl_cursor) {
-        // SDL_DestroyCursor(uicon->mouse_state.sdl_cursor);
-    //}
+    if (uicon->mouse_state.sys_cursor) {
+        glfwDestroyCursor(uicon->mouse_state.sys_cursor);
+    }
     glfwDestroyWindow(uicon->window);
     glfwTerminate();
 }
@@ -193,18 +155,40 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    RdtEvent event;
     printf("Cursor position: (%.2f, %.2f)\n", xpos, ypos);
+    event.mouse_motion.type = RDT_EVENT_MOUSE_MOVE;
+    event.mouse_motion.timestamp = glfwGetTime();
+    event.mouse_motion.x = xpos * ui_context.pixel_ratio;
+    event.mouse_motion.y = ypos * ui_context.pixel_ratio;
+    handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 }
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    RdtEvent event;
+    event.mouse_button.type = action == GLFW_PRESS ? RDT_EVENT_MOUSE_DOWN : RDT_EVENT_MOUSE_UP;
+    event.mouse_button.timestamp = glfwGetTime();
+    event.mouse_button.button = button;
+
     if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
         printf("Right mouse button pressed\n");
     else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
         printf("Right mouse button released\n");
-    else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
+    else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
         printf("Left mouse button pressed\n");
+        double xpos, ypos;
+        glfwGetCursorPos(window, &xpos, &ypos);
+        printf("Mouse position: (%.2f, %.2f)\n", xpos, ypos);
+        ui_context.mouse_state.is_mouse_down = 1;
+        ui_context.mouse_state.down_x = event.mouse_button.x = xpos * ui_context.pixel_ratio;
+        ui_context.mouse_state.down_y = event.mouse_button.y = ypos * ui_context.pixel_ratio;
+    }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
         printf("Left mouse button released\n");
+
+    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+    }
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
@@ -253,7 +237,7 @@ void render_rectangles(unsigned char *bitmap, int width) {
     }
 }
 
-void render_to_screen(GLFWwindow *window) {
+void repaint_window() {
     // test rendering
     // render_rectangles(ui_context.surface->pixels, ui_context.surface->width);
 
@@ -305,7 +289,7 @@ void render(GLFWwindow* window) {
         printf("Reflow time: %.2f ms\n", (glfwGetTime() - start_time) * 1000);
     }
 
-    render_to_screen(window);
+    repaint_window();
 
     double end = glfwGetTime();
     // printf("Render time: %.4f ms\n", (end - start) * 1000);
@@ -330,7 +314,7 @@ int main() {
     glfwSetInputMode(window, GLFW_LOCK_KEY_MODS, GLFW_TRUE);  // receive the state of the Caps Lock and Num Lock keys
     glfwSetKeyCallback(window, key_callback);  // receive raw keyboard input
     glfwSetCharCallback(window, character_callback);  // receive character input
-    // glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor position
+    glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor/mouse position
     glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
     glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input    
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);

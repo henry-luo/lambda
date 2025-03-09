@@ -38,56 +38,6 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     }
 }
 
-void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
-    uint32_t* pixel = (uint32_t*)pixels + x;  uint32_t* end = pixel + wd;
-    while (pixel < end) { *pixel++ = color; }
-}
-
-void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color) {
-    Rect r;
-    if (!surface) return;
-    if (!rect) { r = (Rect){0, 0, surface->width, surface->height};  rect = &r; }
-    printf("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x\n", rect->x, rect->y, rect->w, rect->h, color);
-    for (int i = 0; i < rect->h; i++) {
-        if (rect->y + i < 0 || rect->y + i >= surface->height) continue;
-        uint8_t* row_pixels = (uint8_t*)surface->pixels + (rect->y + i) * surface->pitch;
-        if (0 <= rect->x && rect->x + rect->w <= surface->width) {
-            _fill_row(row_pixels, rect->x, rect->w, color);
-        }
-    }
-}
-
-// a primitive blit function to copy pixels from src to dst
-void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect) {
-    Rect rect;
-    if (!src || !dst || !dst_rect) return;
-    if (!src_rect) {
-        rect = (Rect){0, 0, src->width, src->height};
-        src_rect = &rect;
-    }
-    printf("blit surface: src(%d, %d, %d, %d) to dst(%d, %d, %d, %d)\n", 
-        src_rect->x, src_rect->y, src_rect->w, src_rect->h, dst_rect->x, dst_rect->y, dst_rect->w, dst_rect->h);
-    float x_ratio = (float)src_rect->w / dst_rect->w;
-    float y_ratio = (float)src_rect->h / dst_rect->h;
-    for (int i = 0; i < dst_rect->h; i++) {
-        if (dst_rect->y + i < 0 || dst_rect->y + i >= dst->height) continue;
-        uint8_t* row_pixels = (uint8_t*)dst->pixels + (dst_rect->y + i) * dst->pitch;
-        for (int j = 0; j < dst_rect->w; j++) {
-            if (dst_rect->x + j < 0 || dst_rect->x + j >= dst->width) continue;
-            // todo: support different scale mode, like SDL_SCALEMODE_LINEAR
-            int src_x = src_rect->x + j * x_ratio;
-            int src_y = src_rect->y + i * y_ratio;
-            uint8_t* src_pixel = (uint8_t*)src->pixels + (src_y * src->pitch) + (src_x * 4);
-            uint8_t* dst_pixel = (uint8_t*)row_pixels + (dst_rect->x + j) * 4;
-            // hardcoded for ABGR to RGBA conversion
-            dst_pixel[0] = src_pixel[3];  // dst alpha channel
-            dst_pixel[1] = src_pixel[2];  // dst blue channel
-            dst_pixel[2] = src_pixel[1];  // dst green channel
-            dst_pixel[3] = src_pixel[0];  // dst red channel
-        }
-    }
-}
-
 void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
