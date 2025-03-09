@@ -86,15 +86,29 @@
         {
             "name": "glfw",
             "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib",
-            "link": "dynamic"
+            "lib": "/opt/homebrew/lib/libglfw3.a",
+            "link": "static"
         },
         {
             "name": "GL",
-            "include": null,
             "lib": "-framework OpenGL",
             "link": "static"
-        }        
+        },
+        {
+            "name": "Cocoa",
+            "lib": "-framework Cocoa",
+            "link": "static"
+        },
+        {
+            "name": "IOKit",
+            "lib": "-framework IOKit",
+            "link": "static"
+        },    
+        {
+            "name": "CoreVideo",
+            "lib": "-framework CoreVideo",
+            "link": "static"
+        }                     
     ],
     "warnings": [
         "incompatible-pointer-types",
