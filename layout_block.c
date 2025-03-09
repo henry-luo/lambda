@@ -299,7 +299,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             block->x = lycon->line.advance_x;  
         }
         block->y = lycon->block.advance_y;
-        lycon->line.advance_x += block->width;  
+        lycon->line.is_line_start = false;  lycon->line.advance_x += block->width;  
         lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);  // inline block aligned at baseline
     } else {
         if (block->bound) {
