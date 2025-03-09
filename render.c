@@ -314,9 +314,9 @@ void render_children(RenderContext* rdcon, View* view) {
 
 void drawTriangle(Tvg_Canvas* canvas) {
     Tvg_Paint* shape = tvg_shape_new();
-    tvg_shape_move_to(shape, 200, 1000);
-    tvg_shape_line_to(shape, 300, 1100);
-    tvg_shape_line_to(shape, 50, 1200);
+    tvg_shape_move_to(shape, 750, 1150);
+    tvg_shape_line_to(shape, 800, 1175);
+    tvg_shape_line_to(shape, 750, 1200);
     tvg_shape_close(shape);
     tvg_shape_set_fill_color(shape, 255, 10, 10, 200); // semi-transparent red color
     tvg_canvas_push(canvas, shape);
