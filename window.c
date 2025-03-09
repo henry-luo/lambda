@@ -208,6 +208,10 @@ void window_refresh_callback(GLFWwindow *window) {
     do_redraw = 0;
 }
 
+void to_repaint() {
+    do_redraw = 1;
+}
+
 void fill_rect(unsigned char *bitmap, int x, int y, int width, int height) {
     // file a rect in the bitmap at x, y with width and height
     for (int i = y; i < y + height; i++) {

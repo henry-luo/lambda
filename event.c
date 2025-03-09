@@ -1,7 +1,7 @@
 #include "view.h"
 
 Document* show_html_doc(char* doc_filename);
-void repaint_window();
+void to_repaint();
 
 typedef struct EventContext {
     RdtEvent event;
@@ -22,8 +22,9 @@ void target_text_view(EventContext* evcon, ViewText* text);
 
 void target_children(EventContext* evcon, View* view) {
     do {
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
-            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
+            view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM || 
+            view->type == RDT_VIEW_IMAGE) {
             ViewBlock* block = (ViewBlock*)view;
             printf("target view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
@@ -35,9 +36,12 @@ void target_children(EventContext* evcon, View* view) {
             printf("target view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
             target_inline_view(evcon, span);
         }
-        else {
+        else if (view->type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             target_text_view(evcon, text);
+        }
+        else {
+            printf("Invalid target view type: %d\n", view->type);
         }
         view = view->next;
     } while (view && !evcon->target);
@@ -181,14 +185,21 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
 void fire_events(EventContext* evcon, ArrayList* target_list) {
     int stack_size = target_list->length;
     for (int i = 0; i < stack_size; i++) {
+        printf("fire event to view no. %d\n", i);
         View* view = (View*)target_list->data[i];
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_LIST || 
-            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
+        if (view->type == RDT_VIEW_BLOCK || 
+            view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM || 
+            view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
             fire_block_event(evcon, (ViewBlock*)view);
-        } else if (view->type == RDT_VIEW_INLINE) {
+        } 
+        else if (view->type == RDT_VIEW_INLINE) {
             fire_inline_event(evcon, (ViewSpan*)view);
-        } else if (view->type == RDT_VIEW_TEXT) {
+        } 
+        else if (view->type == RDT_VIEW_TEXT) {
             fire_text_event(evcon, (ViewText*)view);
+        }
+        else {
+            printf("Invalid fire view type: %d\n", view->type);
         }
     }
 }
@@ -233,6 +244,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         } else {
             printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
         }
+        
         if (uicon->mouse_state.cursor != evcon.new_cursor) {
             printf("Change cursor to %d\n", evcon.new_cursor);
             uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
@@ -272,7 +284,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             printf("Opening URI: %s\n", evcon.new_uri);
             // open the URI
             evcon.ui_context->document = show_html_doc(evcon.new_uri);
-            repaint_window();
+            to_repaint();
         }
         break;
     case RDT_EVENT_MOUSE_SCROLL:

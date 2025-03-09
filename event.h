@@ -28,7 +28,7 @@ typedef enum  {
 //     RDT_EVENT_CHANGE,
 } EventType;
 
-typedef struct MouseMotionEvent{
+typedef struct MouseMotionEvent {
     EventType type;        // RDT_EVENT_MOUSE_MOVE
     double timestamp;       // in seconds, populated using glfwGetTime()
     // Uint32 windowID;    /**< The window with mouse focus, if any */
@@ -41,16 +41,10 @@ typedef struct MouseMotionEvent{
 } MouseMotionEvent;
 
 typedef struct MouseButtonEvent {
-    EventType type;        // RDT_EVENT_MOUSE_DOWN or RDT_EVENT_MOUSE_UP
-    double timestamp;   // in seconds, populated using glfwGetTime()
-    // Uint32 windowID;    /**< The window with mouse focus, if any */
-    // Uint32 which;       /**< The mouse instance id, or SDL_TOUCH_MOUSEID */
+    MouseMotionEvent;
     uint8_t button;       /**< The mouse button index */
-    // Uint8 state;        /**< SDL_PRESSED or SDL_RELEASED */
     uint8_t clicks;       /**< 1 for single-click, 2 for double-click, etc. */
     // Uint8 padding1;
-    int x;           /**< X coordinate, relative to window */
-    int y;           /**< Y coordinate, relative to window */
 } MouseButtonEvent;
 
 typedef union RdtEvent {
