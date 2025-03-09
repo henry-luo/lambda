@@ -429,6 +429,22 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             = span->bound->border->width.right = span->bound->border->width.top;
         span->bound->border->style = border->style;
         break;
+    case LXB_CSS_PROPERTY_FONT_FAMILY:
+        const lxb_css_property_font_family_t *font_family = declr->u.font_family;
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->family = alloc_prop(lycon, font_family->first->u.str.length + 1);
+        strncpy(span->font->family, (char*)font_family->first->u.str.data, font_family->first->u.str.length);
+        span->font->family[font_family->first->u.str.length] = '\0';
+        printf("font family property: %s\n", span->font->family);
+        break;
+    case LXB_CSS_PROPERTY_FONT_SIZE:
+        const lxb_css_property_font_size_t *font_size = declr->u.font_size;
+        printf("font size property: %d\n", font_size->type);
+        break;
+    case LXB_CSS_PROPERTY_FONT_STYLE:   
+        const lxb_css_property_font_style_t *font_style = declr->u.font_style;
+        printf("font style property: %d\n", font_style->type);
+        break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);

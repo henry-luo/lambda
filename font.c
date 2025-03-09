@@ -105,6 +105,17 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     return face;
 }
 
+void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
+    fbox->style = *fprop;
+    fbox->face = load_styled_font(uicon, fprop->family ? fprop->family : font_name, fprop);
+    if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
+        fprintf(stderr, "could not load space character\n");
+        fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
+    } else {
+        fbox->space_width = fbox->face->glyph->advance.x >> 6;
+    }
+}
+
 bool fontface_entry_free(const void *item, void *udata) {
     FontfaceEntry* entry = (FontfaceEntry*)item;
     free(entry->name);

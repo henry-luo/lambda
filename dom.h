@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <math.h>
+#include <string.h>
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>

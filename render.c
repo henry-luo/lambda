@@ -20,7 +20,8 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                 // blend the pixel with the background
                 uint8_t* p = (uint8_t*)(row_pixels + (x + j) * 4);
                 // important to use 32bit int for computation below
-                uint32_t v = 255 - intensity;  
+                uint32_t v = 255 - intensity;
+                // can further optimize if background is a fixed color
                 if (rdcon->color.c == 0xFF) { // black text color
                     p[0] = 0xFF;
                     p[1] = p[1] * v / 255;  

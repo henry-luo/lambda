@@ -1,6 +1,6 @@
 #include "layout.h"
 
-FontProp default_font_prop = {16, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
+FontProp default_font_prop = {"Arial", 16, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
 
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
@@ -50,7 +50,10 @@ void free_view(ViewTree* tree, View* view) {
         }
         // free props
         ViewSpan* span = (ViewSpan*)view;
-        if (span->font) pool_variable_free(tree->pool, span->font);
+        if (span->font) {
+            if (span->font->family) pool_variable_free(tree->pool, span->font->family);
+            pool_variable_free(tree->pool, span->font);
+        }
         if (span->in_line) pool_variable_free(tree->pool, span->in_line);
         if (span->bound) {
             if (span->bound->background) pool_variable_free(tree->pool, span->bound->background);
@@ -101,10 +104,10 @@ void view_pool_destroy(ViewTree* tree) {
     tree->pool = NULL;
 }
 
-void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
+void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
     if (span->in_line) {
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_str(buf, "prop {");
+        strbuf_append_str(buf, "{");
         if (span->in_line->cursor) {
             char* cursor;
             switch (span->in_line->cursor) {
@@ -122,25 +125,25 @@ void print_inline_prop(ViewSpan* span, StrBuf* buf, int indent) {
         }
         strbuf_append_str(buf, "}\n");
     }
-    else if (span->font) {
+    if (span->font) {
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_format(buf, "prop {font-size:%f, font-style:%s, font-weight:%s, text-decoration:%s}\n",
-            span->font->font_size, lxb_css_value_by_id(span->font->font_style)->name,
+        strbuf_append_format(buf, "{font:{family:'%s', size:%f, style:%s, weight:%s, decoration:%s}}\n",
+            span->font->family, span->font->font_size, lxb_css_value_by_id(span->font->font_style)->name,
             lxb_css_value_by_id(span->font->font_weight)->name, lxb_css_value_by_id(span->font->text_deco)->name);
     }
-    else if (span->bound) {
+    if (span->bound) {
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_str(buf, "prop {");
+        strbuf_append_str(buf, "{");
         if (span->bound->background) {
             strbuf_append_format(buf, "bgcolor:#%x", span->bound->background->color.c);
         }
-        strbuf_append_format(buf, " margin {left:%d, right:%d, top:%d, bottom:%d}",
+        strbuf_append_format(buf, " margin:{left:%d, right:%d, top:%d, bottom:%d}",
             span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
-        strbuf_append_format(buf, " padding {left:%d, right:%d, top:%d, bottom:%d}",
+        strbuf_append_format(buf, " padding:{left:%d, right:%d, top:%d, bottom:%d}",
             span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
             strbuf_append_str(buf, "}\n");
         if (span->bound->border) {
-            strbuf_append_format(buf, "border {color:#%x, width:%d, style:%d}\n",
+            strbuf_append_format(buf, "border:{color:#%x, width:%d, style:%d}\n",
                 span->bound->border->color.c, span->bound->border->width.top, span->bound->border->style);
         }
     }  
@@ -157,14 +160,14 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_format(buf, "view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                     block->x, block->y, block->width, block->height);
-                print_inline_prop((ViewSpan*)block, buf, indent+2);              
+                print_inline_props((ViewSpan*)block, buf, indent+2);              
                 print_view_group((ViewGroup*)view, buf, indent+2);
             }
             else if (view->type == RDT_VIEW_INLINE) {
                 ViewSpan* span = (ViewSpan*)view;
                 strbuf_append_format(buf, "view inline:%s\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
-                print_inline_prop(span, buf, indent + 2);
+                print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
             }
             else if (view->type == RDT_VIEW_TEXT) {

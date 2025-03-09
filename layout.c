@@ -70,17 +70,6 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
-void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
-    fbox->style = *fprop;
-    fbox->face = load_styled_font(uicon, font_name, fprop);
-    if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
-        fprintf(stderr, "could not load space character\n");
-        fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
-    } else {
-        fbox->space_width = fbox->face->glyph->advance.x >> 6;
-    }
-}
-
 void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt) {
     layout_block(lycon, elmt, LXB_CSS_VALUE_BLOCK);
     lycon->prev_view->type = RDT_VIEW_LIST_ITEM;
