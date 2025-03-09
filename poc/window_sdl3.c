@@ -4,8 +4,36 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include "layout.h"
+// #include "../layout.h"
 #include <SDL3/SDL_opengl.h>
+#include <fontconfig.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <thorvg_capi.h>
+#include "../lib/mem-pool/include/mem_pool.h"
+#include <assert.h>
+
+typedef struct {
+    SDL_Window *window;    // current window
+    int window_width;    // window pixel width
+    int window_height;   // window pixel height
+    SDL_Surface* surface;  // rendering surface of a window
+    SDL_Texture* texture;  // texture for rendering
+    SDL_Renderer* renderer;  // renderer for rendering
+    Tvg_Canvas* canvas;    // ThorVG canvas
+
+    // font handling
+    FcConfig *font_config;
+    FT_Library ft_library;
+    struct hashmap* fontface_map;  // cache of font faces loaded
+
+    // image cache
+    struct hashmap* image_cache;  // cache for images loaded
+
+    float pixel_ratio;      // actual vs. logical pixel ratio, could be 1.0, 1.5, 2.0, etc.
+    // Document* document;     // current document
+    // MouseState mouse_state; // current mouse state
+} UiContext;
 
 typedef struct {
     SDL_Window *window;
@@ -17,56 +45,56 @@ typedef struct {
 UiContext ui_context;
 GLuint gl_texture;
 
-void render_html_doc(UiContext* uicon, View* root_view);
-void parse_html_doc(Document* doc, const char* doc_path);
-View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-void view_pool_destroy(ViewTree* tree);
-void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
+// void render_html_doc(UiContext* uicon, View* root_view);
+// void parse_html_doc(Document* doc, const char* doc_path);
+// View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
+// void view_pool_destroy(ViewTree* tree);
+// void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 void fontface_cleanup(UiContext* uicon);
-void image_cache_cleanup(UiContext* uicon);
+// void image_cache_cleanup(UiContext* uicon);
 
-Document* show_html_doc(char* doc_filename) {
-    Document* doc = calloc(1, sizeof(Document));
-    parse_html_doc(doc, doc_filename);
+// Document* show_html_doc(char* doc_filename) {
+//     Document* doc = calloc(1, sizeof(Document));
+//     parse_html_doc(doc, doc_filename);
     
-    // layout html doc 
-    if (doc->dom_tree) {
-        layout_html_doc(&ui_context, doc, false);
-    }
-    // render html doc
-    if (doc->view_tree && doc->view_tree->root) { 
-        render_html_doc(&ui_context, doc->view_tree->root); 
-    }
-    return doc;
-}
+//     // layout html doc 
+//     if (doc->dom_tree) {
+//         layout_html_doc(&ui_context, doc, false);
+//     }
+//     // render html doc
+//     if (doc->view_tree && doc->view_tree->root) { 
+//         render_html_doc(&ui_context, doc->view_tree->root); 
+//     }
+//     return doc;
+// }
 
-void repaint_window() {
-    SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
-    // render the texture to the screen
-    assert(ui_context.window_width == ui_context.surface->w && ui_context.window_height == ui_context.surface->h);
+// void repaint_window() {
+//     SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
+//     // render the texture to the screen
+//     assert(ui_context.window_width == ui_context.surface->w && ui_context.window_height == ui_context.surface->h);
 
-    int logical_w, logical_h, pixel_w, pixel_h;
-    SDL_GetWindowSize(ui_context.window, &logical_w, &logical_h);       // Logical size
-    SDL_GetCurrentRenderOutputSize(ui_context.renderer, &pixel_w, &pixel_h); // Actual clear pixel size
-    printf("Repainting window: %dx%d, logic: %dx%d, actual: %dx%d\n", 
-        ui_context.window_width, ui_context.window_height, logical_w, logical_h, pixel_w, pixel_h);
+//     int logical_w, logical_h, pixel_w, pixel_h;
+//     SDL_GetWindowSize(ui_context.window, &logical_w, &logical_h);       // Logical size
+//     SDL_GetCurrentRenderOutputSize(ui_context.renderer, &pixel_w, &pixel_h); // Actual clear pixel size
+//     printf("Repainting window: %dx%d, logic: %dx%d, actual: %dx%d\n", 
+//         ui_context.window_width, ui_context.window_height, logical_w, logical_h, pixel_w, pixel_h);
 
-    SDL_FRect rect = {0, 0, ui_context.surface->w * 2, ui_context.surface->h * 2};
-    SDL_RenderTexture(ui_context.renderer, ui_context.texture, &rect, &rect);
-    SDL_RenderPresent(ui_context.renderer);
-}
+//     SDL_FRect rect = {0, 0, ui_context.surface->w * 2, ui_context.surface->h * 2};
+//     SDL_RenderTexture(ui_context.renderer, ui_context.texture, &rect, &rect);
+//     SDL_RenderPresent(ui_context.renderer);
+// }
 
-void reflow_html_doc(Document* doc) {
-    if (!doc || !doc->dom_tree) {
-        printf("No document to reflow\n");
-        return;
-    }
-    layout_html_doc(&ui_context, doc, true);
-    // render html doc
-    if (doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root);
-    }
-}
+// void reflow_html_doc(Document* doc) {
+//     if (!doc || !doc->dom_tree) {
+//         printf("No document to reflow\n");
+//         return;
+//     }
+//     layout_html_doc(&ui_context, doc, true);
+//     // render html doc
+//     if (doc->view_tree->root) {
+//         render_html_doc(&ui_context, doc->view_tree->root);
+//     }
+// }
 
 void repaint_window() {
     SDL_UpdateTexture(ui_context.texture, NULL, ui_context.surface->pixels, ui_context.surface->pitch);
@@ -85,7 +113,6 @@ void repaint_window() {
 }
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
-    // pixel_width = 2048;  pixel_height = 1536;
     // re-create the surface
     if (uicon->surface) SDL_DestroySurface(uicon->surface);
     // creates the surface for rendering, 32-bits per pixel, RGBA format
@@ -131,13 +158,13 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
     int logical_w, logical_h, pixel_w, pixel_h;
     SDL_GetWindowSize(uicon->window, &logical_w, &logical_h);       // Logical size
     pixel_w = logical_w;  pixel_h = logical_h;
-    // SDL_GetCurrentRenderOutputSize(uicon->renderer, &pixel_w, &pixel_h); // Actual clear pixel size
+    SDL_GetCurrentRenderOutputSize(uicon->renderer, &pixel_w, &pixel_h); // Actual clear pixel size
     float scale_x = (float)pixel_w / logical_w;
     float scale_y = (float)pixel_h / logical_h;
     printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
     uicon->pixel_ratio = scale_x;   
     uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
-    default_font_prop.font_size = 16 * uicon->pixel_ratio;
+    // default_font_prop.font_size = 16 * uicon->pixel_ratio;
 
     // init ThorVG engine
     tvg_engine_init(TVG_ENGINE_SW, 1);    
@@ -150,31 +177,31 @@ int ui_context_init(AppState *state, UiContext* uicon, int width, int height) {
 
 void ui_context_cleanup(UiContext* uicon) {
     printf("Cleaning up UI context\n");
-    if (uicon->document) {
-        if (uicon->document->dom_tree) {
-            lxb_html_document_destroy(uicon->document->dom_tree);
-        }
-        if (uicon->document->view_tree) {
-            view_pool_destroy(uicon->document->view_tree);
-            free(uicon->document->view_tree);
-        }
-        free(uicon->document);
-    }
+    // if (uicon->document) {
+    //     if (uicon->document->dom_tree) {
+    //         lxb_html_document_destroy(uicon->document->dom_tree);
+    //     }
+    //     if (uicon->document->view_tree) {
+    //         view_pool_destroy(uicon->document->view_tree);
+    //         free(uicon->document->view_tree);
+    //     }
+    //     free(uicon->document);
+    // }
     printf("Cleaning up fonts\n");
-    fontface_cleanup(uicon);  // free font cache
+    // fontface_cleanup(uicon);  // free font cache
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
-    image_cache_cleanup(uicon);  // cleanup image cache
+    // image_cache_cleanup(uicon);  // cleanup image cache
     
     tvg_canvas_destroy(uicon->canvas);
     tvg_engine_term(TVG_ENGINE_SW);
     SDL_DestroySurface(uicon->surface);
     SDL_DestroyTexture(uicon->texture);
-    // SDL_DestroyRenderer(uicon->renderer);
+    SDL_DestroyRenderer(uicon->renderer);
 
-    if (uicon->mouse_state.sdl_cursor) {
-        SDL_DestroyCursor(uicon->mouse_state.sdl_cursor);
-    }
+    // if (uicon->mouse_state.sdl_cursor) {
+    //     SDL_DestroyCursor(uicon->mouse_state.sdl_cursor);
+    // }
     SDL_DestroyWindow(uicon->window);
     SDL_Quit();
 }
@@ -186,7 +213,6 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     ui_context_init(state, &ui_context, 400, 600);
     // ui_context.document = show_html_doc("test/sample.html");
     // repaint_window();
-    // gl_render();
     return state->window ? SDL_APP_CONTINUE : SDL_APP_FAILURE;
 }
 
@@ -200,7 +226,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
         // Clear the screen and set new viewport dimensions
         SDL_RenderClear(state->renderer);
-        SDL_SetRenderViewport(state->renderer, NULL);        
+        // SDL_SetRenderViewport(state->renderer, NULL);        
 		break;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         state->redraw = true;
@@ -214,8 +240,8 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 	return SDL_APP_CONTINUE;
 }
 
-#define RECT_WIDTH 30
-#define RECT_HEIGHT 15
+#define RECT_WIDTH 120
+#define RECT_HEIGHT 60
 #define GAP 15
 #define NUM_RECTANGLES 50
 
@@ -260,9 +286,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         //     printf("Reflow time: %llu ms\n", SDL_GetTicks() - start_time);
         // }
 
-        render_rectangles(ui_context.surface, w);
-        SDL_Rect viewport = { 0, 0, w, h };
-        SDL_SetRenderViewport(state->renderer, &viewport);        
+        render_rectangles(ui_context.surface, w*2);  
         repaint_window();
 		state->redraw = false;
 	}

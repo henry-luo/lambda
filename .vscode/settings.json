@@ -26,6 +26,7 @@
         "stb_image_write.h": "c",
         "queue": "c",
         "stack": "c",
-        "sdl_opengl.h": "c"
+        "sdl_opengl.h": "c",
+        "layout.h": "c"
     }
 }
