@@ -9,7 +9,7 @@ typedef struct {
 typedef struct {
     int width, height;  // given width and height for the inner content of the block
     int advance_y;
-    int max_width;
+    int max_width, max_height;  // max content width and height (without padding)
     int line_height;
     PropValue text_align;
     int given_width, given_height;  // specified width and height by css or html attributes

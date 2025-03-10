@@ -160,6 +160,7 @@ typedef struct {
     int contentWidth, contentHeight;
     int scrollX, scrollY;
     PropValue overflowX, overflowY;
+    bool hasHOverflow, hasVOverflow;
     bool hasHScroll, hasVScroll;
     int scrollSpeed;
     bool draggingHScroll;    // Is horizontal scrollbar being dragged
@@ -172,7 +173,7 @@ typedef struct {
     ViewSpan;  // extends ViewSpan
     // x, y, width, height forms the BORDER box of the block
     int x, y, width, height;  // x, y are relative to the parent block
-    int content_width, content_height;  // width and height of the content box
+    int content_width, content_height;  // width and height of the child content incluiding padding
     BlockProp* props;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
 } ViewBlock;

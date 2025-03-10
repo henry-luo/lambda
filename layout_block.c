@@ -237,12 +237,12 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         }
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
-        lycon->line.advance_x += block->bound->padding.left;
-        lycon->block.advance_y += block->bound->padding.top;
         if (block->bound->border) {
             lycon->line.advance_x += block->bound->border->width.left;
             lycon->block.advance_y += block->bound->border->width.top;
-        }
+        }        
+        lycon->line.advance_x += block->bound->padding.left;
+        lycon->block.advance_y += block->bound->padding.top;
         lycon->line.left = lycon->line.advance_x;
     } 
     else {
@@ -278,32 +278,46 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         line_align(lycon);
 
         // finalize the block size
+        int flow_width, flow_height;
         if (block->bound) {
             block->content_width = lycon->block.max_width + block->bound->padding.left + block->bound->padding.right;
+            // advance_y already includes padding.top and border.top
             block->content_height = lycon->block.advance_y + block->bound->padding.bottom;
-            if (block->scroller) {
-                if (block->scroller->overflowX == LXB_CSS_VALUE_HIDDEN) {}
-            }
-            block->width = max(block->width, block->content_width +
-                (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0));              
-            block->height = block->content_height 
-                + (block->bound->border ? block->bound->border->width.bottom : 0);
-        } 
-        else {
-            block->content_width = lycon->block.max_width;
-            block->content_height = lycon->block.advance_y;
-            block->width = max(block->width, lycon->block.max_width);  
-            block->height = lycon->block.advance_y;
+            flow_width = block->content_width +
+                (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
+            flow_height = block->content_height +
+                (block->bound->border ? block->bound->border->width.bottom : 0);
+        } else {
+            flow_width = block->content_width = lycon->block.max_width;
+            flow_height = block->content_height = lycon->block.advance_y;
         }
-        // handle overflow
-        // if (block->scroller) {
-        //     if (block->scroller->overflowX == LXB_CSS_VALUE_HIDDEN) {
-        //         block->width = min(block->width, lycon->block.width);
-        //     }
-        //     if (block->scroller->overflowY == LXB_CSS_VALUE_HIDDEN) {
-        //         block->height = min(block->height, lycon->block.height);
-        //     }
-        // }
+        
+        // handle horizontal overflow
+        if (flow_width > block->width) { // hz overflow
+            if (block->scroller == NULL) {
+                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            }
+            block->scroller->hasHOverflow = true;
+            if (block->scroller->overflowX == LXB_CSS_VALUE_VISIBLE) {
+                pa_block.max_width = max(pa_block.max_width, flow_width);  
+            }            
+        }
+        // handle vertical overflow and determine block->height
+        if (lycon->block.given_height >= 0) { // got specified height
+            if (flow_height > block->height) { // vt overflow
+                if (block->scroller == NULL) {
+                    block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+                }
+                block->scroller->hasVOverflow = true;    
+            }
+            // no change to block->height
+            if (block->scroller->overflowY == LXB_CSS_VALUE_VISIBLE) {
+                pa_block.max_height = max(pa_block.max_height, block->y + flow_height);  
+            }                    
+        }
+        else {
+            block->height = flow_height;
+        }
     }
 
     // flow the block in parent context
