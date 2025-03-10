@@ -225,6 +225,14 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_no
     return RDT_NOT_SURE;
 }
 
+void output_text(LayoutContext* lycon, ViewText* text, int text_length) {
+    text->length = text_length;  assert(text->length > 0);
+    lycon->line.advance_x += text->width;
+    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face->size->metrics.ascender >> 6);
+    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face->size->metrics.descender) >> 6);
+    printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
+}
+
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     unsigned char* text_start = text_node->char_data.data.data;  
     unsigned char* str = text_start;  printf("layout text: %s\n", str);
@@ -278,8 +286,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                 printf("break on space\n");
                 // skip all spaces
                 do { str++; } while (is_space(*str));
-                text->length = str - text_start - text->start_index;
-                assert(text->length > 0);
+                output_text(lycon, text, str - text_start - text->start_index);
                 line_break(lycon);
                 printf("after space line break\n");
                 if (*str) { goto LAYOUT_TEXT; }
@@ -289,8 +296,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                 printf("break at last space\n");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                     str = lycon->line.last_space + 1;
-                    text->length = str - text_start - text->start_index;
-                    assert(text->length > 0);
+                    output_text(lycon, text, str - text_start - text->start_index);
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text, break at start of text
@@ -317,8 +323,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         if (view_has_line_filled(lycon, (View*)text, text->node) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                 str = lycon->line.last_space + 1;
-                text->length = str - text_start - text->start_index;
-                assert(text->length > 0);
+                output_text(lycon, text, str - text_start - text->start_index);
                 line_break(lycon);  
                 if (*str) goto LAYOUT_TEXT;
                 else return;  // end of text
@@ -335,11 +340,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         }
     }
     // else output the entire text
-    text->length = str - text_start - text->start_index;  assert(text->length > 0);
-    lycon->line.advance_x += text->width;
-    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face->size->metrics.ascender >> 6);
-    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face->size->metrics.descender) >> 6);
-    printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
+    output_text(lycon, text, str - text_start - text->start_index);
 }
 
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
