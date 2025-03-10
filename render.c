@@ -237,12 +237,13 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
         render_bound(rdcon, view_block);
     }
 
+    rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
     View* view = view_block->child;
     if (view) {
         if (view_block->in_line && view_block->in_line->color.c) {
             rdcon->color = view_block->in_line->color;
         }
-        rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
+        
         render_children(rdcon, view);
     }
     else {
@@ -252,31 +253,14 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     // render scrollbars
     if (view_block->scroller) {
         printf("render scrollbars\n");
-        if (view_block->scroller->hasHScroll) {
-            printf("render hscroll\n");
+        if (view_block->scroller->hasHScroll || view_block->scroller->hasVScroll) {
             if (!view_block->scroller->pane) {
-                Rect rect;
-                rect.x = rdcon->block.x;  rect.y = rdcon->block.y + view_block->height - 20;
-                rect.width = view_block->width;  rect.height = 20;
                 view_block->scroller->pane = 
-                    scrollpane_create(rect.x, rect.y, rect.width, rect.height);
+                    scrollpane_create(rdcon->block.x, rdcon->block.y, view_block->width, view_block->height);
             }
             scrollpane_set_content_size(view_block->scroller->pane, 
                 view_block->content_width, view_block->content_height);
             scrollpane_update(rdcon->ui_context->canvas, view_block->scroller->pane);
-        }
-        if (view_block->scroller->hasVScroll) {
-            printf("render vscroll\n");
-            if (!view_block->scroller->pane) {
-                Rect rect;
-                rect.x = rdcon->block.x + view_block->width - 20;  rect.y = rdcon->block.y;
-                rect.width = 20;  rect.height = view_block->height;
-                view_block->scroller->pane = 
-                    scrollpane_create(rect.x, rect.y, rect.width, rect.height);
-            }
-            scrollpane_set_content_size(view_block->scroller->pane, 
-                view_block->content_width, view_block->content_height);
-            scrollpane_update(rdcon->ui_context->canvas, view_block->scroller->pane);            
         }
     }
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;

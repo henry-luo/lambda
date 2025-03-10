@@ -1,7 +1,7 @@
 #include "render.h"
 
 #define SCROLLBAR_SIZE 20
-#define MIN_HANDLE_SIZE 40
+#define MIN_HANDLE_SIZE 30
 #define HANDLE_RADIUS 10
 
 void tvg_shape_get_bounds(Tvg_Paint* shape, int* x, int* y, int* width, int* height) {
@@ -38,22 +38,18 @@ ScrollPane* scrollpane_create(int x, int y, int width, int height) {
     
     // Vertical scrollbar
     sp->v_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(sp->v_scrollbar, 
-                         x + width - SCROLLBAR_SIZE, y, 
-                         SCROLLBAR_SIZE, height, 0, 0);
+    tvg_shape_append_rect(sp->v_scrollbar, x + width - SCROLLBAR_SIZE, y, SCROLLBAR_SIZE, height, 0, 0);
     tvg_shape_set_fill_color(sp->v_scrollbar, 200, 200, 200, 255);
     sp->v_scroll_handle = tvg_shape_new();
     tvg_shape_set_fill_color(sp->v_scroll_handle, 100, 100, 100, 255);
     
     // Horizontal scrollbar
     sp->h_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(sp->h_scrollbar, 
-                         x, y + height - SCROLLBAR_SIZE, 
-                         width, SCROLLBAR_SIZE, 0, 0);
+    tvg_shape_append_rect(sp->h_scrollbar, x, y + height - SCROLLBAR_SIZE, width, SCROLLBAR_SIZE, 0, 0);
+    printf("hz scrollbar bounds: %d, %d, %d, %d\n", x, y + height - SCROLLBAR_SIZE, width, SCROLLBAR_SIZE);
     tvg_shape_set_fill_color(sp->h_scrollbar, 200, 200, 200, 255);
     sp->h_scroll_handle = tvg_shape_new();
     tvg_shape_set_fill_color(sp->h_scroll_handle, 100, 100, 100, 255);
-    
     return sp;
 }
 
