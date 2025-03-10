@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
-#include "./lib/strbuf.h"
+#include "../lib/strbuf.h"
 #include "flexbox.h"
-#include "dom.h"
+#include "../dom.h"
 
 // Axis properties
 typedef struct {

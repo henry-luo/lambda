@@ -27,6 +27,8 @@
         "queue": "c",
         "stack": "c",
         "sdl_opengl.h": "c",
-        "layout.h": "c"
+        "layout.h": "c",
+        "criterion.h": "c",
+        "flexbox.h": "c"
     }
 }

@@ -5,6 +5,7 @@ transpile
 *.a
 *.dylib
 *.pc
+*.exe
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
 hello

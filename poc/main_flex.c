@@ -30,4 +30,4 @@ int main() {
     return 0;
 }
 
-// clang -o flexbox main_flex.c layout_flex.c lib/strbuf.c  -I/usr/local/include /usr/local/lib/liblexbor_static.a
+// clang -o flexbox.exe main_flex.c layout_flex.c ../lib/strbuf.c  -I/usr/local/include /usr/local/lib/liblexbor_static.a
