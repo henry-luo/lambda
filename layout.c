@@ -205,6 +205,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span) 
 LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_node_t* node) {
     // note: this function navigates to parenets through laid out view tree, 
     // and siblings through non-processed html nodes
+    printf("check if view has line filled\n");
     float current_advance_x = lycon->line.advance_x;
     node = lxb_dom_node_next(node);
     if (node) {
@@ -213,11 +214,13 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_no
     }
     // check at parent level
     view = (View*)view->parent;
-    if (view->type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
-    else if (view->type == RDT_VIEW_INLINE) {
-        return view_has_line_filled(lycon, view, view->node);
+    if (view) {
+        if (view->type == RDT_VIEW_BLOCK) { return RDT_LINE_NOT_FILLED; }
+        else if (view->type == RDT_VIEW_INLINE) {
+            return view_has_line_filled(lycon, view, view->node);
+        }
+        printf("unknown view type\n");
     }
-    printf("unknown view type\n");
     return RDT_NOT_SURE;
 }
 
@@ -254,6 +257,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     // layout the text glyphs
     do {
         int wd;
+        // printf("char: %c\n", *str);
         if (is_space(*str)) {
             wd = lycon->font.space_width;
         }
@@ -276,6 +280,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                 text->length = str - text_start - text->start_index;
                 assert(text->length > 0);
                 line_break(lycon);
+                printf("after space line break\n");
                 if (*str) { goto LAYOUT_TEXT; }
                 else return;
             }
@@ -295,7 +300,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                     // continue the text flow
                 }
             }
-            // else cannot break, continue the flow with overflow
+            // else cannot break, continue the flow in current line
         }
         if (is_space(*str)) {
             do { str++; } while (is_space(*str));
@@ -315,7 +320,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
                 assert(text->length > 0);
                 line_break(lycon);  
                 if (*str) goto LAYOUT_TEXT;
-                else return;
+                else return;  // end of text
             }
             else { // last_space outside the text, break at start of text
                 line_break(lycon);

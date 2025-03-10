@@ -273,7 +273,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
                 lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
             }
             lycon->parent = block->parent;
-            printf("block height: %d\n", lycon->block.advance_y);
         }
         line_align(lycon);
 
@@ -294,7 +293,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         
         // handle horizontal overflow
         if (flow_width > block->width) { // hz overflow
-            if (block->scroller == NULL) {
+            if (!block->scroller) {
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
             }
             block->scroller->hasHOverflow = true;
@@ -305,15 +304,15 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         // handle vertical overflow and determine block->height
         if (lycon->block.given_height >= 0) { // got specified height
             if (flow_height > block->height) { // vt overflow
-                if (block->scroller == NULL) {
+                if (!block->scroller) {
                     block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
                 }
-                block->scroller->hasVOverflow = true;    
+                block->scroller->hasVOverflow = true;
+                if (block->scroller->overflowY == LXB_CSS_VALUE_VISIBLE) {
+                    pa_block.max_height = max(pa_block.max_height, block->y + flow_height);  
+                }                 
             }
             // no change to block->height
-            if (block->scroller->overflowY == LXB_CSS_VALUE_VISIBLE) {
-                pa_block.max_height = max(pa_block.max_height, block->y + flow_height);  
-            }                    
         }
         else {
             block->height = flow_height;
@@ -321,6 +320,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     }
 
     // flow the block in parent context
+    printf("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     if (display == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (lycon->line.advance_x + block->width >= lycon->line.right) { 
