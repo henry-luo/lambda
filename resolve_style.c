@@ -344,6 +344,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     if (!data) { return LXB_STATUS_ERROR_NOT_EXISTS; }
     printf("style entry: %ld %s\n", declr->type, data->name);
     ViewSpan* span = (ViewSpan*)lycon->view;
+    ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: 
@@ -445,20 +446,38 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_font_style_t *font_style = declr->u.font_style;
         printf("font style property: %d\n", font_style->type);
         break;
+    case LXB_CSS_PROPERTY_WIDTH:
+        const lxb_css_property_width_t *width = declr->u.width;
+        lycon->block.given_width = resolve_length_value(lycon, width);
+        printf("width property: %d\n", lycon->block.given_width);
+        break;
+    case LXB_CSS_PROPERTY_HEIGHT:
+        const lxb_css_property_height_t *height = declr->u.height;
+        lycon->block.given_height = resolve_length_value(lycon, height);
+        printf("height property: %d\n", lycon->block.given_height);
+        break;
+    case LXB_CSS_PROPERTY_OVERFLOW_X:
+        if (!block) { break; }
+        const lxb_css_property_overflow_x_t *overflow_x = declr->u.overflow_x;
+        printf("overflow x property: %d\n", overflow_x->type);
+        if (!block->scroller) {
+            block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+        }
+        block->scroller->overflowX = overflow_x->type;
+        break;
+    case LXB_CSS_PROPERTY_OVERFLOW_Y:
+        if (!block) { break; }
+        const lxb_css_property_overflow_y_t *overflow = declr->u.overflow_y;
+        printf("overflow property: %d\n", overflow->type);
+        if (!block->scroller) {
+            block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+        }
+        block->scroller->overflowY = overflow->type;
+        break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);
-        // if (sv_eq(custom_name, sv_from_cstr("cursor"))) {
-        //     ViewSpan* span = (ViewSpan*)lycon->view;
-        //     if (!span->in_line) {
-        //         span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
-        //     }
-        //     String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
-        //     if (sv_eq(custom_value, sv_from_cstr("pointer"))) {
-        //         printf("got cursor: pointer\n");
-        //         span->in_line->cursor = LXB_CSS_VALUE_POINTER;
-        //     }
-        // }
+        // String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
         printf("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
         break;
     default:

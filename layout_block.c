@@ -99,7 +99,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     }
     // save parent context
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   FontBox pa_font = lycon->font;
-    lycon->block.width = -1;  lycon->block.height = -1;
+    lycon->block.width = lycon->block.height = 0;
+    lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
     uintptr_t elmt_name = elmt->element.node.local_name;
     ViewBlock* block = elmt_name == LXB_TAG_IMG ? 
@@ -152,13 +153,13 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
         if (value) {
             int width = strToInt((const char*)value, value_len);
-            if (width > 0) lycon->block.width = width * lycon->ui_context->pixel_ratio;
+            if (width >= 0) lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
             // else width attr ignored
         }
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"height", 6, &value_len);
         if (value) {
             int height = strToInt((const char*)value, value_len);
-            if (height > 0) lycon->block.height = height * lycon->ui_context->pixel_ratio;
+            if (height >= 0) lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
             // else height attr ignored
         }
         break;        
@@ -194,22 +195,21 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             image->img = loadImage(lycon->ui_context, src->s);
             strbuf_free(src);
         }
-        if (lycon->block.width < 0 || lycon->block.height < 0) {
+        if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
             if (image->img) {
                 int w = image->img->width, h = image->img->height;
-                printf("image dims: %d x %d, %f x %f\n", w, h, lycon->block.width, lycon->block.height);
-                if (lycon->block.width >= 0) { // scale unspecified height
-                    lycon->block.height = lycon->block.width * h / w;
+                printf("image dims: %d x %d, %d x %d\n", w, h, lycon->block.given_width, lycon->block.given_height);
+                if (lycon->block.given_width >= 0) { // scale unspecified height
+                    lycon->block.given_height = lycon->block.given_width * h / w;
                 }
-                if (lycon->block.height >= 0) { // scale unspecified width
-                    lycon->block.width = lycon->block.height * w / h;
-                }
-                else { // both width and height unspecified
-                    lycon->block.width = w;  lycon->block.height = h;
+                if (lycon->block.given_height >= 0) { // scale unspecified width
+                    lycon->block.given_width = lycon->block.given_height * w / h;
+                } else { // both width and height unspecified
+                    lycon->block.given_width = w;  lycon->block.given_height = h;
                 }
             }
             // todo: use a placeholder
-            printf("image dimensions: %f x %f\n", lycon->block.width, lycon->block.height);
+            printf("image dimensions: %d x %d\n", lycon->block.given_width, lycon->block.given_height);
         }
         // else width & height both specified
     }
@@ -218,16 +218,18 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
     if (block->bound) {
-        if (lycon->block.width >= 0) { // got specified width 
-            block->width = lycon->block.width + block->bound->padding.left + block->bound->padding.right +
+        if (lycon->block.given_width >= 0) { // got specified width 
+            block->width = lycon->block.given_width + block->bound->padding.left + block->bound->padding.right +
                 (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
+            lycon->block.width = lycon->block.given_width;
         } else {
             block->width = pa_block.width - (block->bound->margin.left + block->bound->margin.right);
             lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
         }
-        if (lycon->block.height >= 0) { // got specified height 
-            block->height = lycon->block.height + block->bound->padding.top + block->bound->padding.bottom +
+        if (lycon->block.given_height >= 0) { // got specified height 
+            block->height = lycon->block.given_height + block->bound->padding.top + block->bound->padding.bottom +
                 (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
+            lycon->block.height = lycon->block.given_height;
         } else {
             block->height = block->bound->margin.top + block->bound->margin.bottom;
             lycon->block.height = pa_block.height - block->height - (block->bound->padding.top + block->bound->padding.bottom)
@@ -244,13 +246,13 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         lycon->line.left = lycon->line.advance_x;
     } 
     else {
-        if (lycon->block.width >= 0) { // got specified width 
-            block->width = lycon->block.width;
+        if (lycon->block.given_width >= 0) { // got specified width 
+            block->width = lycon->block.width = lycon->block.given_width;
         } else {
             block->width = lycon->block.width = pa_block.width;
         }
-        if (lycon->block.height >= 0) { // got specified height 
-            block->height = lycon->block.height;
+        if (lycon->block.given_height >= 0) { // got specified height 
+            block->height = lycon->block.height = lycon->block.given_height;
         } else {
             block->height = lycon->block.height = pa_block.height;
         }
@@ -271,22 +273,37 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
                 lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
             }
             lycon->parent = block->parent;
-            printf("block height: %f\n", lycon->block.advance_y);
+            printf("block height: %d\n", lycon->block.advance_y);
         }
         line_align(lycon);
 
         // finalize the block size
         if (block->bound) {
-            block->width = max(block->width, lycon->block.max_width 
-                + block->bound->padding.left + block->bound->padding.right +
+            block->content_width = lycon->block.max_width + block->bound->padding.left + block->bound->padding.right;
+            block->content_height = lycon->block.advance_y + block->bound->padding.bottom;
+            if (block->scroller) {
+                if (block->scroller->overflowX == LXB_CSS_VALUE_HIDDEN) {}
+            }
+            block->width = max(block->width, block->content_width +
                 (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0));              
-            block->height = lycon->block.advance_y + block->bound->padding.bottom 
+            block->height = block->content_height 
                 + (block->bound->border ? block->bound->border->width.bottom : 0);
         } 
         else {
+            block->content_width = lycon->block.max_width;
+            block->content_height = lycon->block.advance_y;
             block->width = max(block->width, lycon->block.max_width);  
             block->height = lycon->block.advance_y;
         }
+        // handle overflow
+        // if (block->scroller) {
+        //     if (block->scroller->overflowX == LXB_CSS_VALUE_HIDDEN) {
+        //         block->width = min(block->width, lycon->block.width);
+        //     }
+        //     if (block->scroller->overflowY == LXB_CSS_VALUE_HIDDEN) {
+        //         block->height = min(block->height, lycon->block.height);
+        //     }
+        // }
     }
 
     // flow the block in parent context

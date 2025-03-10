@@ -8,6 +8,7 @@
         "layout.c",
         "layout_block.c",
         "resolve_style.c",
+        "scroller.c",
         "view_pool.c",
         "font.c",
         "surface.c",
