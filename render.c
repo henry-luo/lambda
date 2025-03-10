@@ -6,6 +6,9 @@
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
+ScrollPane* scrollpane_create(int x, int y, int width, int height);
+void scrollpane_set_content_size(ScrollPane* sp, int content_width, int content_height);
+void scrollpane_update(Tvg_Canvas* canvas, ScrollPane* sp);
 
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
@@ -93,8 +96,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         else if (rdcon->font.style.text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height / 2;
         }
-        rect.w = text->width;  rect.h = thinkness;
-        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, rect.x, rect.y, rect.w, rect.h);
+        rect.width = text->width;  rect.height = thinkness; // corrected the variable name from h to height
+        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, 
+            rect.x, rect.y, rect.width, rect.height); // corrected w to width
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     printf("end of text view\n");
@@ -158,7 +162,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         Rect rect;
         rect.x = rdcon->block.x + list_item->x - 15 * ratio;  
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
-        rect.w = rect.h = 5 * ratio;
+        rect.width = rect.height = 5 * ratio;
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c);
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
@@ -200,22 +204,22 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;  
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-    rect.w = view->width;  rect.h = view->height;
+    rect.width = view->width;  rect.height = view->height;
     if (view->bound->background) {
         fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
     }
     if (view->bound->border) {
         Rect border_rect = rect;
-        border_rect.w = view->bound->border->width.left;
+        border_rect.width = view->bound->border->width.left;
         fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
-        border_rect.x = rect.x + rect.w - view->bound->border->width.right;
-        border_rect.w = view->bound->border->width.right;
+        border_rect.x = rect.x + rect.width - view->bound->border->width.right;
+        border_rect.width = view->bound->border->width.right;
         fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
         border_rect = rect;
-        border_rect.h = view->bound->border->width.top;
+        border_rect.height = view->bound->border->width.top;
         fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
-        border_rect.y = rect.y + rect.h - view->bound->border->width.bottom;
-        border_rect.h = view->bound->border->width.bottom;
+        border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
+        border_rect.height = view->bound->border->width.bottom;
         fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
     }
 }
@@ -244,6 +248,37 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     else {
         printf("view has no child\n");
     }
+
+    // render scrollbars
+    if (view_block->scroller) {
+        printf("render scrollbars\n");
+        if (view_block->scroller->hasHScroll) {
+            printf("render hscroll\n");
+            if (!view_block->scroller->pane) {
+                Rect rect;
+                rect.x = rdcon->block.x;  rect.y = rdcon->block.y + view_block->height - 20;
+                rect.width = view_block->width;  rect.height = 20;
+                view_block->scroller->pane = 
+                    scrollpane_create(rect.x, rect.y, rect.width, rect.height);
+            }
+            scrollpane_set_content_size(view_block->scroller->pane, 
+                view_block->content_width, view_block->content_height);
+            scrollpane_update(rdcon->ui_context->canvas, view_block->scroller->pane);
+        }
+        if (view_block->scroller->hasVScroll) {
+            printf("render vscroll\n");
+            if (!view_block->scroller->pane) {
+                Rect rect;
+                rect.x = rdcon->block.x + view_block->width - 20;  rect.y = rdcon->block.y;
+                rect.width = 20;  rect.height = view_block->height;
+                view_block->scroller->pane = 
+                    scrollpane_create(rect.x, rect.y, rect.width, rect.height);
+            }
+            scrollpane_set_content_size(view_block->scroller->pane, 
+                view_block->content_width, view_block->content_height);
+            scrollpane_update(rdcon->ui_context->canvas, view_block->scroller->pane);            
+        }
+    }
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
 }
 
@@ -254,7 +289,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
     if (view->img) {
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-        rect.w = view->width;  rect.h = view->height; 
+        rect.width = view->width;  rect.height = view->height; 
         blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect);
     }
     else {

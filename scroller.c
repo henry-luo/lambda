@@ -8,30 +8,6 @@ void scroller_get_hscroll_bounds(ScrollProp* pane, float* x, float* width);
 void scroller_get_vscroll_bounds(ScrollProp* pane, float* y, float* height);
 void scroller_update(ScrollProp* pane);
 
-ScrollProp scroller_create(float x, float y, float width, float height,
-    float contentWidth, float contentHeight, PropValue overflowX, PropValue overflowY) {
-    ScrollProp pane = {
-        .x = x, .y = y,
-        .width = width, .height = height,
-        .contentWidth = contentWidth, .contentHeight = contentHeight,
-        .scrollX = 0.0f, .scrollY = 0.0f,
-        .overflowX = overflowX, .overflowY = overflowY,
-        .scrollSpeed = 50.0f,
-        .draggingHScroll = false, .draggingVScroll = false
-    };
-    scroller_update(&pane);
-    return pane;
-}
-
-void scroller_update(ScrollProp* pane) {
-    pane->hasHScroll = (pane->overflowX == LXB_CSS_VALUE_SCROLL) || 
-        (pane->overflowX == LXB_CSS_VALUE_AUTO && pane->contentWidth > pane->width);
-    pane->hasVScroll = (pane->overflowY == LXB_CSS_VALUE_SCROLL) || 
-        (pane->overflowY == LXB_CSS_VALUE_AUTO && pane->contentHeight > pane->height);
-    pane->scrollX = max(0, min(pane->scrollX, pane->contentWidth - pane->width));
-    pane->scrollY = max(0, min(pane->scrollY, pane->contentHeight - pane->height));
-}
-
 void scroller_scroll_callback(ScrollProp* pane, GLFWwindow* window, double xoffset, double yoffset) {
     double mouseX, mouseY;
     glfwGetCursorPos(window, &mouseX, &mouseY);

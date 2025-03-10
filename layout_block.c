@@ -299,7 +299,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             block->scroller->hasHOverflow = true;
             if (block->scroller->overflowX == LXB_CSS_VALUE_VISIBLE) {
                 pa_block.max_width = max(pa_block.max_width, flow_width);  
-            }            
+            }
+            else if (block->scroller->overflowX == LXB_CSS_VALUE_SCROLL || block->scroller->overflowX == LXB_CSS_VALUE_AUTO) {
+                block->scroller->hasHScroll = true;
+            }
         }
         // handle vertical overflow and determine block->height
         if (lycon->block.given_height >= 0) { // got specified height
@@ -310,7 +313,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
                 block->scroller->hasVOverflow = true;
                 if (block->scroller->overflowY == LXB_CSS_VALUE_VISIBLE) {
                     pa_block.max_height = max(pa_block.max_height, block->y + flow_height);  
-                }                 
+                }
+                else if (block->scroller->overflowY == LXB_CSS_VALUE_SCROLL || block->scroller->overflowY == LXB_CSS_VALUE_AUTO) {
+                    block->scroller->hasVScroll = true;
+                }
             }
             // no change to block->height
         }

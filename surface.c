@@ -40,12 +40,12 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color) {
     Rect r;
     if (!surface) return;
     if (!rect) { r = (Rect){0, 0, surface->width, surface->height};  rect = &r; }
-    printf("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x\n", rect->x, rect->y, rect->w, rect->h, color);
-    for (int i = 0; i < rect->h; i++) {
+    printf("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x\n", rect->x, rect->y, rect->width, rect->height, color);
+    for (int i = 0; i < rect->height; i++) {
         if (rect->y + i < 0 || rect->y + i >= surface->height) continue;
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (rect->y + i) * surface->pitch;
-        if (0 <= rect->x && rect->x + rect->w <= surface->width) {
-            _fill_row(row_pixels, rect->x, rect->w, color);
+        if (0 <= rect->x && rect->x + rect->width <= surface->width) {
+            _fill_row(row_pixels, rect->x, rect->width, color);
         }
     }
 }
@@ -59,13 +59,13 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
         src_rect = &rect;
     }
     printf("blit surface: src(%d, %d, %d, %d) to dst(%d, %d, %d, %d)\n", 
-        src_rect->x, src_rect->y, src_rect->w, src_rect->h, dst_rect->x, dst_rect->y, dst_rect->w, dst_rect->h);
-    float x_ratio = (float)src_rect->w / dst_rect->w;
-    float y_ratio = (float)src_rect->h / dst_rect->h;
-    for (int i = 0; i < dst_rect->h; i++) {
+        src_rect->x, src_rect->y, src_rect->width, src_rect->height, dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height);
+    float x_ratio = (float)src_rect->width / dst_rect->width;
+    float y_ratio = (float)src_rect->height / dst_rect->height;
+    for (int i = 0; i < dst_rect->height; i++) {
         if (dst_rect->y + i < 0 || dst_rect->y + i >= dst->height) continue;
         uint8_t* row_pixels = (uint8_t*)dst->pixels + (dst_rect->y + i) * dst->pitch;
-        for (int j = 0; j < dst_rect->w; j++) {
+        for (int j = 0; j < dst_rect->width; j++) {
             if (dst_rect->x + j < 0 || dst_rect->x + j >= dst->width) continue;
             // todo: support different scale mode, like SDL_SCALEMODE_LINEAR
             int src_x = src_rect->x + j * x_ratio;

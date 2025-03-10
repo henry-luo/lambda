@@ -149,6 +149,48 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
     }  
 }
 
+void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
+    if (block->props) {
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "{");
+        if (block->props->text_align) {
+            strbuf_append_format(buf, "text-align:%s", lxb_css_value_by_id(block->props->text_align)->name);
+        }
+        if (block->props->line_height) {
+            strbuf_append_format(buf, "line-height:%f", block->props->line_height);
+        }
+        if (block->props->text_indent) {
+            strbuf_append_format(buf, "text-indent:%f", block->props->text_indent);
+        }
+        strbuf_append_str(buf, "}\n");
+    }
+    if (block->scroller) {
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "{");
+        if (block->scroller->overflowX) {
+            strbuf_append_format(buf, " overflow-x:%s", lxb_css_value_by_id(block->scroller->overflowX)->name);
+        }
+        if (block->scroller->overflowY) {
+            strbuf_append_format(buf, " overflow-y:%s", lxb_css_value_by_id(block->scroller->overflowY)->name);
+        }        
+        if (block->scroller->hasHOverflow) {
+            strbuf_append_str(buf, " hz-overflow:true");
+        }
+        if (block->scroller->hasVOverflow) {
+            strbuf_append_str(buf, " vt-overflow:true");
+        }
+        if (block->scroller->hasHScroll) {
+            strbuf_append_str(buf, " hz-scroll:true");
+        }
+        if (block->scroller->hasVScroll) {
+            strbuf_append_str(buf, " vt-scroll:true");
+        }
+        // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroller->pane->v_scrollbar, block->scroller->pane->h_scrollbar);
+        strbuf_append_str(buf, "}\n");
+    }
+
+}
+
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     View* view = view_group->child;
     if (view) {
@@ -160,6 +202,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_format(buf, "view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
                     block->x, block->y, block->width, block->height);
+                print_block_props(block, buf, indent + 2);
                 print_inline_props((ViewSpan*)block, buf, indent+2);              
                 print_view_group((ViewGroup*)view, buf, indent+2);
             }

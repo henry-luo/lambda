@@ -32,7 +32,7 @@ typedef union {
 
 typedef struct Rect {
     int x, y;
-    int w, h;
+    int width, height;
 } Rect;
 
 typedef struct ImageSurface {
@@ -155,18 +155,30 @@ typedef struct {
 } ViewSpan;
 
 typedef struct {
-    int x, y;
-    int width, height;
-    int contentWidth, contentHeight;
-    int scrollX, scrollY;
+    Tvg_Paint* v_scrollbar;    // Vertical scrollbar
+    Tvg_Paint* v_scroll_handle;
+    Tvg_Paint* h_scrollbar;    // Horizontal scrollbar
+    Tvg_Paint* h_scroll_handle;
+    
+    int content_width, content_height;
+    int view_x, view_y;
+    int view_width, view_height;
+    int v_scroll_position, h_scroll_position;
+    int v_max_scroll, h_max_scroll;
+    
+    bool v_is_dragging, h_is_dragging;
+    int drag_start_x, drag_start_y;
+    int v_drag_start_scroll, h_drag_start_scroll;
+    
+    int drag_speed;
+} ScrollPane;
+
+typedef struct {
     PropValue overflowX, overflowY;
     bool hasHOverflow, hasVOverflow;
     bool hasHScroll, hasVScroll;
+    ScrollPane* pane;
     int scrollSpeed;
-    bool draggingHScroll;    // Is horizontal scrollbar being dragged
-    bool draggingVScroll;    // Is vertical scrollbar being dragged
-    int dragStartX, dragStartY;  // Changed to int for consistent types
-    int scrollStartX, scrollStartY;  // Changed to int for consistent types
 } ScrollProp;
 
 typedef struct {
@@ -214,6 +226,7 @@ typedef struct {
 // rendering context structs
 typedef struct {
     int x, y;  // abs x, y relative to entire canvas/screen
+    Rect clip;  // clipping rect
 } BlockBlot;
 
 typedef struct {
