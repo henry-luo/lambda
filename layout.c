@@ -144,6 +144,7 @@ void line_start(LayoutContext* lycon) {
 }
 
 void line_break(LayoutContext* lycon) {
+    lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
     lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
     // reset linebox
     line_start(lycon);
