@@ -1,19 +1,17 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
-#include <assert.h>
-#include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include <math.h>
+#include <assert.h>
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
 #include "./lib/strbuf.h"
 #include "./lib/hashmap.h"
 #include "./lib/arraylist.h"
-
-typedef unsigned int uint32_t;
-typedef unsigned short uint16_t;
-typedef unsigned char uint8_t;
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))

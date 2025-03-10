@@ -172,6 +172,49 @@ struct ViewTree {
     View* root;
 };
 
+// Flexbox node structure (supports hierarchy)
+typedef struct FlexNode {
+    // Container properties
+    float width, height;           // Container dimensions (NaN if undefined)
+    const char* direction;         // "row", "row-reverse", "column", "column-reverse"
+    const char* justify;           // "flex-start", "flex-end", "center", "space-between", "space-around"
+    const char* align_items;       // "flex-start", "center", "flex-end", "stretch"
+    const char* align_content;     // "flex-start", "center", "flex-end", "space-between", "space-around", "stretch"
+    const char* wrap;              // "nowrap", "wrap", "wrap-reverse"
+
+    // Item properties
+    float flex_basis;              // Initial main-axis size (NaN if undefined)
+    float flex_grow;               // Growth factor
+    float flex_shrink;             // Shrink factor
+    float content_cross_size;      // Intrinsic cross-axis size (NaN if undefined)
+
+    // Children
+    struct FlexNode** children;    // Array of child nodes
+    int num_children;              // Number of children
+
+    // Internal state
+    bool is_dirty;                 // Needs recalculation
+    float position_main, position_cross; // Computed positions
+    float main_size, cross_size;   // Computed sizes
+} FlexNode;
+
+// Custom measure function type (e.g., for text or dynamic content)
+typedef void (*MeasureFunc)(FlexNode* node, float width, float height, 
+                           float* out_main_size, float* out_cross_size);
+
+// Create and destroy nodes
+FlexNode* createFlexNode(void);
+void destroyFlexNode(FlexNode* node);
+
+// Add a child to a node
+void addChild(FlexNode* parent, FlexNode* child);
+
+// Mark a node as dirty
+void markDirty(FlexNode* node);
+
+// Calculate layout for a node tree
+void calculateFlexLayout(FlexNode* root, MeasureFunc measure);
+
 typedef struct CursorState {
     View* view;
     int x, y;

@@ -2,6 +2,19 @@
 #define SV_IMPLEMENTATION
 #include "./lib/sv.h"
 
+lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
+    printf("style rule: %.*s\n", (int) len, (const char *) data);
+    return LXB_STATUS_OK;
+}
+
+lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t **root,
+    lexbor_avl_node_t *node, void *ctx) {
+    lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
+    printf("style entry: %ld\n", declr->type);
+    lxb_css_rule_declaration_serialize(declr, style_print_callback, NULL);
+    return LXB_STATUS_OK;
+}
+
 // CSS4 has a total of 148 colors
 Color color_name_to_rgb(PropValue color_name) {
     uint32_t c;
@@ -321,19 +334,6 @@ PropValue resolve_element_display(lxb_html_element_t* elmt) {
         }
     }
     return outer_display;
-}
-
-lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
-    printf("style rule: %.*s\n", (int) len, (const char *) data);
-    return LXB_STATUS_OK;
-}
-
-lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t **root,
-    lexbor_avl_node_t *node, void *ctx) {
-    lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
-    printf("style entry: %ld\n", declr->type);
-    lxb_css_rule_declaration_serialize(declr, style_print_callback, NULL);
-    return LXB_STATUS_OK;
 }
 
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
