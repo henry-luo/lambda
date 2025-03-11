@@ -30,5 +30,6 @@
         "layout.h": "c",
         "criterion.h": "c",
         "flexbox.h": "c"
-    }
+    },
+    "cmake.sourceDirectory": "/Users/henryluo/Projects/Jubily/lambda-parser/tree-sitter-javascript"
 }
