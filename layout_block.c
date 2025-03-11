@@ -336,8 +336,17 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             block->x = lycon->line.advance_x;  
         }
         block->y = lycon->block.advance_y;
-        lycon->line.is_line_start = false;  lycon->line.advance_x += block->width;  
-        lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);  // inline block aligned at baseline
+        lycon->line.advance_x += block->width;
+        if (block->bound) { 
+            block->x += block->bound->margin.left;
+            block->y += block->bound->margin.top;
+            lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
+            lycon->line.max_ascender = max(lycon->line.max_ascender, 
+                block->height + block->bound->margin.top + block->bound->margin.bottom); 
+        } else {
+            lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);  // inline block aligned at baseline
+        }
+        lycon->line.is_line_start = false;
     } else {
         if (block->bound) {
             lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
