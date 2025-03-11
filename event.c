@@ -209,7 +209,7 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     evcon->ui_context = uicon;
     evcon->event = *event;
     // load default font Arial, size 16 px
-    setup_font(uicon, &evcon->font, "Hei", &default_font_prop);
+    setup_font(uicon, &evcon->font, "Hei", &evcon->ui_context->default_font);
     evcon->new_cursor = LXB_CSS_VALUE_AUTO;
 }
 

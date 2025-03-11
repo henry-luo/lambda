@@ -3,7 +3,6 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <wchar.h>
-#include <locale.h>
 #include <assert.h>
 #include <stdbool.h>
 #include "layout.h"
@@ -12,14 +11,13 @@ void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, View* root_view);
 void parse_html_doc(Document* doc, const char* doc_path);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
-void view_pool_destroy(ViewTree* tree);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
-void fontface_cleanup(UiContext* uicon);
-void image_cache_cleanup(UiContext* uicon);
+
+int ui_context_init(UiContext* uicon);
+void ui_context_cleanup(UiContext* uicon);
+void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
 // Window dimensions
-int WINDOW_WIDTH = 400;
-int WINDOW_HEIGHT = 700;
 bool do_redraw = false;
 UiContext ui_context;
 
@@ -48,91 +46,6 @@ void reflow_html_doc(Document* doc) {
     if (doc->view_tree->root) {
         render_html_doc(&ui_context, doc->view_tree->root);
     }
-}
-
-void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
-    // re-creates the surface for rendering, 32-bits per pixel, RGBA format
-    if (uicon->surface) image_surface_destroy(uicon->surface);
-    uicon->surface = image_surface_create(pixel_width, pixel_height);
-    if (!uicon->surface) {
-        fprintf(stderr, "Error: Could not create image surface.\n");
-        return;
-    }         
-}
-
-int ui_context_init(UiContext* uicon, int window_width, int window_height) {
-    memset(uicon, 0, sizeof(UiContext));
-
-    setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
-
-    // init FreeType
-    if (FT_Init_FreeType(&uicon->ft_library)) {
-        fprintf(stderr, "Could not initialize FreeType library\n");
-        return EXIT_FAILURE;
-    }
-    // init Fontconfig
-    uicon->font_config = FcInitLoadConfigAndFonts();
-    if (!uicon->font_config) {
-        fprintf(stderr, "Failed to initialize Fontconfig\n");
-        return EXIT_FAILURE;
-    }
-
-    if (!glfwInit()) {
-        fprintf(stderr, "Error: Could not initialize GLFW.\n");
-        return EXIT_FAILURE;
-    }
-
-    // create a window and its OpenGL context
-    uicon->window = glfwCreateWindow(window_width, window_height, "FreeType and GLFW Text Rendering", NULL, NULL);
-    if (!uicon->window) {
-        fprintf(stderr, "Error: Could not create GLFW window.\n");
-        return EXIT_FAILURE;
-    }
-
-    // get logical and actual pixel ratio
-    int pixel_w, pixel_h;
-    glfwGetFramebufferSize(uicon->window, &pixel_w, &pixel_h);
-    float scale_x = (float)pixel_w / window_width;
-    float scale_y = (float)pixel_h / window_height;
-    printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
-    uicon->pixel_ratio = scale_x;   
-    uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
-    default_font_prop.font_size = 16 * uicon->pixel_ratio;
-
-    // init ThorVG engine
-    tvg_engine_init(TVG_ENGINE_SW, 1);
-
-    // creates the surface for rendering
-    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);  
-    return EXIT_SUCCESS; 
-}
-
-void ui_context_cleanup(UiContext* uicon) {
-    printf("Cleaning up UI context\n");
-    if (uicon->document) {
-        if (uicon->document->dom_tree) {
-            lxb_html_document_destroy(uicon->document->dom_tree);
-        }
-        if (uicon->document->view_tree) {
-            view_pool_destroy(uicon->document->view_tree);
-            free(uicon->document->view_tree);
-        }
-        free(uicon->document);
-    }
-    printf("Cleaning up fonts\n");
-    fontface_cleanup(uicon);  // free font cache
-    FT_Done_FreeType(uicon->ft_library);
-    FcConfigDestroy(uicon->font_config);
-    image_cache_cleanup(uicon);  // cleanup image cache
-    
-    tvg_engine_term(TVG_ENGINE_SW);
-    image_surface_destroy(uicon->surface);
-
-    if (uicon->mouse_state.sys_cursor) {
-        glfwDestroyCursor(uicon->mouse_state.sys_cursor);
-    }
-    glfwDestroyWindow(uicon->window);
-    glfwTerminate();
 }
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -194,8 +107,6 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
 // Callback function to handle window resize
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     printf("Window resized to: %d x %d\n", width, height);
-    WINDOW_WIDTH = width / 2;
-    WINDOW_HEIGHT = height / 2;
     do_redraw = 1;
 }
 
@@ -206,35 +117,6 @@ void window_refresh_callback(GLFWwindow *window) {
 
 void to_repaint() {
     do_redraw = 1;
-}
-
-void fill_rect(unsigned char *bitmap, int x, int y, int width, int height) {
-    // file a rect in the bitmap at x, y with width and height
-    for (int i = y; i < y + height; i++) {
-        for (int j = x; j < x + width; j++) {
-            int index = (i * WINDOW_WIDTH * 2 + j) * 4;
-            bitmap[index + 0] = 255; // Alpha
-            bitmap[index + 1] = 0; // Blue 
-            bitmap[index + 2] = y; // Green
-            bitmap[index + 3] = j - x; // Red
-        }
-    }
-}
-
-void render_rectangles(unsigned char *bitmap, int width) {
-    int RECT_WIDTH = 120;
-    int RECT_HEIGHT = 30;
-    int GAP = 15;
-    int NUM_RECTANGLES = 50;    
-    int x = GAP, y = GAP;
-    for (int i = 0; i < NUM_RECTANGLES; i++) {
-        if (x + RECT_WIDTH > width) { // Wrap to next row if out of bounds using width parameter
-            x = GAP;
-            y += RECT_HEIGHT + GAP;
-        }
-        fill_rect(bitmap, x, y, RECT_WIDTH, RECT_HEIGHT);
-        x += RECT_WIDTH + GAP;
-    }
 }
 
 void repaint_window() {
@@ -275,7 +157,6 @@ void render(GLFWwindow* window) {
     // get window size
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
-    assert(width == WINDOW_WIDTH * ui_context.pixel_ratio && height == WINDOW_HEIGHT * ui_context.pixel_ratio);
 
     if (width != ui_context.window_width || height != ui_context.window_height) {
         double start_time = glfwGetTime();
@@ -300,7 +181,7 @@ void render(GLFWwindow* window) {
 }
 
 int main() {
-    ui_context_init(&ui_context, WINDOW_WIDTH, WINDOW_HEIGHT);
+    ui_context_init(&ui_context);
     GLFWwindow* window = ui_context.window;
     if (!window) {
         ui_context_cleanup(&ui_context);

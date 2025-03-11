@@ -103,6 +103,13 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
                 p++;  continue;
             }
             p += bytes;  printf("codepoint: %d, bytes: %d\n", codepoint, bytes);
+
+            // FT_UInt glyph_index = FT_Get_Char_Index(ft_face, utf32_str[i]);
+            // ret = FT_Load_Glyph(ft_face, glyph_index, FT_LOAD_RENDER);
+            // if (ret != 0) {
+            //   fprintf(stderr, "FT_Load_Glyph() failed.\n");
+            //   return 0;
+            // }            
             if (FT_Load_Char(rdcon->font.face, codepoint, FT_LOAD_RENDER)) {
                 printf("Could not load character '%c'\n", *p);
                 continue;
@@ -396,7 +403,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888); 
 
     // load default font Arial, size 16 px
-    setup_font(uicon, &rdcon->font, "Hei", &default_font_prop);
+    setup_font(uicon, &rdcon->font, "Hei", &rdcon->ui_context->default_font);
     rdcon->block.clip = (Rect){0, 0, uicon->surface->width, uicon->surface->height};
 }
 
@@ -430,7 +437,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
         fprintf(stderr, "Invalid root view\n");
     }
 
-    drawTriangle(rdcon.canvas);
+    // drawTriangle(rdcon.canvas);
     tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
     tvg_canvas_sync(rdcon.canvas);  // wait for async draw operation to complete
 

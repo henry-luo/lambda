@@ -247,6 +247,7 @@ typedef struct {
     FcConfig *font_config;
     FT_Library ft_library;
     struct hashmap* fontface_map;  // cache of font faces loaded
+    FontProp default_font;  // default font style
 
     // image cache
     struct hashmap* image_cache;  // cache for images loaded
@@ -258,6 +259,5 @@ typedef struct {
 
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
-extern FontProp default_font_prop;
 
 extern void* loadImage(UiContext* uicon, const char *file_path);

@@ -10,7 +10,7 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     // most browsers use a generic sans-serif font as the default
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
-    setup_font(uicon, &lycon->font, "Hei", &default_font_prop);
+    setup_font(uicon, &lycon->font, "Hei", &lycon->ui_context->default_font);
 }
 
 void layout_cleanup(LayoutContext* lycon) {

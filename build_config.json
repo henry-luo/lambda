@@ -3,6 +3,7 @@
     "output": "window",
     "source_files": [
         "window.c",
+        "ui_context.c",
         "parse_html.c",
         "layout_html.c",
         "layout.c",
