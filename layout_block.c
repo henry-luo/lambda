@@ -34,6 +34,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     // save parent context
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
+    lycon->elmt = elmt;
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
@@ -316,4 +317,9 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     }
     lycon->prev_view = (View*)block;
     printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
+}
+
+void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt) {
+    layout_block(lycon, elmt, LXB_CSS_VALUE_BLOCK);
+    lycon->prev_view->type = RDT_VIEW_LIST_ITEM;
 }

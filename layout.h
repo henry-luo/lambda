@@ -28,6 +28,12 @@ typedef struct {
     bool has_space; // whether last layout character is a space
 } Linebox;
 
+typedef enum LineFillStatus {
+    RDT_NOT_SURE = 0,
+    RDT_LINE_NOT_FILLED = 1,
+    RDT_LINE_FILLED = 2,
+} LineFillStatus;
+
 typedef struct {
     ViewGroup* parent;
     View* prev_view;
@@ -35,6 +41,7 @@ typedef struct {
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style
+    lxb_html_element_t *elmt;  // current html element
     Document* doc;
     UiContext* ui_context;
 } LayoutContext;
@@ -50,3 +57,4 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node);
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display);
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx);
+PropValue resolve_element_display(lxb_html_element_t* elmt);
