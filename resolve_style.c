@@ -213,7 +213,8 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
     return (Color){0};
 }
 
-float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_percentage_t *value) {
+float resolve_length_value(LayoutContext* lycon, uintptr_t property, 
+    const lxb_css_value_length_percentage_t *value) {
     float result = 0;
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
@@ -266,25 +267,27 @@ float resolve_length_value(LayoutContext* lycon, const lxb_css_value_length_perc
     return result;
 }
 
-void resolve_length_prop(LayoutContext* lycon, const lxb_css_property_margin_t *margin, Spacing* spacing) {
+// resolve property 'margin', and put result in 'spacing'
+void resolve_length_prop(LayoutContext* lycon, uintptr_t property, 
+    const lxb_css_property_margin_t *margin, Spacing* spacing) {
     printf("margin property: t %d, r %d, b %d, l %d, t %f, r %f, b %f, l %f\n", 
         margin->top.u.length.unit, margin->right.u.length.unit, margin->bottom.u.length.unit, margin->left.u.length.unit,
         margin->top.u.length.num, margin->right.u.length.num, margin->bottom.u.length.num, margin->left.u.length.num);
     int value_cnt = 0;
     if (margin->top.u.length.unit) {
-        spacing->top = resolve_length_value(lycon, &margin->top);
+        spacing->top = resolve_length_value(lycon, property, &margin->top);
         value_cnt++;
     }
     if (margin->right.u.length.unit) {
-        spacing->right = resolve_length_value(lycon, &margin->right);
+        spacing->right = resolve_length_value(lycon, property, &margin->right);
         value_cnt++;
     }
     if (margin->bottom.u.length.unit) {
-        spacing->bottom = resolve_length_value(lycon, &margin->bottom);
+        spacing->bottom = resolve_length_value(lycon, property, &margin->bottom);
         value_cnt++;
     }
     if (margin->left.u.length.unit) {
-        spacing->left = resolve_length_value(lycon, &margin->left);
+        spacing->left = resolve_length_value(lycon, property, &margin->left);
         value_cnt++;
     }
     switch (value_cnt) {
@@ -406,14 +409,14 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         printf("@@margin prop: %lf, unit: %d\n", margin->top.u.length.num, margin->top.u.length.unit);
-        resolve_length_prop(lycon, margin, &span->bound->margin);
+        resolve_length_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, &span->bound->margin);
         break;
     case LXB_CSS_PROPERTY_PADDING:
         const lxb_css_property_padding_t *padding = declr->u.padding;
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
-        resolve_length_prop(lycon, (lxb_css_property_margin_t*)padding, &span->bound->padding);
+        resolve_length_prop(lycon, LXB_CSS_PROPERTY_PADDING, (lxb_css_property_margin_t*)padding, &span->bound->padding);
         break;
     case LXB_CSS_PROPERTY_BORDER:
         const lxb_css_property_border_t *border = declr->u.border;
@@ -424,7 +427,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
         span->bound->border->color = resolve_color_value(&border->color);
-        span->bound->border->width.top = resolve_length_value(lycon, 
+        span->bound->border->width.top = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
             (lxb_css_value_length_percentage_t*)&border->width);
         span->bound->border->width.bottom = span->bound->border->width.left 
             = span->bound->border->width.right = span->bound->border->width.top;
@@ -448,12 +451,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         break;
     case LXB_CSS_PROPERTY_WIDTH:
         const lxb_css_property_width_t *width = declr->u.width;
-        lycon->block.given_width = resolve_length_value(lycon, width);
+        lycon->block.given_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
         printf("width property: %d\n", lycon->block.given_width);
         break;
     case LXB_CSS_PROPERTY_HEIGHT:
         const lxb_css_property_height_t *height = declr->u.height;
-        lycon->block.given_height = resolve_length_value(lycon, height);
+        lycon->block.given_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
         printf("height property: %d\n", lycon->block.given_height);
         break;
     case LXB_CSS_PROPERTY_OVERFLOW_X:
