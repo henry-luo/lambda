@@ -73,12 +73,6 @@
             "link": "dynamic"
         },
         {
-            "_name": "tbox",
-            "_include": "/opt/homebrew/Cellar/tbox/1.7.6/include",
-            "_lib": "/opt/homebrew/Cellar/tbox/1.7.6/lib/libtbox.a",
-            "_link": "static"
-        },
-        {
             "name": "zlib",
             "include": null,
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",

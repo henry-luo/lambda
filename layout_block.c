@@ -120,7 +120,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     if (block->props) lycon->block.text_align = block->props->text_align;
     lycon->line.left = lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.start_view = NULL;
+    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
+    lycon->line.start_view = NULL;
     block->x = pa_line.left;  block->y = pa_block.advance_y;
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
