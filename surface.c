@@ -103,13 +103,13 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     while (pixel < end) { *pixel++ = color; }
 }
 
-void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color) {
+void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Rect* clip) {
     Rect r;
     if (!surface) return;
     if (!rect) { r = (Rect){0, 0, surface->width, surface->height};  rect = &r; }
     printf("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x\n", rect->x, rect->y, rect->width, rect->height, color);
-    int left = max(0, rect->x), right = min(surface->width, rect->x + rect->width);
-    int top = max(0, rect->y), bottom = min(surface->height, rect->y + rect->height);
+    int left = max(clip->x, rect->x), right = min(clip->x + clip->width, rect->x + rect->width);
+    int top = max(clip->y, rect->y), bottom = min(clip->x + clip->height, rect->y + rect->height);
     if (left >= right || top >= bottom) return; // rect outside the surface
     for (int i = top; i < bottom; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + i * surface->pitch; // updated to use 'i'
@@ -118,9 +118,9 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color) {
 }
 
 // a primitive blit function to copy pixels from src to dst
-void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect) {
+void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Rect* clip) {
     Rect rect;
-    if (!src || !dst || !dst_rect) return;
+    if (!src || !dst || !dst_rect || !clip) return;
     if (!src_rect) { // use the entire source image
         rect = (Rect){0, 0, src->width, src->height};
         src_rect = &rect;
@@ -130,8 +130,8 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
         dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height);
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
-    int left = max(0, dst_rect->x), right = min(dst->width, dst_rect->x + dst_rect->width);
-    int top = max(0, dst_rect->y), bottom = min(dst->height, dst_rect->y + dst_rect->height);
+    int left = max(clip->x, dst_rect->x), right = min(clip->x + clip->width, dst_rect->x + dst_rect->width);
+    int top = max(clip->y, dst_rect->y), bottom = min(clip->y + clip->height, dst_rect->y + dst_rect->height);
     if (left >= right || top >= bottom) return; // dst_rect outside the dst surface
     for (int i = top; i < bottom; i++) {
         uint8_t* row_pixels = (uint8_t*)dst->pixels + i * dst->pitch;

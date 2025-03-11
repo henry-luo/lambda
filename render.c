@@ -103,7 +103,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         rect.width = text->width;  rect.height = thinkness; // corrected the variable name from h to height
         printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, 
             rect.x, rect.y, rect.width, rect.height); // corrected w to width
-        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
     printf("end of text view\n");
 }
@@ -167,7 +167,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         rect.x = rdcon->block.x + list_item->x - 15 * ratio;  
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
         rect.width = rect.height = 5 * ratio;
-        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
         printf("render list decimal\n");
@@ -210,21 +210,21 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.width = view->width;  rect.height = view->height;
     if (view->bound->background) {
-        fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
     }
     if (view->bound->border) {
         Rect border_rect = rect;
         border_rect.width = view->bound->border->width.left;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
         border_rect.x = rect.x + rect.width - view->bound->border->width.right;
         border_rect.width = view->bound->border->width.right;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
         border_rect = rect;
         border_rect.height = view->bound->border->width.top;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
         border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
         border_rect.height = view->bound->border->width.bottom;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
     }
 }
 
@@ -247,9 +247,12 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
         if (view_block->in_line && view_block->in_line->color.c) {
             rdcon->color = view_block->in_line->color;
         }
+        // setup clip box
         if (view_block->scroller && view_block->scroller->has_clip) {
-            rdcon->block.clip = view_block->scroller->clip;
-            rdcon->block.clip.x += rdcon->block.x;   rdcon->block.clip.y += rdcon->block.y;
+            rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + view_block->scroller->clip.x);
+            rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + view_block->scroller->clip.y);
+            rdcon->block.clip.width = min(rdcon->block.clip.width, view_block->scroller->clip.width);
+            rdcon->block.clip.height = min(rdcon->block.clip.height, view_block->scroller->clip.height);
         }
         render_children(rdcon, view);
     }
@@ -281,7 +284,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.width = view->width;  rect.height = view->height; 
-        blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect);
+        blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
     }
     else {
         printf("image view has no image surface\n");
@@ -380,7 +383,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     render_init(&rdcon, uicon);
 
     // fill the surface with a white background
-    fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF);
+    fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF, &rdcon.block.clip);
 
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
