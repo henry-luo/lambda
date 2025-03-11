@@ -10,6 +10,34 @@ ScrollPane* scrollpane_create(int x, int y, int width, int height);
 void scrollpane_set_content_size(ScrollPane* sp, int content_width, int content_height);
 void scrollpane_update(Tvg_Canvas* canvas, ScrollPane* sp);
 
+// decode UTF8 to UTF32 codepoint, returns number of bytes consumed, or -1 on error.
+static int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
+    unsigned char c = utf8[0];
+    
+    if (c <= 0x7F) {  // 1-byte sequence (ASCII)
+        *codepoint = c;
+        return 1;
+    }
+    if ((c & 0xE0) == 0xC0) {  // 2-byte sequence
+        if ((utf8[1] & 0xC0) != 0x80) return -1;
+        *codepoint = ((c & 0x1F) << 6) | (utf8[1] & 0x3F);
+        return 2;
+    }
+    if ((c & 0xF0) == 0xE0) {  // 3-byte sequence
+        if ((utf8[1] & 0xC0) != 0x80 || (utf8[2] & 0xC0) != 0x80) return -1;
+        *codepoint = ((c & 0x0F) << 12) | ((utf8[1] & 0x3F) << 6) | (utf8[2] & 0x3F);
+        return 3;
+    }
+    if ((c & 0xF8) == 0xF0) {  // 4-byte sequence
+        if ((utf8[1] & 0xC0) != 0x80 || (utf8[2] & 0xC0) != 0x80 || 
+            (utf8[3] & 0xC0) != 0x80) return -1;
+        *codepoint = ((c & 0x07) << 18) | ((utf8[1] & 0x3F) << 12) | 
+                     ((utf8[2] & 0x3F) << 6) | (utf8[3] & 0x3F);
+        return 4;
+    }
+    return -1;  // Invalid UTF-8 sequence
+}
+
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     int left = max(rdcon->block.clip.x, x);
@@ -47,33 +75,42 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 }
 
 void render_text_view(RenderContext* rdcon, ViewText* text) {
+    if (!rdcon->font.face) {
+        printf("font face is null\n");
+        return;
+    }    
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
     // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n", 
     //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
-    bool has_space = false;
-    for (; p < end; p++) {
+    bool has_space = false;  uint32_t codepoint;
+    while (p < end) {
         // printf("draw character '%c'\n", *p);
         if (is_space(*p)) { 
-            if (has_space) continue;  // skip consecutive spaces
-            else has_space = true;
-            // printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
-            x += rdcon->font.space_width;
+            if (!has_space) {  // add whitespace
+                has_space = true;
+                // printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
+                x += rdcon->font.space_width;                
+            } 
+            // else  // skip consecutive spaces
+            p++;
         }
         else {
             has_space = false;
-            if (!rdcon->font.face) {
-                printf("font face is null\n");
-                return;
+            int bytes = utf8_to_codepoint(p, &codepoint);
+            if (bytes <= 0) {
+                p++;  continue;
             }
-            if (FT_Load_Char(rdcon->font.face, *p, FT_LOAD_RENDER)) {
+            p += bytes;  printf("codepoint: %d, bytes: %d\n", codepoint, bytes);
+            if (FT_Load_Char(rdcon->font.face, codepoint, FT_LOAD_RENDER)) {
                 printf("Could not load character '%c'\n", *p);
                 continue;
             }
             if (!rdcon->font.face->glyph) {
                 printf("font glyph is null\n");
-                return;
+                // todo: render a placeholder
+                continue;
             }
             // draw the glyph to the image buffer
             int ascend = rdcon->font.face->size->metrics.ascender >> 6;
@@ -359,7 +396,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888); 
 
     // load default font Arial, size 16 px
-    setup_font(uicon, &rdcon->font, "Arial", &default_font_prop);
+    setup_font(uicon, &rdcon->font, "Hei", &default_font_prop);
     rdcon->block.clip = (Rect){0, 0, uicon->surface->width, uicon->surface->height};
 }
 

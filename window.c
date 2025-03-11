@@ -19,7 +19,7 @@ void image_cache_cleanup(UiContext* uicon);
 
 // Window dimensions
 int WINDOW_WIDTH = 400;
-int WINDOW_HEIGHT = 600;
+int WINDOW_HEIGHT = 700;
 bool do_redraw = false;
 UiContext ui_context;
 

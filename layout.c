@@ -6,12 +6,12 @@ typedef enum LineFillStatus {
     RDT_LINE_FILLED = 2,
 } LineFillStatus;
 
+LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
+PropValue resolve_element_display(lxb_html_element_t* elmt);
+
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
-
-LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
-PropValue resolve_element_display(lxb_html_element_t* elmt);
 
 void span_line_align(LayoutContext* lycon, float offset, ViewSpan* span) {
     // align the views in the line
