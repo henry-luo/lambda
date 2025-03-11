@@ -221,7 +221,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             if (!lycon->line.is_line_start) { line_break(lycon); }
             lycon->parent = block->parent;
         }
-        line_align(lycon);
 
         // finalize the block size
         int flow_width, flow_height;

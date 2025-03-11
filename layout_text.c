@@ -13,9 +13,9 @@ void line_start(LayoutContext* lycon) {
 void line_break(LayoutContext* lycon) {
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
     lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
+    line_align(lycon);
     // reset linebox
     line_start(lycon);
-    line_align(lycon);
 }
 
 LineFillStatus text_has_line_filled(LayoutContext* lycon, lxb_dom_text_t *text_node) {
