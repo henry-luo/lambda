@@ -1,8 +1,6 @@
 #include "layout.h"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "lib/stb_image.h"
-
+// convert substring to integer
 int strToInt(const char* str, int len) {
     int result = 0, sign = 1;
     if (len <= 0 || str[0] == '\0') {
@@ -25,70 +23,6 @@ int strToInt(const char* str, int len) {
         str++;
     }
     return sign * result;
-}
-
-typedef struct ImageEntry {
-    const char* path;  // todo: change to URL
-    ImageSurface *image;
-} ImageEntry;
-
-int image_compare(const void *a, const void *b, void *udata) {
-    const ImageEntry *fa = a;
-    const ImageEntry *fb = b;
-    return strcmp(fa->path, fb->path);
-}
-
-uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const ImageEntry *image = item;
-    // xxhash3 is a fast hash function
-    return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
-}
-
-void *loadImage(UiContext* uicon, const char *file_path) {
-    if (uicon->image_cache == NULL) {
-        // create a new hash map. 2nd argument is the initial capacity. 
-        // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = hashmap_new(sizeof(ImageEntry), 10, 0, 0, 
-            image_hash, image_compare, NULL, NULL);
-    }
-    ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &(ImageEntry){.path = file_path});
-    if (entry) {
-        printf("Image loaded from cache: %s\n", file_path);
-        return entry->image;
-    }
-    else {
-        printf("Image not found in cache: %s\n", file_path);
-    }
-    int width, height, channels;
-    unsigned char *data = stbi_load(file_path, &width, &height, &channels, 4);
-    if (!data) {
-        printf("Failed to load image: %s\n", file_path);
-        return NULL;
-    }
-    ImageSurface *surface = image_surface_create_from(width, height, data);
-    if (!surface) { stbi_image_free(data);  return NULL; }
-
-    // copy the font name
-    char* path = (char*)malloc(strlen(file_path) + 1);  strcpy(path, file_path);
-    hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
-    return surface;
-}
-
-bool image_entry_free(const void *item, void *udata) {
-    ImageEntry* entry = (ImageEntry*)item;
-    free((char*)entry->path);
-    image_surface_destroy(entry->image);
-    return true;
-}
-
-void image_cache_cleanup(UiContext* uicon) {
-    // loop through the hashmap and free the images
-    if (uicon->image_cache) {
-        printf("Cleaning up cached images\n");
-        hashmap_scan(uicon->image_cache, image_entry_free, NULL);
-        hashmap_free(uicon->image_cache);
-        uicon->image_cache = NULL;
-    }
 }
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display) {
@@ -135,6 +69,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         block->font = alloc_font_prop(lycon);
         block->font->font_size = lycon->font.style.font_size * em_size;
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
+        break;
+    case LXB_TAG_P:
+        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
         break;
     case LXB_TAG_UL:  case LXB_TAG_OL: 
         if (!block->props) {

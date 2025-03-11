@@ -1,14 +1,15 @@
 <html>
 <head>
+    <base href="../" />
     <style>
     h1 { color: blue; }
     .red { color: red; }
     .bold { font-weight: bold; }
     p { text-align: justify; }
     p i { font-size: 20px; }
-    center { line-height: 2.7; background-color:lightblue; display: inline-block; width: 200px; }
+    center { line-height: 2.7; background-color:lightblue; display: inline-block; width: 150px; }
     .middle { vertical-align: middle; }
-    .bottom { vertical-align: bottom; }
+    .bottom { vertical-align: bottom; display: inline-block; background-color:#ccf; line-height:1; width:110px; }
     .wait { cursor: wait; }
     div { margin: 10px; }
     </style>
@@ -19,8 +20,8 @@
     <p>This is a paragraph with a <b>long long line</b> of text to test <i>text wrapping</i>.</p>
     this is <u class="red">dangling text</u> from sample file
     <center><span class='middle wait'>centered text</span></center>
-    <div style="line-height:2; background-color:yellow; margin:12px; cursor: pointer; display: inline-block; width: 150px;">
-        <span class="bottom">bottom aligned text</span>
+    <div style="line-height:2; background-color:yellow; margin:12px; cursor: pointer; display:inline-block; width: 150px;">
+        text <span class="bottom">bottom aligned</span>
     </div>
     <s style='color:green;'>
         text in green and line-through
