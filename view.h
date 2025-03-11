@@ -171,21 +171,24 @@ typedef struct {
     int v_drag_start_scroll, h_drag_start_scroll;
     
     int drag_speed;
+    int scrollSpeed;
 } ScrollPane;
 
 typedef struct {
-    PropValue overflowX, overflowY;
-    bool hasHOverflow, hasVOverflow;
-    bool hasHScroll, hasVScroll;
+    PropValue overflow_x, overflow_y;
     ScrollPane* pane;
-    int scrollSpeed;
+    bool has_hz_overflow, has_vt_overflow;
+    bool has_hz_scroll, has_vt_scroll;
+
+    Rect clip; // clipping rect, relative to the block border box
+    bool has_clip;
 } ScrollProp;
 
 typedef struct {
     ViewSpan;  // extends ViewSpan
     // x, y, width, height forms the BORDER box of the block
     int x, y, width, height;  // x, y are relative to the parent block
-    int content_width, content_height;  // width and height of the child content incluiding padding
+    int content_width, content_height;  // width and height of the child content including padding
     BlockProp* props;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
 } ViewBlock;

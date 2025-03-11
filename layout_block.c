@@ -235,29 +235,44 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             if (!block->scroller) {
                 block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
             }
-            block->scroller->hasHOverflow = true;
-            if (block->scroller->overflowX == LXB_CSS_VALUE_VISIBLE) {
+            block->scroller->has_hz_overflow = true;
+            if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {
                 pa_block.max_width = max(pa_block.max_width, flow_width);  
             }
-            else if (block->scroller->overflowX == LXB_CSS_VALUE_SCROLL || block->scroller->overflowX == LXB_CSS_VALUE_AUTO) {
-                block->scroller->hasHScroll = true;
+            else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL || 
+                block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
+                block->scroller->has_hz_scroll = true;
+            }
+            if (block->scroller->has_hz_scroll || 
+                block->scroller->overflow_x == LXB_CSS_VALUE_CLIP || 
+                block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
+                block->scroller->has_clip = true;
+                block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
+                block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                
             }
         }
         // handle vertical overflow and determine block->height
         if (lycon->block.given_height >= 0) { // got specified height
+            // no change to block->height
             if (flow_height > block->height) { // vt overflow
                 if (!block->scroller) {
                     block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
                 }
-                block->scroller->hasVOverflow = true;
-                if (block->scroller->overflowY == LXB_CSS_VALUE_VISIBLE) {
+                block->scroller->has_vt_overflow = true;
+                if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) {
                     pa_block.max_height = max(pa_block.max_height, block->y + flow_height);  
                 }
-                else if (block->scroller->overflowY == LXB_CSS_VALUE_SCROLL || block->scroller->overflowY == LXB_CSS_VALUE_AUTO) {
-                    block->scroller->hasVScroll = true;
+                else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
+                    block->scroller->has_vt_scroll = true;
                 }
+                if (block->scroller->has_hz_scroll || 
+                    block->scroller->overflow_y == LXB_CSS_VALUE_CLIP || 
+                    block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
+                    block->scroller->has_clip = true;
+                    block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
+                    block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                    
+                }                
             }
-            // no change to block->height
         }
         else {
             block->height = flow_height;

@@ -167,22 +167,22 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->scroller) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        if (block->scroller->overflowX) {
-            strbuf_append_format(buf, " overflow-x:%s", lxb_css_value_by_id(block->scroller->overflowX)->name);
+        if (block->scroller->overflow_x) {
+            strbuf_append_format(buf, " overflow-x:%s", lxb_css_value_by_id(block->scroller->overflow_x)->name); // corrected variable name
         }
-        if (block->scroller->overflowY) {
-            strbuf_append_format(buf, " overflow-y:%s", lxb_css_value_by_id(block->scroller->overflowY)->name);
+        if (block->scroller->overflow_y) {
+            strbuf_append_format(buf, " overflow-y:%s", lxb_css_value_by_id(block->scroller->overflow_y)->name); // corrected variable name
         }        
-        if (block->scroller->hasHOverflow) {
+        if (block->scroller->has_hz_overflow) {
             strbuf_append_str(buf, " hz-overflow:true");
         }
-        if (block->scroller->hasVOverflow) {
+        if (block->scroller->has_vt_overflow) { // corrected variable name
             strbuf_append_str(buf, " vt-overflow:true");
         }
-        if (block->scroller->hasHScroll) {
+        if (block->scroller->has_hz_scroll) {
             strbuf_append_str(buf, " hz-scroll:true");
         }
-        if (block->scroller->hasVScroll) {
+        if (block->scroller->has_vt_scroll) {
             strbuf_append_str(buf, " vt-scroll:true");
         }
         // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroller->pane->v_scrollbar, block->scroller->pane->h_scrollbar);

@@ -14,10 +14,10 @@ void scroller_scroll_callback(ScrollProp* pane, GLFWwindow* window, double xoffs
     
     if (mouseX >= pane->x && mouseX <= pane->x + pane->width &&
         mouseY >= pane->y && mouseY <= pane->y + pane->height) {
-        if (pane->hasHScroll && xoffset != 0) {
+        if (pane->has_hz_scroll && xoffset != 0) {
             pane->scrollX += xoffset * pane->scrollSpeed; // cast to int
         }
-        if (pane->hasVScroll && yoffset != 0) {
+        if (pane->has_vt_scroll && yoffset != 0) {
             pane->scrollY -= yoffset * pane->scrollSpeed;
         }
         scroller_update(pane);
@@ -33,7 +33,7 @@ void scroller_mouse_button_callback(ScrollProp* pane, GLFWwindow* window, int bu
     
     if (action == GLFW_PRESS) {
         // Check horizontal scrollbar
-        if (pane->hasHScroll) {
+        if (pane->has_hz_scroll) {
             float thumbX, thumbWidth;
             scroller_get_hscroll_bounds(pane, &thumbX, &thumbWidth);
             if (mouseX >= thumbX && mouseX <= thumbX + thumbWidth &&
@@ -46,7 +46,7 @@ void scroller_mouse_button_callback(ScrollProp* pane, GLFWwindow* window, int bu
         }
         
         // Check vertical scrollbar
-        if (pane->hasVScroll) {
+        if (pane->has_vt_scroll) {
             float thumbY, thumbHeight;
             scroller_get_vscroll_bounds(pane, &thumbY, &thumbHeight);
             if (mouseX >= pane->x + pane->width - SCROLLBAR_SIZE &&
@@ -67,14 +67,14 @@ void scroller_mouse_button_callback(ScrollProp* pane, GLFWwindow* window, int bu
 void scroller_cursor_pos_callback(ScrollProp* pane, GLFWwindow* window, double xpos, double ypos) {
     if (pane->draggingHScroll) {
         float deltaX = xpos - pane->dragStartX;
-        float scrollArea = pane->width - SCROLLBAR_SIZE * (pane->hasVScroll ? 2 : 1);
+        float scrollArea = pane->width - SCROLLBAR_SIZE * (pane->has_vt_scroll ? 2 : 1);
         float contentRange = pane->contentWidth - pane->width;
         pane->scrollX = pane->scrollStartX + (deltaX / scrollArea) * contentRange;
         scroller_update(pane);
     }
     if (pane->draggingVScroll) {
         float deltaY = (float)ypos - pane->dragStartY;
-        float scrollArea = pane->height - SCROLLBAR_SIZE * (pane->hasHScroll ? 2 : 1);
+        float scrollArea = pane->height - SCROLLBAR_SIZE * (pane->has_hz_scroll ? 2 : 1);
         float contentRange = pane->contentHeight - pane->height;
         pane->scrollY = pane->scrollStartY + (deltaY / scrollArea) * contentRange;
         scroller_update(pane);
@@ -83,7 +83,7 @@ void scroller_cursor_pos_callback(ScrollProp* pane, GLFWwindow* window, double x
 
 // Get horizontal scrollbar thumb bounds
 void scroller_get_hscroll_bounds(ScrollProp* pane, float* x, float* width) {
-    float scrollArea = pane->width - (pane->hasVScroll ? SCROLLBAR_SIZE : 0);
+    float scrollArea = pane->width - (pane->has_vt_scroll ? SCROLLBAR_SIZE : 0);
     float thumbRatio = pane->width / pane->contentWidth;
     *width = fmaxf(MIN_THUMB_SIZE, scrollArea * thumbRatio);
     float scrollRange = scrollArea - *width;
@@ -93,7 +93,7 @@ void scroller_get_hscroll_bounds(ScrollProp* pane, float* x, float* width) {
 
 // Get vertical scrollbar thumb bounds
 void scroller_get_vscroll_bounds(ScrollProp* pane, float* y, float* height) {
-    float scrollArea = pane->height - (pane->hasHScroll ? SCROLLBAR_SIZE : 0);
+    float scrollArea = pane->height - (pane->has_hz_scroll ? SCROLLBAR_SIZE : 0);
     float thumbRatio = pane->height / pane->contentHeight;
     *height = fmaxf(MIN_THUMB_SIZE, scrollArea * thumbRatio);
     float scrollRange = scrollArea - *height;

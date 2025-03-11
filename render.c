@@ -12,11 +12,15 @@ void scrollpane_update(Tvg_Canvas* canvas, ScrollPane* sp);
 
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
+    int left = max(rdcon->block.clip.x, x);
+    int right = min(rdcon->block.clip.x + rdcon->block.clip.width, x + (int)bitmap->width);
+    int top = max(rdcon->block.clip.y, y);
+    int bottom = min(rdcon->block.clip.y + rdcon->block.clip.height, y + (int)bitmap->rows);
+    if (left >= right || top >= bottom) return; // glyph outside the surface
     ImageSurface* surface = rdcon->ui_context->surface;
-    for (int i = 0; i < (int)bitmap->rows; i++) {
-        if (y + i < 0 || y + i >= surface->height) continue;
+    for (int i = top - y; i < bottom - y; i++) {
         uint8_t* row_pixels = (uint8_t*)surface->pixels + (y + i) * surface->pitch;
-        for (int j = 0; j < (int)bitmap->width; j++) {
+        for (int j = left - x; j < right - x; j++) {
             if (x + j < 0 || x + j >= surface->width) continue;
             uint32_t intensity = bitmap->buffer[i * bitmap->pitch + j];
             if (intensity > 0) {
@@ -243,7 +247,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
         if (view_block->in_line && view_block->in_line->color.c) {
             rdcon->color = view_block->in_line->color;
         }
-        
+        if (view_block->scroller && view_block->scroller->has_clip) {
+            rdcon->block.clip = view_block->scroller->clip;
+            rdcon->block.clip.x += rdcon->block.x;   rdcon->block.clip.y += rdcon->block.y;
+        }
         render_children(rdcon, view);
     }
     else {
@@ -253,7 +260,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     // render scrollbars
     if (view_block->scroller) {
         printf("render scrollbars\n");
-        if (view_block->scroller->hasHScroll || view_block->scroller->hasVScroll) {
+        if (view_block->scroller->has_hz_scroll || view_block->scroller->has_vt_scroll) {
             if (!view_block->scroller->pane) {
                 view_block->scroller->pane = 
                     scrollpane_create(rdcon->block.x, rdcon->block.y, view_block->width, view_block->height);
@@ -349,7 +356,8 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888); 
 
     // load default font Arial, size 16 px
-    setup_font(uicon, &rdcon->font, "Arial", &default_font_prop);   
+    setup_font(uicon, &rdcon->font, "Arial", &default_font_prop);
+    rdcon->block.clip = (Rect){0, 0, uicon->surface->width, uicon->surface->height};
 }
 
 void render_clean_up(RenderContext* rdcon) {

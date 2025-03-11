@@ -463,7 +463,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block->scroller) {
             block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
         }
-        block->scroller->overflowX = overflow_x->type;
+        block->scroller->overflow_x = overflow_x->type;
         break;
     case LXB_CSS_PROPERTY_OVERFLOW_Y:
         if (!block) { break; }
@@ -472,7 +472,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block->scroller) {
             block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
         }
-        block->scroller->overflowY = overflow->type;
+        block->scroller->overflow_y = overflow->type;
         break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
