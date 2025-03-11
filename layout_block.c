@@ -41,7 +41,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     uintptr_t elmt_name = elmt->element.node.local_name;
     ViewBlock* block = elmt_name == LXB_TAG_IMG ? 
         (ViewBlock*)alloc_view(lycon, RDT_VIEW_IMAGE, (lxb_dom_node_t*)elmt) :
-        (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
+        (ViewBlock*)alloc_view(lycon, display == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     
@@ -215,9 +215,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
                 child = lxb_dom_node_next(child);
             } while (child);
             // handle last line
-            if (lycon->line.max_ascender) {
-                lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
-            }
+            // if (lycon->line.max_ascender) {
+            //     lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
+            // }
+            if (!lycon->line.is_line_start) { line_break(lycon); }
             lycon->parent = block->parent;
         }
         line_align(lycon);
@@ -237,6 +238,9 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             flow_height = block->content_height = lycon->block.advance_y;
         }
         
+        if (display == LXB_CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
+            block->width = min(flow_width, block->width);
+        }
         // handle horizontal overflow
         if (flow_width > block->width) { // hz overflow
             if (!block->scroller) {

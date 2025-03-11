@@ -356,7 +356,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 
 void render_children(RenderContext* rdcon, View* view) {
     do {
-        if (view->type == RDT_VIEW_BLOCK) {
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block = (ViewBlock*)view;
             printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                 lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),

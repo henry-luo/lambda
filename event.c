@@ -187,9 +187,9 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
     for (int i = 0; i < stack_size; i++) {
         printf("fire event to view no. %d\n", i);
         View* view = (View*)target_list->data[i];
-        if (view->type == RDT_VIEW_BLOCK || 
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
             view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM || 
-            view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
+            view->type == RDT_VIEW_IMAGE) {
             fire_block_event(evcon, (ViewBlock*)view);
         } 
         else if (view->type == RDT_VIEW_INLINE) {
