@@ -348,9 +348,13 @@ PropValue resolve_element_display(lxb_html_element_t* elmt) {
         case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
         case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER: 
         case LXB_TAG_UL: case LXB_TAG_OL: 
+        case LXB_TAG_SECTION: case LXB_TAG_ARTICLE: case LXB_TAG_ASIDE: case LXB_TAG_NAV:
+        case LXB_TAG_HEADER: case LXB_TAG_FOOTER: case LXB_TAG_ADDRESS: case LXB_TAG_BLOCKQUOTE:
+        case LXB_TAG_DETAILS: case LXB_TAG_DIALOG: case LXB_TAG_FIGURE: case LXB_TAG_MAIN:
+        case LXB_TAG_MENU:         
             outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
-        case LXB_TAG_LI:
+        case LXB_TAG_LI:  case LXB_TAG_SUMMARY: 
             outer_display = LXB_CSS_VALUE_LIST_ITEM;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
         case LXB_TAG_IMG:
