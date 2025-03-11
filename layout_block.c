@@ -32,7 +32,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
     // save parent context
-    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   FontBox pa_font = lycon->font;
+    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   
+    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 

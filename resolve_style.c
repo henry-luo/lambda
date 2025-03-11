@@ -213,7 +213,11 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
     return (Color){0};
 }
 
-float resolve_length_value(LayoutContext* lycon, uintptr_t property, 
+void resolve_font_size(LayoutContext* lycon) {
+    lycon->font.current_font_size = lycon->font.style.font_size;
+}
+
+int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value) {
     float result = 0;
     switch (value->type) {
@@ -245,12 +249,20 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         case LXB_CSS_UNIT_PX:
             result = value->u.length.num * lycon->ui_context->pixel_ratio;
             break;
+
         // relative units
         // case LXB_CSS_UNIT_CAP:
         //     result = value->u.length.num * lycon->font.style.font_size;
         //     break;
         case LXB_CSS_UNIT_EM:
-            result = value->u.length.num * lycon->font.style.font_size;
+            if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
+                result = value->u.length.num *  lycon->font.style.font_size;
+            } else {
+                if (lycon->font.current_font_size < 0) {
+                    resolve_font_size(lycon);
+                }
+                result = value->u.length.num * lycon->font.current_font_size;
+            }
             break;
         default:
             result = 0;
@@ -268,11 +280,8 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
 }
 
 // resolve property 'margin', and put result in 'spacing'
-void resolve_length_prop(LayoutContext* lycon, uintptr_t property, 
+void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_property_margin_t *margin, Spacing* spacing) {
-    printf("margin property: t %d, r %d, b %d, l %d, t %f, r %f, b %f, l %f\n", 
-        margin->top.u.length.unit, margin->right.u.length.unit, margin->bottom.u.length.unit, margin->left.u.length.unit,
-        margin->top.u.length.num, margin->right.u.length.num, margin->bottom.u.length.num, margin->left.u.length.num);
     int value_cnt = 0;
     if (margin->top.u.length.unit) {
         spacing->top = resolve_length_value(lycon, property, &margin->top);
@@ -409,14 +418,14 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         printf("@@margin prop: %lf, unit: %d\n", margin->top.u.length.num, margin->top.u.length.unit);
-        resolve_length_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, &span->bound->margin);
+        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, &span->bound->margin);
         break;
     case LXB_CSS_PROPERTY_PADDING:
         const lxb_css_property_padding_t *padding = declr->u.padding;
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
-        resolve_length_prop(lycon, LXB_CSS_PROPERTY_PADDING, (lxb_css_property_margin_t*)padding, &span->bound->padding);
+        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, (lxb_css_property_margin_t*)padding, &span->bound->padding);
         break;
     case LXB_CSS_PROPERTY_BORDER:
         const lxb_css_property_border_t *border = declr->u.border;

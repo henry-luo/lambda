@@ -8,6 +8,9 @@ typedef enum LineFillStatus {
 
 LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
 PropValue resolve_element_display(lxb_html_element_t* elmt);
+void print_view_tree(ViewGroup* view_block);
+void view_pool_init(ViewTree* tree);
+void view_pool_destroy(ViewTree* tree);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -80,7 +83,8 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
 
     // save parent context
-    FontBox pa_font = lycon->font;  PropValue pa_line_align = lycon->line.vertical_align;
+    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
+    PropValue pa_line_align = lycon->line.vertical_align;
     ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
     switch (elmt->element.node.local_name) {
     case LXB_TAG_B:
@@ -379,5 +383,53 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
         printf("layout unknown node type: %d\n", node->type);
         // skip the node
     }    
+}
+
+void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
+    memset(lycon, 0, sizeof(LayoutContext));
+    lycon->doc = doc;  lycon->ui_context = uicon;
+    // most browsers use a generic sans-serif font as the default
+    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
+    // default font size in HTML is 16 px for most browsers
+    setup_font(uicon, &lycon->font, uicon->default_font.family, &lycon->ui_context->default_font);
+}
+
+void layout_cleanup(LayoutContext* lycon) {
+}
+
+void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
+    LayoutContext lycon;
+    if (!doc) return;
+    if (is_reflow) {
+        // free existing view tree
+        if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
+        view_pool_destroy(doc->view_tree);
+    } else {
+        doc->view_tree = calloc(1, sizeof(ViewTree));
+    }
+    view_pool_init(doc->view_tree);
+
+    lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(doc->dom_tree);
+    if (body) {
+        printf("start to layout DOM tree\n");
+        
+        layout_init(&lycon, doc, uicon);
+        doc->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
+        
+        lycon.parent = (ViewGroup*)doc->view_tree->root;
+        lycon.block.width = uicon->window_width;  
+        lycon.block.height = uicon->window_height;
+        lycon.block.advance_y = 0;  lycon.block.max_width = 800;
+        lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
+        lycon.block.text_align = LXB_CSS_VALUE_LEFT;
+        lycon.line.is_line_start = true;
+        printf("start to layout body\n");
+        layout_block(&lycon, (lxb_html_element_t*)body, LXB_CSS_VALUE_BLOCK);
+        printf("end layout\n");
+
+        layout_cleanup(&lycon);
+        
+        print_view_tree((ViewGroup*)doc->view_tree->root);
+    }
 }
 

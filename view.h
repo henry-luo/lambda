@@ -224,6 +224,7 @@ typedef struct {
     FontProp style;  // current font style
     FT_Face face;  // current font face
     float space_width;  // width of a space character of the current font 
+    int current_font_size;  // font size of current element
 } FontBox;
 
 // rendering context structs
