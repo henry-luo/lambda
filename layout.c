@@ -171,6 +171,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
 
     // init context
     lycon->elmt = elmt;
+    lycon->font.style = lycon->ui_context->default_font;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
     lycon->block.height = lycon->ui_context->window_height;

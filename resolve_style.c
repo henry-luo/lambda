@@ -235,7 +235,7 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value) {
-    float result = 0;
+    int result = 0;
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
         result = value->u.length.num;
@@ -298,7 +298,8 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         result = value->u.percentage.num * lycon->block.width;
         break;
     default:
-        result = 0;
+        printf("Unknown length type: %d\n", value->type);
+        result = -1;
     }
     return result;
 }
@@ -484,6 +485,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         resolve_font_size(lycon, declr);
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.current_font_size;
+        assert(span->font->font_size > 0);
         break;
     case LXB_CSS_PROPERTY_FONT_STYLE:   
         const lxb_css_property_font_style_t *font_style = declr->u.font_style;

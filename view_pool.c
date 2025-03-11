@@ -81,8 +81,7 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
 
 FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
-    *prop = lycon->ui_context->default_font;
-    prop->font_size = lycon->font.style.font_size;
+    *prop = lycon->font.style;  assert(prop->font_size > 0);
     return prop;
 }
 
@@ -126,7 +125,7 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
     }
     if (span->font) {
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_format(buf, "{font:{family:'%s', size:%f, style:%s, weight:%s, decoration:%s}}\n",
+        strbuf_append_format(buf, "{font:{family:'%s', size:%d, style:%s, weight:%s, decoration:%s}}\n",
             span->font->family, span->font->font_size, lxb_css_value_by_id(span->font->font_style)->name,
             lxb_css_value_by_id(span->font->font_weight)->name, lxb_css_value_by_id(span->font->text_deco)->name);
     }
