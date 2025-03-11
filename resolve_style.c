@@ -270,8 +270,14 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         // case LXB_CSS_UNIT_CAP:
         //     result = value->u.length.num * lycon->font.style.font_size;
         //     break;
-        // LXB_CSS_UNIT_REM:
-        //    break;
+        case LXB_CSS_UNIT_REM:
+            if (lycon->root_font_size < 0) {
+                resolve_font_size(lycon, NULL);
+                lycon->root_font_size = lycon->font.current_font_size < 0 ? 
+                    lycon->ui_context->default_font.font_size : lycon->font.current_font_size;                
+            }
+            result = value->u.length.num * lycon->root_font_size;
+            break;
         case LXB_CSS_UNIT_EM:
             if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
                 result = value->u.length.num *  lycon->font.style.font_size;

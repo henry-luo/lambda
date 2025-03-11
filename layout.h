@@ -42,6 +42,7 @@ typedef struct {
     Linebox line;  // current linebox
     FontBox font;  // current font style
     lxb_html_element_t *elmt;  // current html element
+    int root_font_size;
     Document* doc;
     UiContext* ui_context;
 } LayoutContext;

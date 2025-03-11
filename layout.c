@@ -170,11 +170,17 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout html root\n");
 
     // init context
-    lycon->font.current_font_size = -1;  // unresolved yet
     lycon->elmt = elmt;
+    lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
+    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
+    lycon->block.height = lycon->ui_context->window_height;
+    lycon->block.advance_y = 0;
+    lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
+    lycon->block.text_align = LXB_CSS_VALUE_LEFT;
+    lycon->line.is_line_start = true;    
 
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
-    lycon->doc->view_tree->root = (View*)html;
+    lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
     // resolve CSS styles
     if (elmt->element.style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
@@ -184,14 +190,11 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (html->font) {
         setup_font(lycon->ui_context, &lycon->font, lycon->font.face->family_name, html->font);
     }
-    lycon->parent = (ViewGroup*)html;
-    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
-    lycon->block.height = lycon->ui_context->window_height;
-    lycon->block.advance_y = 0;
-    lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
-    lycon->block.text_align = LXB_CSS_VALUE_LEFT;
-    lycon->line.is_line_start = true;
-
+    if (lycon->root_font_size < 0) {
+        lycon->root_font_size = lycon->font.current_font_size < 0 ? 
+            lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
+    }
+    // layout body content
     lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
     if (body) {
         printf("layout body\n");
