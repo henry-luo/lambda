@@ -131,8 +131,6 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
 }
 
-
-
 void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
     printf("layout node %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
     if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
@@ -168,6 +166,41 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
     }    
 }
 
+void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
+    printf("layout html root\n");
+
+    // init context
+    lycon->font.current_font_size = -1;  // unresolved yet
+    lycon->elmt = elmt;
+
+    ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
+    lycon->doc->view_tree->root = (View*)html;
+    // resolve CSS styles
+    if (elmt->element.style) {
+        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
+        lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
+    }
+
+    if (html->font) {
+        setup_font(lycon->ui_context, &lycon->font, lycon->font.face->family_name, html->font);
+    }
+    lycon->parent = (ViewGroup*)html;
+    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
+    lycon->block.height = lycon->ui_context->window_height;
+    lycon->block.advance_y = 0;
+    lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
+    lycon->block.text_align = LXB_CSS_VALUE_LEFT;
+    lycon->line.is_line_start = true;
+
+    lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
+    if (body) {
+        printf("layout body\n");
+        layout_block(lycon, (lxb_html_element_t*)body, LXB_CSS_VALUE_BLOCK);  
+    } else {
+        printf("No body element found\n");
+    }
+}
+
 void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
@@ -191,28 +224,18 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         doc->view_tree = calloc(1, sizeof(ViewTree));
     }
     view_pool_init(doc->view_tree);
+    printf("start to layout DOM tree\n");
+    layout_init(&lycon, doc, uicon);
 
-    lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(doc->dom_tree);
-    if (body) {
-        printf("start to layout DOM tree\n");
-        
-        layout_init(&lycon, doc, uicon);
-        doc->view_tree->root = alloc_view(&lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)body);
-        
-        lycon.parent = (ViewGroup*)doc->view_tree->root;
-        lycon.block.width = uicon->window_width;  
-        lycon.block.height = uicon->window_height;
-        lycon.block.advance_y = 0;  lycon.block.max_width = 800;
-        lycon.block.line_height = round(1.2 * 16 * uicon->pixel_ratio);  
-        lycon.block.text_align = LXB_CSS_VALUE_LEFT;
-        lycon.line.is_line_start = true;
-        printf("start to layout body\n");
-        layout_block(&lycon, (lxb_html_element_t*)body, LXB_CSS_VALUE_BLOCK);
-        printf("end layout\n");
+    lxb_html_element_t *root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
+    printf("layout html root %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(root), NULL));
+    layout_html_root(&lycon, root);
 
-        layout_cleanup(&lycon);
-        
+    printf("end layout\n");
+    layout_cleanup(&lycon);
+
+    if (doc->view_tree && doc->view_tree->root) 
         print_view_tree((ViewGroup*)doc->view_tree->root);
-    }
+    
 }
 

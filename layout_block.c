@@ -46,9 +46,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     
     switch (elmt_name) {
-    case LXB_TAG_CENTER:
-        block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-        block->props->text_align = LXB_CSS_VALUE_CENTER;
+    case LXB_TAG_BODY:
+        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        block->bound->margin.top = block->bound->margin.bottom = 
+            block->bound->margin.left = block->bound->margin.right = 8 * lycon->ui_context->pixel_ratio;  // 8px
         break;
     case LXB_TAG_H1:
         em_size = 2;  // 2em
@@ -89,6 +90,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         break;
+    case LXB_TAG_CENTER:
+        block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        block->props->text_align = LXB_CSS_VALUE_CENTER;
+        break;    
     case LXB_TAG_IMG:  // get html width and height (before the css styles)
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
         if (value) {

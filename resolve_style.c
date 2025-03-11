@@ -338,7 +338,8 @@ PropValue resolve_element_display(lxb_html_element_t* elmt) {
     // determine element 'display'
     int name = elmt->element.node.local_name;  // todo: should check ns as well 
     switch (name) { 
-        case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3: case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
+        case LXB_TAG_BODY: case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3: 
+        case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
         case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER: 
         case LXB_TAG_UL: case LXB_TAG_OL: 
             outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;
