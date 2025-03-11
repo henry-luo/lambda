@@ -403,7 +403,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888); 
 
     // load default font Arial, size 16 px
-    setup_font(uicon, &rdcon->font, "Hei", &rdcon->ui_context->default_font);
+    setup_font(uicon, &rdcon->font, uicon->default_font.family, &rdcon->ui_context->default_font);
     rdcon->block.clip = (Rect){0, 0, uicon->surface->width, uicon->surface->height};
 }
 
