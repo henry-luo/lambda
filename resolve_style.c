@@ -217,7 +217,7 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
 }
 
 void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* decl) {
-    printf("font size property: %lu\n", decl->type);
+    printf("font size property: %p\n", decl);
     if (!decl) {
         if (lycon->elmt->element.style != NULL) {
             decl = lxb_dom_element_style_by_id((lxb_dom_element_t*)lycon->elmt, LXB_CSS_PROPERTY_FONT_SIZE);
@@ -446,6 +446,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, (lxb_css_property_margin_t*)padding, &span->bound->padding);
         break;
     case LXB_CSS_PROPERTY_BORDER:
+        printf("border property: %lu\n", declr->type);
         const lxb_css_property_border_t *border = declr->u.border;
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
