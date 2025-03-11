@@ -260,7 +260,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
             }
             scrollpane_set_content_size(view_block->scroller->pane, 
                 view_block->content_width, view_block->content_height);
-            scrollpane_update(rdcon->ui_context->canvas, view_block->scroller->pane);
+            scrollpane_update(rdcon->canvas, view_block->scroller->pane);
         }
     }
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
@@ -344,11 +344,16 @@ void drawTriangle(Tvg_Canvas* canvas) {
 void render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
+    rdcon->canvas = tvg_swcanvas_create();
+    tvg_swcanvas_set_target(rdcon->canvas, uicon->surface->pixels, uicon->surface->width,
+        uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888); 
+
     // load default font Arial, size 16 px
     setup_font(uicon, &rdcon->font, "Arial", &default_font_prop);   
 }
 
 void render_clean_up(RenderContext* rdcon) {
+    tvg_canvas_destroy(rdcon->canvas);
 }
 
 // void save_surface_to_png(SDL_Surface* surface, const char* filename) {
@@ -377,9 +382,9 @@ void render_html_doc(UiContext* uicon, View* root_view) {
         fprintf(stderr, "Invalid root view\n");
     }
 
-    drawTriangle(rdcon.ui_context->canvas);
-    tvg_canvas_draw(rdcon.ui_context->canvas, false); // no clearing of the buffer
-    tvg_canvas_sync(rdcon.ui_context->canvas);  // wait for async draw operation to complete
+    drawTriangle(rdcon.canvas);
+    tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
+    tvg_canvas_sync(rdcon.canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
     // save_surface_to_png(rdcon.ui_context->surface, "output.png");

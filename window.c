@@ -57,9 +57,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     if (!uicon->surface) {
         fprintf(stderr, "Error: Could not create image surface.\n");
         return;
-    }
-    tvg_swcanvas_set_target(uicon->canvas, uicon->surface->pixels, 
-        pixel_width, pixel_width, pixel_height, TVG_COLORSPACE_ABGR8888);          
+    }         
 }
 
 int ui_context_init(UiContext* uicon, int window_width, int window_height) {
@@ -102,8 +100,7 @@ int ui_context_init(UiContext* uicon, int window_width, int window_height) {
     default_font_prop.font_size = 16 * uicon->pixel_ratio;
 
     // init ThorVG engine
-    tvg_engine_init(TVG_ENGINE_SW, 1);    
-    uicon->canvas = tvg_swcanvas_create();
+    tvg_engine_init(TVG_ENGINE_SW, 1);
 
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);  
@@ -128,7 +125,6 @@ void ui_context_cleanup(UiContext* uicon) {
     FcConfigDestroy(uicon->font_config);
     image_cache_cleanup(uicon);  // cleanup image cache
     
-    tvg_canvas_destroy(uicon->canvas);
     tvg_engine_term(TVG_ENGINE_SW);
     image_surface_destroy(uicon->surface);
 

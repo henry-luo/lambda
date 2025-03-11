@@ -239,7 +239,6 @@ typedef struct {
     int window_width;    // window pixel width
     int window_height;   // window pixel height
     ImageSurface* surface;  // rendering surface of a window
-    Tvg_Canvas* canvas;    // ThorVG canvas
 
     // font handling
     FcConfig *font_config;

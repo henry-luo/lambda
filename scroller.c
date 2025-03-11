@@ -102,61 +102,6 @@ void scroller_get_vscroll_bounds(ScrollProp* pane, float* y, float* height) {
 }
 
 /*
-// Render scrollbars (assumes OpenGL context)
-void scroller_render(ScrollPane* pane) {
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, pane->x + pane->width, pane->y + pane->height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-
-    if (pane->hasHScroll) {
-        // Draw horizontal scrollbar background
-        glColor3f(0.8f, 0.8f, 0.8f);
-        glBegin(GL_QUADS);
-        glVertex2f(pane->x, pane->y + pane->height - SCROLLBAR_SIZE);
-        glVertex2f(pane->x + pane->width, pane->y + pane->height - SCROLLBAR_SIZE);
-        glVertex2f(pane->x + pane->width, pane->y + pane->height);
-        glVertex2f(pane->x, pane->y + pane->height);
-        glEnd();
-
-        // Draw horizontal thumb
-        float thumbX, thumbWidth;
-        scroller_get_hscroll_bounds(pane, &thumbX, &thumbWidth);
-        glColor3f(0.6f, 0.6f, 0.6f);
-        glBegin(GL_QUADS);
-        glVertex2f(thumbX, pane->y + pane->height - SCROLLBAR_SIZE);
-        glVertex2f(thumbX + thumbWidth, pane->y + pane->height - SCROLLBAR_SIZE);
-        glVertex2f(thumbX + thumbWidth, pane->y + pane->height);
-        glVertex2f(thumbX, pane->y + pane->height);
-        glEnd();
-    }
-
-    if (pane->hasVScroll) {
-        // Draw vertical scrollbar background
-        glColor3f(0.8f, 0.8f, 0.8f);
-        glBegin(GL_QUADS);
-        glVertex2f(pane->x + pane->width - SCROLLBAR_SIZE, pane->y);
-        glVertex2f(pane->x + pane->width, pane->y);
-        glVertex2f(pane->x + pane->width, pane->y + pane->height);
-        glVertex2f(pane->x + pane->width - SCROLLBAR_SIZE, pane->y + pane->height);
-        glEnd();
-
-        // Draw vertical thumb
-        float thumbY, thumbHeight;
-        scroller_get_vscroll_bounds(pane, &thumbY, &thumbHeight);
-        glColor3f(0.6f, 0.6f, 0.6f);
-        glBegin(GL_QUADS);
-        glVertex2f(pane->x + pane->width - SCROLLBAR_SIZE, thumbY);
-        glVertex2f(pane->x + pane->width, thumbY);
-        glVertex2f(pane->x + pane->width, thumbY + thumbHeight);
-        glVertex2f(pane->x + pane->width - SCROLLBAR_SIZE, thumbY + thumbHeight);
-        glEnd();
-    }
-}
-*/
-
-/*
 int main() {
     if (!glfwInit()) return -1;
 
