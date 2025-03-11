@@ -2,6 +2,9 @@
 #define SV_IMPLEMENTATION
 #include "./lib/sv.h"
 
+int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
+    const lxb_css_value_length_percentage_t *value);
+
 lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
     printf("style rule: %.*s\n", (int) len, (const char *) data);
     return LXB_STATUS_OK;
@@ -213,7 +216,20 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
     return (Color){0};
 }
 
-void resolve_font_size(LayoutContext* lycon) {
+void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* decl) {
+    printf("font size property: %lu\n", decl->type);
+    if (!decl) {
+        if (lycon->elmt->element.style != NULL) {
+            decl = lxb_dom_element_style_by_id((lxb_dom_element_t*)lycon->elmt, LXB_CSS_PROPERTY_FONT_SIZE);
+        }
+    }
+    if (decl) {
+        lxb_css_property_font_size_t* font_size = decl->u.font_size;
+        lycon->font.current_font_size = resolve_length_value(lycon, 
+            LXB_CSS_PROPERTY_FONT_SIZE, &font_size->length);
+        return;
+    }
+    // use font size from context
     lycon->font.current_font_size = lycon->font.style.font_size;
 }
 
@@ -254,12 +270,14 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         // case LXB_CSS_UNIT_CAP:
         //     result = value->u.length.num * lycon->font.style.font_size;
         //     break;
+        // LXB_CSS_UNIT_REM:
+        //    break;
         case LXB_CSS_UNIT_EM:
             if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
                 result = value->u.length.num *  lycon->font.style.font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
-                    resolve_font_size(lycon);
+                    resolve_font_size(lycon, NULL);
                 }
                 result = value->u.length.num * lycon->font.current_font_size;
             }
@@ -451,8 +469,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         printf("font family property: %s\n", span->font->family);
         break;
     case LXB_CSS_PROPERTY_FONT_SIZE:
-        const lxb_css_property_font_size_t *font_size = declr->u.font_size;
-        printf("font size property: %d\n", font_size->type);
+        resolve_font_size(lycon, declr);
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_size = lycon->font.current_font_size;
         break;
     case LXB_CSS_PROPERTY_FONT_STYLE:   
         const lxb_css_property_font_style_t *font_style = declr->u.font_style;
