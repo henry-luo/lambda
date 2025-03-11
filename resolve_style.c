@@ -489,6 +489,23 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_font_style_t *font_style = declr->u.font_style;
         printf("font style property: %d\n", font_style->type);
         break;
+    case LXB_CSS_PROPERTY_TEXT_DECORATION:
+        const lxb_css_property_text_decoration_t *text_decoration = declr->u.text_decoration;
+        printf("text decoration property: %d\n", text_decoration->line.type);
+        if (!span->font) {
+            span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+        }
+        span->font->text_deco = text_decoration->line.type;
+        break;
+    case LXB_CSS_PROPERTY_TEXT_ALIGN:
+        if (!block) { break; }
+        const lxb_css_property_text_align_t *text_align = declr->u.text_align;
+        printf("text align property: %d\n", text_align->type);
+        if (!block->props) {
+            block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        }
+        block->props->text_align = text_align->type;
+        break;
     case LXB_CSS_PROPERTY_WIDTH:
         const lxb_css_property_width_t *width = declr->u.width;
         lycon->block.given_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
