@@ -335,7 +335,7 @@ int main() {
     double deltaTime = 0.0;
     int frames = 0;
 
-    ui_context.document = show_html_doc("test/sample.html");
+    ui_context.document = show_html_doc("test/sample.html"); // 
 
     // main loop
     while (!glfwWindowShouldClose(window)) {
