@@ -217,30 +217,36 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
 }
 
 void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* decl) {
-    printf("font size property: %p\n", decl);
+    printf("resolve font size property\n");
     if (!decl) {
-        if (lycon->elmt->element.style != NULL) {
+        printf("no decl\n");
+        if (lycon->elmt->element.style) {
             decl = lxb_dom_element_style_by_id((lxb_dom_element_t*)lycon->elmt, LXB_CSS_PROPERTY_FONT_SIZE);
         }
     }
     if (decl) {
+        printf("got decl\n");
         lxb_css_property_font_size_t* font_size = decl->u.font_size;
+        printf("resolving font length\n");
         lycon->font.current_font_size = resolve_length_value(lycon, 
             LXB_CSS_PROPERTY_FONT_SIZE, &font_size->length);
         return;
     }
     // use font size from context
     lycon->font.current_font_size = lycon->font.style.font_size;
+    printf("resolved font size\n");
 }
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value) {
-    int result = 0;
+    float result = 0;  // need to use float here, as there might be int overflow
+    printf("length value type %d\n", value->type);
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
         result = value->u.length.num;
         break;
-    case LXB_CSS_VALUE__LENGTH:      
+    case LXB_CSS_VALUE__LENGTH:
+        printf("length value unit: %d\n", value->u.length.unit);
         result = value->u.length.num;
         switch (value->u.length.unit) {
         // absolute units
@@ -272,6 +278,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         //     break;
         case LXB_CSS_UNIT_REM:
             if (lycon->root_font_size < 0) {
+                printf("resolving font size for rem value");
                 resolve_font_size(lycon, NULL);
                 lycon->root_font_size = lycon->font.current_font_size < 0 ? 
                     lycon->ui_context->default_font.font_size : lycon->font.current_font_size;                
@@ -280,9 +287,10 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             break;
         case LXB_CSS_UNIT_EM:
             if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
-                result = value->u.length.num *  lycon->font.style.font_size;
+                result = value->u.length.num * lycon->font.style.font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
+                    printf("resolving font size for em value");
                     resolve_font_size(lycon, NULL);
                 }
                 result = value->u.length.num * lycon->font.current_font_size;
@@ -294,14 +302,23 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         }
         break;
     case LXB_CSS_VALUE__PERCENTAGE:
-        // todo: fix this
-        result = value->u.percentage.num * lycon->block.width;
+        printf("percetage value\n");
+        if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
+            printf("percetage font size\n");
+            printf("percent: %f\n", value->u.percentage.num);
+            printf("pa font size: %d\n", lycon->font.style.font_size);
+            result = value->u.percentage.num * lycon->font.style.font_size / 100;
+        } else {
+            // todo: fix this
+            result = value->u.percentage.num * lycon->block.width / 100;
+        }
+        printf("got percent value %f\n", result);
         break;
     default:
         printf("Unknown length type: %d\n", value->type);
         result = -1;
     }
-    return result;
+    return (int)result;
 }
 
 // resolve property 'margin', and put result in 'spacing'
@@ -384,10 +401,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
     const lxb_css_entry_data_t *data = lxb_css_property_by_id(declr->type);
     if (!data) { return LXB_STATUS_ERROR_NOT_EXISTS; }
-    printf("style entry: %ld %s\n", declr->type, data->name);
+    printf("style entry:: %ld %s\n", declr->type, data->name);
+    if (!lycon->view) { printf("missing view"); return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
 
+    printf("before the style switch %lu\n", declr->type);
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: 
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
@@ -482,7 +501,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         printf("font family property: %s\n", span->font->family);
         break;
     case LXB_CSS_PROPERTY_FONT_SIZE:
+        printf("before resolving font size\n");
         resolve_font_size(lycon, declr);
+        printf("after resolving font size\n");
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.current_font_size;
         assert(span->font->font_size > 0);
@@ -537,6 +558,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         block->scroller->overflow_y = overflow->type;
         break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
+        printf("@@ custom property");
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);
         // String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
@@ -547,3 +569,5 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     return LXB_STATUS_OK;
 }
+
+// issue: mac hangs when there's integer overflow

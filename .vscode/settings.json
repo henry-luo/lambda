@@ -29,7 +29,10 @@
         "sdl_opengl.h": "c",
         "layout.h": "c",
         "criterion.h": "c",
-        "flexbox.h": "c"
+        "flexbox.h": "c",
+        "bitset": "c",
+        "limits": "c",
+        "tuple": "c"
     },
     "cmake.sourceDirectory": "/Users/henryluo/Projects/Jubily/lambda-parser/tree-sitter-javascript"
 }

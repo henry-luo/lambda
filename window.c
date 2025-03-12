@@ -23,6 +23,7 @@ UiContext ui_context;
 
 Document* show_html_doc(char* doc_filename) {
     Document* doc = calloc(1, sizeof(Document));
+    doc->url = strdup(doc_filename);
     parse_html_doc(doc, doc_filename);
     
     // layout html doc 
@@ -239,3 +240,7 @@ int main() {
     ui_context_cleanup(&ui_context);
     return 0;
 }
+
+// todo: doc manager
+// cache doc
+// free document

@@ -5,6 +5,7 @@ void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt);
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node);
+char* readTextFile(const char *filename);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -178,10 +179,87 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->block.advance_y = 0;
     lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
-    lycon->line.is_line_start = true;    
+    lycon->line.is_line_start = true;
 
+    // apply header styles
+    lxb_html_head_element_t *head = lxb_html_document_head_element(lycon->doc->dom_tree);
+    if (head) {
+        lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(head));
+        while (child) {
+            if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+                lxb_html_element_t *child_elmt = lxb_html_interface_element(child);
+                if (child_elmt->element.node.local_name == LXB_TAG_STYLE) {
+                    // parse style content
+                    lxb_dom_node_t *text_node = lxb_dom_node_first_child(lxb_dom_interface_node(child_elmt));
+                    if (text_node && text_node->type == LXB_DOM_NODE_TYPE_TEXT) {
+                        lxb_dom_text_t *text = lxb_dom_interface_text(text_node);
+                        const unsigned char* str = text->char_data.data.data;
+                        printf("Style: %s\n", str);
+                        // parse CSS styles
+                        // lxb_css_parser_t *parser = lxb_css_parser_create();
+                        // lxb_css_stylesheet_t *sheet = lxb_css_parser_parse(parser, str, text->char_data.data.length);
+                        // if (sheet) {
+                        //     lxb_css_selector_list_t *selectors = lxb_css_stylesheet_selectors(sheet);
+                        //     if (selectors) {
+                        //         lxb_css_selector_t *selector = selectors->list;
+                        //         while (selector) {
+                        //             lxb_css_selector_entry_t *entry = selector->entry;
+                        //             while (entry) {
+                        //                 printf("selector: %s\n", entry->data);
+                        //                 entry = entry->next;
+                        //             }
+                        //             selector = selector->next;
+                        //         }
+                        //     }
+                        // }
+                        // lxb_css_parser_destroy(parser);
+                    }
+                }
+                else if (child_elmt->element.node.local_name == LXB_TAG_LINK) {
+                    // parse link content
+                    lxb_dom_attr_t* href = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_HREF);
+                    if (href) {
+                        StrBuf* path = strbuf_create("../test/");  // hard-coded path
+                        strbuf_append_str(path, (const char*)href->value->data);
+                        printf("link path: %s\n", path->s);
+
+                        char* sty_source = readTextFile(path->s); // Use the constructed path
+                        if (!sty_source) { // corrected variable name to sty_source
+                            fprintf(stderr, "Failed to read CSS file\n"); // updated error message
+                        }
+                        else {
+                            lxb_css_parser_t *parser;  lxb_status_t status;  lxb_css_stylesheet_t *sst;
+                            parser = lxb_css_parser_create();
+                            status = lxb_css_parser_init(parser, NULL);
+                            if (status == LXB_STATUS_OK) {
+                                sst = lxb_css_stylesheet_parse(parser, (const lxb_char_t *)sty_source, strlen(sty_source));
+                                if (sst != NULL) {
+                                    status = lxb_html_document_stylesheet_attach(lycon->doc->dom_tree, sst);
+                                    if (status != LXB_STATUS_OK) {
+                                        printf("Failed to attach CSS StyleSheet to document");
+                                    } else {
+                                        printf("CSS StyleSheet attached to document\n");
+                                    }
+                                }
+                                else {
+                                    printf("Failed to parse CSS StyleSheet\n");
+                                }
+                            }
+                            lxb_css_parser_destroy(parser, true);
+                            free(sty_source);
+                        }
+                        strbuf_free(path);
+                    }
+                }
+            }
+            child = lxb_dom_node_next(child);
+        }
+    }
+
+    // resolve html styles
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
     lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
+    lycon->elmt = elmt;
     // resolve CSS styles
     if (elmt->element.style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles

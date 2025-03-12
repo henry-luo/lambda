@@ -23,6 +23,7 @@ typedef struct {
     lxb_html_document_t* dom_tree;  // current HTML document DOM tree
     ViewTree* view_tree;
     StateTree* state_tree;
+    char* url;  // document URL
 } Document;
 
 typedef unsigned short PropValue;
