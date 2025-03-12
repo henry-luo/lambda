@@ -150,6 +150,9 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
         else if (outer_display == LXB_CSS_VALUE_LIST_ITEM) {
             layout_list_item(lycon, elmt);
         }
+        else if (outer_display == LXB_CSS_VALUE_NONE) {
+            printf("skipping elemnt of display: none\n");
+        }
         else {
             printf("unknown display type\n");
             // skip the element
@@ -216,12 +219,20 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
                     }
                 }
                 else if (child_elmt->element.node.local_name == LXB_TAG_LINK) {
-                    // parse link content
+                    // Lebor does not support 'rel' attribute
+                    // lxb_dom_attr_t* rel = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_REL);
+                    // load and parse linked stylesheet
                     lxb_dom_attr_t* href = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_HREF);
+                    
                     if (href) {
                         StrBuf* path = strbuf_create("../test/");  // hard-coded path
                         strbuf_append_str(path, (const char*)href->value->data);
                         printf("link path: %s\n", path->s);
+                        int len = path->length;
+                        if (!(len > 4 && path->s[len-4]=='.' && path->s[len-3]=='c' && 
+                            path->s[len-2]=='s' && path->s[len-1]=='s')) {
+                            printf("not stylesheet\n");  goto NEXT;
+                        }
 
                         char* sty_source = readTextFile(path->s); // Use the constructed path
                         if (!sty_source) { // corrected variable name to sty_source
@@ -252,6 +263,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
                     }
                 }
             }
+            NEXT:
             child = lxb_dom_node_next(child);
         }
     }

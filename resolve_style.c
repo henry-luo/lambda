@@ -302,17 +302,12 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         }
         break;
     case LXB_CSS_VALUE__PERCENTAGE:
-        printf("percetage value\n");
         if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
-            printf("percetage font size\n");
-            printf("percent: %f\n", value->u.percentage.num);
-            printf("pa font size: %d\n", lycon->font.style.font_size);
             result = value->u.percentage.num * lycon->font.style.font_size / 100;
         } else {
             // todo: fix this
             result = value->u.percentage.num * lycon->block.width / 100;
         }
-        printf("got percent value %f\n", result);
         break;
     default:
         printf("Unknown length type: %d\n", value->type);
@@ -378,7 +373,10 @@ PropValue resolve_element_display(lxb_html_element_t* elmt) {
         case LXB_TAG_IMG:
             outer_display = LXB_CSS_VALUE_INLINE_BLOCK;  inner_display = LXB_CSS_VALUE_REPLACED;
             break;
-        default:  // inline elements, like span, b, i, u, a, img, input
+        case LXB_TAG_SCRIPT:  case LXB_TAG_STYLE:  case LXB_TAG_SVG:
+            outer_display = LXB_CSS_VALUE_NONE;  inner_display = LXB_CSS_VALUE_NONE;
+            break;
+        default:  // inline elements, like span, b, i, u, a, img, input, or custom elements
             outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
     }
     // get CSS display if specified

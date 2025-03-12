@@ -40,7 +40,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
 
 void free_view(ViewTree* tree, View* view) {
     printf("free view %p, type %d\n", view, view->type);
-    if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE) {
+    if (view->type != RDT_VIEW_TEXT) {
         View* child = ((ViewGroup*)view)->child;
         while (child) {
             View* next = child->next;
@@ -50,18 +50,33 @@ void free_view(ViewTree* tree, View* view) {
         // free props
         ViewSpan* span = (ViewSpan*)view;
         if (span->font) {
-            if (span->font->family) pool_variable_free(tree->pool, span->font->family);
+            printf("free font prop\n");
+            // if (span->font->family) pool_variable_free(tree->pool, span->font->family);
             pool_variable_free(tree->pool, span->font);
         }
-        if (span->in_line) pool_variable_free(tree->pool, span->in_line);
+        if (span->in_line) {
+            printf("free inline prop\n");
+            pool_variable_free(tree->pool, span->in_line);
+        }
         if (span->bound) {
+            printf("free bound prop\n");
             if (span->bound->background) pool_variable_free(tree->pool, span->bound->background);
             if (span->bound->border) pool_variable_free(tree->pool, span->bound->border);
             pool_variable_free(tree->pool, span->bound);
         }
-        if (view->type == RDT_VIEW_BLOCK) {
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK || 
+            view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM ||
+            view->type == RDT_VIEW_IMAGE) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->props) pool_variable_free(tree->pool, block->props);
+            if (block->props) {
+                printf("free block prop\n");
+                pool_variable_free(tree->pool, block->props);
+            }
+            if (block->scroller) {
+                printf("free scroller\n");
+                if (block->scroller->pane) pool_variable_free(tree->pool, block->scroller->pane);
+                pool_variable_free(tree->pool, block->scroller);
+            }
         }
     }
     pool_variable_free(tree->pool, view);
