@@ -170,6 +170,27 @@ void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
     }    
 }
 
+void load_style(LayoutContext* lycon, unsigned char* style_source) {
+    lxb_css_parser_t *parser;  lxb_status_t status;  lxb_css_stylesheet_t *sst;
+    parser = lxb_css_parser_create();
+    status = lxb_css_parser_init(parser, NULL);
+    if (status == LXB_STATUS_OK) {
+        sst = lxb_css_stylesheet_parse(parser, (const lxb_char_t *)style_source, strlen((char*)style_source));
+        if (sst != NULL) {
+            status = lxb_html_document_stylesheet_attach(lycon->doc->dom_tree, sst);
+            if (status != LXB_STATUS_OK) {
+                printf("Failed to attach CSS StyleSheet to document");
+            } else {
+                printf("CSS StyleSheet attached to document\n");
+            }
+        }
+        else {
+            printf("Failed to parse CSS StyleSheet\n");
+        }
+    }
+    lxb_css_parser_destroy(parser, true);    
+}
+
 void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout html root\n");
 
@@ -196,26 +217,9 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
                     lxb_dom_node_t *text_node = lxb_dom_node_first_child(lxb_dom_interface_node(child_elmt));
                     if (text_node && text_node->type == LXB_DOM_NODE_TYPE_TEXT) {
                         lxb_dom_text_t *text = lxb_dom_interface_text(text_node);
-                        const unsigned char* str = text->char_data.data.data;
+                        unsigned char* str = text->char_data.data.data;
                         printf("Style: %s\n", str);
-                        // parse CSS styles
-                        // lxb_css_parser_t *parser = lxb_css_parser_create();
-                        // lxb_css_stylesheet_t *sheet = lxb_css_parser_parse(parser, str, text->char_data.data.length);
-                        // if (sheet) {
-                        //     lxb_css_selector_list_t *selectors = lxb_css_stylesheet_selectors(sheet);
-                        //     if (selectors) {
-                        //         lxb_css_selector_t *selector = selectors->list;
-                        //         while (selector) {
-                        //             lxb_css_selector_entry_t *entry = selector->entry;
-                        //             while (entry) {
-                        //                 printf("selector: %s\n", entry->data);
-                        //                 entry = entry->next;
-                        //             }
-                        //             selector = selector->next;
-                        //         }
-                        //     }
-                        // }
-                        // lxb_css_parser_destroy(parser);
+                        load_style(lycon, str);
                     }
                 }
                 else if (child_elmt->element.node.local_name == LXB_TAG_LINK) {
@@ -239,24 +243,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
                             fprintf(stderr, "Failed to read CSS file\n"); // updated error message
                         }
                         else {
-                            lxb_css_parser_t *parser;  lxb_status_t status;  lxb_css_stylesheet_t *sst;
-                            parser = lxb_css_parser_create();
-                            status = lxb_css_parser_init(parser, NULL);
-                            if (status == LXB_STATUS_OK) {
-                                sst = lxb_css_stylesheet_parse(parser, (const lxb_char_t *)sty_source, strlen(sty_source));
-                                if (sst != NULL) {
-                                    status = lxb_html_document_stylesheet_attach(lycon->doc->dom_tree, sst);
-                                    if (status != LXB_STATUS_OK) {
-                                        printf("Failed to attach CSS StyleSheet to document");
-                                    } else {
-                                        printf("CSS StyleSheet attached to document\n");
-                                    }
-                                }
-                                else {
-                                    printf("Failed to parse CSS StyleSheet\n");
-                                }
-                            }
-                            lxb_css_parser_destroy(parser, true);
+                            load_style(lycon, (unsigned char*)sty_source);
                             free(sty_source);
                         }
                         strbuf_free(path);
