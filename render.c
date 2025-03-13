@@ -102,7 +102,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             if (bytes <= 0) {
                 p++;  continue;
             }
-            p += bytes;  printf("codepoint: %d, bytes: %d\n", codepoint, bytes);
+            p += bytes;  // printf("codepoint: %d, bytes: %d\n", codepoint, bytes);
 
             // FT_UInt glyph_index = FT_Get_Char_Index(ft_face, utf32_str[i]);
             // ret = FT_Load_Glyph(ft_face, glyph_index, FT_LOAD_RENDER);
@@ -131,7 +131,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
     }
     // render text deco
-    printf("before text deco\n");
     if (rdcon->font.style.text_deco != LXB_CSS_VALUE_NONE) {
         int thinkness = max(rdcon->font.face->underline_thickness >> 6, 1);
         Rect rect;
@@ -149,7 +148,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             rect.x, rect.y, rect.width, rect.height); // corrected w to width
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
-    printf("end of text view\n");
 }
 
 // Function to convert integer to Roman numeral

@@ -465,8 +465,34 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
-        printf("@@margin prop: %lf, unit: %d\n", margin->top.u.length.num, margin->top.u.length.unit);
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, &span->bound->margin);
+        break;
+    case LXB_CSS_PROPERTY_MARGIN_LEFT:      case LXB_CSS_PROPERTY_MARGIN_RIGHT:
+    case LXB_CSS_PROPERTY_MARGIN_TOP:       case LXB_CSS_PROPERTY_MARGIN_BOTTOM:
+    case LXB_CSS_PROPERTY_PADDING_LEFT:     case LXB_CSS_PROPERTY_PADDING_RIGHT:
+    case LXB_CSS_PROPERTY_PADDING_TOP:      case LXB_CSS_PROPERTY_PADDING_BOTTOM:
+    // case LXB_CSS_PROPERTY_BORDER_LEFT:      case LXB_CSS_PROPERTY_BORDER_RIGHT:
+    // case LXB_CSS_PROPERTY_BORDER_TOP:       case LXB_CSS_PROPERTY_BORDER_BOTTOM:
+        const lxb_css_value_length_percentage_t *space = declr->u.margin_left;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        // if ((declr->type == LXB_CSS_PROPERTY_BORDER_LEFT || declr->type ==LXB_CSS_PROPERTY_BORDER_RIGHT ||
+        //     declr->type == LXB_CSS_PROPERTY_BORDER_TOP || declr->type == LXB_CSS_PROPERTY_BORDER_BOTTOM)
+        //     && !span->bound->border) {
+        //         span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        // }        
+        int space_length = resolve_length_value(lycon, declr->type, space);
+        switch (declr->type) {
+        case LXB_CSS_PROPERTY_MARGIN_LEFT: span->bound->margin.left = space_length;  break;
+        case LXB_CSS_PROPERTY_MARGIN_RIGHT: span->bound->margin.right = space_length;  break;
+        case LXB_CSS_PROPERTY_MARGIN_TOP: span->bound->margin.top = space_length;  break;
+        case LXB_CSS_PROPERTY_MARGIN_BOTTOM: span->bound->margin.bottom = space_length;  break;
+        case LXB_CSS_PROPERTY_PADDING_LEFT: span->bound->padding.left = space_length;  break;
+        case LXB_CSS_PROPERTY_PADDING_RIGHT: span->bound->padding.right = space_length;  break;
+        case LXB_CSS_PROPERTY_PADDING_TOP: span->bound->padding.top = space_length;  break;
+        case LXB_CSS_PROPERTY_PADDING_BOTTOM: span->bound->padding.bottom = space_length;  break;
+        }
         break;
     case LXB_CSS_PROPERTY_PADDING:
         const lxb_css_property_padding_t *padding = declr->u.padding;

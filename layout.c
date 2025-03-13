@@ -213,14 +213,14 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
             if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
                 lxb_html_element_t *child_elmt = lxb_html_interface_element(child);
                 if (child_elmt->element.node.local_name == LXB_TAG_STYLE) {
-                    // parse style content
-                    lxb_dom_node_t *text_node = lxb_dom_node_first_child(lxb_dom_interface_node(child_elmt));
-                    if (text_node && text_node->type == LXB_DOM_NODE_TYPE_TEXT) {
-                        lxb_dom_text_t *text = lxb_dom_interface_text(text_node);
-                        unsigned char* str = text->char_data.data.data;
-                        printf("Style: %s\n", str);
-                        load_style(lycon, str);
-                    }
+                    // style element already handled by the parser
+                    // lxb_dom_node_t *text_node = lxb_dom_node_first_child(lxb_dom_interface_node(child_elmt));
+                    // if (text_node && text_node->type == LXB_DOM_NODE_TYPE_TEXT) {
+                    //     lxb_dom_text_t *text = lxb_dom_interface_text(text_node);
+                    //     unsigned char* str = text->char_data.data.data;
+                    //     printf("@@@ loading style: %s\n", str);
+                    //     load_style(lycon, str);
+                    // }
                 }
                 else if (child_elmt->element.node.local_name == LXB_TAG_LINK) {
                     // Lebor does not support 'rel' attribute
