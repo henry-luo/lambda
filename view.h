@@ -94,6 +94,7 @@ typedef struct {
 
 typedef struct {
     int top, right, bottom, left;
+    uint32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
 
 typedef struct {
