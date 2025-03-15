@@ -104,7 +104,13 @@
             "name": "CoreVideo",
             "lib": "-framework CoreVideo",
             "link": "static"
-        }                     
+        },
+        {
+            "name": "zlog",
+            "include": "/usr/local/include",
+            "lib": "/usr/local/lib/libzlog.a",
+            "link": "static"
+        }     
     ],
     "warnings": [
         "incompatible-pointer-types",

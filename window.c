@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include "layout.h"
+#include "zlog.h" 
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, View* root_view);
@@ -182,6 +183,9 @@ void render(GLFWwindow* window) {
 }
 
 int main() {
+    int rc;
+    rc = dzlog_init("log.conf", "default");    
+    dzlog_info("hello, zlog");
     ui_context_init(&ui_context);
     GLFWwindow* window = ui_context.window;
     if (!window) {
@@ -235,9 +239,13 @@ int main() {
             glfwWaitEventsTimeout((1.0 / 60.0) - deltaTime);
         }
         frames++;
-    }
+    } 
 
     ui_context_cleanup(&ui_context);
+    dzlog_error("Exiting application error");
+    dzlog_debug("Exiting application debug");
+    dzlog_info("Exiting application info");    
+    zlog_fini();
     return 0;
 }
 

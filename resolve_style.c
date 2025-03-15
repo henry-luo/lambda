@@ -745,10 +745,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         block->scroller->overflow_y = overflow->type;
         break;
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
-        printf("@@ custom property");
+        printf("@@ custom property\n");
         const lxb_css_property__custom_t *custom = declr->u.custom;
-        // String_View custom_name = sv_from_parts((char*)custom->name.data, custom->name.length);
-        // String_View custom_value = sv_from_parts((char*)custom->value.data, custom->value.length);
         printf("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
         break;
     default:
