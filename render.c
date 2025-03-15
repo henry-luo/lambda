@@ -257,16 +257,16 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     if (view->bound->border) {
         Rect border_rect = rect;
         border_rect.width = view->bound->border->width.left;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->left_color.c, &rdcon->block.clip);
         border_rect.x = rect.x + rect.width - view->bound->border->width.right;
         border_rect.width = view->bound->border->width.right;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->right_color.c, &rdcon->block.clip);
         border_rect = rect;
         border_rect.height = view->bound->border->width.top;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->top_color.c, &rdcon->block.clip);
         border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
         border_rect.height = view->bound->border->width.bottom;
-        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->color.c, &rdcon->block.clip);
+        fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->bottom_color.c, &rdcon->block.clip);
     }
 }
 

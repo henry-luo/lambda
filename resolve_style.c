@@ -465,6 +465,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     if (!lycon->view) { printf("missing view"); return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
+    Color c;
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: 
@@ -527,50 +528,43 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, specificity, &span->bound->margin);
         break;
+    case LXB_CSS_PROPERTY_PADDING:
+        const lxb_css_property_padding_t *padding = declr->u.padding;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, 
+            (lxb_css_property_margin_t*)padding, specificity, &span->bound->padding);
+        break;
     case LXB_CSS_PROPERTY_MARGIN_LEFT:      case LXB_CSS_PROPERTY_MARGIN_RIGHT:
     case LXB_CSS_PROPERTY_MARGIN_TOP:       case LXB_CSS_PROPERTY_MARGIN_BOTTOM:
     case LXB_CSS_PROPERTY_PADDING_LEFT:     case LXB_CSS_PROPERTY_PADDING_RIGHT:
     case LXB_CSS_PROPERTY_PADDING_TOP:      case LXB_CSS_PROPERTY_PADDING_BOTTOM:
-    // case LXB_CSS_PROPERTY_BORDER_LEFT:      case LXB_CSS_PROPERTY_BORDER_RIGHT:
-    // case LXB_CSS_PROPERTY_BORDER_TOP:       case LXB_CSS_PROPERTY_BORDER_BOTTOM:
         const lxb_css_value_length_percentage_t *space = declr->u.margin_left;
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-        }
-        // if ((declr->type == LXB_CSS_PROPERTY_BORDER_LEFT || declr->type ==LXB_CSS_PROPERTY_BORDER_RIGHT ||
-        //     declr->type == LXB_CSS_PROPERTY_BORDER_TOP || declr->type == LXB_CSS_PROPERTY_BORDER_BOTTOM)
-        //     && !span->bound->border) {
-        //         span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
-        // }        
+        }       
         int space_length = resolve_length_value(lycon, declr->type, (lxb_css_value_length_percentage_t *)space);
         switch (declr->type) {
-        case LXB_CSS_PROPERTY_MARGIN_LEFT: 
-            printf("#### margin left: %d, val spec: %d, cur spec: %d\n", space_length, 
-                specificity, span->bound->margin.left_specificity);
+        case LXB_CSS_PROPERTY_MARGIN_LEFT:
             if (specificity > span->bound->margin.left_specificity) {
                 span->bound->margin.left = space_length;  
                 span->bound->margin.left_specificity = specificity;
             }
             break;
-        case LXB_CSS_PROPERTY_MARGIN_RIGHT: 
-            printf("#### margin right: %d, val spec: %d, cur spec: %d\n", space_length, 
-                specificity, span->bound->margin.right_specificity);
+        case LXB_CSS_PROPERTY_MARGIN_RIGHT:
             if (specificity > span->bound->margin.right_specificity) {
                 span->bound->margin.right = space_length;  
                 span->bound->margin.right_specificity = specificity; 
             }
             break;
-        case LXB_CSS_PROPERTY_MARGIN_TOP: 
-            printf("#### margin top: %d, val spec: %d, cur spec: %d\n", space_length, 
-                specificity, span->bound->margin.top_specificity);
+        case LXB_CSS_PROPERTY_MARGIN_TOP:
             if (specificity > span->bound->margin.top_specificity) {
                 span->bound->margin.top = space_length;  
                 span->bound->margin.top_specificity = specificity; 
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_BOTTOM:
-            printf("#### margin bottom: %d, val spec: %d, cur spec: %d\n", space_length, 
-                specificity, span->bound->margin.bottom_specificity);
             if (specificity > span->bound->margin.bottom_specificity) {
                 span->bound->margin.bottom = space_length;  
                 span->bound->margin.bottom_specificity = specificity; 
@@ -602,14 +596,6 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             break;
         }
         break;
-    case LXB_CSS_PROPERTY_PADDING:
-        const lxb_css_property_padding_t *padding = declr->u.padding;
-        if (!span->bound) {
-            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-        }
-        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, 
-            (lxb_css_property_margin_t*)padding, specificity, &span->bound->padding);
-        break;
     case LXB_CSS_PROPERTY_BORDER:
         printf("border property: %lu\n", declr->type);
         const lxb_css_property_border_t *border = declr->u.border;
@@ -619,12 +605,79 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        span->bound->border->color = resolve_color_value(&border->color);
-        span->bound->border->width.top = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
+        c = resolve_color_value(&border->color);
+        if (specificity > span->bound->border->top_color_specificity) {
+            span->bound->border->top_color = c;
+            span->bound->border->top_color_specificity = specificity;
+        }
+        if (specificity > span->bound->border->bottom_color_specificity) {
+            span->bound->border->bottom_color = c;
+            span->bound->border->bottom_color_specificity = specificity;
+        }
+        if (specificity > span->bound->border->left_color_specificity) {
+            span->bound->border->left_color = c;
+            span->bound->border->left_color_specificity = specificity;
+        }
+        if (specificity > span->bound->border->right_color_specificity) {
+            span->bound->border->right_color = c;
+            span->bound->border->right_color_specificity = specificity;
+        }
+        int length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
             (lxb_css_value_length_percentage_t*)&border->width);
-        span->bound->border->width.bottom = span->bound->border->width.left 
-            = span->bound->border->width.right = span->bound->border->width.top;
+        if (specificity > span->bound->border->width.top_specificity) {
+            span->bound->border->width.top = length;
+            span->bound->border->width.top_specificity = specificity;
+        }
+        if (specificity > span->bound->border->width.bottom_specificity) {
+            span->bound->border->width.bottom = length;
+            span->bound->border->width.bottom_specificity = specificity;
+        }
+        if (specificity > span->bound->border->width.left_specificity) {
+            span->bound->border->width.left = length;
+            span->bound->border->width.left_specificity = specificity;
+        }
+        if (specificity > span->bound->border->width.right_specificity) {
+            span->bound->border->width.right = length;
+            span->bound->border->width.right_specificity = specificity;
+        }
         span->bound->border->style = border->style;
+        break;
+    case LXB_CSS_PROPERTY_BORDER_TOP_COLOR:  case LXB_CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+    case LXB_CSS_PROPERTY_BORDER_LEFT_COLOR: case LXB_CSS_PROPERTY_BORDER_RIGHT_COLOR:
+        const lxb_css_property_border_top_color_t *border_color = declr->u.border_top_color;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        c = resolve_color_value(border_color);
+        switch (declr->type) {
+        case LXB_CSS_PROPERTY_BORDER_TOP_COLOR:
+            if (specificity > span->bound->border->top_color_specificity) {
+                span->bound->border->top_color = c;
+                span->bound->border->top_color_specificity = specificity;
+            }
+            break;
+        case LXB_CSS_PROPERTY_BORDER_BOTTOM_COLOR:
+            if (specificity > span->bound->border->bottom_color_specificity) {
+                span->bound->border->bottom_color = c;
+                span->bound->border->bottom_color_specificity = specificity;
+            }
+            break;
+        case LXB_CSS_PROPERTY_BORDER_LEFT_COLOR:
+            if (specificity > span->bound->border->left_color_specificity) {
+                span->bound->border->left_color = c;
+                span->bound->border->left_color_specificity = specificity;
+            }
+            break;
+        case LXB_CSS_PROPERTY_BORDER_RIGHT_COLOR:
+            if (specificity > span->bound->border->right_color_specificity) {
+                span->bound->border->right_color = c;
+                span->bound->border->right_color_specificity = specificity;
+            }
+            break;
+        }
         break;
     case LXB_CSS_PROPERTY_FONT_FAMILY:
         const lxb_css_property_font_family_t *font_family = declr->u.font_family;

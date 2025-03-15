@@ -100,7 +100,8 @@ typedef struct {
 typedef struct {
     Spacing width;
     PropValue style;
-    Color color;
+    Color top_color, right_color, bottom_color, left_color;
+    uint32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
     Spacing radius;    
 } BorderProp;
 

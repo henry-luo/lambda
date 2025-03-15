@@ -156,8 +156,13 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
             span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
             strbuf_append_str(buf, "}\n");
         if (span->bound->border) {
-            strbuf_append_format(buf, "border:{color:#%x, width:%d, style:%d}\n",
-                span->bound->border->color.c, span->bound->border->width.top, span->bound->border->style);
+            strbuf_append_format(buf, "border:{top-color:#%x, right-color:#%x, bottom-color:#%x, left-color:#%x, "
+                "top-width:%d, right-width:%d, bottom-width:%d, left-width:%d, style:%d}\n",
+                span->bound->border->top_color.c, span->bound->border->right_color.c, 
+                span->bound->border->bottom_color.c, span->bound->border->left_color.c, 
+                span->bound->border->width.top, span->bound->border->width.right,
+                span->bound->border->width.bottom, span->bound->border->width.left,
+                span->bound->border->style);
         }
     }  
 }
@@ -255,9 +260,6 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
         strbuf_append_str(buf, "view has no child\n");
     }
 }
-
-#include <stdio.h>
-#include <stdlib.h>
 
 void write_string_to_file(const char *filename, const char *text) {
     FILE *file = fopen(filename, "w"); // Open file in write mode
