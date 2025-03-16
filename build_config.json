@@ -131,5 +131,8 @@
         "pointer-sign",
         "pointer-to-int-cast",
         "pointer-truncate"
+    ],
+    "flags": [
+        "fwrapv"
     ]
 }

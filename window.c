@@ -6,7 +6,6 @@
 #include <assert.h>
 #include <stdbool.h>
 #include "layout.h"
-#include "zlog.h" 
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, View* root_view);
@@ -241,10 +240,8 @@ int main() {
         frames++;
     } 
 
+    dzlog_info("End of app");
     ui_context_cleanup(&ui_context);
-    dzlog_error("Exiting application error");
-    dzlog_debug("Exiting application debug");
-    dzlog_info("Exiting application info");    
     zlog_fini();
     return 0;
 }

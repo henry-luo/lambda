@@ -12,6 +12,7 @@
 #include "./lib/strbuf.h"
 #include "./lib/hashmap.h"
 #include "./lib/arraylist.h"
+#include "zlog.h" 
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))

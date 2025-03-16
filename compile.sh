@@ -54,6 +54,12 @@ for warning in $WARNINGS; do
     CMD_STRING+="-Werror=$warning \\"$'\n'
 done
 
+# Add flags
+FLAGS=$(jq -r '.flags[]' "$CONFIG_FILE")
+for flag in $FLAGS; do
+    CMD_STRING+="-$flag \\"$'\n'
+done
+
 # Print the command
 echo "Compile command:"
 echo "$CMD_STRING"

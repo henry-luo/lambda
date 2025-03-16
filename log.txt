@@ -1,0 +1,3460 @@
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x140248a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x140248b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x140248c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x140248000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x140248d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 3, end block>>
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x140248200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x140248400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x140248480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1402484c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 5, end block>>
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x140248600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1402486c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x140248700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x140248800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x140248840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x140248880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 7, end block>>
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x140248980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x140248f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x150067e80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x150068040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:211 - layout block content
+
+layout_block.c:295 - flow block in parent context
+
+layout_block.c:329 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x15007a0c0
+
+layout_block.c:163 - setting up block props
+
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x1581f0a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:198 - setting up bounds
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x1581f0b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x1581f0c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1581f0000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x1581f0d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 3, end block>>
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x1581f0200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1581f0400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x1581f0480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:198 - setting up bounds
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1581f04c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:198 - setting up bounds
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 5, end block>>
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x1581f0600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1581f06c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:198 - setting up bounds
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:198 - setting up bounds
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1581f0700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x1581f0800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x1581f0840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x1581f0880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 7, end block>>
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1581f0980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1581f0f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x128067e80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x128068040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:214 - layout block content
+
+layout_block.c:298 - flow block in parent context
+
+layout_block.c:332 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x12807a0c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x130040a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:200 - setting up bounds
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x130040b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x130040c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x130040000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x130040d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 3, end block>>
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x130040200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x130040400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x130040480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:200 - setting up bounds
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1300404c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:200 - setting up bounds
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 5, end block>>
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x130040600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1300406c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:200 - setting up bounds
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:200 - setting up bounds
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x130040700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x130040800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x130040840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x130040880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 7, end block>>
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x130040980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x130040f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x170067e80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x170068040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:178 - setting up height
+
+layout_block.c:188 - setting up x, y
+
+layout_block.c:216 - layout block content
+
+layout_block.c:300 - flow block in parent context
+
+layout_block.c:334 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x17007a0c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x128060a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:202 - setting up bounds
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x128060b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x128060c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128060000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x128060d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 3, end block>>
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x128060200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128060400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x128060480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:202 - setting up bounds
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1280604c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:202 - setting up bounds
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 5, end block>>
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x128060600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1280606c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:202 - setting up bounds
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:202 - setting up bounds
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128060700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x128060800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x128060840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x128060880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 7, end block>>
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128060980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128060f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x14813fe80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x148140040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:180 - setting up height
+
+layout_block.c:190 - setting up x, y
+
+layout_block.c:218 - layout block content
+
+layout_block.c:302 - flow block in parent context
+
+layout_block.c:336 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x1481520c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x118080a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x118080b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x118080c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x118080000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x118080d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x118080200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x118080400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x118080480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1180804c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x118080600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1180806c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x118080700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x118080800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x118080840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x118080880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 7, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x118080980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x118080f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x178047e80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x178048040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x17805a0c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width
+
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 800, 16, 16
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x138060a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138060b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x138060c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138060000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x138060d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x138060200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138060400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x138060480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 240, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1380604c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 160, 20, 10
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x138060600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1380606c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138060700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138060800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x138060840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x138060880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 7, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138060980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138060f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 20, 20
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x150067e80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 800, 16, 16
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x150068040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x15007a0c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 1804838904, 1804838904
+
+window.c:187 - hello, zlog
+layout_block.c:30 - <<layout block body
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 800, 16, 16
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x128070a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x128070b40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block center
+
+layout_block.c:118 - resolved element style: 0x128070c80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128070000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block span
+
+layout_block.c:118 - resolved element style: 0x128070d80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block custom-elmt
+
+layout_block.c:118 - resolved element style: 0x128070200
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128070400
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x128070480
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 240, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1280704c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 160, 20, 10
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 3, end block>>
+
+layout_block.c:30 - <<layout block ol
+
+layout_block.c:118 - resolved element style: 0x128070600
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1280706c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:203 - setting up bounds
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128070700
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x128070800
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x128070840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 7, end block>>
+
+layout_block.c:30 - <<layout block img
+
+layout_block.c:118 - resolved element style: 0x128070880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 7, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128070980
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:171 - got given width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x128070f40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 20, 20
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block body
+
+layout_block.c:118 - resolved element style: 0x13817fe80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 800, 16, 16
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block header
+
+layout_block.c:118 - resolved element style: 0x138180040
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block main
+
+layout_block.c:118 - resolved element style: 0x1381920c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 1794582520, 1794582520
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138182180
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block article
+
+layout_block.c:118 - resolved element style: 0x138182340
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block h2
+
+layout_block.c:118 - resolved element style: 0x138182500
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 1, 1
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x1381826c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block h4
+
+layout_block.c:118 - resolved element style: 0x138182880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138182a40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138182c00
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138182dc0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138182f80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138183140
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x1381834c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x138192840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x138183880
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804322, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x1381929c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x138183dc0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804322, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x138184140
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804322, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x1381844c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804322, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block li
+
+layout_block.c:118 - resolved element style: 0x138184840
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804322, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138184b80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138184f00
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x1381850c0
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block p
+
+layout_block.c:118 - resolved element style: 0x138185280
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1713804272, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block footer
+
+layout_block.c:118 - resolved element style: 0x138185440
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 768, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138193140
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: 588, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138178000
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1882237492, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block h1
+
+layout_block.c:118 - resolved element style: 0x138185a80
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1882237492, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:30 - <<layout block div
+
+layout_block.c:118 - resolved element style: 0x138178500
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1882237492, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:30 - <<layout block ul
+
+layout_block.c:118 - resolved element style: 0x138193e40
+
+layout_block.c:163 - setting up block props
+
+layout_block.c:165 - setting up font props
+
+layout_block.c:169 - setting up bound props
+
+layout_block.c:176 - no given width: -1882237492, 0, 0
+
+layout_block.c:178 - setting block.width
+
+layout_block.c:181 - setting up height
+
+layout_block.c:191 - setting up x, y
+
+layout_block.c:219 - layout block content
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 5, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+layout_block.c:303 - flow block in parent context
+
+layout_block.c:337 - block view: 4, end block>>
+
+window.c:243 - End of app

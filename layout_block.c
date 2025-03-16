@@ -27,7 +27,7 @@ int strToInt(const char* str, int len) {
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    printf("layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
+    dzlog_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (display != LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
@@ -115,7 +115,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     if (elmt->element.style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt);
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
-        printf("### got element style: %p\n", elmt->element.style);
+        dzlog_debug("resolved element style: %p\n", elmt->element.style);
     }
     
     // switch block to list
@@ -160,18 +160,25 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         // else width & height both specified
     }
     
+    dzlog_debug("setting up block props\n");
     if (block->font) {
+        dzlog_debug("setting up font props\n");
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
     if (block->bound) {
+        dzlog_debug("setting up bound props\n");
         if (lycon->block.given_width >= 0) { // got specified width 
+            dzlog_debug("got given width\n");
             block->width = lycon->block.given_width + block->bound->padding.left + block->bound->padding.right +
                 (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
             lycon->block.width = lycon->block.given_width;
         } else {
+            dzlog_debug("no given width: %d, %d, %d\n", pa_block.width, block->bound->margin.left, block->bound->margin.right);
             block->width = pa_block.width - (block->bound->margin.left + block->bound->margin.right);
+            dzlog_debug("setting block.width\n");
             lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
         }
+        dzlog_debug("setting up height\n");
         if (lycon->block.given_height >= 0) { // got specified height 
             block->height = lycon->block.given_height + block->bound->padding.top + block->bound->padding.bottom +
                 (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
@@ -181,6 +188,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             lycon->block.height = pa_block.height - block->height - (block->bound->padding.top + block->bound->padding.bottom)
                 - (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
         }
+        dzlog_debug("setting up x, y\n");
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
         if (block->bound->border) {
@@ -192,6 +200,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         lycon->line.left = lycon->line.advance_x;
     } 
     else {
+        dzlog_debug("setting up bounds\n");
         if (lycon->block.given_width >= 0) { // got specified width 
             block->width = lycon->block.width = lycon->block.given_width;
         } else {
@@ -207,6 +216,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
 
     if (elmt_name != LXB_TAG_IMG) {
         // layout block content
+        dzlog_debug("layout block content\n");
         lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
@@ -290,7 +300,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     }
 
     // flow the block in parent context
-    printf("flow block in parent context\n");
+    dzlog_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     if (display == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (lycon->line.advance_x + block->width >= lycon->line.right) { 
@@ -324,7 +334,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         assert(lycon->line.is_line_start);
     }
     lycon->prev_view = (View*)block;
-    printf("block view: %d, self %p, child %p\n", block->type, block, block->child);
+    dzlog_debug("block view: %d, end block>>\n", block->type);
 }
 
 void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt) {
