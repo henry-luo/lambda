@@ -1,4 +1,3 @@
-
 #include "render.h"
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
@@ -325,8 +324,15 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
     if (view->img) {
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-        rect.width = view->width;  rect.height = view->height; 
-        blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
+        rect.width = view->width;  rect.height = view->height;         
+        if (view->img->format == IMAGE_FORMAT_SVG) {
+            // render the SVG image
+            tvg_picture_set_size(view->img->pic, rect.width, rect.height);
+            tvg_paint_translate(view->img->pic, rect.x, rect.y);
+            tvg_canvas_push(rdcon->canvas, view->img->pic);
+        } else {
+            blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
+        }
     }
     else {
         printf("image view has no image surface\n");

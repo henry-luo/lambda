@@ -4,6 +4,7 @@
 #include "lib/stb_image.h"
 
 typedef struct ImageEntry {
+    // ImageFormat format;
     const char* path;  // todo: change to URL
     ImageSurface *image;
 } ImageEntry;
@@ -20,7 +21,7 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
 }
 
-void* loadImage(UiContext* uicon, const char *file_path) {
+ImageSurface* load_image(UiContext* uicon, const char *file_path) {
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity. 
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
@@ -35,16 +36,42 @@ void* loadImage(UiContext* uicon, const char *file_path) {
     else {
         printf("Image not found in cache: %s\n", file_path);
     }
-    int width, height, channels;
-    unsigned char *data = stbi_load(file_path, &width, &height, &channels, 4);
-    if (!data) {
-        printf("Failed to load image: %s\n", file_path);
-        return NULL;
-    }
-    ImageSurface *surface = image_surface_create_from(width, height, data);
-    if (!surface) { stbi_image_free(data);  return NULL; }
 
-    // copy the font name
+    ImageSurface *surface;
+    int slen = strlen(file_path);
+    if (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0) {
+        surface = (ImageSurface *)calloc(1, sizeof(ImageSurface));
+        surface->format = IMAGE_FORMAT_SVG;
+        surface->pic = tvg_picture_new();
+        Tvg_Result ret = tvg_picture_load(surface->pic, file_path);
+        if (ret != TVG_RESULT_SUCCESS) {
+            printf("Failed to load SVG image: %s\n", file_path);
+            tvg_paint_del(surface->pic);
+            free(surface);
+            return NULL;
+        }
+    }
+    else {
+        int width, height, channels;
+        unsigned char *data = stbi_load(file_path, &width, &height, &channels, 4);
+        if (!data) {
+            printf("Failed to load image: %s\n", file_path);
+            return NULL;
+        }
+        surface = image_surface_create_from(width, height, data);
+        if (!surface) { stbi_image_free(data);  return NULL; }
+        if (slen > 5 && strcmp(file_path + slen - 5, ".jpeg") == 0) {
+            surface->format = IMAGE_FORMAT_JPEG;
+        }
+        else if (slen > 4 && strcmp(file_path + slen - 4, ".jpg") == 0) {
+            surface->format = IMAGE_FORMAT_JPEG;
+        }        
+        else if (slen > 4 && strcmp(file_path + slen - 4, ".png") == 0) {
+            surface->format = IMAGE_FORMAT_PNG;
+        }
+    }
+
+    // copy the image path
     char* path = (char*)malloc(strlen(file_path) + 1);  strcpy(path, file_path);
     hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
     return surface;
@@ -153,6 +180,9 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
         if (img_surface->pixels) free(img_surface->pixels);
+        if (img_surface->format == IMAGE_FORMAT_SVG && img_surface->pic) {
+            tvg_paint_del(img_surface->pic);
+        }
         free(img_surface);
     }
 }

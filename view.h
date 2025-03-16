@@ -37,17 +37,22 @@ typedef struct Rect {
     int width, height;
 } Rect;
 
+typedef enum {
+    IMAGE_FORMAT_UNKNOWN = 0,
+    IMAGE_FORMAT_SVG,
+    IMAGE_FORMAT_PNG,
+    IMAGE_FORMAT_JPEG,
+} ImageFormat;
+
 typedef struct ImageSurface {
-    // SDL_SurfaceFlags flags;     /**< The flags of the surface, read-only */
-    // SDL_PixelFormat format;     /**< The format of the surface, read-only */
-    int width;                      /**< The width of the surface, read-only. */
-    int height;                      /**< The height of the surface, read-only. */
-    int pitch;                  /**< The distance in bytes between rows of pixels, read-only */
+    ImageFormat format;
+    int width;             // the width of the surface, read-only.
+    int height;            // the height of the surface, read-only.
+    int pitch;             // no. of bytes for rows of pixels, read-only
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit    
-    void *pixels;               /**< A pointer to the pixels of the surface, the pixels are writeable if non-NULL */
-    // int refcount;               /**< Application reference count, used when freeing surface */
-    // void *reserved;             /**< Reserved for internal use */
+    void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
+    Tvg_Paint* pic;        // ThorVG picture for SVG image
 } ImageSurface;
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
@@ -265,4 +270,4 @@ typedef struct {
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
 
-extern void* loadImage(UiContext* uicon, const char *file_path);
+extern ImageSurface* load_image(UiContext* uicon, const char *file_path);

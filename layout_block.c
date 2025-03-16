@@ -139,7 +139,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);
             printf("image src: %s\n", src->s);
-            image->img = loadImage(lycon->ui_context, src->s);
+            image->img = load_image(lycon->ui_context, src->s);
             strbuf_free(src);
         }
         if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
