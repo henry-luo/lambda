@@ -23,12 +23,12 @@
 #define LENGTH_AUTO                 (INT_MAX - 1)
 
 typedef union {
-    uint32_t c;  // 32-bit ARGB color format, 
+    uint32_t c;  // 32-bit ABGR color format, 
     struct {
-        uint8_t a;
-        uint8_t b;
-        uint8_t g;
         uint8_t r;
+        uint8_t g;
+        uint8_t b;
+        uint8_t a;
     };
 } Color;  
 

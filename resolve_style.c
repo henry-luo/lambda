@@ -172,7 +172,10 @@ Color color_name_to_rgb(PropValue color_name) {
         case LXB_CSS_VALUE_YELLOWGREEN: c = 0x9ACD32;  break;
         default: c = 0x000000;  break;
     }
-    return (Color){(c << 8) | 0xFF};
+    uint32_t r = (c >> 16) & 0xFF;
+    uint32_t g = (c >> 8) & 0xFF;
+    uint32_t b = c & 0xFF;
+    return (Color){ 0xFF000000 | (b << 16) | (g << 8) | r };
 }
 
 Color resolve_color_value(const lxb_css_value_color_t *color) {
@@ -189,13 +192,14 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
                 g = (rgba->g << 4) | rgba->g;
                 b = (rgba->b << 4) | rgba->b;
                 a = (rgba->a << 4) | rgba->a;
-                c.c = (r << 24) | (g << 16) | (b << 8) | a;  printf("c: %d\n", c.c);
+                c.c = (a << 24) | (b << 16) | (g << 8) | r;
                 return c;
             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8:
             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_6:
                 printf("color 6 hex: %d, %d, %d\n", rgba->r, rgba->g, rgba->b);
-                r = rgba->r;  g = rgba->g;  b = rgba->b;  a = rgba->a;
-                c.c = (r << 24) | (g << 16) | (b << 8) | a;  printf("c: %d\n", c.c);
+                // r = rgba->r;  g = rgba->g;  b = rgba->b;  a = rgba->a;
+                // c.c = (r << 24) | (g << 16) | (b << 8) | a;  printf("c: %d\n", c.c);
+                c.c = *((uint32_t*)rgba);
                 return c;
         }
         break;

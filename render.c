@@ -57,16 +57,16 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                 uint32_t v = 255 - intensity;
                 // can further optimize if background is a fixed color
                 if (rdcon->color.c == 0xFF) { // black text color
-                    p[0] = 0xFF;
+                    p[0] = p[0] * v / 255;
                     p[1] = p[1] * v / 255;  
                     p[2] = p[2] * v / 255;
-                    p[3] = p[3] * v / 255;                    
+                    p[3] = 0xFF;           
                 }
                 else { // non-black text color
-                    p[0] = 0xFF;  // alpha channel
-                    p[1] = (p[1] * v + rdcon->color.b * intensity) / 255;  
-                    p[2] = (p[2] * v + rdcon->color.g * intensity) / 255;
-                    p[3] = (p[3] * v + rdcon->color.r * intensity) / 255;
+                    p[0] = (p[0] * v + rdcon->color.r * intensity) / 255;
+                    p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;  
+                    p[2] = (p[2] * v + rdcon->color.b * intensity) / 255;
+                    p[3] = 0xFF;  // alpha channel
                 }
             }
         }
