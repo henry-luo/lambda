@@ -434,7 +434,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     if (!lycon->view) { printf("missing view"); return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
-    Color c;
+    Color c;  int length;
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: 
@@ -566,8 +566,69 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             break;
         }
         break;
+    case LXB_CSS_PROPERTY_BORDER_TOP:  case LXB_CSS_PROPERTY_BORDER_RIGHT:
+    case LXB_CSS_PROPERTY_BORDER_BOTTOM:  case LXB_CSS_PROPERTY_BORDER_LEFT:
+        const lxb_css_property_border_top_t *border_top = declr->u.border_top;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        c = resolve_color_value(&border_top->color);
+        if (declr->type == LXB_CSS_PROPERTY_BORDER_TOP) {
+            if (specificity > span->bound->border->top_color_specificity) {
+                span->bound->border->top_color = c;
+                span->bound->border->top_color_specificity = specificity;
+            }
+        }
+        else if (declr->type == LXB_CSS_PROPERTY_BORDER_BOTTOM) {
+            if (specificity > span->bound->border->bottom_color_specificity) {
+                span->bound->border->bottom_color = c;
+                span->bound->border->bottom_color_specificity = specificity;
+            }
+        }
+        else if (declr->type == LXB_CSS_PROPERTY_BORDER_LEFT) {
+            if (specificity > span->bound->border->left_color_specificity) {
+                span->bound->border->left_color = c;
+                span->bound->border->left_color_specificity = specificity;
+            }
+        }
+        else if (declr->type == LXB_CSS_PROPERTY_BORDER_RIGHT) {
+            if (specificity > span->bound->border->right_color_specificity) {
+                span->bound->border->right_color = c;
+                span->bound->border->right_color_specificity = specificity;
+            }
+        }
+        length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
+            (lxb_css_value_length_percentage_t*)&border_top->width);
+        if (declr->type == LXB_CSS_PROPERTY_BORDER_TOP) {
+            if (specificity > span->bound->border->width.top_specificity) {
+                span->bound->border->width.top = length;
+                span->bound->border->width.top_specificity = specificity;
+            }
+        }
+        else if (declr->type == LXB_CSS_PROPERTY_BORDER_BOTTOM) {
+            if (specificity > span->bound->border->width.bottom_specificity) {
+                span->bound->border->width.bottom = length;
+                span->bound->border->width.bottom_specificity = specificity;
+            }
+        }
+        else if (declr->type == LXB_CSS_PROPERTY_BORDER_LEFT) {
+            if (specificity > span->bound->border->width.left_specificity) {
+                span->bound->border->width.left = length;
+                span->bound->border->width.left_specificity = specificity;
+            }
+        }
+        else if (declr->type == LXB_CSS_PROPERTY_BORDER_RIGHT) {
+            if (specificity > span->bound->border->width.right_specificity) {
+                span->bound->border->width.right = length;
+                span->bound->border->width.right_specificity = specificity;
+            }
+        }
+        span->bound->border->style = border_top->style;    
+        break;
     case LXB_CSS_PROPERTY_BORDER:
-        printf("border property: %lu\n", declr->type);
         const lxb_css_property_border_t *border = declr->u.border;
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
@@ -592,7 +653,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border->right_color = c;
             span->bound->border->right_color_specificity = specificity;
         }
-        int length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
+        length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
             (lxb_css_value_length_percentage_t*)&border->width);
         if (specificity > span->bound->border->width.top_specificity) {
             span->bound->border->width.top = length;
