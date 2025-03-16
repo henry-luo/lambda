@@ -168,11 +168,7 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             int src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
             uint8_t* src_pixel = (uint8_t*)src->pixels + (src_y * src->pitch) + (src_x * 4);
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (j * 4);
-            // hardcoded for ABGR to RGBA conversion
-            dst_pixel[0] = src_pixel[0];  // dst alpha channel
-            dst_pixel[1] = src_pixel[1];  // dst blue channel
-            dst_pixel[2] = src_pixel[2];  // dst green channel
-            dst_pixel[3] = src_pixel[3];  // dst red channel
+            *((uint32_t*)dst_pixel) = *((uint32_t*)src_pixel);
         }
     }
 }
