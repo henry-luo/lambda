@@ -162,13 +162,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     
     dzlog_debug("setting up block props\n");
     if (block->font) {
-        dzlog_debug("setting up font props\n");
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
     if (block->bound) {
-        dzlog_debug("setting up bound props\n");
         if (lycon->block.given_width >= 0) { // got specified width 
-            dzlog_debug("got given width\n");
             block->width = lycon->block.given_width + block->bound->padding.left + block->bound->padding.right +
                 (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
             lycon->block.width = lycon->block.given_width;

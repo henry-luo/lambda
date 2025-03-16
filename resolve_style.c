@@ -239,8 +239,8 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value) {
-    float result = 0;  // need to use float here, as there might be int overflow
-    printf("length value type %d\n", value->type);
+    int result = 0;
+    dzlog_debug("length value type %d", value->type);
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
         result = value->u.length.num;
@@ -309,9 +309,14 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             result = value->u.percentage.num * lycon->block.width / 100;
         }
         break;
+    case LXB_CSS_VALUE_AUTO:
+        dzlog_info("length value: auto");
+        result = (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT || 
+            property == LXB_CSS_PROPERTY_MARGIN_RIGHT) ? LENGTH_AUTO : 0;
+        break;
     default:
-        printf("Unknown length type: %d\n", value->type);
-        result = -1;
+        dzlog_warn("unknown length type: %d", value->type);
+        result = 0;
     }
     return (int)result;
 }
@@ -320,94 +325,58 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_property_margin_t *margin, uint32_t specificity, Spacing* spacing) {
     int value_cnt = 0;  Spacing sp;
-    if (margin->top.u.length.unit) {
+    dzlog_debug("resolving margin property");
+    if (margin->top.type != LXB_CSS_VALUE__UNDEF) {
+        dzlog_debug("resolving margin top");
         sp.top = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->top);
         value_cnt++;
     }
-    if (margin->right.u.length.unit) {
+    if (margin->right.type != LXB_CSS_VALUE__UNDEF) {
+        dzlog_debug("resolving margin right");
         sp.right = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->right);
         value_cnt++;
     }
-    if (margin->bottom.u.length.unit) {
+    if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) {
+        dzlog_debug("resolving margin bottom");
         sp.bottom = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->bottom);
         value_cnt++;
     }
-    if (margin->left.u.length.unit) {
+    if (margin->left.type != LXB_CSS_VALUE__UNDEF) {
+        dzlog_debug("resolving margin left");
         sp.left = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->left);
         value_cnt++;
     }
+    dzlog_debug("margin value count: %d", value_cnt);
     switch (value_cnt) {
-    case 1:  // all sides
-        if (specificity > spacing->top_specificity) {
-            spacing->top = sp.top;
-            spacing->top_specificity = specificity;
-        }
-        if (specificity > spacing->bottom_specificity) {
-            spacing->bottom = sp.top;
-            spacing->bottom_specificity = specificity;
-        }  
-        if (specificity > spacing->right_specificity) {
-            spacing->right = sp.top;
-            spacing->right_specificity = specificity;
-        }
-        if (specificity > spacing->left_specificity) {
-            spacing->left = sp.top;
-            spacing->left_specificity = specificity;
-        }
+    case 1:
+        sp.right = sp.left = sp.bottom = sp.top;
         break;
-    case 2:  // top-bottom, left-right
-        if (specificity > spacing->top_specificity) {
-            spacing->top = sp.top;
-            spacing->top_specificity = specificity;
-        }
-        if (specificity > spacing->bottom_specificity) {
-            spacing->bottom = sp.top;
-            spacing->bottom_specificity = specificity;
-        }  
-        if (specificity > spacing->right_specificity) {
-            spacing->right = sp.right;
-            spacing->right_specificity = specificity;
-        }
-        if (specificity > spacing->left_specificity) {
-            spacing->left = sp.right;
-            spacing->left_specificity = specificity;
-        }
-        break;      
-    case 3:  // top, left-right, bottom
-        if (specificity > spacing->top_specificity) {
-            spacing->top = sp.top;
-            spacing->top_specificity = specificity;
-        }
-        if (specificity > spacing->bottom_specificity) {
-            spacing->bottom = sp.bottom;
-            spacing->bottom_specificity = specificity;
-        }  
-        if (specificity > spacing->right_specificity) {
-            spacing->right = sp.right;
-            spacing->right_specificity = specificity;
-        }
-        if (specificity > spacing->left_specificity) {
-            spacing->left = sp.right;
-            spacing->left_specificity = specificity;
-        }
+    case 2:
+        sp.bottom = sp.top;
+        sp.left = sp.right;
         break;
-    case 4:  // top, right, bottom, left
-        if (specificity > spacing->top_specificity) {
-            spacing->top = sp.top;
-            spacing->top_specificity = specificity;
-        }
-        if (specificity > spacing->bottom_specificity) {
-            spacing->bottom = sp.bottom;
-            spacing->bottom_specificity = specificity;
-        }  
-        if (specificity > spacing->right_specificity) {
-            spacing->right = sp.right;
-            spacing->right_specificity = specificity;
-        }
-        if (specificity > spacing->left_specificity) {
-            spacing->left = sp.left;
-            spacing->left_specificity = specificity;
-        }
+    case 3:
+        sp.left = sp.right;
+        break;
+    case 4:
+        break;  // no change
+    }
+    if (specificity > spacing->top_specificity) {
+        spacing->top = sp.top;
+        spacing->top_specificity = specificity;
+    }
+    if (specificity > spacing->bottom_specificity) {
+        spacing->bottom = sp.bottom;
+        spacing->bottom_specificity = specificity;
+    }  
+    if (specificity > spacing->right_specificity) {
+        // only margin-left and right support auto value
+        spacing->right = sp.right;   
+        spacing->right_specificity = specificity;
+    }
+    if (specificity > spacing->left_specificity) {
+        spacing->left = sp.left;
+        spacing->left_specificity = specificity;
     }
 }
 
@@ -461,7 +430,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     const lxb_css_entry_data_t *data = lxb_css_property_by_id(declr->type);
     if (!data) { return LXB_STATUS_ERROR_NOT_EXISTS; }
 
-    printf("style entry: %ld %s, sp: %d\n", declr->type, data->name, specificity);
+    printf("style entry: %ld %s, specy: %d\n", declr->type, data->name, specificity);
     if (!lycon->view) { printf("missing view"); return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
@@ -747,10 +716,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         printf("@@ custom property\n");
         const lxb_css_property__custom_t *custom = declr->u.custom;
-        printf("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
+        dzlog_warn("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
         break;
     default:
-        printf("unhandled property: %s\n", data->name);
+        dzlog_warn("unhandled property: %s\n", data->name);
     }
     return LXB_STATUS_OK;
 }

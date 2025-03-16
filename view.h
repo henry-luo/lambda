@@ -20,6 +20,8 @@
 #define LXB_CSS_VALUE_LOWER_ALPHA   (LXB_CSS_VALUE__LAST_ENTRY + 18)
 #define LXB_CSS_VALUE_UPPER_ALPHA   (LXB_CSS_VALUE__LAST_ENTRY + 19)
 
+#define LENGTH_AUTO                 (INT_MAX - 1)
+
 typedef union {
     uint32_t c;  // 32-bit ARGB color format, 
     struct {
