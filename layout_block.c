@@ -169,8 +169,17 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             block->width = lycon->block.given_width + block->bound->padding.left + block->bound->padding.right +
                 (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
             lycon->block.width = lycon->block.given_width;
+            if (block->bound->margin.left == LENGTH_AUTO && block->bound->margin.right == LENGTH_AUTO)  {
+                block->bound->margin.left = block->bound->margin.right = (pa_block.width - block->width) / 2;
+            }
+            else {
+                if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
+                if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
+            }
         } else {
             dzlog_debug("no given width: %d, %d, %d\n", pa_block.width, block->bound->margin.left, block->bound->margin.right);
+            if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
+            if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
             block->width = pa_block.width - (block->bound->margin.left + block->bound->margin.right);
             dzlog_debug("setting block.width\n");
             lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
