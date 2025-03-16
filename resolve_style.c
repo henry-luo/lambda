@@ -305,8 +305,8 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
             result = value->u.percentage.num * lycon->font.style.font_size / 100;
         } else {
-            // todo: fix this
-            result = value->u.percentage.num * lycon->block.width / 100;
+            // todo: handle % based on property
+            result = value->u.percentage.num * lycon->block.pa_block->width / 100;
         }
         break;
     case LXB_CSS_VALUE_AUTO:
@@ -362,11 +362,11 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         break;  // no change
     }
     if (specificity > spacing->top_specificity) {
-        spacing->top = sp.top;
+        spacing->top = sp.top == LENGTH_AUTO ? 0 : sp.top;
         spacing->top_specificity = specificity;
     }
     if (specificity > spacing->bottom_specificity) {
-        spacing->bottom = sp.bottom;
+        spacing->bottom = sp.bottom == LENGTH_AUTO ? 0 : sp.bottom;
         spacing->bottom_specificity = specificity;
     }  
     if (specificity > spacing->right_specificity) {

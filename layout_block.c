@@ -35,6 +35,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
     lycon->elmt = elmt;
+    lycon->block.pa_block = &pa_block;
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
 
@@ -181,7 +182,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
             if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
             block->width = pa_block.width - (block->bound->margin.left + block->bound->margin.right);
-            dzlog_debug("setting block.width\n");
             lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
         }
         dzlog_debug("setting up height\n");
@@ -219,9 +219,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         }
     }
     lycon->line.right = lycon->block.width;  
+    dzlog_debug("block width: %d, height: %d\n", block->width, block->height);
+    assert(lycon->block.width > 0 && lycon->block.height > 0);
 
+    // layout block content
     if (elmt_name != LXB_TAG_IMG) {
-        // layout block content
         dzlog_debug("layout block content\n");
         lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
         if (child) {
@@ -231,9 +233,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
                 child = lxb_dom_node_next(child);
             } while (child);
             // handle last line
-            // if (lycon->line.max_ascender) {
-            //     lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
-            // }
             if (!lycon->line.is_line_start) { line_break(lycon); }
             lycon->parent = block->parent;
         }
