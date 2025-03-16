@@ -479,6 +479,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // black color is 0x000000FF, not 0x00
         span->in_line->color = resolve_color_value(color);
         break;
+    case LXB_CSS_PROPERTY_BACKGROUND:
     case LXB_CSS_PROPERTY_BACKGROUND_COLOR:
         const lxb_css_property_background_color_t *background_color = declr->u.background_color;
         printf("background color property: %d\n", background_color->type);
@@ -717,6 +718,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         printf("@@ custom property\n");
         const lxb_css_property__custom_t *custom = declr->u.custom;
         dzlog_warn("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
+        // if (strncmp(custom->name.data, "background", custom->name.length) == 0) {
+        //     dzlog_warn("background property: %.*s\n", (int)custom->name.length, custom->name.data);
+        // }
         break;
     default:
         dzlog_warn("unhandled property: %s\n", data->name);
