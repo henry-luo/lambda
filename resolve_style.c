@@ -1,6 +1,5 @@
 #include "layout.h"
 #define SV_IMPLEMENTATION
-#include "./lib/sv.h"
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value);
