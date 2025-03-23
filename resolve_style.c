@@ -180,6 +180,8 @@ Color color_name_to_rgb(PropValue color_name) {
 Color resolve_color_value(const lxb_css_value_color_t *color) {
     uint32_t r, g, b, a;  Color c;
     switch (color->type) {
+    case LXB_CSS_COLOR_TRANSPARENT:
+        return (Color){0};
     case LXB_CSS_COLOR_HEX:
         const lxb_css_value_color_hex_t *hex = &color->u.hex;
         const lxb_css_value_color_hex_rgba_t *rgba = &hex->rgba;

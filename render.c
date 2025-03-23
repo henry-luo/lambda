@@ -250,7 +250,8 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     Rect rect;  
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.width = view->width;  rect.height = view->height;
-    if (view->bound->background) {
+    // fill background, if bg-color is non-transparent
+    if (view->bound->background && (view->bound->background->color.a)) {
         fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
     }
     if (view->bound->border) {
