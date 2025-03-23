@@ -217,7 +217,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         lxb_dom_text_t node;  ViewText text;
         text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
         text.start_index = 0;  text.length = num->length;
-        node.char_data.data.data = (lxb_char_t *)num->s;  node.char_data.data.length = text.length;
+        node.char_data.data.data = (lxb_char_t *)num->str;  node.char_data.data.length = text.length;
         text.node = (lxb_dom_node_t *)&node;
         int font_size = rdcon->font.face->size->metrics.y_ppem >> 6;
         text.x = list_item->x - 20 * ratio;

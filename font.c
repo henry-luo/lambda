@@ -30,14 +30,14 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     strbuf_append_str(name_and_size, ":");  
     strbuf_append_int(name_and_size, font_size);
     FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, 
-        &(FontfaceEntry){.name = name_and_size->s});
+        &(FontfaceEntry){.name = name_and_size->str});
     if (entry) {
-        printf("Fontface loaded from cache: %s\n", name_and_size->s);
+        printf("Fontface loaded from cache: %s\n", name_and_size->str);
         strbuf_free(name_and_size);
         return entry->face;
     }
     else {
-        printf("Fontface not found in cache: %s\n", name_and_size->s);
+        printf("Fontface not found in cache: %s\n", name_and_size->str);
     }
 
     // todo: cache the fonts loaded
@@ -73,7 +73,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
                 // put the font face into the hashmap
                 if (uicon->fontface_map) {
                     // copy the font name
-                    char* name = (char*)malloc(name_and_size->length + 1);  strcpy(name, name_and_size->s);
+                    char* name = (char*)malloc(name_and_size->length + 1);  strcpy(name, name_and_size->str);
                     hashmap_set(uicon->fontface_map, &(FontfaceEntry){.name=name, .face=face});   
                 }
             }            
@@ -98,9 +98,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     else if (font_style->font_style == LXB_CSS_VALUE_ITALIC) { 
         strbuf_append_str(name, ":italic");
     }
-    FT_Face face = load_font_face(uicon, name->s, font_style->font_size);
+    FT_Face face = load_font_face(uicon, name->str, font_style->font_size);
     printf("Loading font: %s, ascd: %ld, desc: %ld\n", 
-        name->s, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6);
+        name->str, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6);
     strbuf_free(name);
     return face;
 }
