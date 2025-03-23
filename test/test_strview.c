@@ -9,16 +9,16 @@ Test(strview_suite, basic) {
     const char* str = "Hello, World!";
     StrView s = strview_from_str(str);
     
-    cr_expect(eq(u64, s.len, strlen(str)));
+    cr_expect(eq(u64, s.length, strlen(str)));
     cr_expect(eq(i8, strview_get(&s, 0), 'H'));
-    cr_expect(eq(i8, strview_get(&s, s.len), '\0'));
+    cr_expect(eq(i8, strview_get(&s, s.length), '\0'));
 }
 
 Test(strview_suite, sub) {
     StrView s = strview_from_str("Hello, World!");
     StrView sub = strview_sub(&s, 7, 12);
     
-    cr_expect(eq(u64, sub.len, 5));
+    cr_expect(eq(u64, sub.length, 5));
     cr_expect(strview_equals(&sub, &strview_from_str("World")));
 }
 
@@ -44,7 +44,7 @@ Test(strview_suite, trim) {
     strview_trim(&s);
     
     cr_expect(strview_equals(&s, &strview_from_str("Hello, World!")));
-    cr_expect(eq(u64, s.len, 13));
+    cr_expect(eq(u64, s.length, 13));
 }
 
 Test(strview_suite, to_cstr) {

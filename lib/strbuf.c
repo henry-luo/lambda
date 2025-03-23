@@ -6,12 +6,12 @@ StrBuf* strbuf_new_cap(size_t size) {
     StrBuf *sb = (StrBuf*)malloc(sizeof(StrBuf));
     if (!sb) return NULL;
     
-    sb->s = (char*)malloc(size);
-    if (!sb->s) {
+    sb->str = (char*)malloc(size);
+    if (!sb->str) {
         free(sb);
         return NULL;
     }
-    sb->s[0] = '\0';
+    sb->str[0] = '\0';
     sb->length = 0;
     sb->capacity = size;
     return sb;
@@ -23,27 +23,27 @@ StrBuf* strbuf_new() {
 
 StrBuf* strbuf_create(const char *str) {
     size_t str_len = strlen(str);
-    StrBuf *sbuf = strbuf_new(str_len + 1);
+    StrBuf *sbuf = strbuf_new_cap(str_len + 1);
     if (!sbuf) return NULL;
-    memcpy(sbuf->s, str, str_len);
-    sbuf->s[sbuf->length = str_len] = '\0';
+    memcpy(sbuf->str, str, str_len);
+    sbuf->str[sbuf->length = str_len] = '\0';
     return sbuf;
 }
 
 void strbuf_free(StrBuf *sb) {
-    if (sb->s) free(sb->s);
+    if (sb->str) free(sb->str);
     free(sb);
 }
 
 void strbuf_reset(StrBuf *sb) {
-    if (sb->s) {
-        sb->s[0] = '\0';
+    if (sb->str) {
+        sb->str[0] = '\0';
         sb->length = 0;
     }
 }
 
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
-    if (!sb->s) return false;
+    if (!sb->str) return false;
     if (min_capacity <= sb->capacity) return true;
     
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
@@ -51,9 +51,9 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
         new_capacity *= 2;
     }
 
-    char *new_s = (char*)realloc(sb->s, new_capacity);
+    char *new_s = (char*)realloc(sb->str, new_capacity);
     if (!new_s) return false;
-    sb->s = new_s;
+    sb->str = new_s;
     sb->capacity = new_capacity;
     return true;
 }
@@ -62,7 +62,7 @@ void strbuf_append_str(StrBuf *sb, const char *str) {
     if (!str) return;
     size_t str_len = strlen(str);
     if (!strbuf_ensure_cap(sb, sb->length + str_len + 1)) return;
-    memcpy(sb->s + sb->length, str, str_len + 1);
+    memcpy(sb->str + sb->length, str, str_len + 1);
     sb->length += str_len;
 }
 
@@ -71,24 +71,24 @@ void strbuf_append_str(StrBuf *sb, const char *str) {
 void strbuf_append_str_n(StrBuf *sb, const char *str, size_t len) {
     if (!str) return;
     if (!strbuf_ensure_cap(sb, sb->length + len + 1)) return;
-    memcpy(sb->s + sb->length, str, len);
+    memcpy(sb->str + sb->length, str, len);
     sb->length += len;
-    sb->s[sb->length] = '\0';
+    sb->str[sb->length] = '\0';
 }
 
 void strbuf_append_char(StrBuf *sb, char c) {
     if (!strbuf_ensure_cap(sb, sb->length + 2)) return;
-    sb->s[sb->length] = c;
-    sb->s[sb->length + 1] = '\0';
+    sb->str[sb->length] = c;
+    sb->str[sb->length + 1] = '\0';
     sb->length++;
 }
 
 // append char `c` `n` times
 void strbuf_append_char_n(StrBuf *buf, char c, size_t n) {
     if (!strbuf_ensure_cap(buf, buf->length + n + 1)) return;
-    memset(buf->s + buf->length, c, n);
+    memset(buf->str + buf->length, c, n);
     buf->length += n;
-    buf->s[buf->length] = '\0';
+    buf->str[buf->length] = '\0';
 }
 
 void strbuf_append_all(StrBuf *sb, int num_args, ...) {
@@ -125,7 +125,7 @@ void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
     if (size < 0) return;    
     if (!strbuf_ensure_cap(sb, sb->length + size + 1)) return;
     
-    size = vsnprintf(sb->s + sb->length, sb->capacity - sb->length, format, args);
+    size = vsnprintf(sb->str + sb->length, sb->capacity - sb->length, format, args);
     if (size < 0) return;
     sb->length += size;
 }
@@ -135,24 +135,24 @@ void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
 // memory usage.  Returns true on success, false on failure.
 bool strbuf_resize(StrBuf *sbuf, size_t new_len) {
     size_t capacity = ROUNDUP2POW(new_len + 1);
-    char *new_buff = realloc(sbuf->s, capacity * sizeof(char));
+    char *new_buff = realloc(sbuf->str, capacity * sizeof(char));
     if (!new_buff) return false;
 
-    sbuf->s = new_buff;
+    sbuf->str = new_buff;
     sbuf->capacity = capacity;
     if (sbuf->length > new_len) {
         // Buffer was shrunk - re-add null byte
         sbuf->length = new_len;
-        sbuf->s[sbuf->length] = '\0';
+        sbuf->str[sbuf->length] = '\0';
     }
     return true;
 }
 
 void strbuf_trim_to_length(StrBuf *sb) {
-    if (!sb->s) return;
-    char *new_s = (char*)realloc(sb->s, sb->length + 1);
+    if (!sb->str) return;
+    char *new_s = (char*)realloc(sb->str, sb->length + 1);
     if (new_s) {
-        sb->s = new_s;
+        sb->str = new_s;
         sb->capacity = sb->length + 1;
     }
 }
@@ -161,7 +161,7 @@ void strbuf_copy(StrBuf *dst, const StrBuf *src) {
     if (!dst || !src) return;
     strbuf_reset(dst);
     if (!strbuf_ensure_cap(dst, src->length + 1)) return;
-    memcpy(dst->s, src->s, src->length + 1);
+    memcpy(dst->str, src->str, src->length + 1);
     dst->length = src->length;
 }
 
@@ -232,7 +232,7 @@ void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
     size_t pos = num_digits - 1;
 
     strbuf_ensure_cap(buf, buf->length + num_digits);
-    char *dst = buf->s + buf->length; // Updated to use buf->s instead of buf->b
+    char *dst = buf->str + buf->length; // Updated to use buf->s instead of buf->b
 
     while(value >= 100) {
         size_t v = value % 100;
@@ -250,7 +250,7 @@ void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
         dst[pos - 1] = digits[value * 2];
     }
     buf->length += num_digits;
-    buf->s[buf->length] = '\0'; // Updated to use buf->s instead of buf->b
+    buf->str[buf->length] = '\0'; // Updated to use buf->str instead of buf->b
 }
 
 void strbuf_append_int(StrBuf *buf, int value) {
@@ -273,9 +273,9 @@ bool strbuf_append_file(StrBuf *sb, FILE *file) {
     if (size < 0) return false;
     if (!strbuf_ensure_cap(sb, sb->length + size + 1)) return false;
     
-    size_t read = fread(sb->s + sb->length, 1, size, file);
+    size_t read = fread(sb->str + sb->length, 1, size, file);
     sb->length += read;
-    sb->s[sb->length] = '\0';
+    sb->str[sb->length] = '\0';
     return (read >= 0);
 }
 
@@ -283,8 +283,8 @@ bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n) {
     if (!file) return false;
     if (!strbuf_ensure_cap(sb, sb->length + n + 1)) return false;
     
-    size_t read = fread(sb->s + sb->length, 1, n, file);
+    size_t read = fread(sb->str + sb->length, 1, n, file);
     sb->length += read;
-    sb->s[sb->length] = '\0';
+    sb->str[sb->length] = '\0';
     return (read >= 0);
 }

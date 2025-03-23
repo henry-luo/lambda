@@ -11,7 +11,7 @@ static void cleanup() {
 TestSuite(FlexboxEnhanced);
 
 FlexNode* parse_html_css(const char* html, const char* css) {
-    StrBuf* html_buf = strbuf_new(1024);
+    StrBuf* html_buf = strbuf_new_cap(1024);
     strbuf_append_str(html_buf, "<html><head><style>");
     strbuf_append_str(html_buf, css);
     strbuf_append_str(html_buf, "</style></head><body>");

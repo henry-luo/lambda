@@ -17,7 +17,7 @@ StrBuf* readTextFile(const char *filename) {
     long fileSize = ftell(file);
     rewind(file); // reset file pointer to the beginning
 
-    StrBuf* buf = strbuf_new(fileSize + 1);
+    StrBuf* buf = strbuf_new_cap(fileSize + 1);
     if (buf == NULL) {
         perror("Memory allocation failed");
         fclose(file);
@@ -218,7 +218,7 @@ int main(void) {
     free(string);
 
     // transpile the AST 
-    tp.code_buf = strbuf_new(1024);
+    tp.code_buf = strbuf_new_cap(1024);
     TSNode root_node = ts_tree_root_node(tree);
     assert(strcmp(ts_node_type(root_node), "document") == 0);
     TSNode main_node = ts_node_named_child(root_node, 0);

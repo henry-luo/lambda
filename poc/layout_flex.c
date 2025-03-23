@@ -75,7 +75,7 @@ lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx)
 static const char* getCSSProperty(lxb_dom_element_t* element, const char* property) {
     lxb_css_rule_declaration_t *style = lxb_dom_element_style_by_name(element, (lxb_char_t*)property, strlen(property));
     if (style) {
-        StrBuf* buf = strbuf_new(32);
+        StrBuf* buf = strbuf_new_cap(32);
         
         const lxb_css_entry_data_t *data = lxb_css_property_by_id(style->type);
         lxb_status_t status = data->serialize(style->u.user, style_print_callback, buf);

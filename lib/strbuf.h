@@ -6,10 +6,10 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include "strview.h"
 
 typedef struct {
-    char *s;
-    size_t length;  // length of the string in the buffer, excluding the null terminator
+    StrView; // extends StrView
     size_t capacity;
 } StrBuf;
 

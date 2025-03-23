@@ -5,13 +5,13 @@
 #include <stdbool.h>
 
 typedef struct {
-    char* data;      // Pointer to null-terminated string data
-    size_t len;      // Length excluding null terminator
+    char* str;      // Pointer to null-terminated string data
+    size_t length;      // Length excluding null terminator
 } StrView;
 
 // String View functions
-#define strview_new(str, len) ((StrView){.data = (char*)str, .len = len})
-#define strview_from_str(str) ((StrView){.data = (char*)str, .len = strlen(str)})
+#define strview_new(string, len) ((StrView){.str = (char*)string, .length = len})
+#define strview_from_str(string) ((StrView){.str = (char*)string, .length = strlen(string)})
 char strview_get(const StrView* s, size_t index);        // Get character at index
 StrView strview_sub(const StrView* s, size_t start, size_t end); // Substring
 bool strview_equals(const StrView* a, const StrView* b); // String comparison
