@@ -3,6 +3,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "lib/stb_image.h"
 
+lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+char* url_to_local_path(lxb_url_t *url);
+
 typedef struct ImageEntry {
     // ImageFormat format;
     const char* path;  // todo: change to URL
@@ -21,7 +24,19 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(image->path, strlen(image->path), seed0, seed1);
 }
 
-ImageSurface* load_image(UiContext* uicon, const char *file_path) {
+ImageSurface* load_image(UiContext* uicon, const char *img_url) {
+    lxb_url_t* abs_url = parse_url(uicon->document->url, img_url);
+    if (!abs_url) {
+        printf("Failed to parse URL: %s\n", img_url);
+        return NULL;
+    }
+    char* file_path = url_to_local_path(abs_url);
+    if (!file_path) {
+        printf("Failed to parse URL: %s\n", img_url);
+        return NULL;
+    }
+    printf("Loading image: %s\n", file_path);
+
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity. 
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.

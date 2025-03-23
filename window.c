@@ -21,9 +21,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 bool do_redraw = false;
 UiContext ui_context;
 
-Document* show_html_doc(lxb_url_t *base, char* doc_url) {
-    printf("Showing HTML document %s\n", doc_url);
-    // parse the url
+lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url) {
     lxb_url_parser_t parser;
     if (lxb_url_parser_init(&parser, NULL) != LXB_STATUS_OK) {
         printf("Failed to init URL parser.\n");
@@ -35,10 +33,21 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
         printf("Failed to parse URL: %s\n", doc_url);
         return NULL;
     }
+    return url;
+}
+
+Document* show_html_doc(lxb_url_t *base, char* doc_url) {
+    printf("Showing HTML document %s\n", doc_url);
+    lxb_url_t* url = parse_url(base, doc_url);
+    if (!url) {
+        printf("Failed to parse URL: %s\n", doc_url);
+        return NULL;
+    }
     
     // parse the html document
     Document* doc = calloc(1, sizeof(Document));
     doc->url = url;
+    ui_context.document = doc;
     parse_html_doc(doc);
     
     // layout html doc 
@@ -267,7 +276,7 @@ int main() {
 
     lxb_url_t* cwd = get_current_dir();
     if (cwd) {
-        ui_context.document = show_html_doc(cwd, "test/sample.html");
+        show_html_doc(cwd, "test/sample.html");
         lxb_url_destroy(cwd);
     }
 
