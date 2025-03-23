@@ -123,12 +123,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         }
         if (image->img) {
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
-                int w = image->img->width, h = image->img->height;
-                if (image->img->format == IMAGE_FORMAT_SVG) {
-                    float svg_w, svg_h;
-                    tvg_picture_get_size(image->img->pic, &svg_w, &svg_h);
-                    w = svg_w;  h = svg_h;
-                }                
+                int w = image->img->width, h = image->img->height;               
                 printf("image dims: intrinsic - %d x %d, spec - %d x %d\n", w, h, lycon->block.given_width, lycon->block.given_height);
                 if (lycon->block.given_width >= 0) { // scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
@@ -148,6 +143,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
                 }
             }
             // else both width and height specified
+
+            if (image->img->format == IMAGE_FORMAT_SVG) {
+                image->img->max_render_width = max(lycon->block.given_width, image->img->max_render_width);
+            }
             printf("image dimensions: %d x %d\n", lycon->block.given_width, lycon->block.given_height);         
         }
     }

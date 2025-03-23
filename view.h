@@ -46,13 +46,14 @@ typedef enum {
 
 typedef struct ImageSurface {
     ImageFormat format;
-    int width;             // the width of the surface, read-only.
-    int height;            // the height of the surface, read-only.
-    int pitch;             // no. of bytes for rows of pixels, read-only
+    int width;             // the intrinsic width of the surface/image
+    int height;            // the intrinsic height of the surface/image
+    int pitch;             // no. of bytes for rows of pixels
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit    
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
     Tvg_Paint* pic;        // ThorVG picture for SVG image
+    int max_render_width;  // maximum width for rendering the image
 } ImageSurface;
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);

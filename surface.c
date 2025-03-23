@@ -50,6 +50,10 @@ ImageSurface* load_image(UiContext* uicon, const char *file_path) {
             free(surface);
             return NULL;
         }
+        float svg_w, svg_h;
+        tvg_picture_get_size(surface->pic, &svg_w, &svg_h);
+        surface->width = svg_w;  
+        surface->height = svg_h;
     }
     else {
         int width, height, channels;
@@ -176,9 +180,9 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
         if (img_surface->pixels) free(img_surface->pixels);
-        // if (img_surface->format == IMAGE_FORMAT_SVG && img_surface->pic) {
-        //     tvg_paint_del(img_surface->pic);
-        // }
-        // free(img_surface);
+        if (img_surface->pic) {
+            tvg_paint_del(img_surface->pic);
+        }
+        free(img_surface);
     }
 }

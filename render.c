@@ -317,38 +317,39 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
 }
 
-void renderSvg(ImageSurface* surface, uint32_t width, uint32_t height) {
+void renderSvg(ImageSurface* surface) {
     if (!surface->pic) {
         printf("no picture to render\n");
         return;
     }
     // Step 1: Create an offscreen canvas to render the original Picture
-    Tvg_Canvas* offscreenCanvas = tvg_swcanvas_create();
-    if (!offscreenCanvas) return;
+    Tvg_Canvas* canvas = tvg_swcanvas_create();
+    if (!canvas) return;
 
-    // Allocate a buffer for rendering (ARGB8888 format)
+    uint32_t width = surface->max_render_width;  
+    uint32_t height = surface->max_render_width * surface->height / surface->width;
     surface->pixels = (uint32_t*)malloc(width * height * sizeof(uint32_t));
     if (!surface->pixels) {
-        tvg_canvas_destroy(offscreenCanvas);
+        tvg_canvas_destroy(canvas);
         return;
     }
 
     // Set the canvas target to the buffer
-    if (tvg_swcanvas_set_target(offscreenCanvas, surface->pixels, width, width, height, 
+    if (tvg_swcanvas_set_target(canvas, surface->pixels, width, width, height, 
         TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
         printf("Failed to set canvas target\n");
         free(surface->pixels);  surface->pixels = NULL;
-        tvg_canvas_destroy(offscreenCanvas);
+        tvg_canvas_destroy(canvas);
         return;
     }
 
     tvg_picture_set_size(surface->pic, width, height);
-    tvg_canvas_push(offscreenCanvas, surface->pic);
-    tvg_canvas_draw(offscreenCanvas, true);
-    tvg_canvas_update(offscreenCanvas);
+    tvg_canvas_push(canvas, surface->pic);
+    tvg_canvas_draw(canvas, true);
+    tvg_canvas_update(canvas);
 
     // Step 4: Clean up canvas
-    tvg_canvas_destroy(offscreenCanvas); // this also frees pic
+    tvg_canvas_destroy(canvas); // this also frees pic
     surface->pic = NULL;
     surface->width = width;  surface->height = height;  surface->pitch = width * sizeof(uint32_t);
 }
@@ -380,7 +381,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
             // render the SVG image
             if (!view->img->pixels) {
                 printf("@@@ render svg to surface\n");
-                renderSvg(view->img, view->width, view->height);
+                renderSvg(view->img);
             }
             Tvg_Paint* pic = load_picture(view->img);
             if (pic) {
