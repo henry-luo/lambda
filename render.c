@@ -384,6 +384,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
             }
             Tvg_Paint* pic = load_picture(view->img);
             if (pic) {
+                tvg_picture_set_size(pic, rect.width, rect.height);
                 tvg_paint_translate(pic, rect.x, rect.y);
                 tvg_canvas_push(rdcon->canvas, pic);
             } else {
