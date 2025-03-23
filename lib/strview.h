@@ -11,6 +11,7 @@ typedef struct {
 
 // String View functions
 #define strview_new(str, len) ((StrView){.data = (char*)str, .len = len})
+#define strview_from_str(str) ((StrView){.data = (char*)str, .len = strlen(str)})
 char strview_get(const StrView* s, size_t index);        // Get character at index
 StrView strview_sub(const StrView* s, size_t start, size_t end); // Substring
 bool strview_equals(const StrView* a, const StrView* b); // String comparison

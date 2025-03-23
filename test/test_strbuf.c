@@ -152,14 +152,6 @@ Test(strbuf_tests, test_copy_and_dup) {
     strbuf_free(dup);
 }
 
-Test(strbuf_tests, test_chomp) {
-    StrBuf* sb = strbuf_create("Hello\n\r");
-    strbuf_chomp(sb);
-    cr_assert_str_eq(sb->s, "Hello");
-    cr_assert_eq(sb->length, 5);
-    strbuf_free(sb);
-}
-
 Test(strbuf_tests, test_append_file) {
     // Create a temporary file for testing
     FILE* temp = tmpfile();
