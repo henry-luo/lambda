@@ -3,9 +3,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "lib/stb_image.h"
 
-lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-char* url_to_local_path(lxb_url_t *url);
-
 typedef struct ImageEntry {
     // ImageFormat format;
     const char* path;  // todo: change to URL
@@ -90,9 +87,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
     }
 
-    // copy the image path
-    char* path = (char*)malloc(strlen(file_path) + 1);  strcpy(path, file_path);
-    hashmap_set(uicon->image_cache, &(ImageEntry){.path = path, .image = surface});     
+    hashmap_set(uicon->image_cache, &(ImageEntry){.path = file_path, .image = surface});     
     return surface;
 }
 

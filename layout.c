@@ -229,16 +229,24 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
                     lxb_dom_attr_t* href = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_HREF);
                     
                     if (href) {
-                        StrBuf* path = strbuf_create("../test/");  // hard-coded path
-                        strbuf_append_str(path, (const char*)href->value->data);
-                        printf("link path: %s\n", path->str);
-                        int len = path->length;
-                        if (!(len > 4 && path->str[len-4]=='.' && path->str[len-3]=='c' && 
-                            path->str[len-2]=='s' && path->str[len-1]=='s')) {
+                        lxb_url_t* abs_url = parse_url(lycon->ui_context->document->url, (const char*)href->value->data);
+                        if (!abs_url) {
+                            printf("Failed to parse URL\n");
+                            goto NEXT;
+                        }
+                        char* file_path = url_to_local_path(abs_url);
+                        if (!file_path) {
+                            printf("Failed to parse URL\n");
+                            goto NEXT;
+                        }
+                        printf("Loading stylesheet: %s\n", file_path);
+
+                        int len = strlen(file_path);
+                        if (!(len > 4 && strcmp(file_path + len - 4, ".css") == 0)) {
                             printf("not stylesheet\n");  goto NEXT;
                         }
 
-                        char* sty_source = readTextFile(path->str); // Use the constructed path
+                        char* sty_source = readTextFile(file_path); // Use the constructed path
                         if (!sty_source) {
                             fprintf(stderr, "Failed to read CSS file\n");
                         }
@@ -246,7 +254,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
                             load_style(lycon, (unsigned char*)sty_source);
                             free(sty_source);
                         }
-                        strbuf_free(path);
+                        free(file_path);
                     }
                 }
             }

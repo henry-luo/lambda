@@ -31,3 +31,6 @@ typedef struct {
 } Document;
 
 typedef unsigned short PropValue;
+
+lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+char* url_to_local_path(lxb_url_t *url);
