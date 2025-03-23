@@ -9,7 +9,7 @@
 
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, View* root_view);
-void parse_html_doc(Document* doc, const char* doc_path);
+void parse_html_doc(Document* doc);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 
@@ -21,10 +21,25 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 bool do_redraw = false;
 UiContext ui_context;
 
-Document* show_html_doc(char* doc_filename) {
+Document* show_html_doc(lxb_url_t *base, char* doc_url) {
+    printf("Showing HTML document %s\n", doc_url);
+    // parse the url
+    lxb_url_parser_t parser;
+    if (lxb_url_parser_init(&parser, NULL) != LXB_STATUS_OK) {
+        printf("Failed to init URL parser.\n");
+        return NULL;
+    }
+    lxb_url_t *url = lxb_url_parse(&parser, base, (const lxb_char_t *)doc_url, strlen(doc_url));
+    lxb_url_parser_destroy(&parser, false);
+    if (url == NULL) {
+        printf("Failed to parse URL: %s\n", doc_url);
+        return NULL;
+    }
+    
+    // parse the html document
     Document* doc = calloc(1, sizeof(Document));
-    doc->url = strdup(doc_filename);
-    parse_html_doc(doc, doc_filename);
+    doc->url = url;
+    parse_html_doc(doc);
     
     // layout html doc 
     if (doc->dom_tree) {
@@ -181,6 +196,40 @@ void render(GLFWwindow* window) {
     glFinish(); // important, this waits until rendering result is actually visible, thus making resizing less ugly
 }
 
+#ifdef _WIN32
+    #include <direct.h>
+    #define GETCWD _getcwd
+#else
+    #include <unistd.h>
+    #define GETCWD getcwd
+#endif
+
+lxb_url_t* get_current_dir() {
+    char cwd[PATH_MAX + 8];  // "file://" + max_path + '/'
+    strcat(cwd, "file://");
+    if (!GETCWD(cwd + 7, sizeof(cwd) - 7)) {
+        perror("getcwd() error");  return NULL;
+    }
+    strcat(cwd, "/");
+    printf("Current working directory: %s\n", cwd);
+
+    lxb_url_parser_t parser;
+    lxb_status_t status = lxb_url_parser_init(&parser, NULL);
+    if (status != LXB_STATUS_OK) {
+        printf("Failed to init URL parser.\n");
+        return NULL;
+    }
+
+    lxb_url_t* url = lxb_url_parse(&parser, NULL, (const lxb_char_t *)cwd, strlen(cwd));
+    if (url == NULL) {
+        printf("Failed to parse URL.\n");
+        return NULL;
+    }
+
+    lxb_url_parser_destroy(&parser, false);    
+    return url; 
+}
+
 int main() {
     int rc;
     rc = dzlog_init("log.conf", "default");    
@@ -216,7 +265,11 @@ int main() {
     double deltaTime = 0.0;
     int frames = 0;
 
-    ui_context.document = show_html_doc("test/sample.html"); // 
+    lxb_url_t* cwd = get_current_dir();
+    if (cwd) {
+        ui_context.document = show_html_doc(cwd, "test/sample.html");
+        lxb_url_destroy(cwd);
+    }
 
     // main loop
     while (!glfwWindowShouldClose(window)) {

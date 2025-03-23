@@ -9,6 +9,7 @@
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
+#include <lexbor/url/url.h>
 #include "./lib/strview.h"
 #include "./lib/strbuf.h"
 #include "./lib/hashmap.h"
@@ -17,6 +18,7 @@
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
+#define PATH_MAX 4096
 
 typedef struct ViewTree ViewTree;
 typedef struct StateTree StateTree;
@@ -25,7 +27,7 @@ typedef struct {
     lxb_html_document_t* dom_tree;  // current HTML document DOM tree
     ViewTree* view_tree;
     StateTree* state_tree;
-    char* url;  // document URL
+    lxb_url_t* url;  // document URL
 } Document;
 
 typedef unsigned short PropValue;

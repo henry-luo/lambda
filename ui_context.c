@@ -74,6 +74,9 @@ void free_document(Document* doc) {
         view_pool_destroy(doc->view_tree);
         free(doc->view_tree);
     }
+    if (doc->url) {
+        lxb_url_destroy(doc->url);
+    }
     free(doc);
 }
 

@@ -1,6 +1,6 @@
 #include "view.h"
 
-Document* show_html_doc(char* doc_filename);
+Document* show_html_doc(lxb_url_t *base, char* doc_filename);
 void free_document(Document* doc);
 void to_repaint();
 
@@ -283,11 +283,10 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         }
         if (evcon.new_uri) {
             printf("Opening URI: %s\n", evcon.new_uri);
-            if (evcon.ui_context->document) {
-                free_document(evcon.ui_context->document);
-            }
-            // open the URI
-            evcon.ui_context->document = show_html_doc(evcon.new_uri);
+            Document* old_doc = evcon.ui_context->document;
+            // load the new document
+            evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_uri);
+            free_document(old_doc);
             to_repaint();
         }
         break;
