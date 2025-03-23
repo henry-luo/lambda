@@ -66,17 +66,21 @@ int ui_context_init(UiContext* uicon) {
     return EXIT_SUCCESS; 
 }
 
+void free_document(Document* doc) {
+    if (doc->dom_tree) {
+        lxb_html_document_destroy(doc->dom_tree);
+    }
+    if (doc->view_tree) {
+        view_pool_destroy(doc->view_tree);
+        free(doc->view_tree);
+    }
+    free(doc);
+}
+
 void ui_context_cleanup(UiContext* uicon) {
     printf("Cleaning up UI context\n");
     if (uicon->document) {
-        if (uicon->document->dom_tree) {
-            lxb_html_document_destroy(uicon->document->dom_tree);
-        }
-        if (uicon->document->view_tree) {
-            view_pool_destroy(uicon->document->view_tree);
-            free(uicon->document->view_tree);
-        }
-        free(uicon->document);
+        free_document(uicon->document);
     }
     printf("Cleaning up fonts\n");
     fontface_cleanup(uicon);  // free font cache
