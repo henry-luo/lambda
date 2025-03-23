@@ -79,6 +79,33 @@ void strview_trim(StrView* s) {
     s->length = end - start;
 }
 
+// convert substring to integer
+int strview_to_int(StrView* s) {
+    const char* str = s->str;
+    int len = s->length;
+    int result = 0, sign = 1;
+    if (len <= 0 || str[0] == '\0') {
+        return 0;
+    }
+    // handle sign
+    if (*str == '-') {
+        sign = -1;  str++;
+    } else if (*str == '+') {
+        str++;
+    }
+    // process digits
+    const char* end = str + len;
+    while (str < end) {
+        if (*str >= '0' && *str <= '9') {
+            result = result * 10 + (*str - '0');
+        } else {
+            break;
+        }
+        str++;
+    }
+    return sign * result;
+}
+
 char* strview_to_cstr(const StrView* s) {
     if (!s || !s->length) {
         char* empty = malloc(1);

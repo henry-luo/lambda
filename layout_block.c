@@ -1,30 +1,5 @@
 #include "layout.h"
 
-// convert substring to integer
-int strToInt(const char* str, int len) {
-    int result = 0, sign = 1;
-    if (len <= 0 || str[0] == '\0') {
-        return 0;
-    }
-    // handle sign
-    if (*str == '-') {
-        sign = -1;  str++;
-    } else if (*str == '+') {
-        str++;
-    }
-    // process digits
-    const char* end = str + len;
-    while (str < end) {
-        if (*str >= '0' && *str <= '9') {
-            result = result * 10 + (*str - '0');
-        } else {
-            break;
-        }
-        str++;
-    }
-    return sign * result;
-}
-
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
     dzlog_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
@@ -98,13 +73,13 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     case LXB_TAG_IMG:  // get html width and height (before the css styles)
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
         if (value) {
-            int width = strToInt((const char*)value, value_len);
+            int width = strview_to_int(&strview_init(value, value_len));
             if (width >= 0) lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
             // else width attr ignored
         }
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"height", 6, &value_len);
         if (value) {
-            int height = strToInt((const char*)value, value_len);
+            int height = strview_to_int(&strview_init(value, value_len));
             if (height >= 0) lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
             // else height attr ignored
         }

@@ -317,6 +317,57 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
 }
 
+void renderSvg(ImageSurface* surface, uint32_t width, uint32_t height) {
+    if (!surface->pic) {
+        printf("no picture to render\n");
+        return;
+    }
+    // Step 1: Create an offscreen canvas to render the original Picture
+    Tvg_Canvas* offscreenCanvas = tvg_swcanvas_create();
+    if (!offscreenCanvas) return;
+
+    // Allocate a buffer for rendering (ARGB8888 format)
+    surface->pixels = (uint32_t*)malloc(width * height * sizeof(uint32_t));
+    if (!surface->pixels) {
+        tvg_canvas_destroy(offscreenCanvas);
+        return;
+    }
+
+    // Set the canvas target to the buffer
+    if (tvg_swcanvas_set_target(offscreenCanvas, surface->pixels, width, width, height, 
+        TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
+        printf("Failed to set canvas target\n");
+        free(surface->pixels);  surface->pixels = NULL;
+        tvg_canvas_destroy(offscreenCanvas);
+        return;
+    }
+
+    tvg_picture_set_size(surface->pic, width, height);
+    tvg_canvas_push(offscreenCanvas, surface->pic);
+    tvg_canvas_draw(offscreenCanvas, true);
+    tvg_canvas_update(offscreenCanvas);
+
+    // Step 4: Clean up canvas
+    tvg_canvas_destroy(offscreenCanvas); // this also frees pic
+    surface->pic = NULL;
+    surface->width = width;  surface->height = height;  surface->pitch = width * sizeof(uint32_t);
+}
+
+// load surface pixels to a picture
+Tvg_Paint* load_picture(ImageSurface* surface) {
+    Tvg_Paint* pic = tvg_picture_new();
+    if (!pic) { return NULL; }
+ 
+    // Load the raw pixel data into the new Picture
+    if (tvg_picture_load_raw(pic, surface->pixels, surface->width, surface->height, 
+        TVG_COLORSPACE_ABGR8888, false) != TVG_RESULT_SUCCESS) {
+        printf("Failed to load raw pixel data\n");
+        tvg_paint_del(pic);
+        return NULL;
+    }
+    return pic;
+}
+
 void render_image_view(RenderContext* rdcon, ViewImage* view) {
     printf("render image view\n");
     render_block_view(rdcon, (ViewBlock*)view);
@@ -327,9 +378,17 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
         rect.width = view->width;  rect.height = view->height;         
         if (view->img->format == IMAGE_FORMAT_SVG) {
             // render the SVG image
-            tvg_picture_set_size(view->img->pic, rect.width, rect.height);
-            tvg_paint_translate(view->img->pic, rect.x, rect.y);
-            tvg_canvas_push(rdcon->canvas, view->img->pic);
+            if (!view->img->pixels) {
+                printf("@@@ render svg to surface\n");
+                renderSvg(view->img, view->width, view->height);
+            }
+            Tvg_Paint* pic = load_picture(view->img);
+            if (pic) {
+                tvg_paint_translate(pic, rect.x, rect.y);
+                tvg_canvas_push(rdcon->canvas, pic);
+            } else {
+                printf("Failed to load svg picture\n");
+            }
         } else {
             blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
         }
@@ -337,6 +396,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
     else {
         printf("image view has no image surface\n");
     }
+    printf("after render image view\n");
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {

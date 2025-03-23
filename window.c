@@ -245,7 +245,3 @@ int main() {
     zlog_fini();
     return 0;
 }
-
-// todo: doc manager
-// cache doc
-// free document

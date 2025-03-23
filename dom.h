@@ -9,6 +9,7 @@
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
+#include "./lib/strview.h"
 #include "./lib/strbuf.h"
 #include "./lib/hashmap.h"
 #include "./lib/arraylist.h"

@@ -15,6 +15,7 @@
         "surface.c",
         "render.c",
         "event.c",
+        "lib/strview.c",
         "lib/strbuf.c",
         "lib/hashmap.c",
         "lib/arraylist.c",

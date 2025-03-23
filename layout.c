@@ -297,8 +297,10 @@ void layout_cleanup(LayoutContext* lycon) {
 void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     LayoutContext lycon;
     if (!doc) return;
+    printf("layout html doc\n");
     if (is_reflow) {
         // free existing view tree
+        printf("free existing views\n");
         if (doc->view_tree->root) free_view(doc->view_tree, doc->view_tree->root);
         view_pool_destroy(doc->view_tree);
     } else {
