@@ -9,7 +9,8 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
 void scrollpane_scroll(EventContext* evcon, ScrollPane* sp);
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
-void scrollpane_mouse_button(EventContext* evcon, ViewBlock* block);
+void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
+void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
 void scrollpane_drag(EventContext* evcon, ViewBlock* block);
 
 void target_children(EventContext* evcon, View* view) {
@@ -188,9 +189,12 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
             scrollpane_scroll(evcon, block->scroller->pane);
         }
-        else if ((evcon->event.type == RDT_EVENT_MOUSE_DOWN || evcon->event.type == RDT_EVENT_MOUSE_UP) && 
+        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN && 
             (block->scroller->pane->is_h_hovered || block->scroller->pane->is_v_hovered)) {
-            scrollpane_mouse_button(evcon, block);
+            scrollpane_mouse_down(evcon, block);
+        }
+        else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
+            scrollpane_mouse_up(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG && 
             (block->scroller->pane->h_is_dragging || block->scroller->pane->v_is_dragging)) {
@@ -309,6 +313,15 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         } else {
             printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
         }
+
+        // fire drag event if dragging in progress
+        if (evcon.event.type == RDT_EVENT_MOUSE_UP && evcon.ui_context->document->state->is_dragging) {
+            printf("mouse up in dragging\n");
+            ArrayList* target_list = build_view_stack(&evcon, evcon.ui_context->document->state->drag_target);
+            fire_events(&evcon, target_list);
+            arraylist_free(target_list);
+        }
+
         if (evcon.new_uri) {
             printf("Opening URI: %s\n", evcon.new_uri);
             Document* old_doc = evcon.ui_context->document;

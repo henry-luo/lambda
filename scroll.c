@@ -137,69 +137,59 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     return false;
 }
 
-void scrollpane_mouse_button(EventContext* evcon, ViewBlock* block) {
+void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
     MouseButtonEvent *event = &evcon->event.mouse_button;
     ScrollPane* sp = block->scroller->pane;
-    printf("mouse down at scrollpane, offset: %d, %d\n", evcon->offset_x, evcon->offset_y);
     if (sp->is_h_hovered) {
         if (evcon->offset_x < sp->h_handle_x ) { 
-            if (event->type == RDT_EVENT_MOUSE_DOWN) { // page left
-                sp->h_scroll_position -= block->width * 0.85;   // scroll 85% of the block width
-                sp->h_scroll_position = max(0, sp->h_scroll_position);
-            }
+            sp->h_scroll_position -= block->width * 0.85;   // scroll 85% of the block width
+            sp->h_scroll_position = max(0, sp->h_scroll_position);
+            evcon->need_repaint = true;
         }
         else if (evcon->offset_x > sp->h_handle_x + sp->h_handle_width) { // page right
-            if (event->type == RDT_EVENT_MOUSE_DOWN) { // page right
-                sp->h_scroll_position += block->width * 0.85;   // scroll 85% of the block width
-                sp->h_scroll_position = min(sp->h_scroll_position, sp->h_max_scroll);
-            }
+            sp->h_scroll_position += block->width * 0.85;   // scroll 85% of the block width
+            sp->h_scroll_position = min(sp->h_scroll_position, sp->h_max_scroll);
+            evcon->need_repaint = true;
         }
         else {
-            if (event->type == RDT_EVENT_MOUSE_DOWN) { // start dragging the handle
-                sp->h_is_dragging = true;
-                sp->drag_start_x = event->x; // capture the current mouse X position
-                sp->h_drag_start_scroll = sp->h_scroll_position;
-                evcon->ui_context->document->state->is_dragging = true;
-                evcon->ui_context->document->state->drag_target = (View*)block;
-            }
-            else { // mouse up
-                sp->h_is_dragging = false;
-                sp->drag_start_x = 0;  sp->h_drag_start_scroll = 0;
-                evcon->ui_context->document->state->is_dragging = false;
-                evcon->ui_context->document->state->drag_target = NULL;
-            }
+            sp->h_is_dragging = true; // start dragging the handle
+            sp->drag_start_x = event->x; // capture the current mouse X position
+            sp->h_drag_start_scroll = sp->h_scroll_position;
+            evcon->ui_context->document->state->is_dragging = true;
+            evcon->ui_context->document->state->drag_target = (View*)block;
         }
     }
     else if (sp->is_v_hovered) {
         if (evcon->offset_y < sp->v_handle_y) { // page up
-            if (event->type == RDT_EVENT_MOUSE_DOWN) { // mouse down
-                sp->v_scroll_position -= block->height * 0.85;   // scroll 85% of the block height
-                sp->v_scroll_position = max(0, sp->v_scroll_position);
-            }
+            sp->v_scroll_position -= block->height * 0.85;   // scroll 85% of the block height
+            sp->v_scroll_position = max(0, sp->v_scroll_position);
+            evcon->need_repaint = true;
         }
         else if (evcon->offset_y > sp->v_handle_y + sp->v_handle_height) { // page down
-            if (event->type == RDT_EVENT_MOUSE_DOWN) { // mouse down
-                sp->v_scroll_position += block->height * 0.85;   // scroll 85% of the block height
-                sp->v_scroll_position = min(sp->v_scroll_position, sp->v_max_scroll);
-            }
+            sp->v_scroll_position += block->height * 0.85;   // scroll 85% of the block height
+            sp->v_scroll_position = min(sp->v_scroll_position, sp->v_max_scroll);
+            evcon->need_repaint = true;
         }
         else {
-            if (event->type == RDT_EVENT_MOUSE_DOWN) { // start dragging the handle
-                sp->v_is_dragging = true;
-                sp->drag_start_y = event->y; // capture the current mouse Y position
-                sp->v_drag_start_scroll = sp->v_scroll_position;
-                evcon->ui_context->document->state->is_dragging = true;
-                evcon->ui_context->document->state->drag_target = (View*)block;
-            }
-            else { // mouse up
-                sp->v_is_dragging = false;
-                sp->drag_start_y = 0;  sp->v_drag_start_scroll = 0;
-                evcon->ui_context->document->state->is_dragging = false;
-                evcon->ui_context->document->state->drag_target = NULL;
-            }
+            sp->v_is_dragging = true; // start dragging the handle
+            sp->drag_start_y = event->y; // capture the current mouse Y position
+            sp->v_drag_start_scroll = sp->v_scroll_position;
+            evcon->ui_context->document->state->is_dragging = true;
+            evcon->ui_context->document->state->drag_target = (View*)block;
         }
     }
-    evcon->need_repaint = true;
+}
+
+void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block) {
+    ScrollPane* sp = block->scroller->pane;
+    if (sp->h_is_dragging || sp->v_is_dragging) {
+        sp->h_is_dragging = false;
+        sp->drag_start_x = 0;  sp->h_drag_start_scroll = 0;
+        sp->v_is_dragging = false;
+        sp->drag_start_y = 0;  sp->v_drag_start_scroll = 0;
+        evcon->ui_context->document->state->is_dragging = false;
+        evcon->ui_context->document->state->drag_target = NULL;   
+    }
 }
 
 void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
