@@ -224,6 +224,8 @@ typedef struct StateStore {
     CaretState* caret;
     CursorState* cursor;
     bool is_dirty;
+    bool is_dragging;
+    View* drag_target;
 } StateStore;
 
 // layout, rendering context structs
