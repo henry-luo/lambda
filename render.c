@@ -298,11 +298,17 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
             rdcon->color = view_block->in_line->color;
         }
         // setup clip box
-        if (view_block->scroller && view_block->scroller->has_clip) {
-            rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + view_block->scroller->clip.x);
-            rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + view_block->scroller->clip.y);
-            rdcon->block.clip.width = min(rdcon->block.clip.width, view_block->scroller->clip.width);
-            rdcon->block.clip.height = min(rdcon->block.clip.height, view_block->scroller->clip.height);
+        if (view_block->scroller) {
+            if (view_block->scroller->has_clip) {
+                rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + view_block->scroller->clip.x);
+                rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + view_block->scroller->clip.y);
+                rdcon->block.clip.width = min(rdcon->block.clip.width, view_block->scroller->clip.width);
+                rdcon->block.clip.height = min(rdcon->block.clip.height, view_block->scroller->clip.height);
+            }
+            if (view_block->scroller->pane) {
+                rdcon->block.x -= view_block->scroller->pane->h_scroll_position;
+                rdcon->block.y -= view_block->scroller->pane->v_scroll_position;
+            }
         }
         render_children(rdcon, view);
     }
@@ -313,6 +319,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     // render scrollbars
     if (view_block->scroller) {
         printf("render scrollbars\n");
+        rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
         if (view_block->scroller->has_hz_scroll || view_block->scroller->has_vt_scroll) {
             if (!view_block->scroller->pane) {
                 view_block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
