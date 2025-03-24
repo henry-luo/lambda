@@ -528,4 +528,7 @@ void render_html_doc(UiContext* uicon, View* root_view) {
     // }
 
     render_clean_up(&rdcon);
+    if (uicon->document->state) {
+        uicon->document->state->is_dirty = false;
+    }
 }

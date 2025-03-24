@@ -21,13 +21,13 @@
 #define PATH_MAX 4096
 
 typedef struct ViewTree ViewTree;
-typedef struct StateTree StateTree;
+typedef struct StateStore StateStore;
 
 typedef struct {
+    lxb_url_t* url;  // document URL
     lxb_html_document_t* dom_tree;  // current HTML document DOM tree
     ViewTree* view_tree;
-    StateTree* state_tree;
-    lxb_url_t* url;  // document URL
+    StateStore* state;
 } Document;
 
 typedef unsigned short PropValue;

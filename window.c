@@ -91,10 +91,10 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
     RdtEvent event;
     printf("Cursor position: (%.2f, %.2f)\n", xpos, ypos);
-    event.mouse_motion.type = RDT_EVENT_MOUSE_MOVE;
-    event.mouse_motion.timestamp = glfwGetTime();
-    event.mouse_motion.x = xpos * ui_context.pixel_ratio;
-    event.mouse_motion.y = ypos * ui_context.pixel_ratio;
+    event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
+    event.mouse_position.timestamp = glfwGetTime();
+    event.mouse_position.x = xpos * ui_context.pixel_ratio;
+    event.mouse_position.y = ypos * ui_context.pixel_ratio;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 }
 
@@ -125,8 +125,21 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
     }
 }
 
+// handles mouse/touchpad scroll input 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    RdtEvent event;
+    event.scroll.type = RDT_EVENT_SCROLL;
+    event.scroll.timestamp = glfwGetTime();
+    event.scroll.xoffset = xoffset * ui_context.pixel_ratio;
+    event.scroll.yoffset = yoffset * ui_context.pixel_ratio;
     printf("Scroll offset: (%.2f, %.2f)\n", xoffset, yoffset);
+    assert(xoffset != 0 || yoffset != 0);
+    double xpos, ypos;
+    glfwGetCursorPos(window, &xpos, &ypos);
+    printf("Mouse position: (%.2f, %.2f)\n", xpos, ypos);
+    event.scroll.x = xpos * ui_context.pixel_ratio;
+    event.scroll.y = ypos * ui_context.pixel_ratio;
+    handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
 }
 
 // Callback function to handle window resize
@@ -141,6 +154,7 @@ void window_refresh_callback(GLFWwindow *window) {
 }
 
 void to_repaint() {
+    printf("Requesting repaint\n");
     do_redraw = 1;
 }
 
@@ -183,6 +197,7 @@ void render(GLFWwindow* window) {
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
 
+    // reflow the document if window size has changed
     if (width != ui_context.window_width || height != ui_context.window_height) {
         double start_time = glfwGetTime();
         ui_context.window_width = width;  ui_context.window_height = height;
@@ -194,7 +209,12 @@ void render(GLFWwindow* window) {
         }
         printf("Reflow time: %.2f ms\n", (glfwGetTime() - start_time) * 1000);
     }
+    // rerender if the document is dirty
+    if (ui_context.document->state && ui_context.document->state->is_dirty) {
+        render_html_doc(&ui_context, ui_context.document->view_tree->root);
+    }
 
+    // repaint to screen
     repaint_window();
 
     double end = glfwGetTime();

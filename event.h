@@ -5,7 +5,7 @@ typedef enum  {
     RDT_EVENT_MOUSE_DOWN,
     RDT_EVENT_MOUSE_UP,
     RDT_EVENT_MOUSE_MOVE,
-    RDT_EVENT_MOUSE_SCROLL,
+    RDT_EVENT_SCROLL,
 //     RDT_EVENT_KEY_DOWN,
 //     RDT_EVENT_KEY_UP,
 //     RDT_EVENT_KEY_PRESS,
@@ -28,33 +28,40 @@ typedef enum  {
 //     RDT_EVENT_CHANGE,
 } EventType;
 
-typedef struct MouseMotionEvent {
-    EventType type;        // RDT_EVENT_MOUSE_MOVE
-    double timestamp;       // in seconds, populated using glfwGetTime()
-    // Uint32 windowID;    /**< The window with mouse focus, if any */
-    // Uint32 which;       /**< The mouse instance id, or SDL_TOUCH_MOUSEID */
-    // Uint32 state;       /**< The current button state */
-    int x;           /**< X coordinate, relative to window */
-    int y;           /**< Y coordinate, relative to window */
-    // Sint32 xrel;        /**< The relative motion in the X direction */
-    // Sint32 yrel;        /**< The relative motion in the Y direction */
-} MouseMotionEvent;
+typedef struct Event {
+    EventType type;
+    double timestamp;  // in seconds, populated using glfwGetTime()
+} Event;
 
+// mouse/pointer motion event
+typedef struct MousePositionEvent {
+    Event;      // extends Event
+    int x;      // X coordinate, relative to window
+    int y;      // Y coordinate, relative to window
+} MousePositionEvent;
+
+// mouse click events
 typedef struct MouseButtonEvent {
-    MouseMotionEvent;
-    uint8_t button;       /**< The mouse button index */
-    uint8_t clicks;       /**< 1 for single-click, 2 for double-click, etc. */
-    // Uint8 padding1;
+    MousePositionEvent;
+    uint8_t button;     // mouse button index
+    uint8_t clicks;     // 1 for single-click, 2 for double-click, etc.
 } MouseButtonEvent;
+
+// mouse/touchpad scroll event
+typedef struct ScrollEvent {
+    MousePositionEvent;   // extends MousePositionEvent
+    float xoffset;        // horizontal scroll offset, can have fractional value
+    float yoffset;        // vertical scroll offset, can have fractional value
+} ScrollEvent;
 
 typedef union RdtEvent {
     struct {
         EventType type;
-        uint32_t timestamp;   /**< In milliseconds, populated using SDL_GetTicks() */
+        double timestamp;  // in seconds, populated using glfwGetTime()
     };
-    MouseMotionEvent mouse_motion;
+    MousePositionEvent mouse_position;
     MouseButtonEvent mouse_button;
-    // SDL_MouseWheelEvent mouse_wheel;
+    ScrollEvent scroll;
     // SDL_KeyboardEvent key;
     // SDL_WindowEvent window;
     // SDL_TextEditingEvent text_edit;

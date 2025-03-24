@@ -123,8 +123,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         }
         if (image->img) {
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
-                int w = image->img->width, h = image->img->height;               
-                printf("image dims: intrinsic - %d x %d, spec - %d x %d\n", w, h, lycon->block.given_width, lycon->block.given_height);
+                // scale image by pixel ratio
+                int w = image->img->width * lycon->ui_context->pixel_ratio;
+                int h = image->img->height * lycon->ui_context->pixel_ratio;               
+                printf("image dims: intrinsic - %d x %d, spec - %d x %d\n", w, h, 
+                    lycon->block.given_width, lycon->block.given_height);
                 if (lycon->block.given_width >= 0) { // scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
                 }

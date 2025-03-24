@@ -224,10 +224,11 @@ typedef struct CaretState {
     int x_offset;
 } CaretState;
 
-typedef struct StateTree {
+typedef struct StateStore {
     CaretState* caret;
     CursorState* cursor;
-} StateTree;
+    bool is_dirty;
+} StateStore;
 
 // layout, rendering context structs
 typedef struct {

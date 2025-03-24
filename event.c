@@ -1,25 +1,13 @@
-#include "view.h"
+#include "handler.h"
 
 Document* show_html_doc(lxb_url_t *base, char* doc_filename);
 void free_document(Document* doc);
 void to_repaint();
 
-typedef struct EventContext {
-    RdtEvent event;
-    View* target;
-
-    BlockBlot block;
-    FontBox font;  // current font style
-
-    PropValue new_cursor;
-    char* new_uri; 
-    
-    UiContext* ui_context;
-} EventContext;
-
 void target_block_view(EventContext* evcon, ViewBlock* view_block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
+void scrollpane_scroll(EventContext* evcon, ScrollPane* sp, ScrollEvent* event);
 
 void target_children(EventContext* evcon, View* view) {
     do {
@@ -74,7 +62,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
             wd = evcon->font.face->glyph->advance.x >> 6;  // changed from rdcon to evcon
         }
         float char_right = x + wd;  float char_bottom = y + (evcon->font.face->height >> 6);
-        MouseMotionEvent* event = &evcon->event.mouse_motion;
+        MousePositionEvent* event = &evcon->event.mouse_position;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             printf("hit on text: %c\n", *p);
             evcon->target = (View*)text;  return;
@@ -109,11 +97,11 @@ void target_block_view(EventContext* evcon, ViewBlock* view_block) {
         }        
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself
-            float x = evcon->block.x, y = evcon->block.y;
-            MouseMotionEvent* event = &evcon->event.mouse_motion;
+            int x = evcon->block.x, y = evcon->block.y;
+            MousePositionEvent* event = &evcon->event.mouse_position;
             if (x <= event->x && event->x < x + view_block->width &&
                 y <= event->y && event->y < y + view_block->height) {
-                printf("@@ hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
+                printf("hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
                 evcon->target = (View*)view_block;
             }
         }
@@ -162,7 +150,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
         evcon->new_cursor = span->in_line->cursor;
     }
     int name = ((lxb_html_element_t*)span->node)->element.node.local_name;
-    printf("fired at inline view %s, %d, %d\n", 
+    printf("fired at view %s, %d, %d\n", 
         lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), name, LXB_TAG_A);
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
@@ -181,6 +169,9 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     printf("fire block event\n");
     // fire as inline view first
     fire_inline_event(evcon, (ViewSpan*)block);
+    if (evcon->event.type == RDT_EVENT_SCROLL && block->scroller && block->scroller->pane) {
+        scrollpane_scroll(evcon, block->scroller->pane, &evcon->event.scroll);
+    }
 }
 
 void fire_events(EventContext* evcon, ArrayList* target_list) {
@@ -212,6 +203,9 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, uicon->default_font.family, &evcon->ui_context->default_font);
     evcon->new_cursor = LXB_CSS_VALUE_AUTO;
+    if (!uicon->document->state) {
+        uicon->document->state = calloc(1, sizeof(StateStore));
+    }
 }
 
 void event_context_cleanup(EventContext* evcon) {
@@ -230,7 +224,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     int mouse_x, mouse_y;
     switch (event->type) {
     case RDT_EVENT_MOUSE_MOVE:  
-        MouseMotionEvent* motion = &event->mouse_motion;
+        MousePositionEvent* motion = &event->mouse_position;
         printf("Mouse event at (%d, %d)\n", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree->root);
@@ -290,12 +284,31 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             to_repaint();
         }
         break;
-    case RDT_EVENT_MOUSE_SCROLL:
+    case RDT_EVENT_SCROLL:
+        ScrollEvent* scroll = &event->scroll;
         printf("Mouse scroll event\n");
+        mouse_x = scroll->x;  mouse_y = scroll->y; // updated to use scroll's x and y
+        target_html_doc(&evcon, doc->view_tree->root);
+        if (evcon.target) {
+            printf("Target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            // build stack of views from root to target view
+            ArrayList* target_list = build_view_stack(&evcon, evcon.target);
+
+            // fire event to views in the stack
+            fire_events(&evcon, target_list);
+            arraylist_free(target_list);
+        } else {
+            printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
+        }
         break;
     default:
+        printf("Unhandled event type: %d\n", event->type);
         break;
     }
+    if (evcon.need_repaint) {
+        uicon->document->state->is_dirty = true;
+        to_repaint();
+    }    
     printf("end of event %d\n", event->type);
 
     event_context_cleanup(&evcon);
