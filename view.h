@@ -165,11 +165,6 @@ typedef struct {
 } ViewSpan;
 
 typedef struct {
-    Tvg_Paint* v_scrollbar;    // Vertical scrollbar
-    Tvg_Paint* v_scroll_handle;
-    Tvg_Paint* h_scrollbar;    // Horizontal scrollbar
-    Tvg_Paint* h_scroll_handle;
-    
     int content_width, content_height;
     int view_x, view_y;
     int view_width, view_height;

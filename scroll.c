@@ -37,18 +37,18 @@ ScrollPane* scrollpane_create(int x, int y, int width, int height) {
     return sp;
 }
 
-void scrollpane_set_content_size(ScrollPane* sp, int content_width, int content_height) {
+void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, int content_width, int content_height) {
     dzlog_debug("render scroller content size: %d x %d\n", content_width, content_height);
     sp->content_width = content_width;  sp->content_height = content_height;
     
     // Vertical scrollbar
-    sp->v_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(sp->v_scrollbar, sp->view_x + sp->view_width - SCROLLBAR_SIZE, 
+    Tvg_Paint* v_scrollbar = tvg_shape_new();
+    tvg_shape_append_rect(v_scrollbar, sp->view_x + sp->view_width - SCROLLBAR_SIZE, 
         sp->view_y, SCROLLBAR_SIZE, sp->view_height, 0, 0);
-    tvg_shape_set_fill_color(sp->v_scrollbar, 200, 200, 200, 255);
+    tvg_shape_set_fill_color(v_scrollbar, 200, 200, 200, 255);
 
-    sp->v_scroll_handle = tvg_shape_new();
-    tvg_shape_set_fill_color(sp->v_scroll_handle, 100, 100, 100, 255);
+    Tvg_Paint* v_scroll_handle = tvg_shape_new();
+    tvg_shape_set_fill_color(v_scroll_handle, 100, 100, 100, 255);
     if (content_height > 0) {
         sp->v_max_scroll = content_height > sp->view_height ? content_height - sp->view_height : 0;
         int v_ratio = sp->view_height * 100 / content_height;
@@ -59,18 +59,18 @@ void scrollpane_set_content_size(ScrollPane* sp, int content_width, int content_
         int v_scroll_x = sp->view_x + sp->view_width - SCROLLBAR_SIZE;
         dzlog_debug("v_scroll_handle bounds: %d, %d, %d, %d, v_pos: %d\n", v_scroll_x, sp->view_y, 
             SCROLLBAR_SIZE, v_handle_height, sp->v_scroll_position);
-        tvg_shape_append_rect(sp->v_scroll_handle,
+        tvg_shape_append_rect(v_scroll_handle,
             v_scroll_x, sp->view_y + v_handle_y, SCROLLBAR_SIZE, v_handle_height, HANDLE_RADIUS, HANDLE_RADIUS);
     }
     
     // Horizontal scrollbar
-    sp->h_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(sp->h_scrollbar, sp->view_x, 
+    Tvg_Paint* h_scrollbar = tvg_shape_new();
+    tvg_shape_append_rect(h_scrollbar, sp->view_x, 
         sp->view_y + sp->view_height - SCROLLBAR_SIZE, sp->view_width, SCROLLBAR_SIZE, 0, 0);
-    tvg_shape_set_fill_color(sp->h_scrollbar, 200, 200, 200, 255);
+    tvg_shape_set_fill_color(h_scrollbar, 200, 200, 200, 255);
 
-    sp->h_scroll_handle = tvg_shape_new();
-    tvg_shape_set_fill_color(sp->h_scroll_handle, 100, 100, 100, 255);
+    Tvg_Paint* h_scroll_handle = tvg_shape_new();
+    tvg_shape_set_fill_color(h_scroll_handle, 100, 100, 100, 255);
     if (content_width > 0) {
         sp->h_max_scroll = content_width > sp->view_width ? content_width - sp->view_width : 0;
         int h_ratio = sp->view_width * 100 / content_width;
@@ -81,24 +81,17 @@ void scrollpane_set_content_size(ScrollPane* sp, int content_width, int content_
         int h_scroll_y = sp->view_y + sp->view_height - SCROLLBAR_SIZE;
         dzlog_debug("h_scroll_handle bounds: %d, %d, %d, %d, h_pos: %d\n", 
             sp->view_x + h_handle_x, h_scroll_y, h_handle_width, SCROLLBAR_SIZE, sp->h_scroll_position);
-        tvg_shape_append_rect(sp->h_scroll_handle,
+        tvg_shape_append_rect(h_scroll_handle,
             sp->view_x + h_handle_x, h_scroll_y, h_handle_width, SCROLLBAR_SIZE, HANDLE_RADIUS, HANDLE_RADIUS);
     }
-}
 
-void scrollpane_update(Tvg_Canvas* canvas, ScrollPane* sp) {
-    printf("update scrollpane\n");
     if (sp->content_height > sp->view_height) {
-        tvg_canvas_push(canvas, sp->v_scrollbar);
-        sp->v_scrollbar = NULL;
-        tvg_canvas_push(canvas, sp->v_scroll_handle);
-        sp->v_scroll_handle = NULL;
+        tvg_canvas_push(canvas, v_scrollbar);
+        tvg_canvas_push(canvas, v_scroll_handle);
     }
     if (sp->content_width > sp->view_width) {
-        tvg_canvas_push(canvas, sp->h_scrollbar);
-        sp->h_scrollbar = NULL;
-        tvg_canvas_push(canvas, sp->h_scroll_handle);
-        sp->h_scroll_handle = NULL;
+        tvg_canvas_push(canvas, h_scrollbar);
+        tvg_canvas_push(canvas, h_scroll_handle);
     }
     tvg_canvas_update(canvas);
 }
@@ -195,18 +188,12 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp, ScrollEvent* event) 
 //     }
     
 //     if (sp->v_is_dragging || sp->h_is_dragging) {
-//         scrollpane_set_content_size(sp, sp->content_width, sp->content_height);
-//         // scrollpane_update(sp);
+//         evcon->need_repaint = true;
 //     }
 // }
 
 void scrollpane_destroy(ScrollPane* sp) {
-    if (!sp) return;
-    tvg_paint_del(sp->v_scrollbar);
-    tvg_paint_del(sp->v_scroll_handle);
-    tvg_paint_del(sp->h_scrollbar);
-    tvg_paint_del(sp->h_scroll_handle);
-    free(sp);
+    if (sp) free(sp);
 }
 
 /*
