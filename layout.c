@@ -104,6 +104,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
         // anchor style
         span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         span->in_line->cursor = LXB_CSS_VALUE_POINTER;
+        span->in_line->color = color_name_to_rgb(LXB_CSS_VALUE_BLUE);   
         span->font = alloc_font_prop(lycon);
         span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
         break;

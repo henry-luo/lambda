@@ -60,3 +60,4 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx);
 PropValue resolve_element_display(lxb_html_element_t* elmt);
+Color color_name_to_rgb(PropValue color_name);
