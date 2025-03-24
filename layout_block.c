@@ -1,5 +1,73 @@
 #include "layout.h"
 
+void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display, Blockbox* pa_block) {
+    // finalize the block size
+    int flow_width, flow_height;
+    if (block->bound) {
+        block->content_width = lycon->block.max_width + block->bound->padding.left + block->bound->padding.right;
+        // advance_y already includes padding.top and border.top
+        block->content_height = lycon->block.advance_y + block->bound->padding.bottom;
+        flow_width = block->content_width +
+            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
+        flow_height = block->content_height +
+            (block->bound->border ? block->bound->border->width.bottom : 0);
+    } else {
+        flow_width = block->content_width = lycon->block.max_width;
+        flow_height = block->content_height = lycon->block.advance_y;
+    }
+    
+    if (display == LXB_CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
+        block->width = min(flow_width, block->width);
+    }
+    // handle horizontal overflow
+    if (flow_width > block->width) { // hz overflow
+        if (!block->scroller) {
+            block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+        }
+        block->scroller->has_hz_overflow = true;
+        if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {
+            pa_block->max_width = max(pa_block->max_width, flow_width);  
+        }
+        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL || 
+            block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
+            block->scroller->has_hz_scroll = true;
+        }
+        if (block->scroller->has_hz_scroll || 
+            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP || 
+            block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->has_clip = true;
+            block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
+            block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                
+        }
+    }
+    // handle vertical overflow and determine block->height
+    if (lycon->block.given_height >= 0) { // got specified height
+        // no change to block->height
+        if (flow_height > block->height) { // vt overflow
+            if (!block->scroller) {
+                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            }
+            block->scroller->has_vt_overflow = true;
+            if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) {
+                pa_block->max_height = max(pa_block->max_height, block->y + flow_height);  
+            }
+            else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
+                block->scroller->has_vt_scroll = true;
+            }
+            if (block->scroller->has_hz_scroll || 
+                block->scroller->overflow_y == LXB_CSS_VALUE_CLIP || 
+                block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
+                block->scroller->has_clip = true;
+                block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
+                block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                    
+            }                
+        }
+    }
+    else {
+        block->height = flow_height;
+    }
+}
+
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
     dzlog_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
@@ -24,9 +92,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     switch (elmt_name) {
     case LXB_TAG_BODY:
         block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        // default: 8px margin for body
         block->bound->margin.top = block->bound->margin.bottom = 
-            block->bound->margin.left = block->bound->margin.right = 8 * lycon->ui_context->pixel_ratio;  // 8px
-        break;
+            block->bound->margin.left = block->bound->margin.right = 8 * lycon->ui_context->pixel_ratio; 
+         break;
     case LXB_TAG_H1:
         em_size = 2;  // 2em
         goto HEADING_PROP;
@@ -229,72 +298,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
             if (!lycon->line.is_line_start) { line_break(lycon); }
             lycon->parent = block->parent;
         }
-
-        // finalize the block size
-        int flow_width, flow_height;
-        if (block->bound) {
-            block->content_width = lycon->block.max_width + block->bound->padding.left + block->bound->padding.right;
-            // advance_y already includes padding.top and border.top
-            block->content_height = lycon->block.advance_y + block->bound->padding.bottom;
-            flow_width = block->content_width +
-                (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
-            flow_height = block->content_height +
-                (block->bound->border ? block->bound->border->width.bottom : 0);
-        } else {
-            flow_width = block->content_width = lycon->block.max_width;
-            flow_height = block->content_height = lycon->block.advance_y;
-        }
-        
-        if (display == LXB_CSS_VALUE_INLINE_BLOCK && lycon->block.given_width < 0) {
-            block->width = min(flow_width, block->width);
-        }
-        // handle horizontal overflow
-        if (flow_width > block->width) { // hz overflow
-            if (!block->scroller) {
-                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-            }
-            block->scroller->has_hz_overflow = true;
-            if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {
-                pa_block.max_width = max(pa_block.max_width, flow_width);  
-            }
-            else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL || 
-                block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
-                block->scroller->has_hz_scroll = true;
-            }
-            if (block->scroller->has_hz_scroll || 
-                block->scroller->overflow_x == LXB_CSS_VALUE_CLIP || 
-                block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
-                block->scroller->has_clip = true;
-                block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
-                block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                
-            }
-        }
-        // handle vertical overflow and determine block->height
-        if (lycon->block.given_height >= 0) { // got specified height
-            // no change to block->height
-            if (flow_height > block->height) { // vt overflow
-                if (!block->scroller) {
-                    block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-                }
-                block->scroller->has_vt_overflow = true;
-                if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) {
-                    pa_block.max_height = max(pa_block.max_height, block->y + flow_height);  
-                }
-                else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
-                    block->scroller->has_vt_scroll = true;
-                }
-                if (block->scroller->has_hz_scroll || 
-                    block->scroller->overflow_y == LXB_CSS_VALUE_CLIP || 
-                    block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
-                    block->scroller->has_clip = true;
-                    block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
-                    block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                    
-                }                
-            }
-        }
-        else {
-            block->height = flow_height;
-        }
+        finalize_block_flow(lycon, block, display, &pa_block);
     }
 
     // flow the block in parent context

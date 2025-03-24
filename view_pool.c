@@ -1,5 +1,7 @@
 #include "layout.h"
 
+void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
+
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
     ViewTree* tree = lycon->doc->view_tree;
@@ -206,7 +208,19 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroller->pane->v_scrollbar, block->scroller->pane->h_scrollbar);
         strbuf_append_str(buf, "}\n");
     }
+}
 
+void print_block(ViewBlock* block, StrBuf* buf, int indent) {
+    strbuf_append_format(buf, "view %s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
+        lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
+        block->type == RDT_VIEW_BLOCK ? "block" : 
+        block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
+        block->type == RDT_VIEW_LIST ? "list" :
+        block->type == RDT_VIEW_LIST_ITEM ? "list-item" : "image",
+        block->x, block->y, block->width, block->height);
+    print_block_props(block, buf, indent + 2);
+    print_inline_props((ViewSpan*)block, buf, indent+2);              
+    print_view_group((ViewGroup*)block, buf, indent+2);
 }
 
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
@@ -217,21 +231,11 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
                 view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM || 
                 view->type == RDT_VIEW_IMAGE) {
-                ViewBlock* block = (ViewBlock*)view;
-                strbuf_append_format(buf, "view %s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                    lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
-                    view->type == RDT_VIEW_BLOCK ? "block" : 
-                    view->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
-                    view->type == RDT_VIEW_LIST ? "list" :
-                    view->type == RDT_VIEW_LIST_ITEM ? "list-item" : "image",
-                    block->x, block->y, block->width, block->height);
-                print_block_props(block, buf, indent + 2);
-                print_inline_props((ViewSpan*)block, buf, indent+2);              
-                print_view_group((ViewGroup*)view, buf, indent+2);
+                print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {
                 ViewSpan* span = (ViewSpan*)view;
-                strbuf_append_format(buf, "view inline:%s\n",
+                strbuf_append_format(buf, "view %s:inline\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
                 print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
@@ -273,7 +277,7 @@ void write_string_to_file(const char *filename, const char *text) {
 
 void print_view_tree(ViewGroup* view_root) {
     StrBuf* buf = strbuf_new_cap(1024);
-    print_view_group(view_root, buf, 0);
+    print_block((ViewBlock*)view_root, buf, 0);
     printf("=================\nView tree:\n");
     printf("%s", buf->str);
     printf("=================\n");

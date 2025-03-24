@@ -318,6 +318,12 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
                 view_block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
             }
             Rect rect = {rdcon->block.x, rdcon->block.y, view_block->width, view_block->height};
+            if (view_block->bound && view_block->bound->border) {
+                rect.x += view_block->bound->border->width.left;
+                rect.y += view_block->bound->border->width.top;
+                rect.width -= view_block->bound->border->width.left + view_block->bound->border->width.right;
+                rect.height -= view_block->bound->border->width.top + view_block->bound->border->width.bottom;
+            }
             scrollpane_render(rdcon->canvas, view_block->scroller->pane, &rect,
                 view_block->content_width, view_block->content_height);
         }

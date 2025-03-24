@@ -6,6 +6,7 @@ void view_pool_destroy(ViewTree* tree);
 void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt);
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node);
 char* readTextFile(const char *filename);
+void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display, Blockbox* pa_block);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -192,20 +193,7 @@ void load_style(LayoutContext* lycon, unsigned char* style_source) {
     lxb_css_parser_destroy(parser, true);    
 }
 
-void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
-    printf("layout html root\n");
-
-    // init context
-    lycon->elmt = elmt;
-    lycon->font.style = lycon->ui_context->default_font;
-    lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
-    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
-    lycon->block.height = lycon->ui_context->window_height;
-    lycon->block.advance_y = 0;
-    lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
-    lycon->block.text_align = LXB_CSS_VALUE_LEFT;
-    lycon->line.is_line_start = true;
-
+void apply_header_style(LayoutContext* lycon) {
     // apply header styles
     lxb_html_head_element_t *head = lxb_html_document_head_element(lycon->doc->dom_tree);
     if (head) {
@@ -263,14 +251,36 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
             child = lxb_dom_node_next(child);
         }
     }
+}
 
-    // resolve html styles
+void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
+    printf("layout html root\n");
+    apply_header_style(lycon);
+
+    // init context
+    lycon->elmt = elmt;
+    lycon->font.style = lycon->ui_context->default_font;
+    lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
+    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
+    lycon->block.height = lycon->ui_context->window_height;
+    lycon->block.advance_y = 0;
+    lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
+    lycon->block.text_align = LXB_CSS_VALUE_LEFT;
+    lycon->line.is_line_start = true;
+    Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
+
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
+    html->width = lycon->block.width;  html->height = lycon->block.height;
     lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
     lycon->elmt = elmt;
-    // resolve CSS styles
+    // default html styles
+    html->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+    html->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
+    html->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
+    lycon->block.given_width = lycon->ui_context->window_width;
+    lycon->block.given_height = lycon->ui_context->window_height;    
+    // load CSS stylesheets
     if (elmt->element.style) {
-        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
     }
 
@@ -289,6 +299,8 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     } else {
         printf("No body element found\n");
     }
+
+    finalize_block_flow(lycon, html, LXB_CSS_VALUE_BLOCK, &pa_block);
 }
 
 void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
@@ -328,6 +340,5 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
 
     if (doc->view_tree && doc->view_tree->root) 
         print_view_tree((ViewGroup*)doc->view_tree->root);
-    
 }
 
