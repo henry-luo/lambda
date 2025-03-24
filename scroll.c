@@ -54,13 +54,13 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         sp->v_max_scroll = content_height > view_height ? content_height - view_height : 0;
         int bar_height = view_height - SCROLLBAR_SIZE - SCROLL_BORDER_MAIN * 2;
         int v_ratio = view_height * 100 / content_height;
-        int v_handle_height = (v_ratio * bar_height) / 100;
-        v_handle_height = max(MIN_HANDLE_SIZE, v_handle_height);
-        int v_handle_y = SCROLL_BORDER_MAIN + (sp->v_max_scroll > 0 ? 
-                        (sp->v_scroll_position * (bar_height - v_handle_height)) / sp->v_max_scroll : 0);
+        sp->v_handle_height = (v_ratio * bar_height) / 100;
+        sp->v_handle_height = max(MIN_HANDLE_SIZE, sp->v_handle_height);
+        sp->v_handle_y = SCROLL_BORDER_MAIN + (sp->v_max_scroll > 0 ? 
+            (sp->v_scroll_position * (bar_height - sp->v_handle_height)) / sp->v_max_scroll : 0);
         int v_scroll_x = view_x + view_width - SCROLLBAR_SIZE + SCROLL_BORDER_CROSS;
-        tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + v_handle_y, 
-            SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, v_handle_height, HANDLE_RADIUS, HANDLE_RADIUS);
+        tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y, 
+            SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, sp->v_handle_height, HANDLE_RADIUS, HANDLE_RADIUS);
     }
     
     // Horizontal scrollbar
@@ -75,13 +75,13 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         sp->h_max_scroll = content_width > view_width ? content_width - view_width : 0;
         int bar_width = view_width - SCROLLBAR_SIZE - SCROLL_BORDER_MAIN * 2;
         int h_ratio = view_width * 100 / content_width;
-        int h_handle_width = (h_ratio * bar_width) / 100;
-        h_handle_width = max(MIN_HANDLE_SIZE, h_handle_width);
-        int h_handle_x = SCROLL_BORDER_MAIN + (sp->h_max_scroll > 0 ? 
-                        (sp->h_scroll_position * (bar_width - h_handle_width)) / sp->h_max_scroll : 0);
+        sp->h_handle_width = (h_ratio * bar_width) / 100;
+        sp->h_handle_width = max(MIN_HANDLE_SIZE, sp->h_handle_width);
+        sp->h_handle_x = SCROLL_BORDER_MAIN + (sp->h_max_scroll > 0 ? 
+            (sp->h_scroll_position * (bar_width - sp->h_handle_width)) / sp->h_max_scroll : 0);
         int h_scroll_y = view_y + view_height - SCROLLBAR_SIZE + SCROLL_BORDER_CROSS;
-        tvg_shape_append_rect(h_scroll_handle, view_x + h_handle_x, h_scroll_y, 
-            h_handle_width, SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, HANDLE_RADIUS, HANDLE_RADIUS);
+        tvg_shape_append_rect(h_scroll_handle, view_x + sp->h_handle_x, h_scroll_y, 
+            sp->h_handle_width, SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, HANDLE_RADIUS, HANDLE_RADIUS);
     }
 
     if (sp->content_height > view_height) {
@@ -95,7 +95,8 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     tvg_canvas_update(canvas);
 }
 
-void scrollpane_scroll(EventContext* evcon, ScrollPane* sp, ScrollEvent* event) {
+void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
+    ScrollEvent* event = &evcon->event.scroll;
     printf("firing scroll event: %f, %f\n", event->xoffset, event->yoffset);
     int scroll_amount = 50;  // pixels to scroll per offset
     if (event->yoffset != 0 && sp->v_max_scroll > 0) {
@@ -113,12 +114,67 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp, ScrollEvent* event) 
     // todo: set invalidate_rect
 }
 
-// void _mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-//     ScrollPane* sp = (ScrollPane*)glfwGetWindowUserPointer(window);
-//     if (!sp || button != GLFW_MOUSE_BUTTON_LEFT) return;
+bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
+    MousePositionEvent *event = &evcon->event.mouse_position;
+    ScrollPane* sp = block->scroller->pane;
+    int bottom = evcon->block.y + block->height;  int right = evcon->block.x + block->width;
+    if (block->scroller->has_hz_scroll) {
+        if (evcon->block.x <= event->x && event->x < right &&
+            bottom - SCROLLBAR_SIZE <= event->y && event->y < bottom) {
+            sp->is_h_hovered = true;
+            return true;
+        }
+        else sp->is_h_hovered = false;
+    }
+    if (block->scroller->has_vt_scroll) {
+        if (evcon->block.y <= event->y && event->y < bottom &&
+            right - SCROLLBAR_SIZE <= event->x && event->x < right) {
+            sp->is_v_hovered = true;
+            return true;
+        }
+        else sp->is_v_hovered = false;
+    }
+    return false;
+}
+
+void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block) {
+    MouseButtonEvent *event = &evcon->event.mouse_button;
+    ScrollPane* sp = block->scroller->pane;
+    printf("mouse down at scrollpane, offset: %d, %d\n", evcon->offset_x, evcon->offset_y);
+    if (sp->is_h_hovered) {
+        if (evcon->offset_x < sp->h_handle_x ) { // page left
+            sp->h_scroll_position -= block->width * 0.85;   // scroll 85% of the block width
+            sp->h_scroll_position = max(0, sp->h_scroll_position);
+        }
+        else if (evcon->offset_x > sp->h_handle_x + sp->h_handle_width) { // page right
+            sp->h_scroll_position += block->width * 0.85;   // scroll 85% of the block width
+            sp->h_scroll_position = min(sp->h_scroll_position, sp->h_max_scroll);
+        }
+        else {
+            // do nothing when clicked on the handle
+        }
+    }
+    else if (sp->is_v_hovered) {
+        if (evcon->offset_y < sp->v_handle_y) { // page up
+            sp->v_scroll_position -= block->height * 0.85;   // scroll 85% of the block height
+            sp->v_scroll_position = max(0, sp->v_scroll_position);
+        }
+        else if (evcon->offset_y > sp->v_handle_y + sp->v_handle_height) { // page down
+            sp->v_scroll_position += block->height * 0.85;   // scroll 85% of the block height
+            sp->v_scroll_position = min(sp->v_scroll_position, sp->v_max_scroll);
+        }
+        else {
+            // do nothing when clicked on the handle
+        }
+    }
+    evcon->need_repaint = true;
+}    
+
+// void scrollpane_mouse_button(EventContext* evcon, ScrollPane* sp, int button, int action, int mods) {
+//     if (button != GLFW_MOUSE_BUTTON_LEFT) return;
     
 //     double xpos, ypos;
-//     glfwGetCursorPos(window, &xpos, &ypos);
+//     glfwGetCursorPos(evcon->window, &xpos, &ypos);
     
 //     // Vertical scrollbar check
 //     int vsx, vsy, vsw, vsh;
@@ -143,7 +199,7 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp, ScrollEvent* event) 
 //         sp->h_drag_start_scroll = sp->h_scroll_position;
 //         return;
 //     }
-    
+
 //     if (action == GLFW_RELEASE) {
 //         sp->v_is_dragging = false;
 //         sp->h_is_dragging = false;

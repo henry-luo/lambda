@@ -7,7 +7,9 @@ void to_repaint();
 void target_block_view(EventContext* evcon, ViewBlock* view_block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
-void scrollpane_scroll(EventContext* evcon, ScrollPane* sp, ScrollEvent* event);
+void scrollpane_scroll(EventContext* evcon, ScrollPane* sp);
+bool scrollpane_target(EventContext* evcon, ViewBlock* block);
+void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
 
 void target_children(EventContext* evcon, View* view) {
     do {
@@ -89,26 +91,40 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
 
 void target_block_view(EventContext* evcon, ViewBlock* view_block) {
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
+    evcon->block.x = pa_block.x + view_block->x;  evcon->block.y = pa_block.y + view_block->y;
+    MousePositionEvent* event = &evcon->event.mouse_position;
+    // target the scrollbars first
+    if (view_block->scroller && view_block->scroller->pane) {
+        bool hover = scrollpane_target(evcon, view_block);
+        if (hover) {
+            printf("hit on block scroll: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
+            evcon->target = (View*)view_block;
+            evcon->offset_x = event->x - evcon->block.x;
+            evcon->offset_y = event->y - evcon->block.y;
+            goto RETURN;
+        }
+    }
     View* view = view_block->child;
     if (view) {
-        evcon->block.x = pa_block.x + view_block->x;  evcon->block.y = pa_block.y + view_block->y;
         if (view_block->font) {
             setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, view_block->font); 
         }        
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself
             int x = evcon->block.x, y = evcon->block.y;
-            MousePositionEvent* event = &evcon->event.mouse_position;
             if (x <= event->x && event->x < x + view_block->width &&
                 y <= event->y && event->y < y + view_block->height) {
                 printf("hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
                 evcon->target = (View*)view_block;
+                evcon->offset_x = event->x - evcon->block.x;
+                evcon->offset_y = event->y - evcon->block.y;                
             }
         }
     }
     else {
         printf("view has no child\n");
     }
+    RETURN:
     evcon->block = pa_block;  evcon->font = pa_font;
 }
 
@@ -146,12 +162,10 @@ void fire_text_event(EventContext* evcon, ViewText* text) {
 void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     printf("fire inline event\n");
     if (span->in_line && span->in_line->cursor) {
-        printf("changing to new cursor\n");
         evcon->new_cursor = span->in_line->cursor;
     }
     int name = ((lxb_html_element_t*)span->node)->element.node.local_name;
-    printf("fired at view %s, %d, %d\n", 
-        lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL), name, LXB_TAG_A);
+    printf("fired at view %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
@@ -169,8 +183,14 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     printf("fire block event\n");
     // fire as inline view first
     fire_inline_event(evcon, (ViewSpan*)block);
-    if (evcon->event.type == RDT_EVENT_SCROLL && block->scroller && block->scroller->pane) {
-        scrollpane_scroll(evcon, block->scroller->pane, &evcon->event.scroll);
+    if (block->scroller && block->scroller->pane) {
+        if (evcon->event.type == RDT_EVENT_SCROLL) {
+            scrollpane_scroll(evcon, block->scroller->pane);
+        }
+        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN && 
+            (block->scroller->pane->is_h_hovered || block->scroller->pane->is_v_hovered)) {
+            scrollpane_mouse_down(evcon, block);
+        }
     }
 }
 

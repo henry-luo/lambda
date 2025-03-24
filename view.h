@@ -85,6 +85,7 @@ typedef enum {
     RDT_VIEW_TABLE_HEADER_GROUP,
     RDT_VIEW_TABLE_FOOTER_GROUP,
     RDT_VIEW_TABLE_BODY_GROUP,
+    RDT_VIEW_SCROLL_PANE,
 } ViewType;
 
 typedef struct {
@@ -168,7 +169,10 @@ typedef struct {
     int content_width, content_height;
     int v_scroll_position, h_scroll_position;
     int v_max_scroll, h_max_scroll;
+    int v_handle_y, v_handle_height;
+    int h_handle_x, h_handle_width;
     
+    bool is_h_hovered, is_v_hovered;
     bool v_is_dragging, h_is_dragging;
     int drag_start_x, drag_start_y;
     int v_drag_start_scroll, h_drag_start_scroll;
