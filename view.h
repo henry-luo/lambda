@@ -166,15 +166,12 @@ typedef struct {
 
 typedef struct {
     int content_width, content_height;
-    int view_x, view_y;
-    int view_width, view_height;
     int v_scroll_position, h_scroll_position;
     int v_max_scroll, h_max_scroll;
     
     bool v_is_dragging, h_is_dragging;
     int drag_start_x, drag_start_y;
     int v_drag_start_scroll, h_drag_start_scroll;
-    
     int drag_speed;
     int scrollSpeed;
 } ScrollPane;

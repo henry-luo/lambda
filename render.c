@@ -5,8 +5,7 @@
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
-ScrollPane* scrollpane_create(int x, int y, int width, int height);
-void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, int content_width, int content_height);
+void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, int content_width, int content_height);
 
 // decode UTF8 to UTF32 codepoint, returns number of bytes consumed, or -1 on error.
 static int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
@@ -316,10 +315,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
         printf("render scrollbars\n");
         if (view_block->scroller->has_hz_scroll || view_block->scroller->has_vt_scroll) {
             if (!view_block->scroller->pane) {
-                view_block->scroller->pane = 
-                    scrollpane_create(rdcon->block.x, rdcon->block.y, view_block->width, view_block->height);
+                view_block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
             }
-            scrollpane_render(rdcon->canvas, view_block->scroller->pane, 
+            Rect rect = {rdcon->block.x, rdcon->block.y, view_block->width, view_block->height};
+            scrollpane_render(rdcon->canvas, view_block->scroller->pane, &rect,
                 view_block->content_width, view_block->content_height);
         }
     }

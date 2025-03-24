@@ -1,9 +1,13 @@
 #include "render.h"
 #include "handler.h"
 
-#define SCROLLBAR_SIZE 20
-#define MIN_HANDLE_SIZE 30
-#define HANDLE_RADIUS 10
+#define SCROLLBAR_SIZE 24
+#define MIN_HANDLE_SIZE 32
+#define HANDLE_RADIUS 8
+#define SCROLL_BORDER_MAIN 2
+#define SCROLL_BORDER_CROSS 4
+#define BAR_COLOR 0xF6
+#define HANDLE_COLOR 0xC0
 
 void tvg_shape_get_bounds(Tvg_Paint* shape, int* x, int* y, int* width, int* height) {
     Tvg_Matrix m;
@@ -30,66 +34,61 @@ float tvg_shape_get_h(Tvg_Paint* shape) {
     return p[2].y - p[0].y;
 }
 
-ScrollPane* scrollpane_create(int x, int y, int width, int height) {
-    ScrollPane* sp = (ScrollPane*)calloc(1, sizeof(ScrollPane));
-    sp->view_x = x;  sp->view_y = y;
-    sp->view_width = width;  sp->view_height = height;
-    return sp;
-}
-
-void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, int content_width, int content_height) {
+void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, 
+    int content_width, int content_height) {
     dzlog_debug("render scroller content size: %d x %d\n", content_width, content_height);
     sp->content_width = content_width;  sp->content_height = content_height;
     
+    int view_x = block_bound->x, view_y = block_bound->y;
+    int view_width = block_bound->width, view_height = block_bound->height;
+
     // Vertical scrollbar
     Tvg_Paint* v_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(v_scrollbar, sp->view_x + sp->view_width - SCROLLBAR_SIZE, 
-        sp->view_y, SCROLLBAR_SIZE, sp->view_height, 0, 0);
-    tvg_shape_set_fill_color(v_scrollbar, 200, 200, 200, 255);
+    tvg_shape_append_rect(v_scrollbar, view_x + view_width - SCROLLBAR_SIZE, 
+        view_y, SCROLLBAR_SIZE, view_height, 0, 0);
+    tvg_shape_set_fill_color(v_scrollbar, BAR_COLOR, BAR_COLOR, BAR_COLOR, 255);
 
     Tvg_Paint* v_scroll_handle = tvg_shape_new();
-    tvg_shape_set_fill_color(v_scroll_handle, 100, 100, 100, 255);
+    tvg_shape_set_fill_color(v_scroll_handle, HANDLE_COLOR, HANDLE_COLOR, HANDLE_COLOR, 255);
     if (content_height > 0) {
-        sp->v_max_scroll = content_height > sp->view_height ? content_height - sp->view_height : 0;
-        int v_ratio = sp->view_height * 100 / content_height;
-        int v_handle_height = (v_ratio * sp->view_height) / 100;
-        v_handle_height = v_handle_height < MIN_HANDLE_SIZE ? MIN_HANDLE_SIZE : v_handle_height;
-        int v_handle_y = sp->v_max_scroll > 0 ? 
-                        (sp->v_scroll_position * (sp->view_height - v_handle_height)) / sp->v_max_scroll : 0;
-        int v_scroll_x = sp->view_x + sp->view_width - SCROLLBAR_SIZE;
-        dzlog_debug("v_scroll_handle bounds: %d, %d, %d, %d, v_pos: %d\n", v_scroll_x, sp->view_y, 
-            SCROLLBAR_SIZE, v_handle_height, sp->v_scroll_position);
-        tvg_shape_append_rect(v_scroll_handle,
-            v_scroll_x, sp->view_y + v_handle_y, SCROLLBAR_SIZE, v_handle_height, HANDLE_RADIUS, HANDLE_RADIUS);
+        sp->v_max_scroll = content_height > view_height ? content_height - view_height : 0;
+        int bar_height = view_height - SCROLLBAR_SIZE - SCROLL_BORDER_MAIN * 2;
+        int v_ratio = view_height * 100 / content_height;
+        int v_handle_height = (v_ratio * bar_height) / 100;
+        v_handle_height = max(MIN_HANDLE_SIZE, v_handle_height);
+        int v_handle_y = SCROLL_BORDER_MAIN + (sp->v_max_scroll > 0 ? 
+                        (sp->v_scroll_position * (bar_height - v_handle_height)) / sp->v_max_scroll : 0);
+        int v_scroll_x = view_x + view_width - SCROLLBAR_SIZE + SCROLL_BORDER_CROSS;
+        tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + v_handle_y, 
+            SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, v_handle_height, HANDLE_RADIUS, HANDLE_RADIUS);
     }
     
     // Horizontal scrollbar
     Tvg_Paint* h_scrollbar = tvg_shape_new();
-    tvg_shape_append_rect(h_scrollbar, sp->view_x, 
-        sp->view_y + sp->view_height - SCROLLBAR_SIZE, sp->view_width, SCROLLBAR_SIZE, 0, 0);
-    tvg_shape_set_fill_color(h_scrollbar, 200, 200, 200, 255);
+    tvg_shape_append_rect(h_scrollbar, view_x, 
+        view_y + view_height - SCROLLBAR_SIZE, view_width, SCROLLBAR_SIZE, 0, 0);
+    tvg_shape_set_fill_color(h_scrollbar, BAR_COLOR, BAR_COLOR, BAR_COLOR, 255);
 
     Tvg_Paint* h_scroll_handle = tvg_shape_new();
-    tvg_shape_set_fill_color(h_scroll_handle, 100, 100, 100, 255);
+    tvg_shape_set_fill_color(h_scroll_handle, HANDLE_COLOR, HANDLE_COLOR, HANDLE_COLOR, 255);
     if (content_width > 0) {
-        sp->h_max_scroll = content_width > sp->view_width ? content_width - sp->view_width : 0;
-        int h_ratio = sp->view_width * 100 / content_width;
-        int h_handle_width = (h_ratio * sp->view_width) / 100;
-        h_handle_width = h_handle_width < MIN_HANDLE_SIZE ? MIN_HANDLE_SIZE : h_handle_width;
-        int h_handle_x = sp->h_max_scroll > 0 ? 
-                        (sp->h_scroll_position * (sp->view_width - h_handle_width)) / sp->h_max_scroll : 0;
-        int h_scroll_y = sp->view_y + sp->view_height - SCROLLBAR_SIZE;
-        dzlog_debug("h_scroll_handle bounds: %d, %d, %d, %d, h_pos: %d\n", 
-            sp->view_x + h_handle_x, h_scroll_y, h_handle_width, SCROLLBAR_SIZE, sp->h_scroll_position);
-        tvg_shape_append_rect(h_scroll_handle,
-            sp->view_x + h_handle_x, h_scroll_y, h_handle_width, SCROLLBAR_SIZE, HANDLE_RADIUS, HANDLE_RADIUS);
+        sp->h_max_scroll = content_width > view_width ? content_width - view_width : 0;
+        int bar_width = view_width - SCROLLBAR_SIZE - SCROLL_BORDER_MAIN * 2;
+        int h_ratio = view_width * 100 / content_width;
+        int h_handle_width = (h_ratio * bar_width) / 100;
+        h_handle_width = max(MIN_HANDLE_SIZE, h_handle_width);
+        int h_handle_x = SCROLL_BORDER_MAIN + (sp->h_max_scroll > 0 ? 
+                        (sp->h_scroll_position * (bar_width - h_handle_width)) / sp->h_max_scroll : 0);
+        int h_scroll_y = view_y + view_height - SCROLLBAR_SIZE + SCROLL_BORDER_CROSS;
+        tvg_shape_append_rect(h_scroll_handle, view_x + h_handle_x, h_scroll_y, 
+            h_handle_width, SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, HANDLE_RADIUS, HANDLE_RADIUS);
     }
 
-    if (sp->content_height > sp->view_height) {
+    if (sp->content_height > view_height) {
         tvg_canvas_push(canvas, v_scrollbar);
         tvg_canvas_push(canvas, v_scroll_handle);
     }
-    if (sp->content_width > sp->view_width) {
+    if (sp->content_width > view_width) {
         tvg_canvas_push(canvas, h_scrollbar);
         tvg_canvas_push(canvas, h_scroll_handle);
     }
