@@ -90,7 +90,6 @@ void layoutFlexContainer(FlexContainer* container) {
     int isReverse = (container->direction == DIR_ROW_REVERSE || container->direction == DIR_COLUMN_REVERSE);
     float mainSize = isRow ? container->width : container->height;
     float crossSize = isRow ? container->height : container->width;
-    // Handle zero or negative dimensions
     if (mainSize <= 0) mainSize = 0;
     if (crossSize <= 0) crossSize = 0;
 
@@ -104,11 +103,28 @@ void layoutFlexContainer(FlexContainer* container) {
     int lineCount = 0;
     createFlexLines(container, layoutItems, layoutCount, &lines, &lineCount);
 
-    // Process each line
-    float crossPos = 0;
+    // Calculate total cross size for wrap-reverse
+    float totalCrossSize = 0;
     for (int l = 0; l < lineCount; l++) {
-        processFlexLine(container, &lines[l], lines, mainSize, crossPos, isRow, isReverse);
-        crossPos += lines[l].height + (l < lineCount - 1 ? container->gap : 0);
+        totalCrossSize += lines[l].height;
+        if (l < lineCount - 1) totalCrossSize += container->gap;
+    }
+
+    // Process each line
+    float crossPos;
+    if (container->wrap == WRAP_WRAP_REVERSE && isRow) {
+        crossPos = crossSize;  // Start from bottom
+        for (int l = 0; l < lineCount; l++) {
+            crossPos -= lines[l].height;  // Move up by line height
+            processFlexLine(container, &lines[l], lines, mainSize, crossPos, isRow, isReverse);
+            if (l < lineCount - 1) crossPos -= container->gap;  // Add gap before next line
+        }
+    } else {
+        crossPos = 0;  // Start from top
+        for (int l = 0; l < lineCount; l++) {
+            processFlexLine(container, &lines[l], lines, mainSize, crossPos, isRow, isReverse);
+            crossPos += lines[l].height + (l < lineCount - 1 ? container->gap : 0);
+        }
     }
 
     // Update original items

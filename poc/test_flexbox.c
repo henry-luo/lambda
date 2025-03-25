@@ -231,6 +231,112 @@ Test(flexbox_tests, zero_size_container) {
     cleanupContainer(container);
 }
 
+// Add after existing tests, before the main function
+
+Test(flexbox_tests, min_max_constraints) {
+    FlexContainer* container = createTestContainer(3);
+    container->items[0] = (FlexItem){ 
+        .width = 200, 
+        .height = 100, 
+        .minWidth = 150, 
+        .maxWidth = 250, 
+        .flexGrow = 1, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[1] = (FlexItem){ 
+        .width = 100, 
+        .height = 100, 
+        .minWidth = 150, 
+        .maxWidth = 200, 
+        .flexShrink = 1, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[2] = (FlexItem){ 
+        .width = 300, 
+        .height = 100, 
+        .minWidth = 200, 
+        .maxWidth = 250, 
+        .flexGrow = 1, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layoutFlexContainer(container);
+
+    // Check that widths respect min/max constraints
+    cr_assert_float_eq(container->items[0].width, 250, 0.1, "Item 0 width should be at max");
+    cr_assert_float_eq(container->items[1].width, 150, 0.1, "Item 1 width should be at min");
+    cr_assert_float_eq(container->items[2].width, 250, 0.1, "Item 2 width should be at max");
+    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 260, 0.1, "Item 1 x");
+    cr_assert_float_eq(container->items[2].positionCoords.x, 420, 0.1, "Item 2 x");
+
+    cleanupContainer(container);
+}
+
+Test(flexbox_tests, wrap_reverse) {
+    FlexContainer* container = createTestContainer(3);
+    container->wrap = WRAP_WRAP_REVERSE;
+    container->width = 400;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layoutFlexContainer(container);
+
+    // In wrap-reverse, lines should stack bottom-to-top from container bottom
+    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[0].positionCoords.y, 500, 0.1, "Item 0 y");  // Changed from 220
+    cr_assert_float_eq(container->items[1].positionCoords.x, 0, 0.1, "Item 1 x");
+    cr_assert_float_eq(container->items[1].positionCoords.y, 390, 0.1, "Item 1 y");  // Changed from 110
+    cr_assert_float_eq(container->items[2].positionCoords.x, 0, 0.1, "Item 2 x");
+    cr_assert_float_eq(container->items[2].positionCoords.y, 280, 0.1, "Item 2 y");  // Changed from 0
+
+    cleanupContainer(container);
+}
+
+Test(flexbox_tests, nested_containers) {
+    // Outer container
+    FlexContainer* outer = createTestContainer(1);
+    outer->direction = DIR_COLUMN;
+    
+    // Inner container as an item
+    FlexContainer* inner = createTestContainer(2);
+    inner->width = 400;
+    inner->height = 200;
+    inner->items[0] = (FlexItem){ .width = 150, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    inner->items[1] = (FlexItem){ .width = 150, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    // Set inner container as an item in outer container
+    outer->items[0] = (FlexItem){
+        .width = 400,
+        .height = 200,
+        .position = POS_STATIC,
+        .visibility = VIS_VISIBLE
+    };
+
+    // Layout inner container first
+    layoutFlexContainer(inner);
+    
+    // Then layout outer container
+    layoutFlexContainer(outer);
+
+    // Check inner container items
+    cr_assert_float_eq(inner->items[0].positionCoords.x, 0, 0.1, "Inner item 0 x");
+    cr_assert_float_eq(inner->items[0].positionCoords.y, 0, 0.1, "Inner item 0 y");
+    cr_assert_float_eq(inner->items[1].positionCoords.x, 160, 0.1, "Inner item 1 x");
+    cr_assert_float_eq(inner->items[1].positionCoords.y, 0, 0.1, "Inner item 1 y");
+    
+    // Check outer container positioning
+    cr_assert_float_eq(outer->items[0].positionCoords.x, 0, 0.1, "Outer item 0 x");
+    cr_assert_float_eq(outer->items[0].positionCoords.y, 0, 0.1, "Outer item 0 y");
+
+    cleanupContainer(inner);
+    cleanupContainer(outer);
+}
+
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     struct criterion_test_set *tests = criterion_initialize();
