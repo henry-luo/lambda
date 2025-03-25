@@ -203,10 +203,17 @@ void layoutFlexContainer(FlexContainer* container) {
             } else {
                 line->items[idx]->positionCoords.y = currentPos;
             }
-            float extraSpace = (container->justify == JUSTIFY_SPACE_EVENLY || 
-                              (container->justify == JUSTIFY_SPACE_BETWEEN && i < line->itemCount - 1)) 
-                              ? spacing : 0;
-            currentPos += line->items[idx]->width + container->gap + extraSpace;
+            // Add item width
+            currentPos += line->items[idx]->width;
+            // Add gap and spacing only if not the last item
+            if (i < line->itemCount - 1) {
+                currentPos += container->gap;
+                if (container->justify == JUSTIFY_SPACE_BETWEEN || 
+                    container->justify == JUSTIFY_SPACE_EVENLY) {
+                    currentPos += spacing;
+                }
+            }
+            // For SPACE_EVENLY, add final spacing after last item (already accounted for in freeSpace)
             printf("Item %d: mainPos=%.1f\n", idx, currentPos);
         }
 
