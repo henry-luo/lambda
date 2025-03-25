@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include "flex.c"
 
-// Helper function to create a container with items
 FlexContainer* createTestContainer(int itemCount) {
     FlexContainer* container = malloc(sizeof(FlexContainer));
     *container = (FlexContainer){
@@ -26,7 +25,6 @@ void cleanupContainer(FlexContainer* container) {
     free(container);
 }
 
-// Test Suite
 Test(flexbox, basic_layout) {
     FlexContainer* container = createTestContainer(3);
     container->items[0] = (FlexItem){ .width = 200, .height = 100 };
@@ -35,11 +33,10 @@ Test(flexbox, basic_layout) {
 
     layoutFlexContainer(container);
 
-    // Check positions
-    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x position");
-    cr_assert_float_eq(container->items[0].positionCoords.y, 0, 0.1, "Item 0 y position");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 210, 0.1, "Item 1 x position");
-    cr_assert_float_eq(container->items[2].positionCoords.x, 420, 0.1, "Item 2 x position");
+    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 210, 0.1, "Item 1 x");
+    cr_assert_float_eq(container->items[2].positionCoords.x, 420, 0.1, "Item 2 x");
+    cr_assert_float_eq(container->items[0].positionCoords.y, 0, 0.1, "Item 0 y");
 
     cleanupContainer(container);
 }
@@ -51,30 +48,28 @@ Test(flexbox, flex_grow) {
 
     layoutFlexContainer(container);
 
-    // Total width = 800, base = 400 + 10 gap = 410, free space = 390
-    // Item 0 gets 1/3 of 390 = 130, Item 1 gets 2/3 = 260
-    cr_assert_float_eq(container->items[0].width, 330, 0.1, "Item 0 width with flex-grow");
-    cr_assert_float_eq(container->items[1].width, 460, 0.1, "Item 1 width with flex-grow");
-    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x position");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 340, 0.1, "Item 1 x position");
+    // 800 - (400 + 10) = 390 free space, 1:2 ratio = 130 + 260
+    cr_assert_float_eq(container->items[0].width, 330, 0.1, "Item 0 width");
+    cr_assert_float_eq(container->items[1].width, 460, 0.1, "Item 1 width");
+    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 340, 0.1, "Item 1 x");
 
     cleanupContainer(container);
 }
 
 Test(flexbox, flex_shrink) {
     FlexContainer* container = createTestContainer(2);
-    container->width = 400;  // Force shrinking
+    container->width = 400;
     container->items[0] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 1 };
     container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 2 };
 
     layoutFlexContainer(container);
 
-    // Total base = 600 + 10 gap = 610, available = 400, deficit = 210
-    // Item 0 shrinks by 1/3 of 210 = 70, Item 1 by 2/3 = 140
-    cr_assert_float_eq(container->items[0].width, 230, 0.1, "Item 0 width with flex-shrink");
-    cr_assert_float_eq(container->items[1].width, 160, 0.1, "Item 1 width with flex-shrink");
-    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x position");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 240, 0.1, "Item 1 x position");
+    // 400 - (600 + 10) = -210 deficit, 1:2 ratio = 70 + 140 reduction
+    cr_assert_float_eq(container->items[0].width, 230, 0.1, "Item 0 width");
+    cr_assert_float_eq(container->items[1].width, 160, 0.1, "Item 1 width");
+    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 240, 0.1, "Item 1 x");
 
     cleanupContainer(container);
 }
@@ -89,10 +84,13 @@ Test(flexbox, wrap) {
 
     layoutFlexContainer(container);
 
-    // First line: Item 0, Second line: Item 1 and 2 (simplified check)
-    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x position");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 0, 0.1, "Item 1 x position on new line");
-    cr_assert_float_eq(container->items[2].positionCoords.x, 210, 0.1, "Item 2 x position");
+    // Each item on its own line: 400 - 200 = 200 free space per line
+    cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[0].positionCoords.y, 0, 0.1, "Item 0 y");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 0, 0.1, "Item 1 x");
+    cr_assert_float_eq(container->items[1].positionCoords.y, 110, 0.1, "Item 1 y");
+    cr_assert_float_eq(container->items[2].positionCoords.x, 0, 0.1, "Item 2 x");
+    cr_assert_float_eq(container->items[2].positionCoords.y, 220, 0.1, "Item 2 y");
 
     cleanupContainer(container);
 }
@@ -105,10 +103,9 @@ Test(flexbox, justify_content) {
 
     layoutFlexContainer(container);
 
-    // Total width = 800, items = 400 + 10 gap = 410, free space = 390
-    // Space evenly: 390 / 3 = 130 between each and edges
-    cr_assert_float_eq(container->items[0].positionCoords.x, 130, 0.1, "Item 0 x with space-evenly");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 340, 0.1, "Item 1 x with space-evenly");
+    // 800 - (400 + 10) = 390, 390 / 3 = 130 spacing
+    cr_assert_float_eq(container->items[0].positionCoords.x, 130, 0.1, "Item 0 x");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 340, 0.1, "Item 1 x");
 
     cleanupContainer(container);
 }
@@ -121,14 +118,12 @@ Test(flexbox, align_items) {
 
     layoutFlexContainer(container);
 
-    // Container height = 600, items centered vertically
-    cr_assert_float_eq(container->items[0].positionCoords.y, 250, 0.1, "Item 0 y with align center");
-    cr_assert_float_eq(container->items[1].positionCoords.y, 225, 0.1, "Item 1 y with align center");
+    cr_assert_float_eq(container->items[0].positionCoords.y, 250, 0.1, "Item 0 y");
+    cr_assert_float_eq(container->items[1].positionCoords.y, 225, 0.1, "Item 1 y");
 
     cleanupContainer(container);
 }
 
-// Run all tests
 int main(int argc, char *argv[]) {
     struct criterion_test_set *tests = criterion_initialize();
     // criterion_options_t options = { .no_early_exit = false };
@@ -137,4 +132,4 @@ int main(int argc, char *argv[]) {
     return result ? 0 : 1;
 }
 
-// zig cc -o flex_test.exe flex_test.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
+// zig cc -o test_flexbox.exe test_flexbox.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib

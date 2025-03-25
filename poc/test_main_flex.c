@@ -225,4 +225,4 @@ Test(FlexboxEnhanced, EmptyContainer) {
     destroyFlexNode(root);
 }
 
-// clang -o test_flex.exe test_flex.c layout_flex.c ../lib/strbuf.c -I/usr/local/include/lexbor -L/usr/local/lib -llexbor -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -I./lib -rpath /usr/local/lib
+// clang -o test_flex.exe test_main_flex.c layout_flex.c ../lib/strbuf.c -I/usr/local/include/lexbor -L/usr/local/lib -llexbor -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -I./lib -rpath /usr/local/lib
