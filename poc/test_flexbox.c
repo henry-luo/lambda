@@ -1,5 +1,6 @@
 #include <criterion/criterion.h>
 #include <criterion/new/assert.h>
+#include <criterion/logging.h>
 #include <stdlib.h>
 #include "flex.c"
 
@@ -27,9 +28,9 @@ void cleanupContainer(FlexContainer* container) {
 
 Test(flexbox, basic_layout) {
     FlexContainer* container = createTestContainer(3);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100 };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100 };
-    container->items[2] = (FlexItem){ .width = 200, .height = 100 };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layoutFlexContainer(container);
 
@@ -43,12 +44,11 @@ Test(flexbox, basic_layout) {
 
 Test(flexbox, flex_grow) {
     FlexContainer* container = createTestContainer(2);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 1 };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 2 };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layoutFlexContainer(container);
 
-    // 800 - (400 + 10) = 390 free space, 1:2 ratio = 130 + 260
     cr_assert_float_eq(container->items[0].width, 330, 0.1, "Item 0 width");
     cr_assert_float_eq(container->items[1].width, 460, 0.1, "Item 1 width");
     cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
@@ -60,12 +60,11 @@ Test(flexbox, flex_grow) {
 Test(flexbox, flex_shrink) {
     FlexContainer* container = createTestContainer(2);
     container->width = 400;
-    container->items[0] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 1 };
-    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 2 };
+    container->items[0] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layoutFlexContainer(container);
 
-    // 400 - (600 + 10) = -210 deficit, 1:2 ratio = 70 + 140 reduction
     cr_assert_float_eq(container->items[0].width, 230, 0.1, "Item 0 width");
     cr_assert_float_eq(container->items[1].width, 160, 0.1, "Item 1 width");
     cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
@@ -78,13 +77,12 @@ Test(flexbox, wrap) {
     FlexContainer* container = createTestContainer(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->items[0] = (FlexItem){ .width = 200, .height = 100 };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100 };
-    container->items[2] = (FlexItem){ .width = 200, .height = 100 };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layoutFlexContainer(container);
 
-    // Each item on its own line: 400 - 200 = 200 free space per line
     cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Item 0 x");
     cr_assert_float_eq(container->items[0].positionCoords.y, 0, 0.1, "Item 0 y");
     cr_assert_float_eq(container->items[1].positionCoords.x, 0, 0.1, "Item 1 x");
@@ -98,12 +96,11 @@ Test(flexbox, wrap) {
 Test(flexbox, justify_content) {
     FlexContainer* container = createTestContainer(2);
     container->justify = JUSTIFY_SPACE_EVENLY;
-    container->items[0] = (FlexItem){ .width = 200, .height = 100 };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100 };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layoutFlexContainer(container);
 
-    // 800 - (400 + 10) = 390, 390 / 3 = 130 spacing
     cr_assert_float_eq(container->items[0].positionCoords.x, 130, 0.1, "Item 0 x");
     cr_assert_float_eq(container->items[1].positionCoords.x, 340, 0.1, "Item 1 x");
 
@@ -113,8 +110,8 @@ Test(flexbox, justify_content) {
 Test(flexbox, align_items) {
     FlexContainer* container = createTestContainer(2);
     container->alignItems = ALIGN_CENTER;
-    container->items[0] = (FlexItem){ .width = 200, .height = 100 };
-    container->items[1] = (FlexItem){ .width = 200, .height = 150 };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layoutFlexContainer(container);
 
@@ -124,9 +121,12 @@ Test(flexbox, align_items) {
     cleanupContainer(container);
 }
 
+// Simplified main function
 int main(int argc, char *argv[]) {
+    // Disable stdout buffering to ensure immediate output
+    setbuf(stdout, NULL);
+
     struct criterion_test_set *tests = criterion_initialize();
-    // criterion_options_t options = { .no_early_exit = false };
     int result = criterion_run_all_tests(tests);
     criterion_finalize(tests);
     return result ? 0 : 1;
