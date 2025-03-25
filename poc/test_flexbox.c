@@ -142,6 +142,7 @@ Test(flexbox_tests, all_tests) {
         container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
         container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
+        printf("Running column direction test, direction=%d\n", container->direction);
         layoutFlexContainer(container);
 
         cr_assert_float_eq(container->items[0].positionCoords.x, 0, 0.1, "Column: Item 0 x");

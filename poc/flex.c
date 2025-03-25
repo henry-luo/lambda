@@ -195,6 +195,14 @@ void layoutFlexContainer(FlexContainer* container) {
         }
         printf("Main axis: mainPos=%.1f, spacing=%.1f\n", mainPos, spacing);
 
+        // Adjust starting position for reverse directions
+        if (isReverse) {
+            float totalSize = line->totalBaseSize + (container->justify == JUSTIFY_SPACE_EVENLY ? 
+                spacing * (line->itemCount + 1) : 
+                spacing * (line->itemCount > 1 ? line->itemCount - 1 : 0));
+            mainPos = (isRow ? container->width : container->height) - totalSize;
+        }
+
         float currentPos = mainPos;
         for (int i = 0; i < line->itemCount; i++) {
             int idx = isReverse ? line->itemCount - 1 - i : i;
@@ -203,7 +211,7 @@ void layoutFlexContainer(FlexContainer* container) {
             } else {
                 line->items[idx]->positionCoords.y = currentPos;
             }
-            currentPos += isRow ? line->items[idx]->width : line->items[idx]->height;  // Fixed: use height in column mode
+            currentPos += isRow ? line->items[idx]->width : line->items[idx]->height;
             if (i < line->itemCount - 1) {
                 currentPos += container->gap;
                 if (container->justify == JUSTIFY_SPACE_BETWEEN || 
@@ -211,7 +219,7 @@ void layoutFlexContainer(FlexContainer* container) {
                     currentPos += spacing;
                 }
             }
-            printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);  // Fixed: print correct coordinate
+            printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
         } 
 
         // Cross axis positioning
