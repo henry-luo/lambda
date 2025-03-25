@@ -90,7 +90,9 @@ void layoutFlexContainer(FlexContainer* container) {
     int isReverse = (container->direction == DIR_ROW_REVERSE || container->direction == DIR_COLUMN_REVERSE);
     float mainSize = isRow ? container->width : container->height;
     float crossSize = isRow ? container->height : container->width;
-    assert(mainSize > 0 && crossSize > 0 && "Container dimensions must be positive");
+    // Handle zero or negative dimensions
+    if (mainSize <= 0) mainSize = 0;
+    if (crossSize <= 0) crossSize = 0;
 
     // Filter and initialize items
     FlexItem* layoutItems = malloc(container->itemCount * sizeof(FlexItem));
@@ -142,6 +144,9 @@ static void createFlexLines(FlexContainer* container, FlexItem* layoutItems, int
                          ? container->width : container->height;
     FlexLine currentLine = { .items = NULL, .itemCount = 0, .totalBaseSize = 0, .height = 0 };
     
+    *lineCount = 0;
+    *lines = NULL;
+
     for (int i = 0; i < layoutCount; i++) {
         float itemSize = layoutItems[i].width;
         float spaceNeeded = itemSize + (currentLine.itemCount > 0 ? container->gap : 0);
@@ -156,10 +161,13 @@ static void createFlexLines(FlexContainer* container, FlexItem* layoutItems, int
             if (currentLine.itemCount > 0) {
                 *lines = realloc(*lines, (*lineCount + 1) * sizeof(FlexLine));
                 (*lines)[(*lineCount)++] = currentLine;
+                currentLine = (FlexLine){ .items = NULL, .itemCount = 0, .totalBaseSize = 0, .height = 0 };
             }
-            currentLine = (FlexLine){ .items = malloc(sizeof(FlexItem*)), .itemCount = 1, 
-                                    .totalBaseSize = itemSize, .height = layoutItems[i].height };
+            currentLine.items = realloc(currentLine.items, sizeof(FlexItem*));
             currentLine.items[0] = &layoutItems[i];
+            currentLine.itemCount = 1;
+            currentLine.totalBaseSize = itemSize;
+            currentLine.height = layoutItems[i].height;
             remainingSpace = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE) 
                            ? container->width - itemSize : container->height - itemSize;
         }
@@ -167,6 +175,8 @@ static void createFlexLines(FlexContainer* container, FlexItem* layoutItems, int
     if (currentLine.itemCount > 0) {
         *lines = realloc(*lines, (*lineCount + 1) * sizeof(FlexLine));
         (*lines)[(*lineCount)++] = currentLine;
+    } else {
+        free(currentLine.items);  // Clean up if no items were added
     }
     printf("Created %d lines\n", *lineCount);
 }
@@ -232,7 +242,7 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
 
     float currentPos;
     if (isReverse) {
-        currentPos = mainSize - mainPos;  // Start from right/bottom edge
+        currentPos = mainSize;  // Start from the far end
         for (int i = 0; i < line->itemCount; i++) {
             int idx = line->itemCount - 1 - i;
             currentPos -= (isRow ? line->items[idx]->width : line->items[idx]->height);
@@ -251,7 +261,8 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
             }
             printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
         }
-    } else {
+    } 
+    else {
         currentPos = mainPos;
         for (int i = 0; i < line->itemCount; i++) {
             int idx = i;
