@@ -5,7 +5,12 @@ void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
 
-char *fallback_fonts[] = {"PingFang SC", "Helvetica Neue", "San Francisco", NULL};
+char *fallback_fonts[] = {
+    "PingFang SC", // Chinese, partial Japanese and Korean
+    "Helvetica Neue", // Latin, Cyrillic, Greek, Vietnamese, Turkish
+    "Times New Roman", // for Arabic
+    NULL
+};
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
