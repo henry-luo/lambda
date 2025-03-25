@@ -105,6 +105,33 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     return face;
 }
 
+FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint) {
+    FT_GlyphSlot slot = NULL;  FT_Error error;
+    FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
+    if (char_index > 0) {
+        error = FT_Load_Glyph(face, char_index, FT_LOAD_RENDER);
+        if (!error) { slot = face->glyph;  return slot; } 
+    }
+    
+    // failed to load glyph under current font, try fallback fonts
+    dzlog_debug("failed to load glyph: %u", codepoint);
+    char** font_ptr = uicon->fallback_fonts;
+    while (*font_ptr) {
+        dzlog_debug("trying fallback font '%s' for char: %u", *font_ptr, codepoint);
+        FT_Face fallback_face = load_styled_font(uicon, *font_ptr, font_style);
+        if (fallback_face) {
+            char_index = FT_Get_Char_Index(fallback_face, codepoint);
+            if (char_index > 0) {
+                error = FT_Load_Glyph(fallback_face, char_index, FT_LOAD_RENDER);
+                if (!error) { slot = fallback_face->glyph;  return slot; } 
+            }
+            dzlog_debug("failed to load glyph from fallback font: %s, %u", *font_ptr, codepoint);
+        }
+        font_ptr++;
+    }
+    return NULL;
+}
+
 void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
     fbox->style = *fprop;
     fbox->face = load_styled_font(uicon, fprop->family ? fprop->family : font_name, fprop);
@@ -133,4 +160,4 @@ void fontface_cleanup(UiContext* uicon) {
     }
 }
 
-// todo: cache glyph advvance_x
+// todo: cache glyph advance_x

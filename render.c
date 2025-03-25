@@ -7,34 +7,6 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, int content_width, int content_height);
 
-// decode UTF8 to UTF32 codepoint, returns number of bytes consumed, or -1 on error.
-static int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
-    unsigned char c = utf8[0];
-    
-    if (c <= 0x7F) {  // 1-byte sequence (ASCII)
-        *codepoint = c;
-        return 1;
-    }
-    if ((c & 0xE0) == 0xC0) {  // 2-byte sequence
-        if ((utf8[1] & 0xC0) != 0x80) return -1;
-        *codepoint = ((c & 0x1F) << 6) | (utf8[1] & 0x3F);
-        return 2;
-    }
-    if ((c & 0xF0) == 0xE0) {  // 3-byte sequence
-        if ((utf8[1] & 0xC0) != 0x80 || (utf8[2] & 0xC0) != 0x80) return -1;
-        *codepoint = ((c & 0x0F) << 12) | ((utf8[1] & 0x3F) << 6) | (utf8[2] & 0x3F);
-        return 3;
-    }
-    if ((c & 0xF8) == 0xF0) {  // 4-byte sequence
-        if ((utf8[1] & 0xC0) != 0x80 || (utf8[2] & 0xC0) != 0x80 || 
-            (utf8[3] & 0xC0) != 0x80) return -1;
-        *codepoint = ((c & 0x07) << 18) | ((utf8[1] & 0x3F) << 12) | 
-                     ((utf8[2] & 0x3F) << 6) | (utf8[3] & 0x3F);
-        return 4;
-    }
-    return -1;  // Invalid UTF-8 sequence
-}
-
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     int left = max(rdcon->block.clip.x, x);
@@ -96,35 +68,23 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         else {
             has_space = false;
             int bytes = utf8_to_codepoint(p, &codepoint);
-            if (bytes <= 0) {
-                p++;  continue;
-            }
-            p += bytes;  // printf("codepoint: %d, bytes: %d\n", codepoint, bytes);
+            if (bytes <= 0) { p++;  codepoint = 0; }
+            else { p += bytes; }
 
-            // FT_UInt glyph_index = FT_Get_Char_Index(ft_face, utf32_str[i]);
-            // ret = FT_Load_Glyph(ft_face, glyph_index, FT_LOAD_RENDER);
-            // if (ret != 0) {
-            //   fprintf(stderr, "FT_Load_Glyph() failed.\n");
-            //   return 0;
-            // }            
-            if (FT_Load_Char(rdcon->font.face, codepoint, FT_LOAD_RENDER)) {
-                printf("Could not load character '%c'\n", *p);
-                continue;
+            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face, &rdcon->font.style, codepoint);
+            if (!glyph) {
+                // draw a square box for missing glyph
+                Rect rect = {x + 1, y, rdcon->font.space_width - 2, rdcon->font.face->size->metrics.y_ppem >> 6};
+                fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
+                x += rdcon->font.space_width;
             }
-            if (!rdcon->font.face->glyph) {
-                printf("font glyph is null\n");
-                // todo: render a placeholder
-                continue;
+            else {
+                // draw the glyph to the image buffer
+                int ascend = rdcon->font.face->size->metrics.ascender >> 6; // still use orginal font ascend to align glyphs at same baseline
+                draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
+                // advance to the next position
+                x += glyph->advance.x >> 6;
             }
-            // draw the glyph to the image buffer
-            int ascend = rdcon->font.face->size->metrics.ascender >> 6;
-            // printf("draw_glyph: %c, x:%f, y:%f, asc:%d, btop:%d\n", *p, x + rdcon->font.face->glyph->bitmap_left, 
-            //     y + ascend - rdcon->font.face->glyph->bitmap_top, ascend, rdcon->font.face->glyph->bitmap_top);
-            draw_glyph(rdcon, &rdcon->font.face->glyph->bitmap, x + rdcon->font.face->glyph->bitmap_left, 
-                y + ascend - rdcon->font.face->glyph->bitmap_top);
-            // advance to the next position
-            int wd = rdcon->font.face->glyph->advance.x >> 6;
-            x += wd;
         }
     }
     // render text deco

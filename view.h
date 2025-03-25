@@ -166,7 +166,6 @@ typedef struct {
 } ViewSpan;
 
 typedef struct {
-    int content_width, content_height;
     int v_scroll_position, h_scroll_position;
     int v_max_scroll, h_max_scroll;
     int v_handle_y, v_handle_height;
@@ -176,8 +175,8 @@ typedef struct {
     bool v_is_dragging, h_is_dragging;
     int drag_start_x, drag_start_y;
     int v_drag_start_scroll, h_drag_start_scroll;
-    int drag_speed;
-    int scrollSpeed;
+    // int drag_speed;
+    // int scrollSpeed;
 } ScrollPane;
 
 typedef struct {
@@ -258,6 +257,7 @@ typedef struct {
     FT_Library ft_library;
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style
+    char** fallback_fonts;  // fallback fonts
 
     // image cache
     struct hashmap* image_cache;  // cache for images loaded
@@ -268,6 +268,7 @@ typedef struct {
 } UiContext;
 
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
+extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint);
 extern void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
 
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);

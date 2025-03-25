@@ -102,8 +102,9 @@ void output_text(LayoutContext* lycon, ViewText* text, int text_length, int text
 }
 
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
+    unsigned char* next_ch;
     unsigned char* text_start = text_node->char_data.data.data;  
-    unsigned char* str = text_start;  printf("layout text: %s\n", str);
+    unsigned char* str = text_start;  
     if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) { // skip space at start of line
         do { str++; } while (is_space(*str));
         if (!*str) return;
@@ -134,17 +135,21 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     // layout the text glyphs
     do {
         int wd;
-        // printf("char: %c\n", *str);
         if (is_space(*str)) {
             wd = lycon->font.space_width;
         }
         else {
-            if (FT_Load_Char(lycon->font.face, *str, FT_LOAD_RENDER)) {
-                fprintf(stderr, "Could not load character '%c'\n", *str);
-                return;
+            uint32_t codepoint = *str;  FT_Error error;
+            if (codepoint >= 128) { // unicode char
+                int bytes = utf8_to_codepoint(str, &codepoint);
+                if (bytes <= 0) { // invalid utf8 char
+                    next_ch = str + 1;  codepoint = 0;
+                }
+                else { next_ch = str + bytes; }
             }
-            FT_GlyphSlot slot = lycon->font.face->glyph;  
-            wd = slot->advance.x >> 6;
+            else { next_ch = str + 1; } 
+            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face, &lycon->font.style, codepoint);
+            wd = glyph ? (glyph->advance.x >> 6) : lycon->font.space_width;
         }
         // printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
@@ -183,7 +188,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
             lycon->line.has_space = true;
         }
         else { 
-            str++;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
+            str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
         }
     } while (*str);
     // end of text
