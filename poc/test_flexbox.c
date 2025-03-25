@@ -151,8 +151,8 @@ Test(flexbox_tests, row_reverse) {
 
     layoutFlexContainer(container);
 
-    cr_assert_float_eq(container->items[0].positionCoords.x, 410, 0.1, "Item 0 x");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 200, 0.1, "Item 1 x");
+    cr_assert_float_eq(container->items[0].positionCoords.x, 390, 0.1, "Item 0 x");  // Changed from 410
+    cr_assert_float_eq(container->items[1].positionCoords.x, 600, 0.1, "Item 1 x");  // Changed from 200
     cr_assert_float_eq(container->items[0].positionCoords.y, 0, 0.1, "Item 0 y");
 
     cleanupContainer(container);

@@ -184,23 +184,24 @@ static void createFlexLines(FlexContainer* container, FlexItem* layoutItems, int
 static void processFlexLine(FlexContainer* container, FlexLine* line, FlexLine* lines, float mainSize, float crossPos, 
                           int isRow, int isReverse) {
     float freeSpace = mainSize - line->totalBaseSize;
-    // When mainSize is 0, don't apply gaps and force items to stack
     if (mainSize <= 0) {
         freeSpace = 0;
-        line->totalBaseSize = 0;  // Reset to prevent negative freeSpace
+        line->totalBaseSize = 0;
         for (int i = 0; i < line->itemCount; i++) {
-            line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height);
+            // When mainSize is 0, stack items without gaps
+            line->totalBaseSize += 0;  // Don't accumulate size
         }
+    } else {
+        applyFlexAdjustments(line, lines, freeSpace);
+        
+        // Recalculate total size after flex adjustments
+        line->totalBaseSize = 0;
+        for (int i = 0; i < line->itemCount; i++) {
+            line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height) + 
+                                 (i > 0 ? container->gap : 0);
+        }
+        freeSpace = mainSize - line->totalBaseSize;
     }
-    applyFlexAdjustments(line, lines, freeSpace);
-    
-    // Recalculate total size after flex adjustments
-    line->totalBaseSize = 0;
-    for (int i = 0; i < line->itemCount; i++) {
-        line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height) + 
-                              (mainSize > 0 && i > 0 ? container->gap : 0);
-    }
-    freeSpace = mainSize <= 0 ? 0 : (mainSize - line->totalBaseSize);
     
     positionItemsMainAxis(container, line, mainSize, isRow, isReverse);
     positionItemsCrossAxis(container, line, isRow ? container->height : container->width, crossPos, isRow);
@@ -251,17 +252,16 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
 
     float currentPos;
     if (isReverse) {
-        // Fixed reverse positioning
-        currentPos = mainSize - mainPos;  // Start from end minus justified offset
-        for (int i = 0; i < line->itemCount; i++) {
-            int idx = line->itemCount - 1 - i;
-            currentPos -= (isRow ? line->items[idx]->width : line->items[idx]->height);
+        currentPos = mainSize - mainPos;  // Start from right edge adjusted by justification
+        for (int i = line->itemCount - 1; i >= 0; i--) {  // Count down from last item
             if (isRow) {
-                line->items[idx]->positionCoords.x = currentPos;
+                line->items[i]->positionCoords.x = currentPos - line->items[i]->width;
+                currentPos = line->items[i]->positionCoords.x;
             } else {
-                line->items[idx]->positionCoords.y = currentPos;
+                line->items[i]->positionCoords.y = currentPos - line->items[i]->height;
+                currentPos = line->items[i]->positionCoords.y;
             }
-            if (i < line->itemCount - 1) {
+            if (i > 0) {  // Apply gap/spacing before next item
                 currentPos -= container->gap;
                 if (container->justify == JUSTIFY_SPACE_BETWEEN || 
                     container->justify == JUSTIFY_SPACE_EVENLY ||
@@ -269,7 +269,7 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
                     currentPos -= spacing;
                 }
             }
-            printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
+            printf("Item %d: pos=%.1f\n", i, isRow ? line->items[i]->positionCoords.x : line->items[i]->positionCoords.y);
         }
     } else {
         currentPos = mainPos;
