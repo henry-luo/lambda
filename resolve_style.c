@@ -385,7 +385,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     }
 }
 
-PropValue resolve_element_display(lxb_html_element_t* elmt) {
+DisplayValue resolve_display(lxb_html_element_t* elmt) {
     PropValue outer_display, inner_display;
     // determine element 'display'
     int name = elmt->element.node.local_name;  // todo: should check ns as well 
@@ -424,7 +424,7 @@ PropValue resolve_element_display(lxb_html_element_t* elmt) {
             inner_display = display_decl->u.display->b;
         }
     }
-    return outer_display;
+    return (DisplayValue){.outer = outer_display, .inner = inner_display};
 }
 
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,

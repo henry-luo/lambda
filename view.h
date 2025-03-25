@@ -89,6 +89,11 @@ typedef enum {
 } ViewType;
 
 typedef struct {
+    PropValue outer;
+    PropValue inner;
+} DisplayValue;
+
+typedef struct {
     char* family;  // font family name
     int font_size;  // font size in pixels, scaled by pixel_ratio
     PropValue font_style;

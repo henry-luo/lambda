@@ -68,10 +68,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
     }
 }
 
-void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue display) {
+void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
     dzlog_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
-    if (display != LXB_CSS_VALUE_INLINE_BLOCK) {
+    if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
     // save parent context
@@ -85,7 +85,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     uintptr_t elmt_name = elmt->element.node.local_name;
     ViewBlock* block = elmt_name == LXB_TAG_IMG ? 
         (ViewBlock*)alloc_view(lycon, RDT_VIEW_IMAGE, (lxb_dom_node_t*)elmt) :
-        (ViewBlock*)alloc_view(lycon, display == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
+        (ViewBlock*)alloc_view(lycon, 
+            display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : 
+            (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK), 
+            (lxb_dom_node_t*)elmt);
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     
@@ -291,20 +294,20 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             do {
-                layout_node(lycon, child);
+                layout_flow_node(lycon, child);
                 child = lxb_dom_node_next(child);
             } while (child);
             // handle last line
             if (!lycon->line.is_line_start) { line_break(lycon); }
             lycon->parent = block->parent;
         }
-        finalize_block_flow(lycon, block, display, &pa_block);
+        finalize_block_flow(lycon, block, display.outer, &pa_block);
     }
 
     // flow the block in parent context
     dzlog_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
-    if (display == LXB_CSS_VALUE_INLINE_BLOCK) {
+    if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (lycon->line.advance_x + block->width >= lycon->line.right) { 
             line_break(lycon);
             block->x = lycon->line.left;
@@ -337,9 +340,4 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, PropValue disp
     }
     lycon->prev_view = (View*)block;
     dzlog_debug("block view: %d, end block>>\n", block->type);
-}
-
-void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt) {
-    layout_block(lycon, elmt, LXB_CSS_VALUE_BLOCK);
-    lycon->prev_view->type = RDT_VIEW_LIST_ITEM;
 }

@@ -3,7 +3,6 @@
 void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
-void layout_list_item(LayoutContext* lycon, lxb_html_element_t *elmt);
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node);
 char* readTextFile(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display, Blockbox* pa_block);
@@ -124,7 +123,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (child) {
         lycon->parent = (ViewGroup*)span;  lycon->prev_view = NULL;
         do {
-            layout_node(lycon, child);
+            layout_flow_node(lycon, child);
             child = lxb_dom_node_next(child);
         } while (child);
         lycon->parent = span->parent;
@@ -134,28 +133,24 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
 }
 
-void layout_node(LayoutContext* lycon, lxb_dom_node_t *node) {
+void layout_flow_node(LayoutContext* lycon, lxb_dom_node_t *node) {
     printf("layout node %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
     if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
         printf("Element: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
         lxb_html_element_t *elmt = lxb_html_interface_element(node);
-        PropValue outer_display = resolve_element_display(elmt);
-        if (outer_display == LXB_CSS_VALUE_BLOCK) {
-            layout_block(lycon, elmt, outer_display);
-        }
-        else if (outer_display == LXB_CSS_VALUE_INLINE) {
+        DisplayValue display = resolve_display(elmt);
+        switch (display.outer) {
+        case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
+        case LXB_CSS_VALUE_LIST_ITEM:
+            layout_block(lycon, elmt, display);
+            break;
+        case LXB_CSS_VALUE_INLINE:
             layout_inline(lycon, elmt);
-        }
-        else if (outer_display == LXB_CSS_VALUE_INLINE_BLOCK) {
-            layout_block(lycon, elmt, outer_display);
-        }
-        else if (outer_display == LXB_CSS_VALUE_LIST_ITEM) {
-            layout_list_item(lycon, elmt);
-        }
-        else if (outer_display == LXB_CSS_VALUE_NONE) {
+            break;
+        case LXB_CSS_VALUE_NONE:
             printf("skipping elemnt of display: none\n");
-        }
-        else {
+            break;
+        default:
             printf("unknown display type\n");
             // skip the element
         }
@@ -294,8 +289,8 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     // layout body content
     lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
     if (body) {
-        printf("layout body\n");
-        layout_block(lycon, (lxb_html_element_t*)body, LXB_CSS_VALUE_BLOCK);  
+        layout_block(lycon, (lxb_html_element_t*)body, 
+            (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});  
     } else {
         printf("No body element found\n");
     }

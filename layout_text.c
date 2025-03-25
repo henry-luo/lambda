@@ -45,7 +45,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* node) 
         }
         else if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
             lxb_html_element_t *elmt = lxb_html_interface_element(node);
-            PropValue outer_display = resolve_element_display(elmt);  
+            PropValue outer_display = resolve_display(elmt).outer;  
             if (outer_display == LXB_CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
             else if (outer_display == LXB_CSS_VALUE_INLINE) {
                 LineFillStatus result = span_has_line_filled(lycon, node);
