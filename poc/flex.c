@@ -184,14 +184,23 @@ static void createFlexLines(FlexContainer* container, FlexItem* layoutItems, int
 static void processFlexLine(FlexContainer* container, FlexLine* line, FlexLine* lines, float mainSize, float crossPos, 
                           int isRow, int isReverse) {
     float freeSpace = mainSize - line->totalBaseSize;
+    // When mainSize is 0, don't apply gaps and force items to stack
+    if (mainSize <= 0) {
+        freeSpace = 0;
+        line->totalBaseSize = 0;  // Reset to prevent negative freeSpace
+        for (int i = 0; i < line->itemCount; i++) {
+            line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height);
+        }
+    }
     applyFlexAdjustments(line, lines, freeSpace);
     
     // Recalculate total size after flex adjustments
     line->totalBaseSize = 0;
     for (int i = 0; i < line->itemCount; i++) {
-        line->totalBaseSize += line->items[i]->width + (i > 0 ? container->gap : 0);
+        line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height) + 
+                              (mainSize > 0 && i > 0 ? container->gap : 0);
     }
-    freeSpace = mainSize - line->totalBaseSize;
+    freeSpace = mainSize <= 0 ? 0 : (mainSize - line->totalBaseSize);
     
     positionItemsMainAxis(container, line, mainSize, isRow, isReverse);
     positionItemsCrossAxis(container, line, isRow ? container->height : container->width, crossPos, isRow);
@@ -242,7 +251,8 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
 
     float currentPos;
     if (isReverse) {
-        currentPos = mainSize;  // Start from the far end
+        // Fixed reverse positioning
+        currentPos = mainSize - mainPos;  // Start from end minus justified offset
         for (int i = 0; i < line->itemCount; i++) {
             int idx = line->itemCount - 1 - i;
             currentPos -= (isRow ? line->items[idx]->width : line->items[idx]->height);
@@ -261,8 +271,7 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
             }
             printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
         }
-    } 
-    else {
+    } else {
         currentPos = mainPos;
         for (int i = 0; i < line->itemCount; i++) {
             int idx = i;
