@@ -137,4 +137,4 @@ int main(int argc, char *argv[]) {
     return result ? 0 : 1;
 }
 
-// zig cc -o flex_test flex_test.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
+// zig cc -o flex_test.exe flex_test.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
