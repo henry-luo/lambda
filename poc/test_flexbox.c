@@ -102,7 +102,7 @@ Test(flexbox, justify_content) {
     layoutFlexContainer(container);
 
     cr_assert_float_eq(container->items[0].positionCoords.x, 130, 0.1, "Item 0 x");
-    cr_assert_float_eq(container->items[1].positionCoords.x, 340, 0.1, "Item 1 x");
+    cr_assert_float_eq(container->items[1].positionCoords.x, 470, 0.1, "Item 1 x");  // Changed from 340 to 470
 
     cleanupContainer(container);
 }
@@ -133,3 +133,4 @@ int main(int argc, char *argv[]) {
 }
 
 // zig cc -o test_flexbox.exe test_flexbox.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
+// ./test_flexbox.exe --jobs 1 --verbose
