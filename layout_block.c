@@ -68,6 +68,15 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
     }
 }
 
+void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
+    dzlog_debug("layout flex nodes\n");
+    lxb_dom_node_t *child = first_child;
+    do {
+        layout_flow_node(lycon, child);
+        child = lxb_dom_node_next(child);
+    } while (child);
+}
+
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
     dzlog_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
@@ -293,12 +302,20 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
-            do {
-                layout_flow_node(lycon, child);
-                child = lxb_dom_node_next(child);
-            } while (child);
-            // handle last line
-            if (!lycon->line.is_line_start) { line_break(lycon); }
+            if (display.inner == LXB_CSS_VALUE_FLOW) {
+                do {
+                    layout_flow_node(lycon, child);
+                    child = lxb_dom_node_next(child);
+                } while (child);
+                // handle last line
+                if (!lycon->line.is_line_start) { line_break(lycon); }                
+            }
+            else if (display.inner == LXB_CSS_VALUE_FLEX) {
+                layout_flex_nodes(lycon, child);
+            }
+            else {
+                dzlog_debug("unknown display type\n");
+            }
             lycon->parent = block->parent;
         }
         finalize_block_flow(lycon, block, display.outer, &pa_block);

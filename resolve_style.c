@@ -418,10 +418,67 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
         const lxb_css_rule_declaration_t* display_decl = 
             lxb_dom_element_style_by_id((lxb_dom_element_t*)elmt, LXB_CSS_PROPERTY_DISPLAY);
         if (display_decl) {
-            // printf("display: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
-            //     lxb_css_value_by_id(display_decl->u.display->b)->name);
-            outer_display = display_decl->u.display->a;
-            inner_display = display_decl->u.display->b;
+            dzlog_debug("display_value: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
+                lxb_css_value_by_id(display_decl->u.display->b)->name);
+            if (display_decl->u.display->b == LXB_CSS_VALUE__UNDEF) {
+                // map single display value
+                switch (display_decl->u.display->a) {
+                    case LXB_CSS_VALUE_BLOCK:
+                        outer_display = LXB_CSS_VALUE_BLOCK;
+                        inner_display = LXB_CSS_VALUE_FLOW;
+                        break;
+                    case LXB_CSS_VALUE_INLINE:
+                        outer_display = LXB_CSS_VALUE_INLINE;
+                        inner_display = LXB_CSS_VALUE_FLOW;
+                        break;
+                    case LXB_CSS_VALUE_INLINE_BLOCK:
+                        outer_display = LXB_CSS_VALUE_INLINE_BLOCK;
+                        inner_display = LXB_CSS_VALUE_FLOW;
+                        break;
+                    case LXB_CSS_VALUE_FLEX:
+                        outer_display = LXB_CSS_VALUE_BLOCK;
+                        inner_display = LXB_CSS_VALUE_FLEX;
+                        break;
+                    case LXB_CSS_VALUE_INLINE_FLEX:
+                        outer_display = LXB_CSS_VALUE_INLINE;
+                        inner_display = LXB_CSS_VALUE_FLEX;
+                        break;
+                    case LXB_CSS_VALUE_GRID:
+                        outer_display = LXB_CSS_VALUE_BLOCK;
+                        inner_display = LXB_CSS_VALUE_GRID;
+                        break;
+                    case LXB_CSS_VALUE_INLINE_GRID:
+                        outer_display = LXB_CSS_VALUE_INLINE;
+                        inner_display = LXB_CSS_VALUE_GRID;
+                        break;
+                    case LXB_CSS_VALUE_TABLE:
+                        outer_display = LXB_CSS_VALUE_BLOCK;
+                        inner_display = LXB_CSS_VALUE_TABLE;
+                        break;
+                    case LXB_CSS_VALUE_INLINE_TABLE:
+                        outer_display = LXB_CSS_VALUE_INLINE;
+                        inner_display = LXB_CSS_VALUE_TABLE;
+                        break;
+                    case LXB_CSS_VALUE_LIST_ITEM:
+                        outer_display = LXB_CSS_VALUE_LIST_ITEM;
+                        inner_display = LXB_CSS_VALUE_FLOW;
+                        break;
+                    case LXB_CSS_VALUE_TABLE_ROW:
+                        outer_display = LXB_CSS_VALUE_TABLE_ROW;
+                        inner_display = LXB_CSS_VALUE_TABLE_ROW;
+                        break;
+                    case LXB_CSS_VALUE_TABLE_CELL:
+                        outer_display = LXB_CSS_VALUE_TABLE_CELL;
+                        inner_display = LXB_CSS_VALUE_TABLE_CELL;
+                        break;
+                    default:  // unknown display
+                        outer_display = LXB_CSS_VALUE_INLINE;
+                        inner_display = LXB_CSS_VALUE_FLOW;
+                }
+            } else {
+                outer_display = display_decl->u.display->a;
+                inner_display = display_decl->u.display->b;
+            }
         }
     }
     return (DisplayValue){.outer = outer_display, .inner = inner_display};
