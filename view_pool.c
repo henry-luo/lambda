@@ -53,7 +53,10 @@ void free_view(ViewTree* tree, View* view) {
         ViewSpan* span = (ViewSpan*)view;
         if (span->font) {
             printf("free font prop\n");
-            // if (span->font->family) pool_variable_free(tree->pool, span->font->family);
+            // font-family could be static and not from the pool
+            if (span->font->family && pool_variable_is_associated(tree->pool, span->font->family)) {
+                pool_variable_free(tree->pool, span->font->family);
+            }
             pool_variable_free(tree->pool, span->font);
         }
         if (span->in_line) {
