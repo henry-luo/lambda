@@ -187,9 +187,8 @@ void layoutFlexContainer(FlexContainer* container) {
                 mainPos = spacing / 2; 
                 break;
             case JUSTIFY_SPACE_EVENLY: 
-                // Changed to match test expectation: distribute space between and around items only
-                spacing = (line->itemCount > 1) ? freeSpace / line->itemCount : freeSpace; 
-                mainPos = spacing / 2; 
+                spacing = freeSpace / (line->itemCount + 1);  // Correct: 390/3 = 130
+                mainPos = spacing; 
                 break;
             default: 
                 break;
@@ -213,7 +212,7 @@ void layoutFlexContainer(FlexContainer* container) {
                 }
             }
             printf("Item %d: pos=%.1f\n", idx, line->items[idx]->positionCoords.x);
-        } 
+        }
 
         // Cross axis positioning
         for (int i = 0; i < line->itemCount; i++) {
