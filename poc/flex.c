@@ -89,7 +89,8 @@ void layoutFlexContainer(FlexContainer* container) {
     for (int i = 0; i < container->itemCount; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
             layoutItems[layoutCount] = container->items[i];
-            layoutItems[layoutCount].positionCoords = (Point){0, 0};  // Initialize here
+            layoutItems[layoutCount].positionCoords = (Point){0, 0};
+            layoutItems[layoutCount].alignSelf = ALIGN_START;  // Default to avoid override
             layoutCount++;
         }
     }
@@ -180,7 +181,7 @@ void layoutFlexContainer(FlexContainer* container) {
 
         // Main axis positioning
         float mainPos = 0, spacing = 0;
-        if (line->itemCount > 0) {  // Ensure at least one item
+        if (line->itemCount > 0) {
             switch (container->justify) {
                 case JUSTIFY_END: mainPos = freeSpace; break;
                 case JUSTIFY_CENTER: mainPos = freeSpace / 2; break;
@@ -199,14 +200,13 @@ void layoutFlexContainer(FlexContainer* container) {
             int idx = isReverse ? line->itemCount - 1 - i : i;
             if (isRow) line->items[idx].positionCoords.x = mainPos;
             else line->items[idx].positionCoords.y = mainPos;
-            mainPos += line->items[idx].width + (i < line->itemCount - 1 ? container->gap + spacing : spacing);
-            printf("Positioned item %d: %s=%.1f\n", idx, isRow ? "x" : "y", line->items[idx].positionCoords.x);
+            printf("Positioned item %d: %s=%.1f\n", idx, isRow ? "x" : "y", mainPos);
+            mainPos += line->items[idx].width + (i < line->itemCount - 1 ? container->gap : 0) + spacing;
         }
 
         // Cross axis positioning
         for (int i = 0; i < line->itemCount; i++) {
-            AlignType align = (line->items[i].alignSelf == ALIGN_STRETCH) ? 
-                             container->alignItems : line->items[i].alignSelf;
+            AlignType align = (line->items[i].alignSelf == ALIGN_START) ? container->alignItems : line->items[i].alignSelf;
             float itemCrossPos = crossPos;
             switch (align) {
                 case ALIGN_END: itemCrossPos = crossPos + (crossSize - line->items[i].height); break;
@@ -216,18 +216,23 @@ void layoutFlexContainer(FlexContainer* container) {
             }
             if (isRow) line->items[i].positionCoords.y = itemCrossPos;
             else line->items[i].positionCoords.x = itemCrossPos;
-            printf("Cross axis item %d: %s=%.1f\n", i, isRow ? "y" : "x", line->items[i].positionCoords.y);
+            printf("Cross axis item %d: %s=%.1f\n", i, isRow ? "y" : "x", itemCrossPos);
         }
         crossPos += line->height + (l < lineCount - 1 ? container->gap : 0);
     }
 
     // Update original items
-    for (int i = 0, k = 0; i < container->itemCount; i++) {
+    int k = 0;
+    for (int i = 0; i < container->itemCount; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
-            container->items[i] = layoutItems[k++];
+            container->items[i].width = layoutItems[k].width;
+            container->items[i].height = layoutItems[k].height;
+            container->items[i].positionCoords.x = layoutItems[k].positionCoords.x;
+            container->items[i].positionCoords.y = layoutItems[k].positionCoords.y;
             printf("Final item %d: x=%.1f, y=%.1f, w=%.1f, h=%.1f\n", 
                    i, container->items[i].positionCoords.x, container->items[i].positionCoords.y,
                    container->items[i].width, container->items[i].height);
+            k++;
         }
     }
 
