@@ -188,8 +188,7 @@ static void processFlexLine(FlexContainer* container, FlexLine* line, FlexLine* 
         freeSpace = 0;
         line->totalBaseSize = 0;
         for (int i = 0; i < line->itemCount; i++) {
-            // When mainSize is 0, stack items without gaps
-            line->totalBaseSize += 0;  // Don't accumulate size
+            line->totalBaseSize = 0;  // Keep total size at 0 for zero mainSize
         }
     } else {
         applyFlexAdjustments(line, lines, freeSpace);
@@ -237,31 +236,33 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
                                 int isRow, int isReverse) {
     float freeSpace = mainSize - line->totalBaseSize;
     float mainPos = 0, spacing = 0;
-    switch (container->justify) {
-        case JUSTIFY_END: mainPos = freeSpace; break;
-        case JUSTIFY_CENTER: mainPos = freeSpace / 2; break;
-        case JUSTIFY_SPACE_BETWEEN: 
-            spacing = (line->itemCount > 1) ? freeSpace / (line->itemCount - 1) : 0; break;
-        case JUSTIFY_SPACE_AROUND: 
-            spacing = freeSpace / line->itemCount; mainPos = spacing / 2; break;
-        case JUSTIFY_SPACE_EVENLY: 
-            spacing = freeSpace / (line->itemCount + 1); mainPos = spacing; break;
-        default: break;
+    if (mainSize > 0) {  // Only calculate justification if we have space
+        switch (container->justify) {
+            case JUSTIFY_END: mainPos = freeSpace; break;
+            case JUSTIFY_CENTER: mainPos = freeSpace / 2; break;
+            case JUSTIFY_SPACE_BETWEEN: 
+                spacing = (line->itemCount > 1) ? freeSpace / (line->itemCount - 1) : 0; break;
+            case JUSTIFY_SPACE_AROUND: 
+                spacing = freeSpace / line->itemCount; mainPos = spacing / 2; break;
+            case JUSTIFY_SPACE_EVENLY: 
+                spacing = freeSpace / (line->itemCount + 1); mainPos = spacing; break;
+            default: break;
+        }
     }
     printf("Main axis: mainPos=%.1f, spacing=%.1f\n", mainPos, spacing);
 
     float currentPos;
     if (isReverse) {
-        currentPos = mainSize - mainPos;  // Start from right edge adjusted by justification
-        for (int i = line->itemCount - 1; i >= 0; i--) {  // Count down from last item
+        currentPos = mainSize - mainPos;
+        for (int i = line->itemCount - 1; i >= 0; i--) {
             if (isRow) {
-                line->items[i]->positionCoords.x = currentPos - line->items[i]->width;
+                line->items[i]->positionCoords.x = mainSize <= 0 ? 0 : (currentPos - line->items[i]->width);
                 currentPos = line->items[i]->positionCoords.x;
             } else {
-                line->items[i]->positionCoords.y = currentPos - line->items[i]->height;
+                line->items[i]->positionCoords.y = mainSize <= 0 ? 0 : (currentPos - line->items[i]->height);
                 currentPos = line->items[i]->positionCoords.y;
             }
-            if (i > 0) {  // Apply gap/spacing before next item
+            if (i > 0 && mainSize > 0) {  // Only apply gap if we have space
                 currentPos -= container->gap;
                 if (container->justify == JUSTIFY_SPACE_BETWEEN || 
                     container->justify == JUSTIFY_SPACE_EVENLY ||
@@ -276,17 +277,19 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
         for (int i = 0; i < line->itemCount; i++) {
             int idx = i;
             if (isRow) {
-                line->items[idx]->positionCoords.x = currentPos;
+                line->items[idx]->positionCoords.x = mainSize <= 0 ? 0 : currentPos;
             } else {
-                line->items[idx]->positionCoords.y = currentPos;
+                line->items[idx]->positionCoords.y = mainSize <= 0 ? 0 : currentPos;
             }
-            currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
-            if (i < line->itemCount - 1) {
-                currentPos += container->gap;
-                if (container->justify == JUSTIFY_SPACE_BETWEEN || 
-                    container->justify == JUSTIFY_SPACE_EVENLY ||
-                    container->justify == JUSTIFY_SPACE_AROUND) {
-                    currentPos += spacing;
+            if (mainSize > 0) {  // Only increment position if we have space
+                currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
+                if (i < line->itemCount - 1) {
+                    currentPos += container->gap;
+                    if (container->justify == JUSTIFY_SPACE_BETWEEN || 
+                        container->justify == JUSTIFY_SPACE_EVENLY ||
+                        container->justify == JUSTIFY_SPACE_AROUND) {
+                        currentPos += spacing;
+                    }
                 }
             }
             printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
