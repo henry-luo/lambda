@@ -187,7 +187,7 @@ void layoutFlexContainer(FlexContainer* container) {
                 mainPos = spacing / 2; 
                 break;
             case JUSTIFY_SPACE_EVENLY: 
-                spacing = freeSpace / (line->itemCount + 1);  // Correct: 390/3 = 130
+                spacing = freeSpace / (line->itemCount + 1); 
                 mainPos = spacing; 
                 break;
             default: 
@@ -203,7 +203,7 @@ void layoutFlexContainer(FlexContainer* container) {
             } else {
                 line->items[idx]->positionCoords.y = currentPos;
             }
-            currentPos += line->items[idx]->width;
+            currentPos += isRow ? line->items[idx]->width : line->items[idx]->height;  // Fixed: use height in column mode
             if (i < line->itemCount - 1) {
                 currentPos += container->gap;
                 if (container->justify == JUSTIFY_SPACE_BETWEEN || 
@@ -211,8 +211,8 @@ void layoutFlexContainer(FlexContainer* container) {
                     currentPos += spacing;
                 }
             }
-            printf("Item %d: pos=%.1f\n", idx, line->items[idx]->positionCoords.x);
-        }
+            printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);  // Fixed: print correct coordinate
+        } 
 
         // Cross axis positioning
         for (int i = 0; i < line->itemCount; i++) {
