@@ -70,9 +70,11 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
 
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     dzlog_debug("layout flex nodes\n");
+    // first, layout each child as inline-block, to determine its width and height
     lxb_dom_node_t *child = first_child;
     do {
-        layout_flow_node(lycon, child);
+        DisplayValue display = {.outer = LXB_CSS_VALUE_INLINE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
+        layout_block(lycon, child, display);        
         child = lxb_dom_node_next(child);
     } while (child);
 }
