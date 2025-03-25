@@ -230,23 +230,47 @@ static void positionItemsMainAxis(FlexContainer* container, FlexLine* line, floa
     }
     printf("Main axis: mainPos=%.1f, spacing=%.1f\n", mainPos, spacing);
 
-    float currentPos = isReverse ? (mainSize - line->totalBaseSize - mainPos) : mainPos;
-    for (int i = 0; i < line->itemCount; i++) {
-        int idx = isReverse ? line->itemCount - 1 - i : i;
-        if (isRow) {
-            line->items[idx]->positionCoords.x = currentPos;
-        } else {
-            line->items[idx]->positionCoords.y = currentPos;
+    float currentPos;
+    if (isReverse) {
+        currentPos = mainSize - mainPos;  // Start from right/bottom edge
+        for (int i = 0; i < line->itemCount; i++) {
+            int idx = line->itemCount - 1 - i;
+            currentPos -= (isRow ? line->items[idx]->width : line->items[idx]->height);
+            if (isRow) {
+                line->items[idx]->positionCoords.x = currentPos;
+            } else {
+                line->items[idx]->positionCoords.y = currentPos;
+            }
+            if (i < line->itemCount - 1) {
+                currentPos -= container->gap;
+                if (container->justify == JUSTIFY_SPACE_BETWEEN || 
+                    container->justify == JUSTIFY_SPACE_EVENLY ||
+                    container->justify == JUSTIFY_SPACE_AROUND) {
+                    currentPos -= spacing;
+                }
+            }
+            printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
         }
-        currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height) + 
-                     (i < line->itemCount - 1 ? container->gap : 0);
-        if (i < line->itemCount - 1 && 
-            (container->justify == JUSTIFY_SPACE_BETWEEN || 
-             container->justify == JUSTIFY_SPACE_EVENLY ||
-             container->justify == JUSTIFY_SPACE_AROUND)) {
-            currentPos += spacing;
+    } else {
+        currentPos = mainPos;
+        for (int i = 0; i < line->itemCount; i++) {
+            int idx = i;
+            if (isRow) {
+                line->items[idx]->positionCoords.x = currentPos;
+            } else {
+                line->items[idx]->positionCoords.y = currentPos;
+            }
+            currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
+            if (i < line->itemCount - 1) {
+                currentPos += container->gap;
+                if (container->justify == JUSTIFY_SPACE_BETWEEN || 
+                    container->justify == JUSTIFY_SPACE_EVENLY ||
+                    container->justify == JUSTIFY_SPACE_AROUND) {
+                    currentPos += spacing;
+                }
+            }
+            printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
         }
-        printf("Item %d: pos=%.1f\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
     }
 }
 
