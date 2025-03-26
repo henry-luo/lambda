@@ -877,5 +877,135 @@ Test(flexbox_tests, mixed_percentage_absolute) {
     cleanup_container(container);
 }
 
+// Test baseline alignment
+Test(flexbox_tests, baseline_alignment) {
+    FlexContainer* container = create_test_container(3);
+    container->alignItems = ALIGN_BASELINE;
+    
+    // Item with default baseline (3/4 of height)
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 80,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE,
+        // Default baseline will be at 60px (3/4 of height)
+    };
+    
+    // Item with explicit baseline offset
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 120,
+        .baselineOffset = 100,  // Baseline is near the bottom
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Item with another baseline offset
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 160,
+        .baselineOffset = 40,  // Baseline is near the top
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+    
+    // The maximum baseline is at 100px from the top (from item 1)
+    // Each item should be positioned so its baseline is at this position
+    
+    // Item 0: baseline at 60px, should be positioned at y = 100 - 60 = 40
+    cr_assert_eq(container->items[0].pos.y, 40, "Item 0 should be positioned to align baseline");
+    
+    // Item 1: baseline at 100px, should be positioned at y = 100 - 100 = 0
+    cr_assert_eq(container->items[1].pos.y, 0, "Item 1 should be positioned to align baseline");
+    
+    // Item 2: baseline at 40px, should be positioned at y = 100 - 40 = 60
+    cr_assert_eq(container->items[2].pos.y, 60, "Item 2 should be positioned to align baseline");
+
+    cleanup_container(container);
+}
+
+// Test baseline alignment with align-self override
+Test(flexbox_tests, baseline_align_self) {
+    FlexContainer* container = create_test_container(3);
+    container->alignItems = ALIGN_START; // Default alignment
+    
+    // Item with baseline alignment
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 80,
+        .alignSelf = ALIGN_BASELINE,
+        .baselineOffset = 60,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE
+    };
+    
+    // Another item with baseline alignment
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 120,
+        .alignSelf = ALIGN_BASELINE,
+        .baselineOffset = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Item with default alignment (start)
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 160,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+    
+    // The maximum baseline among baseline-aligned items is 100px
+    
+    // Item 0: baseline alignment with offset 60px
+    cr_assert_eq(container->items[0].pos.y, 40, "Item 0 should align its baseline");
+    
+    // Item 1: baseline alignment with offset 100px
+    cr_assert_eq(container->items[1].pos.y, 0, "Item 1 should align its baseline");
+    
+    // Item 2: start alignment (not baseline)
+    cr_assert_eq(container->items[2].pos.y, 0, "Item 2 should use start alignment");
+
+    cleanup_container(container);
+}
+
+// Test baseline alignment in column direction
+Test(flexbox_tests, baseline_column_direction) {
+    FlexContainer* container = create_test_container(3);
+    container->direction = DIR_COLUMN;
+    container->alignItems = ALIGN_BASELINE;
+    
+    // In column direction, baseline alignment is equivalent to start alignment
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 80,
+        .baselineOffset = 60,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE
+    };
+    
+    container->items[1] = (FlexItem){ 
+        .width = 150, .height = 80,
+        .baselineOffset = 60,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    container->items[2] = (FlexItem){ 
+        .width = 200, .height = 80,
+        .baselineOffset = 60,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+    
+    // In column direction, all items should be positioned at x=0 (start)
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x position with baseline in column");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x position with baseline in column");
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x position with baseline in column");
+
+    cleanup_container(container);
+}
+
 // zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
 // ./test_layout_flex.exe --verbose

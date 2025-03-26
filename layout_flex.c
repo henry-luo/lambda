@@ -41,6 +41,7 @@ typedef struct {
     int isMaxWidthPercent : 1;
     int isMinHeightPercent : 1;
     int isMaxHeightPercent : 1;
+    int baselineOffset;  // Distance from top to baseline
 } FlexItem;
 
 typedef struct {
@@ -375,21 +376,65 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
     }
 }
 
+// Find the maximum baseline offset in the line
+static int find_max_baseline(FlexLine* line) {
+    int maxBaseline = 0;
+    int found = 0;
+    for (int i = 0; i < line->itemCount; i++) {
+        // Only consider items with align-self: ALIGN_BASELINE
+        if (line->items[i]->alignSelf == ALIGN_BASELINE) {
+            // If no explicit baseline is set, use 3/4 of height as a default
+            int baseline = line->items[i]->baselineOffset;
+            if (baseline <= 0) {
+                baseline = (int)(line->items[i]->height * 0.75);
+            }
+            maxBaseline = fmax(maxBaseline, baseline);
+            found = 1;
+        }
+    }
+    
+    // If no baseline items were found, return 0
+    return found ? maxBaseline : 0;
+}
+
 static void position_items_cross_axis(FlexContainer* container, FlexLine* line, float crossSize, 
                                     float crossPos, int isRow) {
+    // For baseline alignment, find the maximum baseline
+    int maxBaseline = find_max_baseline(line);
+    
     for (int i = 0; i < line->itemCount; i++) {
         float itemCrossSize = isRow ? line->items[i]->height : line->items[i]->width;
         float itemCrossPos = crossPos;
         
         switch (line->items[i]->alignSelf) {
-            case ALIGN_END: itemCrossPos = crossPos + (crossSize - itemCrossSize); break;
-            case ALIGN_CENTER: itemCrossPos = crossPos + (crossSize - itemCrossSize) / 2; break;
+            case ALIGN_END: 
+                itemCrossPos = crossPos + (crossSize - itemCrossSize); 
+                break;
+            case ALIGN_CENTER: 
+                itemCrossPos = crossPos + (crossSize - itemCrossSize) / 2; 
+                break;
             case ALIGN_STRETCH: 
                 if (isRow) line->items[i]->height = crossSize;
                 else line->items[i]->width = crossSize;
                 itemCrossPos = crossPos;
                 break;
-            default: itemCrossPos = crossPos; break;
+            case ALIGN_BASELINE:
+                if (isRow) {
+                    // Calculate baseline offset - default to 3/4 of height if not specified
+                    int baseline = line->items[i]->baselineOffset;
+                    if (baseline <= 0) {
+                        baseline = (int)(line->items[i]->height * 0.75);
+                    }
+                    // Position item so its baseline aligns with the line's maximum baseline
+                    itemCrossPos = crossPos + (maxBaseline - baseline);
+                } else {
+                    // For column direction, baseline is equivalent to start alignment
+                    itemCrossPos = crossPos;
+                }
+                break;
+            default: // ALIGN_START
+                itemCrossPos = crossPos; 
+                break;
         }
         
         if (isRow) {
