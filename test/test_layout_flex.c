@@ -13,7 +13,7 @@ FlexContainer* create_test_container(int itemCount) {
         .wrap = WRAP_NOWRAP,
         .justify = JUSTIFY_START,
         .alignItems = ALIGN_START,
-        .columnGap = 10,
+        .gap = 10,
         .items = malloc(itemCount * sizeof(FlexItem)),
         .itemCount = itemCount,
         .writingMode = WM_HORIZONTAL_TB,

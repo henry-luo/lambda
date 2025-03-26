@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
 
-// enums (unchanged)
 // enums (unchanged)
 typedef enum { DIR_ROW, DIR_ROW_REVERSE, DIR_COLUMN, DIR_COLUMN_REVERSE } FlexDirection;
 typedef enum { WRAP_NOWRAP, WRAP_WRAP, WRAP_WRAP_REVERSE } FlexWrap;
@@ -49,14 +49,13 @@ typedef struct {
     JustifyContent justify;
     AlignType alignItems;
     AlignType alignContent;
-    int rowGap, columnGap;
+    int gap;
     FlexItem* items;
     int itemCount;
     WritingMode writingMode;
     TextDirection textDirection;
 } FlexContainer;
 
-// Function declarations
 static void initialize_items(FlexContainer* container, FlexItem* layoutItems, int* layoutCount);
 static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, int layoutCount, FlexLine** lines, int* lineCount);
 static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, int lineCount, float mainSize, float crossSize, float* crossPos, int isRow, int isReverse);
@@ -66,9 +65,8 @@ static void position_items_cross_axis(FlexContainer* container, FlexLine* line, 
 static void update_original_items(FlexContainer* container, FlexItem* layoutItems, int layoutCount);
 
 // Helper functions
-// Helper functions
 float clamp(float value, float min, float max) {
-    float result = (max != 0) ? fminf(fmaxf(value, min), max) : fmaxf(value, min);
+    float result = (max != 0) ? fmin(fmax(value, min), max) : fmax(value, min);
     printf("clamp(%.1f, %.1f, %.1f) = %.1f\n", value, min, max, result);
     return result;
 }
@@ -78,23 +76,18 @@ int resolve_flex_basis(FlexItem* item) {
     if (item->flexBasis == -1) {
         basis = item->width > 0 ? item->width : 0;
     } else {
-        printf("resolve_flex_basis: width=%.1f, flexBasis=%.1f -> %.1f\n", item->width, item->flexBasis, basis);
+        basis = (item->flexBasis > 0) ? item->flexBasis : item->width;
     }
+    printf("resolve_flex_basis: width=%d, flexBasis=%d -> %d\n", item->width, item->flexBasis, basis);
+    assert(basis >= 0 && "Flex basis must be non-negative");
     return basis;
 }
 
 void apply_constraints(FlexItem* item) {
-    float oldWidth = item->width, oldHeight = item->height;
-    if (item->aspectRatio > 0) {
-        if (item->width <= 0 && item->height > 0) {
-            item->width = item->height * item->aspectRatio;
-        } else if (item->height <= 0 && item->width > 0) {
-            item->height = item->width / item->aspectRatio;
-        }
-    }
+    int oldWidth = item->width, oldHeight = item->height;
     item->width = clamp(item->width, item->minWidth, item->maxWidth);
     item->height = clamp(item->height, item->minHeight, item->maxHeight);
-    printf("apply_constraints: width %.1f -> %.1f, height %.1f -> %.1f\n", oldWidth, item->width, oldHeight, item->height);
+    printf("apply_constraints: width %d -> %d, height %d -> %d\n", oldWidth, item->width, oldHeight, item->height);
 }
 
 // Flex layout sub-functions
@@ -118,8 +111,6 @@ static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, i
                             FlexLine** lines, int* lineCount) {
     float remainingSpace = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE) 
                          ? container->width : container->height;
-    float gap = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE) 
-                ? container->columnGap : container->rowGap;
     FlexLine currentLine = { .items = NULL, .itemCount = 0, .totalBaseSize = 0, .height = 0 };
     
     *lineCount = 0;
@@ -127,15 +118,16 @@ static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, i
 
     for (int i = 0; i < layoutCount; i++) {
         float itemSize = layoutItems[i].width;
-        float spaceNeeded = itemSize + (currentLine.itemCount > 0 ? gap : 0);
+        float spaceNeeded = itemSize + (currentLine.itemCount > 0 ? container->gap : 0);
         
         if (container->wrap == WRAP_NOWRAP || remainingSpace >= spaceNeeded) {
             currentLine.items = realloc(currentLine.items, (currentLine.itemCount + 1) * sizeof(FlexItem*));
             currentLine.items[currentLine.itemCount++] = &layoutItems[i];
             currentLine.totalBaseSize += spaceNeeded;
-            currentLine.height = fmaxf(currentLine.height, layoutItems[i].height);
+            currentLine.height = fmax(currentLine.height, layoutItems[i].height);
             remainingSpace -= spaceNeeded;
-        } else {
+        }
+        else {
             if (currentLine.itemCount > 0) {
                 *lines = realloc(*lines, (*lineCount + 1) * sizeof(FlexLine));
                 (*lines)[(*lineCount)++] = currentLine;
@@ -195,23 +187,23 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
            line - lines, freeSpace, totalGrow, totalShrink);
 
     if (freeSpace > 0 && totalGrow > 0) {
-        float growFactor = freeSpace / totalGrow;
+        float remainingSpace = freeSpace;
         for (int i = 0; i < line->itemCount; i++) {
             if (line->items[i]->flexGrow > 0) {
-                float growAmount = growFactor * line->items[i]->flexGrow;
-                line->items[i]->width += growAmount;
+                float growAmount = (remainingSpace * line->items[i]->flexGrow) / totalGrow;
+                line->items[i]->width += (int)roundf(growAmount);
                 apply_constraints(line->items[i]);
-                printf("Grow item %d: width=%.1f\n", i, line->items[i]->width);
+                printf("Grow item %d: width=%d\n", i, line->items[i]->width);
             }
         }
     } else if (freeSpace < 0 && totalShrink > 0) {
-        float shrinkFactor = -freeSpace / totalShrink;
+        float remainingSpace = fabs(freeSpace);
         for (int i = 0; i < line->itemCount; i++) {
             if (line->items[i]->flexShrink > 0) {
-                float shrinkAmount = shrinkFactor * line->items[i]->flexShrink;
-                line->items[i]->width = fmaxf(0, line->items[i]->width - shrinkAmount);
+                float shrinkAmount = (remainingSpace * line->items[i]->flexShrink) / totalShrink;
+                line->items[i]->width -= (int)roundf(shrinkAmount);
                 apply_constraints(line->items[i]);
-                printf("Shrink item %d: width=%.1f\n", i, line->items[i]->width);
+                printf("Shrink item %d: width=%d\n", i, line->items[i]->width);
             }
         }
     }
@@ -219,17 +211,9 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
 
 static void position_items_main_axis(FlexContainer* container, FlexLine* line, float mainSize, 
                                    int isRow, int isReverse) {
-    float gap = isRow ? container->columnGap : container->rowGap;
-    float totalItemSize = 0;
-    for (int i = 0; i < line->itemCount; i++) {
-        totalItemSize += (isRow ? line->items[i]->width : line->items[i]->height);
-        if (i > 0) totalItemSize += gap;
-    }
-    
-    float freeSpace = mainSize - totalItemSize;
+    float freeSpace = mainSize - line->totalBaseSize;
     float mainPos = 0, spacing = 0;
-    
-    if (freeSpace > 0) {
+    if (mainSize > 0) {
         switch (container->justify) {
             case JUSTIFY_END: mainPos = freeSpace; break;
             case JUSTIFY_CENTER: mainPos = freeSpace / 2; break;
@@ -246,22 +230,36 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
 
     if (isReverse) {
         float currentPos = mainSize - mainPos;
-        for (int i = line->itemCount - 1; i >= 0; i--) {
-            float itemSize = isRow ? line->items[i]->width : line->items[i]->height;
+        for (int i = 0; i < line->itemCount; i++) {
+            int idx = line->itemCount - 1 - i;
+            float itemSize = isRow ? line->items[idx]->width : line->items[idx]->height;
             currentPos -= itemSize;
-            if (isRow) line->items[i]->pos.x = currentPos;
-            else line->items[i]->pos.y = currentPos;
-            currentPos -= (i > 0) ? gap + spacing : 0;
-            printf("Item %d: pos=%.1f\n", i, isRow ? line->items[i]->pos.x : line->items[i]->pos.y);
+            if (isRow) {
+                line->items[idx]->pos.x = mainSize <= 0 ? 0 : (int)currentPos;
+            } else {
+                line->items[idx]->pos.y = mainSize <= 0 ? 0 : (int)currentPos;
+            }
+            if (i < line->itemCount - 1 && mainSize > 0) {
+                currentPos -= container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
+            }
+            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[idx]->pos.y);
         }
     } else {
         float currentPos = mainPos;
         for (int i = 0; i < line->itemCount; i++) {
-            if (isRow) line->items[i]->pos.x = currentPos;
-            else line->items[i]->pos.y = currentPos;
-            currentPos += (isRow ? line->items[i]->width : line->items[i]->height);
-            if (i < line->itemCount - 1) currentPos += gap + spacing;
-            printf("Item %d: pos=%.1f\n", i, isRow ? line->items[i]->pos.x : line->items[i]->pos.y);
+            int idx = i;
+            if (isRow) {
+                line->items[idx]->pos.x = mainSize <= 0 ? 0 : (int)currentPos;
+            } else {
+                line->items[idx]->pos.y = mainSize <= 0 ? 0 : (int)currentPos;
+            }
+            if (mainSize > 0) {
+                currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
+                if (i < line->itemCount - 1) {
+                    currentPos += container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
+                }
+            }
+            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[idx]->pos.y);
         }
     }
 }
@@ -292,39 +290,12 @@ static void position_items_cross_axis(FlexContainer* container, FlexLine* line, 
     }
 }
 
-static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, float mainSize, float crossPos, 
-                            int lineCount, int isRow, int isReverse) {
-    float gap = isRow ? container->columnGap : container->rowGap;
-    line->totalBaseSize = 0;
-    for (int i = 0; i < line->itemCount; i++) {
-        line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height);
-        if (i > 0) line->totalBaseSize += gap;
-    }
-    
-    float freeSpace = mainSize - line->totalBaseSize;
-    apply_flex_adjustments(line, lines, freeSpace);
-    
-    // Recalculate total size after adjustments
-    line->totalBaseSize = 0;
-    for (int i = 0; i < line->itemCount; i++) {
-        line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height);
-        if (i > 0) line->totalBaseSize += gap;
-    }
-    
-    position_items_main_axis(container, line, mainSize, isRow, isReverse);
-    position_items_cross_axis(container, line, isRow ? container->height : container->width, crossPos, isRow);
-}
-
 static void update_original_items(FlexContainer* container, FlexItem* layoutItems, int layoutCount) {
     int k = 0;
     for (int i = 0; i < container->itemCount; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
             container->items[i] = layoutItems[k];
-            container->items[i].pos.x = roundf(container->items[i].pos.x);
-            container->items[i].pos.y = roundf(container->items[i].pos.y);
-            container->items[i].width = roundf(container->items[i].width);
-            container->items[i].height = roundf(container->items[i].height);
-            printf("Final item %d: x=%.1f, y=%.1f, w=%.1f, h=%.1f\n",
+            printf("Final item %d: x=%d, y=%d, w=%d, h=%d\n",
                    i, container->items[i].pos.x, container->items[i].pos.y,
                    container->items[i].width, container->items[i].height);
             k++;
@@ -332,6 +303,7 @@ static void update_original_items(FlexContainer* container, FlexItem* layoutItem
     }
 }
 
+// flex layout main function
 void layout_flex_container(FlexContainer* container) {
     printf("\n=== Starting layout_flex_container ===\n");
     printf("Container: width=%d, height=%d, gap=%d, items=%d, justify=%d, alignItems=%d, alignContent=%d\n", 
@@ -342,7 +314,8 @@ void layout_flex_container(FlexContainer* container) {
     int isReverse = (container->direction == DIR_ROW_REVERSE || container->direction == DIR_COLUMN_REVERSE);
     float mainSize = isRow ? container->width : container->height;
     float crossSize = isRow ? container->height : container->width;
-    float crossGap = isRow ? container->rowGap : container->columnGap;
+    if (mainSize <= 0) mainSize = 0;
+    if (crossSize <= 0) crossSize = 0;
 
     FlexItem* layoutItems = malloc(container->itemCount * sizeof(FlexItem));
     int layoutCount = 0;
