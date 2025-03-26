@@ -49,7 +49,8 @@ typedef struct {
     JustifyContent justify;
     AlignType alignItems;
     AlignType alignContent;
-    int gap;
+    int rowGap;      // Gap between rows
+    int columnGap;   // Gap between columns
     FlexItem* items;
     int itemCount;
     WritingMode writingMode;
@@ -79,7 +80,7 @@ int resolve_flex_basis(FlexItem* item) {
         basis = (item->flexBasis > 0) ? item->flexBasis : item->width;
     }
     printf("resolve_flex_basis: width=%d, flexBasis=%d -> %d\n", item->width, item->flexBasis, basis);
-    assert(basis >= 0 && "Flex basis must be non-negative");
+    if (basis < 0)  basis = 0;
     return basis;
 }
 
@@ -136,9 +137,13 @@ static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, i
     *lineCount = 0;
     *lines = NULL;
 
+    // Determine which gap to use based on direction
+    int mainAxisGap = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE) 
+                    ? container->columnGap : container->rowGap;
+
     for (int i = 0; i < layoutCount; i++) {
         float itemSize = layoutItems[i].width;
-        float spaceNeeded = itemSize + (currentLine.itemCount > 0 ? container->gap : 0);
+        float spaceNeeded = itemSize + (currentLine.itemCount > 0 ? mainAxisGap : 0);
         
         if (container->wrap == WRAP_NOWRAP || remainingSpace >= spaceNeeded) {
             currentLine.items = realloc(currentLine.items, (currentLine.itemCount + 1) * sizeof(FlexItem*));
@@ -183,10 +188,13 @@ static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine
     } else {
         apply_flex_adjustments(line, lines, freeSpace);
         
+        // Use appropriate gap based on direction
+        int mainAxisGap = isRow ? container->columnGap : container->rowGap;
+        
         line->totalBaseSize = 0;
         for (int i = 0; i < line->itemCount; i++) {
             line->totalBaseSize += (isRow ? line->items[i]->width : line->items[i]->height) + 
-                                 (i > 0 ? container->gap : 0);
+                                 (i > 0 ? mainAxisGap : 0);
         }
         freeSpace = mainSize - line->totalBaseSize;
     }
@@ -245,6 +253,10 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
                                    int isRow, int isReverse) {
     float freeSpace = mainSize - line->totalBaseSize;
     float mainPos = 0, spacing = 0;
+    
+    // Select the appropriate gap based on direction
+    int mainAxisGap = isRow ? container->columnGap : container->rowGap;
+    
     if (mainSize > 0) {
         switch (container->justify) {
             case JUSTIFY_END: mainPos = freeSpace; break;
@@ -272,7 +284,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
                 line->items[i]->pos.y = mainSize <= 0 ? 0 : (int)currentPos; // Use i for column_reverse
             }
             if (i < line->itemCount - 1 && mainSize > 0) {
-                currentPos -= container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
+                currentPos -= mainAxisGap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
             }
             printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[i]->pos.y);
         }
@@ -288,7 +300,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
             if (mainSize > 0) {
                 currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
                 if (i < line->itemCount - 1) {
-                    currentPos += container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
+                    currentPos += mainAxisGap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
                 }
             }
             printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[idx]->pos.y);
@@ -338,8 +350,8 @@ static void update_original_items(FlexContainer* container, FlexItem* layoutItem
 // flex layout main function
 void layout_flex_container(FlexContainer* container) {
     printf("\n=== Starting layout_flex_container ===\n");
-    printf("Container: width=%d, height=%d, gap=%d, items=%d, justify=%d, alignItems=%d, alignContent=%d\n", 
-           container->width, container->height, container->gap, container->itemCount, container->justify, 
+    printf("Container: width=%d, height=%d, rowGap=%d, columnGap=%d, items=%d, justify=%d, alignItems=%d, alignContent=%d\n", 
+           container->width, container->height, container->rowGap, container->columnGap, container->itemCount, container->justify, 
            container->alignItems, container->alignContent);
 
     int isRow = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE);
@@ -360,7 +372,7 @@ void layout_flex_container(FlexContainer* container) {
     float totalCrossSize = 0;
     for (int l = 0; l < lineCount; l++) {
         totalCrossSize += lines[l].height;
-        if (l < lineCount - 1) totalCrossSize += container->gap;
+        if (l < lineCount - 1) totalCrossSize += container->rowGap;
     }
     float freeCrossSpace = crossSize - totalCrossSize;
     float crossPos = 0, crossSpacing = 0;
@@ -407,7 +419,7 @@ void layout_flex_container(FlexContainer* container) {
             process_flex_line(container, &lines[l], lines, lineCount, mainSize, crossSize, 
                             &currentCrossPos, isRow, isReverse);
             if (l < lineCount - 1) {
-                currentCrossPos -= container->gap + (container->alignContent >= ALIGN_SPACE_BETWEEN ? crossSpacing : 0);
+                currentCrossPos -= container->rowGap + (container->alignContent >= ALIGN_SPACE_BETWEEN ? crossSpacing : 0);
             }
         }
     } else {
@@ -416,7 +428,7 @@ void layout_flex_container(FlexContainer* container) {
             process_flex_line(container, &lines[l], lines, lineCount, mainSize, crossSize, 
                             &currentCrossPos, isRow, isReverse);
             if (l < lineCount - 1) {
-                currentCrossPos += lines[l].height + container->gap + 
+                currentCrossPos += lines[l].height + container->rowGap + 
                                  (container->alignContent >= ALIGN_SPACE_BETWEEN ? crossSpacing : 0);
             }
         }

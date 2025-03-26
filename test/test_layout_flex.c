@@ -13,7 +13,8 @@ FlexContainer* create_test_container(int itemCount) {
         .wrap = WRAP_NOWRAP,
         .justify = JUSTIFY_START,
         .alignItems = ALIGN_START,
-        .gap = 10,
+        .rowGap = 10,
+        .columnGap = 10,
         .items = malloc(itemCount * sizeof(FlexItem)),
         .itemCount = itemCount,
         .writingMode = WM_HORIZONTAL_TB,
@@ -567,6 +568,37 @@ Test(flexbox_tests, align_content_stretch) {
     cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
     cr_assert_eq(container->items[2].pos.y, 394, "Item 2 y");  // 197 + 187 + 10
     cr_assert_eq(container->items[2].height, 187, "Item 2 height stretched");
+
+    cleanup_container(container);
+}
+
+// Test different row and column gaps
+Test(flexbox_tests, different_row_column_gaps) {
+    FlexContainer* container = create_test_container(4);
+    container->rowGap = 20;     // Vertical gap between rows
+    container->columnGap = 30;  // Horizontal gap between columns
+    container->wrap = WRAP_WRAP;
+    container->width = 450;
+    
+    // Create 4 items that will form 2 rows with 2 items each
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[3] = (FlexItem){ .width = 200, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    // First row
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.x, 230, "Item 1 x");  // 0 + 200 + 30 (columnGap)
+    cr_assert_eq(container->items[1].pos.y, 0, "Item 1 y");
+    
+    // Second row - should be positioned 20px (rowGap) below first row
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 120, "Item 2 y");  // 0 + 100 + 20 (rowGap)
+    cr_assert_eq(container->items[3].pos.x, 230, "Item 3 x");  // 0 + 200 + 30 (columnGap)
+    cr_assert_eq(container->items[3].pos.y, 120, "Item 3 y");  // 0 + 100 + 20 (rowGap)
 
     cleanup_container(container);
 }
