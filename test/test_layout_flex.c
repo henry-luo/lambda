@@ -603,5 +603,92 @@ Test(flexbox_tests, different_row_column_gaps) {
     cleanup_container(container);
 }
 
+// Test for the order property
+Test(flexbox_tests, item_order) {
+    FlexContainer* container = create_test_container(4);
+    
+    // Set up 4 items with different order values that don't match their array indices
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = 3,  // Will be displayed last
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = 1,  // Will be displayed second
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = 0,  // Will be displayed first (default value)
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[3] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = 2,  // Will be displayed third
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check that items are positioned in order of their order property, not their array index
+    // Item 2 (order: 0) should be first
+    cr_assert_eq(container->items[2].pos.x, 0, "Item with order 0 should be positioned first");
+    
+    // Item 1 (order: 1) should be second
+    cr_assert_eq(container->items[1].pos.x, 110, "Item with order 1 should be positioned second");
+    
+    // Item 3 (order: 2) should be third
+    cr_assert_eq(container->items[3].pos.x, 220, "Item with order 2 should be positioned third");
+    
+    // Item 0 (order: 3) should be fourth
+    cr_assert_eq(container->items[0].pos.x, 330, "Item with order 3 should be positioned fourth");
+
+    cleanup_container(container);
+}
+
+// Test for negative order values
+Test(flexbox_tests, negative_order) {
+    FlexContainer* container = create_test_container(3);
+    
+    // Set up 3 items with different order values including negative
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = 0,    // Middle
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = -1,   // First (negative comes before 0)
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 100, 
+        .order = 1,    // Last
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check that items are positioned in order of their order property
+    // Item 1 (order: -1) should be first
+    cr_assert_eq(container->items[1].pos.x, 0, "Item with order -1 should be positioned first");
+    
+    // Item 0 (order: 0) should be second
+    cr_assert_eq(container->items[0].pos.x, 110, "Item with order 0 should be positioned second");
+    
+    // Item 2 (order: 1) should be third
+    cr_assert_eq(container->items[2].pos.x, 220, "Item with order 1 should be positioned third");
+
+    cleanup_container(container);
+}
+
 // zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
 // ./test_layout_flex.exe --verbose

@@ -57,6 +57,12 @@ typedef struct {
     TextDirection textDirection;
 } FlexContainer;
 
+// Add a temporary structure to keep track of original indices during sorting
+typedef struct {
+    FlexItem item;
+    int originalIndex;
+} FlexItemWithIndex;
+
 static void initialize_items(FlexContainer* container, FlexItem* layoutItems, int* layoutCount);
 static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, int layoutCount, FlexLine** lines, int* lineCount);
 static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, int lineCount, float mainSize, float crossSize, float* crossPos, int isRow, int isReverse);
@@ -70,6 +76,13 @@ float clamp(float value, float min, float max) {
     float result = (max != 0) ? fmin(fmax(value, min), max) : fmax(value, min);
     printf("clamp(%.1f, %.1f, %.1f) = %.1f\n", value, min, max, result);
     return result;
+}
+
+// Modified comparison function for sorting
+static int compare_item_order(const void* a, const void* b) {
+    FlexItemWithIndex* item_a = (FlexItemWithIndex*)a;
+    FlexItemWithIndex* item_b = (FlexItemWithIndex*)b;
+    return item_a->item.order - item_b->item.order;
 }
 
 int resolve_flex_basis(FlexItem* item) {
@@ -361,9 +374,37 @@ void layout_flex_container(FlexContainer* container) {
     if (mainSize <= 0) mainSize = 0;
     if (crossSize <= 0) crossSize = 0;
 
+    // Use the modified structure to track original indices
+    FlexItemWithIndex* itemsWithIndices = malloc(container->itemCount * sizeof(FlexItemWithIndex));
     FlexItem* layoutItems = malloc(container->itemCount * sizeof(FlexItem));
     int layoutCount = 0;
-    initialize_items(container, layoutItems, &layoutCount);
+    
+    // Initialize items and track original indices
+    for (int i = 0; i < container->itemCount; i++) {
+        if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
+            itemsWithIndices[layoutCount].item = container->items[i];
+            itemsWithIndices[layoutCount].item.pos = (Point){0, 0};
+            itemsWithIndices[layoutCount].originalIndex = i;
+            
+            if (itemsWithIndices[layoutCount].item.alignSelf == ALIGN_START) {
+                itemsWithIndices[layoutCount].item.alignSelf = container->alignItems;
+            }
+            itemsWithIndices[layoutCount].item.width = resolve_flex_basis(&itemsWithIndices[layoutCount].item);
+            apply_constraints(&itemsWithIndices[layoutCount].item);
+            layoutCount++;
+        }
+    }
+    
+    // Sort the items by their order property
+    if (layoutCount > 0) {
+        qsort(itemsWithIndices, layoutCount, sizeof(FlexItemWithIndex), compare_item_order);
+        printf("Items sorted by order property\n");
+        
+        // Extract just the items for layout processing
+        for (int i = 0; i < layoutCount; i++) {
+            layoutItems[i] = itemsWithIndices[i].item;
+        }
+    }
 
     FlexLine* lines = NULL;
     int lineCount = 0;
@@ -434,8 +475,23 @@ void layout_flex_container(FlexContainer* container) {
         }
     }
 
-    update_original_items(container, layoutItems, layoutCount);
+    // Modify update_original_items to use the original indices
+    int k = 0;
+    for (int i = 0; i < container->itemCount; i++) {
+        if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
+            // Find the original index for this layout item
+            container->items[itemsWithIndices[k].originalIndex] = layoutItems[k];
+            printf("Final item %d: x=%d, y=%d, w=%d, h=%d\n",
+                   itemsWithIndices[k].originalIndex, 
+                   layoutItems[k].pos.x, 
+                   layoutItems[k].pos.y,
+                   layoutItems[k].width, 
+                   layoutItems[k].height);
+            k++;
+        }
+    }
 
+    free(itemsWithIndices);
     free(layoutItems);
     for (int i = 0; i < lineCount; i++) free(lines[i].items);
     free(lines);
