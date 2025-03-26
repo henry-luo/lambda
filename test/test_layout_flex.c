@@ -1007,5 +1007,233 @@ Test(flexbox_tests, baseline_column_direction) {
     cleanup_container(container);
 }
 
+// Test auto margins in main axis (horizontal)
+Test(flexbox_tests, auto_margins_main) {
+    FlexContainer* container = create_test_container(3);
+    container->width = 800;
+    
+    // First item with auto margin on right - pushes subsequent items to the end
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginRightAuto = 1,  // Auto margin right
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Standard item
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Standard item
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Free space = 800 - (100 + 10 + 100 + 10 + 100) = 800 - 320 = 480
+    // All 480px should go to the auto margin
+    
+    cr_assert_eq(container->items[0].pos.x, 0, "First item should start at x=0");
+    cr_assert_eq(container->items[1].pos.x, 590, "Second item should be pushed to the end minus width");
+    cr_assert_eq(container->items[2].pos.x, 700, "Third item should be at the end");
+
+    cleanup_container(container);
+}
+
+// Test auto margins for centering
+Test(flexbox_tests, auto_margins_center) {
+    FlexContainer* container = create_test_container(1);
+    container->width = 800;
+    
+    // Item with auto margins on both sides should be centered
+    container->items[0] = (FlexItem){ 
+        .width = 200, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginLeftAuto = 1,
+        .isMarginRightAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Free space = 800 - 200 = 600px, split equally between left and right margins (300px each)
+    cr_assert_eq(container->items[0].pos.x, 300, "Item should be centered");
+
+    cleanup_container(container);
+}
+
+// Test auto margins in cross axis (vertical)
+Test(flexbox_tests, auto_margins_cross) {
+    FlexContainer* container = create_test_container(3);
+    container->width = 600;
+    container->height = 400;
+    
+    // Standard item
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Item with auto margin on top - pushes to bottom
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginTopAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Item with auto margins on top and bottom - centers vertically
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginTopAuto = 1,
+        .isMarginBottomAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Cross axis free space for each item = 400 - 100 = 300px
+    cr_assert_eq(container->items[0].pos.y, 0, "First item should be at top (default)");
+    cr_assert_eq(container->items[1].pos.y, 300, "Second item should be pushed to bottom");
+    cr_assert_eq(container->items[2].pos.y, 150, "Third item should be centered vertically");
+
+    cleanup_container(container);
+}
+
+// Test auto margins with multiple items in line
+Test(flexbox_tests, auto_margins_multiple) {
+    FlexContainer* container = create_test_container(4);
+    container->width = 800;
+    
+    // First item
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Auto margin right - creates space between items 0 and 2
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginRightAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Third item
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Fourth item with auto margins on both sides - creates equal space around
+    container->items[3] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginLeftAuto = 1,
+        .isMarginRightAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Free space = 800 - (100 + 10 + 100 + 10 + 100 + 10 + 100) = 370px
+    // With 3 auto margins, each gets 370/3 ≈ 123px
+    
+    cr_assert_eq(container->items[0].pos.x, 0, "First item at start");
+    cr_assert_eq(container->items[1].pos.x, 110, "Second item after first + gap");
+    cr_assert_eq(container->items[2].pos.x, 343, "Third item after second + auto margin + gap"); // 110 + 100 + 123 + 10
+    cr_assert_eq(container->items[3].pos.x, 577, "Fourth item centered in remaining space"); // 343 + 100 + 10 + 124
+
+    cleanup_container(container);
+}
+
+// Test auto margins overriding justify-content
+Test(flexbox_tests, auto_margins_override_justify) {
+    FlexContainer* container = create_test_container(3);
+    container->width = 800;
+    container->justify = JUSTIFY_CENTER; // This would normally center all items
+    
+    // First item with auto margin on right - should override justify-content
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginRightAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Regular items
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    container->items[2] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Even though justify-content is center, the auto margin should take precedence
+    cr_assert_eq(container->items[0].pos.x, 0, "First item at start");
+    cr_assert_eq(container->items[1].pos.x, 590, "Second item after auto margin");
+    cr_assert_eq(container->items[2].pos.x, 700, "Third item after second + gap");
+
+    cleanup_container(container);
+}
+
+// Test auto margins overriding align-items
+Test(flexbox_tests, auto_margins_override_align) {
+    FlexContainer* container = create_test_container(2);
+    container->width = 400;
+    container->height = 400;
+    container->alignItems = ALIGN_CENTER; // This would normally center items vertically
+    
+    // First item with default align-center
+    container->items[0] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Second item with auto margin on top - should override align-items
+    container->items[1] = (FlexItem){ 
+        .width = 100, .height = 100,
+        .margin = {0, 0, 0, 0},
+        .isMarginTopAuto = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // First item should be centered (per align-items)
+    cr_assert_eq(container->items[0].pos.y, 150, "First item should be centered");
+    
+    // Second item should be pushed to bottom (auto margin overrides align-items)
+    cr_assert_eq(container->items[1].pos.y, 300, "Second item should be pushed to bottom");
+
+    cleanup_container(container);
+}
+
 // zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
 // ./test_layout_flex.exe --verbose
