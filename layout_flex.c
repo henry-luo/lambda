@@ -182,33 +182,21 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
            line - lines, freeSpace, totalGrow, totalShrink);
 
     if (freeSpace > 0 && totalGrow > 0) {
-        int remainingSpace = (int)freeSpace;  // Convert to int for precise distribution
-        int totalUnits = (int)totalGrow;
+        float remainingSpace = freeSpace;
         for (int i = 0; i < line->itemCount; i++) {
             if (line->items[i]->flexGrow > 0) {
-                int growAmount = (int)(line->items[i]->flexGrow * freeSpace / totalGrow);
-                remainingSpace -= growAmount;
-                totalUnits -= (int)line->items[i]->flexGrow;
-                if (i == line->itemCount - 1 && remainingSpace > 0) {
-                    growAmount += remainingSpace;  // Distribute any remaining space
-                }
-                line->items[i]->width += growAmount;
+                float growAmount = (remainingSpace * line->items[i]->flexGrow) / totalGrow;
+                line->items[i]->width += (int)roundf(growAmount);
                 apply_constraints(line->items[i]);
                 printf("Grow item %d: width=%d\n", i, line->items[i]->width);
             }
         }
     } else if (freeSpace < 0 && totalShrink > 0) {
-        int remainingSpace = (int)fabs(freeSpace);
-        int totalUnits = (int)totalShrink;
+        float remainingSpace = fabs(freeSpace);
         for (int i = 0; i < line->itemCount; i++) {
             if (line->items[i]->flexShrink > 0) {
-                int shrinkAmount = (int)(line->items[i]->flexShrink * fabs(freeSpace) / totalShrink);
-                remainingSpace -= shrinkAmount;
-                totalUnits -= (int)line->items[i]->flexShrink;
-                if (i == line->itemCount - 1 && remainingSpace > 0) {
-                    shrinkAmount += remainingSpace;  // Distribute any remaining space
-                }
-                line->items[i]->width -= shrinkAmount;
+                float shrinkAmount = (remainingSpace * line->items[i]->flexShrink) / totalShrink;
+                line->items[i]->width -= (int)roundf(shrinkAmount);
                 apply_constraints(line->items[i]);
                 printf("Shrink item %d: width=%d\n", i, line->items[i]->width);
             }
@@ -229,9 +217,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
             case JUSTIFY_SPACE_AROUND: 
                 spacing = freeSpace / line->itemCount; mainPos = spacing / 2; break;
             case JUSTIFY_SPACE_EVENLY: 
-                spacing = freeSpace / (line->itemCount + 1); 
-                mainPos = spacing; 
-                break;
+                spacing = freeSpace / (line->itemCount + 1); mainPos = spacing; break;
             default: break;
         }
     }
@@ -240,21 +226,16 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
     if (isReverse) {
         float currentPos = mainSize - mainPos;
         for (int i = 0; i < line->itemCount; i++) {
-            int idx = line->itemCount - 1 - i;  // Reverse the order
+            int idx = line->itemCount - 1 - i;
+            float itemSize = isRow ? line->items[idx]->width : line->items[idx]->height;
+            currentPos -= itemSize;
             if (isRow) {
-                line->items[idx]->positionCoords.x = mainSize <= 0 ? 0 : (int)(currentPos - line->items[idx]->width);
-                currentPos = line->items[idx]->positionCoords.x;
+                line->items[idx]->positionCoords.x = mainSize <= 0 ? 0 : (int)currentPos;
             } else {
-                line->items[idx]->positionCoords.y = mainSize <= 0 ? 0 : (int)(currentPos - line->items[idx]->height);
-                currentPos = line->items[idx]->positionCoords.y;
+                line->items[idx]->positionCoords.y = mainSize <= 0 ? 0 : (int)currentPos;
             }
             if (i < line->itemCount - 1 && mainSize > 0) {
-                currentPos -= container->gap;
-                if (container->justify == JUSTIFY_SPACE_BETWEEN || 
-                    container->justify == JUSTIFY_SPACE_EVENLY ||
-                    container->justify == JUSTIFY_SPACE_AROUND) {
-                    currentPos -= spacing;
-                }
+                currentPos -= container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
             }
             printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
         }
@@ -270,12 +251,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
             if (mainSize > 0) {
                 currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
                 if (i < line->itemCount - 1) {
-                    currentPos += container->gap;
-                    if (container->justify == JUSTIFY_SPACE_BETWEEN || 
-                        container->justify == JUSTIFY_SPACE_EVENLY ||
-                        container->justify == JUSTIFY_SPACE_AROUND) {
-                        currentPos += spacing;
-                    }
+                    currentPos += container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
                 }
             }
             printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);

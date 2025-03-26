@@ -48,37 +48,6 @@ Test(flexbox_tests, basic_layout) {
     cleanup_container(container);
 }
 
-Test(flexbox_tests, flex_grow) {
-    FlexContainer* container = create_test_container(2);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-
-    layout_flex_container(container);
-
-    cr_assert_eq(container->items[0].width, 333, "Item 0 width");  // Adjusted for integer math
-    cr_assert_eq(container->items[1].width, 467, "Item 1 width");  // Adjusted for integer math
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 343, "Item 1 x");  // Adjusted due to integer width
-
-    cleanup_container(container);
-}
-
-Test(flexbox_tests, flex_shrink) {
-    FlexContainer* container = create_test_container(2);
-    container->width = 400;
-    container->items[0] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-
-    layout_flex_container(container);
-
-    cr_assert_eq(container->items[0].width, 233, "Item 0 width");  // Adjusted for integer math
-    cr_assert_eq(container->items[1].width, 157, "Item 1 width");  // Adjusted for integer math
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 243, "Item 1 x");  // Adjusted due to integer width
-
-    cleanup_container(container);
-}
-
 Test(flexbox_tests, wrap) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
@@ -95,20 +64,6 @@ Test(flexbox_tests, wrap) {
     cr_assert_eq(container->items[1].positionCoords.y, 110, "Item 1 y");
     cr_assert_eq(container->items[2].positionCoords.x, 0, "Item 2 x");
     cr_assert_eq(container->items[2].positionCoords.y, 220, "Item 2 y");
-
-    cleanup_container(container);
-}
-
-Test(flexbox_tests, justify_content) {
-    FlexContainer* container = create_test_container(2);
-    container->justify = JUSTIFY_SPACE_EVENLY;
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-
-    layout_flex_container(container);
-
-    cr_assert_eq(container->items[0].positionCoords.x, 133, "Item 0 x");  // Adjusted for integer math
-    cr_assert_eq(container->items[1].positionCoords.x, 467, "Item 1 x");  // Adjusted for integer math
 
     cleanup_container(container);
 }
@@ -143,6 +98,51 @@ Test(flexbox_tests, column_direction) {
     cleanup_container(container);
 }
 
+Test(flexbox_tests, flex_grow) {
+    FlexContainer* container = create_test_container(2);
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].width, 333, "Item 0 width");  // Correct per perfect distribution
+    cr_assert_eq(container->items[1].width, 467, "Item 1 width");  // Correct per perfect distribution
+    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].positionCoords.x, 343, "Item 1 x");  // 333 + 10
+
+    cleanup_container(container);
+}
+
+Test(flexbox_tests, flex_shrink) {
+    FlexContainer* container = create_test_container(2);
+    container->width = 400;
+    container->items[0] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].width, 230, "Item 0 width");  // Correct per spec
+    cr_assert_eq(container->items[1].width, 160, "Item 1 width");  // Correct per spec
+    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].positionCoords.x, 240, "Item 1 x");  // 230 + 10
+
+    cleanup_container(container);
+}
+
+Test(flexbox_tests, justify_content) {
+    FlexContainer* container = create_test_container(2);
+    container->justify = JUSTIFY_SPACE_EVENLY;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].positionCoords.x, 130, "Item 0 x");  // Correct per spec
+    cr_assert_eq(container->items[1].positionCoords.x, 470, "Item 1 x");  // Correct per spec
+
+    cleanup_container(container);
+}
+
 Test(flexbox_tests, row_reverse) {
     FlexContainer* container = create_test_container(2);
     container->direction = DIR_ROW_REVERSE;
@@ -151,8 +151,8 @@ Test(flexbox_tests, row_reverse) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 410, "Item 0 x");  // Adjusted for integer math
-    cr_assert_eq(container->items[1].positionCoords.x, 200, "Item 1 x");  // Adjusted for integer math
+    cr_assert_eq(container->items[0].positionCoords.x, 390, "Item 0 x");  // Correct per spec
+    cr_assert_eq(container->items[1].positionCoords.x, 600, "Item 1 x");  // Correct per spec
     cr_assert_eq(container->items[0].positionCoords.y, 0, "Item 0 y");
 
     cleanup_container(container);
