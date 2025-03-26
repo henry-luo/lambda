@@ -5,7 +5,7 @@
 #include "../layout_flex.c"
 
 // Container setup helper
-FlexContainer* _create_test_container(int itemCount) {
+FlexContainer* create_test_container(int itemCount) {
     FlexContainer* container = malloc(sizeof(FlexContainer));
     *container = (FlexContainer){
         .width = 800, .height = 600,
@@ -40,10 +40,10 @@ Test(flexbox_tests, basic_layout) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 210, "Item 1 x");
-    cr_assert_eq(container->items[2].positionCoords.x, 420, "Item 2 x");
-    cr_assert_eq(container->items[0].positionCoords.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 210, "Item 1 x");
+    cr_assert_eq(container->items[2].pos.x, 420, "Item 2 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
 
     cleanup_container(container);
 }
@@ -58,12 +58,12 @@ Test(flexbox_tests, wrap) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[0].positionCoords.y, 0, "Item 0 y");
-    cr_assert_eq(container->items[1].positionCoords.x, 0, "Item 1 x");
-    cr_assert_eq(container->items[1].positionCoords.y, 110, "Item 1 y");
-    cr_assert_eq(container->items[2].positionCoords.x, 0, "Item 2 x");
-    cr_assert_eq(container->items[2].positionCoords.y, 220, "Item 2 y");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 110, "Item 1 y");
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 220, "Item 2 y");
 
     cleanup_container(container);
 }
@@ -76,8 +76,8 @@ Test(flexbox_tests, align_items) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.y, 250, "Item 0 y");
-    cr_assert_eq(container->items[1].positionCoords.y, 225, "Item 1 y");
+    cr_assert_eq(container->items[0].pos.y, 250, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.y, 225, "Item 1 y");
 
     cleanup_container(container);
 }
@@ -90,10 +90,10 @@ Test(flexbox_tests, column_direction) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[0].positionCoords.y, 0, "Item 0 y");
-    cr_assert_eq(container->items[1].positionCoords.x, 0, "Item 1 x");
-    cr_assert_eq(container->items[1].positionCoords.y, 110, "Item 1 y");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 110, "Item 1 y");
 
     cleanup_container(container);
 }
@@ -107,8 +107,8 @@ Test(flexbox_tests, flex_grow) {
 
     cr_assert_eq(container->items[0].width, 330, "Item 0 width");  // Corrected from 333
     cr_assert_eq(container->items[1].width, 460, "Item 1 width");  // Corrected from 467
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 340, "Item 1 x");  // Corrected from 343
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 340, "Item 1 x");  // Corrected from 343
 
     cleanup_container(container);
 }
@@ -123,8 +123,8 @@ Test(flexbox_tests, flex_shrink) {
 
     cr_assert_eq(container->items[0].width, 230, "Item 0 width");  // Correct per spec
     cr_assert_eq(container->items[1].width, 160, "Item 1 width");  // Correct per spec
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 240, "Item 1 x");  // 230 + 10
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 240, "Item 1 x");  // 230 + 10
 
     cleanup_container(container);
 }
@@ -137,8 +137,8 @@ Test(flexbox_tests, justify_content) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 130, "Item 0 x");  // Correct per spec
-    cr_assert_eq(container->items[1].positionCoords.x, 470, "Item 1 x");  // Correct per spec
+    cr_assert_eq(container->items[0].pos.x, 130, "Item 0 x");  // Correct per spec
+    cr_assert_eq(container->items[1].pos.x, 470, "Item 1 x");  // Correct per spec
 
     cleanup_container(container);
 }
@@ -151,9 +151,9 @@ Test(flexbox_tests, row_reverse) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 390, "Item 0 x");  // Correct per spec
-    cr_assert_eq(container->items[1].positionCoords.x, 600, "Item 1 x");  // Correct per spec
-    cr_assert_eq(container->items[0].positionCoords.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[0].pos.x, 390, "Item 0 x");  // Correct per spec
+    cr_assert_eq(container->items[1].pos.x, 600, "Item 1 x");  // Correct per spec
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
 
     cleanup_container(container);
 }
@@ -166,9 +166,9 @@ Test(flexbox_tests, absolute_positioning) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[2].positionCoords.x, 210, "Item 2 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 0, "Item 1 x unchanged");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[2].pos.x, 210, "Item 2 x");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x unchanged");
 
     cleanup_container(container);
 }
@@ -181,9 +181,9 @@ Test(flexbox_tests, hidden_visibility) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[2].positionCoords.x, 210, "Item 2 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 0, "Item 1 x unchanged");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[2].pos.x, 210, "Item 2 x");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x unchanged");
 
     cleanup_container(container);
 }
@@ -197,8 +197,8 @@ Test(flexbox_tests, flex_basis) {
 
     cr_assert_eq(container->items[0].width, 300, "Item 0 width");
     cr_assert_eq(container->items[1].width, 400, "Item 1 width");
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 310, "Item 1 x");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 310, "Item 1 x");
 
     cleanup_container(container);
 }
@@ -212,8 +212,8 @@ Test(flexbox_tests, flex_basis_auto) {
 
     cr_assert_eq(container->items[0].width, 200, "Item 0 width should match width with auto");
     cr_assert_eq(container->items[1].width, 300, "Item 1 width should match width with auto");
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 210, "Item 1 x");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 210, "Item 1 x");
 
     cleanup_container(container);
 }
@@ -226,8 +226,8 @@ Test(flexbox_tests, align_self_override) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.y, 500, "Item 0 y");
-    cr_assert_eq(container->items[1].positionCoords.y, 225, "Item 1 y");
+    cr_assert_eq(container->items[0].pos.y, 500, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.y, 225, "Item 1 y");
 
     cleanup_container(container);
 }
@@ -240,8 +240,8 @@ Test(flexbox_tests, zero_size_container) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
 
     cleanup_container(container);
 }
@@ -281,9 +281,9 @@ Test(flexbox_tests, min_max_constraints) {
     cr_assert_eq(container->items[0].width, 250, "Item 0 width should be at max");
     cr_assert_eq(container->items[1].width, 150, "Item 1 width should be at min");
     cr_assert_eq(container->items[2].width, 250, "Item 2 width should be at max");
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 260, "Item 1 x");
-    cr_assert_eq(container->items[2].positionCoords.x, 420, "Item 2 x");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[1].pos.x, 260, "Item 1 x");
+    cr_assert_eq(container->items[2].pos.x, 420, "Item 2 x");
 
     cleanup_container(container);
 }
@@ -298,12 +298,12 @@ Test(flexbox_tests, wrap_reverse) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[0].positionCoords.y, 500, "Item 0 y");
-    cr_assert_eq(container->items[1].positionCoords.x, 0, "Item 1 x");
-    cr_assert_eq(container->items[1].positionCoords.y, 390, "Item 1 y");
-    cr_assert_eq(container->items[2].positionCoords.x, 0, "Item 2 x");
-    cr_assert_eq(container->items[2].positionCoords.y, 280, "Item 2 y");
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 500, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 390, "Item 1 y");
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 280, "Item 2 y");
 
     cleanup_container(container);
 }
@@ -328,12 +328,12 @@ Test(flexbox_tests, nested_containers) {
     layout_flex_container(inner);
     layout_flex_container(outer);
 
-    cr_assert_eq(inner->items[0].positionCoords.x, 0, "Inner item 0 x");
-    cr_assert_eq(inner->items[0].positionCoords.y, 0, "Inner item 0 y");
-    cr_assert_eq(inner->items[1].positionCoords.x, 160, "Inner item 1 x");
-    cr_assert_eq(inner->items[1].positionCoords.y, 0, "Inner item 1 y");
-    cr_assert_eq(outer->items[0].positionCoords.x, 0, "Outer item 0 x");
-    cr_assert_eq(outer->items[0].positionCoords.y, 0, "Outer item 0 y");
+    cr_assert_eq(inner->items[0].pos.x, 0, "Inner item 0 x");
+    cr_assert_eq(inner->items[0].pos.y, 0, "Inner item 0 y");
+    cr_assert_eq(inner->items[1].pos.x, 160, "Inner item 1 x");
+    cr_assert_eq(inner->items[1].pos.y, 0, "Inner item 1 y");
+    cr_assert_eq(outer->items[0].pos.x, 0, "Outer item 0 x");
+    cr_assert_eq(outer->items[0].pos.y, 0, "Outer item 0 y");
 
     cleanup_container(inner);
     cleanup_container(outer);

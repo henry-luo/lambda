@@ -18,6 +18,7 @@ typedef enum { TD_LTR, TD_RTL } TextDirection;
 typedef struct { int x, y; } Point;
 
 typedef struct {
+    Point pos;
     int width, height;
     int minWidth, maxWidth;
     int minHeight, maxHeight;
@@ -29,7 +30,6 @@ typedef struct {
     Visibility visibility;
     PositionType position;
     float aspectRatio;
-    Point positionCoords;
 } FlexItem;
 
 typedef struct {
@@ -92,7 +92,7 @@ static void initialize_items(FlexContainer* container, FlexItem* layoutItems, in
     for (int i = 0; i < container->itemCount; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
             layoutItems[*layoutCount] = container->items[i];
-            layoutItems[*layoutCount].positionCoords = (Point){0, 0};
+            layoutItems[*layoutCount].pos = (Point){0, 0};
             if (layoutItems[*layoutCount].alignSelf == ALIGN_START) {
                 layoutItems[*layoutCount].alignSelf = container->alignItems;
             }
@@ -230,23 +230,23 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
             float itemSize = isRow ? line->items[idx]->width : line->items[idx]->height;
             currentPos -= itemSize;
             if (isRow) {
-                line->items[idx]->positionCoords.x = mainSize <= 0 ? 0 : (int)currentPos;
+                line->items[idx]->pos.x = mainSize <= 0 ? 0 : (int)currentPos;
             } else {
-                line->items[idx]->positionCoords.y = mainSize <= 0 ? 0 : (int)currentPos;
+                line->items[idx]->pos.y = mainSize <= 0 ? 0 : (int)currentPos;
             }
             if (i < line->itemCount - 1 && mainSize > 0) {
                 currentPos -= container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
             }
-            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
+            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[idx]->pos.y);
         }
     } else {
         float currentPos = mainPos;
         for (int i = 0; i < line->itemCount; i++) {
             int idx = i;
             if (isRow) {
-                line->items[idx]->positionCoords.x = mainSize <= 0 ? 0 : (int)currentPos;
+                line->items[idx]->pos.x = mainSize <= 0 ? 0 : (int)currentPos;
             } else {
-                line->items[idx]->positionCoords.y = mainSize <= 0 ? 0 : (int)currentPos;
+                line->items[idx]->pos.y = mainSize <= 0 ? 0 : (int)currentPos;
             }
             if (mainSize > 0) {
                 currentPos += (isRow ? line->items[idx]->width : line->items[idx]->height);
@@ -254,7 +254,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
                     currentPos += container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
                 }
             }
-            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->positionCoords.x : line->items[idx]->positionCoords.y);
+            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[idx]->pos.y);
         }
     }
 }
@@ -277,9 +277,9 @@ static void position_items_cross_axis(FlexContainer* container, FlexLine* line, 
         }
         
         if (isRow) {
-            line->items[i]->positionCoords.y = itemCrossPos;
+            line->items[i]->pos.y = itemCrossPos;
         } else {
-            line->items[i]->positionCoords.x = itemCrossPos;
+            line->items[i]->pos.x = itemCrossPos;
         }
         printf("Item %d: crossPos=%.1f\n", i, itemCrossPos);
     }
@@ -291,7 +291,7 @@ static void update_original_items(FlexContainer* container, FlexItem* layoutItem
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
             container->items[i] = layoutItems[k];
             printf("Final item %d: x=%d, y=%d, w=%d, h=%d\n",
-                   i, container->items[i].positionCoords.x, container->items[i].positionCoords.y,
+                   i, container->items[i].pos.x, container->items[i].pos.y,
                    container->items[i].width, container->items[i].height);
             k++;
         }
@@ -351,36 +351,4 @@ void layout_flex_container(FlexContainer* container) {
 
 void free_flex_container(FlexContainer* container) {
     if (container->items) free(container->items);
-}
-
-FlexContainer* create_test_container(int itemCount) {
-    FlexContainer* container = malloc(sizeof(FlexContainer));
-    *container = (FlexContainer){
-        .width = 800, .height = 600,
-        .direction = DIR_ROW,
-        .wrap = WRAP_NOWRAP,
-        .justify = JUSTIFY_START,
-        .alignItems = ALIGN_START,
-        .gap = 10,
-        .items = malloc(itemCount * sizeof(FlexItem)),
-        .itemCount = itemCount,
-        .writingMode = WM_HORIZONTAL_TB,
-        .textDirection = TD_LTR
-    };
-    return container;
-}
-
-void test_flex() {
-    printf("starting flex layout test\n");
-    FlexContainer* container = create_test_container(3);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexBasis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexBasis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[2] = (FlexItem){ .width = 200, .height = 100, .flexBasis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-
-    layout_flex_container(container);
-
-    assert(container->items[0].positionCoords.x == 0);
-    assert(container->items[1].positionCoords.x == 210);
-    assert(container->items[2].positionCoords.x == 420);
-    assert(container->items[0].positionCoords.y == 0);
 }

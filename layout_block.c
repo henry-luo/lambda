@@ -68,8 +68,6 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
     }
 }
 
-void test_flex();
-
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     dzlog_debug("layout flex nodes\n");
     // first, layout each child as inline-block, to determine its width and height
@@ -79,8 +77,6 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
         // layout_block(lycon, (lxb_html_element_t*)child, display);        
         child = lxb_dom_node_next(child);
     } while (child);
-
-    test_flex();
 }
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
