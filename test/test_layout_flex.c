@@ -359,6 +359,46 @@ Test(flexbox_tests, aspect_ratio) {
     cleanup_container(container);
 }
 
+Test(flexbox_tests, column_flex_direction) {
+    FlexContainer* container = create_test_container(3);
+    container->direction = DIR_COLUMN;
+    container->height = 400;
+    container->items[0] = (FlexItem){ .width = 100, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 100, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 100, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 110, "Item 1 y");
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 220, "Item 2 y");
+
+    cleanup_container(container);
+}
+
+Test(flexbox_tests, column_reverse_flex_direction) {
+    FlexContainer* container = create_test_container(3);
+    container->direction = DIR_COLUMN_REVERSE;
+    container->height = 400;
+    container->items[0] = (FlexItem){ .width = 100, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 100, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 100, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 300, "Item 0 y");
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 190, "Item 1 y"); // 300 - 100 - 10
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 80, "Item 2 y");  // 190 - 100 - 10
+
+    cleanup_container(container);
+}
+
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     struct criterion_test_set *tests = criterion_initialize();

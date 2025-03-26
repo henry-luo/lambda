@@ -263,18 +263,18 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
     if (isReverse) {
         float currentPos = mainSize - mainPos;
         for (int i = 0; i < line->itemCount; i++) {
-            int idx = line->itemCount - 1 - i;
+            int idx = isRow ? (line->itemCount - 1 - i) : i; // Use reversed index for row, direct for column
             float itemSize = isRow ? line->items[idx]->width : line->items[idx]->height;
             currentPos -= itemSize;
             if (isRow) {
                 line->items[idx]->pos.x = mainSize <= 0 ? 0 : (int)currentPos;
             } else {
-                line->items[idx]->pos.y = mainSize <= 0 ? 0 : (int)currentPos;
+                line->items[i]->pos.y = mainSize <= 0 ? 0 : (int)currentPos; // Use i for column_reverse
             }
             if (i < line->itemCount - 1 && mainSize > 0) {
                 currentPos -= container->gap + (container->justify >= JUSTIFY_SPACE_BETWEEN ? spacing : 0);
             }
-            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[idx]->pos.y);
+            printf("Item %d: pos=%d\n", idx, isRow ? line->items[idx]->pos.x : line->items[i]->pos.y);
         }
     } else {
         float currentPos = mainPos;
