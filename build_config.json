@@ -8,6 +8,7 @@
         "layout.c",
         "layout_block.c",
         "layout_text.c",
+        "layout_flex.c",
         "resolve_style.c",
         "scroll.c",
         "view_pool.c",
