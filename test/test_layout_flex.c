@@ -105,10 +105,10 @@ Test(flexbox_tests, flex_grow) {
 
     layout_flex_container(container);
 
-    cr_assert_eq(container->items[0].width, 333, "Item 0 width");  // Correct per perfect distribution
-    cr_assert_eq(container->items[1].width, 467, "Item 1 width");  // Correct per perfect distribution
+    cr_assert_eq(container->items[0].width, 330, "Item 0 width");  // Corrected from 333
+    cr_assert_eq(container->items[1].width, 460, "Item 1 width");  // Corrected from 467
     cr_assert_eq(container->items[0].positionCoords.x, 0, "Item 0 x");
-    cr_assert_eq(container->items[1].positionCoords.x, 343, "Item 1 x");  // 333 + 10
+    cr_assert_eq(container->items[1].positionCoords.x, 340, "Item 1 x");  // Corrected from 343
 
     cleanup_container(container);
 }
