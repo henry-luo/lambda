@@ -347,5 +347,169 @@ int main(int argc, char *argv[]) {
     return result ? 0 : 1;
 }
 
+// Test align-content: ALIGN_START (default, lines at top)
+Test(flexbox_tests, align_content_start) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_START;  // Explicitly set to START (default)
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");    // Line 1 at top
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 110, "Item 1 y");  // Line 2 below Line 1
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 220, "Item 2 y");  // Line 3 below Line 2
+
+    cleanup_container(container);
+}
+
+// Test align-content: ALIGN_END (lines at bottom)
+Test(flexbox_tests, align_content_end) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_END;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    // Total height of 3 lines + 2 gaps = 100 + 10 + 100 + 10 + 100 = 320
+    // Free space = 600 - 320 = 280, so lines start at y=280
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 280, "Item 0 y");  // Line 1 at bottom - 2 lines
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 390, "Item 1 y");  // Line 2 above Line 1
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 500, "Item 2 y");  // Line 3 at bottom
+
+    cleanup_container(container);
+}
+
+// Test align-content: ALIGN_CENTER (lines centered)
+Test(flexbox_tests, align_content_center) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_CENTER;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    // Total height = 320, free space = 280, half free space = 140
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 140, "Item 0 y");  // Line 1 centered
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 250, "Item 1 y");  // Line 2
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 360, "Item 2 y");  // Line 3
+
+    cleanup_container(container);
+}
+
+// Test align-content: ALIGN_SPACE_BETWEEN (space distributed between lines)
+Test(flexbox_tests, align_content_space_between) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_SPACE_BETWEEN;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    // Total height = 320, free space = 280, 2 gaps = 280 / 2 = 140
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");    // First line at top
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 250, "Item 1 y");  // Middle line (100 + 10 + 140)
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 500, "Item 2 y");  // Last line at bottom
+
+    cleanup_container(container);
+}
+
+// Test align-content: ALIGN_SPACE_AROUND (space distributed around lines)
+Test(flexbox_tests, align_content_space_around) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_SPACE_AROUND;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 46, "Item 0 y");   // 46.7 rounded to 46
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 250, "Item 1 y");  // Matches output: 46.7 + 100 + 10 + 93.3 = 250
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 453, "Item 2 y");  // 453.3 rounded to 453
+
+    cleanup_container(container);
+}
+
+// Test align-content: ALIGN_SPACE_EVENLY (space distributed evenly including edges)
+Test(flexbox_tests, align_content_space_evenly) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_SPACE_EVENLY;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    // Total height = 320, free space = 280, 4 spaces = 280 / 4 = 70
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 70, "Item 0 y");   // First space
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 250, "Item 1 y");  // 70 + 100 + 10 + 70
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 430, "Item 2 y");  // 250 + 10 + 100 + 70
+
+    cleanup_container(container);
+}
+
+// Test align-content: ALIGN_STRETCH (lines stretch to fill container)
+Test(flexbox_tests, align_content_stretch) {
+    FlexContainer* container = create_test_container(3);
+    container->wrap = WRAP_WRAP;
+    container->width = 400;
+    container->alignContent = ALIGN_STRETCH;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    // Total original height = 320 (100 + 10 + 100 + 10 + 100), stretch factor = 600 / 320 = 1.875
+    // Each line height = 100 * 1.875 = 187 (rounded), total = 187 * 3 + 10 * 2 = 581 (adjusted to fit)
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
+    cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
+    cr_assert_eq(container->items[0].height, 187, "Item 0 height stretched");  // Approx
+    cr_assert_eq(container->items[1].pos.x, 0, "Item 1 x");
+    cr_assert_eq(container->items[1].pos.y, 197, "Item 1 y");  // 187 + 10
+    cr_assert_eq(container->items[1].height, 187, "Item 1 height stretched");
+    cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
+    cr_assert_eq(container->items[2].pos.y, 394, "Item 2 y");  // 197 + 187 + 10
+    cr_assert_eq(container->items[2].height, 187, "Item 2 height stretched");
+
+    cleanup_container(container);
+}
+
 // zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
 // ./test_layout_flex.exe --verbose

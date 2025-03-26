@@ -4,17 +4,20 @@
 #include <math.h>
 #include <assert.h>
 
-// enums
+// enums (unchanged)
 typedef enum { DIR_ROW, DIR_ROW_REVERSE, DIR_COLUMN, DIR_COLUMN_REVERSE } FlexDirection;
 typedef enum { WRAP_NOWRAP, WRAP_WRAP, WRAP_WRAP_REVERSE } FlexWrap;
 typedef enum { JUSTIFY_START, JUSTIFY_END, JUSTIFY_CENTER, JUSTIFY_SPACE_BETWEEN, JUSTIFY_SPACE_AROUND, JUSTIFY_SPACE_EVENLY } JustifyContent;
-typedef enum { ALIGN_START, ALIGN_END, ALIGN_CENTER, ALIGN_BASELINE, ALIGN_STRETCH } AlignType;
+typedef enum { 
+    ALIGN_START, ALIGN_END, ALIGN_CENTER, ALIGN_BASELINE, ALIGN_STRETCH,
+    ALIGN_SPACE_BETWEEN, ALIGN_SPACE_AROUND, ALIGN_SPACE_EVENLY
+} AlignType;
 typedef enum { VIS_VISIBLE, VIS_HIDDEN, VIS_COLLAPSE } Visibility;
 typedef enum { POS_STATIC, POS_ABSOLUTE } PositionType;
 typedef enum { WM_HORIZONTAL_TB, WM_VERTICAL_RL, WM_VERTICAL_LR } WritingMode;
 typedef enum { TD_LTR, TD_RTL } TextDirection;
 
-// structs
+// structs (unchanged)
 typedef struct { int x, y; } Point;
 
 typedef struct {
@@ -22,7 +25,7 @@ typedef struct {
     int width, height;
     int minWidth, maxWidth;
     int minHeight, maxHeight;
-    int flexBasis;  // -1 represents 'auto'
+    int flexBasis;  // -1 for auto
     float flexGrow, flexShrink;
     int margin[4];
     AlignType alignSelf;
@@ -55,13 +58,13 @@ typedef struct {
 
 static void initialize_items(FlexContainer* container, FlexItem* layoutItems, int* layoutCount);
 static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, int layoutCount, FlexLine** lines, int* lineCount);
-static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, float mainSize, float crossPos, int isRow, int isReverse);
+static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, int lineCount, float mainSize, float crossSize, float* crossPos, int isRow, int isReverse);
 static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSpace);
 static void position_items_main_axis(FlexContainer* container, FlexLine* line, float mainSize, int isRow, int isReverse);
 static void position_items_cross_axis(FlexContainer* container, FlexLine* line, float crossSize, float crossPos, int isRow);
 static void update_original_items(FlexContainer* container, FlexItem* layoutItems, int layoutCount);
 
-// helper functions
+// Helper functions
 float clamp(float value, float min, float max) {
     float result = (max != 0) ? fmin(fmax(value, min), max) : fmax(value, min);
     printf("clamp(%.1f, %.1f, %.1f) = %.1f\n", value, min, max, result);
@@ -70,8 +73,8 @@ float clamp(float value, float min, float max) {
 
 int resolve_flex_basis(FlexItem* item) {
     int basis;
-    if (item->flexBasis == -1) {  // 'auto' case
-        basis = item->width > 0 ? item->width : 0;  // Fallback to 0 if width not specified
+    if (item->flexBasis == -1) {
+        basis = item->width > 0 ? item->width : 0;
     } else {
         basis = (item->flexBasis > 0) ? item->flexBasis : item->width;
     }
@@ -87,7 +90,7 @@ void apply_constraints(FlexItem* item) {
     printf("apply_constraints: width %d -> %d, height %d -> %d\n", oldWidth, item->width, oldHeight, item->height);
 }
 
-// flex layout sub-functions
+// Flex layout sub-functions
 static void initialize_items(FlexContainer* container, FlexItem* layoutItems, int* layoutCount) {
     for (int i = 0; i < container->itemCount; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
@@ -148,8 +151,8 @@ static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, i
     printf("Created %d lines\n", *lineCount);
 }
 
-static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, float mainSize, float crossPos, 
-                            int isRow, int isReverse) {
+static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, int lineCount,
+                            float mainSize, float containerCrossSize, float* crossPos, int isRow, int isReverse) {
     float freeSpace = mainSize - line->totalBaseSize;
     if (mainSize <= 0) {
         freeSpace = 0;
@@ -169,7 +172,9 @@ static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine
     }
     
     position_items_main_axis(container, line, mainSize, isRow, isReverse);
-    position_items_cross_axis(container, line, isRow ? container->height : container->width, crossPos, isRow);
+    position_items_cross_axis(container, line, containerCrossSize, *crossPos, isRow);  // Use containerCrossSize
+    
+    printf("Processed line %ld: crossPos=%.1f, height=%d\n", line - lines, *crossPos, line->height);
 }
 
 static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSpace) {
@@ -301,8 +306,9 @@ static void update_original_items(FlexContainer* container, FlexItem* layoutItem
 // flex layout main function
 void layout_flex_container(FlexContainer* container) {
     printf("\n=== Starting layout_flex_container ===\n");
-    printf("Container: width=%d, height=%d, gap=%d, items=%d, justify=%d, alignItems=%d\n", 
-           container->width, container->height, container->gap, container->itemCount, container->justify, container->alignItems);
+    printf("Container: width=%d, height=%d, gap=%d, items=%d, justify=%d, alignItems=%d, alignContent=%d\n", 
+           container->width, container->height, container->gap, container->itemCount, container->justify, 
+           container->alignItems, container->alignContent);
 
     int isRow = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE);
     int isReverse = (container->direction == DIR_ROW_REVERSE || container->direction == DIR_COLUMN_REVERSE);
@@ -324,20 +330,63 @@ void layout_flex_container(FlexContainer* container) {
         totalCrossSize += lines[l].height;
         if (l < lineCount - 1) totalCrossSize += container->gap;
     }
+    float freeCrossSpace = crossSize - totalCrossSize;
+    float crossPos = 0, crossSpacing = 0;
 
-    float crossPos;
+    if (container->wrap != WRAP_NOWRAP && lineCount > 1 && crossSize > 0) {
+        switch (container->alignContent) {
+            case ALIGN_END: crossPos = freeCrossSpace; break;
+            case ALIGN_CENTER: crossPos = freeCrossSpace / 2; break;
+            case ALIGN_SPACE_BETWEEN: crossSpacing = freeCrossSpace / (lineCount - 1); break;
+            case ALIGN_SPACE_AROUND: 
+                crossSpacing = freeCrossSpace / lineCount; 
+                crossPos = crossSpacing / 2; 
+                break;
+            case ALIGN_SPACE_EVENLY: 
+                crossSpacing = freeCrossSpace / (lineCount + 1); 
+                crossPos = crossSpacing; 
+                break;
+            case ALIGN_STRETCH: 
+                float stretchFactor = crossSize / totalCrossSize;
+                for (int l = 0; l < lineCount; l++) {
+                    lines[l].height = (int)(lines[l].height * stretchFactor);
+                    // Apply stretched height to each item in the line
+                    for (int i = 0; i < lines[l].itemCount; i++) {
+                        if (isRow) {
+                            lines[l].items[i]->height = lines[l].height;
+                        } else {
+                            lines[l].items[i]->width = lines[l].height;
+                        }
+                    }
+                }
+                totalCrossSize = crossSize;
+                freeCrossSpace = 0;
+                break;
+            default: break;
+        }
+    }
+    printf("Align-content: freeCrossSpace=%.1f, crossPos=%.1f, crossSpacing=%.1f\n", 
+           freeCrossSpace, crossPos, crossSpacing);
+
     if (container->wrap == WRAP_WRAP_REVERSE && isRow) {
-        crossPos = crossSize;
+        float currentCrossPos = crossSize - crossPos;
         for (int l = 0; l < lineCount; l++) {
-            crossPos -= lines[l].height;
-            process_flex_line(container, &lines[l], lines, mainSize, crossPos, isRow, isReverse);
-            if (l < lineCount - 1) crossPos -= container->gap;
+            currentCrossPos -= lines[l].height;
+            process_flex_line(container, &lines[l], lines, lineCount, mainSize, crossSize, 
+                            &currentCrossPos, isRow, isReverse);
+            if (l < lineCount - 1) {
+                currentCrossPos -= container->gap + (container->alignContent >= ALIGN_SPACE_BETWEEN ? crossSpacing : 0);
+            }
         }
     } else {
-        crossPos = 0;
+        float currentCrossPos = crossPos;
         for (int l = 0; l < lineCount; l++) {
-            process_flex_line(container, &lines[l], lines, mainSize, crossPos, isRow, isReverse);
-            crossPos += lines[l].height + (l < lineCount - 1 ? container->gap : 0);
+            process_flex_line(container, &lines[l], lines, lineCount, mainSize, crossSize, 
+                            &currentCrossPos, isRow, isReverse);
+            if (l < lineCount - 1) {
+                currentCrossPos += lines[l].height + container->gap + 
+                                 (container->alignContent >= ALIGN_SPACE_BETWEEN ? crossSpacing : 0);
+            }
         }
     }
 
