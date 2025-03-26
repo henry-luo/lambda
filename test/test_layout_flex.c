@@ -339,6 +339,26 @@ Test(flexbox_tests, nested_containers) {
     cleanup_container(outer);
 }
 
+Test(flexbox_tests, aspect_ratio) {
+    FlexContainer* container = create_test_container(3);
+    container->width = 600;
+    container->height = 400;
+    container->wrap = WRAP_NOWRAP;
+
+    container->items[0] = (FlexItem){ .width = 200, .aspectRatio = 2.0, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .height = 100, .aspectRatio = 1.5, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 150, .height = 75, .aspectRatio = 2.0, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+
+    layout_flex_container(container);
+
+    cr_assert_eq(container->items[0].height, 100, "Item 0 height should respect aspect ratio");
+    cr_assert_eq(container->items[1].width, 150, "Item 1 width should respect aspect ratio");
+    cr_assert_eq(container->items[2].width, 150, "Item 2 width should remain unchanged");
+    cr_assert_eq(container->items[2].height, 75, "Item 2 height should remain unchanged");
+
+    cleanup_container(container);
+}
+
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     struct criterion_test_set *tests = criterion_initialize();

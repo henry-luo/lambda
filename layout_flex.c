@@ -85,8 +85,28 @@ int resolve_flex_basis(FlexItem* item) {
 
 void apply_constraints(FlexItem* item) {
     int oldWidth = item->width, oldHeight = item->height;
+
+    // Adjust dimensions based on aspect ratio
+    if (item->aspectRatio > 0) {
+        if (item->width > 0 && item->height == 0) {
+            item->height = (int)(item->width / item->aspectRatio);
+        } else if (item->height > 0 && item->width == 0) {
+            item->width = (int)(item->height * item->aspectRatio);
+        }
+    }
+
     item->width = clamp(item->width, item->minWidth, item->maxWidth);
     item->height = clamp(item->height, item->minHeight, item->maxHeight);
+
+    // Reapply aspect ratio constraints after clamping
+    if (item->aspectRatio > 0) {
+        if (item->width > 0 && item->height == 0) {
+            item->height = (int)(item->width / item->aspectRatio);
+        } else if (item->height > 0 && item->width == 0) {
+            item->width = (int)(item->height * item->aspectRatio);
+        }
+    }
+
     printf("apply_constraints: width %d -> %d, height %d -> %d\n", oldWidth, item->width, oldHeight, item->height);
 }
 
@@ -192,8 +212,14 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
             if (line->items[i]->flexGrow > 0) {
                 float growAmount = (remainingSpace * line->items[i]->flexGrow) / totalGrow;
                 line->items[i]->width += (int)roundf(growAmount);
+
+                // Adjust height based on aspect ratio
+                if (line->items[i]->aspectRatio > 0) {
+                    line->items[i]->height = (int)(line->items[i]->width / line->items[i]->aspectRatio);
+                }
+
                 apply_constraints(line->items[i]);
-                printf("Grow item %d: width=%d\n", i, line->items[i]->width);
+                printf("Grow item %d: width=%d, height=%d\n", i, line->items[i]->width, line->items[i]->height);
             }
         }
     } else if (freeSpace < 0 && totalShrink > 0) {
@@ -202,8 +228,14 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
             if (line->items[i]->flexShrink > 0) {
                 float shrinkAmount = (remainingSpace * line->items[i]->flexShrink) / totalShrink;
                 line->items[i]->width -= (int)roundf(shrinkAmount);
+
+                // Adjust height based on aspect ratio
+                if (line->items[i]->aspectRatio > 0) {
+                    line->items[i]->height = (int)(line->items[i]->width / line->items[i]->aspectRatio);
+                }
+
                 apply_constraints(line->items[i]);
-                printf("Shrink item %d: width=%d\n", i, line->items[i]->width);
+                printf("Shrink item %d: width=%d, height=%d\n", i, line->items[i]->width, line->items[i]->height);
             }
         }
     }
