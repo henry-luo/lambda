@@ -1235,5 +1235,248 @@ Test(flexbox_tests, auto_margins_override_align) {
     cleanup_container(container);
 }
 
+// Test deep nesting (3 levels)
+Test(flexbox_tests, deep_nested_containers) {
+    // Level 1 (grandparent)
+    FlexContainer* grandparent = create_test_container(1);
+    grandparent->width = 1000;
+    grandparent->height = 800;
+    grandparent->direction = DIR_COLUMN;
+    
+    // Level 2 (parent)
+    FlexContainer* parent = create_test_container(2);
+    parent->width = 800;
+    parent->height = 500;
+    parent->direction = DIR_ROW;
+    
+    // Level 3 (child)
+    FlexContainer* child = create_test_container(2);
+    child->width = 400;
+    child->height = 300;
+    child->direction = DIR_COLUMN;
+    
+    // Set up the child container items
+    child->items[0] = (FlexItem){ .width = 300, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    child->items[1] = (FlexItem){ .width = 300, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Set up parent items - first is normal, second will contain the child container
+    parent->items[0] = (FlexItem){ .width = 350, .height = 400, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    parent->items[1] = (FlexItem){ .width = 400, .height = 300, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Grandparent contains the parent
+    grandparent->items[0] = (FlexItem){ .width = 800, .height = 500, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Layout from inside out
+    layout_flex_container(child);
+    layout_flex_container(parent);
+    layout_flex_container(grandparent);
+    
+    // Child items should be positioned relative to the child container
+    cr_assert_eq(child->items[0].pos.x, 0, "Child item 0 x");
+    cr_assert_eq(child->items[0].pos.y, 0, "Child item 0 y");
+    cr_assert_eq(child->items[1].pos.x, 0, "Child item 1 x");
+    cr_assert_eq(child->items[1].pos.y, 110, "Child item 1 y"); // 100 + 10(gap)
+    
+    // Parent items positions
+    cr_assert_eq(parent->items[0].pos.x, 0, "Parent item 0 x");
+    cr_assert_eq(parent->items[0].pos.y, 0, "Parent item 0 y");
+    cr_assert_eq(parent->items[1].pos.x, 360, "Parent item 1 x"); // 350 + 10(gap)
+    cr_assert_eq(parent->items[1].pos.y, 0, "Parent item 1 y");
+    
+    // Grandparent item position
+    cr_assert_eq(grandparent->items[0].pos.x, 0, "Grandparent item x");
+    cr_assert_eq(grandparent->items[0].pos.y, 0, "Grandparent item y");
+    
+    cleanup_container(child);
+    cleanup_container(parent);
+    cleanup_container(grandparent);
+}
+
+// Test nested containers with different flex directions
+Test(flexbox_tests, nested_different_directions) {
+    // Outer container with row direction
+    FlexContainer* outer = create_test_container(2);
+    outer->width = 900;
+    outer->height = 700;
+    outer->direction = DIR_ROW;
+    
+    // Inner container with column direction
+    FlexContainer* inner = create_test_container(3);
+    inner->width = 400;
+    inner->height = 600;
+    inner->direction = DIR_COLUMN;
+    
+    // Set up inner items
+    inner->items[0] = (FlexItem){ .width = 300, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    inner->items[1] = (FlexItem){ .width = 300, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    inner->items[2] = (FlexItem){ .width = 300, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Set up outer items - second will be the inner container position
+    outer->items[0] = (FlexItem){ .width = 350, .height = 500, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    outer->items[1] = (FlexItem){ .width = 400, .height = 600, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    layout_flex_container(inner);
+    layout_flex_container(outer);
+    
+    // Check inner items are laid out in column
+    cr_assert_eq(inner->items[0].pos.x, 0, "Inner item 0 x");
+    cr_assert_eq(inner->items[0].pos.y, 0, "Inner item 0 y");
+    cr_assert_eq(inner->items[1].pos.x, 0, "Inner item 1 x");
+    cr_assert_eq(inner->items[1].pos.y, 160, "Inner item 1 y"); // 150 + 10(gap)
+    cr_assert_eq(inner->items[2].pos.x, 0, "Inner item 2 x");
+    cr_assert_eq(inner->items[2].pos.y, 320, "Inner item 2 y"); // 160 + 150 + 10(gap)
+    
+    // Check outer items are laid out in row
+    cr_assert_eq(outer->items[0].pos.x, 0, "Outer item 0 x");
+    cr_assert_eq(outer->items[0].pos.y, 0, "Outer item 0 y");
+    cr_assert_eq(outer->items[1].pos.x, 360, "Outer item 1 x"); // 350 + 10(gap)
+    cr_assert_eq(outer->items[1].pos.y, 0, "Outer item 1 y");
+    
+    cleanup_container(inner);
+    cleanup_container(outer);
+}
+
+// Test nested containers with wrapping
+Test(flexbox_tests, nested_with_wrapping) {
+    // Outer container with wrapping
+    FlexContainer* outer = create_test_container(3);
+    outer->width = 500;
+    outer->height = 800;
+    outer->wrap = WRAP_WRAP;
+    
+    // Inner container (will be the middle item)
+    FlexContainer* inner = create_test_container(2);
+    inner->width = 250;
+    inner->height = 300;
+    inner->wrap = WRAP_WRAP;
+    
+    // Inner container items that will wrap
+    inner->items[0] = (FlexItem){ .width = 150, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    inner->items[1] = (FlexItem){ .width = 150, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Outer container items - middle one will be positioned after layout
+    outer->items[0] = (FlexItem){ .width = 400, .height = 200, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    outer->items[1] = (FlexItem){ .width = 250, .height = 300, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    outer->items[2] = (FlexItem){ .width = 400, .height = 200, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    layout_flex_container(inner);
+    layout_flex_container(outer);
+    
+    // Inner items should wrap within inner container
+    cr_assert_eq(inner->items[0].pos.x, 0, "Inner item 0 x");
+    cr_assert_eq(inner->items[0].pos.y, 0, "Inner item 0 y");
+    cr_assert_eq(inner->items[1].pos.x, 0, "Inner item 1 x");
+    cr_assert_eq(inner->items[1].pos.y, 110, "Inner item 1 y"); // Wrapped to next line
+    
+    // Outer items should wrap too (item 2 on second line)
+    cr_assert_eq(outer->items[0].pos.x, 0, "Outer item 0 x");
+    cr_assert_eq(outer->items[0].pos.y, 0, "Outer item 0 y");
+    cr_assert_eq(outer->items[1].pos.x, 0, "Outer item 1 x");
+    cr_assert_eq(outer->items[1].pos.y, 210, "Outer item 1 y"); // 200 + 10(gap)
+    cr_assert_eq(outer->items[2].pos.x, 0, "Outer item 2 x");
+    cr_assert_eq(outer->items[2].pos.y, 520, "Outer item 2 y"); // 210 + 300 + 10(gap)
+    
+    cleanup_container(inner);
+    cleanup_container(outer);
+}
+
+// Test nested containers with absolute positioning
+Test(flexbox_tests, nested_with_absolute) {
+    // Outer container
+    FlexContainer* outer = create_test_container(2);
+    outer->width = 1000;
+    outer->height = 800;
+    
+    // Inner container
+    FlexContainer* inner = create_test_container(3);
+    inner->width = 600;
+    inner->height = 400;
+    
+    // Inner items - mix of static and absolute
+    inner->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    inner->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_ABSOLUTE, .visibility = VIS_VISIBLE};
+    inner->items[1].pos = (Point){.x = 50, .y = 50}; // Absolute positioned
+    inner->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Outer items
+    outer->items[0] = (FlexItem){ .width = 300, .height = 300, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    outer->items[1] = (FlexItem){ .width = 600, .height = 400, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    layout_flex_container(inner);
+    layout_flex_container(outer);
+    
+    // Check static items in inner container
+    cr_assert_eq(inner->items[0].pos.x, 0, "Inner item 0 x");
+    cr_assert_eq(inner->items[0].pos.y, 0, "Inner item 0 y");
+    cr_assert_eq(inner->items[2].pos.x, 210, "Inner item 2 x"); // 0 + 200 + 10(gap)
+    cr_assert_eq(inner->items[2].pos.y, 0, "Inner item 2 y");
+    
+    // Check absolute item in inner container
+    cr_assert_eq(inner->items[1].pos.x, 50, "Inner absolute item x"); // Set by left property
+    cr_assert_eq(inner->items[1].pos.y, 50, "Inner absolute item y"); // Set by top property
+    
+    // Check outer items
+    cr_assert_eq(outer->items[0].pos.x, 0, "Outer item 0 x");
+    cr_assert_eq(outer->items[0].pos.y, 0, "Outer item 0 y");
+    cr_assert_eq(outer->items[1].pos.x, 310, "Outer item 1 x"); // 300 + 10(gap)
+    cr_assert_eq(outer->items[1].pos.y, 0, "Outer item 1 y");
+    
+    cleanup_container(inner);
+    cleanup_container(outer);
+}
+
+// Test nested containers with coordinate transformations
+Test(flexbox_tests, nested_coordinate_transform) {
+    // Outer container
+    FlexContainer* outer = create_test_container(2);
+    outer->width = 1000;
+    outer->height = 700;
+    
+    // Inner container
+    FlexContainer* inner = create_test_container(2);
+    inner->width = 500;
+    inner->height = 400;
+    
+    // Inner items
+    inner->items[0] = (FlexItem){ .width = 150, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    inner->items[1] = (FlexItem){ .width = 150, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Outer items - second one will be inner container
+    outer->items[0] = (FlexItem){ .width = 300, .height = 500, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    outer->items[1] = (FlexItem){ .width = 500, .height = 400, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    
+    // Layout the containers
+    layout_flex_container(inner);
+    layout_flex_container(outer);
+    
+    // Get the absolute coordinates of the inner items
+    int inner_container_x = outer->items[1].pos.x;
+    int inner_container_y = outer->items[1].pos.y;
+    
+    int item0_absolute_x = inner_container_x + inner->items[0].pos.x;
+    int item0_absolute_y = inner_container_y + inner->items[0].pos.y;
+    int item1_absolute_x = inner_container_x + inner->items[1].pos.x;
+    int item1_absolute_y = inner_container_y + inner->items[1].pos.y;
+    
+    // Check inner items relative positions
+    cr_assert_eq(inner->items[0].pos.x, 0, "Inner item 0 relative x");
+    cr_assert_eq(inner->items[0].pos.y, 0, "Inner item 0 relative y");
+    cr_assert_eq(inner->items[1].pos.x, 160, "Inner item 1 relative x");
+    cr_assert_eq(inner->items[1].pos.y, 0, "Inner item 1 relative y");
+    
+    // Check outer container position
+    cr_assert_eq(outer->items[1].pos.x, 310, "Inner container x in outer");
+    cr_assert_eq(outer->items[1].pos.y, 0, "Inner container y in outer");
+    
+    // Check absolute coordinates calculations
+    cr_assert_eq(item0_absolute_x, 310, "Inner item 0 absolute x");
+    cr_assert_eq(item0_absolute_y, 0, "Inner item 0 absolute y");
+    cr_assert_eq(item1_absolute_x, 470, "Inner item 1 absolute x");
+    cr_assert_eq(item1_absolute_y, 0, "Inner item 1 absolute y");
+    
+    cleanup_container(inner);
+    cleanup_container(outer);
+}
+
 // zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
 // ./test_layout_flex.exe --verbose
