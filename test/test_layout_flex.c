@@ -5,20 +5,20 @@
 #include "../layout_flex.c"
 
 // Container setup helper
-FlexContainer* create_test_container(int itemCount) {
+FlexContainer* create_test_container(int item_count) {
     FlexContainer* container = malloc(sizeof(FlexContainer));
     *container = (FlexContainer){
         .width = 800, .height = 600,
         .direction = DIR_ROW,
         .wrap = WRAP_NOWRAP,
         .justify = JUSTIFY_START,
-        .alignItems = ALIGN_START,
-        .rowGap = 10,
-        .columnGap = 10,
-        .items = malloc(itemCount * sizeof(FlexItem)),
-        .itemCount = itemCount,
-        .writingMode = WM_HORIZONTAL_TB,
-        .textDirection = TD_LTR
+        .align_items = ALIGN_START,
+        .row_gap = 10,
+        .column_gap = 10,
+        .items = malloc(item_count * sizeof(FlexItem)),
+        .item_count = item_count,
+        .writing_mode = WM_HORIZONTAL_TB,
+        .text_direction = TD_LTR
     };
     return container;
 }
@@ -71,7 +71,7 @@ Test(flexbox_tests, wrap) {
 
 Test(flexbox_tests, align_items) {
     FlexContainer* container = create_test_container(2);
-    container->alignItems = ALIGN_CENTER;
+    container->align_items = ALIGN_CENTER;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
@@ -101,8 +101,8 @@ Test(flexbox_tests, column_direction) {
 
 Test(flexbox_tests, flex_grow) {
     FlexContainer* container = create_test_container(2);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexGrow = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flex_grow = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flex_grow = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layout_flex_container(container);
 
@@ -117,8 +117,8 @@ Test(flexbox_tests, flex_grow) {
 Test(flexbox_tests, flex_shrink) {
     FlexContainer* container = create_test_container(2);
     container->width = 400;
-    container->items[0] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexShrink = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[0] = (FlexItem){ .width = 300, .height = 100, .flex_shrink = 1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flex_shrink = 2, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layout_flex_container(container);
 
@@ -191,8 +191,8 @@ Test(flexbox_tests, hidden_visibility) {
 
 Test(flexbox_tests, flex_basis) {
     FlexContainer* container = create_test_container(2);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexBasis = 300, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flexBasis = 400, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flex_basis = 300, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 200, .height = 100, .flex_basis = 400, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layout_flex_container(container);
 
@@ -206,8 +206,8 @@ Test(flexbox_tests, flex_basis) {
 
 Test(flexbox_tests, flex_basis_auto) {
     FlexContainer* container = create_test_container(2);
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flexBasis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flexBasis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .flex_basis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .width = 300, .height = 100, .flex_basis = -1, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layout_flex_container(container);
 
@@ -221,8 +221,8 @@ Test(flexbox_tests, flex_basis_auto) {
 
 Test(flexbox_tests, align_self_override) {
     FlexContainer* container = create_test_container(2);
-    container->alignItems = ALIGN_CENTER;
-    container->items[0] = (FlexItem){ .width = 200, .height = 100, .alignSelf = ALIGN_END, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->align_items = ALIGN_CENTER;
+    container->items[0] = (FlexItem){ .width = 200, .height = 100, .align_self = ALIGN_END, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 150, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layout_flex_container(container);
@@ -252,27 +252,27 @@ Test(flexbox_tests, min_max_constraints) {
     container->items[0] = (FlexItem){ 
         .width = 200, 
         .height = 100, 
-        .minWidth = 150, 
-        .maxWidth = 250, 
-        .flexGrow = 1, 
+        .min_width = 150, 
+        .max_width = 250, 
+        .flex_grow = 1, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
     container->items[1] = (FlexItem){ 
         .width = 100, 
         .height = 100, 
-        .minWidth = 150, 
-        .maxWidth = 200, 
-        .flexShrink = 1, 
+        .min_width = 150, 
+        .max_width = 200, 
+        .flex_shrink = 1, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
     container->items[2] = (FlexItem){ 
         .width = 300, 
         .height = 100, 
-        .minWidth = 200, 
-        .maxWidth = 250, 
-        .flexGrow = 1, 
+        .min_width = 200, 
+        .max_width = 250, 
+        .flex_grow = 1, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -346,9 +346,9 @@ Test(flexbox_tests, aspect_ratio) {
     container->height = 400;
     container->wrap = WRAP_NOWRAP;
 
-    container->items[0] = (FlexItem){ .width = 200, .aspectRatio = 2.0, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[1] = (FlexItem){ .height = 100, .aspectRatio = 1.5, .position = POS_STATIC, .visibility = VIS_VISIBLE };
-    container->items[2] = (FlexItem){ .width = 150, .height = 75, .aspectRatio = 2.0, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[0] = (FlexItem){ .width = 200, .aspect_ratio = 2.0, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[1] = (FlexItem){ .height = 100, .aspect_ratio = 1.5, .position = POS_STATIC, .visibility = VIS_VISIBLE };
+    container->items[2] = (FlexItem){ .width = 150, .height = 75, .aspect_ratio = 2.0, .position = POS_STATIC, .visibility = VIS_VISIBLE };
 
     layout_flex_container(container);
 
@@ -413,7 +413,7 @@ Test(flexbox_tests, align_content_start) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_START;  // Explicitly set to START (default)
+    container->align_content = ALIGN_START;  // Explicitly set to START (default)
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -435,7 +435,7 @@ Test(flexbox_tests, align_content_end) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_END;
+    container->align_content = ALIGN_END;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -459,7 +459,7 @@ Test(flexbox_tests, align_content_center) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_CENTER;
+    container->align_content = ALIGN_CENTER;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -482,7 +482,7 @@ Test(flexbox_tests, align_content_space_between) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_SPACE_BETWEEN;
+    container->align_content = ALIGN_SPACE_BETWEEN;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -505,7 +505,7 @@ Test(flexbox_tests, align_content_space_around) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_SPACE_AROUND;
+    container->align_content = ALIGN_SPACE_AROUND;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -527,7 +527,7 @@ Test(flexbox_tests, align_content_space_evenly) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_SPACE_EVENLY;
+    container->align_content = ALIGN_SPACE_EVENLY;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -550,7 +550,7 @@ Test(flexbox_tests, align_content_stretch) {
     FlexContainer* container = create_test_container(3);
     container->wrap = WRAP_WRAP;
     container->width = 400;
-    container->alignContent = ALIGN_STRETCH;
+    container->align_content = ALIGN_STRETCH;
     container->items[0] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[1] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
     container->items[2] = (FlexItem){ .width = 200, .height = 100, .position = POS_STATIC, .visibility = VIS_VISIBLE };
@@ -575,8 +575,8 @@ Test(flexbox_tests, align_content_stretch) {
 // Test different row and column gaps
 Test(flexbox_tests, different_row_column_gaps) {
     FlexContainer* container = create_test_container(4);
-    container->rowGap = 20;     // Vertical gap between rows
-    container->columnGap = 30;  // Horizontal gap between columns
+    container->row_gap = 20;     // Vertical gap between rows
+    container->column_gap = 30;  // Horizontal gap between columns
     container->wrap = WRAP_WRAP;
     container->width = 450;
     
@@ -591,14 +591,14 @@ Test(flexbox_tests, different_row_column_gaps) {
     // First row
     cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x");
     cr_assert_eq(container->items[0].pos.y, 0, "Item 0 y");
-    cr_assert_eq(container->items[1].pos.x, 230, "Item 1 x");  // 0 + 200 + 30 (columnGap)
+    cr_assert_eq(container->items[1].pos.x, 230, "Item 1 x");  // 0 + 200 + 30 (column_gap)
     cr_assert_eq(container->items[1].pos.y, 0, "Item 1 y");
     
-    // Second row - should be positioned 20px (rowGap) below first row
+    // Second row - should be positioned 20px (row_gap) below first row
     cr_assert_eq(container->items[2].pos.x, 0, "Item 2 x");
-    cr_assert_eq(container->items[2].pos.y, 120, "Item 2 y");  // 0 + 100 + 20 (rowGap)
-    cr_assert_eq(container->items[3].pos.x, 230, "Item 3 x");  // 0 + 200 + 30 (columnGap)
-    cr_assert_eq(container->items[3].pos.y, 120, "Item 3 y");  // 0 + 100 + 20 (rowGap)
+    cr_assert_eq(container->items[2].pos.y, 120, "Item 2 y");  // 0 + 100 + 20 (row_gap)
+    cr_assert_eq(container->items[3].pos.x, 230, "Item 3 x");  // 0 + 200 + 30 (column_gap)
+    cr_assert_eq(container->items[3].pos.y, 120, "Item 3 y");  // 0 + 100 + 20 (row_gap)
 
     cleanup_container(container);
 }
@@ -698,7 +698,7 @@ Test(flexbox_tests, percentage_widths) {
     
     // Item with 50% width
     container->items[0] = (FlexItem){ 
-        .width = 50, .isWidthPercent = 1, 
+        .width = 50, .is_width_percent = 1, 
         .height = 100, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
@@ -706,7 +706,7 @@ Test(flexbox_tests, percentage_widths) {
     
     // Item with 30% width
     container->items[1] = (FlexItem){ 
-        .width = 30, .isWidthPercent = 1, 
+        .width = 30, .is_width_percent = 1, 
         .height = 100, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
@@ -734,14 +734,14 @@ Test(flexbox_tests, percentage_heights) {
     // Items with percentage heights
     container->items[0] = (FlexItem){ 
         .width = 200, 
-        .height = 50, .isHeightPercent = 1,
+        .height = 50, .is_height_percent = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
     
     container->items[1] = (FlexItem){ 
         .width = 200, 
-        .height = 25, .isHeightPercent = 1,
+        .height = 25, .is_height_percent = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -764,18 +764,18 @@ Test(flexbox_tests, percentage_flex_basis) {
     // Items with percentage flex-basis
     container->items[0] = (FlexItem){ 
         .width = 100, 
-        .flexBasis = 40, .isFlexBasisPercent = 1,
+        .flex_basis = 40, .is_flex_basis_percent = 1,
         .height = 100, 
-        .flexGrow = 0,
+        .flex_grow = 0,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
     
     container->items[1] = (FlexItem){ 
         .width = 100, 
-        .flexBasis = 20, .isFlexBasisPercent = 1,
+        .flex_basis = 20, .is_flex_basis_percent = 1,
         .height = 100, 
-        .flexGrow = 0,
+        .flex_grow = 0,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -802,9 +802,9 @@ Test(flexbox_tests, percentage_constraints) {
     // Item with percentage min/max width constraints
     container->items[0] = (FlexItem){ 
         .width = 200, 
-        .minWidth = 30, .isMinWidthPercent = 1,  // 30% = 300px
-        .maxWidth = 40, .isMaxWidthPercent = 1,  // 40% = 400px
-        .flexGrow = 1,
+        .min_width = 30, .is_min_width_percent = 1,  // 30% = 300px
+        .max_width = 40, .is_max_width_percent = 1,  // 40% = 400px
+        .flex_grow = 1,
         .height = 100, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
@@ -813,9 +813,9 @@ Test(flexbox_tests, percentage_constraints) {
     // Item with mixed constraints
     container->items[1] = (FlexItem){ 
         .width = 100, 
-        .minWidth = 150,  // absolute pixels
-        .maxWidth = 20, .isMaxWidthPercent = 1,  // 20% = 200px
-        .flexGrow = 1,
+        .min_width = 150,  // absolute pixels
+        .max_width = 20, .is_max_width_percent = 1,  // 20% = 200px
+        .flex_grow = 1,
         .height = 100, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
@@ -835,7 +835,7 @@ Test(flexbox_tests, mixed_percentage_absolute) {
     FlexContainer* container = create_test_container(3);
     container->width = 1000;
     container->height = 600;
-    container->columnGap = 20; // Larger gap for clarity
+    container->column_gap = 20; // Larger gap for clarity
     
     // Absolute width
     container->items[0] = (FlexItem){ 
@@ -847,7 +847,7 @@ Test(flexbox_tests, mixed_percentage_absolute) {
     
     // Percentage width
     container->items[1] = (FlexItem){ 
-        .width = 30, .isWidthPercent = 1,  // 30% = 300px
+        .width = 30, .is_width_percent = 1,  // 30% = 300px
         .height = 100, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
@@ -856,7 +856,7 @@ Test(flexbox_tests, mixed_percentage_absolute) {
     // Percentage flex-basis
     container->items[2] = (FlexItem){ 
         .width = 100, 
-        .flexBasis = 25, .isFlexBasisPercent = 1,  // 25% = 250px
+        .flex_basis = 25, .is_flex_basis_percent = 1,  // 25% = 250px
         .height = 100, 
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
@@ -880,7 +880,7 @@ Test(flexbox_tests, mixed_percentage_absolute) {
 // Test baseline alignment
 Test(flexbox_tests, baseline_alignment) {
     FlexContainer* container = create_test_container(3);
-    container->alignItems = ALIGN_BASELINE;
+    container->align_items = ALIGN_BASELINE;
     
     // Item with default baseline (3/4 of height)
     container->items[0] = (FlexItem){ 
@@ -893,7 +893,7 @@ Test(flexbox_tests, baseline_alignment) {
     // Item with explicit baseline offset
     container->items[1] = (FlexItem){ 
         .width = 100, .height = 120,
-        .baselineOffset = 100,  // Baseline is near the bottom
+        .baseline_offset = 100,  // Baseline is near the bottom
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -901,7 +901,7 @@ Test(flexbox_tests, baseline_alignment) {
     // Item with another baseline offset
     container->items[2] = (FlexItem){ 
         .width = 100, .height = 160,
-        .baselineOffset = 40,  // Baseline is near the top
+        .baseline_offset = 40,  // Baseline is near the top
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -926,13 +926,13 @@ Test(flexbox_tests, baseline_alignment) {
 // Test baseline alignment with align-self override
 Test(flexbox_tests, baseline_align_self) {
     FlexContainer* container = create_test_container(3);
-    container->alignItems = ALIGN_START; // Default alignment
+    container->align_items = ALIGN_START; // Default alignment
     
     // Item with baseline alignment
     container->items[0] = (FlexItem){ 
         .width = 100, .height = 80,
-        .alignSelf = ALIGN_BASELINE,
-        .baselineOffset = 60,
+        .align_self = ALIGN_BASELINE,
+        .baseline_offset = 60,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE
     };
@@ -940,8 +940,8 @@ Test(flexbox_tests, baseline_align_self) {
     // Another item with baseline alignment
     container->items[1] = (FlexItem){ 
         .width = 100, .height = 120,
-        .alignSelf = ALIGN_BASELINE,
-        .baselineOffset = 100,
+        .align_self = ALIGN_BASELINE,
+        .baseline_offset = 100,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -973,26 +973,26 @@ Test(flexbox_tests, baseline_align_self) {
 Test(flexbox_tests, baseline_column_direction) {
     FlexContainer* container = create_test_container(3);
     container->direction = DIR_COLUMN;
-    container->alignItems = ALIGN_BASELINE;
+    container->align_items = ALIGN_BASELINE;
     
     // In column direction, baseline alignment is equivalent to start alignment
     container->items[0] = (FlexItem){ 
         .width = 100, .height = 80,
-        .baselineOffset = 60,
+        .baseline_offset = 60,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE
     };
     
     container->items[1] = (FlexItem){ 
         .width = 150, .height = 80,
-        .baselineOffset = 60,
+        .baseline_offset = 60,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
     
     container->items[2] = (FlexItem){ 
         .width = 200, .height = 80,
-        .baselineOffset = 60,
+        .baseline_offset = 60,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1016,7 +1016,7 @@ Test(flexbox_tests, auto_margins_main) {
     container->items[0] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginRightAuto = 1,  // Auto margin right
+        .is_margin_right_auto = 1,  // Auto margin right
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1056,8 +1056,8 @@ Test(flexbox_tests, auto_margins_center) {
     container->items[0] = (FlexItem){ 
         .width = 200, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginLeftAuto = 1,
-        .isMarginRightAuto = 1,
+        .is_margin_left_auto = 1,
+        .is_margin_right_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1087,7 +1087,7 @@ Test(flexbox_tests, auto_margins_cross) {
     container->items[1] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginTopAuto = 1,
+        .is_margin_top_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1096,8 +1096,8 @@ Test(flexbox_tests, auto_margins_cross) {
     container->items[2] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginTopAuto = 1,
-        .isMarginBottomAuto = 1,
+        .is_margin_top_auto = 1,
+        .is_margin_bottom_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1128,7 +1128,7 @@ Test(flexbox_tests, auto_margins_multiple) {
     container->items[1] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginRightAuto = 1,
+        .is_margin_right_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1144,8 +1144,8 @@ Test(flexbox_tests, auto_margins_multiple) {
     container->items[3] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginLeftAuto = 1,
-        .isMarginRightAuto = 1,
+        .is_margin_left_auto = 1,
+        .is_margin_right_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1173,7 +1173,7 @@ Test(flexbox_tests, auto_margins_override_justify) {
     container->items[0] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginRightAuto = 1,
+        .is_margin_right_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
@@ -1206,7 +1206,7 @@ Test(flexbox_tests, auto_margins_override_align) {
     FlexContainer* container = create_test_container(2);
     container->width = 400;
     container->height = 400;
-    container->alignItems = ALIGN_CENTER; // This would normally center items vertically
+    container->align_items = ALIGN_CENTER; // This would normally center items vertically
     
     // First item with default align-center
     container->items[0] = (FlexItem){ 
@@ -1219,7 +1219,7 @@ Test(flexbox_tests, auto_margins_override_align) {
     container->items[1] = (FlexItem){ 
         .width = 100, .height = 100,
         .margin = {0, 0, 0, 0},
-        .isMarginTopAuto = 1,
+        .is_margin_top_auto = 1,
         .position = POS_STATIC, 
         .visibility = VIS_VISIBLE 
     };
