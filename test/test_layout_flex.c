@@ -690,5 +690,192 @@ Test(flexbox_tests, negative_order) {
     cleanup_container(container);
 }
 
+// Test percentage-based widths
+Test(flexbox_tests, percentage_widths) {
+    FlexContainer* container = create_test_container(2);
+    container->width = 1000;
+    container->height = 600;
+    
+    // Item with 50% width
+    container->items[0] = (FlexItem){ 
+        .width = 50, .isWidthPercent = 1, 
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Item with 30% width
+    container->items[1] = (FlexItem){ 
+        .width = 30, .isWidthPercent = 1, 
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check that percentage widths are calculated correctly
+    cr_assert_eq(container->items[0].width, 500, "Item 0 width should be 50% of container (500px)");
+    cr_assert_eq(container->items[1].width, 300, "Item 1 width should be 30% of container (300px)");
+    
+    // Check positions
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x position");
+    cr_assert_eq(container->items[1].pos.x, 510, "Item 1 x position"); // 500 + 10(gap)
+
+    cleanup_container(container);
+}
+
+// Test percentage-based heights
+Test(flexbox_tests, percentage_heights) {
+    FlexContainer* container = create_test_container(2);
+    container->width = 800;
+    container->height = 600;
+    
+    // Items with percentage heights
+    container->items[0] = (FlexItem){ 
+        .width = 200, 
+        .height = 50, .isHeightPercent = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    container->items[1] = (FlexItem){ 
+        .width = 200, 
+        .height = 25, .isHeightPercent = 1,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check that percentage heights are calculated correctly
+    cr_assert_eq(container->items[0].height, 300, "Item 0 height should be 50% of container (300px)");
+    cr_assert_eq(container->items[1].height, 150, "Item 1 height should be 25% of container (150px)");
+
+    cleanup_container(container);
+}
+
+// Test percentage-based flex-basis
+Test(flexbox_tests, percentage_flex_basis) {
+    FlexContainer* container = create_test_container(2);
+    container->width = 1000;
+    container->height = 600;
+    
+    // Items with percentage flex-basis
+    container->items[0] = (FlexItem){ 
+        .width = 100, 
+        .flexBasis = 40, .isFlexBasisPercent = 1,
+        .height = 100, 
+        .flexGrow = 0,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    container->items[1] = (FlexItem){ 
+        .width = 100, 
+        .flexBasis = 20, .isFlexBasisPercent = 1,
+        .height = 100, 
+        .flexGrow = 0,
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check that percentage flex-basis values are calculated correctly
+    cr_assert_eq(container->items[0].width, 400, "Item 0 width should be based on 40% flex-basis (400px)");
+    cr_assert_eq(container->items[1].width, 200, "Item 1 width should be based on 20% flex-basis (200px)");
+    
+    // Check positions
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x position");
+    cr_assert_eq(container->items[1].pos.x, 410, "Item 1 x position"); // 400 + 10(gap)
+
+    cleanup_container(container);
+}
+
+// Test percentage-based min/max constraints
+Test(flexbox_tests, percentage_constraints) {
+    FlexContainer* container = create_test_container(2);
+    container->width = 1000;
+    container->height = 600;
+    
+    // Item with percentage min/max width constraints
+    container->items[0] = (FlexItem){ 
+        .width = 200, 
+        .minWidth = 30, .isMinWidthPercent = 1,  // 30% = 300px
+        .maxWidth = 40, .isMaxWidthPercent = 1,  // 40% = 400px
+        .flexGrow = 1,
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Item with mixed constraints
+    container->items[1] = (FlexItem){ 
+        .width = 100, 
+        .minWidth = 150,  // absolute pixels
+        .maxWidth = 20, .isMaxWidthPercent = 1,  // 20% = 200px
+        .flexGrow = 1,
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check that constraints are applied correctly
+    cr_assert_eq(container->items[0].width, 400, "Item 0 width should be constrained to 40% max (400px)");
+    cr_assert_eq(container->items[1].width, 200, "Item 1 width should be constrained to 20% max (200px)");
+
+    cleanup_container(container);
+}
+
+// Test mixture of percentage and absolute items
+Test(flexbox_tests, mixed_percentage_absolute) {
+    FlexContainer* container = create_test_container(3);
+    container->width = 1000;
+    container->height = 600;
+    container->columnGap = 20; // Larger gap for clarity
+    
+    // Absolute width
+    container->items[0] = (FlexItem){ 
+        .width = 200, 
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Percentage width
+    container->items[1] = (FlexItem){ 
+        .width = 30, .isWidthPercent = 1,  // 30% = 300px
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+    
+    // Percentage flex-basis
+    container->items[2] = (FlexItem){ 
+        .width = 100, 
+        .flexBasis = 25, .isFlexBasisPercent = 1,  // 25% = 250px
+        .height = 100, 
+        .position = POS_STATIC, 
+        .visibility = VIS_VISIBLE 
+    };
+
+    layout_flex_container(container);
+
+    // Check widths
+    cr_assert_eq(container->items[0].width, 200, "Item 0 should keep absolute width (200px)");
+    cr_assert_eq(container->items[1].width, 300, "Item 1 should be 30% of container (300px)");
+    cr_assert_eq(container->items[2].width, 250, "Item 2 should have flex-basis of 25% (250px)");
+    
+    // Check positions
+    cr_assert_eq(container->items[0].pos.x, 0, "Item 0 x position");
+    cr_assert_eq(container->items[1].pos.x, 220, "Item 1 x position"); // 200 + 20(gap)
+    cr_assert_eq(container->items[2].pos.x, 540, "Item 2 x position"); // 220 + 300 + 20(gap)
+
+    cleanup_container(container);
+}
+
 // zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
 // ./test_layout_flex.exe --verbose

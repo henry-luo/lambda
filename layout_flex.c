@@ -33,6 +33,14 @@ typedef struct {
     Visibility visibility;
     PositionType position;
     float aspectRatio;
+    // Flags for percentage values
+    int isWidthPercent : 1;
+    int isHeightPercent : 1;
+    int isFlexBasisPercent : 1;
+    int isMinWidthPercent : 1;
+    int isMaxWidthPercent : 1;
+    int isMinHeightPercent : 1;
+    int isMaxHeightPercent : 1;
 } FlexItem;
 
 typedef struct {
@@ -66,7 +74,7 @@ typedef struct {
 static void initialize_items(FlexContainer* container, FlexItem* layoutItems, int* layoutCount);
 static void create_flex_lines(FlexContainer* container, FlexItem* layoutItems, int layoutCount, FlexLine** lines, int* lineCount);
 static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, int lineCount, float mainSize, float crossSize, float* crossPos, int isRow, int isReverse);
-static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSpace);
+static void apply_flex_adjustments(FlexContainer* container, FlexLine* line, FlexLine* lines, float freeSpace);
 static void position_items_main_axis(FlexContainer* container, FlexLine* line, float mainSize, int isRow, int isReverse);
 static void position_items_cross_axis(FlexContainer* container, FlexLine* line, float crossSize, float crossPos, int isRow);
 static void update_original_items(FlexContainer* container, FlexItem* layoutItems, int layoutCount);
@@ -85,47 +93,85 @@ static int compare_item_order(const void* a, const void* b) {
     return item_a->item.order - item_b->item.order;
 }
 
-int resolve_flex_basis(FlexItem* item) {
+// Helper function to resolve percentage values
+int resolve_percentage(int value, int isPercent, int containerSize) {
+    if (isPercent) {
+        // Convert from percentage (0-100) to absolute pixels
+        float percentage = (float)value / 100.0f;
+        return (int)(percentage * containerSize);
+    }
+    return value;
+}
+
+// Updated function to resolve flex basis with percentage support
+int resolve_flex_basis(FlexItem* item, int containerMainSize) {
     int basis;
     if (item->flexBasis == -1) {
-        basis = item->width > 0 ? item->width : 0;
+        // Auto - use item width (which might be a percentage)
+        basis = resolve_percentage(item->width, item->isWidthPercent, containerMainSize);
+        basis = basis > 0 ? basis : 0;
     } else {
-        basis = (item->flexBasis > 0) ? item->flexBasis : item->width;
+        // Specific flex-basis value (might be a percentage)
+        basis = resolve_percentage(item->flexBasis, item->isFlexBasisPercent, containerMainSize);
+        basis = basis > 0 ? basis : resolve_percentage(item->width, item->isWidthPercent, containerMainSize);
     }
-    printf("resolve_flex_basis: width=%d, flexBasis=%d -> %d\n", item->width, item->flexBasis, basis);
-    if (basis < 0)  basis = 0;
+    
+    printf("resolve_flex_basis: width=%d, flexBasis=%d -> %d\n", 
+           item->width, item->flexBasis, basis);
+    
+    if (basis < 0) basis = 0;
     return basis;
 }
 
-void apply_constraints(FlexItem* item) {
+// Updated function to apply constraints with percentage support
+void apply_constraints(FlexItem* item, int containerWidth, int containerHeight) {
     int oldWidth = item->width, oldHeight = item->height;
-
+    
+    // Resolve percentage-based values
+    int actualWidth = resolve_percentage(item->width, item->isWidthPercent, containerWidth);
+    int actualHeight = resolve_percentage(item->height, item->isHeightPercent, containerHeight);
+    int minWidth = resolve_percentage(item->minWidth, item->isMinWidthPercent, containerWidth);
+    int maxWidth = resolve_percentage(item->maxWidth, item->isMaxWidthPercent, containerWidth);
+    int minHeight = resolve_percentage(item->minHeight, item->isMinHeightPercent, containerHeight);
+    int maxHeight = resolve_percentage(item->maxHeight, item->isMaxHeightPercent, containerHeight);
+    
     // Adjust dimensions based on aspect ratio
     if (item->aspectRatio > 0) {
-        if (item->width > 0 && item->height == 0) {
-            item->height = (int)(item->width / item->aspectRatio);
-        } else if (item->height > 0 && item->width == 0) {
-            item->width = (int)(item->height * item->aspectRatio);
+        if (actualWidth > 0 && actualHeight == 0) {
+            actualHeight = (int)(actualWidth / item->aspectRatio);
+        } else if (actualHeight > 0 && actualWidth == 0) {
+            actualWidth = (int)(actualHeight * item->aspectRatio);
         }
     }
 
-    item->width = clamp(item->width, item->minWidth, item->maxWidth);
-    item->height = clamp(item->height, item->minHeight, item->maxHeight);
+    // Apply constraints
+    actualWidth = clamp(actualWidth, minWidth, maxWidth);
+    actualHeight = clamp(actualHeight, minHeight, maxHeight);
 
     // Reapply aspect ratio constraints after clamping
     if (item->aspectRatio > 0) {
-        if (item->width > 0 && item->height == 0) {
-            item->height = (int)(item->width / item->aspectRatio);
-        } else if (item->height > 0 && item->width == 0) {
-            item->width = (int)(item->height * item->aspectRatio);
+        if (actualWidth > 0 && actualHeight == 0) {
+            actualHeight = (int)(actualWidth / item->aspectRatio);
+        } else if (actualHeight > 0 && actualWidth == 0) {
+            actualWidth = (int)(actualHeight * item->aspectRatio);
         }
     }
 
-    printf("apply_constraints: width %d -> %d, height %d -> %d\n", oldWidth, item->width, oldHeight, item->height);
+    // Update the item with constrained values
+    // We preserve the percentage flags but update the values to resolved pixels
+    item->width = actualWidth;
+    item->height = actualHeight;
+    
+    printf("apply_constraints: width %d -> %d, height %d -> %d\n", 
+           oldWidth, item->width, oldHeight, item->height);
 }
 
 // Flex layout sub-functions
 static void initialize_items(FlexContainer* container, FlexItem* layoutItems, int* layoutCount) {
+    int isRow = (container->direction == DIR_ROW || container->direction == DIR_ROW_REVERSE);
+    int containerMainSize = isRow ? container->width : container->height;
+    int containerCrossSize = isRow ? container->height : container->width;
+    
     for (int i = 0; i < container->itemCount; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
             layoutItems[*layoutCount] = container->items[i];
@@ -133,8 +179,16 @@ static void initialize_items(FlexContainer* container, FlexItem* layoutItems, in
             if (layoutItems[*layoutCount].alignSelf == ALIGN_START) {
                 layoutItems[*layoutCount].alignSelf = container->alignItems;
             }
-            layoutItems[*layoutCount].width = resolve_flex_basis(&layoutItems[*layoutCount]);
-            apply_constraints(&layoutItems[*layoutCount]);
+            
+            // Resolve flex basis (considering percentages)
+            layoutItems[*layoutCount].width = resolve_flex_basis(&layoutItems[*layoutCount], containerMainSize);
+            
+            // Clear percentage flags since we've resolved to absolute pixels
+            layoutItems[*layoutCount].isWidthPercent = 0;
+            layoutItems[*layoutCount].isFlexBasisPercent = 0;
+            
+            // Apply constraints
+            apply_constraints(&layoutItems[*layoutCount], container->width, container->height);
             (*layoutCount)++;
         }
     }
@@ -199,7 +253,7 @@ static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine
             line->totalBaseSize = 0;
         }
     } else {
-        apply_flex_adjustments(line, lines, freeSpace);
+        apply_flex_adjustments(container, line, lines, freeSpace);
         
         // Use appropriate gap based on direction
         int mainAxisGap = isRow ? container->columnGap : container->rowGap;
@@ -218,7 +272,7 @@ static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine
     printf("Processed line %ld: crossPos=%.1f, height=%d\n", line - lines, *crossPos, line->height);
 }
 
-static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSpace) {
+static void apply_flex_adjustments(FlexContainer* container,FlexLine* line, FlexLine* lines, float freeSpace) {
     float totalGrow = 0, totalShrink = 0;
     for (int i = 0; i < line->itemCount; i++) {
         totalGrow += line->items[i]->flexGrow;
@@ -239,7 +293,7 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
                     line->items[i]->height = (int)(line->items[i]->width / line->items[i]->aspectRatio);
                 }
 
-                apply_constraints(line->items[i]);
+                apply_constraints(line->items[i], container->width, container->height);
                 printf("Grow item %d: width=%d, height=%d\n", i, line->items[i]->width, line->items[i]->height);
             }
         }
@@ -255,7 +309,7 @@ static void apply_flex_adjustments(FlexLine* line, FlexLine* lines, float freeSp
                     line->items[i]->height = (int)(line->items[i]->width / line->items[i]->aspectRatio);
                 }
 
-                apply_constraints(line->items[i]);
+                apply_constraints(line->items[i], container->width, container->height);
                 printf("Shrink item %d: width=%d, height=%d\n", i, line->items[i]->width, line->items[i]->height);
             }
         }
@@ -389,8 +443,18 @@ void layout_flex_container(FlexContainer* container) {
             if (itemsWithIndices[layoutCount].item.alignSelf == ALIGN_START) {
                 itemsWithIndices[layoutCount].item.alignSelf = container->alignItems;
             }
-            itemsWithIndices[layoutCount].item.width = resolve_flex_basis(&itemsWithIndices[layoutCount].item);
-            apply_constraints(&itemsWithIndices[layoutCount].item);
+            
+            // Resolve flex basis (considering percentages)
+            int mainSize = isRow ? container->width : container->height;
+            itemsWithIndices[layoutCount].item.width = 
+                resolve_flex_basis(&itemsWithIndices[layoutCount].item, mainSize);
+            
+            // Clear percentage flags since we've resolved to absolute pixels
+            itemsWithIndices[layoutCount].item.isWidthPercent = 0;
+            itemsWithIndices[layoutCount].item.isFlexBasisPercent = 0;
+            
+            // Apply constraints
+            apply_constraints(&itemsWithIndices[layoutCount].item, container->width, container->height);
             layoutCount++;
         }
     }
