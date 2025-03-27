@@ -48,7 +48,7 @@ void free_view(ViewTree* tree, View* view) {
             free_view(tree, child);
             child = next;
         }
-        // free props
+        // free blk
         ViewSpan* span = (ViewSpan*)view;
         if (span->font) {
             printf("free font prop\n");
@@ -71,9 +71,9 @@ void free_view(ViewTree* tree, View* view) {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK || 
             view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->props) {
+            if (block->blk) {
                 printf("free block prop\n");
-                pool_variable_free(tree->pool, block->props);
+                pool_variable_free(tree->pool, block->blk);
             }
             if (block->scroller) {
                 printf("free scroller\n");
@@ -112,7 +112,7 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
     return prop;
 }
 
-// alloc flex container props
+// alloc flex container blk
 FlexContainerProp* alloc_flex_container_prop(LayoutContext* lycon) {
     FlexContainerProp* prop = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
     // set defaults
@@ -153,10 +153,10 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
             default:
                 cursor = (char*)lxb_css_value_by_id(span->in_line->cursor)->name;
             }
-            strbuf_append_format(buf, "cursor:%s", cursor);
+            strbuf_append_format(buf, "cursor:%s ", cursor);
         }
         if (span->in_line->color.c) {
-            strbuf_append_format(buf, " color:#%x", span->in_line->color.c);
+            strbuf_append_format(buf, "color:#%x ", span->in_line->color.c);
         }
         strbuf_append_str(buf, "}\n");
     }
@@ -170,16 +170,19 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
         if (span->bound->background) {
-            strbuf_append_format(buf, "bgcolor:#%x", span->bound->background->color.c);
+            strbuf_append_format(buf, "bgcolor:#%x ", span->bound->background->color.c);
         }
-        strbuf_append_format(buf, " margin:{left:%d, right:%d, top:%d, bottom:%d}",
+        strbuf_append_format(buf, "margin:{left:%d, right:%d, top:%d, bottom:%d} ",
             span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
-        strbuf_append_format(buf, " padding:{left:%d, right:%d, top:%d, bottom:%d}",
+        strbuf_append_format(buf, "padding:{left:%d, right:%d, top:%d, bottom:%d}",
             span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
-            strbuf_append_str(buf, "}\n");
+        strbuf_append_str(buf, "}\n");
+
+        // border prop group
         if (span->bound->border) {
+            strbuf_append_char_n(buf, ' ', indent);  strbuf_append_str(buf, "{");
             strbuf_append_format(buf, "border:{top-color:#%x, right-color:#%x, bottom-color:#%x, left-color:#%x, "
-                "top-width:%d, right-width:%d, bottom-width:%d, left-width:%d, style:%d}\n",
+                "top-wd:%d, right-wd:%d, bottom-wd:%d, left-wd:%d, style:%d}\n",
                 span->bound->border->top_color.c, span->bound->border->right_color.c, 
                 span->bound->border->bottom_color.c, span->bound->border->left_color.c, 
                 span->bound->border->width.top, span->bound->border->width.right,
@@ -190,17 +193,21 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
 }
 
 void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
-    if (block->props) {
+    if (block->blk) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        if (block->props->text_align) {
-            strbuf_append_format(buf, "text-align:%s", lxb_css_value_by_id(block->props->text_align)->name);
+        if (block->blk->text_align) {
+            strbuf_append_format(buf, "text-align:%s ", lxb_css_value_by_id(block->blk->text_align)->name);
         }
-        if (block->props->line_height) {
-            strbuf_append_format(buf, "line-height:%f", block->props->line_height);
+        if (block->blk->line_height) {
+            strbuf_append_format(buf, "line-height:%f ", block->blk->line_height);
         }
-        if (block->props->text_indent) {
-            strbuf_append_format(buf, "text-indent:%f", block->props->text_indent);
+        if (block->blk->text_indent) {
+            strbuf_append_format(buf, "text-indent:%f ", block->blk->text_indent);
+        }
+        if (block->blk->list_style_type) {
+            // strbuf_append_format(buf, "list-style-type:%s", lxb_css_value_by_id(block->blk->list_style_type)->name);
+            strbuf_append_format(buf, "list-style-type:%d", block->blk->list_style_type);
         }
         strbuf_append_str(buf, "}\n");
     }
@@ -208,22 +215,22 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
         if (block->scroller->overflow_x) {
-            strbuf_append_format(buf, " overflow-x:%s", lxb_css_value_by_id(block->scroller->overflow_x)->name); // corrected variable name
+            strbuf_append_format(buf, "overflow-x:%s ", lxb_css_value_by_id(block->scroller->overflow_x)->name); // corrected variable name
         }
         if (block->scroller->overflow_y) {
-            strbuf_append_format(buf, " overflow-y:%s", lxb_css_value_by_id(block->scroller->overflow_y)->name); // corrected variable name
+            strbuf_append_format(buf, "overflow-y:%s ", lxb_css_value_by_id(block->scroller->overflow_y)->name); // corrected variable name
         }        
         if (block->scroller->has_hz_overflow) {
-            strbuf_append_str(buf, " hz-overflow:true");
+            strbuf_append_str(buf, "hz-overflow:true ");
         }
         if (block->scroller->has_vt_overflow) { // corrected variable name
-            strbuf_append_str(buf, " vt-overflow:true");
+            strbuf_append_str(buf, "vt-overflow:true ");
         }
         if (block->scroller->has_hz_scroll) {
-            strbuf_append_str(buf, " hz-scroll:true");
+            strbuf_append_str(buf, "hz-scroll:true ");
         }
         if (block->scroller->has_vt_scroll) {
-            strbuf_append_str(buf, " vt-scroll:true");
+            strbuf_append_str(buf, "vt-scroll:true");
         }
         // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroller->pane->v_scrollbar, block->scroller->pane->h_scrollbar);
         strbuf_append_str(buf, "}\n");
@@ -231,49 +238,65 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 }
 
 void print_block(ViewBlock* block, StrBuf* buf, int indent) {
-    strbuf_append_format(buf, "view %s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-        lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_format(buf, "[view-%s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
         block->type == RDT_VIEW_BLOCK ? "block" : 
         block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
         block->type == RDT_VIEW_LIST_ITEM ? "list-item" : "image",
+        lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
         block->x, block->y, block->width, block->height);
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);              
     print_view_group((ViewGroup*)block, buf, indent+2);
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "]\n");
 }
 
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     View* view = view_group->child;
     if (view) {
         do {
-            strbuf_append_char_n(buf, ' ', indent);
+            
             if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
                 view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
                 print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {
+                strbuf_append_char_n(buf, ' ', indent);
                 ViewSpan* span = (ViewSpan*)view;
-                strbuf_append_format(buf, "view %s:inline\n",
+                strbuf_append_format(buf, "[view-inline:%s\n",
                     lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
                 print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
+                strbuf_append_char_n(buf, ' ', indent);
+                strbuf_append_str(buf, "]\n");
             }
             else if (view->type == RDT_VIEW_TEXT) {
+                strbuf_append_char_n(buf, ' ', indent);
                 ViewText* text = (ViewText*)view;
                 lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
                 unsigned char* str = node->char_data.data.data + text->start_index;
                 if (!(*str) || text->length <= 0) {
                     strbuf_append_format(buf, "invalid text node: len:%d\n", text->length); 
                 } else {
-                    strbuf_append_str(buf, "text:'");  strbuf_append_str_n(buf, (char*)str, text->length);
+                    strbuf_append_str(buf, "text:'");
+                    strbuf_append_str_n(buf, (char*)str, text->length);
+                    // replace newline and '\'' with '^'
+                    char* s = buf->str + buf->length - text->length;
+                    while (*s) {
+                        if (*s == '\n' || *s == '\r' || *s == '\'') { *s = '^'; }
+                        s++;
+                    }
                     strbuf_append_format(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
                         text->start_index, text->length, text->x, text->y, text->width, text->height);                    
                 }
             }
             else {
-                strbuf_append_format(buf, "unknown view: %d\n", view->type);
+                strbuf_append_char_n(buf, ' ', indent);
+                strbuf_append_format(buf, "unknown-view: %d\n", view->type);
             }
-            if (view == view->next) { printf("invalid next view\n");  return; }
+            // a check for robustness
+            if (view == view->next) { dzlog_debug("invalid next view");  return; }
             view = view->next;
         } while (view);
     }

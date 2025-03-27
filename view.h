@@ -200,7 +200,7 @@ typedef struct {
     // x, y, width, height forms the BORDER box of the block
     int x, y, width, height;  // x, y are relative to the parent block
     int content_width, content_height;  // width and height of the child content including padding
-    BlockProp* props;  // block specific style properties
+    BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
     FlexContainerProp* flex_container; // flex container properties
 } ViewBlock;

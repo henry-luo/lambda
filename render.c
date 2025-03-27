@@ -201,7 +201,7 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = (ViewBlock*)view;
     printf("view list:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list->node), NULL)); 
     ListBlot pa_list = rdcon->list;
-    rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->props->list_style_type;
+    rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->blk->list_style_type;
     render_block_view(rdcon, list);
     rdcon->list = pa_list;
 }
@@ -433,7 +433,7 @@ void render_children(RenderContext* rdcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->props && block->props->list_style_type) {
+            if (block->blk && block->blk->list_style_type) {
                 render_list_view(rdcon, block);
             }
             else {

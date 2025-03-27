@@ -128,10 +128,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
         break;
     case LXB_TAG_UL:  case LXB_TAG_OL: 
-        if (!block->props) {
-            block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        if (!block->blk) {
+            block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
         }
-        block->props->list_style_type = elmt_name == LXB_TAG_UL ?
+        block->blk->list_style_type = elmt_name == LXB_TAG_UL ?
             LXB_CSS_VALUE_DISC : LXB_CSS_VALUE_DECIMAL;
         if (!block->bound) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
@@ -141,8 +141,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         break;
     case LXB_TAG_CENTER:
-        block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-        block->props->text_align = LXB_CSS_VALUE_CENTER;
+        block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        block->blk->text_align = LXB_CSS_VALUE_CENTER;
         break;    
     case LXB_TAG_IMG:  // get html width and height (before the css styles)
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
@@ -169,7 +169,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     }
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
-    if (block->props) lycon->block.text_align = block->props->text_align;
+    if (block->blk) lycon->block.text_align = block->blk->text_align;
     lycon->line.left = 0;  lycon->line.right = pa_block.width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_start(lycon);
@@ -222,7 +222,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         }
     }
     
-    dzlog_debug("setting up block props\n");
+    dzlog_debug("setting up block blk\n");
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }

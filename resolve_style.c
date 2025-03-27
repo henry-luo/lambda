@@ -805,10 +805,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_text_align_t *text_align = declr->u.text_align;
         printf("text align property: %d\n", text_align->type);
-        if (!block->props) {
-            block->props = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        if (!block->blk) {
+            block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
         }
-        block->props->text_align = text_align->type;
+        block->blk->text_align = text_align->type;
         break;
     case LXB_CSS_PROPERTY_WIDTH:
         const lxb_css_property_width_t *width = declr->u.width;
