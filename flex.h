@@ -15,32 +15,37 @@ typedef enum { TD_LTR, TD_RTL } TextDirection;
 typedef struct { int x, y; } Point;
 
 typedef struct {
-    Point pos;
-    int width, height;
-    int min_width, max_width;
-    int min_height, max_height;
     int flex_basis;  // -1 for auto
-    float flex_grow, flex_shrink;
-    int margin[4];  // top, right, bottom, left
+    float flex_grow;
+    float flex_shrink;
     AlignType align_self;
     int order;
-    Visibility visibility;
-    PositionType position;
     float aspect_ratio;
+    int baseline_offset;
     // Flags for percentage values
-    int is_width_percent : 1;
-    int is_height_percent : 1;
     int is_flex_basis_percent : 1;
-    int is_min_width_percent : 1;
-    int is_max_width_percent : 1;
-    int is_min_height_percent : 1;
-    int is_max_height_percent : 1;
-    int baseline_offset;  // Distance from top to baseline
-    // Auto margin flags - true if margin should be 'auto'
     int is_margin_top_auto : 1;
     int is_margin_right_auto : 1;
     int is_margin_bottom_auto : 1;
     int is_margin_left_auto : 1;
+} FlexItemProp;
+
+typedef struct {
+    Point pos;
+    int width, height;
+    int min_width, max_width;
+    int min_height, max_height;
+    int margin[4];  // top, right, bottom, left
+    Visibility visibility;
+    PositionType position;
+    FlexItemProp; // embed FlexItemProp
+    // flags for percentage values
+    int is_width_percent : 1;
+    int is_height_percent : 1;
+    int is_min_width_percent : 1;
+    int is_max_width_percent : 1;
+    int is_min_height_percent : 1;
+    int is_max_height_percent : 1;
 } FlexItem;
 
 typedef struct {
@@ -57,16 +62,20 @@ typedef struct {
 } FlexItemWithIndex;
 
 typedef struct {
-    int width, height;
     FlexDirection direction;
     FlexWrap wrap;
     JustifyContent justify;
     AlignType align_items;
     AlignType align_content;
-    int row_gap;      // Gap between rows
-    int column_gap;   // Gap between columns
+    int row_gap;
+    int column_gap;
+} FlexContainerProp;
+
+typedef struct {
+    int width, height;
     FlexItem* items;
     int item_count;
+    FlexContainerProp; // embed FlexContainerProp
     WritingMode writing_mode;
     TextDirection text_direction;
 } FlexContainer;

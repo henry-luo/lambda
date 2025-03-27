@@ -137,6 +137,7 @@
         "pointer-truncate"
     ],
     "flags": [
-        "fwrapv"
+        "fwrapv",
+        "fms-extensions"
     ]
 }

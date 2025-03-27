@@ -21,7 +21,7 @@ if [ "$OUTPUT" = "null" ] || [ -z "$OUTPUT" ]; then
 fi
 
 # Initialize command array
-CMD_STRING+="zig cc -fms-extensions -o $OUTPUT \\"$'\n'  # Add line continuation and newline
+CMD_STRING+="zig cc -o $OUTPUT \\"$'\n'  # Add line continuation and newline
 
 # Add source files
 SOURCE_FILES=$(jq -r '.source_files[]' "$CONFIG_FILE")
