@@ -72,4 +72,4 @@ void free_flex_container(FlexContainer* container);
 
 void line_start(LayoutContext* lycon);
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);
-void apply_vertical_alignment(LayoutContext* lycon, View* view);
+void view_vertical_align(LayoutContext* lycon, View* view);

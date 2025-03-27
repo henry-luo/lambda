@@ -2,7 +2,7 @@
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
-#undef DEBUG_RENDER
+#define DEBUG_RENDER 0
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -174,6 +174,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         printf("render list decimal\n");
         StrBuf* num = strbuf_new_cap(10);
         strbuf_append_format(num, "%d.", rdcon->list.item_index);
+        // output the number as VIEW_TEXT
         lxb_dom_text_t node;  ViewText text;
         text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
         text.start_index = 0;  text.length = num->length;
@@ -255,47 +256,46 @@ void drawRect(Tvg_Canvas* canvas, Rect rect) {
     tvg_canvas_push(canvas, shape);
 }
 
-void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
+void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
-    if (view_block->font) {
-        setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, view_block->font);
+    if (block->font) {
+        setup_font(rdcon->ui_context, &rdcon->font, pa_font.face->family_name, block->font);
     }
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
-    if (view_block->type == RDT_VIEW_LIST_ITEM) {
-        render_list_bullet(rdcon, view_block);
+    if (block->type == RDT_VIEW_LIST_ITEM) {
+        render_list_bullet(rdcon, block);
     }
-    if (view_block->bound) {
-        render_bound(rdcon, view_block);
+    if (block->bound) {
+        render_bound(rdcon, block);
     }
 
-    rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
+    rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
 
-    #ifdef DEBUG_RENDER
-    // debugging outline around the block margin border
-    Rect rc;
-    rc.x = rdcon->block.x - (view_block->bound ? view_block->bound->margin.left : 0);  
-    rc.y = rdcon->block.y - (view_block->bound ? view_block->bound->margin.top : 0);
-    rc.width = view_block->width + (view_block->bound ? view_block->bound->margin.left + view_block->bound->margin.right : 0);
-    rc.height = view_block->height + (view_block->bound ? view_block->bound->margin.top + view_block->bound->margin.bottom : 0);
-    drawRect(rdcon->canvas, rc);
-    #endif
+    if (DEBUG_RENDER) {  // debugging outline around the block margin border
+        Rect rc;
+        rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left : 0);  
+        rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top : 0);
+        rc.width = block->width + (block->bound ? block->bound->margin.left + block->bound->margin.right : 0);
+        rc.height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
+        drawRect(rdcon->canvas, rc);
+    }
 
-    View* view = view_block->child;
+    View* view = block->child;
     if (view) {
-        if (view_block->in_line && view_block->in_line->color.c) {
-            rdcon->color = view_block->in_line->color;
+        if (block->in_line && block->in_line->color.c) {
+            rdcon->color = block->in_line->color;
         }
         // setup clip box
-        if (view_block->scroller) {
-            if (view_block->scroller->has_clip) {
-                rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + view_block->scroller->clip.x);
-                rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + view_block->scroller->clip.y);
-                rdcon->block.clip.width = min(rdcon->block.clip.width, view_block->scroller->clip.width);
-                rdcon->block.clip.height = min(rdcon->block.clip.height, view_block->scroller->clip.height);
+        if (block->scroller) {
+            if (block->scroller->has_clip) {
+                rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + block->scroller->clip.x);
+                rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + block->scroller->clip.y);
+                rdcon->block.clip.width = min(rdcon->block.clip.width, block->scroller->clip.width);
+                rdcon->block.clip.height = min(rdcon->block.clip.height, block->scroller->clip.height);
             }
-            if (view_block->scroller->pane) {
-                rdcon->block.x -= view_block->scroller->pane->h_scroll_position;
-                rdcon->block.y -= view_block->scroller->pane->v_scroll_position;
+            if (block->scroller->pane) {
+                rdcon->block.x -= block->scroller->pane->h_scroll_position;
+                rdcon->block.y -= block->scroller->pane->v_scroll_position;
             }
         }
         render_children(rdcon, view);
@@ -305,22 +305,22 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     }
 
     // render scrollbars
-    if (view_block->scroller) {
+    if (block->scroller) {
         printf("render scrollbars\n");
-        rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
-        if (view_block->scroller->has_hz_scroll || view_block->scroller->has_vt_scroll) {
-            if (!view_block->scroller->pane) {
-                view_block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
+        rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
+        if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
+            if (!block->scroller->pane) {
+                block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
             }
-            Rect rect = {rdcon->block.x, rdcon->block.y, view_block->width, view_block->height};
-            if (view_block->bound && view_block->bound->border) {
-                rect.x += view_block->bound->border->width.left;
-                rect.y += view_block->bound->border->width.top;
-                rect.width -= view_block->bound->border->width.left + view_block->bound->border->width.right;
-                rect.height -= view_block->bound->border->width.top + view_block->bound->border->width.bottom;
+            Rect rect = {rdcon->block.x, rdcon->block.y, block->width, block->height};
+            if (block->bound && block->bound->border) {
+                rect.x += block->bound->border->width.left;
+                rect.y += block->bound->border->width.top;
+                rect.width -= block->bound->border->width.left + block->bound->border->width.right;
+                rect.height -= block->bound->border->width.top + block->bound->border->width.bottom;
             }
-            scrollpane_render(rdcon->canvas, view_block->scroller->pane, &rect,
-                view_block->content_width, view_block->content_height);
+            scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
+                block->content_width, block->content_height);
         }
     }
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;

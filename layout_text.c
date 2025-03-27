@@ -18,7 +18,7 @@ void line_break(LayoutContext* lycon) {
         // apply vertical alignment
         View* view = lycon->line.start_view;
         while (view) {
-            apply_vertical_alignment(lycon, view);
+            view_vertical_align(lycon, view);
             view = view->next;
         }            
     }
@@ -132,7 +132,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     int font_height = lycon->font.face->size->metrics.height >> 6;
     text->x = lycon->line.advance_x;  text->height = font_height;
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
-        printf("middle aligned text\n");
+        dzlog_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
@@ -145,7 +145,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     }
     else { // baseline
         printf("baseline aligned text\n");
-        text->y = lycon->block.advance_y; //  + (lycon->font.face->size->metrics.ascender >> 6);
+        text->y = lycon->block.advance_y;
     }
     // layout the text glyphs
     do {
