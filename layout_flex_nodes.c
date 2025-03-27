@@ -3,17 +3,7 @@
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     dzlog_debug("layout flex nodes");
     ViewBlock* block = (ViewBlock*)lycon->view;
-    if (!block->flex_container) {
-        block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
-        // Initialize defaults
-        block->flex_container->direction = DIR_ROW;
-        block->flex_container->wrap = WRAP_NOWRAP;  // default nowrap
-        block->flex_container->justify = JUSTIFY_START;
-        block->flex_container->align_items = ALIGN_STRETCH;
-        block->flex_container->align_content = ALIGN_START;
-        block->flex_container->row_gap = 0;
-        block->flex_container->column_gap = 0;  
-    }
+    if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
     
     // Count children first
     int child_count = 0;

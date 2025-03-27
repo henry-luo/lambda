@@ -105,6 +105,25 @@ FontProp* alloc_font_prop(LayoutContext* lycon) {
     return prop;
 }
 
+FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
+    FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+    // set defaults
+    prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
+    prop->align_self = ALIGN_START;  
+    // prop->flex_grow = 0;  prop->order = 0;  
+    return prop;
+}
+
+// alloc flex container props
+FlexContainerProp* alloc_flex_container_prop(LayoutContext* lycon) {
+    FlexContainerProp* prop = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+    // set defaults
+    prop->direction = DIR_ROW;  prop->wrap = WRAP_NOWRAP;  prop->justify = JUSTIFY_START;
+    prop->align_items = ALIGN_STRETCH;  prop->align_content = ALIGN_START;
+    // prop->row_gap = 0;  prop->column_gap = 0;
+    return prop;
+}
+
 void view_pool_init(ViewTree* tree) {
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
