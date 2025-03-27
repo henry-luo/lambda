@@ -32,7 +32,8 @@
         "flexbox.h": "c",
         "bitset": "c",
         "limits": "c",
-        "tuple": "c"
+        "tuple": "c",
+        "flex.h": "c"
     },
     "cmake.sourceDirectory": "/Users/henryluo/Projects/Jubily/lambda-parser/tree-sitter-javascript"
 }

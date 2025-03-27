@@ -1,5 +1,6 @@
 #include "layout.h"
-#define SV_IMPLEMENTATION
+
+AlignType resolve_align_type(PropValue value);
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value);
@@ -845,10 +846,416 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         //     dzlog_warn("background property: %.*s\n", (int)custom->name.length, custom->name.data);
         // }
         break;
-    default:
-        dzlog_warn("unhandled property: %s\n", data->name);
+    case LXB_CSS_PROPERTY_FLEX_DIRECTION:
+        if (!block) { break; }
+        const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
+        printf("flex-direction property: %d\n", flex_direction->type);
+        if (!block->flex_container) {
+            block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+            // Initialize defaults
+            block->flex_container->direction = DIR_ROW;
+            block->flex_container->wrap = WRAP_NOWRAP;
+            block->flex_container->justify = JUSTIFY_START;
+            block->flex_container->align_items = ALIGN_STRETCH;
+            block->flex_container->align_content = ALIGN_START;
+            block->flex_container->row_gap = 0;
+            block->flex_container->column_gap = 0;
+        }
+        
+        switch (flex_direction->type) {
+            case LXB_CSS_VALUE_ROW:
+                block->flex_container->direction = DIR_ROW; break;
+            case LXB_CSS_VALUE_ROW_REVERSE:
+                block->flex_container->direction = DIR_ROW_REVERSE; break;
+            case LXB_CSS_VALUE_COLUMN:
+                block->flex_container->direction = DIR_COLUMN; break;
+            case LXB_CSS_VALUE_COLUMN_REVERSE:
+                block->flex_container->direction = DIR_COLUMN_REVERSE; break;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_FLEX_WRAP:
+        if (!block) { break; }
+        const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
+        printf("flex-wrap property: %d\n", flex_wrap->type);
+        if (!block->flex_container) {
+            block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+            // Initialize defaults
+            block->flex_container->direction = DIR_ROW;
+            block->flex_container->wrap = WRAP_NOWRAP;
+            block->flex_container->justify = JUSTIFY_START;
+            block->flex_container->align_items = ALIGN_STRETCH;
+            block->flex_container->align_content = ALIGN_START;
+            block->flex_container->row_gap = 0;
+            block->flex_container->column_gap = 0;
+        }
+        
+        switch (flex_wrap->type) {
+            case LXB_CSS_VALUE_NOWRAP:
+                block->flex_container->wrap = WRAP_NOWRAP; break;
+            case LXB_CSS_VALUE_WRAP:
+                block->flex_container->wrap = WRAP_WRAP; break;
+            case LXB_CSS_VALUE_WRAP_REVERSE:
+                block->flex_container->wrap = WRAP_WRAP_REVERSE; break;
+        }
+        break;
+    
+    case LXB_CSS_PROPERTY_FLEX_FLOW:
+        if (!block) { break; }
+        const lxb_css_property_flex_flow_t *flex_flow = declr->u.flex_flow;
+        
+        if (!block->flex_container) {
+            block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+            // Initialize defaults
+            block->flex_container->direction = DIR_ROW;
+            block->flex_container->wrap = WRAP_NOWRAP;
+            block->flex_container->justify = JUSTIFY_START;
+            block->flex_container->align_items = ALIGN_STRETCH;
+            block->flex_container->align_content = ALIGN_START;
+            block->flex_container->row_gap = 0;
+            block->flex_container->column_gap = 0;
+        }
+        
+        // Handle direction
+        if (flex_flow->type_direction != LXB_CSS_VALUE__UNDEF) {
+            switch (flex_flow->type_direction) {
+                case LXB_CSS_VALUE_ROW:
+                    block->flex_container->direction = DIR_ROW; break;
+                case LXB_CSS_VALUE_ROW_REVERSE:
+                    block->flex_container->direction = DIR_ROW_REVERSE; break;
+                case LXB_CSS_VALUE_COLUMN:
+                    block->flex_container->direction = DIR_COLUMN; break;
+                case LXB_CSS_VALUE_COLUMN_REVERSE:
+                    block->flex_container->direction = DIR_COLUMN_REVERSE; break;
+            }
+        }
+        
+        // Handle wrap
+        if (flex_flow->wrap != LXB_CSS_VALUE__UNDEF) {
+            switch (flex_flow->wrap) {
+                case LXB_CSS_VALUE_NOWRAP:
+                    block->flex_container->wrap = WRAP_NOWRAP; break;
+                case LXB_CSS_VALUE_WRAP:
+                    block->flex_container->wrap = WRAP_WRAP; break;
+                case LXB_CSS_VALUE_WRAP_REVERSE:
+                    block->flex_container->wrap = WRAP_WRAP_REVERSE; break;
+            }
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_JUSTIFY_CONTENT:
+        if (!block) { break; }
+        const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
+        printf("justify-content property: %d\n", justify_content->type);
+        if (!block->flex_container) {
+            block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+            // Initialize defaults
+            block->flex_container->direction = DIR_ROW;
+            block->flex_container->wrap = WRAP_NOWRAP;
+            block->flex_container->justify = JUSTIFY_START;
+            block->flex_container->align_items = ALIGN_STRETCH;
+            block->flex_container->align_content = ALIGN_START;
+            block->flex_container->row_gap = 0;
+            block->flex_container->column_gap = 0;
+        }
+        
+        block->flex_container->justify = resolve_justify_content(justify_content->type);
+        break;
+        
+    case LXB_CSS_PROPERTY_ALIGN_ITEMS:
+        if (!block) { break; }
+        const lxb_css_property_align_items_t *align_items = declr->u.align_items;
+        printf("align-items property: %d\n", align_items->type);
+        if (!block->flex_container) {
+            block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+            // Initialize defaults
+            block->flex_container->direction = DIR_ROW;
+            block->flex_container->wrap = WRAP_NOWRAP;
+            block->flex_container->justify = JUSTIFY_START;
+            block->flex_container->align_items = ALIGN_STRETCH;
+            block->flex_container->align_content = ALIGN_START;
+            block->flex_container->row_gap = 0;
+            block->flex_container->column_gap = 0;
+        }
+        
+        block->flex_container->align_items = resolve_align_type(align_items->type);
+        break;
+        
+    case LXB_CSS_PROPERTY_ALIGN_CONTENT:
+        if (!block) { break; }
+        const lxb_css_property_align_content_t *align_content = declr->u.align_content;
+        printf("align-content property: %d\n", align_content->type);
+        if (!block->flex_container) {
+            block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+            // Initialize defaults
+            block->flex_container->direction = DIR_ROW;
+            block->flex_container->wrap = WRAP_NOWRAP;
+            block->flex_container->justify = JUSTIFY_START;
+            block->flex_container->align_items = ALIGN_STRETCH;
+            block->flex_container->align_content = ALIGN_START;
+            block->flex_container->row_gap = 0;
+            block->flex_container->column_gap = 0;
+        }
+        
+        block->flex_container->align_content = resolve_align_type(align_content->type);
+        break;
+        
+    case LXB_CSS_PROPERTY_ALIGN_SELF:
+        // Align-self applies to flex items, not containers
+        const lxb_css_property_align_self_t *align_self = declr->u.align_self;
+        printf("align-self property: %d\n", align_self->type);
+        
+        if (!span->flex_item) {
+            span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+            // Initialize defaults
+            span->flex_item->flex_basis = -1;
+            span->flex_item->flex_grow = 0;
+            span->flex_item->flex_shrink = 1;
+            span->flex_item->align_self = ALIGN_START;
+            span->flex_item->order = 0;
+        }
+        
+        span->flex_item->align_self = resolve_align_type(align_self->type);
+        break;
+        
+    case LXB_CSS_PROPERTY_ORDER:
+        const lxb_css_property_order_t *order = declr->u.order;
+        printf("order property: %ld\n", order->integer.num);
+        
+        if (!span->flex_item) {
+            span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+            // Initialize defaults
+            span->flex_item->flex_basis = -1;
+            span->flex_item->flex_grow = 0;
+            span->flex_item->flex_shrink = 1;
+            span->flex_item->align_self = ALIGN_START;
+            span->flex_item->order = 0;
+        }
+        
+        span->flex_item->order = order->integer.num;
+        break;
+        
+    case LXB_CSS_PROPERTY_FLEX:
+        const lxb_css_property_flex_t *flex = declr->u.flex;
+        
+        if (!span->flex_item) {
+            span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+            // Initialize defaults
+            span->flex_item->flex_basis = -1;
+            span->flex_item->flex_grow = 0;
+            span->flex_item->flex_shrink = 1;
+            span->flex_item->align_self = ALIGN_START;
+            span->flex_item->order = 0;
+        }
+        
+        // Handle flex-grow
+        if (flex->grow.type != LXB_CSS_VALUE__UNDEF) {
+            span->flex_item->flex_grow = flex->grow.number.num;
+        } 
+        // else if (flex->none) {
+        //     span->flex_item->flex_grow = 0;
+        // } 
+        else {
+            span->flex_item->flex_grow = 1;  // Default for 'flex: auto'
+        }
+        
+        // Handle flex-shrink
+        if (flex->shrink.type != LXB_CSS_VALUE__UNDEF) {
+            span->flex_item->flex_shrink = flex->shrink.number.num;
+        } 
+        // else if (flex->none) {
+        //     span->flex_item->flex_shrink = 0;
+        // } 
+        else {
+            span->flex_item->flex_shrink = 1;  // Default for 'flex: auto'
+        }
+        
+        // Handle flex-basis
+        if (flex->basis.type == LXB_CSS_VALUE__LENGTH) {
+            span->flex_item->flex_basis = flex->basis.u.length.num;
+            span->flex_item->is_flex_basis_percent = 0;
+        } else if (flex->basis.type == LXB_CSS_VALUE__PERCENTAGE) {
+            span->flex_item->flex_basis = flex->basis.u.percentage.num;
+            span->flex_item->is_flex_basis_percent = 1;
+        } else if (flex->basis.type == LXB_CSS_VALUE_AUTO ) { // || flex->none
+            span->flex_item->flex_basis = -1; // auto
+            span->flex_item->is_flex_basis_percent = 0;
+        } else {
+            span->flex_item->flex_basis = 0;  // content
+            span->flex_item->is_flex_basis_percent = 0;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_FLEX_GROW:
+        const lxb_css_property_flex_grow_t *flex_grow = declr->u.flex_grow;
+        
+        if (!span->flex_item) {
+            span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+            // Initialize defaults
+            span->flex_item->flex_basis = -1;
+            span->flex_item->flex_grow = 0;
+            span->flex_item->flex_shrink = 1;
+            span->flex_item->align_self = ALIGN_START;
+            span->flex_item->order = 0;
+        }
+        
+        span->flex_item->flex_grow = flex_grow->number.num;
+        break;
+        
+    case LXB_CSS_PROPERTY_FLEX_SHRINK:
+        const lxb_css_property_flex_shrink_t *flex_shrink = declr->u.flex_shrink;
+        
+        if (!span->flex_item) {
+            span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+            // Initialize defaults
+            span->flex_item->flex_basis = -1;
+            span->flex_item->flex_grow = 0;
+            span->flex_item->flex_shrink = 1;
+            span->flex_item->align_self = ALIGN_START;
+            span->flex_item->order = 0;
+        }
+        
+        span->flex_item->flex_shrink = flex_shrink->number.num;
+        break;
+        
+    case LXB_CSS_PROPERTY_FLEX_BASIS:
+        const lxb_css_property_flex_basis_t *flex_basis = declr->u.flex_basis;
+        
+        if (!span->flex_item) {
+            span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
+            // Initialize defaults
+            span->flex_item->flex_basis = -1;
+            span->flex_item->flex_grow = 0;
+            span->flex_item->flex_shrink = 1;
+            span->flex_item->align_self = ALIGN_START;
+            span->flex_item->order = 0;
+        }
+        
+        if (flex_basis->type == LXB_CSS_VALUE__LENGTH) {
+            span->flex_item->flex_basis = flex_basis->u.length.num;
+            span->flex_item->is_flex_basis_percent = 0;
+        } else if (flex_basis->type == LXB_CSS_VALUE__PERCENTAGE) {
+            span->flex_item->flex_basis = flex_basis->u.percentage.num;
+            span->flex_item->is_flex_basis_percent = 1;
+        } else if (flex_basis->type == LXB_CSS_VALUE_AUTO) {
+            span->flex_item->flex_basis = -1; // auto
+            span->flex_item->is_flex_basis_percent = 0;
+        }
+        break;
+        
+    // case LXB_CSS_PROPERTY_ROW_GAP:
+    //     if (!block) { break; }
+    //     const lxb_css_property_row_gap_t *row_gap = declr->u.row_gap;
+        
+    //     if (!block->flex_container) {
+    //         block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+    //         // Initialize defaults
+    //         block->flex_container->direction = DIR_ROW;
+    //         block->flex_container->wrap = WRAP_NOWRAP;
+    //         block->flex_container->justify = JUSTIFY_START;
+    //         block->flex_container->align_items = ALIGN_STRETCH;
+    //         block->flex_container->align_content = ALIGN_START;
+    //         block->flex_container->row_gap = 0;
+    //         block->flex_container->column_gap = 0;
+    //     }
+        
+    //     block->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_ROW_GAP, &row_gap->length);
+    //     break;
+        
+    // case LXB_CSS_PROPERTY_COLUMN_GAP:
+    //     if (!block) { break; }
+    //     const lxb_css_property_column_gap_t *column_gap = declr->u.column_gap;
+        
+    //     if (!block->flex_container) {
+    //         block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+    //         // Initialize defaults
+    //         block->flex_container->direction = DIR_ROW;
+    //         block->flex_container->wrap = WRAP_NOWRAP;
+    //         block->flex_container->justify = JUSTIFY_START;
+    //         block->flex_container->align_items = ALIGN_STRETCH;
+    //         block->flex_container->align_content = ALIGN_START;
+    //         block->flex_container->row_gap = 0;
+    //         block->flex_container->column_gap = 0;
+    //     }
+        
+    //     block->flex_container->column_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_COLUMN_GAP, &column_gap->length);
+    //     break;
+        
+    // case LXB_CSS_PROPERTY_GAP:
+    //     if (!block) { break; }
+    //     const lxb_css_property_gap_t *gap = declr->u.gap;
+        
+    //     if (!block->flex_container) {
+    //         block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+    //         // Initialize defaults
+    //         block->flex_container->direction = DIR_ROW;
+    //         block->flex_container->wrap = WRAP_NOWRAP;
+    //         block->flex_container->justify = JUSTIFY_START;
+    //         block->flex_container->align_items = ALIGN_STRETCH;
+    //         block->flex_container->align_content = ALIGN_START;
+    //         block->flex_container->row_gap = 0;
+    //         block->flex_container->column_gap = 0;
+    //     }
+        
+    //     // Set row gap
+    //     block->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_GAP, &gap->row);
+        
+    //     // Set column gap (if specified, otherwise use row gap)
+    //     if (gap->column.type != LXB_CSS_VALUE__UNDEF) {
+    //         block->flex_container->column_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_GAP, &gap->column);
+    //     } else {
+    //         block->flex_container->column_gap = block->flex_container->row_gap;
+    //     }
+    //     break;
     }
+    
     return LXB_STATUS_OK;
+}
+
+AlignType resolve_align_type(PropValue value) {
+    switch (value) {
+        case LXB_CSS_VALUE_FLEX_START:
+        case LXB_CSS_VALUE_START:
+            return ALIGN_START;
+        case LXB_CSS_VALUE_FLEX_END:
+        case LXB_CSS_VALUE_END:
+            return ALIGN_END;
+        case LXB_CSS_VALUE_CENTER:
+            return ALIGN_CENTER;
+        case LXB_CSS_VALUE_BASELINE:
+            return ALIGN_BASELINE;
+        case LXB_CSS_VALUE_STRETCH:
+            return ALIGN_STRETCH;
+        case LXB_CSS_VALUE_SPACE_BETWEEN:
+            return ALIGN_SPACE_BETWEEN;
+        case LXB_CSS_VALUE_SPACE_AROUND:
+            return ALIGN_SPACE_AROUND;
+        // case LXB_CSS_VALUE_SPACE_EVENLY:
+        //     return ALIGN_SPACE_EVENLY;
+        default:
+            return ALIGN_START;
+    }
+}
+
+JustifyContent resolve_justify_content(PropValue value) {
+    switch (value) {
+        case LXB_CSS_VALUE_FLEX_START:
+        case LXB_CSS_VALUE_START:
+            return JUSTIFY_START;
+        case LXB_CSS_VALUE_FLEX_END:
+        case LXB_CSS_VALUE_END:
+            return JUSTIFY_END;
+        case LXB_CSS_VALUE_CENTER:
+            return JUSTIFY_CENTER;
+        case LXB_CSS_VALUE_SPACE_BETWEEN:
+            return JUSTIFY_SPACE_BETWEEN;
+        case LXB_CSS_VALUE_SPACE_AROUND:
+            return JUSTIFY_SPACE_AROUND;
+        // case LXB_CSS_VALUE_SPACE_EVENLY:
+        //     return JUSTIFY_SPACE_EVENLY;
+        default:
+            return JUSTIFY_START;
+    }
 }
 
 // issue: mac hangs when there's integer overflow

@@ -7,6 +7,7 @@
 #include <thorvg_capi.h>
 #include "./lib/mem-pool/include/mem_pool.h"
 #include "event.h"
+#include "flex.h"
 
 #define RDT_DISPLAY_TEXT            (LXB_CSS_VALUE__LAST_ENTRY + 10)
 #define LXB_CSS_VALUE_REPLACED      (LXB_CSS_VALUE__LAST_ENTRY + 11)
@@ -141,6 +142,33 @@ typedef struct {
     PropValue list_style_type;
 } BlockProp;
 
+typedef struct {
+    FlexDirection direction;
+    FlexWrap wrap;
+    JustifyContent justify;
+    AlignType align_items;
+    AlignType align_content;
+    int row_gap;
+    int column_gap;
+} FlexContainerProp;
+
+typedef struct {
+    int flex_basis;  // -1 for auto
+    float flex_grow;
+    float flex_shrink;
+    AlignType align_self;
+    int order;
+    float aspect_ratio;
+    // Flags for percentage values
+    int is_flex_basis_percent : 1;
+    int baseline_offset;
+    // Auto margin flags
+    int is_margin_top_auto : 1;
+    int is_margin_right_auto : 1;
+    int is_margin_bottom_auto : 1;
+    int is_margin_left_auto : 1;
+} FlexItemProp;
+
 typedef struct View View;
 typedef struct ViewGroup ViewGroup;
 
@@ -168,6 +196,7 @@ typedef struct {
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
     // prop: vertical_align - fully resolved during layout, not stored in view tree
+    FlexItemProp* flex_item; // flex item properties
 } ViewSpan;
 
 typedef struct {
@@ -201,6 +230,7 @@ typedef struct {
     int content_width, content_height;  // width and height of the child content including padding
     BlockProp* props;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
+    FlexContainerProp* flex_container; // flex container properties
 } ViewBlock;
 
 typedef struct {
