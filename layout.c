@@ -11,6 +11,91 @@ bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
 }
 
+// Add this helper function for calculating vertical alignment offsets
+int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline) {
+    switch (align) {
+    case LXB_CSS_VALUE_BASELINE:
+        return baseline_pos - item_baseline;
+    case LXB_CSS_VALUE_TOP:
+        return 0;
+    case LXB_CSS_VALUE_MIDDLE:
+        return (line_height - item_height) / 2;
+    case LXB_CSS_VALUE_BOTTOM:
+        return line_height - item_height;
+    case LXB_CSS_VALUE_TEXT_TOP:
+        // Align with the top of the parent's font
+        return 0;
+    case LXB_CSS_VALUE_TEXT_BOTTOM:
+        // Align with the bottom of the parent's font
+        return line_height - item_height;
+    case LXB_CSS_VALUE_SUB:
+        // Subscript position (approximately 0.3em lower)
+        return baseline_pos - item_baseline + (int)(0.3 * line_height);
+    case LXB_CSS_VALUE_SUPER:
+        // Superscript position (approximately 0.3em higher)
+        return baseline_pos - item_baseline - (int)(0.3 * line_height);
+    default:
+        return baseline_pos - item_baseline; // Default to baseline
+    }
+}
+
+// Apply vertical alignment to a view
+void apply_vertical_alignment(LayoutContext* lycon, View* view, int baseline_pos) {
+    if (!view) return;
+    
+    int vertical_offset = 0;
+    int item_baseline = 0;
+    int item_height = 0;
+    PropValue align = lycon->line.vertical_align;
+    
+    // Extract view-specific properties
+    if (view->type == RDT_VIEW_TEXT) {
+        ViewText* text_view = (ViewText*)view;
+        item_height = text_view->height;
+        // For text, baseline is at font.ascender
+        item_baseline = (int)(lycon->font.face->size->metrics.ascender / 64);
+        
+    } else if (view->type == RDT_VIEW_INLINE) {
+        ViewSpan* span = (ViewSpan*)view;
+        // For inline elements, we need to determine the max baseline of its children
+        // This is simplified - in reality, you'd compute this during inline layout
+        item_baseline = lycon->font.face->size->metrics.height / 64 * 3/4; // Approximation
+        
+        // Check if span has its own vertical-align property
+        if (span->in_line && span->in_line->vertical_align) {
+            align = span->in_line->vertical_align;
+        }
+        
+    } else if (view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
+        ViewBlock* block = (ViewBlock*)view;
+        item_height = block->height;
+        // For replaced elements like images, baseline is at the bottom by default
+        item_baseline = item_height;
+    }
+    
+    // Calculate the offset based on vertical-align value
+    vertical_offset = calculate_vertical_align_offset(align, item_height, 
+                                                     lycon->block.line_height, 
+                                                     baseline_pos, item_baseline);
+    
+    // Apply the offset
+    if (view->type == RDT_VIEW_TEXT) {
+        ViewText* text_view = (ViewText*)view;
+        text_view->y += vertical_offset;
+    } else if (view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
+        ViewBlock* block = (ViewBlock*)view;
+        block->y += vertical_offset;
+    } else if (view->type == RDT_VIEW_INLINE) {
+        // For inline elements, apply to all children
+        ViewSpan* span = (ViewSpan*)view;
+        View* child = span->child;
+        while (child) {
+            apply_vertical_alignment(lycon, child, baseline_pos);
+            child = child->next;
+        }
+    }
+}
+
 void span_line_align(LayoutContext* lycon, float offset, ViewSpan* span) {
     // align the views in the line
     printf("span line align\n");
@@ -68,6 +153,33 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
+void line_break(LayoutContext* lycon) {
+    printf("line break\n");
+    if (lycon->line.is_line_start) return;  // no need to break at line start
+    
+    lycon->line.baseline_position = lycon->line.max_ascender;
+    
+    // Apply vertical alignment to all elements in the line
+    View* view = lycon->line.start_view;
+    while (view) {
+        apply_vertical_alignment(lycon, view, lycon->line.baseline_position);
+        view = view->next;
+    }
+    
+    // Handle horizontal text alignment (existing code)
+    line_align(lycon);
+    
+    // Move to next line
+    lycon->block.advance_y += lycon->line.max_ascender + lycon->line.max_descender;
+    lycon->line.left = lycon->line.advance_x = 0;
+    lycon->line.max_ascender = lycon->line.max_descender = 0;
+    lycon->line.is_line_start = true;  lycon->line.has_space = false;
+    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
+    lycon->line.start_view = NULL;
+    lycon->line.baseline_position = 0;
+    printf("end of line break\n");
+}
+
 void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
@@ -113,6 +225,13 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     if (elmt->element.style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
+    }
+
+    // Store current vertical alignment in linebox
+    if (span->in_line && span->in_line->vertical_align) {
+        lycon->line.vertical_align = span->in_line->vertical_align;
+    } else {
+        lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;  // Default
     }
 
     if (span->font) {

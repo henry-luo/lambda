@@ -314,6 +314,33 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         finalize_block_flow(lycon, block, display.outer, &pa_block);
     }
 
+    // For replaced elements (images) and inline blocks, handle baseline
+    if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK || elmt_name == LXB_TAG_IMG) {
+        // Track this element for baseline alignment
+        // If not the first element in line, add it to the line's elements
+        if (!lycon->line.is_line_start && !lycon->line.start_view) {
+            lycon->line.start_view = (View*)block;
+        }
+        
+        // Calculate and store baseline information
+        int block_baseline = block->height;
+        if (block->in_line && block->in_line->vertical_align) {
+            PropValue valign = block->in_line->vertical_align;
+            if (valign != LXB_CSS_VALUE_BASELINE) {
+                // Will be handled during line break
+                lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+            } else {
+                // Default baseline positioning
+                lycon->line.max_ascender = max(lycon->line.max_ascender, block_baseline);
+                lycon->line.max_descender = max(lycon->line.max_descender, block->height - block_baseline);
+            }
+        } else {
+            // Default baseline alignment - bottom edge is the baseline
+            lycon->line.max_ascender = max(lycon->line.max_ascender, block_baseline);
+            lycon->line.max_descender = max(lycon->line.max_descender, block->height - block_baseline);
+        }
+    }
+
     // flow the block in parent context
     dzlog_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;

@@ -105,6 +105,7 @@ typedef struct {
 typedef struct {
     PropValue cursor;
     Color color;
+    PropValue vertical_align;
 } InlineProp;
 
 typedef struct {
@@ -168,7 +169,6 @@ typedef struct {
     FontProp* font;  // font style
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
-    // prop: vertical_align - fully resolved during layout, not stored in view tree
     FlexItemProp* flex_item; // flex item properties
 } ViewSpan;
 
