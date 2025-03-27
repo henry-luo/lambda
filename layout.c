@@ -40,57 +40,38 @@ int calculate_vertical_align_offset(PropValue align, int item_height, int line_h
 }
 
 // Apply vertical alignment to a view
-void apply_vertical_alignment(LayoutContext* lycon, View* view, int baseline_pos) {
-    if (!view) return;
-    
+void apply_vertical_alignment(LayoutContext* lycon, View* view) {
     int vertical_offset = 0;
     int item_baseline = 0;
     int item_height = 0;
-    PropValue align = lycon->line.vertical_align;
+    PropValue align = LXB_CSS_VALUE_BASELINE; // lycon->line.vertical_align;
     
-    // Extract view-specific properties
+    // Apply the offset
     if (view->type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
         item_height = text_view->height;
         // For text, baseline is at font.ascender
         item_baseline = (int)(lycon->font.face->size->metrics.ascender / 64);
-        
-    } else if (view->type == RDT_VIEW_INLINE) {
-        ViewSpan* span = (ViewSpan*)view;
-        // For inline elements, we need to determine the max baseline of its children
-        // This is simplified - in reality, you'd compute this during inline layout
-        item_baseline = lycon->font.face->size->metrics.height / 64 * 3/4; // Approximation
-        
-        // Check if span has its own vertical-align property
-        if (span->in_line && span->in_line->vertical_align) {
-            align = span->in_line->vertical_align;
-        }
-        
+        vertical_offset = calculate_vertical_align_offset(align, item_height, 
+            lycon->block.line_height, lycon->line.max_ascender, item_baseline);
+
+        text_view->y = lycon->block.advance_y + vertical_offset;
     } else if (view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
         ViewBlock* block = (ViewBlock*)view;
         item_height = block->height;
-        // For replaced elements like images, baseline is at the bottom by default
         item_baseline = item_height;
-    }
-    
-    // Calculate the offset based on vertical-align value
-    vertical_offset = calculate_vertical_align_offset(align, item_height, 
-                                                     lycon->block.line_height, 
-                                                     baseline_pos, item_baseline);
-    
-    // Apply the offset
-    if (view->type == RDT_VIEW_TEXT) {
-        ViewText* text_view = (ViewText*)view;
-        text_view->y += vertical_offset;
-    } else if (view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
-        ViewBlock* block = (ViewBlock*)view;
-        block->y += vertical_offset;
+        vertical_offset = calculate_vertical_align_offset(align, item_height, 
+            lycon->block.line_height, lycon->line.max_ascender, item_baseline);
+        block->y = lycon->block.advance_y + vertical_offset;
+        dzlog_debug("adjusting inline block %s, y: %d, ascender:%d, offset: %d", 
+            lxb_dom_element_local_name(lxb_dom_interface_element(view->node), NULL),
+            block->y, lycon->line.max_ascender, vertical_offset);
     } else if (view->type == RDT_VIEW_INLINE) {
-        // For inline elements, apply to all children
+        // for inline elements, apply to all children
         ViewSpan* span = (ViewSpan*)view;
         View* child = span->child;
         while (child) {
-            apply_vertical_alignment(lycon, child, baseline_pos);
+            apply_vertical_alignment(lycon, child);
             child = child->next;
         }
     }
@@ -353,7 +334,9 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->block.advance_y = 0;
     lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
-    lycon->line.is_line_start = true;
+    lycon->line.left = 0;  lycon->line.right = lycon->block.width;
+    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
+    line_start(lycon);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
@@ -378,6 +361,9 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ? 
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
+    lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;
+    lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
+
     // layout body content
     lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
     if (body) {

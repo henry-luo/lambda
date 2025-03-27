@@ -12,21 +12,24 @@ void line_start(LayoutContext* lycon) {
 
 void line_break(LayoutContext* lycon) {
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
-    lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
-
+    
     if (lycon->line.max_ascender > lycon->block.init_ascender || 
         lycon->line.max_descender > lycon->block.init_descender) {
         // apply vertical alignment
         View* view = lycon->line.start_view;
         while (view) {
-            apply_vertical_alignment(lycon, view, lycon->line.max_ascender);
+            apply_vertical_alignment(lycon, view);
             view = view->next;
         }            
     }
+    // else no change to vertical alignment
 
     // horizontal text alignment
     line_align(lycon);
-    // reset linebox to start a new line
+
+    // advance to next line
+    lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
+    // reset the new line
     line_start(lycon);
 }
 

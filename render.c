@@ -196,11 +196,11 @@ void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
-    ViewBlock* list_item = (ViewBlock*)view;
-    printf("view list item:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list_item->node), NULL)); 
-    ListBlot pa_list = rdcon->list;  BlockBlot pa_block = rdcon->block;
-    rdcon->list.item_index = 0;  rdcon->list.list_style_type = list_item->props->list_style_type;
-    render_block_view(rdcon, list_item);
+    ViewBlock* list = (ViewBlock*)view;
+    printf("view list:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list->node), NULL)); 
+    ListBlot pa_list = rdcon->list;
+    rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->props->list_style_type;
+    render_block_view(rdcon, list);
     rdcon->list = pa_list;
 }
 
@@ -405,13 +405,12 @@ void render_children(RenderContext* rdcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block = (ViewBlock*)view;
-            printf("view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
-                block->x, block->y, block->width, block->height);                
-            render_block_view(rdcon, block);
-        }
-        else if (view->type == RDT_VIEW_LIST) {               
-            render_list_view(rdcon, (ViewBlock*)view);
+            if (block->props && block->props->list_style_type) {
+                render_list_view(rdcon, block);
+            }
+            else {
+                render_block_view(rdcon, block);
+            }
         }
         else if (view->type == RDT_VIEW_LIST_ITEM) {
             render_litem_view(rdcon, (ViewBlock*)view);
@@ -420,13 +419,15 @@ void render_children(RenderContext* rdcon, View* view) {
             render_image_view(rdcon, (ViewImage*)view);
         }
         else if (view->type == RDT_VIEW_INLINE) {
-            ViewSpan* span = (ViewSpan*)view;
-            printf("view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
+            ViewSpan* span = (ViewSpan*)view;                
             render_inline_view(rdcon, span);
         }
-        else {
+        else if (view->type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             render_text_view(rdcon, text);
+        }
+        else {
+            dzlog_debug("unknown view in rendering: %d", view->type);
         }
         view = view->next;
     } while (view);

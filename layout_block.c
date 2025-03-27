@@ -167,15 +167,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
         dzlog_debug("resolved element style: %p\n", elmt->element.style);
     }
-    
-    // switch block to list
-    if (block->props && block->props->list_style_type && elmt_name != LXB_TAG_IMG) {
-        block->type = RDT_VIEW_LIST;
-    }
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->props) lycon->block.text_align = block->props->text_align;
-    lycon->line.left = 0;
+    lycon->line.left = 0;  lycon->line.right = pa_block.width;
+    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_start(lycon);
     block->x = pa_line.left;  block->y = pa_block.advance_y;
 
@@ -332,15 +328,22 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
             block->y += block->bound->margin.top;
             lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
         }
-        // update baseline
-        int block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
+        // update baseline        
         if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
+            int block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
             lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
         } else {
             // default baseline alignment for inline block
-            lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height);
+            if (block->bound) {
+                lycon->line.max_ascender = max(lycon->line.max_ascender, block->height + block->bound->margin.top);
+                // bottom margin is placed below the baseline as descender
+                lycon->line.max_descender = max(lycon->line.max_descender, block->bound->margin.bottom);
+            }
+            else {
+                lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
+            }
         }
-        
+        // line got content
         lycon->line.is_line_start = false;
     } else {
         if (block->bound) {

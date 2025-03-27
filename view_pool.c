@@ -6,8 +6,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
     View* view;  MemPoolError err;
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
-        case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:
-        case RDT_VIEW_LIST:  case RDT_VIEW_LIST_ITEM:
+        case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
             memset(view, 0, sizeof(ViewBlock));
             break;
@@ -70,8 +69,7 @@ void free_view(ViewTree* tree, View* view) {
             pool_variable_free(tree->pool, span->bound);
         }
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK || 
-            view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM ||
-            view->type == RDT_VIEW_IMAGE) {
+            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->props) {
                 printf("free block prop\n");
@@ -237,7 +235,6 @@ void print_block(ViewBlock* block, StrBuf* buf, int indent) {
         lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
         block->type == RDT_VIEW_BLOCK ? "block" : 
         block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
-        block->type == RDT_VIEW_LIST ? "list" :
         block->type == RDT_VIEW_LIST_ITEM ? "list-item" : "image",
         block->x, block->y, block->width, block->height);
     print_block_props(block, buf, indent + 2);
@@ -251,8 +248,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
         do {
             strbuf_append_char_n(buf, ' ', indent);
             if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-                view->type == RDT_VIEW_LIST || view->type == RDT_VIEW_LIST_ITEM || 
-                view->type == RDT_VIEW_IMAGE) {
+                view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
                 print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {
