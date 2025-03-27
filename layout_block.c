@@ -315,17 +315,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         finalize_block_flow(lycon, block, display.outer, &pa_block);
     }
 
-    // for replaced elements (images) and inline blocks, handle baseline alignment
-    if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
-        // calculate and store baseline information
-        if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
-            lycon->line.max_descender = max(lycon->line.max_descender, block->height - lycon->line.max_ascender);
-        } else {
-            // default baseline alignment
-            lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
-        }
-    }
-
     // flow the block in parent context
     dzlog_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
@@ -342,11 +331,16 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
             block->x += block->bound->margin.left;
             block->y += block->bound->margin.top;
             lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
-            lycon->line.max_ascender = max(lycon->line.max_ascender, 
-                block->height + block->bound->margin.top + block->bound->margin.bottom); 
-        } else {
-            lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);  // inline block aligned at baseline
         }
+        // update baseline
+        int block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
+        if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
+            lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
+        } else {
+            // default baseline alignment for inline block
+            lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height);
+        }
+        
         lycon->line.is_line_start = false;
     } else {
         if (block->bound) {
