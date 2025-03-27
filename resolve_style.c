@@ -1086,5 +1086,3 @@ JustifyContent resolve_justify_content(PropValue value) {
             return JUSTIFY_START;
     }
 }
-
-// issue: mac hangs when there's integer overflow
