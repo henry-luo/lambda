@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flexbox Layout Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 40px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+        .item::after {
+            content: attr(data-info);
+            font-size: 12px;
+            display: block;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+        }
+        /* Specific test styles */
+        .basic-layout .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            gap: 10px;
+        }
+        .basic-layout .item {
+            width: 200px;
+            height: 100px;
+        }
+        .wrap-test .container {
+            width: 400px;
+            height: 600px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .wrap-test .item {
+            width: 200px;
+            height: 100px;
+        }
+        .align-items-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .align-items-test .item:nth-child(1) {
+            width: 200px;
+            height: 100px;
+        }
+        .align-items-test .item:nth-child(2) {
+            width: 200px;
+            height: 150px;
+        }
+        .column-direction-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .column-direction-test .item {
+            width: 200px;
+            height: 100px;
+        }
+        .flex-grow-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            gap: 10px;
+        }
+        .flex-grow-test .item:nth-child(1) {
+            flex-grow: 1;
+            height: 100px;
+        }
+        .flex-grow-test .item:nth-child(2) {
+            flex-grow: 2;
+            height: 100px;
+        }
+        .justify-content-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            justify-content: space-evenly;
+            gap: 10px;
+        }
+        .justify-content-test .item {
+            width: 200px;
+            height: 100px;
+        }
+        .row-reverse-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            flex-direction: row-reverse;
+            gap: 10px;
+        }
+        .row-reverse-test .item {
+            width: 200px;
+            height: 100px;
+        }
+        .absolute-positioning-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            gap: 10px;
+        }
+        .absolute-positioning-test .item:nth-child(2) {
+            position: absolute;
+            left: 0;
+            top: 0;
+        }
+        .hidden-visibility-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            gap: 10px;
+        }
+        .hidden-visibility-test .item:nth-child(2) {
+            visibility: hidden;
+        }
+        .flex-basis-test .container {
+            width: 800px;
+            height: 600px;
+            display: flex;
+            gap: 10px;
+        }
+        .flex-basis-test .item:nth-child(1) {
+            flex-basis: 300px;
+            height: 100px;
+        }
+        .flex-basis-test .item:nth-child(2) {
+            flex-basis: 400px;
+            height: 100px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Flexbox Layout Test Cases</h1>
+    <div class="test-case basic-layout">
+        <h2>Basic Layout</h2>
+        <div class="explanation">A simple row layout with 3 items of equal size and 10px gap between them.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 2</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case wrap-test">
+        <h2>Wrap</h2>
+        <div class="explanation">Items wrap to multiple lines when they exceed container width.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 2</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case align-items-test">
+        <h2>Align Items</h2>
+        <div class="explanation">Items are aligned to the center of the container's cross axis.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 150px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case column-direction-test">
+        <h2>Column Direction</h2>
+        <div class="explanation">Items are laid out in a column direction with a 10px gap.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case flex-grow-test">
+        <h2>Flex Grow</h2>
+        <div class="explanation">Items grow to fill the available space proportionally based on their flex-grow values.</div>
+        <div class="container">
+            <div class="item" data-info="flex-grow: 1">Item 1</div>
+            <div class="item" data-info="flex-grow: 2">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case justify-content-test">
+        <h2>Justify Content</h2>
+        <div class="explanation">Items are evenly distributed along the main axis with equal spacing.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case row-reverse-test">
+        <h2>Row Reverse</h2>
+        <div class="explanation">Items are laid out in reverse order along the main axis.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case absolute-positioning-test">
+        <h2>Absolute Positioning</h2>
+        <div class="explanation">One item is absolutely positioned, while others follow the flex layout.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px; position: absolute">Item 2</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case hidden-visibility-test">
+        <h2>Hidden Visibility</h2>
+        <div class="explanation">One item is hidden, but it still occupies space in the layout.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px, height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px, height: 100px; visibility: hidden">Item 2</div>
+            <div class="item" data-info="width: 200px, height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case flex-basis-test">
+        <h2>Flex Basis</h2>
+        <div class="explanation">Items have specific flex-basis values that determine their initial size.</div>
+        <div class="container">
+            <div class="item" data-info="flex-basis: 300px">Item 1</div>
+            <div class="item" data-info="flex-basis: 400px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case align-self-override-test">
+        <h2>Align Self Override</h2>
+        <div class="explanation">An item's align-self property overrides the container's align-items property.</div>
+        <div class="container">
+            <div class="item" data-info="align-self: flex-end; width: 200px; height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px; height: 150px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case zero-size-test">
+        <h2>Zero Size Container</h2>
+        <div class="explanation">A container with zero width causes all items to overlap at the starting position.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px; height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px; height: 100px">Item 2</div>
+        </div>
+    </div>
+    <div class="test-case min-max-constraints-test">
+        <h2>Min/Max Constraints</h2>
+        <div class="explanation">Items respect their min-width and max-width constraints during layout.</div>
+        <div class="container">
+            <div class="item" data-info="min-width: 150px; max-width: 250px; flex-grow: 1">Item 1</div>
+            <div class="item" data-info="min-width: 150px; max-width: 200px; flex-shrink: 1">Item 2</div>
+            <div class="item" data-info="min-width: 200px; max-width: 250px; flex-grow: 1">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case wrap-reverse-test">
+        <h2>Wrap Reverse</h2>
+        <div class="explanation">Items wrap in reverse order when the container's wrap property is set to wrap-reverse.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px; height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px; height: 100px">Item 2</div>
+            <div class="item" data-info="width: 200px; height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case nested-containers-test">
+        <h2>Nested Containers</h2>
+        <div class="explanation">A nested container demonstrates how child containers are laid out within parent containers.</div>
+        <div class="outer-container container">
+            <div class="inner-container container">
+                <div class="item" data-info="width: 150px; height: 100px">Inner Item 1</div>
+                <div class="item" data-info="width: 150px; height: 100px">Inner Item 2</div>
+            </div>
+        </div>
+    </div>
+    <div class="test-case aspect-ratio-test">
+        <h2>Aspect Ratio</h2>
+        <div class="explanation">Items respect their aspect ratio when width or height is specified.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px; aspect-ratio: 2">Item 1</div>
+            <div class="item" data-info="height: 100px; aspect-ratio: 1.5">Item 2</div>
+            <div class="item" data-info="width: 150px; height: 75px; aspect-ratio: 2">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case column-reverse-test">
+        <h2>Column Reverse Flex Direction</h2>
+        <div class="explanation">Items are laid out in reverse column order.</div>
+        <div class="container">
+            <div class="item" data-info="width: 100px; height: 100px">Item 1</div>
+            <div class="item" data-info="width: 100px; height: 100px">Item 2</div>
+            <div class="item" data-info="width: 100px; height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case align-content-space-evenly-test">
+        <h2>Align Content: Space Evenly</h2>
+        <div class="explanation">Lines are distributed evenly, including equal space at the edges.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px; height: 100px">Item 1</div>
+            <div class="item" data-info="width: 200px; height: 100px">Item 2</div>
+            <div class="item" data-info="width: 200px; height: 100px">Item 3</div>
+        </div>
+    </div>
+    <div class="test-case auto-margins-center-test">
+        <h2>Auto Margins for Centering</h2>
+        <div class="explanation">An item with auto margins on both sides is centered within the container.</div>
+        <div class="container">
+            <div class="item" data-info="width: 200px; height: 100px; margin: auto">Item 1</div>
+        </div>
+    </div>
+    <div class="test-case deep-nested-test">
+        <h2>Deep Nested Containers</h2>
+        <div class="explanation">Demonstrates layout with three levels of nested containers.</div>
+        <div class="grandparent container">
+            <div class="parent container">
+                <div class="child container">
+                    <div class="item" data-info="width: 100px; height: 100px">Child Item 1</div>
+                    <div class="item" data-info="width: 100px; height: 100px">Child Item 2</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
