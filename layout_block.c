@@ -71,9 +71,16 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     dzlog_debug("layout flex nodes\n");
     ViewBlock* block = (ViewBlock*)lycon->view;
-    if (!block || !block->flex_container) {
-        dzlog_error("Missing flex container properties\n");
-        return;
+    if (!block->flex_container) {
+        block->flex_container = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+        // Initialize defaults
+        block->flex_container->direction = DIR_ROW;
+        block->flex_container->wrap = WRAP_NOWRAP;  // default nowrap
+        block->flex_container->justify = JUSTIFY_START;
+        block->flex_container->align_items = ALIGN_STRETCH;
+        block->flex_container->align_content = ALIGN_START;
+        block->flex_container->row_gap = 0;
+        block->flex_container->column_gap = 0;  
     }
     
     // Count children first
@@ -120,7 +127,8 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     
     // Create temporary ViewBlock items for measuring children
     ViewBlock** child_blocks = calloc(child_count, sizeof(ViewBlock*));
-    
+            
+    lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
     while (child && index < child_count) {
         DisplayValue display = {.outer = LXB_CSS_VALUE_INLINE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
         
@@ -128,11 +136,8 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
         lycon->block = pa_block;
         lycon->line = pa_line;
         lycon->font = pa_font;
-        
+
         // Layout the child in measuring mode
-        lycon->parent = (ViewGroup*)block;
-        lycon->prev_view = NULL;
-        
         if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
             layout_block(lycon, (lxb_html_element_t*)child, display);
             if (lycon->prev_view && lycon->prev_view->type >= RDT_VIEW_INLINE_BLOCK) {
@@ -143,6 +148,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                 FlexItem* item = &flex_container.items[index];
                 item->width = child_block->width;
                 item->height = child_block->height;
+                dzlog_debug("Flex item %d: width=%d, height=%d\n", index, item->width, item->height);
                 
                 // Copy margins
                 if (child_block->bound) {
@@ -207,6 +213,9 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                 child_blocks[i]->content_width = flex_container.items[i].width;
                 child_blocks[i]->content_height = flex_container.items[i].height;
             }
+
+            dzlog_debug("Flex child block %d: x=%d, y=%d, w=%d, h=%d\n", 
+                        i, child_blocks[i]->x, child_blocks[i]->y, child_blocks[i]->width, child_blocks[i]->height);
         }
     }
     
