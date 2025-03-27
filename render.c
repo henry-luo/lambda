@@ -2,6 +2,8 @@
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
+#undef DEBUG_RENDER
+
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
@@ -238,6 +240,21 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
+void drawRect(Tvg_Canvas* canvas, Rect rect) {
+    Tvg_Paint* shape = tvg_shape_new();
+    tvg_shape_move_to(shape, rect.x, rect.y);
+    tvg_shape_line_to(shape, rect.x + rect.width, rect.y);
+    tvg_shape_line_to(shape, rect.x + rect.width, rect.y + rect.height);
+    tvg_shape_line_to(shape, rect.x, rect.y + rect.height);
+    tvg_shape_close(shape);
+    tvg_shape_set_stroke_width(shape, 2); // stroke width of 2 pixels
+    tvg_shape_set_stroke_color(shape, 255, 0, 0, 100); // Red stroke color (RGBA)
+    // define the dash pattern for a dotted line
+    float dash_pattern[2] = {8.0f, 8.0f}; // 8 units on, 8 units off
+    tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0); 
+    tvg_canvas_push(canvas, shape);
+}
+
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (view_block->font) {
@@ -252,6 +269,17 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block) {
     }
 
     rdcon->block.x = pa_block.x + view_block->x;  rdcon->block.y = pa_block.y + view_block->y;
+
+    #ifdef DEBUG_RENDER
+    // debugging outline around the block margin border
+    Rect rc;
+    rc.x = rdcon->block.x - (view_block->bound ? view_block->bound->margin.left : 0);  
+    rc.y = rdcon->block.y - (view_block->bound ? view_block->bound->margin.top : 0);
+    rc.width = view_block->width + (view_block->bound ? view_block->bound->margin.left + view_block->bound->margin.right : 0);
+    rc.height = view_block->height + (view_block->bound ? view_block->bound->margin.top + view_block->bound->margin.bottom : 0);
+    drawRect(rdcon->canvas, rc);
+    #endif
+
     View* view = view_block->child;
     if (view) {
         if (view_block->in_line && view_block->in_line->color.c) {

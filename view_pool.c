@@ -277,10 +277,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             view = view->next;
         } while (view);
     }
-    else {
-        strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_str(buf, "view has no child\n");
-    }
+    // else no child view
 }
 
 void write_string_to_file(const char *filename, const char *text) {
