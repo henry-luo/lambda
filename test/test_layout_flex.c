@@ -403,9 +403,11 @@ Test(flexbox_tests, column_reverse_flex_direction) {
 int main(int argc, char *argv[]) {
     setbuf(stdout, NULL);
     struct criterion_test_set *tests = criterion_initialize();
-    int result = criterion_run_all_tests(tests);
+    int result = 0;
+    if (criterion_handle_args(argc, argv, true))  // Process args and enable verbosity
+        result = !criterion_run_all_tests(tests);
     criterion_finalize(tests);
-    return result ? 0 : 1;
+    return result;
 }
 
 // Test align-content: ALIGN_START (default, lines at top)
