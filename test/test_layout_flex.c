@@ -1477,6 +1477,3 @@ Test(flexbox_tests, nested_coordinate_transform) {
     cleanup_container(inner);
     cleanup_container(outer);
 }
-
-// zig cc -o test_layout_flex.exe test_layout_flex.c -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib
-// ./test_layout_flex.exe --verbose

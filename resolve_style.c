@@ -1033,12 +1033,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     //     break;
 
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
-        printf("@@ custom property\n");
         const lxb_css_property__custom_t *custom = declr->u.custom;
         dzlog_warn("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
-        // if (strncmp(custom->name.data, "background", custom->name.length) == 0) {
-        //     dzlog_warn("background property: %.*s\n", (int)custom->name.length, custom->name.data);
-        // }
         break;
     }
     
