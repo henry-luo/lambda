@@ -40,26 +40,12 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     child = first_child;
     int index = 0;
     
-    // Save parent context
-    Blockbox pa_block = lycon->block;
-    Linebox pa_line = lycon->line;
-    FontBox pa_font = lycon->font;
-    ViewGroup* pa_parent = lycon->parent;
-    View* pa_prev_view = lycon->prev_view;
-    
     // Create temporary ViewBlock items for measuring children
     ViewBlock** child_blocks = calloc(child_count, sizeof(ViewBlock*));
             
-    lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
+    DisplayValue display = {.outer = LXB_CSS_VALUE_INLINE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
     while (child && index < child_count) {
-        DisplayValue display = {.outer = LXB_CSS_VALUE_INLINE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
-        
-        // Layout child to determine its size
-        lycon->block = pa_block;
-        lycon->line = pa_line;
-        lycon->font = pa_font;
-
-        // Layout the child in measuring mode
+        // Layout child in measuring mode to determine its size 
         if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
             layout_block(lycon, (lxb_html_element_t*)child, display);
             if (lycon->prev_view && lycon->prev_view->type >= RDT_VIEW_INLINE_BLOCK) {
@@ -140,13 +126,6 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                         i, child_blocks[i]->x, child_blocks[i]->y, child_blocks[i]->width, child_blocks[i]->height);
         }
     }
-    
-    // Restore parent context
-    lycon->block = pa_block;
-    lycon->line = pa_line;
-    lycon->font = pa_font;
-    lycon->parent = pa_parent;
-    lycon->prev_view = pa_prev_view;
     
     // Update the block's content size
     int max_width = 0, max_height = 0;
