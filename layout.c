@@ -153,33 +153,6 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
-void line_break(LayoutContext* lycon) {
-    printf("line break\n");
-    if (lycon->line.is_line_start) return;  // no need to break at line start
-    
-    lycon->line.baseline_position = lycon->line.max_ascender;
-    
-    // Apply vertical alignment to all elements in the line
-    View* view = lycon->line.start_view;
-    while (view) {
-        apply_vertical_alignment(lycon, view, lycon->line.baseline_position);
-        view = view->next;
-    }
-    
-    // Handle horizontal text alignment (existing code)
-    line_align(lycon);
-    
-    // Move to next line
-    lycon->block.advance_y += lycon->line.max_ascender + lycon->line.max_descender;
-    lycon->line.left = lycon->line.advance_x = 0;
-    lycon->line.max_ascender = lycon->line.max_descender = 0;
-    lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
-    lycon->line.start_view = NULL;
-    lycon->line.baseline_position = 0;
-    printf("end of line break\n");
-}
-
 void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }

@@ -175,10 +175,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->props) lycon->block.text_align = block->props->text_align;
-    lycon->line.left = lycon->line.advance_x = lycon->line.max_ascender = lycon->line.max_descender = 0;  
-    lycon->line.is_line_start = true;  lycon->line.has_space = false;
-    lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
-    lycon->line.start_view = NULL;
+    lycon->line.left = 0;
+    line_start(lycon);
     block->x = pa_line.left;  block->y = pa_block.advance_y;
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
@@ -232,6 +230,9 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
+    lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;  
+    lycon->block.init_descender = lycon->font.face->size->metrics.descender >> 6;
+
     if (block->bound) {
         if (lycon->block.given_width >= 0) { // got specified width 
             block->width = lycon->block.given_width + block->bound->padding.left + block->bound->padding.right +

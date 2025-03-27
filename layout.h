@@ -11,6 +11,8 @@ typedef struct Blockbox {
     int advance_y;  // advance_y includes padding.top and border.top of current block
     int max_width, max_height;  // max content width and height (without padding)
     int line_height;
+    int init_ascender;  // initial ascender of the line at start of the line
+    int init_descender;  // initial descender of the line at start of the line
     PropValue text_align;
     int given_width, given_height;  // specified width and height by css or html attributes
     struct Blockbox* pa_block;  // parent block
@@ -21,7 +23,6 @@ typedef struct {
     int advance_x;
     int max_ascender;
     int max_descender;
-    int baseline_position;  // position of the baseline from top of the line
     unsigned char* last_space; // last space character in the line
     int last_space_pos;  // position of the last space in the line
     View* start_view;
@@ -69,5 +70,6 @@ Color color_name_to_rgb(PropValue color_name);
 void layout_flex_container(FlexContainer* container);
 void free_flex_container(FlexContainer* container);
 
+void line_start(LayoutContext* lycon);
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);
 void apply_vertical_alignment(LayoutContext* lycon, View* view, int baseline_pos);
