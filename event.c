@@ -4,7 +4,7 @@ Document* show_html_doc(lxb_url_t *base, char* doc_filename);
 void free_document(Document* doc);
 void to_repaint();
 
-void target_block_view(EventContext* evcon, ViewBlock* view_block);
+void target_block_view(EventContext* evcon, ViewBlock* block);
 void target_inline_view(EventContext* evcon, ViewSpan* view_span);
 void target_text_view(EventContext* evcon, ViewText* text);
 void scrollpane_scroll(EventContext* evcon, ScrollPane* sp);
@@ -90,33 +90,36 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     evcon->font = pa_font;
 }
 
-void target_block_view(EventContext* evcon, ViewBlock* view_block) {
+void target_block_view(EventContext* evcon, ViewBlock* block) {
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
-    evcon->block.x = pa_block.x + view_block->x;  evcon->block.y = pa_block.y + view_block->y;
+    evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
     // target the scrollbars first
-    if (view_block->scroller && view_block->scroller->pane) {
-        bool hover = scrollpane_target(evcon, view_block);
+    if (block->scroller && block->scroller->pane) {
+        bool hover = scrollpane_target(evcon, block);
         if (hover) {
-            printf("hit on block scroll: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
-            evcon->target = (View*)view_block;
+            printf("hit on block scroll: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL));
+            evcon->target = (View*)block;
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
             goto RETURN;
         }
+        // setup scrolling offset
+        evcon->block.x -= block->scroller->pane->h_scroll_position;
+        evcon->block.y -= block->scroller->pane->v_scroll_position;
     }
-    View* view = view_block->child;
+    View* view = block->child;
     if (view) {
-        if (view_block->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, view_block->font); 
-        }        
+        if (block->font) {
+            setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, block->font); 
+        }
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself
             int x = evcon->block.x, y = evcon->block.y;
-            if (x <= event->x && event->x < x + view_block->width &&
-                y <= event->y && event->y < y + view_block->height) {
-                printf("hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(view_block->node), NULL));
-                evcon->target = (View*)view_block;
+            if (x <= event->x && event->x < x + block->width &&
+                y <= event->y && event->y < y + block->height) {
+                printf("hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL));
+                evcon->target = (View*)block;
                 evcon->offset_x = event->x - evcon->block.x;
                 evcon->offset_y = event->y - evcon->block.y;                
             }
