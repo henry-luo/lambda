@@ -214,7 +214,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
                 }
             }
             // else both width and height specified
-
             if (image->img->format == IMAGE_FORMAT_SVG) {
                 image->img->max_render_width = max(lycon->block.given_width, image->img->max_render_width);
             }
