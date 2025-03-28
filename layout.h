@@ -45,8 +45,8 @@ typedef struct {
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style
-    lxb_html_element_t *elmt;  // current html element, used before the view is created
     int root_font_size;
+    lxb_html_element_t *elmt;  // current html element, used before the view is created
     Document* doc;
     UiContext* ui_context;
 } LayoutContext;
@@ -71,6 +71,6 @@ Color color_name_to_rgb(PropValue color_name);
 void layout_flex_container(FlexContainer* container);
 void free_flex_container(FlexContainer* container);
 
-void line_start(LayoutContext* lycon);
+void line_init(LayoutContext* lycon);
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);

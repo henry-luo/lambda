@@ -2,7 +2,7 @@
 
 LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
 
-void line_start(LayoutContext* lycon) {
+void line_init(LayoutContext* lycon) {
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.advance_x = lycon->line.left;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
@@ -37,7 +37,7 @@ void line_break(LayoutContext* lycon) {
     // advance to next line
     lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
     // reset the new line
-    line_start(lycon);
+    line_init(lycon);
 }
 
 LineFillStatus text_has_line_filled(LayoutContext* lycon, lxb_dom_text_t *text_node) {

@@ -1,5 +1,87 @@
 #include "layout.h"
 
+void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
+
+void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
+    // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
+    // save parent context
+    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   
+    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
+    lycon->block.pa_block = &pa_block;  // lycon->elmt = elmt;
+    lycon->block.width = lycon->block.height = 0;
+    lycon->block.given_width = -1;  lycon->block.given_height = -1;
+    // lycon->block.line_height // inherit
+    
+    // no need to resolve the styles again
+    lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
+
+    lycon->block.advance_y = 0;  lycon->block.max_width = 0;
+    if (block->blk) lycon->block.text_align = block->blk->text_align;
+    lycon->line.left = 0;  lycon->line.right = pa_block.width;
+    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
+    line_init(lycon);
+    
+    dzlog_debug("setting up block blk\n");
+    if (block->font) {
+        setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
+    }
+    lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;  
+    lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
+
+    if (block->bound) {
+        lycon->block.given_width = block->width - (block->bound->padding.left + block->bound->padding.right);
+        lycon->block.given_height = block->height - (block->bound->padding.top + block->bound->padding.bottom);
+        lycon->block.width = lycon->block.given_width;
+        lycon->block.height = lycon->block.given_height;
+        if (block->bound->margin.left == LENGTH_AUTO && block->bound->margin.right == LENGTH_AUTO)  {
+            block->bound->margin.left = block->bound->margin.right = (pa_block.width - block->width) / 2;
+        }
+        else {
+            if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
+            if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
+        }
+        if (block->bound->border) {
+            lycon->line.advance_x += block->bound->border->width.left;
+            lycon->block.advance_y += block->bound->border->width.top;
+        }        
+        lycon->line.advance_x += block->bound->padding.left;
+        lycon->block.advance_y += block->bound->padding.top;
+        lycon->line.left = lycon->line.advance_x;
+    } 
+    else {
+        lycon->block.width = lycon->block.given_width = block->width;
+        lycon->block.height = lycon->block.given_height = block->height;
+    }
+    lycon->line.right = lycon->block.width;  
+    printf("block-sizes: width:%d, height:%d, line-hg:%d, wd:%d, hg:%d\n",
+        block->width, block->height, lycon->block.line_height, lycon->block.width, lycon->block.height);
+    if (lycon->block.width <0) { lycon->block.width = 0; }
+    if (lycon->block.height < 0) { lycon->block.height = 0; }
+
+    // free old block content
+    if (block->child) {
+        View* view = block->child;
+        do {
+            View* next = view->next;
+            free_view(lycon->doc->view_tree, view);
+            view = next;
+        } while (view);
+        block->child = NULL;
+    }
+    // layout block content
+    if (block->display.inner != RDT_DISPLAY_REPLACED) {
+        layout_block_content(lycon, block, block->display);
+    }
+
+    // flow the block in parent context
+    dzlog_debug("flow block in parent context\n");
+    lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+    lycon->block.max_width = max(lycon->block.max_width, block->width 
+        + (block->bound ? block->bound->margin.left + block->bound->margin.right : 0));
+    lycon->prev_view = (View*)block;
+    dzlog_debug("block view: %d, end block>>\n", block->type);
+}
+
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     dzlog_debug("layout flex nodes");
     ViewBlock* block = (ViewBlock*)lycon->view;
@@ -137,10 +219,16 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
             if (bottom_edge > max_height) max_height = bottom_edge;
         }
     }
-    
     block->content_width = max_width + (block->bound ? block->bound->padding.right : 0);
     block->content_height = max_height + (block->bound ? block->bound->padding.bottom : 0);
     
+    // reflow the block
+    for (int i = 0; i < child_count && i < index; i++) {
+        if (child_blocks[i]) {
+            reflow_flex_item(lycon, child_blocks[i]);
+        }
+    }
+
     // Clean up
     free(child_blocks);
     free(flex_container.items);

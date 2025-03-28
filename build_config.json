@@ -134,7 +134,8 @@
         "pointer-compare",
         "pointer-sign",
         "pointer-to-int-cast",
-        "pointer-truncate"
+        "pointer-truncate",
+        "no-microsoft-anon-tag"
     ],
     "flags": [
         "fwrapv",

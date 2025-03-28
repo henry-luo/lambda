@@ -9,17 +9,18 @@
 #include "event.h"
 #include "flex.h"
 
-#define RDT_DISPLAY_TEXT            (LXB_CSS_VALUE__LAST_ENTRY + 10)
-#define LXB_CSS_VALUE_REPLACED      (LXB_CSS_VALUE__LAST_ENTRY + 11)
+#define RDT_DISPLAY_TEXT                (LXB_CSS_VALUE__LAST_ENTRY + 10)
+#define RDT_DISPLAY_REPLACED            (LXB_CSS_VALUE__LAST_ENTRY + 11)
 
-#define LXB_CSS_VALUE_DISC          (LXB_CSS_VALUE__LAST_ENTRY + 12)
-#define LXB_CSS_VALUE_CIRCLE        (LXB_CSS_VALUE__LAST_ENTRY + 13)
-#define LXB_CSS_VALUE_SQUARE        (LXB_CSS_VALUE__LAST_ENTRY + 14)
-#define LXB_CSS_VALUE_DECIMAL       (LXB_CSS_VALUE__LAST_ENTRY + 15)
-#define LXB_CSS_VALUE_LOWER_ROMAN   (LXB_CSS_VALUE__LAST_ENTRY + 16)
-#define LXB_CSS_VALUE_UPPER_ROMAN   (LXB_CSS_VALUE__LAST_ENTRY + 17)
-#define LXB_CSS_VALUE_LOWER_ALPHA   (LXB_CSS_VALUE__LAST_ENTRY + 18)
-#define LXB_CSS_VALUE_UPPER_ALPHA   (LXB_CSS_VALUE__LAST_ENTRY + 19)
+#define LXB_CSS_VALUE_DISC              (LXB_CSS_VALUE__LAST_ENTRY + 20)
+#define LXB_CSS_VALUE_CIRCLE            (LXB_CSS_VALUE__LAST_ENTRY + 21)
+#define LXB_CSS_VALUE_SQUARE            (LXB_CSS_VALUE__LAST_ENTRY + 22)
+#define LXB_CSS_VALUE_DECIMAL           (LXB_CSS_VALUE__LAST_ENTRY + 23)
+#define LXB_CSS_VALUE_LOWER_ROMAN       (LXB_CSS_VALUE__LAST_ENTRY + 24)
+#define LXB_CSS_VALUE_UPPER_ROMAN       (LXB_CSS_VALUE__LAST_ENTRY + 25)
+#define LXB_CSS_VALUE_LOWER_ALPHA       (LXB_CSS_VALUE__LAST_ENTRY + 26)
+#define LXB_CSS_VALUE_UPPER_ALPHA       (LXB_CSS_VALUE__LAST_ENTRY + 27)
+
 
 #define LENGTH_AUTO                 (INT_MAX - 1)
 
@@ -161,6 +162,7 @@ typedef struct {
 struct ViewGroup {
     View; // extends View
     View* child;  // first child view
+    DisplayValue display;
 };
 
 typedef struct {

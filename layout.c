@@ -5,7 +5,7 @@ void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node);
 char* readTextFile(const char *filename);
-void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display, Blockbox* pa_block);
+void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -143,7 +143,7 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
-void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
+void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
     printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
 
@@ -153,6 +153,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->elmt = elmt;
 
     ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
+    span->display = display;
     switch (elmt->element.node.local_name) {
     case LXB_TAG_B:
         span->font = alloc_font_prop(lycon);
@@ -225,7 +226,7 @@ void layout_flow_node(LayoutContext* lycon, lxb_dom_node_t *node) {
             layout_block(lycon, elmt, display);
             break;
         case LXB_CSS_VALUE_INLINE:
-            layout_inline(lycon, elmt);
+            layout_inline(lycon, elmt, display);
             break;
         case LXB_CSS_VALUE_NONE:
             printf("skipping elemnt of display: none\n");
@@ -343,7 +344,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
     lycon->line.left = 0;  lycon->line.right = lycon->block.width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-    line_start(lycon);
+    line_init(lycon);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
     ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
@@ -380,7 +381,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
         printf("No body element found\n");
     }
 
-    finalize_block_flow(lycon, html, LXB_CSS_VALUE_BLOCK, &pa_block);
+    finalize_block_flow(lycon, html, LXB_CSS_VALUE_BLOCK);
 }
 
 void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
