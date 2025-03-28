@@ -93,8 +93,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     if (rdcon->font.style.text_deco != LXB_CSS_VALUE_NONE) {
         int thinkness = max(rdcon->font.face->underline_thickness >> 6, 1);
         Rect rect;
+        // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
         if (rdcon->font.style.text_deco == LXB_CSS_VALUE_UNDERLINE) {
-            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height - thinkness;      
+            // underline drawn at baseline, with a gap of thickness
+            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + 
+                (rdcon->font.face->size->metrics.ascender >> 6) + thinkness;      
         }
         else if (rdcon->font.style.text_deco == LXB_CSS_VALUE_OVERLINE) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y;
