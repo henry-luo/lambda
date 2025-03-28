@@ -29,6 +29,7 @@ typedef struct {
     PropValue vertical_align;
     bool is_line_start;
     bool has_space; // whether last layout character is a space
+    FontBox line_start_font;
 } Linebox;
 
 typedef enum LineFillStatus {

@@ -8,6 +8,7 @@ void line_start(LayoutContext* lycon) {
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
     lycon->line.start_view = NULL;
+    lycon->line.line_start_font = lycon->font;
 }
 
 void line_break(LayoutContext* lycon) {
@@ -17,10 +18,16 @@ void line_break(LayoutContext* lycon) {
         lycon->line.max_descender > lycon->block.init_descender) {
         // apply vertical alignment
         View* view = lycon->line.start_view;
-        while (view) {
-            view_vertical_align(lycon, view);
-            view = view->next;
-        }            
+        if (view) {
+            FontBox pa_font = lycon->font;
+            lycon->font = lycon->line.line_start_font;
+            do {
+                view_vertical_align(lycon, view);
+                view = view->next;
+            } while (view);
+            // todo: handle more views after the start span
+            lycon->font = pa_font;
+        }
     }
     // else no change to vertical alignment
 

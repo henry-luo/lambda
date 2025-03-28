@@ -227,7 +227,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
     lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;  
-    lycon->block.init_descender = lycon->font.face->size->metrics.descender >> 6;
+    lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
 
     if (block->bound) {
         if (lycon->block.given_width >= 0) { // got specified width 
