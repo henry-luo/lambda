@@ -136,15 +136,14 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
-        printf("bottom aligned text\n");
+        dzlog_debug("bottom-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + lycon->block.line_height - font_height;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_TOP) {
-        printf("top aligned text\n");
+        dzlog_debug("top-aligned-text");
         text->y = lycon->block.advance_y;
     }
     else { // baseline
-        printf("baseline aligned text\n");
         text->y = lycon->block.advance_y;
     }
     // layout the text glyphs

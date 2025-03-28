@@ -44,7 +44,7 @@ typedef struct {
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style
-    lxb_html_element_t *elmt;  // current html element
+    lxb_html_element_t *elmt;  // current html element, used before the view is created
     int root_font_size;
     Document* doc;
     UiContext* ui_context;

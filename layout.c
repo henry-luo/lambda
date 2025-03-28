@@ -20,6 +20,7 @@ int calculate_vertical_align_offset(PropValue align, int item_height, int line_h
     case LXB_CSS_VALUE_MIDDLE:
         return (line_height - item_height) / 2;
     case LXB_CSS_VALUE_BOTTOM:
+        dzlog_debug("bottom-aligned-text: line %d", line_height);
         return line_height - item_height;
     case LXB_CSS_VALUE_TEXT_TOP:
         // Align with the top of the parent's font
@@ -59,21 +60,25 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
-    PropValue align = lycon->line.vertical_align;
+    
     if (view->type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
         int item_height = text_view->height;
         // for text, baseline is at font.ascender
         int item_baseline = (int)(lycon->font.face->size->metrics.ascender / 64);
-        int vertical_offset = calculate_vertical_align_offset(align, item_height, 
+        int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height, 
             lycon->block.line_height, lycon->line.max_ascender, item_baseline);
         text_view->y = lycon->block.advance_y + vertical_offset;
     } else if (view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
         ViewBlock* block = (ViewBlock*)view;
         int item_height = block->height;
+        PropValue align = block->in_line && block->in_line->vertical_align ? 
+            block->in_line->vertical_align : lycon->line.vertical_align;
         int vertical_offset = calculate_vertical_align_offset(align, item_height, 
             lycon->block.line_height, lycon->line.max_ascender, item_height);  // item_baseline same as item_height
         block->y = lycon->block.advance_y + vertical_offset;
+        dzlog_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d", 
+            block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
     } else if (view->type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
         ViewSpan* span = (ViewSpan*)view;

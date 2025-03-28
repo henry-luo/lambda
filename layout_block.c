@@ -78,11 +78,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     }
     // save parent context
     Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;   
-    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
-    lycon->elmt = elmt;
-    lycon->block.pa_block = &pa_block;
+    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
+    lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
+    // lycon->block.line_height // inherit
 
     uintptr_t elmt_name = elmt->element.node.local_name;
     ViewBlock* block = elmt_name == LXB_TAG_IMG ? 
@@ -283,8 +283,9 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         }
     }
     lycon->line.right = lycon->block.width;  
-    dzlog_debug("block width: %d, height: %d\n", block->width, block->height);
-    assert(lycon->block.width > 0 && lycon->block.height > 0);
+    dzlog_debug("block-sizes: width:%d, height:%d, line-hg:%d",
+        block->width, block->height, lycon->block.line_height);
+    assert(lycon->block.width >= 0 && lycon->block.height >= 0);
 
     // layout block content
     if (elmt_name != LXB_TAG_IMG) {
@@ -321,7 +322,16 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         } else {
             block->x = lycon->line.advance_x;  
         }
-        block->y = lycon->block.advance_y;
+        if (block->in_line && block->in_line->vertical_align) {
+            block->y = lycon->block.advance_y + calculate_vertical_align_offset(
+                block->in_line->vertical_align, block->height, lycon->block.line_height, 
+                lycon->line.max_ascender, block->height);
+            dzlog_debug("vertical-aligned-inline-block: line %d, block %d, adv: %d, y: %d, va:%d, %d", 
+                lycon->block.line_height, block->height, lycon->block.advance_y, block->y, 
+                block->in_line->vertical_align, LXB_CSS_VALUE_BOTTOM);
+        } else { 
+            block->y = lycon->block.advance_y;
+        }
         lycon->line.advance_x += block->width;
         if (block->bound) { 
             block->x += block->bound->margin.left;

@@ -158,6 +158,9 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         if (span->in_line->color.c) {
             strbuf_append_format(buf, "color:#%x ", span->in_line->color.c);
         }
+        if (span->in_line->vertical_align) {
+            strbuf_append_format(buf, "vertical-align:%s ", lxb_css_value_by_id(span->in_line->vertical_align)->name);
+        }
         strbuf_append_str(buf, "}\n");
     }
     if (span->font) {
