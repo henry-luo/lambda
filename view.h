@@ -186,9 +186,9 @@ typedef struct {
 } ScrollProp;
 
 typedef struct {
-    lxb_url_t* url;  // the resolved absolute URL of the embed
     ImageSurface* img;  // image surface
     Document* doc;  // iframe document
+    FlexContainerProp* flex_container; // flex container properties
 } EmbedProp;
 
 typedef struct {
@@ -198,9 +198,8 @@ typedef struct {
     int content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
-    // block content properties
-    FlexContainerProp* flex_container; // flex container properties
-    EmbedProp* embed;  // image, iframe, etc.
+    // block content related properties for flexbox, image, iframe
+    EmbedProp* embed;
 } ViewBlock;
 
 struct ViewTree {

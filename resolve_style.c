@@ -846,59 +846,59 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FLEX_DIRECTION:
         if (!block) { break; }
         const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
-        if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
+        alloc_flex_container_prop(lycon, block); 
         switch (flex_direction->type) {
             case LXB_CSS_VALUE_ROW:
-                block->flex_container->direction = DIR_ROW; break;
+                block->embed->flex_container->direction = DIR_ROW; break;
             case LXB_CSS_VALUE_ROW_REVERSE:
-                block->flex_container->direction = DIR_ROW_REVERSE; break;
+                block->embed->flex_container->direction = DIR_ROW_REVERSE; break;
             case LXB_CSS_VALUE_COLUMN:
-                block->flex_container->direction = DIR_COLUMN; break;
+                block->embed->flex_container->direction = DIR_COLUMN; break;
             case LXB_CSS_VALUE_COLUMN_REVERSE:
-                block->flex_container->direction = DIR_COLUMN_REVERSE; break;
+                block->embed->flex_container->direction = DIR_COLUMN_REVERSE; break;
         }
         break;
         
     case LXB_CSS_PROPERTY_FLEX_WRAP:
         if (!block) { break; }
         const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
-        if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
+        alloc_flex_container_prop(lycon, block);
         switch (flex_wrap->type) {
             case LXB_CSS_VALUE_NOWRAP:
-                block->flex_container->wrap = WRAP_NOWRAP; break;
+                block->embed->flex_container->wrap = WRAP_NOWRAP; break;
             case LXB_CSS_VALUE_WRAP:
-                block->flex_container->wrap = WRAP_WRAP; break;
+                block->embed->flex_container->wrap = WRAP_WRAP; break;
             case LXB_CSS_VALUE_WRAP_REVERSE:
-                block->flex_container->wrap = WRAP_WRAP_REVERSE; break;
+                block->embed->flex_container->wrap = WRAP_WRAP_REVERSE; break;
         }
         break;
     
     case LXB_CSS_PROPERTY_FLEX_FLOW:
         if (!block) { break; }
         const lxb_css_property_flex_flow_t *flex_flow = declr->u.flex_flow;
-        if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
+        alloc_flex_container_prop(lycon, block);
         // handle direction
         if (flex_flow->type_direction != LXB_CSS_VALUE__UNDEF) {
             switch (flex_flow->type_direction) {
                 case LXB_CSS_VALUE_ROW:
-                    block->flex_container->direction = DIR_ROW; break;
+                    block->embed->flex_container->direction = DIR_ROW; break;
                 case LXB_CSS_VALUE_ROW_REVERSE:
-                    block->flex_container->direction = DIR_ROW_REVERSE; break;
+                    block->embed->flex_container->direction = DIR_ROW_REVERSE; break;
                 case LXB_CSS_VALUE_COLUMN:
-                    block->flex_container->direction = DIR_COLUMN; break;
+                    block->embed->flex_container->direction = DIR_COLUMN; break;
                 case LXB_CSS_VALUE_COLUMN_REVERSE:
-                    block->flex_container->direction = DIR_COLUMN_REVERSE; break;
+                    block->embed->flex_container->direction = DIR_COLUMN_REVERSE; break;
             }
         }
         // handle wrap
         if (flex_flow->wrap != LXB_CSS_VALUE__UNDEF) {
             switch (flex_flow->wrap) {
                 case LXB_CSS_VALUE_NOWRAP:
-                    block->flex_container->wrap = WRAP_NOWRAP; break;
+                    block->embed->flex_container->wrap = WRAP_NOWRAP; break;
                 case LXB_CSS_VALUE_WRAP:
-                    block->flex_container->wrap = WRAP_WRAP; break;
+                    block->embed->flex_container->wrap = WRAP_WRAP; break;
                 case LXB_CSS_VALUE_WRAP_REVERSE:
-                    block->flex_container->wrap = WRAP_WRAP_REVERSE; break;
+                    block->embed->flex_container->wrap = WRAP_WRAP_REVERSE; break;
             }
         }
         break;
@@ -906,22 +906,22 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_JUSTIFY_CONTENT:
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
-        if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
-        block->flex_container->justify = resolve_justify_content(justify_content->type);
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->justify = resolve_justify_content(justify_content->type);
         break;
         
     case LXB_CSS_PROPERTY_ALIGN_ITEMS:
         if (!block) { break; }
         const lxb_css_property_align_items_t *align_items = declr->u.align_items;
-        if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
-        block->flex_container->align_items = resolve_align_type(align_items->type);
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->align_items = resolve_align_type(align_items->type);
         break;
         
     case LXB_CSS_PROPERTY_ALIGN_CONTENT:
         if (!block) { break; }
         const lxb_css_property_align_content_t *align_content = declr->u.align_content;
-        if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
-        block->flex_container->align_content = resolve_align_type(align_content->type);
+        alloc_flex_container_prop(lycon, block); 
+        block->embed->flex_container->align_content = resolve_align_type(align_content->type);
         break;
         
     case LXB_CSS_PROPERTY_ALIGN_SELF:
@@ -1008,23 +1008,21 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     // case LXB_CSS_PROPERTY_ROW_GAP:
     //     if (!block) { break; }
     //     const lxb_css_property_row_gap_t *row_gap = declr->u.row_gap;
-    //     if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
+    //     alloc_flex_container_prop(lycon, block);
     //     block->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_ROW_GAP, &row_gap->length);
     //     break;
         
     // case LXB_CSS_PROPERTY_COLUMN_GAP:
     //     if (!block) { break; }
     //     const lxb_css_property_column_gap_t *column_gap = declr->u.column_gap;
-    //     if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
-        
+    //     alloc_flex_container_prop(lycon, block);
     //     block->flex_container->column_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_COLUMN_GAP, &column_gap->length);
     //     break;
         
     // case LXB_CSS_PROPERTY_GAP:
     //     if (!block) { break; }
     //     const lxb_css_property_gap_t *gap = declr->u.gap;
-    //     if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon);  }
-        
+    //     alloc_flex_container_prop(lycon, block);
     //     // Set row gap
     //     block->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_GAP, &gap->row);
         

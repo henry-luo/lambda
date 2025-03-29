@@ -109,13 +109,18 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
 }
 
 // alloc flex container blk
-FlexContainerProp* alloc_flex_container_prop(LayoutContext* lycon) {
-    FlexContainerProp* prop = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
-    // set defaults
-    prop->direction = DIR_ROW;  prop->wrap = WRAP_NOWRAP;  prop->justify = JUSTIFY_START;
-    prop->align_items = ALIGN_STRETCH;  prop->align_content = ALIGN_START;
-    // prop->row_gap = 0;  prop->column_gap = 0;
-    return prop;
+void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
+    if (!block->embed) { 
+        block->embed = block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); 
+    }
+    if (!block->embed->flex_container) {
+        FlexContainerProp* prop = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+        // set defaults
+        prop->direction = DIR_ROW;  prop->wrap = WRAP_NOWRAP;  prop->justify = JUSTIFY_START;
+        prop->align_items = ALIGN_STRETCH;  prop->align_content = ALIGN_START;
+        // prop->row_gap = 0;  prop->column_gap = 0;
+        block->embed->flex_container = prop;
+    }
 }
 
 void view_pool_init(ViewTree* tree) {

@@ -85,7 +85,7 @@ void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     dzlog_debug("layout flex nodes");
     ViewBlock* block = (ViewBlock*)lycon->view;
-    if (!block->flex_container) { block->flex_container = alloc_flex_container_prop(lycon); }
+    alloc_flex_container_prop(lycon, block); 
     
     // Count children first
     int child_count = 0;
@@ -106,13 +106,13 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
         (block->bound ? block->bound->padding.left + block->bound->padding.right : 0);
     flex_container.height = block->height - 
         (block->bound ? block->bound->padding.top + block->bound->padding.bottom : 0);
-    flex_container.direction = block->flex_container->direction;
-    flex_container.wrap = block->flex_container->wrap;
-    flex_container.justify = block->flex_container->justify;
-    flex_container.align_items = block->flex_container->align_items;
-    flex_container.align_content = block->flex_container->align_content;
-    flex_container.row_gap = block->flex_container->row_gap;
-    flex_container.column_gap = block->flex_container->column_gap;
+    flex_container.direction = block->embed->flex_container->direction;
+    flex_container.wrap = block->embed->flex_container->wrap;
+    flex_container.justify = block->embed->flex_container->justify;
+    flex_container.align_items = block->embed->flex_container->align_items;
+    flex_container.align_content = block->embed->flex_container->align_content;
+    flex_container.row_gap = block->embed->flex_container->row_gap;
+    flex_container.column_gap = block->embed->flex_container->column_gap;
     
     // Allocate items array
     flex_container.items = calloc(child_count, sizeof(FlexItem));
