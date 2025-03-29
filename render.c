@@ -259,6 +259,39 @@ void drawRect(Tvg_Canvas* canvas, Rect rect) {
     tvg_canvas_push(canvas, shape);
 }
 
+void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
+    if (block->scroller->has_clip) {
+        rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + block->scroller->clip.x);
+        rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + block->scroller->clip.y);
+        rdcon->block.clip.width = min(rdcon->block.clip.width, block->scroller->clip.width);
+        rdcon->block.clip.height = min(rdcon->block.clip.height, block->scroller->clip.height);
+    }
+    if (block->scroller->pane) {
+        rdcon->block.x -= block->scroller->pane->h_scroll_position;
+        rdcon->block.y -= block->scroller->pane->v_scroll_position;
+    }
+}
+
+void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
+    printf("render scrollbars\n");
+    // need to reset block.x and y, which was changed by the scroller
+    rdcon->block.x = pa_block->x + block->x;  rdcon->block.y = pa_block->y + block->y;
+    if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
+        if (!block->scroller->pane) {
+            block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
+        }
+        Rect rect = {rdcon->block.x, rdcon->block.y, block->width, block->height};
+        if (block->bound && block->bound->border) {
+            rect.x += block->bound->border->width.left;
+            rect.y += block->bound->border->width.top;
+            rect.width -= block->bound->border->width.left + block->bound->border->width.right;
+            rect.height -= block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+        scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
+            block->content_width, block->content_height);
+    }
+}
+
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
@@ -273,7 +306,6 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
-
     if (DEBUG_RENDER) {  // debugging outline around the block margin border
         Rect rc;
         rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left : 0);  
@@ -290,16 +322,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         }
         // setup clip box
         if (block->scroller) {
-            if (block->scroller->has_clip) {
-                rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + block->scroller->clip.x);
-                rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + block->scroller->clip.y);
-                rdcon->block.clip.width = min(rdcon->block.clip.width, block->scroller->clip.width);
-                rdcon->block.clip.height = min(rdcon->block.clip.height, block->scroller->clip.height);
-            }
-            if (block->scroller->pane) {
-                rdcon->block.x -= block->scroller->pane->h_scroll_position;
-                rdcon->block.y -= block->scroller->pane->v_scroll_position;
-            }
+            setup_scroller(rdcon, block);
         }
         render_children(rdcon, view);
     }
@@ -309,22 +332,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
     // render scrollbars
     if (block->scroller) {
-        printf("render scrollbars\n");
-        rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
-        if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
-            if (!block->scroller->pane) {
-                block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
-            }
-            Rect rect = {rdcon->block.x, rdcon->block.y, block->width, block->height};
-            if (block->bound && block->bound->border) {
-                rect.x += block->bound->border->width.left;
-                rect.y += block->bound->border->width.top;
-                rect.width -= block->bound->border->width.left + block->bound->border->width.right;
-                rect.height -= block->bound->border->width.top + block->bound->border->width.bottom;
-            }
-            scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
-                block->content_width, block->content_height);
-        }
+        render_scroller(rdcon, block, &pa_block);
     }
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
 }
@@ -411,6 +419,38 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     printf("end of image render\n");
 }
 
+void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
+    BlockBlot pa_block = rdcon->block;
+    if (block->bound) {
+        render_bound(rdcon, block);
+    }
+
+    rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
+    // setup clip box
+    if (block->scroller) { setup_scroller(rdcon, block); }
+    // render the embedded doc
+    if (block->embed && block->embed->doc) {
+        Document* doc = block->embed->doc;       
+        // render html doc
+        if (doc && doc->view_tree && doc->view_tree->root) { 
+            View* root_view = doc->view_tree->root;
+            if (root_view && root_view->type == RDT_VIEW_BLOCK) {
+                printf("render doc root view:\n");
+                render_block_view(rdcon, (ViewBlock*)root_view);
+            }
+            else {
+                printf("Invalid root view\n");
+            }            
+        }        
+    }
+   
+    // render scrollbars
+    if (block->scroller) {
+        render_scroller(rdcon, block, &pa_block);
+    }
+    rdcon->block = pa_block;
+}
+
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     printf("render inline view\n");
@@ -437,6 +477,9 @@ void render_children(RenderContext* rdcon, View* view) {
             if (block->embed) {
                 if (block->embed->img) {
                     render_image_view(rdcon, block);
+                }
+                else if (block->embed->doc) {
+                    render_embed_doc(rdcon, block);
                 }
             }
             else if (block->blk && block->blk->list_style_type) {

@@ -302,7 +302,7 @@ int main() {
 
     lxb_url_t* cwd = get_current_dir();
     if (cwd) {
-        show_html_doc(cwd, "test/sample.html");
+        show_html_doc(cwd, "test/index.html");
         lxb_url_destroy(cwd);
     }
 

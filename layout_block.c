@@ -74,9 +74,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     dzlog_debug("layout block content");
     lxb_html_element_t *elmt = (lxb_html_element_t*)block->node;
-    if (block->display.inner == RDT_DISPLAY_REPLACED) {
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
         uintptr_t elmt_name = elmt->element.node.local_name;
         if (elmt_name == LXB_TAG_IFRAME) {
+            Document* doc = NULL;
             if (!(block->embed && block->embed->doc)) { 
                 // load iframe document
                 size_t value_len;
@@ -86,17 +87,26 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                     StrBuf* src = strbuf_new_cap(value_len);
                     strbuf_append_str_n(src, (const char*)value, value_len);
                     printf("iframe doc src: %s\n", src->str);
-                    Document* doc = load_html_doc(lycon->ui_context->document->url, src->str);
+                    doc = load_html_doc(lycon->ui_context->document->url, src->str);
                     strbuf_free(src);
                     if (!doc) {
                         printf("Failed to load iframe document\n");
                         // todo: use a placeholder
+                    } else {
+                        if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                        block->embed->doc = doc; // assign loaded document to embed property
                     }
-                    if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
-                    block->embed->doc = doc; // assign loaded document to embed property
                 }
             }
-            // else already loaded
+            else {
+                doc = block->embed->doc;
+            }
+            if (doc && doc->view_tree && doc->view_tree->root) {
+                ViewBlock* root = (ViewBlock*)doc->view_tree->root;
+                lycon->block.max_width = root->content_width;
+                lycon->block.advance_y = root->content_height;
+            }
+            finalize_block_flow(lycon, block, display.outer);
         }
         // else LXB_TAG_IMG
     } else {  // layout block child content
