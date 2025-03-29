@@ -377,6 +377,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     dzlog_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
+        if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
         if (lycon->line.advance_x + block->width >= lycon->line.right) { 
             line_break(lycon);
             block->x = lycon->line.left;
