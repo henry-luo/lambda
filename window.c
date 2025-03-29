@@ -36,11 +36,11 @@ lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url) {
     return url;
 }
 
-Document* show_html_doc(lxb_url_t *base, char* doc_url) {
-    printf("Showing HTML document %s\n", doc_url);
+Document* load_html_doc(lxb_url_t *base, char* doc_url) {
+    dzlog_debug("loading HTML document %s", doc_url);
     lxb_url_t* url = parse_url(base, doc_url);
     if (!url) {
-        printf("Failed to parse URL: %s\n", doc_url);
+        dzlog_debug("failed to parse URL: %s", doc_url);
         return NULL;
     }
     
@@ -54,8 +54,14 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
     if (doc->dom_tree) {
         layout_html_doc(&ui_context, doc, false);
     }
+    return doc;
+}
+
+Document* show_html_doc(lxb_url_t *base, char* doc_url) {
+    printf("Showing HTML document %s\n", doc_url);
+    Document* doc = load_html_doc(base, doc_url);
     // render html doc
-    if (doc->view_tree && doc->view_tree->root) { 
+    if (doc && doc->view_tree && doc->view_tree->root) { 
         render_html_doc(&ui_context, doc->view_tree->root); 
     }
     return doc;

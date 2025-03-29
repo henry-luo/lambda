@@ -1,5 +1,6 @@
 #include "layout.h"
 
+Document* load_html_doc(lxb_url_t *base, char* doc_filename);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
@@ -73,27 +74,53 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     dzlog_debug("layout block content");
     lxb_html_element_t *elmt = (lxb_html_element_t*)block->node;
-    uintptr_t elmt_name = elmt->element.node.local_name;
-    lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
-    if (child) {
-        lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
-        if (display.inner == LXB_CSS_VALUE_FLOW) {
-            do {
-                layout_flow_node(lycon, child);
-                child = lxb_dom_node_next(child);
-            } while (child);
-            // handle last line
-            if (!lycon->line.is_line_start) { line_break(lycon); }                
+    if (block->display.inner == RDT_DISPLAY_REPLACED) {
+        uintptr_t elmt_name = elmt->element.node.local_name;
+        if (elmt_name == LXB_TAG_IFRAME) {
+            if (!(block->embed && block->embed->doc)) { 
+                // load iframe document
+                size_t value_len;
+                const lxb_char_t *value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, 
+                    (lxb_char_t*)"src", 3, &value_len);
+                if (value && value_len) {
+                    StrBuf* src = strbuf_new_cap(value_len);
+                    strbuf_append_str_n(src, (const char*)value, value_len);
+                    printf("iframe doc src: %s\n", src->str);
+                    Document* doc = load_html_doc(lycon->ui_context->document->url, src->str);
+                    strbuf_free(src);
+                    if (!doc) {
+                        printf("Failed to load iframe document\n");
+                        // todo: use a placeholder
+                    }
+                    if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                    block->embed->doc = doc; // assign loaded document to embed property
+                }
+            }
+            // else already loaded
         }
-        else if (display.inner == LXB_CSS_VALUE_FLEX) {
-            layout_flex_nodes(lycon, child);
+        // else LXB_TAG_IMG
+    } else {  // layout block child content
+        lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
+        if (child) {
+            lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
+            if (display.inner == LXB_CSS_VALUE_FLOW) {
+                do {
+                    layout_flow_node(lycon, child);
+                    child = lxb_dom_node_next(child);
+                } while (child);
+                // handle last line
+                if (!lycon->line.is_line_start) { line_break(lycon); }                
+            }
+            else if (display.inner == LXB_CSS_VALUE_FLEX) {
+                layout_flex_nodes(lycon, child);
+            }
+            else {
+                dzlog_debug("unknown display type\n");
+            }
+            lycon->parent = block->parent;
         }
-        else {
-            dzlog_debug("unknown display type\n");
-        }
-        lycon->parent = block->parent;
+        finalize_block_flow(lycon, block, display.outer);
     }
-    finalize_block_flow(lycon, block, display.outer);
 }
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
@@ -111,12 +138,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     // lycon->block.line_height // inherit
 
     uintptr_t elmt_name = elmt->element.node.local_name;
-    ViewBlock* block = elmt_name == LXB_TAG_IMG ? 
-        (ViewBlock*)alloc_view(lycon, RDT_VIEW_IMAGE, (lxb_dom_node_t*)elmt) :
-        (ViewBlock*)alloc_view(lycon, 
-            display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : 
-            (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK), 
-            (lxb_dom_node_t*)elmt);
+    ViewBlock* block = (ViewBlock*)alloc_view(lycon, 
+        display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : 
+        (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK), 
+        (lxb_dom_node_t*)elmt);
     block->display = display;
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
@@ -184,7 +209,20 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
             if (height >= 0) lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
             // else height attr ignored
         }
-        break;        
+        break;
+    case LXB_TAG_IFRAME:
+        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        // todo: inset border style
+        block->bound->border->width.top = block->bound->border->width.right = 
+            block->bound->border->width.bottom = block->bound->border->width.left = 
+            1 * lycon->ui_context->pixel_ratio;
+        block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+        block->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
+        block->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
+        lycon->block.given_width = 300 * lycon->ui_context->pixel_ratio;
+        lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;        
+        break;
     }
     lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
 
@@ -204,23 +242,26 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
         value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"src", 3, &value_len);
-        ViewImage* image = (ViewImage*)block;
         if (value && value_len) {
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);
             printf("image src: %s\n", src->str);
-            image->img = load_image(lycon->ui_context, src->str);
+            if (!block->embed) {
+                block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+            }
+            block->embed->img = load_image(lycon->ui_context, src->str);
             strbuf_free(src);
-            if (!image->img) {
+            if (!block->embed->img) {
                 printf("Failed to load image\n");
                 // todo: use a placeholder
             }
         }
-        if (image->img) {
+        if (block->embed->img) {
+            ImageSurface* img = block->embed->img;
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
                 // scale image by pixel ratio
-                int w = image->img->width * lycon->ui_context->pixel_ratio;
-                int h = image->img->height * lycon->ui_context->pixel_ratio;               
+                int w = img->width * lycon->ui_context->pixel_ratio;
+                int h = img->height * lycon->ui_context->pixel_ratio;               
                 printf("image dims: intrinsic - %d x %d, spec - %d x %d\n", w, h, 
                     lycon->block.given_width, lycon->block.given_height);
                 if (lycon->block.given_width >= 0) { // scale unspecified height
@@ -230,7 +271,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
                     lycon->block.given_width = lycon->block.given_height * w / h;
                 } 
                 else { // both width and height unspecified
-                    if (image->img->format == IMAGE_FORMAT_SVG) {
+                    if (img->format == IMAGE_FORMAT_SVG) {
                         // scale to parent block width
                         lycon->block.given_width = lycon->block.pa_block->width;
                         lycon->block.given_height = lycon->block.given_width * h / w;
@@ -241,8 +282,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
                 }
             }
             // else both width and height specified
-            if (image->img->format == IMAGE_FORMAT_SVG) {
-                image->img->max_render_width = max(lycon->block.given_width, image->img->max_render_width);
+            if (img->format == IMAGE_FORMAT_SVG) {
+                img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
             printf("image dimensions: %d x %d\n", lycon->block.given_width, lycon->block.given_height);         
         }

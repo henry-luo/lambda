@@ -408,6 +408,9 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
         case LXB_TAG_IMG:
             outer_display = LXB_CSS_VALUE_INLINE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
             break;
+        case LXB_TAG_IFRAME:
+            outer_display = LXB_CSS_VALUE_INLINE_BLOCK; inner_display = RDT_DISPLAY_REPLACED;
+            break;
         case LXB_TAG_SCRIPT:  case LXB_TAG_STYLE:  case LXB_TAG_SVG:
             outer_display = LXB_CSS_VALUE_NONE;  inner_display = LXB_CSS_VALUE_NONE;
             break;

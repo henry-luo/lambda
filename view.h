@@ -56,6 +56,7 @@ typedef struct ImageSurface {
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
     Tvg_Paint* pic;        // ThorVG picture for SVG image
     int max_render_width;  // maximum width for rendering the image
+    lxb_url_t* url;        // the resolved absolute URL of the image
 } ImageSurface;
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
@@ -73,7 +74,6 @@ typedef enum {
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,
     RDT_VIEW_LIST_ITEM,
-    RDT_VIEW_IMAGE, 
     RDT_VIEW_FLEX,
     RDT_VIEW_GRID,
     RDT_VIEW_TABLE,
@@ -198,20 +198,24 @@ typedef struct {
 } ScrollProp;
 
 typedef struct {
+    lxb_url_t* url;  // the resolved absolute URL of the embed
+    ImageSurface* img;  // image surface
+    Document* doc;  // iframe document
+} EmbedProp;
+
+typedef struct {
     ViewSpan;  // extends ViewSpan
     // x, y, width, height forms the BORDER box of the block
     int x, y, width, height;  // x, y are relative to the parent block
     int content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
-    FlexContainerProp* flex_container; // flex container properties
+    // block content properties
+    union {
+        FlexContainerProp* flex_container; // flex container properties
+        EmbedProp* embed;  // image, iframe, etc.
+    };
 } ViewBlock;
-
-typedef struct {
-    ViewBlock;  // extends ViewBlock
-    // const char* src;  // image src; should be in URL format
-    ImageSurface* img;  // image surface
-} ViewImage;
 
 struct ViewTree {
     VariableMemPool *pool;

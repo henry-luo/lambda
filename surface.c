@@ -30,9 +30,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     char* file_path = url_to_local_path(abs_url);
     if (!file_path) {
         printf("Failed to parse URL: %s\n", img_url);
+        lxb_url_destroy(abs_url);
         return NULL;
     }
-    printf("Loading image: %s\n", file_path);
 
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity. 
@@ -43,6 +43,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageEntry* entry = (ImageEntry*) hashmap_get(uicon->image_cache, &(ImageEntry){.path = file_path});
     if (entry) {
         printf("Image loaded from cache: %s\n", file_path);
+        lxb_url_destroy(abs_url);
         return entry->image;
     }
     else {
@@ -51,6 +52,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
     ImageSurface *surface;
     int slen = strlen(file_path);
+    // load image data
     if (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0) {
         surface = (ImageSurface *)calloc(1, sizeof(ImageSurface));
         surface->format = IMAGE_FORMAT_SVG;
@@ -86,6 +88,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             surface->format = IMAGE_FORMAT_PNG;
         }
     }
+    surface->url = abs_url;
 
     hashmap_set(uicon->image_cache, &(ImageEntry){.path = file_path, .image = surface});     
     return surface;
@@ -94,6 +97,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 bool image_entry_free(const void *item, void *udata) {
     ImageEntry* entry = (ImageEntry*)item;
     free((char*)entry->path);
+    if (entry->image->url) lxb_url_destroy(entry->image->url);
     image_surface_destroy(entry->image);
     return true;
 }

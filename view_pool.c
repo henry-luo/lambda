@@ -10,10 +10,6 @@ View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
             memset(view, 0, sizeof(ViewBlock));
             break;
-        case RDT_VIEW_IMAGE:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewImage), (void **)&view);
-            memset(view, 0, sizeof(ViewImage));
-            break;
         case RDT_VIEW_INLINE:
             err = pool_variable_alloc(tree->pool, sizeof(ViewSpan), (void **)&view);
             memset(view, 0, sizeof(ViewSpan));
@@ -69,7 +65,7 @@ void free_view(ViewTree* tree, View* view) {
             pool_variable_free(tree->pool, span->bound);
         }
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK || 
-            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
+            view->type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->blk) {
                 printf("free block prop\n");
@@ -259,9 +255,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     View* view = view_group->child;
     if (view) {
         do {
-            
             if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-                view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_IMAGE) {
+                view->type == RDT_VIEW_LIST_ITEM) {
                 print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {

@@ -69,7 +69,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height, 
             line_height, lycon->line.max_ascender, item_baseline);
         text_view->y = lycon->block.advance_y + vertical_offset;
-    } else if (view->type == RDT_VIEW_INLINE_BLOCK || view->type == RDT_VIEW_IMAGE) {
+    } else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
         int item_height = block->height;
         PropValue align = block->in_line && block->in_line->vertical_align ? 
@@ -128,7 +128,7 @@ void line_align(LayoutContext* lycon) {
                     ViewText* text = (ViewText*)view;
                     text->x += offset;
                 }
-                else if (view->type == RDT_VIEW_BLOCK) {
+                else if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
                     ViewBlock* block = (ViewBlock*)view;
                     block->x += offset;
                 }

@@ -2,7 +2,7 @@
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
-#define DEBUG_RENDER 0
+#define DEBUG_RENDER 1
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -381,21 +381,22 @@ Tvg_Paint* load_picture(ImageSurface* surface) {
     return pic;
 }
 
-void render_image_view(RenderContext* rdcon, ViewImage* view) {
+void render_image_view(RenderContext* rdcon, ViewBlock* view) {
     printf("render image view\n");
+    // render border and background, etc.
     render_block_view(rdcon, (ViewBlock*)view);
     // render the image
-    if (view->img) {
+    if (view->embed && view->embed->img) {
+        ImageSurface* img = view->embed->img;
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.width = view->width;  rect.height = view->height;         
-        if (view->img->format == IMAGE_FORMAT_SVG) {
+        if (img->format == IMAGE_FORMAT_SVG) {
             // render the SVG image
-            if (!view->img->pixels) {
-                printf("@@@ render svg to surface\n");
-                renderSvg(view->img);
+            if (!img->pixels) {
+                renderSvg(img);
             }
-            Tvg_Paint* pic = load_picture(view->img);
+            Tvg_Paint* pic = load_picture(img);
             if (pic) {
                 tvg_picture_set_size(pic, rect.width, rect.height);
                 tvg_paint_translate(pic, rect.x, rect.y);
@@ -404,7 +405,7 @@ void render_image_view(RenderContext* rdcon, ViewImage* view) {
                 printf("Failed to load svg picture\n");
             }
         } else {
-            blit_surface_scaled(view->img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
+            blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
         }
     }
     else {
@@ -436,7 +437,12 @@ void render_children(RenderContext* rdcon, View* view) {
     do {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block = (ViewBlock*)view;
-            if (block->blk && block->blk->list_style_type) {
+            if (block->embed) {
+                if (block->embed->img) {
+                    render_image_view(rdcon, block);
+                }
+            }
+            else if (block->blk && block->blk->list_style_type) {
                 render_list_view(rdcon, block);
             }
             else {
@@ -446,9 +452,7 @@ void render_children(RenderContext* rdcon, View* view) {
         else if (view->type == RDT_VIEW_LIST_ITEM) {
             render_litem_view(rdcon, (ViewBlock*)view);
         }
-        else if (view->type == RDT_VIEW_IMAGE) {
-            render_image_view(rdcon, (ViewImage*)view);
-        }
+
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;                
             render_inline_view(rdcon, span);
