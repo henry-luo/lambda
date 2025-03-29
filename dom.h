@@ -35,3 +35,5 @@ typedef unsigned short PropValue;
 
 lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
 char* url_to_local_path(lxb_url_t *url);
+Document* load_html_doc(lxb_url_t *base, char* doc_filename);
+void free_document(Document* doc);

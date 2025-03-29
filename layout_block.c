@@ -1,6 +1,5 @@
 #include "layout.h"
 
-Document* load_html_doc(lxb_url_t *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 
