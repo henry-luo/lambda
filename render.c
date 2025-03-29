@@ -408,10 +408,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
             blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
         }
     }
-    else {
-        printf("image view has no image surface\n");
-    }
-    printf("after render image view\n");
+    printf("end of image render\n");
 }
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {

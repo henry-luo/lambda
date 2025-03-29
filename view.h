@@ -74,18 +74,6 @@ typedef enum {
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,
     RDT_VIEW_LIST_ITEM,
-    RDT_VIEW_FLEX,
-    RDT_VIEW_GRID,
-    RDT_VIEW_TABLE,
-    RDT_VIEW_TABLE_CELL,
-    RDT_VIEW_TABLE_ROW,
-    RDT_VIEW_TABLE_ROW_GROUP,
-    RDT_VIEW_TABLE_COLUMN,
-    RDT_VIEW_TABLE_COLUMN_GROUP,
-    RDT_VIEW_TABLE_CAPTION,
-    RDT_VIEW_TABLE_HEADER_GROUP,
-    RDT_VIEW_TABLE_FOOTER_GROUP,
-    RDT_VIEW_TABLE_BODY_GROUP,
     RDT_VIEW_SCROLL_PANE,
 } ViewType;
 
@@ -211,10 +199,8 @@ typedef struct {
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
     // block content properties
-    union {
-        FlexContainerProp* flex_container; // flex container properties
-        EmbedProp* embed;  // image, iframe, etc.
-    };
+    FlexContainerProp* flex_container; // flex container properties
+    EmbedProp* embed;  // image, iframe, etc.
 } ViewBlock;
 
 struct ViewTree {
