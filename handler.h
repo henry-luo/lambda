@@ -12,7 +12,8 @@ typedef struct EventContext {
 
     // effects fields
     PropValue new_cursor;
-    char* new_uri;
+    char* new_url;
+    char* new_target;
     bool need_repaint;
     
     UiContext* ui_context;

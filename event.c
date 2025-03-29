@@ -177,11 +177,20 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
-            printf("mouse down at anchor tag\n");
+            dzlog_debug("mouse down at anchor tag");
             lxb_dom_attr_t *href = lxb_dom_element_attr_by_id(lxb_dom_interface_element(span->node), LXB_DOM_ATTR_HREF);
             if (href) {
                 printf("got anchor href: %s\n", href->value->data);
-                evcon->new_uri = (char*)href->value->data;
+                evcon->new_url = (char*)href->value->data;
+                lxb_char_t *target = (lxb_char_t*)lxb_dom_element_get_attribute(
+                    lxb_dom_interface_element(span->node), (const lxb_char_t *)"target", 6, NULL);
+                if (target) {
+                    dzlog_debug("got anchor target: %s", target);
+                    evcon->new_target = (char*)target;
+                }
+                else {
+                    dzlog_debug("no anchor target found");
+                }
             }
         }
     }
@@ -243,6 +252,49 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
 }
 
 void event_context_cleanup(EventContext* evcon) {
+}
+
+lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_specificity_t spec, void *ctx) {
+    const lxb_char_t *new_src = (const lxb_char_t *)ctx;
+    printf("set iframe src: %s\n", new_src);
+    lxb_dom_element_t *element = lxb_dom_interface_element(node);
+    lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3, 
+        new_src, (size_t)strlen((char*)new_src));
+    return LXB_STATUS_OK;
+}
+
+// find iframe by name and set new src using selector
+lxb_status_t set_iframe_src_by_name(lxb_html_document_t *document, 
+    const char *target_name, const char *new_src) {
+    lxb_status_t status;
+    lxb_css_parser_t *parser = lxb_css_parser_create();
+    status = lxb_css_parser_init(parser, NULL);
+    if (status != LXB_STATUS_OK) { return status; }
+
+    // create selector
+    lxb_selectors_t *selectors = lxb_selectors_create();
+    status = lxb_selectors_init(selectors);
+    if (status != LXB_STATUS_OK) {
+        lxb_selectors_destroy(selectors, true);
+        return status;
+    }
+    
+    // construct selector string: iframe[name="target_name"]
+    char selector_str[128];
+    snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
+    lxb_css_selector_list_t *list = lxb_css_selectors_parse(parser, (const lxb_char_t *)selector_str, strlen(selector_str));
+    if (parser->status != LXB_STATUS_OK) {
+        return LXB_STATUS_ERROR;
+    }
+
+    status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list, 
+        set_iframe_src_callback, (void*)new_src);
+    
+    // cleanup
+    lxb_selectors_destroy(selectors, true);
+    lxb_css_selector_list_destroy_memory(list);
+    lxb_css_parser_destroy(parser, true);
+    return status;
 }
 
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
@@ -327,12 +379,19 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             arraylist_free(target_list);
         }
 
-        if (evcon.new_uri) {
-            printf("Opening URI: %s\n", evcon.new_uri);
-            Document* old_doc = evcon.ui_context->document;
-            // load the new document
-            evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_uri);
-            free_document(old_doc);
+        if (evcon.new_url) {
+            dzlog_debug("opening-url:%s", evcon.new_url);
+            if (evcon.new_target) {
+                dzlog_debug("setting new target: %s", evcon.new_target);
+                // find iframe with the target name
+                set_iframe_src_by_name(doc->dom_tree, evcon.new_target, evcon.new_url);
+            }
+            else {
+                Document* old_doc = evcon.ui_context->document;
+                // load the new document
+                evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url);
+                free_document(old_doc);    
+            }
             to_repaint();
         }
         break;
