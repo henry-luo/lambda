@@ -416,6 +416,11 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
             if (pic) {
                 tvg_picture_set_size(pic, rect.width, rect.height);
                 tvg_paint_translate(pic, rect.x, rect.y);
+                // clip the svg picture
+                Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
+                tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+                tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
+                tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
                 tvg_canvas_push(rdcon->canvas, pic);
             } else {
                 printf("Failed to load svg picture\n");
