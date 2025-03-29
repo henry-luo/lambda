@@ -43,7 +43,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
     unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
+    printf("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
     bool has_space = false;   
     for (; p < end; p++) {
@@ -91,6 +91,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
+    printf("targetting block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL));
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -103,6 +104,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
             goto RETURN;
+        }
+        else {
+            printf("no hit on block scroll\n");
         }
         // setup scrolling offset
         evcon->block.x -= block->scroller->pane->h_scroll_position;

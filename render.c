@@ -421,9 +421,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
 
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
-    if (block->bound) {
-        render_bound(rdcon, block);
-    }
+    if (block->bound) { render_bound(rdcon, block); }
 
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
     // setup clip box

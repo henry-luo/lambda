@@ -1,6 +1,7 @@
 #include "layout.h"
 
 Document* load_html_doc(lxb_url_t *base, char* doc_filename);
+View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
@@ -95,6 +96,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                     } else {
                         if (!(block->embed)) block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                         block->embed->doc = doc; // assign loaded document to embed property
+                        if (doc->dom_tree) {
+                            layout_html_doc(lycon->ui_context, doc, false);
+                        }                        
                     }
                 }
             }

@@ -126,3 +126,32 @@ void parse_html_doc(Document* doc) {
     free(output);
     doc->dom_tree = document;
 }
+
+lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url) {
+    lxb_url_parser_t parser;
+    if (lxb_url_parser_init(&parser, NULL) != LXB_STATUS_OK) {
+        printf("Failed to init URL parser.\n");
+        return NULL;
+    }
+    lxb_url_t *url = lxb_url_parse(&parser, base, (const lxb_char_t *)doc_url, strlen(doc_url));
+    lxb_url_parser_destroy(&parser, false);
+    if (url == NULL) {
+        printf("Failed to parse URL: %s\n", doc_url);
+        return NULL;
+    }
+    return url;
+}
+
+Document* load_html_doc(lxb_url_t *base, char* doc_url) {
+    dzlog_debug("loading HTML document %s", doc_url);
+    lxb_url_t* url = parse_url(base, doc_url);
+    if (!url) {
+        dzlog_debug("failed to parse URL: %s", doc_url);
+        return NULL;
+    }
+    // parse the html document
+    Document* doc = calloc(1, sizeof(Document));
+    doc->url = url;
+    parse_html_doc(doc);
+    return doc;
+}
