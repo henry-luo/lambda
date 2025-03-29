@@ -7,14 +7,15 @@
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
-void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, int content_width, int content_height);
+void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, 
+    int content_width, int content_height, Bound* clip);
 
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
-    int left = max(rdcon->block.clip.x, x);
-    int right = min(rdcon->block.clip.x + rdcon->block.clip.width, x + (int)bitmap->width);
-    int top = max(rdcon->block.clip.y, y);
-    int bottom = min(rdcon->block.clip.y + rdcon->block.clip.height, y + (int)bitmap->rows);
+    int left = max(rdcon->block.clip.left, x);
+    int right = min(rdcon->block.clip.right, x + (int)bitmap->width);
+    int top = max(rdcon->block.clip.top, y);
+    int bottom = min(rdcon->block.clip.bottom, y + (int)bitmap->rows);
     if (left >= right || top >= bottom) return; // glyph outside the surface
     ImageSurface* surface = rdcon->ui_context->surface;
     for (int i = top - y; i < bottom - y; i++) {
@@ -244,7 +245,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     }
 }
 
-void drawRect(Tvg_Canvas* canvas, Rect rect) {
+void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
     Tvg_Paint* shape = tvg_shape_new();
     tvg_shape_move_to(shape, rect.x, rect.y);
     tvg_shape_line_to(shape, rect.x + rect.width, rect.y);
@@ -256,15 +257,22 @@ void drawRect(Tvg_Canvas* canvas, Rect rect) {
     // define the dash pattern for a dotted line
     float dash_pattern[2] = {8.0f, 8.0f}; // 8 units on, 8 units off
     tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0); 
+
+    // set clipping
+    Tvg_Paint* clip_rect = tvg_shape_new();
+    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+    tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
+    tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
+
     tvg_canvas_push(canvas, shape);
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     if (block->scroller->has_clip) {
-        rdcon->block.clip.x = max(rdcon->block.clip.x, rdcon->block.x + block->scroller->clip.x);
-        rdcon->block.clip.y = max(rdcon->block.clip.y, rdcon->block.y + block->scroller->clip.y);
-        rdcon->block.clip.width = min(rdcon->block.clip.width, block->scroller->clip.width);
-        rdcon->block.clip.height = min(rdcon->block.clip.height, block->scroller->clip.height);
+        rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + block->scroller->clip.left);
+        rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top);
+        rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right);
+        rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + block->scroller->clip.bottom);
     }
     if (block->scroller->pane) {
         rdcon->block.x -= block->scroller->pane->h_scroll_position;
@@ -288,7 +296,7 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
             rect.height -= block->bound->border->width.top + block->bound->border->width.bottom;
         }
         scrollpane_render(rdcon->canvas, block->scroller->pane, &rect,
-            block->content_width, block->content_height);
+            block->content_width, block->content_height, &rdcon->block.clip);
     }
 }
 
@@ -312,7 +320,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top : 0);
         rc.width = block->width + (block->bound ? block->bound->margin.left + block->bound->margin.right : 0);
         rc.height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
-        drawRect(rdcon->canvas, rc);
+        draw_debug_rect(rdcon->canvas, rc, &rdcon->block.clip);
     }
 
     View* view = block->child;
@@ -525,7 +533,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
 
     // load default font Arial, size 16 px
     setup_font(uicon, &rdcon->font, uicon->default_font.family, &rdcon->ui_context->default_font);
-    rdcon->block.clip = (Rect){0, 0, uicon->surface->width, uicon->surface->height};
+    rdcon->block.clip = (Bound){0, 0, uicon->surface->width, uicon->surface->height};
 }
 
 void render_clean_up(RenderContext* rdcon) {

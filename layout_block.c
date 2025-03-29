@@ -40,8 +40,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
             block->scroller->overflow_x == LXB_CSS_VALUE_CLIP || 
             block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
-            block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
-            block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                
+            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;                
         }
     }
     // handle vertical overflow and determine block->height
@@ -62,8 +62,8 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
                 block->scroller->overflow_y == LXB_CSS_VALUE_CLIP || 
                 block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
                 block->scroller->has_clip = true;
-                block->scroller->clip.x = 0;  block->scroller->clip.y = 0;
-                block->scroller->clip.width = block->width;  block->scroller->clip.height = block->height;                    
+                block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
+                block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;          
             }                
         }
     }

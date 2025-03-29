@@ -35,11 +35,16 @@ float tvg_shape_get_h(Tvg_Paint* shape) {
 }
 
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, 
-    int content_width, int content_height) {
+    int content_width, int content_height, Bound* clip) {
     dzlog_debug("render scroller content size: %d x %d\n", content_width, content_height);
     
     int view_x = block_bound->x, view_y = block_bound->y;
     int view_width = block_bound->width, view_height = block_bound->height;
+
+    // clip shape
+    Tvg_Paint* clip_rect = tvg_shape_new();
+    tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+    tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
 
     // Vertical scrollbar
     Tvg_Paint* v_scrollbar = tvg_shape_new();
@@ -61,7 +66,10 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y, 
             SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, sp->v_handle_height, HANDLE_RADIUS, HANDLE_RADIUS);
     }
+
+    tvg_paint_set_mask_method(v_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
     tvg_canvas_push(canvas, v_scrollbar);
+    tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     tvg_canvas_push(canvas, v_scroll_handle);
 
     // Horizontal scrollbar
@@ -84,7 +92,10 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         tvg_shape_append_rect(h_scroll_handle, view_x + sp->h_handle_x, h_scroll_y, 
             sp->h_handle_width, SCROLLBAR_SIZE - SCROLL_BORDER_CROSS * 2, HANDLE_RADIUS, HANDLE_RADIUS);
     }
+    
+    tvg_paint_set_mask_method(h_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
     tvg_canvas_push(canvas, h_scrollbar);
+    tvg_paint_set_mask_method(h_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     tvg_canvas_push(canvas, h_scroll_handle);
     
     tvg_canvas_update(canvas);

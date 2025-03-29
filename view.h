@@ -39,6 +39,10 @@ typedef struct Rect {
     int width, height;
 } Rect;
 
+typedef struct Bound {
+    int left, top, right, bottom;
+} Bound;
+
 typedef enum {
     IMAGE_FORMAT_UNKNOWN = 0,
     IMAGE_FORMAT_SVG,
@@ -61,8 +65,8 @@ typedef struct ImageSurface {
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern void image_surface_destroy(ImageSurface* img_surface);
-extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Rect* clip);
-extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Rect* clip);
+extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip);
+extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip);
 
 extern bool can_break(char c);
 extern bool is_space(char c);
@@ -181,7 +185,7 @@ typedef struct {
     bool has_hz_overflow, has_vt_overflow;
     bool has_hz_scroll, has_vt_scroll;
 
-    Rect clip; // clipping rect, relative to the block border box
+    Bound clip; // clipping rect, relative to the block border box
     bool has_clip;
 } ScrollProp;
 
@@ -236,7 +240,7 @@ typedef struct {
 // rendering context structs
 typedef struct {
     int x, y;  // abs x, y relative to entire canvas/screen
-    Rect clip;  // clipping rect
+    Bound clip;  // clipping rect
 } BlockBlot;
 
 typedef struct {
