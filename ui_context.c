@@ -25,7 +25,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 int ui_context_init(UiContext* uicon) {
     memset(uicon, 0, sizeof(UiContext));
     // inital window width and height
-    int window_width = 400, window_height = 700;
+    int window_width = 1000, window_height = 700;
 
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
