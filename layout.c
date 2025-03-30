@@ -68,15 +68,17 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         int item_baseline = (int)(lycon->font.face->size->metrics.ascender / 64);
         int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height, 
             line_height, lycon->line.max_ascender, item_baseline);
-        text_view->y = lycon->block.advance_y + vertical_offset;
+        text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
     } else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
-        int item_height = block->height;
+        int item_height = block->height + (block->bound ? 
+            block->bound->margin.top + block->bound->margin.bottom : 0);
+        int item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
         PropValue align = block->in_line && block->in_line->vertical_align ? 
             block->in_line->vertical_align : lycon->line.vertical_align;
         int vertical_offset = calculate_vertical_align_offset(align, item_height, 
-            line_height, lycon->line.max_ascender, item_height);  // item_baseline same as item_height
-        block->y = lycon->block.advance_y + vertical_offset;
+            line_height, lycon->line.max_ascender, item_baseline);
+        block->y = lycon->block.advance_y + max(vertical_offset, 0);
         dzlog_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d", 
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
     } else if (view->type == RDT_VIEW_INLINE) {
