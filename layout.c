@@ -114,7 +114,7 @@ void line_align(LayoutContext* lycon) {
     if (lycon->block.text_align != LXB_CSS_VALUE_LEFT) {
         View* view = lycon->line.start_view;
         if (view) {
-            float line_width = lycon->line.advance_x;
+            float line_width = lycon->line.advance_x -lycon->line.left;
             float offset = 0;
             if (lycon->block.text_align == LXB_CSS_VALUE_CENTER) {
                 offset = (lycon->block.width - line_width) / 2;
