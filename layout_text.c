@@ -151,6 +151,8 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         text->y = lycon->block.advance_y;
     }
     else { // baseline
+        // text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->line.max_ascender + lycon->line.max_descender))/2 
+        //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender >> 6); 
         text->y = lycon->block.advance_y;
     }
     // layout the text glyphs
