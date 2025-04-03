@@ -11,7 +11,7 @@
         "layout_flex_nodes.c",
         "layout_flex.c",
         "resolve_style.c",
-        "scroll.c",
+        "scroller.c",
         "view_pool.c",
         "font.c",
         "surface.c",

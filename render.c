@@ -221,12 +221,20 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             view->bound->border->radius.top_right > 0 || view->bound->border->radius.bottom_left > 0 || 
             view->bound->border->radius.bottom_right > 0)) {
             // fill the background with rounded corners
+            tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
             Tvg_Paint *bg_shape = tvg_shape_new();
             tvg_shape_append_rect(bg_shape, rect.x, rect.y, rect.width, rect.height, 
                 view->bound->border->radius.top_left, view->bound->border->radius.top_right);
             Color bgcolor = view->bound->background->color;
             tvg_shape_set_fill_color(bg_shape, bgcolor.r, bgcolor.g, bgcolor.b, bgcolor.a);
+            // clip the svg picture
+            Tvg_Paint* clip_rect = tvg_shape_new();  Bound* clip = &rdcon->block.clip;
+            tvg_shape_append_rect(clip_rect, clip->left, clip->top, clip->right - clip->left, clip->bottom - clip->top, 0, 0);
+            tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
+            tvg_paint_set_mask_method(bg_shape, clip_rect, TVG_MASK_METHOD_ALPHA);
             tvg_canvas_push(rdcon->canvas, bg_shape);
+            tvg_canvas_draw(rdcon->canvas, false);
+            tvg_canvas_sync(rdcon->canvas); 
         } else {
             fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
         }
@@ -258,6 +266,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
 }
 
 void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
+    tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
     Tvg_Paint* shape = tvg_shape_new();
     tvg_shape_move_to(shape, rect.x, rect.y);
     tvg_shape_line_to(shape, rect.x + rect.width, rect.y);
@@ -277,6 +286,8 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
     tvg_paint_set_mask_method(shape, clip_rect, TVG_MASK_METHOD_ALPHA);
 
     tvg_canvas_push(canvas, shape);
+    tvg_canvas_draw(canvas, false);
+    tvg_canvas_sync(canvas); 
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
@@ -385,9 +396,10 @@ void renderSvg(ImageSurface* surface) {
 
     tvg_picture_set_size(surface->pic, width, height);
     tvg_canvas_push(canvas, surface->pic);
-    tvg_canvas_draw(canvas, true);
     tvg_canvas_update(canvas);
-
+    tvg_canvas_draw(canvas, true);
+    tvg_canvas_sync(canvas); 
+    
     // Step 4: Clean up canvas
     tvg_canvas_destroy(canvas); // this also frees pic
     surface->pic = NULL;
@@ -426,6 +438,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
             }
             Tvg_Paint* pic = load_picture(img);
             if (pic) {
+                tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
                 tvg_picture_set_size(pic, rect.width, rect.height);
                 tvg_paint_translate(pic, rect.x, rect.y);
                 // clip the svg picture
@@ -434,6 +447,8 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
                 tvg_shape_set_fill_color(clip_rect, 0, 0, 0, 255); // solid fill
                 tvg_paint_set_mask_method(pic, clip_rect, TVG_MASK_METHOD_ALPHA);
                 tvg_canvas_push(rdcon->canvas, pic);
+                tvg_canvas_draw(rdcon->canvas, false);
+                tvg_canvas_sync(rdcon->canvas);
             } else {
                 printf("Failed to load svg picture\n");
             }
@@ -534,16 +549,6 @@ void render_children(RenderContext* rdcon, View* view) {
     } while (view);
 }
 
-void drawTriangle(Tvg_Canvas* canvas) {
-    Tvg_Paint* shape = tvg_shape_new();
-    tvg_shape_move_to(shape, 750, 1150);
-    tvg_shape_line_to(shape, 800, 1175);
-    tvg_shape_line_to(shape, 750, 1200);
-    tvg_shape_close(shape);
-    tvg_shape_set_fill_color(shape, 255, 10, 10, 200); // semi-transparent red color
-    tvg_canvas_push(canvas, shape);
-}
-
 void render_init(RenderContext* rdcon, UiContext* uicon) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
@@ -586,8 +591,8 @@ void render_html_doc(UiContext* uicon, View* root_view) {
         fprintf(stderr, "Invalid root view\n");
     }
 
-    // drawTriangle(rdcon.canvas);
-    tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
+    // all shapes should already have been drawn to the canvas
+    // tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
     tvg_canvas_sync(rdcon.canvas);  // wait for async draw operation to complete
 
     // save the modified surface to a PNG file
