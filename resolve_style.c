@@ -693,7 +693,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 span->bound->border->width.right_specificity = specificity;
             }
         }
-        span->bound->border->style = border_top->style;    
+        span->bound->border->top_style = span->bound->border->right_style = 
+        span->bound->border->bottom_style = span->bound->border->left_style = 
+            border_top->style;
         break;
     case LXB_CSS_PROPERTY_BORDER:
         const lxb_css_property_border_t *border = declr->u.border;
@@ -738,7 +740,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border->width.right = length;
             span->bound->border->width.right_specificity = specificity;
         }
-        span->bound->border->style = border->style;
+        span->bound->border->top_style = span->bound->border->right_style = 
+        span->bound->border->bottom_style = span->bound->border->left_style = 
+            border->style;
         break;
     case LXB_CSS_PROPERTY_BORDER_TOP_COLOR:  case LXB_CSS_PROPERTY_BORDER_BOTTOM_COLOR:
     case LXB_CSS_PROPERTY_BORDER_LEFT_COLOR: case LXB_CSS_PROPERTY_BORDER_RIGHT_COLOR:
@@ -777,6 +781,238 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             break;
         }
         break;
+    case LXB_CSS_PROPERTY_BORDER_STYLE:
+        const lxb_css_property_border_style_t *border_style = declr->u.border_style;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        
+        PropValue top_style = LXB_CSS_VALUE__UNDEF;
+        PropValue right_style = LXB_CSS_VALUE__UNDEF;
+        PropValue bottom_style = LXB_CSS_VALUE__UNDEF;
+        PropValue left_style = LXB_CSS_VALUE__UNDEF;
+        
+        int style_values = 0;
+        if (border_style->top != LXB_CSS_VALUE__UNDEF) {
+            top_style = border_style->top;
+            style_values++;
+        }
+        if (border_style->right != LXB_CSS_VALUE__UNDEF) {
+            right_style = border_style->right;
+            style_values++;
+        }
+        if (border_style->bottom != LXB_CSS_VALUE__UNDEF) {
+            bottom_style = border_style->bottom;
+            style_values++;
+        }
+        if (border_style->left != LXB_CSS_VALUE__UNDEF) {
+            left_style = border_style->left;
+            style_values++;
+        }
+        
+        switch (style_values) {
+            case 1:
+                span->bound->border->top_style = top_style;
+                span->bound->border->right_style = top_style;
+                span->bound->border->bottom_style = top_style;
+                span->bound->border->left_style = top_style;
+                break;
+            case 2:
+                span->bound->border->top_style = top_style;
+                span->bound->border->bottom_style = top_style;
+                span->bound->border->right_style = right_style;
+                span->bound->border->left_style = right_style;
+                break;
+            case 3:
+                span->bound->border->top_style = top_style;
+                span->bound->border->right_style = right_style;
+                span->bound->border->left_style = right_style;
+                span->bound->border->bottom_style = bottom_style;
+                break;
+            case 4:
+                span->bound->border->top_style = top_style;
+                span->bound->border->right_style = right_style;
+                span->bound->border->bottom_style = bottom_style;
+                span->bound->border->left_style = left_style;
+                break;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_TOP_STYLE:
+        const lxb_css_property_border_top_style_t *border_top_style = declr->u.border_top_style;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        span->bound->border->top_style = border_top_style->type;
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_RIGHT_STYLE:
+        const lxb_css_property_border_right_style_t *border_right_style = declr->u.border_right_style;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        span->bound->border->right_style = border_right_style->type;
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_BOTTOM_STYLE:
+        const lxb_css_property_border_bottom_style_t *border_bottom_style = declr->u.border_bottom_style;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        span->bound->border->bottom_style = border_bottom_style->type;
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_LEFT_STYLE:
+        const lxb_css_property_border_left_style_t *border_left_style = declr->u.border_left_style;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        span->bound->border->left_style = border_left_style->type;
+        break;
+/*
+    case LXB_CSS_PROPERTY_BORDER_RADIUS:
+        const lxb_css_property_border_radius_t *border_radius = declr->u.border_radius;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        
+        int top_left_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, 
+            &border_radius->top_left_h);
+        int top_right_h = border_radius->top_right_h.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->top_right_h) : top_left_h;
+        int bottom_right_h = border_radius->bottom_right_h.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_right_h) : top_left_h;
+        int bottom_left_h = border_radius->bottom_left_h.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_left_h) : top_right_h;
+            
+        int top_left_v = border_radius->top_left_v.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->top_left_v) : top_left_h;
+        int top_right_v = border_radius->top_right_v.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->top_right_v) : top_right_h;
+        int bottom_right_v = border_radius->bottom_right_v.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_right_v) : bottom_right_h;
+        int bottom_left_v = border_radius->bottom_left_v.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_left_v) : bottom_left_h;
+        
+        if (specificity > span->bound->border->top_radius.left_specificity) {
+            span->bound->border->top_radius.left = (top_left_h + top_left_v) / 2;
+            span->bound->border->top_radius.left_specificity = specificity;
+        }
+        
+        if (specificity > span->bound->border->top_radius.right_specificity) {
+            span->bound->border->top_radius.right = (top_right_h + top_right_v) / 2;
+            span->bound->border->top_radius.right_specificity = specificity;
+        }
+        
+        if (specificity > span->bound->border->bottom_radius.right_specificity) {
+            span->bound->border->bottom_radius.right = (bottom_right_h + bottom_right_v) / 2;
+            span->bound->border->bottom_radius.right_specificity = specificity;
+        }
+        
+        if (specificity > span->bound->border->bottom_radius.left_specificity) {
+            span->bound->border->bottom_radius.left = (bottom_left_h + bottom_left_v) / 2;
+            span->bound->border->bottom_radius.left_specificity = specificity;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS:
+        const lxb_css_property_border_top_left_radius_t *top_left_radius = declr->u.border_top_left_radius;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        
+        int tl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, 
+            &top_left_radius->horizontal);
+        int tl_v = top_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, &top_left_radius->vertical) : tl_h;
+            
+        if (specificity > span->bound->border->top_radius.left_specificity) {
+            span->bound->border->top_radius.left = (tl_h + tl_v) / 2;
+            span->bound->border->top_radius.left_specificity = specificity;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS:
+        const lxb_css_property_border_top_right_radius_t *top_right_radius = declr->u.border_top_right_radius;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        
+        int tr_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, 
+            &top_right_radius->horizontal);
+        int tr_v = top_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, &top_right_radius->vertical) : tr_h;
+            
+        if (specificity > span->bound->border->top_radius.right_specificity) {
+            span->bound->border->top_radius.right = (tr_h + tr_v) / 2;
+            span->bound->border->top_radius.right_specificity = specificity;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS:
+        const lxb_css_property_border_bottom_right_radius_t *bottom_right_radius = declr->u.border_bottom_right_radius;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        
+        int br_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, 
+            &bottom_right_radius->horizontal);
+        int br_v = bottom_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, &bottom_right_radius->vertical) : br_h;
+            
+        if (specificity > span->bound->border->bottom_radius.right_specificity) {
+            span->bound->border->bottom_radius.right = (br_h + br_v) / 2;
+            span->bound->border->bottom_radius.right_specificity = specificity;
+        }
+        break;
+        
+    case LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS:
+        const lxb_css_property_border_bottom_left_radius_t *bottom_left_radius = declr->u.border_bottom_left_radius;
+        if (!span->bound) {
+            span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        }
+        if (!span->bound->border) {
+            span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        }
+        
+        int bl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, 
+            &bottom_left_radius->horizontal);
+        int bl_v = bottom_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, &bottom_left_radius->vertical) : bl_h;
+            
+        if (specificity > span->bound->border->bottom_radius.left_specificity) {
+            span->bound->border->bottom_radius.left = (bl_h + bl_v) / 2;
+            span->bound->border->bottom_radius.left_specificity = specificity;
+        }
+        break;
+*/
     case LXB_CSS_PROPERTY_FONT_FAMILY:
         const lxb_css_property_font_family_t *font_family = declr->u.font_family;
         if (!span->font) { span->font = alloc_font_prop(lycon); }

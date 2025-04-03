@@ -186,12 +186,13 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         if (span->bound->border) {
             strbuf_append_char_n(buf, ' ', indent);  strbuf_append_str(buf, "{");
             strbuf_append_format(buf, "border:{top-color:#%x, right-color:#%x, bottom-color:#%x, left-color:#%x, "
-                "top-wd:%d, right-wd:%d, bottom-wd:%d, left-wd:%d, style:%d}\n",
+                "top-wd:%d, right-wd:%d, bottom-wd:%d, left-wd:%d, top-sty:%d, right-sty:%d, bottom-sty:%d, left-sty:%d}\n",
                 span->bound->border->top_color.c, span->bound->border->right_color.c, 
                 span->bound->border->bottom_color.c, span->bound->border->left_color.c, 
                 span->bound->border->width.top, span->bound->border->width.right,
                 span->bound->border->width.bottom, span->bound->border->width.left,
-                span->bound->border->style);
+                span->bound->border->top_style, span->bound->border->right_style, 
+                span->bound->border->bottom_style, span->bound->border->left_style);
         }
     }  
 }
