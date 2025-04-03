@@ -444,7 +444,7 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                         inner_display = LXB_CSS_VALUE_FLEX;
                         break;
                     case LXB_CSS_VALUE_INLINE_FLEX:
-                        outer_display = LXB_CSS_VALUE_INLINE;
+                        outer_display = LXB_CSS_VALUE_INLINE_BLOCK;
                         inner_display = LXB_CSS_VALUE_FLEX;
                         break;
                     case LXB_CSS_VALUE_GRID:

@@ -2,7 +2,7 @@
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
-#define DEBUG_RENDER 0
+#define DEBUG_RENDER 1
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -491,6 +491,9 @@ void render_children(RenderContext* rdcon, View* view) {
                 }
                 else if (block->embed->doc) {
                     render_embed_doc(rdcon, block);
+                }
+                else if (block->embed->flex_container) {
+                    render_block_view(rdcon, block);
                 }
             }
             else if (block->blk && block->blk->list_style_type) {
