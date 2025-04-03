@@ -189,12 +189,16 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
                 span->bound->border->top_color.c, span->bound->border->right_color.c, 
                 span->bound->border->bottom_color.c, span->bound->border->left_color.c);
             strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_format(buf, "  t-wd:%d, r-wd:%d, b-wd:%d, l-wd:%d, t-sty:%d, "
-                "r-sty:%d, b-sty:%d, l-sty:%d}\n",
+            strbuf_append_format(buf, "  t-wd:%d, r-wd:%d, b-wd:%d, l-wd:%d, "
+                "t-sty:%d, r-sty:%d, b-sty:%d, l-sty:%d\n",
                 span->bound->border->width.top, span->bound->border->width.right,
                 span->bound->border->width.bottom, span->bound->border->width.left,
                 span->bound->border->top_style, span->bound->border->right_style, 
                 span->bound->border->bottom_style, span->bound->border->left_style);
+            strbuf_append_char_n(buf, ' ', indent);
+            strbuf_append_format(buf, "  tl-rds:%d, tr-rds:%d, br-rds:%d, bl-rds:%d}\n",
+                span->bound->border->radius.top_left, span->bound->border->radius.top_right,
+                span->bound->border->radius.bottom_right, span->bound->border->radius.bottom_left);                
         }
     }  
 }

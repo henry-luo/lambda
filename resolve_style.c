@@ -884,7 +884,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         span->bound->border->left_style = border_left_style->type;
         break;
-/*
+
     case LXB_CSS_PROPERTY_BORDER_RADIUS:
         const lxb_css_property_border_radius_t *border_radius = declr->u.border_radius;
         if (!span->bound) {
@@ -893,46 +893,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        
-        int top_left_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, 
-            &border_radius->top_left_h);
-        int top_right_h = border_radius->top_right_h.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->top_right_h) : top_left_h;
-        int bottom_right_h = border_radius->bottom_right_h.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_right_h) : top_left_h;
-        int bottom_left_h = border_radius->bottom_left_h.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_left_h) : top_right_h;
-            
-        int top_left_v = border_radius->top_left_v.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->top_left_v) : top_left_h;
-        int top_right_v = border_radius->top_right_v.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->top_right_v) : top_right_h;
-        int bottom_right_v = border_radius->bottom_right_v.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_right_v) : bottom_right_h;
-        int bottom_left_v = border_radius->bottom_left_v.type != LXB_CSS_VALUE__UNDEF ? 
-            resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, &border_radius->bottom_left_v) : bottom_left_h;
-        
-        if (specificity > span->bound->border->top_radius.left_specificity) {
-            span->bound->border->top_radius.left = (top_left_h + top_left_v) / 2;
-            span->bound->border->top_radius.left_specificity = specificity;
-        }
-        
-        if (specificity > span->bound->border->top_radius.right_specificity) {
-            span->bound->border->top_radius.right = (top_right_h + top_right_v) / 2;
-            span->bound->border->top_radius.right_specificity = specificity;
-        }
-        
-        if (specificity > span->bound->border->bottom_radius.right_specificity) {
-            span->bound->border->bottom_radius.right = (bottom_right_h + bottom_right_v) / 2;
-            span->bound->border->bottom_radius.right_specificity = specificity;
-        }
-        
-        if (specificity > span->bound->border->bottom_radius.left_specificity) {
-            span->bound->border->bottom_radius.left = (bottom_left_h + bottom_left_v) / 2;
-            span->bound->border->bottom_radius.left_specificity = specificity;
-        }
+        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, 
+            (lxb_css_property_margin_t*)border_radius, specificity, &span->bound->border->radius);
         break;
-        
+    /*    
     case LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS:
         const lxb_css_property_border_top_left_radius_t *top_left_radius = declr->u.border_top_left_radius;
         if (!span->bound) {

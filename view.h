@@ -101,7 +101,10 @@ typedef struct {
 } InlineProp;
 
 typedef struct {
-    int top, right, bottom, left;
+    union {
+        struct { int top, right, bottom, left; };
+        struct { int top_left, top_right, bottom_right, bottom_left; };
+    };
     uint32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
 
@@ -110,7 +113,7 @@ typedef struct {
     PropValue top_style, right_style, bottom_style, left_style;
     Color top_color, right_color, bottom_color, left_color;
     uint32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
-    Spacing top_radius, right_radius, bottom_radius, left_radius;    
+    Spacing radius;    
 } BorderProp;
 
 typedef struct {

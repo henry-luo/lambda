@@ -217,7 +217,19 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     rect.width = view->width;  rect.height = view->height;
     // fill background, if bg-color is non-transparent
     if (view->bound->background && (view->bound->background->color.a)) {
-        fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
+        if (view->bound->border && (view->bound->border->radius.top_left > 0 || 
+            view->bound->border->radius.top_right > 0 || view->bound->border->radius.bottom_left > 0 || 
+            view->bound->border->radius.bottom_right > 0)) {
+            // fill the background with rounded corners
+            Tvg_Paint *bg_shape = tvg_shape_new();
+            tvg_shape_append_rect(bg_shape, rect.x, rect.y, rect.width, rect.height, 
+                view->bound->border->radius.top_left, view->bound->border->radius.top_right);
+            Color bgcolor = view->bound->background->color;
+            tvg_shape_set_fill_color(bg_shape, bgcolor.r, bgcolor.g, bgcolor.b, bgcolor.a);
+            tvg_canvas_push(rdcon->canvas, bg_shape);
+        } else {
+            fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
+        }
     }
     if (view->bound->border) {
         if (view->bound->border->left_color.a) {
