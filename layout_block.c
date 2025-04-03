@@ -7,11 +7,12 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
     // finalize the block size
     int flow_width, flow_height;
     if (block->bound) {
-        block->content_width = lycon->block.max_width + block->bound->padding.left + block->bound->padding.right;
+        // max_width already includes padding.left and border.left
+        block->content_width = lycon->block.max_width + block->bound->padding.right;
         // advance_y already includes padding.top and border.top
         block->content_height = lycon->block.advance_y + block->bound->padding.bottom;
         flow_width = block->content_width +
-            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
+            (block->bound->border ? block->bound->border->width.right : 0);
         flow_height = block->content_height +
             (block->bound->border ? block->bound->border->width.bottom : 0);
     } else {
