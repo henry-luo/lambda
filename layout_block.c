@@ -350,7 +350,6 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         lycon->line.left = lycon->line.advance_x;
     } 
     else {
-        dzlog_debug("setting up bounds\n");
         if (lycon->block.given_width >= 0) { // got specified width 
             block->width = lycon->block.width = lycon->block.given_width;
         } else {
@@ -363,8 +362,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         }
     }
     lycon->line.right = lycon->block.width;  
-    dzlog_debug("block-sizes: width:%d, height:%d, line-hg:%d",
-        block->width, block->height, lycon->block.line_height);
+    dzlog_debug("layout-block-sizes: width:%d, height:%d, line-hg:%d, given-w:%d, given-h:%d\n",
+        block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
     if (lycon->block.width < 0) { lycon->block.width = 0; }
     if (lycon->block.height < 0) { lycon->block.height = 0; }
 
@@ -378,7 +377,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
-        if (lycon->line.advance_x + block->width >= lycon->line.right) { 
+        if (lycon->line.advance_x + block->width > lycon->line.right) { 
             line_break(lycon);
             block->x = lycon->line.left;
         } else {

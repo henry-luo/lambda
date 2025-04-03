@@ -50,7 +50,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, lxb_dom_text_t *text_n
         }
         FT_GlyphSlot slot = lycon->font.face->glyph;
         text_width += slot->advance.x >> 6;
-        if (lycon->line.advance_x + text_width >= lycon->line.right) { // line filled up
+        if (lycon->line.advance_x + text_width > lycon->line.right) { // line filled up
             return RDT_LINE_FILLED;
         }
         str++;
@@ -176,7 +176,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
         }
         // printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
-        if (text->x + text->width >= lycon->line.right) { // line filled up
+        if (text->x + text->width > lycon->line.right) { // line filled up
             printf("line filled up\n");
             if (is_space(*str)) {
                 printf("break on space\n");

@@ -234,10 +234,18 @@ lxb_url_t* get_current_dir() {
     return url; 
 }
 
+void log_init() {
+    // empty existing log file
+    FILE *file = fopen("log.txt", "w");
+    if (file ) { fclose(file); }
+    int rc = dzlog_init("log.conf", "default");
+}
+void log_cleanup() {
+    zlog_fini();
+}
+
 int main() {
-    int rc;
-    rc = dzlog_init("log.conf", "default");    
-    dzlog_info("hello, zlog");
+    log_init();
     ui_context_init(&ui_context);
     GLFWwindow* window = ui_context.window;
     if (!window) {
@@ -299,6 +307,6 @@ int main() {
 
     dzlog_info("End of app");
     ui_context_cleanup(&ui_context);
-    zlog_fini();
+    log_cleanup();
     return 0;
 }
