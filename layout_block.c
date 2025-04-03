@@ -417,7 +417,8 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
             }
         }
         // line got content
-        lycon->line.is_line_start = false;
+        lycon->line.is_line_start = false;  
+        lycon->line.has_space = false;  lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
     } else {
         if (block->bound) {
             lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
