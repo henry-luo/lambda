@@ -4,6 +4,7 @@
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
+char* load_font_path(FcConfig *font_config, const char* font_name);
 
 char *fallback_fonts[] = {
     "PingFang SC", // Chinese, partial Japanese and Korean
@@ -69,7 +70,11 @@ int ui_context_init(UiContext* uicon) {
 
     // init ThorVG engine
     tvg_engine_init(TVG_ENGINE_SW, 1);
-
+    // load font for tvg to render text later
+    char* font_path = load_font_path(uicon->font_config, "Arial");
+    if (font_path) {
+        tvg_font_load(font_path);  free(font_path);
+    }
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);  
     return EXIT_SUCCESS; 

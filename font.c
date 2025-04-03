@@ -18,6 +18,29 @@ uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
 }
 
+char* load_font_path(FcConfig *font_config, const char* font_name) {
+    // search for font
+    FcPattern *pattern = FcNameParse((const FcChar8 *)font_name);
+    FcConfigSubstitute(font_config, pattern, FcMatchPattern);
+    FcDefaultSubstitute(pattern);
+
+    FcResult result;  FcChar8 *file = NULL;  char *path = NULL;
+    FcPattern *match = FcFontMatch(font_config, pattern, &result);
+    if (!match) { printf("Font not found\n"); }
+    else {
+        // get font file path
+        if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch) {
+            dzlog_debug("Failed to get font file path: %s", font_name);
+        } else {
+            dzlog_debug("Found font '%s' at: %s", font_name, file);
+            path = strdup((const char *)file);  // need to strdup, as file will be destroyed by FcPatternDestroy later
+        }
+    }
+    if (match) FcPatternDestroy(match);
+    if (pattern) FcPatternDestroy(pattern);  
+    return path;
+}
+
 FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     // check the hashmap first
     if (uicon->fontface_map == NULL) {
@@ -42,45 +65,29 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
 
     // todo: cache the fonts loaded
     FT_Face face = NULL;
-    // search for font
-    FcPattern *pattern = FcNameParse((const FcChar8 *)font_name);
-    FcConfigSubstitute(uicon->font_config, pattern, FcMatchPattern);
-    FcDefaultSubstitute(pattern);
-
-    FcResult result;
-    FcPattern *match = FcFontMatch(uicon->font_config, pattern, &result);
-    if (!match) {
-        printf("Font not found\n");
-    }
-    else {
-        FcChar8 *file = NULL;
-        // get font file path
-        if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch) {
-            printf("Failed to get font file path\n");
+    char* font_path = load_font_path(uicon->font_config, font_name);
+    if (font_path) {
+        // load the font
+        printf("Loading font at: %s\n", font_path);
+        if (FT_New_Face(uicon->ft_library, (const char *)font_path, 0, &face)) {
+            printf("Could not load font\n");  
+            face = NULL;
         } else {
-            printf("Found font at: %s\n", file);
-            // load the font
-            if (FT_New_Face(uicon->ft_library, (const char *)file, 0, &face)) {
-                printf("Could not load font\n");  
-                face = NULL;
-            } else {
-                // Set height of the font
-                FT_Set_Pixel_Sizes(face, 0, font_size);
-                printf("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d\n", 
-                    face->family_name, face->size->metrics.height >> 6,
-                    face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
-                    face->units_per_EM >> 6);
-                // put the font face into the hashmap
-                if (uicon->fontface_map) {
-                    // copy the font name
-                    char* name = (char*)malloc(name_and_size->length + 1);  strcpy(name, name_and_size->str);
-                    hashmap_set(uicon->fontface_map, &(FontfaceEntry){.name=name, .face=face});   
-                }
-            }            
+            // Set height of the font
+            FT_Set_Pixel_Sizes(face, 0, font_size);
+            printf("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d\n", 
+                face->family_name, face->size->metrics.height >> 6,
+                face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
+                face->units_per_EM >> 6);
+            // put the font face into the hashmap
+            if (uicon->fontface_map) {
+                // copy the font name
+                char* name = (char*)malloc(name_and_size->length + 1);  strcpy(name, name_and_size->str);
+                hashmap_set(uicon->fontface_map, &(FontfaceEntry){.name=name, .face=face});   
+            }
         }
-        FcPatternDestroy(match);
+        free(font_path);
     }
-    FcPatternDestroy(pattern);
     strbuf_free(name_and_size);
     return face;
 }
