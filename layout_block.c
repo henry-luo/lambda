@@ -2,6 +2,7 @@
 
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
+void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -159,7 +160,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     block->display = display;
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
-    
+    resolve_inline_default(lycon, (ViewSpan*)block);
     switch (elmt_name) {
     case LXB_TAG_BODY:
         block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));

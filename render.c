@@ -2,7 +2,7 @@
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
-#define DEBUG_RENDER 1
+#define DEBUG_RENDER 0
 
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);

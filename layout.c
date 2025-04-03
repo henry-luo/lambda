@@ -145,18 +145,9 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
-void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
-    printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
-    if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
-
-    // save parent context
-    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
-    PropValue pa_line_align = lycon->line.vertical_align;
-    lycon->elmt = elmt;
-
-    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
-    span->display = display;
-    switch (elmt->element.node.local_name) {
+void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
+    uintptr_t elmt_name = span->node->local_name;
+    switch (elmt_name) {
     case LXB_TAG_B:
         span->font = alloc_font_prop(lycon);
         span->font->font_weight = LXB_CSS_VALUE_BOLD;
@@ -175,7 +166,7 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue 
         break;
     case LXB_TAG_FONT:
         // parse font style
-        lxb_dom_attr_t* color = lxb_dom_element_attr_by_id((lxb_dom_element_t *)elmt, LXB_DOM_ATTR_COLOR);
+        lxb_dom_attr_t* color = lxb_dom_element_attr_by_id((lxb_dom_element_t *)span->node, LXB_DOM_ATTR_COLOR);
         if (color) { printf("font color: %s\n", color->value->data); }
         break;
     case LXB_TAG_A:
@@ -187,6 +178,21 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue 
         span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
         break;
     }
+}
+
+void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
+    printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
+    if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
+
+    // save parent context
+    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
+    PropValue pa_line_align = lycon->line.vertical_align;
+    lycon->elmt = elmt;
+
+    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
+    span->display = display;
+    // resolve element default styles
+    resolve_inline_default(lycon, span);
     // resolve CSS styles
     if (elmt->element.style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
