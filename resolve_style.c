@@ -249,6 +249,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
     dzlog_debug("length value type %d", value->type);
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
+        printf("number value\n");
         result = value->u.length.num;
         break;
     case LXB_CSS_VALUE__LENGTH:
@@ -1009,9 +1010,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_text_align_t *text_align = declr->u.text_align;
         printf("text align property: %d\n", text_align->type);
-        if (!block->blk) {
-            block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-        }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = text_align->type;
         break;
     case LXB_CSS_PROPERTY_WIDTH:
@@ -1023,6 +1022,27 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_height_t *height = declr->u.height;
         lycon->block.given_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
         printf("height property: %d\n", lycon->block.given_height);
+        break;
+    case LXB_CSS_PROPERTY_MIN_WIDTH:
+        if (!block) { break; }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->min_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_MIN_WIDTH, declr->u.width);
+        break;
+    case LXB_CSS_PROPERTY_MAX_WIDTH:
+        if (!block) { break; }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        printf("max width property: %d\n", declr->u.width->type);
+        block->blk->max_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_MAX_WIDTH, declr->u.width);
+        break;
+    case LXB_CSS_PROPERTY_MIN_HEIGHT:
+        if (!block) { break; }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->min_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_MIN_HEIGHT, declr->u.height);
+        break;
+    case LXB_CSS_PROPERTY_MAX_HEIGHT:
+        if (!block) { break; }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->max_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_MAX_HEIGHT, declr->u.height);
         break;
     case LXB_CSS_PROPERTY_OVERFLOW_X:
         if (!block) { break; }

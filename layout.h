@@ -53,6 +53,7 @@ typedef struct {
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
 FontProp* alloc_font_prop(LayoutContext* lycon);
+BlockProp* alloc_block_prop(LayoutContext* lycon);
 FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
 void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node);

@@ -132,9 +132,10 @@ typedef struct {
 
 typedef struct {
     PropValue text_align;
-    float line_height;
-    float text_indent;
-    // float letter_spacing;
+    int line_height;  // non-negative
+    int text_indent;  // can be negative
+    int min_width, max_width;  // non-negative
+    int min_height, max_height;  // non-negative
     PropValue list_style_type;
 } BlockProp;
 
@@ -178,8 +179,6 @@ typedef struct {
     bool v_is_dragging, h_is_dragging;
     int drag_start_x, drag_start_y;
     int v_drag_start_scroll, h_drag_start_scroll;
-    // int drag_speed;
-    // int scrollSpeed;
 } ScrollPane;
 
 typedef struct {

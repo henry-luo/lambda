@@ -149,19 +149,19 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
     uintptr_t elmt_name = span->node->local_name;
     switch (elmt_name) {
     case LXB_TAG_B:
-        span->font = alloc_font_prop(lycon);
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
     case LXB_TAG_I:
-        span->font = alloc_font_prop(lycon);
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_style = LXB_CSS_VALUE_ITALIC;
         break;
     case LXB_TAG_U:
-        span->font = alloc_font_prop(lycon);    
+        if (!span->font) { span->font = alloc_font_prop(lycon); }    
         span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
         break;
     case LXB_TAG_S:
-        span->font = alloc_font_prop(lycon);    
+        if (!span->font) { span->font = alloc_font_prop(lycon); }    
         span->font->text_deco = LXB_CSS_VALUE_LINE_THROUGH;
         break;
     case LXB_TAG_FONT:
@@ -171,7 +171,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
         break;
     case LXB_TAG_A:
         // anchor style
-        span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         span->in_line->cursor = LXB_CSS_VALUE_POINTER;
         span->in_line->color = color_name_to_rgb(LXB_CSS_VALUE_BLUE);   
         span->font = alloc_font_prop(lycon);

@@ -163,7 +163,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     resolve_inline_default(lycon, (ViewSpan*)block);
     switch (elmt_name) {
     case LXB_TAG_BODY:
-        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         // default: 8px margin for body
         block->bound->margin.top = block->bound->margin.bottom = 
             block->bound->margin.left = block->bound->margin.right = 8 * lycon->ui_context->pixel_ratio; 
@@ -186,18 +186,16 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     case LXB_TAG_H6:
         em_size = 0.67;  // 0.67em
         HEADING_PROP:
-        block->font = alloc_font_prop(lycon);
+        if (!block->font) { block->font = alloc_font_prop(lycon); }
         block->font->font_size = lycon->font.style.font_size * em_size;
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
     case LXB_TAG_P:
-        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
         break;
     case LXB_TAG_UL:  case LXB_TAG_OL: 
-        if (!block->blk) {
-            block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-        }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->list_style_type = elmt_name == LXB_TAG_UL ?
             LXB_CSS_VALUE_DISC : LXB_CSS_VALUE_DECIMAL;
         if (!block->bound) {
@@ -208,7 +206,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         break;
     case LXB_TAG_CENTER:
-        block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = LXB_CSS_VALUE_CENTER;
         break;    
     case LXB_TAG_IMG:  // get html width and height (before the css styles)
@@ -226,13 +224,13 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         }
         break;
     case LXB_TAG_IFRAME:
-        block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-        block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // todo: inset border style
         block->bound->border->width.top = block->bound->border->width.right = 
             block->bound->border->width.bottom = block->bound->border->width.left = 
             1 * lycon->ui_context->pixel_ratio;
-        block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+        if (!block->scroller) { block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp)); }
         block->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
         block->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
         lycon->block.given_width = 300 * lycon->ui_context->pixel_ratio;

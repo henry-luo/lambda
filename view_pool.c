@@ -93,6 +93,13 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
     }
 }
 
+BlockProp* alloc_block_prop(LayoutContext* lycon) {
+    BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+    prop->line_height = -1;  // -1 for undefined
+    prop->min_height = prop->min_width = prop->max_height = prop->max_width = -1;  // -1 for undefined
+    return prop;
+}
+
 FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     *prop = lycon->font.style;  assert(prop->font_size > 0);
@@ -207,19 +214,15 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->blk) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        if (block->blk->text_align) {
-            strbuf_append_format(buf, "text-align:%s ", lxb_css_value_by_id(block->blk->text_align)->name);
-        }
-        if (block->blk->line_height) {
-            strbuf_append_format(buf, "line-height:%f ", block->blk->line_height);
-        }
-        if (block->blk->text_indent) {
-            strbuf_append_format(buf, "text-indent:%f ", block->blk->text_indent);
-        }
-        if (block->blk->list_style_type) {
-            // strbuf_append_format(buf, "list-style-type:%s", lxb_css_value_by_id(block->blk->list_style_type)->name);
-            strbuf_append_format(buf, "list-style-type:%d", block->blk->list_style_type);
-        }
+        strbuf_append_format(buf, "line-hg:%f ", block->blk->line_height);
+        strbuf_append_format(buf, "txt-align:%s ", lxb_css_value_by_id(block->blk->text_align)->name);
+        strbuf_append_format(buf, "txt-indent:%f ", block->blk->text_indent);
+        strbuf_append_format(buf, "ls-sty-type:%d\n", block->blk->list_style_type);
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_format(buf, "min-wd:%f ", block->blk->min_width);
+        strbuf_append_format(buf, "max-wd:%f ", block->blk->max_width);
+        strbuf_append_format(buf, "min-hg:%f ", block->blk->min_height);
+        strbuf_append_format(buf, "max-hg:%f ", block->blk->max_height);
         strbuf_append_str(buf, "}\n");
     }
     if (block->scroller) {
