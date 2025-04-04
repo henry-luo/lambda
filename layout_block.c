@@ -233,6 +233,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         if (!block->scroller) { block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp)); }
         block->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
         block->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
+        // default iframe size to 300 x 200
         lycon->block.given_width = 300 * lycon->ui_context->pixel_ratio;
         lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;        
         break;
@@ -313,36 +314,61 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;  
     lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
 
-    if (block->bound) {
-        if (lycon->block.given_width >= 0) { // got specified width 
-            block->width = lycon->block.given_width + block->bound->padding.left + block->bound->padding.right +
-                (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
-            lycon->block.width = lycon->block.given_width;
-            if (block->bound->margin.left == LENGTH_AUTO && block->bound->margin.right == LENGTH_AUTO)  {
-                block->bound->margin.left = block->bound->margin.right = (pa_block.width - block->width) / 2;
-            }
-            else {
-                if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
-                if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
-            }
+    // determine block width and height
+    int content_width = 0;
+    if (lycon->block.given_width >= 0) { content_width = lycon->block.given_width; }
+    else {
+        if (!block->bound) {
+            content_width = pa_block.width;
         } else {
-            dzlog_debug("no given width: %d, %d, %d\n", pa_block.width, block->bound->margin.left, block->bound->margin.right);
+            content_width = pa_block.width
+                - (block->bound->margin.left == LENGTH_AUTO ? 0 : block->bound->margin.left) 
+                - (block->bound->margin.right == LENGTH_AUTO ? 0 : block->bound->margin.right)
+                - (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0)
+                - (block->bound->padding.left + block->bound->padding.right);
+        }
+    }
+    int content_height = 0;
+    if (lycon->block.given_height >= 0) { content_height = lycon->block.given_height; }
+    else {
+        if (!block->bound) {
+            content_height = pa_block.height;
+        } else {
+            content_height = pa_block.height
+                - (block->bound->margin.top + block->bound->margin.bottom)
+                - (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0)
+                - (block->bound->padding.top + block->bound->padding.bottom);
+        }
+    }
+    if (block->blk) {
+        if (block->blk->max_width >= 0) {
+            content_width = min(content_width, block->blk->max_width);
+        }
+        if (block->blk->min_width >= 0) {
+            content_width = max(content_width, block->blk->min_width);
+        }
+        if (block->blk->max_height >= 0) {
+            content_height = min(content_height, block->blk->max_height);
+        }
+        if (block->blk->min_height >= 0) {
+            content_height = max(content_height, block->blk->min_height);
+        }
+    }
+    content_width = max(content_width, 0);  content_height = max(content_height, 0);  
+    lycon->block.width = content_width;  lycon->block.height = content_height;
+
+    if (block->bound) {
+        block->width = content_width + block->bound->padding.left + block->bound->padding.right +
+            (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
+        block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
+            (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);        
+        // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
+        if (block->bound->margin.left == LENGTH_AUTO && block->bound->margin.right == LENGTH_AUTO)  {
+            block->bound->margin.left = block->bound->margin.right = max((pa_block.width - block->width) / 2, 0);
+        } else {
             if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
             if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
-            block->width = pa_block.width - (block->bound->margin.left + block->bound->margin.right);
-            lycon->block.width = block->width - (block->bound->padding.left + block->bound->padding.right);
         }
-        dzlog_debug("setting up height\n");
-        if (lycon->block.given_height >= 0) { // got specified height 
-            block->height = lycon->block.given_height + block->bound->padding.top + block->bound->padding.bottom +
-                (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
-            lycon->block.height = lycon->block.given_height;
-        } else {
-            block->height = block->bound->margin.top + block->bound->margin.bottom;
-            lycon->block.height = pa_block.height - block->height - (block->bound->padding.top + block->bound->padding.bottom)
-                - (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
-        }
-        dzlog_debug("setting up x, y\n");
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
         if (block->bound->border) {
@@ -354,22 +380,12 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         lycon->line.left = lycon->line.advance_x;
     } 
     else {
-        if (lycon->block.given_width >= 0) { // got specified width 
-            block->width = lycon->block.width = lycon->block.given_width;
-        } else {
-            block->width = lycon->block.width = pa_block.width;
-        }
-        if (lycon->block.given_height >= 0) { // got specified height 
-            block->height = lycon->block.height = lycon->block.given_height;
-        } else {
-            block->height = lycon->block.height = pa_block.height;
-        }
-    }
+        block->width = content_width;  block->height = content_height;
+        // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
+    }  
     lycon->line.right = lycon->block.width;  
-    dzlog_debug("layout-block-sizes: width:%d, height:%d, line-hg:%d, given-w:%d, given-h:%d\n",
-        block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
-    if (lycon->block.width < 0) { lycon->block.width = 0; }
-    if (lycon->block.height < 0) { lycon->block.height = 0; }
+    dzlog_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d\n",
+        block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
     // layout block content
     if (elmt_name != LXB_TAG_IMG) {

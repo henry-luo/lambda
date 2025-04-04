@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <title>Jubily Test Page</title>
     <style>
+    body { 
+        font-family: Arial, sans-serif;
+    }
     .header a { 
         border-radius: 10px; display: inline-block; background-color: lightskyblue;
         padding: 2px 10px;  text-decoration: none;
@@ -11,8 +14,8 @@
     </style>
 </head>
 <body>
-    <h3 style="color: blue; text-align: center;">Jubily Test</h3>
-    <div class="header">
+    <h3 style="color: blue; text-align: center; margin:0px">Jubily Test</h3>
+    <div class="header" style="height:25px">
         <a href="sample.html" target="main_frame">Test 1</a>
         <a href="sample2.html" target="main_frame">Test 2</a>
         <a href="./sample3.html" target="main_frame">Test 3</a>
@@ -28,7 +31,7 @@
         <a href="../../test/blog2.html" target="main_frame">Blog 2</a>
     </div>
     <iframe name="main_frame" src="sample.html" 
-        style="border: 1px solid #999; width:100%; height: 610px; margin-top:-20px">
+        style="border: 1px solid #999; width:100%; height: 610px;">
         Your browser does not support iframes.
     </iframe>
 </body>
