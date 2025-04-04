@@ -415,10 +415,15 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                         }
                         // load the new document
                         Document* old_doc = block->embed->doc;
-                        block->embed->doc = load_html_doc(evcon.ui_context->document->url, evcon.new_url);
-                        if (block->embed->doc && block->embed->doc->dom_tree) {
-                            dzlog_debug("layout doc of iframe view");
-                            layout_html_doc(evcon.ui_context, block->embed->doc, false);
+                        Document* new_doc = block->embed->doc = 
+                            load_html_doc(evcon.ui_context->document->url, evcon.new_url);
+                        if (new_doc && new_doc->dom_tree) {
+                            layout_html_doc(evcon.ui_context, new_doc, false);
+                            if (new_doc->view_tree && new_doc->view_tree->root) {
+                                ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;
+                                block->content_width = root->content_width;
+                                block->content_height = root->content_height;
+                            }                            
                         }           
                         free_document(old_doc);
                         uicon->document->state->is_dirty = true;
