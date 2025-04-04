@@ -300,6 +300,10 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
             }
             printf("image dimensions: %d x %d\n", lycon->block.given_width, lycon->block.given_height);         
         }
+        else { // failed to load image
+            lycon->block.given_width = 40;  lycon->block.given_height = 30;
+            // todo: use a placeholder
+        }
     }
     
     dzlog_debug("setting up block blk\n");
