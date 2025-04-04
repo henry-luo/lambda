@@ -104,7 +104,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     // Set container properties
     flex_container.width = block->width - 
         (block->bound ? block->bound->padding.left + block->bound->padding.right : 0);
-    flex_container.height = block->height - 
+    flex_container.height = lycon->block.given_height >= 0 ? lycon->block.given_height :
         (block->bound ? block->bound->padding.top + block->bound->padding.bottom : 0);
     flex_container.direction = block->embed->flex_container->direction;
     flex_container.wrap = block->embed->flex_container->wrap;
@@ -129,16 +129,20 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     while (child && index < child_count) {
         // Layout child in measuring mode to determine its size 
         if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+            // reset avance_x and advance_y for each child
+            lycon->line.advance_x = 0;  lycon->block.advance_y = 0;
             layout_block(lycon, (lxb_html_element_t*)child, display);
+
             if (lycon->prev_view && lycon->prev_view->type >= RDT_VIEW_INLINE_BLOCK) {
                 ViewBlock* child_block = (ViewBlock*)lycon->prev_view;
                 child_blocks[index] = child_block;
-                
+                dzlog_debug("flex child %d: x=%d, y=%d, w=%d, h=%d", 
+                    index, child_block->x, child_block->y, child_block->width, child_block->height);
+
                 // Set up the FlexItem
                 FlexItem* item = &flex_container.items[index];
-                item->width = child_block->width;
-                item->height = child_block->height;
-                dzlog_debug("Flex item %d: width=%d, height=%d\n", index, item->width, item->height);
+                item->width = child_block->width;  item->height = child_block->height;
+                dzlog_debug("flex item %d: width=%d, height=%d\n", index, item->width, item->height);
                 
                 // Copy margins
                 if (child_block->bound) {
@@ -172,7 +176,6 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                     item->align_self = ALIGN_START; // will be replaced with container's align-items
                     item->order = 0;
                 }
-                
                 index++;
             }
         }
@@ -204,12 +207,12 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                 child_blocks[i]->content_height = flex_container.items[i].height;
             }
 
-            dzlog_debug("Flex child block %d: x=%d, y=%d, w=%d, h=%d\n", 
-                        i, child_blocks[i]->x, child_blocks[i]->y, child_blocks[i]->width, child_blocks[i]->height);
+            dzlog_debug("flex child adjusted block %d: x=%d, y=%d, w=%d, h=%d", 
+                i, child_blocks[i]->x, child_blocks[i]->y, child_blocks[i]->width, child_blocks[i]->height);
         }
     }
     
-    // Update the block's content size
+    // update the block's content size
     int max_width = 0, max_height = 0;
     for (int i = 0; i < index; i++) {
         if (child_blocks[i]) {
@@ -221,6 +224,15 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     }
     block->content_width = max_width + (block->bound ? block->bound->padding.right : 0);
     block->content_height = max_height + (block->bound ? block->bound->padding.bottom : 0);
+    if (lycon->block.given_height < 0) {
+        block->height = block->content_height
+            + (block->bound ? block->bound->padding.top + block->bound->padding.bottom : 0) 
+            + (block->bound && block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
+    }
+    lycon->block.max_width = max_width;  // includes padding-left
+    lycon->block.advance_y = max_height;  // includes padding-top  
+    dzlog_debug("flex block final: content-wd=%d, content-hg=%d, wd:%d, hg:%d\n", 
+        block->content_width, block->content_height, block->width, block->height); 
     
     // reflow the block
     for (int i = 0; i < child_count && i < index; i++) {
@@ -229,7 +241,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
         }
     }
 
-    // Clean up
+    // clean up
     free(child_blocks);
     free(flex_container.items);
     

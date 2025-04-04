@@ -95,7 +95,8 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
 
 BlockProp* alloc_block_prop(LayoutContext* lycon) {
     BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-    prop->line_height = -1;  // -1 for undefined
+    prop->line_height = lycon->block.line_height;  // inherit from parent
+    prop->text_align = lycon->block.text_align;  // inherit from parent
     prop->min_height = prop->min_width = prop->max_height = prop->max_width = -1;  // -1 for undefined
     return prop;
 }
