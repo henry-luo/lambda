@@ -315,6 +315,49 @@ View* find_view(View* view, lxb_dom_node_t *node) {
     return NULL;
 }
 
+void update_scroller(ViewBlock* block, int content_width, int content_height) {
+    if (!block->scroller) { return; }
+    // handle horizontal overflow
+    if (content_width > block->width) { // hz overflow
+        block->scroller->has_hz_overflow = true;
+        if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {}
+        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL || 
+            block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
+            block->scroller->has_hz_scroll = true;
+        }
+        if (block->scroller->has_hz_scroll || 
+            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP || 
+            block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->has_clip = true;
+            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;                
+        }
+    }
+    else {
+        block->scroller->has_hz_overflow = false;
+        block->scroller->has_clip = false;
+    }
+    // handle vertical overflow and determine block->height
+    if (content_height > block->height) { // vt overflow
+        block->scroller->has_vt_overflow = true;
+        if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) { }
+        else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
+            block->scroller->has_vt_scroll = true;
+        }
+        if (block->scroller->has_hz_scroll || 
+            block->scroller->overflow_y == LXB_CSS_VALUE_CLIP || 
+            block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->has_clip = true;
+            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;          
+        }                
+    }
+    else {
+        block->scroller->has_vt_overflow = false;
+        block->scroller->has_clip = false;
+    }
+}
+
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     EventContext evcon;
     printf("Handling event %d\n", event->type);
@@ -423,6 +466,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                                 ViewBlock* root = (ViewBlock*)new_doc->view_tree->root;
                                 block->content_width = root->content_width;
                                 block->content_height = root->content_height;
+                                update_scroller(block, block->content_width, block->content_height);
                             }                            
                         }           
                         free_document(old_doc);
