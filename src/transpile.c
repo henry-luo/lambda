@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <tree_sitter/api.h>
-#include "../lib/string_buffer/string_buffer.h"
+#include "../lib/strbuf.h"
 
 // Function to read and display the content of a text file
 StrBuf* readTextFile(const char *filename) {
@@ -25,8 +25,8 @@ StrBuf* readTextFile(const char *filename) {
     }
 
     // read the file content into the buffer
-    size_t bytesRead = fread(buf->b, 1, fileSize, file);
-    buf->b[bytesRead] = '\0'; // Null-terminate the buffer
+    size_t bytesRead = fread(buf->str, 1, fileSize, file);
+    buf->str[bytesRead] = '\0'; // Null-terminate the buffer
 
     // clean up
     fclose(file);
@@ -76,7 +76,7 @@ void transpile_expr(Transpiler* tp, TSNode expr_node);
 void writeNodeSource(Transpiler* tp, TSNode node) {
     int start_byte = ts_node_start_byte(node);
     char* start = tp->source + start_byte;
-    strbuf_append_strn(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
+    strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
 void transpile_primary_expr(Transpiler* tp, TSNode pri_node) {
@@ -198,8 +198,8 @@ int main(void) {
         return 1;
     }
     StrBuf* buf = readTextFile("hello-world.ls");
-    printf("%s\n", buf->b); // Print the file content
-    tp.source = buf->b;
+    printf("%s\n", buf->str); // Print the file content
+    tp.source = buf->str;
     TSTree* tree = lambda_parse_source(parser, tp.source);
     tp.SYM_IF_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "if_expr", 7, true);
     tp.SYM_LET_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "let_expr", 8, true);
@@ -230,8 +230,8 @@ int main(void) {
         transpile_fn(&tp, main_node);
     }
 
-    printf("transpiled code: %s\n", tp.code_buf->b);
-    writeTextFile("hello-world.c", tp.code_buf->b);
+    printf("transpiled code: %s\n", tp.code_buf->str);
+    writeTextFile("hello-world.c", tp.code_buf->str);
 
     // clean up
     strbuf_free(buf);

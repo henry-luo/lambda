@@ -172,7 +172,6 @@ module.exports = grammar({
 
     expression: $ => choice(
       $.primary_expr,
-      // $._jsx_element,
       // $.assignment_expression,
       // $.augmented_assignment_expression,
       // $.await_expression,
@@ -225,13 +224,9 @@ module.exports = grammar({
         ['<', 'binary_relation'],
         ['<=', 'binary_relation'],
         ['==', 'binary_equality'],
-        // ['===', 'binary_equality'],
         ['!=', 'binary_equality'],
-        // ['!==', 'binary_equality'],
         ['>=', 'binary_relation'],
         ['>', 'binary_relation'],
-        // ['??', 'ternary'],
-        // ['instanceof', 'binary_relation'],
         ['to', 'binary_relation'],
         ['in', 'binary_relation'],
       ].map(([operator, precedence, associativity]) =>
