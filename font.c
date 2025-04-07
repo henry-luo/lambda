@@ -63,7 +63,6 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
         printf("Fontface not found in cache: %s\n", name_and_size->str);
     }
 
-    // todo: cache the fonts loaded
     FT_Face face = NULL;
     char* font_path = load_font_path(uicon->font_config, font_name);
     if (font_path) {

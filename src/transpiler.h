@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <tree_sitter/api.h>
 #include "../lib/strbuf.h"
+#include "../lib/hashmap.h"
 
 typedef enum LambdaTypeId {
     LMD_TYPE_NULL,
@@ -17,9 +18,16 @@ typedef enum LambdaTypeId {
     LMD_TYPE_FUNC,
 } LambdaTypeId;
 
+typedef struct LambdaType {
+    LambdaTypeId type;
+    struct LambdaType* nested;  // nested type
+    int length;  // length of array
+} LambdaType;
+
 typedef struct {
     StrBuf* code_buf;
     const char* source;
+    HashMap* node_type_map;
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;
@@ -46,4 +54,4 @@ typedef struct {
     } phase;
 } Transpiler;
 
-LambdaTypeId infer_expr(Transpiler* tp, TSNode expr_node);
+LambdaType infer_expr(Transpiler* tp, TSNode expr_node);

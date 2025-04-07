@@ -97,7 +97,7 @@ void transpile_assignment_expr(Transpiler* tp, TSNode asn_node) {
     if (ts_node_is_null(val_node)) { printf("no value found\n"); return; }
 
     // declare the type
-    LambdaTypeId type_id = infer_expr(tp, val_node);
+    LambdaTypeId type_id = infer_expr(tp, val_node).type;
     printf("assigned type id: %d\n", type_id);
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -202,6 +202,7 @@ void transpile_fn(Transpiler* tp, TSNode fn_node) {
 
 int main(void) {
     Transpiler tp;
+    memset(&tp, 0, sizeof(Transpiler));
 
     printf("Starting transpiler...\n");
 

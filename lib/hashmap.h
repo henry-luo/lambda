@@ -11,6 +11,8 @@
 
 struct hashmap;
 
+typedef struct hashmap HashMap;
+
 struct hashmap *hashmap_new(size_t elsize, size_t cap, uint64_t seed0, 
     uint64_t seed1, 
     uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1),
