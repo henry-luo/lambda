@@ -151,7 +151,6 @@ module.exports = grammar({
     },
 
     true: _ => 'true',
-
     false: _ => 'false',
 
     null: _ => 'null',
@@ -257,11 +256,11 @@ module.exports = grammar({
     ),
 
     assignment_expr: $ => seq(
-      $.identifier, '=', $.expression,
+      field('name', $.identifier), '=', field('body', $.expression),
     ),
 
     let_expr: $ => seq(
-      'let', '(', field('cond', $.assignment_expr), ')', 
+      'let', repeat1(seq(field('cond', $.assignment_expr), ',')), 
       field('then', $.expression),
     ),
 
