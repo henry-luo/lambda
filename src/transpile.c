@@ -46,7 +46,7 @@ TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 char* lambda_print_tree(TSTree* tree);
 
-void transpile_expr(Transpiler* tp, TSNode expr_node);
+void transpile_expr(Transpiler* tp, AstNode *expr_node);
 
 void writeNodeSource(Transpiler* tp, TSNode node) {
     int start_byte = ts_node_start_byte(node);
@@ -54,50 +54,57 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
-void transpile_primary_expr(Transpiler* tp, TSNode pri_node) {
-    printf("transpile primary expr\n");
-    writeNodeSource(tp, pri_node);
+void transpile_ts_node(Transpiler* tp, TSNode node) {
+    TSSymbol symbol = ts_node_symbol(node);
+    if (symbol == tp->SYM_TRUE) {
+        strbuf_append_str(tp->code_buf, "true");
+    }
+    else if (symbol == tp->SYM_FALSE) {
+        strbuf_append_str(tp->code_buf, "false");
+    }
+    else if (symbol == tp->SYM_NUMBER) {
+        writeNodeSource(tp, node);
+    }
+    else if (symbol == tp->SYM_STRING) {
+        writeNodeSource(tp, node);
+    }
+    else {
+        printf("unknown node type %s\n", ts_node_type(node));
+        // strbuf_append_str(tp->code_buf, ts_node_type(node));
+    }
 }
 
-void transpile_binary_expr(Transpiler* tp, TSNode bi_node) {
+void transpile_primary_expr(Transpiler* tp, AstNode *pri_node) {
+    printf("transpile primary expr\n");
+    writeNodeSource(tp, pri_node->node);
+}
+
+void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     printf("transpile binary expr\n");
     strbuf_append_char(tp->code_buf, '(');
-    TSNode left_node = ts_node_child_by_field_id(bi_node, tp->ID_LEFT);
-    transpile_expr(tp, left_node);
+    transpile_expr(tp, bi_node->left);
 
-    TSNode op_node = ts_node_child_by_field_name(bi_node, "operator", 8);
+    TSNode op_node = ts_node_child_by_field_name(bi_node->node, "operator", 8);
     writeNodeSource(tp, op_node);
 
-    TSNode right_node = ts_node_child_by_field_id(bi_node, tp->ID_RIGHT);
-    transpile_expr(tp, right_node);
+    transpile_expr(tp, bi_node->right);
     strbuf_append_char(tp->code_buf, ')');
 }
 
-void transpile_if_expr(Transpiler* tp, TSNode if_node) {
+void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
     // transpile as C conditional expr
-    TSNode cond_node = ts_node_child_by_field_id(if_node, tp->ID_COND);
     strbuf_append_str(tp->code_buf, "(");
-    transpile_expr(tp, cond_node);
+    transpile_expr(tp, if_node->cond);
     strbuf_append_str(tp->code_buf, ")?(");
-    TSNode then_node = ts_node_child_by_field_id(if_node, tp->ID_THEN);
-    transpile_expr(tp, then_node);
+    transpile_expr(tp, if_node->then);
     strbuf_append_str(tp->code_buf, "):(");
-    TSNode else_node = ts_node_child_by_field_id(if_node, tp->ID_ELSE);
-    transpile_expr(tp, else_node);
+    transpile_expr(tp, if_node->otherwise);
     strbuf_append_str(tp->code_buf, ")");
 }
 
-void transpile_assignment_expr(Transpiler* tp, TSNode asn_node) {
-    printf("transpile assignment expr\n");
-    
-    TSNode id_node = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
-    if (ts_node_is_null(id_node)) { printf("no identifier found\n"); return; }
-
-    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_BODY);
-    if (ts_node_is_null(val_node)) { printf("no value found\n"); return; }
-
+void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     // declare the type
-    LambdaTypeId type_id = infer_expr(tp, val_node).type;
+    LambdaTypeId type_id = asn_node->expr->type.type;
     printf("assigned type id: %d\n", type_id);
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -123,80 +130,69 @@ void transpile_assignment_expr(Transpiler* tp, TSNode asn_node) {
     }
     strbuf_append_char(tp->code_buf, ' ');
     // declare the variable
-    writeNodeSource(tp, id_node);
+    writeNodeSource(tp, asn_node->name);
     strbuf_append_char(tp->code_buf, '=');
 
-    transpile_expr(tp, val_node);
+    transpile_expr(tp, asn_node->expr);
     strbuf_append_char(tp->code_buf, ';');
 }
 
-void transpile_let_expr(Transpiler* tp, TSNode let_node) {
+void transpile_let_expr(Transpiler* tp, AstLetExprNode *let_node) {
     printf("transpile let expr\n");
     if (tp->phase == DECLARE) {
-        // let can have multiple cond declarations
-        TSTreeCursor cursor = ts_tree_cursor_new(let_node);
-        bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-        while (has_node) {
-            // Check if the current node's field ID matches the target field ID
-            TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-            if (field_id == tp->ID_COND) {
-                TSNode child = ts_tree_cursor_current_node(&cursor);
-                transpile_expr(tp, child);
-            }
-            has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+        AstNode *declare = let_node->declare;
+        while (declare) {
+            printf("transpile let declare\n");
+            transpile_expr(tp, declare);
+            declare = declare->next;
         }
-        ts_tree_cursor_delete(&cursor);
     }
     else if (tp->phase == EVALUATE) {
-        // evaluate the expression
-        TSNode then_node = ts_node_child_by_field_id(let_node, tp->ID_THEN);
-        transpile_expr(tp, then_node);
-    }
-    else {
-        printf("unknown phase\n");
+        printf("transpile let then\n");
+        transpile_expr(tp, let_node->then);
     }
 }
 
-void transpile_expr(Transpiler* tp, TSNode expr_node) {
+void transpile_expr(Transpiler* tp, AstNode *expr_node) {
+    if (!expr_node) {
+        printf("missing expression node\n");  return;
+    }
     // get the function name
-    TSSymbol symbol = ts_node_symbol(expr_node);
-    if (symbol == tp->SYM_IF_EXPR) {
-        transpile_if_expr(tp, expr_node);
-    }
-    else if (symbol == tp->SYM_BINARY_EXPR) {
-        transpile_binary_expr(tp, expr_node);
-    }
-    else if (symbol == tp->SYM_PRIMARY_EXPR) {
+    switch (expr_node->node_type) {
+    case AST_NODE_IF_EXPR:
+        transpile_if_expr(tp, (AstIfExprNode*)expr_node);
+        break;
+    case AST_NODE_BINARY:
+        transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
+        break;
+    case AST_NODE_PRIMARY:
         transpile_primary_expr(tp, expr_node);
-    }
-    else if (symbol == tp->SYM_LET_EXPR) {
-        transpile_let_expr(tp, expr_node);
-    }
-    else if (symbol == tp->SYM_ASSIGNMENT_EXPR) {
-        transpile_assignment_expr(tp, expr_node);
-    }
-    else {
-        printf("unknown expr %s\n", ts_node_type(expr_node));
-        // strbuf_append_str(tp->code_buf, ts_node_type(expr_node));
+        break;
+    case AST_NODE_LET_EXPR:
+        transpile_let_expr(tp, (AstLetExprNode*)expr_node);
+        break;
+    case AST_NODE_ASSIGN:
+        transpile_assign_expr(tp, (AstAssignNode*)expr_node);
+        break;
+    default:
+        printf("unknown expression type\n");
+        break;
     }
 }
 
-void transpile_fn(Transpiler* tp, TSNode fn_node) {
+void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // get the function name
-    
-    TSNode fn_name_node = ts_node_child_by_field_name(fn_node, "name", 4);
     strbuf_append_str(tp->code_buf, "int ");
-    writeNodeSource(tp, fn_name_node);
+    writeNodeSource(tp, fn_node->name);
     strbuf_append_str(tp->code_buf, " (){");
    
     // get the function body
-    TSNode fn_body_node = ts_node_child_by_field_name(fn_node, "body", 4);
     tp->phase = DECLARE;
-    transpile_expr(tp, fn_body_node);
+    transpile_expr(tp, fn_node->body);
     
     tp->phase = EVALUATE;
     strbuf_append_str(tp->code_buf, "char* ret=");
-    transpile_expr(tp, fn_body_node);
+    transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, "; printf(\"%s\\n\",ret); return 0;}\n");
 }
 
@@ -230,6 +226,8 @@ int main(void) {
     tp.SYM_ASSIGNMENT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "assignment_expr", 15, true);
     tp.SYM_PRIMARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "primary_expr", 12, true);
     tp.SYM_BINARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "binary_expr", 11, true);
+    tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
+
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
     tp.ID_ELSE = ts_language_field_id_for_name(ts_tree_language(tree), "else", 4);
@@ -243,7 +241,14 @@ int main(void) {
     printf("Syntax tree: %s\n", string);
     free(string);
 
-    // transpile the AST
+    // build the AST from the syntax tree
+    size_t grow_size = 4096;  // 4k
+    size_t tolerance_percent = 20;
+    printf("init view pool\n");
+    if (MEM_POOL_ERR_OK != pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent)) {
+        printf("Failed to initialize AST node pool\n");  return 1;
+    }
+
     TSNode root_node = ts_tree_root_node(tree);
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
@@ -252,15 +257,18 @@ int main(void) {
         return 1;
     }
 
-    tp.code_buf = strbuf_new_cap(1024);
+    // build the AST
     TSNode main_node = ts_node_named_child(root_node, 0);
     char* main_node_type = ts_node_type(main_node);
     printf("main node: %s\n", main_node_type);
+    tp.ast_root = build_expr(&tp, main_node);
+
+    tp.code_buf = strbuf_new_cap(1024);
     strbuf_append_str(tp.code_buf, "#include <stdio.h>\n#include <stdbool.h>\n#define null 0\n"
         "typedef void* Item;\n");
 
     if (strcmp(main_node_type, "fn_definition") == 0) {
-        transpile_fn(&tp, main_node);
+        transpile_fn(&tp, tp.ast_root);
         printf("transpiled code: %s\n", tp.code_buf->str);
         writeTextFile("hello-world.c", tp.code_buf->str);        
     }

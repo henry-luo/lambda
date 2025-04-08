@@ -5,6 +5,7 @@
 #include <tree_sitter/api.h>
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
+#include "../lib/mem-pool/include/mem_pool.h"
 
 typedef enum LambdaTypeId {
     LMD_TYPE_NULL,
@@ -24,21 +25,77 @@ typedef struct LambdaType {
     int length;  // length of array
 } LambdaType;
 
+typedef enum AstNodeType {
+    AST_NODE_NULL,
+    AST_NODE_PRIMARY,
+    AST_NODE_BINARY,
+    AST_NODE_ARRAY,
+    AST_NODE_ASSIGN,
+    AST_NODE_IF_EXPR,
+    AST_NODE_LET_EXPR,
+    AST_NODE_FUNC,
+} AstNodeType;
+
+typedef struct AstNode {
+    AstNodeType node_type;
+    TSNode node;
+    LambdaType type;
+    struct AstNode* next;
+} AstNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *left, *right;
+} AstBinaryNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    TSNode name;
+    AstNode *expr;
+} AstAssignNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *declare;  // declarations in let expression
+    AstNode *then;
+} AstLetExprNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *cond;
+    AstNode *then;
+    AstNode *otherwise;
+} AstIfExprNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *item;  // first item in the array
+} AstArrayNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    TSNode name;
+    AstNode *body;
+} AstFuncNode;
+
 typedef struct {
     StrBuf* code_buf;
     const char* source;
-    HashMap* node_type_map;
+    VariableMemPool* ast_node_pool;
+    AstNode *ast_root;
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;
     TSSymbol SYM_FALSE;
     TSSymbol SYM_NUMBER;
     TSSymbol SYM_STRING;
+    TSSymbol SYM_ARRAY;
     TSSymbol SYM_IF_EXPR;
     TSSymbol SYM_LET_EXPR;
     TSSymbol SYM_ASSIGNMENT_EXPR;
     TSSymbol SYM_BINARY_EXPR;
     TSSymbol SYM_PRIMARY_EXPR;
+    TSSymbol SYM_FUNC;
 
     TSFieldId ID_COND;
     TSFieldId ID_THEN;
@@ -54,4 +111,4 @@ typedef struct {
     } phase;
 } Transpiler;
 
-LambdaType infer_expr(Transpiler* tp, TSNode expr_node);
+AstNode* build_expr(Transpiler* tp, TSNode expr_node);
