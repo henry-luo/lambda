@@ -93,6 +93,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     // let can have multiple cond declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode *prev_declare = NULL;
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
@@ -100,11 +101,12 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *declare = build_expr(tp, child);
             printf("got declare type %d\n", declare->node_type);
-            if (ast_node->declare == NULL) {
+            if (prev_declare == NULL) {
                 ast_node->declare = declare;
             } else {
-                ast_node->declare->next = declare;
+                prev_declare->next = declare;
             }
+            prev_declare = declare;
         }
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
