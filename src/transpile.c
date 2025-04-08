@@ -134,7 +134,7 @@ void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     strbuf_append_char(tp->code_buf, '=');
 
     transpile_expr(tp, asn_node->expr);
-    strbuf_append_char(tp->code_buf, ';');
+    strbuf_append_str(tp->code_buf, ";\n");
 }
 
 void transpile_let_expr(Transpiler* tp, AstLetExprNode *let_node) {
@@ -184,7 +184,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // get the function name
     strbuf_append_str(tp->code_buf, "int ");
     writeNodeSource(tp, fn_node->name);
-    strbuf_append_str(tp->code_buf, " (){");
+    strbuf_append_str(tp->code_buf, " (){\n");
    
     // get the function body
     tp->phase = DECLARE;
@@ -193,7 +193,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     tp->phase = EVALUATE;
     strbuf_append_str(tp->code_buf, "char* ret=");
     transpile_expr(tp, fn_node->body);
-    strbuf_append_str(tp->code_buf, "; printf(\"%s\\n\",ret); return 0;}\n");
+    strbuf_append_str(tp->code_buf, ";\nprintf(\"%s\\n\",ret);\nreturn 0;\n}\n");
 }
 
 int main(void) {
@@ -235,6 +235,7 @@ int main(void) {
     tp.ID_RIGHT = ts_language_field_id_for_name(ts_tree_language(tree), "right", 5);
     tp.ID_NAME = ts_language_field_id_for_name(ts_tree_language(tree), "name", 4);
     tp.ID_BODY = ts_language_field_id_for_name(ts_tree_language(tree), "body", 4);
+    tp.ID_DECLARE = ts_language_field_id_for_name(ts_tree_language(tree), "declare", 7);
 
     // Print the syntax tree as an S-expression.
     char *string = lambda_print_tree(tree);
@@ -248,6 +249,7 @@ int main(void) {
     if (MEM_POOL_ERR_OK != pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent)) {
         printf("Failed to initialize AST node pool\n");  return 1;
     }
+    tp.name_stack = arraylist_new(16);
 
     TSNode root_node = ts_tree_root_node(tree);
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
@@ -273,7 +275,7 @@ int main(void) {
 
     if (strcmp(main_node_type, "fn_definition") == 0) {
         transpile_fn(&tp, tp.ast_root);
-        printf("transpiled code: %s\n", tp.code_buf->str);
+        printf("transpiled code:\n----------------\n%s\n", tp.code_buf->str);
         writeTextFile("hello-world.c", tp.code_buf->str);        
     }
     else {

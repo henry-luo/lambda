@@ -11,7 +11,7 @@
 #define ALIAS_COUNT 0
 #define TOKEN_COUNT 42
 #define EXTERNAL_TOKEN_COUNT 0
-#define FIELD_COUNT 11
+#define FIELD_COUNT 12
 #define MAX_ALIAS_SEQUENCE_LENGTH 7
 #define PRODUCTION_ID_COUNT 11
 
@@ -465,14 +465,15 @@ enum ts_field_identifiers {
   field_argument = 1,
   field_body = 2,
   field_cond = 3,
-  field_else = 4,
-  field_key = 5,
-  field_left = 6,
-  field_name = 7,
-  field_operator = 8,
-  field_right = 9,
-  field_then = 10,
-  field_value = 11,
+  field_declare = 4,
+  field_else = 5,
+  field_key = 6,
+  field_left = 7,
+  field_name = 8,
+  field_operator = 9,
+  field_right = 10,
+  field_then = 11,
+  field_value = 12,
 };
 
 static const char * const ts_field_names[] = {
@@ -480,6 +481,7 @@ static const char * const ts_field_names[] = {
   [field_argument] = "argument",
   [field_body] = "body",
   [field_cond] = "cond",
+  [field_declare] = "declare",
   [field_else] = "else",
   [field_key] = "key",
   [field_left] = "left",
@@ -511,13 +513,13 @@ static const TSFieldMapEntry ts_field_map_entries[] = {
     {field_key, 0},
     {field_value, 2},
   [4] =
-    {field_cond, 0},
+    {field_declare, 0},
   [5] =
-    {field_cond, 1, .inherited = true},
+    {field_declare, 1, .inherited = true},
     {field_then, 2},
   [7] =
-    {field_cond, 0, .inherited = true},
-    {field_cond, 1, .inherited = true},
+    {field_declare, 0, .inherited = true},
+    {field_declare, 1, .inherited = true},
   [9] =
     {field_left, 0},
     {field_operator, 1},

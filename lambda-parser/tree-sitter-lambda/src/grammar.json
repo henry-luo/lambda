@@ -1362,7 +1362,7 @@
             "members": [
               {
                 "type": "FIELD",
-                "name": "cond",
+                "name": "declare",
                 "content": {
                   "type": "SYMBOL",
                   "name": "assignment_expr"
@@ -1446,6 +1446,39 @@
           }
         ]
       }
+    },
+    "let_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "let"
+        },
+        {
+          "type": "REPEAT1",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "FIELD",
+                "name": "declare",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "assignment_expr"
+                }
+              },
+              {
+                "type": "STRING",
+                "value": ","
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
     }
   },
   "extras": [

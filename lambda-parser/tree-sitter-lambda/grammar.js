@@ -260,7 +260,7 @@ module.exports = grammar({
     ),
 
     let_expr: $ => seq(
-      'let', repeat1(seq(field('cond', $.assignment_expr), ',')), 
+      'let', repeat1(seq(field('declare', $.assignment_expr), ',')), 
       field('then', $.expression),
     ),
 
@@ -269,6 +269,10 @@ module.exports = grammar({
       field('then', $.expression),
       optional(seq('else', field('else', $.expression))),
     )),
+
+    let_stam: $ => seq(
+      'let', repeat1(seq(field('declare', $.assignment_expr), ',')), ';'
+    ),    
 
   },
 });

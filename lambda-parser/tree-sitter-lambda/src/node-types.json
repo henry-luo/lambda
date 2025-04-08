@@ -276,7 +276,7 @@
     "type": "let_expr",
     "named": true,
     "fields": {
-      "cond": {
+      "declare": {
         "multiple": true,
         "required": true,
         "types": [

@@ -6,6 +6,7 @@
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/arraylist.h"
 
 typedef enum LambdaTypeId {
     LMD_TYPE_NULL,
@@ -79,10 +80,17 @@ typedef struct {
 } AstFuncNode;
 
 typedef struct {
+    // todo: should have a name pool
+    char* name;
+    AstNode* node;  // AST node that defines the name
+} NameEntry;
+
+typedef struct {
     StrBuf* code_buf;
     const char* source;
     VariableMemPool* ast_node_pool;
     AstNode *ast_root;
+    ArrayList *name_stack;
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;
@@ -104,6 +112,7 @@ typedef struct {
     TSFieldId ID_RIGHT;
     TSFieldId ID_NAME;
     TSFieldId ID_BODY;
+    TSFieldId ID_DECLARE;
 
     enum TP_PHASE {
         DECLARE,  // var declaration phase

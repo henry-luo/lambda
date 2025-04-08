@@ -97,7 +97,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == tp->ID_COND) {
+        if (field_id == tp->ID_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *declare = build_expr(tp, child);
             printf("got declare type %d\n", declare->node_type);
