@@ -181,3 +181,52 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return NULL;
     }
 }
+
+AstNode* print_ast_node(AstNode *node, int indent) {
+    for (int i = 0; i < indent; i++) { printf("  "); }
+    // get the function name
+    switch(node->node_type) {
+    case AST_NODE_IF_EXPR:
+        printf("[if expr]\n");
+        print_ast_node(((AstIfExprNode*)node)->cond, indent + 1);
+        print_ast_node(((AstIfExprNode*)node)->then, indent + 1);
+        print_ast_node(((AstIfExprNode*)node)->otherwise, indent + 1);
+        break;
+    case AST_NODE_BINARY:
+        printf("[binary expr]\n");
+        print_ast_node(((AstBinaryNode*)node)->left, indent + 1);
+        print_ast_node(((AstBinaryNode*)node)->right, indent + 1);
+        break;
+    case AST_NODE_LET_EXPR:
+        printf("[let expr]\n");
+        AstNode *declare = ((AstLetExprNode*)node)->declare;
+        while (declare) {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("declare:\n");
+            print_ast_node(declare, indent + 1);
+            declare = declare->next;
+        }
+        for (int i = 0; i < indent+1; i++) { printf("  "); }
+        printf("then:\n");
+        print_ast_node(((AstLetExprNode*)node)->then, indent + 1);
+        break;
+    case AST_NODE_ASSIGN:
+        printf("[assign expr]\n");
+        print_ast_node(((AstAssignNode*)node)->expr, indent + 1);
+        break;
+    case AST_NODE_ARRAY:
+        printf("[array expr]\n");
+        print_ast_node(((AstArrayNode*)node)->item, indent + 1);
+        break;
+    case AST_NODE_FUNC:
+        printf("[function expr]\n");
+        print_ast_node(((AstFuncNode*)node)->body, indent + 1);
+        break;
+    case AST_NODE_PRIMARY:
+        printf("[primary expr]\n");
+        break;
+    default:
+        printf("unknown expression type\n");
+        break;
+    }
+}

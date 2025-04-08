@@ -262,7 +262,11 @@ int main(void) {
     char* main_node_type = ts_node_type(main_node);
     printf("main node: %s\n", main_node_type);
     tp.ast_root = build_expr(&tp, main_node);
+    // print the AST for debugging
+    print_ast_node(tp.ast_root, 0);
 
+    // transpile the AST to C code
+    printf("transpiling...\n");
     tp.code_buf = strbuf_new_cap(1024);
     strbuf_append_str(tp.code_buf, "#include <stdio.h>\n#include <stdbool.h>\n#define null 0\n"
         "typedef void* Item;\n");

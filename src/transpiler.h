@@ -112,3 +112,4 @@ typedef struct {
 } Transpiler;
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
+AstNode* print_ast_node(AstNode *node, int indent);
