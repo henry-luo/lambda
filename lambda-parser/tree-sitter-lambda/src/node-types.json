@@ -184,6 +184,10 @@
           "named": true
         },
         {
+          "type": "let_stam",
+          "named": true
+        },
+        {
           "type": "null",
           "named": true
         },
@@ -292,6 +296,22 @@
         "types": [
           {
             "type": "expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "let_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "assignment_expr",
             "named": true
           }
         ]
@@ -548,6 +568,10 @@
   },
   {
     "type": ":",
+    "named": false
+  },
+  {
+    "type": ";",
     "named": false
   },
   {

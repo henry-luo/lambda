@@ -73,22 +73,9 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     return ast_node;
 }
 
-AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
-    printf("build assign expr\n");
-    AstAssignNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstAssignNode));
-
-    ast_node->name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
-    if (ts_node_is_null(ast_node->name)) { printf("no identifier found\n"); return NULL; }
-
-    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_BODY);
-    if (ts_node_is_null(val_node)) { printf("no value found\n"); return NULL; }
-    ast_node->expr = build_expr(tp, val_node);
-    return ast_node;
-}
-
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     printf("build let expr\n");
-    AstLetExprNode* ast_node = (AstLetExprNode*)alloc_ast_node(tp, AST_NODE_LET_EXPR, let_node, sizeof(AstLetExprNode));
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_LET_EXPR, let_node, sizeof(AstLetNode));
 
     // let can have multiple cond declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
@@ -117,6 +104,50 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     ast_node->then = build_expr(tp, then_node);
     if (!ast_node->then) { printf("missing let then\n"); }
     else { printf("got let then type %d\n", ast_node->then->node_type); }
+    return ast_node;
+}
+
+AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
+    printf("build assign expr\n");
+    AstAssignNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstAssignNode));
+
+    ast_node->name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
+    if (ts_node_is_null(ast_node->name)) { printf("no identifier found\n"); return NULL; }
+
+    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_BODY);
+    if (ts_node_is_null(val_node)) { printf("no value found\n"); return NULL; }
+    ast_node->expr = build_expr(tp, val_node);
+    return ast_node;
+}
+
+AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
+    printf("build let expr\n");
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
+
+    // let can have multiple cond declarations
+    TSTreeCursor cursor = ts_tree_cursor_new(let_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode *prev_declare = NULL;
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == tp->ID_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode *declare = build_expr(tp, child);
+            printf("got declare type %d\n", declare->node_type);
+            if (prev_declare == NULL) {
+                ast_node->declare = declare;
+            } else {
+                prev_declare->next = declare;
+            }
+            prev_declare = declare;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (!ast_node->declare) { printf("missing let declare\n"); }
+
+    // let statement does not have 'then' clause
     return ast_node;
 }
 
@@ -178,6 +209,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == tp->SYM_FUNC) {
         return build_func(tp, expr_node);
     }
+    else if (symbol == tp->SYM_LET_STAM) {
+        return build_let_stam(tp, expr_node);
+    }
     else {
         printf("unknown expr %s\n", ts_node_type(expr_node));
         return NULL;
@@ -199,18 +233,20 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         print_ast_node(((AstBinaryNode*)node)->left, indent + 1);
         print_ast_node(((AstBinaryNode*)node)->right, indent + 1);
         break;
-    case AST_NODE_LET_EXPR:
-        printf("[let expr]\n");
-        AstNode *declare = ((AstLetExprNode*)node)->declare;
+    case AST_NODE_LET_EXPR:  case AST_NODE_LET_STAM:
+        printf("[let %s]\n", node->node_type == AST_NODE_LET_EXPR ? "expr" : "stam");
+        AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             for (int i = 0; i < indent+1; i++) { printf("  "); }
             printf("declare:\n");
             print_ast_node(declare, indent + 1);
             declare = declare->next;
         }
-        for (int i = 0; i < indent+1; i++) { printf("  "); }
-        printf("then:\n");
-        print_ast_node(((AstLetExprNode*)node)->then, indent + 1);
+        if (node->node_type == AST_NODE_LET_EXPR) {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("then:\n");
+            print_ast_node(((AstLetNode*)node)->then, indent + 1);
+        }
         break;
     case AST_NODE_ASSIGN:
         printf("[assign expr]\n");
@@ -227,8 +263,31 @@ AstNode* print_ast_node(AstNode *node, int indent) {
     case AST_NODE_PRIMARY:
         printf("[primary expr]\n");
         break;
+    case AST_SCRIPT:
+        printf("[script]\n");
+        AstScript* child = ((AstScript*)node)->child;
+        while (child) {
+            print_ast_node(child, indent + 1);
+            child = child->next;
+        }
+        break;
     default:
         printf("unknown expression type\n");
         break;
     }
+}
+
+AstNode* build_script(Transpiler* tp, TSNode script_node) {
+    printf("build script\n");
+    AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
+    TSNode child = ts_node_named_child(script_node, 0);
+    AstNode* prev = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* ast = build_expr(tp, child);
+        if (!prev) ast_node->child = ast;
+        else { prev->next = ast; }
+        prev = ast;
+        child = ts_node_next_named_sibling(child);
+    }
+    return ast_node;
 }

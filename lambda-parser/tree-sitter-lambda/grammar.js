@@ -66,7 +66,7 @@ module.exports = grammar({
   // conflicts: $ => [],
 
   rules: {
-    document: $ => repeat(choice($._value, $.fn_definition)),
+    document: $ => repeat(choice($._value, $.fn_definition, $.let_stam)),
 
     _value: $ => choice(
       $.object,

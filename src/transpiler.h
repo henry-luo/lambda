@@ -35,6 +35,8 @@ typedef enum AstNodeType {
     AST_NODE_IF_EXPR,
     AST_NODE_LET_EXPR,
     AST_NODE_FUNC,
+    AST_SCRIPT,
+    AST_NODE_LET_STAM,
 } AstNodeType;
 
 typedef struct AstNode {
@@ -59,7 +61,7 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *declare;  // declarations in let expression
     AstNode *then;
-} AstLetExprNode;
+} AstLetNode;
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -78,6 +80,11 @@ typedef struct {
     TSNode name;
     AstNode *body;
 } AstFuncNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *child;  // first child
+} AstScript;
 
 typedef struct {
     // todo: should have a name pool
@@ -104,6 +111,7 @@ typedef struct {
     TSSymbol SYM_BINARY_EXPR;
     TSSymbol SYM_PRIMARY_EXPR;
     TSSymbol SYM_FUNC;
+    TSSymbol SYM_LET_STAM;
 
     TSFieldId ID_COND;
     TSFieldId ID_THEN;
@@ -121,4 +129,5 @@ typedef struct {
 } Transpiler;
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
+AstNode* build_script(Transpiler* tp, TSNode script_node);
 AstNode* print_ast_node(AstNode *node, int indent);

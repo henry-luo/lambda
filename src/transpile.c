@@ -137,7 +137,7 @@ void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     strbuf_append_str(tp->code_buf, ";\n");
 }
 
-void transpile_let_expr(Transpiler* tp, AstLetExprNode *let_node) {
+void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
     printf("transpile let expr\n");
     if (tp->phase == DECLARE) {
         AstNode *declare = let_node->declare;
@@ -169,7 +169,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_primary_expr(tp, expr_node);
         break;
     case AST_NODE_LET_EXPR:
-        transpile_let_expr(tp, (AstLetExprNode*)expr_node);
+        transpile_let_expr(tp, (AstLetNode*)expr_node);
         break;
     case AST_NODE_ASSIGN:
         transpile_assign_expr(tp, (AstAssignNode*)expr_node);
@@ -181,8 +181,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 }
 
 void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
-    // get the function name
-    strbuf_append_str(tp->code_buf, "int ");
+    // write the function name, with a prefix '_', so as to diff from built-in functions
+    strbuf_append_str(tp->code_buf, "int _");
+    int name_start = tp->code_buf->length;
     writeNodeSource(tp, fn_node->name);
     strbuf_append_str(tp->code_buf, " (){\n");
    
@@ -191,9 +192,32 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     transpile_expr(tp, fn_node->body);
     
     tp->phase = EVALUATE;
-    strbuf_append_str(tp->code_buf, "char* ret=");
+    strbuf_append_str(tp->code_buf, "void* ret=");
     transpile_expr(tp, fn_node->body);
-    strbuf_append_str(tp->code_buf, ";\nprintf(\"%s\\n\",ret);\nreturn 0;\n}\n");
+    strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
+}
+
+void transpile_script(Transpiler* tp, AstScript *script) {
+    AstNode *node = script->child;
+    tp->phase = DECLARE;
+    while (node) {
+        if (node->node_type == AST_NODE_LET_STAM) {
+            transpile_let_expr(tp, (AstLetNode*)node);
+        }
+        node = node->next;
+    }
+    tp->phase = EVALUATE;
+    node = script->child;
+    while (node) {
+        if (node->node_type == AST_NODE_FUNC) {
+            transpile_fn(tp, (AstFuncNode*)node);
+        }
+        node = node->next;
+    }    
+    strbuf_append_str(tp->code_buf, "int main() { void* ret=_main(); printf(\"%s\\n\", (char*)ret); return 0;}\n");
+
+    printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);
+    writeTextFile("hello-world.c", tp->code_buf->str);  
 }
 
 int main(void) {
@@ -227,6 +251,7 @@ int main(void) {
     tp.SYM_PRIMARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "primary_expr", 12, true);
     tp.SYM_BINARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "binary_expr", 11, true);
     tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
+    tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
 
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
@@ -258,12 +283,8 @@ int main(void) {
         ts_tree_delete(tree);
         return 1;
     }
-
     // build the AST
-    TSNode main_node = ts_node_named_child(root_node, 0);
-    char* main_node_type = ts_node_type(main_node);
-    printf("main node: %s\n", main_node_type);
-    tp.ast_root = build_expr(&tp, main_node);
+    tp.ast_root = build_script(&tp, root_node);
     // print the AST for debugging
     print_ast_node(tp.ast_root, 0);
 
@@ -272,15 +293,7 @@ int main(void) {
     tp.code_buf = strbuf_new_cap(1024);
     strbuf_append_str(tp.code_buf, "#include <stdio.h>\n#include <stdbool.h>\n#define null 0\n"
         "typedef void* Item;\n");
-
-    if (strcmp(main_node_type, "fn_definition") == 0) {
-        transpile_fn(&tp, tp.ast_root);
-        printf("transpiled code:\n----------------\n%s\n", tp.code_buf->str);
-        writeTextFile("hello-world.c", tp.code_buf->str);        
-    }
-    else {
-        printf("Error: main node is not a function.\n");
-    }
+    transpile_script(&tp, (AstScript*)tp.ast_root);
 
     // clean up
     strbuf_free(buf);
