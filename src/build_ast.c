@@ -25,9 +25,27 @@ void* alloc_ast_bytes(Transpiler* tp, size_t size) {
     return bytes;
 }
 
+AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
+    printf("build array expr\n");
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
+    ast_node->type.type = LMD_TYPE_ARRAY;
+    TSNode child = ts_node_named_child(array_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (prev_item) { prev_item->next = item; }
+        else { ast_node->item = item; }
+        prev_item = item;
+        ast_node->type.length++;
+        child = ts_node_next_named_sibling(child);
+    }
+    if (prev_item) ast_node->type.nested = &prev_item->type;
+    return ast_node;
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     printf("build primary expr\n");
-    AstNode* ast_node = alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstNode));
+    AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
     TSNode child = ts_node_named_child(pri_node, 0);
     if (ts_node_is_null(child)) { return ast_node; }
 
@@ -45,9 +63,6 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }
     else if (symbol == tp->SYM_STRING) {
         ast_node->type = STRING_TYPE;
-    }
-    else if (symbol == tp->SYM_NULL) {
-        ast_node->type = NULL_TYPE;
     }
     else if (symbol == tp->SYM_IDENTIFIER) {
         printf("building identifier\n");
@@ -73,6 +88,10 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
             printf("found identifier %.*s\n", entry->name.length, entry->name.str);
             ast_node->type = entry->node->type;
         }
+    }
+    else if (symbol == tp->SYM_ARRAY) {
+        ast_node->expr = build_array_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
     }
     else {
         ast_node->type = NULL_TYPE;
@@ -203,28 +222,6 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     return ast_node;
 }
 
-AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
-    printf("build array expr\n");
-    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
-    ast_node->type.type = LMD_TYPE_ARRAY;
-    TSTreeCursor cursor = ts_tree_cursor_new(array_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    while (has_node) {
-        // Check if the current node's field ID matches the target field ID
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        TSNode child = ts_tree_cursor_current_node(&cursor);
-        AstNode* item = build_expr(tp, child);
-        if (!ast_node->item) ast_node->item = item;
-        else {
-            ast_node->item->next = item;
-        }
-        ast_node->type.length++;
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-    return ast_node;
-}
-
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("infer function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
@@ -315,6 +312,9 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_PRIMARY:
         printf("[primary expr]\n");
+        if (((AstPrimaryNode*)node)->expr) {
+            print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
+        }
         break;
     case AST_SCRIPT:
         printf("[script]\n");

@@ -44,7 +44,6 @@ void writeTextFile(const char *filename, const char *content) {
 
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-char* lambda_print_tree(TSTree* tree);
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 
@@ -79,31 +78,14 @@ void writeType(Transpiler* tp, LambdaTypeId type_id) {
     }
 }
 
-/*
-void transpile_ts_node(Transpiler* tp, TSNode node) {
-    TSSymbol symbol = ts_node_symbol(node);
-    if (symbol == tp->SYM_TRUE) {
-        strbuf_append_str(tp->code_buf, "true");
-    }
-    else if (symbol == tp->SYM_FALSE) {
-        strbuf_append_str(tp->code_buf, "false");
-    }
-    else if (symbol == tp->SYM_NUMBER) {
-        writeNodeSource(tp, node);
-    }
-    else if (symbol == tp->SYM_STRING) {
-        writeNodeSource(tp, node);
-    }
-    else {
-        printf("unknown node type %s\n", ts_node_type(node));
-        // strbuf_append_str(tp->code_buf, ts_node_type(node));
-    }
-}
-*/
-
-void transpile_primary_expr(Transpiler* tp, AstNode *pri_node) {
+void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     printf("transpile primary expr\n");
-    writeNodeSource(tp, pri_node->node);
+    if (pri_node->expr) {
+        transpile_expr(tp, pri_node->expr);
+        return;
+    } else {
+        writeNodeSource(tp, pri_node->node);
+    }
 }
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
@@ -159,6 +141,20 @@ void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
     }
 }
 
+void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
+    printf("transpile array expr\n");
+    strbuf_append_str(tp->code_buf, "array(");
+    AstNode *item = array_node->item;
+    while (item) {
+        transpile_expr(tp, item);
+        if (item->next) {
+            strbuf_append_str(tp->code_buf, ", ");
+        }
+        item = item->next;
+    }
+    strbuf_append_str(tp->code_buf, ")");
+}
+
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     if (!expr_node) {
         printf("missing expression node\n");  return;
@@ -172,13 +168,16 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
         break;
     case AST_NODE_PRIMARY:
-        transpile_primary_expr(tp, expr_node);
+        transpile_primary_expr(tp, (AstPrimaryNode*)expr_node);
         break;
     case AST_NODE_LET_EXPR:
         transpile_let_expr(tp, (AstLetNode*)expr_node);
         break;
     case AST_NODE_ASSIGN:
         transpile_assign_expr(tp, (AstAssignNode*)expr_node);
+        break;
+    case AST_NODE_ARRAY:
+        transpile_array_expr(tp, (AstArrayNode*)expr_node);
         break;
     default:
         printf("unknown expression type\n");
@@ -207,8 +206,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_script(Transpiler* tp, AstScript *script) {
-    strbuf_append_str(tp->code_buf, "#include <stdio.h>\n#include <stdbool.h>\n#define null 0\n"
-        "typedef void* Item;\n");
+    strbuf_append_str(tp->code_buf, "#include \"src/lambda.h\"\n");
 
     AstNode *node = script->child;
     tp->phase = TP_DECLARE;
@@ -265,6 +263,7 @@ int main(void) {
     tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
     tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
     tp.SYM_IDENTIFIER = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
+    tp.SYM_ARRAY = ts_language_symbol_for_name(ts_tree_language(tree), "array", 5, true);
 
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
@@ -276,9 +275,10 @@ int main(void) {
     tp.ID_DECLARE = ts_language_field_id_for_name(ts_tree_language(tree), "declare", 7);
 
     // print the syntax tree as an S-expression.
-    char *string = lambda_print_tree(tree);
-    printf("Syntax tree: %s\n", string);
-    free(string);
+    printf("Syntax tree: ---------\n");
+    TSNode root_node = ts_tree_root_node(tree);
+    print_ts_node(root_node, 0);
+    
     // todo: verify the source tree, report errors if any
     // we'll transpile functions without error, and ignore the rest
 
@@ -290,7 +290,6 @@ int main(void) {
         printf("Failed to initialize AST node pool\n");  return 1;
     }
 
-    TSNode root_node = ts_tree_root_node(tree);
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
         strbuf_free(source_buf);  ts_parser_delete(parser);

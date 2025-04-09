@@ -65,6 +65,11 @@ struct AstNode {
 
 typedef struct {
     AstNode;  // extends AstNode
+    AstNode *expr;
+} AstPrimaryNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
     AstNode *left, *right;
 } AstBinaryNode;
 
@@ -149,3 +154,4 @@ void* alloc_ast_bytes(Transpiler* tp, size_t size);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 AstNode* print_ast_node(AstNode *node, int indent);
+void print_ts_node(TSNode node, uint32_t indent);

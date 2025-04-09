@@ -27,9 +27,30 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
   return tree;
 }
 
-char* lambda_print_tree(TSTree* tree) {
-  TSNode root_node = ts_tree_root_node(tree);
-  char *string = ts_node_string(root_node);
-  return string;
+void print_ts_node(TSNode node, uint32_t indent) {
+  for (uint32_t i = 0; i < indent; i++) {
+      printf("  ");  // 2 spaces per indent level
+  }
+  const char *type = ts_node_type(node);
+  printf("(%s", type);
+
+  uint32_t child_count = ts_node_child_count(node);
+  if (child_count > 0) {
+      printf("\n");
+      for (uint32_t i = 0; i < child_count; i++) {
+          TSNode child = ts_node_child(node, i);
+          print_ts_node(child, indent + 1);
+      }
+      for (uint32_t i = 0; i < indent; i++) {
+          printf("  ");
+      }
+  }
+  printf(")\n");
 }
+
+// char* lambda_print_tree(TSTree* tree) {
+//   TSNode root_node = ts_tree_root_node(tree);
+//   char *string = ts_node_string(root_node);
+//   return string;
+// }
 
