@@ -7,6 +7,7 @@
 #include "../lib/hashmap.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/arraylist.h"
+#include "../lib/strview.h"
 
 typedef enum LambdaTypeId {
     LMD_TYPE_NULL,
@@ -26,6 +27,21 @@ typedef struct LambdaType {
     int length;  // length of array
 } LambdaType;
 
+typedef struct AstNode AstNode;
+
+// entry in the name_stack
+typedef struct {
+    StrView name;
+    AstNode* node;  // AST node that defines the name
+} NameEntry;
+
+// name_scope
+typedef struct NameScope {
+    NameEntry* start_entry;  // start name entry in the current scope
+    NameEntry* end_entry;  // end name entry in the current scope
+    struct NameScope* parent;  // parent scope
+} NameScope;
+
 typedef enum AstNodeType {
     AST_NODE_NULL,
     AST_NODE_PRIMARY,
@@ -39,12 +55,12 @@ typedef enum AstNodeType {
     AST_NODE_LET_STAM,
 } AstNodeType;
 
-typedef struct AstNode {
+struct AstNode {
     AstNodeType node_type;
     TSNode node;
     LambdaType type;
     struct AstNode* next;
-} AstNode;
+};
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -53,7 +69,7 @@ typedef struct {
 
 typedef struct {
     AstNode;  // extends AstNode
-    TSNode name;
+    StrView name;
     AstNode *expr;
 } AstAssignNode;
 
@@ -79,25 +95,30 @@ typedef struct {
     AstNode;  // extends AstNode
     TSNode name;
     AstNode *body;
+    NameScope *params;  // params for the function
+    NameScope *locals;  // local variables in the function
 } AstFuncNode;
 
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *child;  // first child
+    NameScope *global_vars;  // global variables
 } AstScript;
 
-typedef struct {
-    // todo: should have a name pool
-    char* name;
-    AstNode* node;  // AST node that defines the name
-} NameEntry;
+typedef enum {
+    TP_DECLARE,  // var declaration phase
+    TP_COMPOSE,  // expr composition phase
+} TranspilePhase;
 
 typedef struct {
     StrBuf* code_buf;
     const char* source;
     VariableMemPool* ast_node_pool;
     AstNode *ast_root;
+    // todo: have a hashmap to speed up name lookup
     ArrayList *name_stack;
+    TranspilePhase phase;
+    NameScope* current_scope;  // current name scope
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;
@@ -121,13 +142,9 @@ typedef struct {
     TSFieldId ID_NAME;
     TSFieldId ID_BODY;
     TSFieldId ID_DECLARE;
-
-    enum TP_PHASE {
-        DECLARE,  // var declaration phase
-        EVALUATE,  // expr evaluation phase
-    } phase;
 } Transpiler;
 
+void* alloc_ast_bytes(Transpiler* tp, size_t size);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 AstNode* print_ast_node(AstNode *node, int indent);

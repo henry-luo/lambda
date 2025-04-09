@@ -54,6 +54,7 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
+/*
 void transpile_ts_node(Transpiler* tp, TSNode node) {
     TSSymbol symbol = ts_node_symbol(node);
     if (symbol == tp->SYM_TRUE) {
@@ -73,6 +74,7 @@ void transpile_ts_node(Transpiler* tp, TSNode node) {
         // strbuf_append_str(tp->code_buf, ts_node_type(node));
     }
 }
+*/
 
 void transpile_primary_expr(Transpiler* tp, AstNode *pri_node) {
     printf("transpile primary expr\n");
@@ -130,7 +132,7 @@ void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     }
     strbuf_append_char(tp->code_buf, ' ');
     // declare the variable
-    writeNodeSource(tp, asn_node->name);
+    strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
     strbuf_append_char(tp->code_buf, '=');
 
     transpile_expr(tp, asn_node->expr);
@@ -139,7 +141,7 @@ void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
 
 void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
     printf("transpile let expr\n");
-    if (tp->phase == DECLARE) {
+    if (tp->phase == TP_DECLARE) {
         AstNode *declare = let_node->declare;
         while (declare) {
             printf("transpile let declare\n");
@@ -147,7 +149,7 @@ void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
             declare = declare->next;
         }
     }
-    else if (tp->phase == EVALUATE) {
+    else if (tp->phase == TP_COMPOSE) {
         printf("transpile let then\n");
         transpile_expr(tp, let_node->then);
     }
@@ -188,25 +190,28 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, " (){\n");
    
     // get the function body
-    tp->phase = DECLARE;
+    tp->phase = TP_DECLARE;
     transpile_expr(tp, fn_node->body);
     
-    tp->phase = EVALUATE;
+    tp->phase = TP_COMPOSE;
     strbuf_append_str(tp->code_buf, "void* ret=");
     transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
 }
 
 void transpile_script(Transpiler* tp, AstScript *script) {
+    strbuf_append_str(tp->code_buf, "#include <stdio.h>\n#include <stdbool.h>\n#define null 0\n"
+        "typedef void* Item;\n");
+
     AstNode *node = script->child;
-    tp->phase = DECLARE;
+    tp->phase = TP_DECLARE;
     while (node) {
         if (node->node_type == AST_NODE_LET_STAM) {
             transpile_let_expr(tp, (AstLetNode*)node);
         }
         node = node->next;
     }
-    tp->phase = EVALUATE;
+    tp->phase = TP_COMPOSE;
     node = script->child;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
@@ -214,7 +219,7 @@ void transpile_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }    
-    strbuf_append_str(tp->code_buf, "int main() { void* ret=_main(); printf(\"%s\\n\", (char*)ret); return 0;}\n");
+    strbuf_append_str(tp->code_buf, "int main() {void* ret=_main(); printf(\"%s\\n\", (char*)ret); return 0;}\n");
 
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);
     writeTextFile("hello-world.c", tp->code_buf->str);  
@@ -226,17 +231,17 @@ int main(void) {
 
     printf("Starting transpiler...\n");
 
-    // Create a parser.
+    // create a parser.
     const TSParser* parser = lambda_parser();
     if (parser == NULL) { return 1; }
-
-    StrBuf* buf = readTextFile("hello-world.ls");
-    printf("%s\n", buf->str); // Print the file content
-    tp.source = buf->str;
+    // read the source and parse it
+    StrBuf* source_buf = readTextFile("hello-world.ls");
+    // printf("%s\n", buf->str); // print the file content
+    tp.source = source_buf->str;
     TSTree* tree = lambda_parse_source(parser, tp.source);
     if (tree == NULL) {
         printf("Error: Failed to parse the source code.\n");
-        strbuf_free(buf);  ts_parser_delete(parser);
+        strbuf_free(source_buf);  ts_parser_delete(parser);
         return 1;
     }
 
@@ -262,10 +267,12 @@ int main(void) {
     tp.ID_BODY = ts_language_field_id_for_name(ts_tree_language(tree), "body", 4);
     tp.ID_DECLARE = ts_language_field_id_for_name(ts_tree_language(tree), "declare", 7);
 
-    // Print the syntax tree as an S-expression.
+    // print the syntax tree as an S-expression.
     char *string = lambda_print_tree(tree);
     printf("Syntax tree: %s\n", string);
     free(string);
+    // todo: verify the source tree, report errors if any
+    // we'll transpile functions without error, and ignore the rest
 
     // build the AST from the syntax tree
     size_t grow_size = 4096;  // 4k
@@ -274,12 +281,12 @@ int main(void) {
     if (MEM_POOL_ERR_OK != pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent)) {
         printf("Failed to initialize AST node pool\n");  return 1;
     }
-    tp.name_stack = arraylist_new(16);
+    tp.name_stack = arraylist_new(32);
 
     TSNode root_node = ts_tree_root_node(tree);
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
-        strbuf_free(buf);  ts_parser_delete(parser);
+        strbuf_free(source_buf);  ts_parser_delete(parser);
         ts_tree_delete(tree);
         return 1;
     }
@@ -291,12 +298,10 @@ int main(void) {
     // transpile the AST to C code
     printf("transpiling...\n");
     tp.code_buf = strbuf_new_cap(1024);
-    strbuf_append_str(tp.code_buf, "#include <stdio.h>\n#include <stdbool.h>\n#define null 0\n"
-        "typedef void* Item;\n");
     transpile_script(&tp, (AstScript*)tp.ast_root);
 
     // clean up
-    strbuf_free(buf);
+    strbuf_free(source_buf);
     strbuf_free(tp.code_buf);
     ts_tree_delete(tree);
     ts_parser_delete(parser);

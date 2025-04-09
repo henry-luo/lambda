@@ -38,7 +38,8 @@
         "mem_pool.h": "c",
         "complex": "c",
         "type_traits": "c",
-        "variant": "c"
+        "variant": "c",
+        "strview.h": "c"
     },
     "cmake.sourceDirectory": "/Users/henryluo/Projects/Jubily/lambda-parser/tree-sitter-javascript"
 }

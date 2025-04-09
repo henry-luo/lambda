@@ -17,6 +17,14 @@ AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size
     return ast_node;
 }
 
+void* alloc_ast_bytes(Transpiler* tp, size_t size) {
+    void* bytes;
+    pool_variable_alloc(tp->ast_node_pool, size, &bytes);
+    if (!bytes) { return NULL; }
+    memset(bytes, 0, size);
+    return bytes;
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     printf("build primary expr\n");
     AstNode* ast_node = alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstNode));
@@ -111,12 +119,25 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("build assign expr\n");
     AstAssignNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstAssignNode));
 
-    ast_node->name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
-    if (ts_node_is_null(ast_node->name)) { printf("no identifier found\n"); return NULL; }
+    TSNode name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
+    int start_byte = ts_node_start_byte(name);
+    ast_node->name.str = tp->source + start_byte;
+    ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
     TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_BODY);
-    if (ts_node_is_null(val_node)) { printf("no value found\n"); return NULL; }
     ast_node->expr = build_expr(tp, val_node);
+
+    // determine the type of the variable
+    ast_node->type = ast_node->expr->type;
+
+    // push the name to the name stack
+    printf("pushing name %.*s\n", ast_node->name.length, ast_node->name.str);
+    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
+    entry->name = ast_node->name;  entry->node = ast_node;
+    if (!tp->current_scope->start_entry) {
+        tp->current_scope->start_entry = entry;
+    }
+    tp->current_scope->end_entry = entry;
     return ast_node;
 }
 
@@ -200,6 +221,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == tp->SYM_LET_EXPR) {
         return build_let_expr(tp, expr_node);
     }
+    else if (symbol == tp->SYM_LET_STAM) {
+        return build_let_stam(tp, expr_node);
+    }    
     else if (symbol == tp->SYM_ASSIGNMENT_EXPR) {
         return build_assign_expr(tp, expr_node);
     }
@@ -208,9 +232,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == tp->SYM_FUNC) {
         return build_func(tp, expr_node);
-    }
-    else if (symbol == tp->SYM_LET_STAM) {
-        return build_let_stam(tp, expr_node);
     }
     else {
         printf("unknown expr %s\n", ts_node_type(expr_node));
@@ -280,6 +301,9 @@ AstNode* print_ast_node(AstNode *node, int indent) {
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
     printf("build script\n");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
+    tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+
+    // build the script body
     TSNode child = ts_node_named_child(script_node, 0);
     AstNode* prev = NULL;
     while (!ts_node_is_null(child)) {

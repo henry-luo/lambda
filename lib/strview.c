@@ -59,9 +59,7 @@ int strview_find(const StrView* s, const char* substr) {
 }
 
 void strview_trim(StrView* s) {
-    if (!s || !s->length) {
-        return;
-    }
+    if (!s || !s->length) { return; }
     
     // Trim start
     size_t start = 0;

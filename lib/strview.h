@@ -5,8 +5,8 @@
 #include <stdbool.h>
 
 typedef struct {
-    char* str;      // Pointer to null-terminated string data
-    size_t length;      // Length excluding null terminator
+    char* str;      // pointer to string data (may or may-not be null-terminated)
+    size_t length;      // length excluding null terminator
 } StrView;
 
 // String View functions
