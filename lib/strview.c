@@ -18,14 +18,14 @@ StrView strview_sub(const StrView* s, size_t start, size_t end) {
     return (StrView){.str = s->str + start, .length = end - start};
 }
 
-bool strview_equals(const StrView* a, const StrView* b) {
+bool strview_eq(const StrView* a, const StrView* b) {
     if (!a || !b || a->length != b->length) {
         return false;
     }
     return strncmp(a->str, b->str, a->length) == 0;
 }
 
-bool strview_starts_with(const StrView* s, const char* prefix) {
+bool strview_start_with(const StrView* s, const char* prefix) {
     if (!s || !prefix) {
         return false;
     }
@@ -36,7 +36,7 @@ bool strview_starts_with(const StrView* s, const char* prefix) {
     return strncmp(s->str, prefix, prefix_len) == 0;
 }
 
-bool strview_ends_with(const StrView* s, const char* suffix) {
+bool strview_end_with(const StrView* s, const char* suffix) {
     if (!s || !suffix) {
         return false;
     }

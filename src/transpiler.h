@@ -30,15 +30,16 @@ typedef struct LambdaType {
 typedef struct AstNode AstNode;
 
 // entry in the name_stack
-typedef struct {
+typedef struct NameEntry {
     StrView name;
     AstNode* node;  // AST node that defines the name
+    struct NameEntry* next;
 } NameEntry;
 
 // name_scope
 typedef struct NameScope {
-    NameEntry* start_entry;  // start name entry in the current scope
-    NameEntry* end_entry;  // end name entry in the current scope
+    NameEntry* first;  // start name entry in the current scope
+    NameEntry* last;  // last name entry in the current scope
     struct NameScope* parent;  // parent scope
 } NameScope;
 
@@ -116,7 +117,6 @@ typedef struct {
     VariableMemPool* ast_node_pool;
     AstNode *ast_root;
     // todo: have a hashmap to speed up name lookup
-    ArrayList *name_stack;
     TranspilePhase phase;
     NameScope* current_scope;  // current name scope
 
@@ -133,6 +133,7 @@ typedef struct {
     TSSymbol SYM_PRIMARY_EXPR;
     TSSymbol SYM_FUNC;
     TSSymbol SYM_LET_STAM;
+    TSSymbol SYM_IDENTIFIER;
 
     TSFieldId ID_COND;
     TSFieldId ID_THEN;

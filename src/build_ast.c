@@ -33,6 +33,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
 
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
+    printf("primary expr symbol %d\n", symbol);
     if (symbol == tp->SYM_NULL) {
         ast_node->type = NULL_TYPE;
     }
@@ -47,6 +48,31 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }
     else if (symbol == tp->SYM_NULL) {
         ast_node->type = NULL_TYPE;
+    }
+    else if (symbol == tp->SYM_IDENTIFIER) {
+        printf("building identifier\n");
+        // get the identifier name
+        // check if the name is in the name stack
+        StrView var_name = {tp->source + ts_node_start_byte(child), ts_node_end_byte(child) - ts_node_start_byte(child)};
+        NameScope *scope = tp->current_scope;
+        FIND_VAR_NAME:
+        NameEntry *entry = scope->first;
+        while (entry) {
+            if (strview_eq(&entry->name, &var_name)) { break; }
+            entry = entry->next;
+        }
+        if (!entry) {
+            if (tp->current_scope->parent) {
+                scope = tp->current_scope->parent;
+                goto FIND_VAR_NAME;
+            }
+            printf("missing identifier %.*s\n", var_name.length, var_name.str);
+            ast_node->type = NULL_TYPE;
+        }
+        else {
+            printf("found identifier %.*s\n", entry->name.length, entry->name.str);
+            ast_node->type = entry->node->type;
+        }
     }
     else {
         ast_node->type = NULL_TYPE;
@@ -78,6 +104,8 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     ast_node->then = build_expr(tp, then_node);
     TSNode else_node = ts_node_child_by_field_id(if_node, tp->ID_ELSE);
     ast_node->otherwise = build_expr(tp, else_node);
+    // determine the type of the if expression
+    ast_node->type = ast_node->then->type;
     return ast_node;
 }
 
@@ -112,6 +140,9 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     ast_node->then = build_expr(tp, then_node);
     if (!ast_node->then) { printf("missing let then\n"); }
     else { printf("got let then type %d\n", ast_node->then->node_type); }
+
+    // determine let node type
+    ast_node->type = ast_node->then->type;
     return ast_node;
 }
 
@@ -134,10 +165,10 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("pushing name %.*s\n", ast_node->name.length, ast_node->name.str);
     NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
     entry->name = ast_node->name;  entry->node = ast_node;
-    if (!tp->current_scope->start_entry) {
-        tp->current_scope->start_entry = entry;
-    }
-    tp->current_scope->end_entry = entry;
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (!tp->current_scope->last) { tp->current_scope->last = entry; }
+    else { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
     return ast_node;
 }
 
@@ -197,12 +228,13 @@ AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("infer function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
+    ast_node->type.type = LMD_TYPE_FUNC;
     // get the function name
     TSNode fn_name_node = ts_node_child_by_field_id(func_node, tp->ID_NAME);
     ast_node->name = fn_name_node;
     // get the function body
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, tp->ID_BODY);
-    ast_node->body = build_expr(tp, fn_body_node);
+    ast_node->body = build_expr(tp, fn_body_node);    
     return ast_node;
 }
 

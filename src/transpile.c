@@ -54,6 +54,31 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
+void writeType(Transpiler* tp, LambdaTypeId type_id) {
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        strbuf_append_str(tp->code_buf, "void*");
+        break;
+    case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "long");
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "double");
+        break;
+    case LMD_TYPE_STRING:
+        strbuf_append_str(tp->code_buf, "char*");
+        break;
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "bool");
+        break;
+    case LMD_TYPE_ARRAY:
+        strbuf_append_str(tp->code_buf, "Item*");
+        break;
+    default:
+        printf("unknown type %d\n", type_id);
+    }
+}
+
 /*
 void transpile_ts_node(Transpiler* tp, TSNode node) {
     TSSymbol symbol = ts_node_symbol(node);
@@ -108,28 +133,7 @@ void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     // declare the type
     LambdaTypeId type_id = asn_node->expr->type.type;
     printf("assigned type id: %d\n", type_id);
-    switch (type_id) {
-    case LMD_TYPE_NULL:
-        strbuf_append_str(tp->code_buf, "void*");
-        break;
-    case LMD_TYPE_INT:
-        strbuf_append_str(tp->code_buf, "long");
-        break;
-    case LMD_TYPE_FLOAT:
-        strbuf_append_str(tp->code_buf, "double");
-        break;
-    case LMD_TYPE_STRING:
-        strbuf_append_str(tp->code_buf, "char*");
-        break;
-    case LMD_TYPE_BOOL:
-        strbuf_append_str(tp->code_buf, "bool");
-        break;
-    case LMD_TYPE_ARRAY:
-        strbuf_append_str(tp->code_buf, "Item*");
-        break;
-    default:
-        printf("unknown type %d\n", type_id);
-    }
+    writeType(tp, type_id);
     strbuf_append_char(tp->code_buf, ' ');
     // declare the variable
     strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
@@ -183,9 +187,11 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 }
 
 void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
+    // use function body type as the return type for the time being
+    LambdaTypeId ret_type = fn_node->body->type.type;
+    writeType(tp, ret_type);
     // write the function name, with a prefix '_', so as to diff from built-in functions
-    strbuf_append_str(tp->code_buf, "int _");
-    int name_start = tp->code_buf->length;
+    strbuf_append_str(tp->code_buf, " _");
     writeNodeSource(tp, fn_node->name);
     strbuf_append_str(tp->code_buf, " (){\n");
    
@@ -194,7 +200,8 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     transpile_expr(tp, fn_node->body);
     
     tp->phase = TP_COMPOSE;
-    strbuf_append_str(tp->code_buf, "void* ret=");
+    writeType(tp, ret_type);
+    strbuf_append_str(tp->code_buf, " ret=");
     transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
 }
@@ -257,6 +264,7 @@ int main(void) {
     tp.SYM_BINARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "binary_expr", 11, true);
     tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
     tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
+    tp.SYM_IDENTIFIER = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
 
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
@@ -281,7 +289,6 @@ int main(void) {
     if (MEM_POOL_ERR_OK != pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent)) {
         printf("Failed to initialize AST node pool\n");  return 1;
     }
-    tp.name_stack = arraylist_new(32);
 
     TSNode root_node = ts_tree_root_node(tree);
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
