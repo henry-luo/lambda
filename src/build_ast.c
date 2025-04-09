@@ -30,16 +30,22 @@ AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
     ast_node->type.type = LMD_TYPE_ARRAY;
     TSNode child = ts_node_named_child(array_node, 0);
-    AstNode* prev_item = NULL;
+    AstNode* prev_item = NULL;  LambdaType *nested_type = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
-        if (prev_item) { prev_item->next = item; }
-        else { ast_node->item = item; }
+        if (!prev_item) { 
+            ast_node->item = item;  nested_type = &item->type;
+        } else {  
+            prev_item->next = item;
+            if (nested_type && item->type.type != nested_type->type) {
+                nested_type = NULL;  // type mismatch, reset the nested type to NULL
+            }
+        }
         prev_item = item;
         ast_node->type.length++;
         child = ts_node_next_named_sibling(child);
     }
-    if (prev_item) ast_node->type.nested = &prev_item->type;
+    ast_node->type.nested = nested_type;
     return ast_node;
 }
 

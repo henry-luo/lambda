@@ -53,7 +53,8 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
-void writeType(Transpiler* tp, LambdaTypeId type_id) {
+void writeType(Transpiler* tp, LambdaType *type) {
+    LambdaTypeId type_id = type->type;
     switch (type_id) {
     case LMD_TYPE_NULL:
         strbuf_append_str(tp->code_buf, "void*");
@@ -71,7 +72,11 @@ void writeType(Transpiler* tp, LambdaTypeId type_id) {
         strbuf_append_str(tp->code_buf, "bool");
         break;
     case LMD_TYPE_ARRAY:
-        strbuf_append_str(tp->code_buf, "Item*");
+        if (type->nested && type->nested->type == LMD_TYPE_INT) {
+            strbuf_append_str(tp->code_buf, "long*");
+        } else {
+            strbuf_append_str(tp->code_buf, "Item*");
+        }
         break;
     default:
         printf("unknown type %d\n", type_id);
@@ -113,9 +118,9 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
 
 void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     // declare the type
-    LambdaTypeId type_id = asn_node->expr->type.type;
-    printf("assigned type id: %d\n", type_id);
-    writeType(tp, type_id);
+    LambdaType *type = &asn_node->expr->type;
+    printf("assigned type id: %d\n", type->type);
+    writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
     // declare the variable
     strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
@@ -143,16 +148,19 @@ void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
-    strbuf_append_str(tp->code_buf, "array(");
+    strbuf_append_str(tp->code_buf, (array_node->type.nested && array_node->type.nested->type == LMD_TYPE_INT) 
+        ? "array_long(" : "array(");
+    strbuf_append_int(tp->code_buf, array_node->type.length);
+    strbuf_append_char(tp->code_buf, ',');
     AstNode *item = array_node->item;
     while (item) {
         transpile_expr(tp, item);
         if (item->next) {
-            strbuf_append_str(tp->code_buf, ", ");
+            strbuf_append_char(tp->code_buf, ',');
         }
         item = item->next;
     }
-    strbuf_append_str(tp->code_buf, ")");
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
@@ -187,7 +195,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 
 void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // use function body type as the return type for the time being
-    LambdaTypeId ret_type = fn_node->body->type.type;
+    LambdaType *ret_type = &fn_node->body->type;
     writeType(tp, ret_type);
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
