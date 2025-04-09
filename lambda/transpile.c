@@ -248,7 +248,7 @@ int main(void) {
     const TSParser* parser = lambda_parser();
     if (parser == NULL) { return 1; }
     // read the source and parse it
-    StrBuf* source_buf = readTextFile("hello-world.ls");
+    StrBuf* source_buf = readTextFile("test/hello-world.ls");
     // printf("%s\n", buf->str); // print the file content
     tp.source = source_buf->str;
     TSTree* tree = lambda_parse_source(parser, tp.source);

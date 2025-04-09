@@ -1,6 +1,6 @@
 {
    "_tmp":["event.c"],
-    "output": "window",
+    "output": "window.exe",
     "source_files": [
         "radiant/window.c",
         "radiant/ui_context.c",
