@@ -214,7 +214,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_script(Transpiler* tp, AstScript *script) {
-    strbuf_append_str(tp->code_buf, "#include \"src/lambda.h\"\n");
+    strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
 
     AstNode *node = script->child;
     tp->phase = TP_DECLARE;
