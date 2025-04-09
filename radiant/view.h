@@ -5,7 +5,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <thorvg_capi.h>
-#include "./lib/mem-pool/include/mem_pool.h"
+#include "../lib/mem-pool/include/mem_pool.h"
 #include "event.h"
 #include "flex.h"
 

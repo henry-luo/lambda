@@ -10,12 +10,12 @@
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
 #include <lexbor/url/url.h>
-#include "./lib/strview.h"
-#include "./lib/strbuf.h"
-#include "./lib/hashmap.h"
-#include "./lib/arraylist.h"
-#include "./lib/utf.h"
-#include "zlog.h" 
+#include <zlog.h> 
+#include "../lib/strview.h"
+#include "../lib/strbuf.h"
+#include "../lib/hashmap.h"
+#include "../lib/arraylist.h"
+#include "../lib/utf.h"
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
