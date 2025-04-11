@@ -82,7 +82,7 @@ typedef struct {
 typedef struct {
     AstNode;  // extends AstNode
     StrView name;
-    AstNode *expr;
+    AstNode *then;
 } AstAssignNode;
 
 typedef struct {
@@ -90,6 +90,12 @@ typedef struct {
     AstNode *declare;  // declarations in let expression
     AstNode *then;
 } AstLetNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *loop;
+    AstNode *then;
+} AstForNode;
 
 typedef struct {
     AstNode;  // extends AstNode

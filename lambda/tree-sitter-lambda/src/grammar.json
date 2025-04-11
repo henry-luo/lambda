@@ -686,6 +686,10 @@
         {
           "type": "SYMBOL",
           "name": "if_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "for_expr"
         }
       ]
     },
@@ -1140,7 +1144,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "binary_equality",
+          "value": "binary_eq",
           "content": {
             "type": "SEQ",
             "members": [
@@ -1173,7 +1177,7 @@
         },
         {
           "type": "PREC_LEFT",
-          "value": "binary_equality",
+          "value": "binary_eq",
           "content": {
             "type": "SEQ",
             "members": [
@@ -1339,42 +1343,38 @@
       ]
     },
     "unary_expr": {
-      "type": "PREC_LEFT",
-      "value": "unary_void",
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "FIELD",
-            "name": "operator",
-            "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "not"
-                },
-                {
-                  "type": "STRING",
-                  "value": "-"
-                },
-                {
-                  "type": "STRING",
-                  "value": "+"
-                }
-              ]
-            }
-          },
-          {
-            "type": "FIELD",
-            "name": "argument",
-            "content": {
-              "type": "SYMBOL",
-              "name": "expression"
-            }
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "operator",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "not"
+              },
+              {
+                "type": "STRING",
+                "value": "-"
+              },
+              {
+                "type": "STRING",
+                "value": "+"
+              }
+            ]
           }
-        ]
-      }
+        },
+        {
+          "type": "FIELD",
+          "name": "then",
+          "content": {
+            "type": "SYMBOL",
+            "name": "expression"
+          }
+        }
+      ]
     },
     "identifier": {
       "type": "TOKEN",
@@ -1453,7 +1453,7 @@
         },
         {
           "type": "FIELD",
-          "name": "body",
+          "name": "then",
           "content": {
             "type": "SYMBOL",
             "name": "expression"
@@ -1560,6 +1560,76 @@
         ]
       }
     },
+    "loop_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "STRING",
+          "value": "in"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "expression"
+        }
+      ]
+    },
+    "for_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "for"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "declare",
+          "content": {
+            "type": "SYMBOL",
+            "name": "loop_expr"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "FIELD",
+                "name": "declare",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "loop_expr"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        },
+        {
+          "type": "FIELD",
+          "name": "then",
+          "content": {
+            "type": "SYMBOL",
+            "name": "expression"
+          }
+        }
+      ]
+    },
     "let_stam": {
       "type": "SEQ",
       "members": [
@@ -1620,8 +1690,8 @@
         "value": "call"
       },
       {
-        "type": "STRING",
-        "value": "unary_void"
+        "type": "SYMBOL",
+        "name": "unary_expr"
       },
       {
         "type": "STRING",
@@ -1649,7 +1719,7 @@
       },
       {
         "type": "STRING",
-        "value": "binary_equality"
+        "value": "binary_eq"
       },
       {
         "type": "STRING",
@@ -1673,7 +1743,11 @@
       },
       {
         "type": "STRING",
-        "value": "ternary"
+        "value": "to"
+      },
+      {
+        "type": "STRING",
+        "value": "in"
       },
       {
         "type": "SYMBOL",
@@ -1682,6 +1756,10 @@
       {
         "type": "SYMBOL",
         "name": "if_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "for_expr"
       }
     ]
   ],

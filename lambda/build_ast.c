@@ -212,11 +212,11 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_BODY);
-    ast_node->expr = build_expr(tp, val_node);
+    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_THEN);
+    ast_node->then = build_expr(tp, val_node);
 
     // determine the type of the variable
-    ast_node->type = ast_node->expr->type;
+    ast_node->type = ast_node->then->type;
 
     // push the name to the name stack
     printf("pushing name %.*s\n", ast_node->name.length, ast_node->name.str);
@@ -338,7 +338,7 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_ASSIGN:
         printf("[assign expr]\n");
-        print_ast_node(((AstAssignNode*)node)->expr, indent + 1);
+        print_ast_node(((AstAssignNode*)node)->then, indent + 1);
         break;
     case AST_NODE_ARRAY:
         printf("[array expr]\n");

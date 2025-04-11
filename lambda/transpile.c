@@ -118,7 +118,7 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
 
 void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     // declare the type
-    LambdaType *type = &asn_node->expr->type;
+    LambdaType *type = &asn_node->then->type;
     printf("assigned type id: %d\n", type->type);
     writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
@@ -126,7 +126,7 @@ void transpile_assign_expr(Transpiler* tp, AstAssignNode *asn_node) {
     strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
     strbuf_append_char(tp->code_buf, '=');
 
-    transpile_expr(tp, asn_node->expr);
+    transpile_expr(tp, asn_node->then);
     strbuf_append_str(tp->code_buf, ";\n");
 }
 

@@ -39,31 +39,29 @@ module.exports = grammar({
     $._parenthesized_expr,
   ],
 
-  precedences: $ => [
-    [
-      'member',
-      'template_call',
-      'call',
-      // $.update_expression,
-      'unary_void',
-      'binary_exp',
-      'binary_times',
-      'binary_plus',
-      'binary_shift',
-      'binary_compare',
-      'binary_relation',
-      'binary_equality',
-      'bitwise_and',
-      'bitwise_xor',
-      'bitwise_or',
-      'logical_and',
-      'logical_or',
-      'ternary',
-      // $.sequence_expression,
-      $.let_expr,
-      $.if_expr,
-    ],
-  ],  
+  precedences: $ => [[
+    'member',
+    'template_call',
+    'call',
+    $.unary_expr,
+    'binary_exp',
+    'binary_times',
+    'binary_plus',
+    'binary_shift',
+    'binary_compare',
+    'binary_relation',
+    'binary_eq',
+    'bitwise_and',
+    'bitwise_xor',
+    'bitwise_or',
+    'logical_and',
+    'logical_or',
+    'to',
+    'in',
+    $.let_expr,
+    $.if_expr,
+    $.for_expr
+  ]],  
 
   // conflicts: $ => [],
 
@@ -173,17 +171,12 @@ module.exports = grammar({
 
     expression: $ => choice(
       $.primary_expr,
-      // $.assignment_expression,
-      // $.augmented_assignment_expression,
       // $.await_expression,
       $.unary_expr,
       $.binary_expr,
-      // $.ternary_expression,
-      // $.update_expression,
-      // $.new_expression,
-      // $.yield_expression,
       $.let_expr,
       $.if_expr,
+      $.for_expr,
     ),
 
     primary_expr: $ => choice(
@@ -235,8 +228,8 @@ module.exports = grammar({
         ['**', 'binary_exp', 'right'],
         ['<', 'binary_relation'],
         ['<=', 'binary_relation'],
-        ['==', 'binary_equality'],
-        ['!=', 'binary_equality'],
+        ['==', 'binary_eq'],
+        ['!=', 'binary_eq'],
         ['>=', 'binary_relation'],
         ['>', 'binary_relation'],
         ['to', 'binary_relation'],
@@ -250,10 +243,10 @@ module.exports = grammar({
       ),
     ),
 
-    unary_expr: $ => prec.left('unary_void', seq(
-      field('operator', choice('not', '-', '+')), // 'typeof', 'void', 'delete', '~' bitwise_not
-      field('argument', $.expression),
-    )),
+    unary_expr: $ => seq(
+      field('operator', choice('not', '-', '+')),
+      field('then', $.expression),
+    ),
 
     identifier: _ => {
       // copied from JS grammar
@@ -269,7 +262,7 @@ module.exports = grammar({
     ),
 
     assignment_expr: $ => seq(
-      field('name', $.identifier), '=', field('body', $.expression),
+      field('name', $.identifier), '=', field('then', $.expression),
     ),
 
     let_expr: $ => seq(
@@ -282,6 +275,16 @@ module.exports = grammar({
       field('then', $.expression),
       optional(seq('else', field('else', $.expression))),
     )),
+
+    loop_expr: $ => seq(
+      $.identifier, 'in', $.expression,
+    ),
+    
+    for_expr: $ => seq(
+      'for', '(', field('declare', $.loop_expr), 
+      repeat(seq(',', field('declare', $.loop_expr))), ')', 
+      field('then', $.expression),
+    ),    
 
     let_stam: $ => seq(
       'let', repeat1(seq(field('declare', $.assignment_expr), ',')), ';'
