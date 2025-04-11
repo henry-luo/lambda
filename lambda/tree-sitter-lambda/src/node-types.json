@@ -319,6 +319,36 @@
     }
   },
   {
+    "type": "member_expr",
+    "named": true,
+    "fields": {
+      "field": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          }
+        ]
+      },
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "object",
     "named": true,
     "fields": {},
@@ -420,6 +450,10 @@
           "named": true
         },
         {
+          "type": "member_expr",
+          "named": true
+        },
+        {
           "type": "null",
           "named": true
         },
@@ -433,6 +467,10 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "subscript_expr",
           "named": true
         },
         {
@@ -463,6 +501,32 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "subscript_expr",
+    "named": true,
+    "fields": {
+      "field": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "expression",
+            "named": true
+          }
+        ]
+      },
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -563,6 +627,10 @@
     "named": false
   },
   {
+    "type": ".",
+    "named": false
+  },
+  {
     "type": "/",
     "named": false
   },
@@ -641,6 +709,10 @@
   {
     "type": "in",
     "named": false
+  },
+  {
+    "type": "integer",
+    "named": true
   },
   {
     "type": "let",

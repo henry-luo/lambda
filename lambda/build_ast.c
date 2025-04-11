@@ -49,6 +49,52 @@ AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
     return ast_node;
 }
 
+AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
+    printf("build field expr\n");
+    AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_FIELD_EXPR, array_node, sizeof(AstFieldNode));
+    TSNode object_node = ts_node_child_by_field_id(array_node, tp->ID_OBJECT);
+    ast_node->object = build_expr(tp, object_node);
+    TSNode field_node = ts_node_child_by_field_id(array_node, tp->ID_FIELD);
+    ast_node->field = build_expr(tp, field_node);
+    if (ast_node->object->type.type == LMD_TYPE_ARRAY) {
+        ast_node->type = *ast_node->object->type.nested;
+    }
+    else if (ast_node->object->type.type == LMD_TYPE_MAP) {
+        ast_node->type = *ast_node->object->type.nested;
+    }
+    else {
+        ast_node->type = ast_node->object->type;
+    }
+    return ast_node;
+}
+
+LambdaType build_identifier(Transpiler* tp, TSNode id_node) {
+    printf("building identifier\n");
+    // get the identifier name
+    // check if the name is in the name stack
+    StrView var_name = {tp->source + ts_node_start_byte(id_node), 
+        ts_node_end_byte(id_node) - ts_node_start_byte(id_node)};
+    NameScope *scope = tp->current_scope;
+    FIND_VAR_NAME:
+    NameEntry *entry = scope->first;
+    while (entry) {
+        if (strview_eq(&entry->name, &var_name)) { break; }
+        entry = entry->next;
+    }
+    if (!entry) {
+        if (tp->current_scope->parent) {
+            scope = tp->current_scope->parent;
+            goto FIND_VAR_NAME;
+        }
+        printf("missing identifier %.*s\n", var_name.length, var_name.str);
+        return NULL_TYPE;
+    }
+    else {
+        printf("found identifier %.*s\n", entry->name.length, entry->name.str);
+        return entry->node->type;
+    }
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     printf("build primary expr\n");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
@@ -71,32 +117,18 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = STRING_TYPE;
     }
     else if (symbol == tp->SYM_IDENTIFIER) {
-        printf("building identifier\n");
-        // get the identifier name
-        // check if the name is in the name stack
-        StrView var_name = {tp->source + ts_node_start_byte(child), ts_node_end_byte(child) - ts_node_start_byte(child)};
-        NameScope *scope = tp->current_scope;
-        FIND_VAR_NAME:
-        NameEntry *entry = scope->first;
-        while (entry) {
-            if (strview_eq(&entry->name, &var_name)) { break; }
-            entry = entry->next;
-        }
-        if (!entry) {
-            if (tp->current_scope->parent) {
-                scope = tp->current_scope->parent;
-                goto FIND_VAR_NAME;
-            }
-            printf("missing identifier %.*s\n", var_name.length, var_name.str);
-            ast_node->type = NULL_TYPE;
-        }
-        else {
-            printf("found identifier %.*s\n", entry->name.length, entry->name.str);
-            ast_node->type = entry->node->type;
-        }
+        ast_node->type = build_identifier(tp, child);
     }
     else if (symbol == tp->SYM_ARRAY) {
         ast_node->expr = build_array_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == tp->SYM_MEMBER_EXPR) {
+        ast_node->expr = build_field_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == tp->SYM_SUBSCRIPT_EXPR) {
+        ast_node->expr = build_field_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else {

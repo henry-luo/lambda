@@ -163,6 +163,14 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
+void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
+    printf("transpile field expr\n");
+    transpile_expr(tp, field_node->object);
+    strbuf_append_char(tp->code_buf, '[');
+    writeNodeSource(tp, field_node->field->node);
+    strbuf_append_char(tp->code_buf, ']');
+}
+
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     if (!expr_node) {
         printf("missing expression node\n");  return;
@@ -186,6 +194,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_ARRAY:
         transpile_array_expr(tp, (AstArrayNode*)expr_node);
+        break;
+    case AST_NODE_FIELD_EXPR:
+        transpile_field_expr(tp, (AstFieldNode*)expr_node);
         break;
     default:
         printf("unknown expression type\n");
@@ -271,6 +282,8 @@ int main(void) {
     tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
     tp.SYM_IDENTIFIER = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
     tp.SYM_ARRAY = ts_language_symbol_for_name(ts_tree_language(tree), "array", 5, true);
+    tp.SYM_MEMBER_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "member_expr", 11, true);
+    tp.SYM_SUBSCRIPT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "subscript_expr", 14, true);
 
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
@@ -280,6 +293,8 @@ int main(void) {
     tp.ID_NAME = ts_language_field_id_for_name(ts_tree_language(tree), "name", 4);
     tp.ID_BODY = ts_language_field_id_for_name(ts_tree_language(tree), "body", 4);
     tp.ID_DECLARE = ts_language_field_id_for_name(ts_tree_language(tree), "declare", 7);
+    tp.ID_OBJECT = ts_language_field_id_for_name(ts_tree_language(tree), "object", 6);
+    tp.ID_FIELD = ts_language_field_id_for_name(ts_tree_language(tree), "field", 5);
 
     // print the syntax tree as an S-expression.
     printf("Syntax tree: ---------\n");

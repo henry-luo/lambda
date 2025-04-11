@@ -17,6 +17,8 @@ function commaSep(rule) {
   return optional(commaSep1(rule));
 }
 
+const decimalDigits = /\d+/;
+
 module.exports = grammar({
   name: "lambda",
 
@@ -34,7 +36,7 @@ module.exports = grammar({
 
   inline: $ => [
     $._value,
-    $._parenthesized_expression,
+    $._parenthesized_expr,
   ],
 
   precedences: $ => [
@@ -130,25 +132,25 @@ module.exports = grammar({
     )),
 
     number: _ => {
-      const decimalDigits = /\d+/;
       const signedInteger = seq(optional('-'), decimalDigits);
       const exponentPart = seq(choice('e', 'E'), signedInteger);
-
       const decimalIntegerLiteral = seq(
         optional('-'),
-        choice(
-          '0',
-          seq(/[1-9]/, optional(decimalDigits)),
-        ),
+        choice('0', seq(/[1-9]/, optional(decimalDigits))),
       );
-
       const decimalLiteral = choice(
         seq(decimalIntegerLiteral, '.', optional(decimalDigits), optional(exponentPart)),
         seq(decimalIntegerLiteral, optional(exponentPart)),
       );
-
       return token(decimalLiteral);
     },
+
+    integer: _ => {
+      const integerLiteral = seq(
+        choice('0', seq(/[1-9]/, optional(decimalDigits))),
+      );
+      return token(integerLiteral);
+    },    
 
     true: _ => 'true',
     false: _ => 'false',
@@ -165,7 +167,7 @@ module.exports = grammar({
     )),
 
     // Expressions
-    _parenthesized_expression: $ => seq(
+    _parenthesized_expr: $ => seq(
       '(', $.expression, ')',
     ),
 
@@ -185,9 +187,9 @@ module.exports = grammar({
     ),
 
     primary_expr: $ => choice(
-      // $.subscript_expression,
-      // $.member_expression,
-      $._parenthesized_expression,
+      $.subscript_expr,
+      $.member_expr,
+      $._parenthesized_expr,
       $.identifier,
       // alias($._reserved_identifier, $.identifier),
       // $.this,
@@ -208,6 +210,17 @@ module.exports = grammar({
       // $.class,
       // $.meta_property,
       // $.call_expression,
+    ),
+
+    subscript_expr: $ => seq(
+      field('object', $.primary_expr),
+      // optional(field('optional_chain', $.optional_chain)),
+      '[', field('field', $.expression), ']',
+    ),
+    
+    member_expr: $ => seq(
+      field('object',$.primary_expr), ".", 
+      field('field', choice($.identifier, $.integer))
     ),
 
     binary_expr: $ => choice(

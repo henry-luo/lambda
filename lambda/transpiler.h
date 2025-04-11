@@ -54,6 +54,7 @@ typedef enum AstNodeType {
     AST_NODE_FUNC,
     AST_SCRIPT,
     AST_NODE_LET_STAM,
+    AST_NODE_FIELD_EXPR,
 } AstNodeType;
 
 struct AstNode {
@@ -62,6 +63,11 @@ struct AstNode {
     LambdaType type;
     struct AstNode* next;
 };
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *object, *field;
+} AstFieldNode;
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -139,6 +145,8 @@ typedef struct {
     TSSymbol SYM_FUNC;
     TSSymbol SYM_LET_STAM;
     TSSymbol SYM_IDENTIFIER;
+    TSSymbol SYM_MEMBER_EXPR;
+    TSSymbol SYM_SUBSCRIPT_EXPR;
 
     TSFieldId ID_COND;
     TSFieldId ID_THEN;
@@ -148,6 +156,8 @@ typedef struct {
     TSFieldId ID_NAME;
     TSFieldId ID_BODY;
     TSFieldId ID_DECLARE;
+    TSFieldId ID_OBJECT;
+    TSFieldId ID_FIELD;
 } Transpiler;
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
