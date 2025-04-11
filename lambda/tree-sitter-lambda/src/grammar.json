@@ -1436,7 +1436,7 @@
         }
       ]
     },
-    "assignment_expr": {
+    "assign_expr": {
       "type": "SEQ",
       "members": [
         {
@@ -1478,7 +1478,7 @@
                 "name": "declare",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "assignment_expr"
+                  "name": "assign_expr"
                 }
               },
               {
@@ -1564,16 +1564,24 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "identifier"
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
         },
         {
           "type": "STRING",
           "value": "in"
         },
         {
-          "type": "SYMBOL",
-          "name": "expression"
+          "type": "FIELD",
+          "name": "then",
+          "content": {
+            "type": "SYMBOL",
+            "name": "expression"
+          }
         }
       ]
     },
@@ -1647,7 +1655,7 @@
                 "name": "declare",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "assignment_expr"
+                  "name": "assign_expr"
                 }
               },
               {

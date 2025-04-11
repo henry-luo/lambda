@@ -2,26 +2,59 @@
 #include "lambda.h"
 #endif
 
-Array array(int count, ...) {
+Array* array(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    Array arr = malloc(count * sizeof(Item));
+    Array *arr = malloc(sizeof(Array));
+    arr->items = malloc(count * sizeof(Item));
     for (int i = 0; i < count; i++) {
-        arr[i] = va_arg(args, Item);
+        arr->items[i] = va_arg(args, Item);
     }
+    arr->length = count;
     va_end(args);
     return arr;
 }
 
-long* array_long(int count, ...) {
-    long* arr = malloc(count * sizeof(long));
+ArrayLong* array_long(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
+    ArrayLong *arr = malloc(sizeof(ArrayLong));
+    arr->items = malloc(count * sizeof(long));
+    arr->length = count;
     for (int i = 0; i < count; i++) {
-        arr[i] = va_arg(args, long);
+        arr->items[i] = va_arg(args, long);
     }       
     va_end(args);
     return arr;
+}
+
+List* list() {
+    List *list = malloc(sizeof(List));
+    list->items = NULL;
+    list->length = 0;
+    list->capacity = 0;
+    return list;
+}
+void list_push(List *list, Item item) {
+    if (list->length >= list->capacity) {
+        list->capacity = list->capacity ? list->capacity * 2 : 1;
+        list->items = realloc(list->items, list->capacity * sizeof(Item));
+    }
+    list->items[list->length++] = item;
+}
+ListLong* list_long() {
+    ListLong *list = malloc(sizeof(ListLong));
+    list->items = NULL;
+    list->length = 0;
+    list->capacity = 0;
+    return list;
+}
+void list_long_push(ListLong *list, long item) {
+    if (list->length >= list->capacity) {
+        list->capacity = list->capacity ? list->capacity * 2 : 1;
+        list->items = realloc(list->items, list->capacity * sizeof(long));
+    }
+    list->items[list->length++] = item;
 }

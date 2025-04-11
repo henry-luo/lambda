@@ -261,12 +261,12 @@ module.exports = grammar({
       field('body', $.expression), '}',
     ),
 
-    assignment_expr: $ => seq(
+    assign_expr: $ => seq(
       field('name', $.identifier), '=', field('then', $.expression),
     ),
 
     let_expr: $ => seq(
-      'let', repeat1(seq(field('declare', $.assignment_expr), ',')), 
+      'let', repeat1(seq(field('declare', $.assign_expr), ',')), 
       field('then', $.expression),
     ),
 
@@ -277,7 +277,7 @@ module.exports = grammar({
     )),
 
     loop_expr: $ => seq(
-      $.identifier, 'in', $.expression,
+      field('name', $.identifier), 'in', field('then', $.expression),
     ),
     
     for_expr: $ => seq(
@@ -287,7 +287,7 @@ module.exports = grammar({
     ),    
 
     let_stam: $ => seq(
-      'let', repeat1(seq(field('declare', $.assignment_expr), ',')), ';'
+      'let', repeat1(seq(field('declare', $.assign_expr), ',')), ';'
     ),    
 
   },

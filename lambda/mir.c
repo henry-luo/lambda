@@ -5,9 +5,6 @@
 #include "c2mir.h"
 #include "lambda.h"
 
-Array array(int count, ...);
-long* array_long(int count, ...);
-
 typedef struct jit_item {
     char *code;
     size_t code_size;
@@ -25,10 +22,14 @@ typedef struct {
     void (*func)(void);
 } func_obj_t;
 
-func_obj_t func_list[4] = {
+func_obj_t func_list[] = {
     {"printf", (void (*)(void))printf},
     {"array", (void (*)(void))array},
     {"array_long", (void (*)(void))array_long},
+    {"list", (void (*)(void))list},
+    {"list_long", (void (*)(void))list_long},
+    {"list_push", (void (*)(void))list_push},
+    {"list_long_push", (void (*)(void))list_long_push},
     {NULL, NULL}
 };
 

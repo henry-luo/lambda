@@ -73,9 +73,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;
     case LMD_TYPE_ARRAY:
         if (type->nested && type->nested->type == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "long*");
+            strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
-            strbuf_append_str(tp->code_buf, "Item*");
+            strbuf_append_str(tp->code_buf, "Array*");
         }
         break;
     default:
@@ -145,6 +145,53 @@ void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
         transpile_expr(tp, let_node->then);
     }
 }
+void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
+    printf("transpile let stam\n");
+    if (tp->phase == TP_DECLARE) {
+        AstNode *declare = let_node->declare;
+        while (declare) {
+            printf("transpile let declare\n");
+            transpile_expr(tp, declare);
+            declare = declare->next;
+        }
+    }
+    else if (tp->phase == TP_COMPOSE) {
+        printf("transpile let then\n");
+        transpile_expr(tp, let_node->then);
+    }
+}
+void transpile_loop_expr(Transpiler* tp, AstAssignNode *loop_node, AstNode* for_then) {
+    printf("transpile loop expr\n");
+    // todo: prefix var name with '_'
+    strbuf_append_str(tp->code_buf, "ArrayLong *arr=");
+    transpile_expr(tp, loop_node->then);
+    strbuf_append_str(tp->code_buf, ";\nfor (int i=0; i<arr->length; i++){\nlong ");
+    strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
+    strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
+    AstNode *next_loop = loop_node->next;
+    if (next_loop) {
+        printf("transpile nested loop\n");
+        transpile_loop_expr(tp, next_loop, for_then);
+    }
+    else {
+        strbuf_append_str(tp->code_buf, "list_long_push(ls,");
+        transpile_expr(tp, for_then);
+        strbuf_append_str(tp->code_buf, ");}\n");
+    }
+}
+
+void transpile_for_expr(Transpiler* tp, AstLetNode *for_node) {
+    printf("transpile for expr\n");
+    // init a list
+    strbuf_append_str(tp->code_buf, "({ListLong* ls=list_long();\n");
+    AstNode *loop = for_node->declare;
+    if (loop) {
+        printf("transpile for loop\n");
+        transpile_loop_expr(tp, (AstAssignNode*)loop, for_node->then);
+    }
+    // return the list
+    strbuf_append_str(tp->code_buf, " ls;})\n");
+}
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
@@ -164,9 +211,9 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 }
 
 void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
-    printf("transpile field expr\n");
+    printf("transpile field expr!!\n");
     transpile_expr(tp, field_node->object);
-    strbuf_append_char(tp->code_buf, '[');
+    strbuf_append_str(tp->code_buf, "->items[");
     writeNodeSource(tp, field_node->field->node);
     strbuf_append_char(tp->code_buf, ']');
 }
@@ -177,18 +224,21 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
     // get the function name
     switch (expr_node->node_type) {
-    case AST_NODE_IF_EXPR:
-        transpile_if_expr(tp, (AstIfExprNode*)expr_node);
-        break;
     case AST_NODE_BINARY:
         transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
         break;
     case AST_NODE_PRIMARY:
         transpile_primary_expr(tp, (AstPrimaryNode*)expr_node);
         break;
+    case AST_NODE_IF_EXPR:
+        transpile_if_expr(tp, (AstIfExprNode*)expr_node);
+        break;        
     case AST_NODE_LET_EXPR:
         transpile_let_expr(tp, (AstLetNode*)expr_node);
         break;
+    case AST_NODE_FOR_EXPR:
+        transpile_for_expr(tp, (AstForNode*)expr_node);
+        break;        
     case AST_NODE_ASSIGN:
         transpile_assign_expr(tp, (AstAssignNode*)expr_node);
         break;
@@ -275,16 +325,17 @@ int main(void) {
     tp.SYM_STRING = ts_language_symbol_for_name(ts_tree_language(tree), "string", 6, true);
     tp.SYM_IF_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "if_expr", 7, true);
     tp.SYM_LET_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "let_expr", 8, true);
-    tp.SYM_ASSIGNMENT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "assignment_expr", 15, true);
+    tp.SYM_FOR_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "for_expr", 8, true);
+    tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
+    tp.SYM_ASSIGN_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "assign_expr", 11, true);
     tp.SYM_PRIMARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "primary_expr", 12, true);
     tp.SYM_BINARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "binary_expr", 11, true);
     tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
-    tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
     tp.SYM_IDENTIFIER = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
     tp.SYM_ARRAY = ts_language_symbol_for_name(ts_tree_language(tree), "array", 5, true);
     tp.SYM_MEMBER_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "member_expr", 11, true);
     tp.SYM_SUBSCRIPT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "subscript_expr", 14, true);
-
+    
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
     tp.ID_ELSE = ts_language_field_id_for_name(ts_tree_language(tree), "else", 4);

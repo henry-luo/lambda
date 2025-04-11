@@ -49,11 +49,13 @@ typedef enum AstNodeType {
     AST_NODE_BINARY,
     AST_NODE_ARRAY,
     AST_NODE_ASSIGN,
+    AST_NODE_LOOP,
     AST_NODE_IF_EXPR,
     AST_NODE_LET_EXPR,
+    AST_NODE_FOR_EXPR,
+    AST_NODE_LET_STAM,
     AST_NODE_FUNC,
     AST_SCRIPT,
-    AST_NODE_LET_STAM,
     AST_NODE_FIELD_EXPR,
 } AstNodeType;
 
@@ -143,17 +145,18 @@ typedef struct {
     TSSymbol SYM_NUMBER;
     TSSymbol SYM_STRING;
     TSSymbol SYM_ARRAY;
+    TSSymbol SYM_PRIMARY_EXPR;
+    TSSymbol SYM_BINARY_EXPR;
     TSSymbol SYM_IF_EXPR;
     TSSymbol SYM_LET_EXPR;
-    TSSymbol SYM_ASSIGNMENT_EXPR;
-    TSSymbol SYM_BINARY_EXPR;
-    TSSymbol SYM_PRIMARY_EXPR;
-    TSSymbol SYM_FUNC;
+    TSSymbol SYM_FOR_EXPR;
     TSSymbol SYM_LET_STAM;
+    TSSymbol SYM_ASSIGN_EXPR;
+    TSSymbol SYM_LOOP_EXPR;
+    TSSymbol SYM_FUNC;
     TSSymbol SYM_IDENTIFIER;
     TSSymbol SYM_MEMBER_EXPR;
     TSSymbol SYM_SUBSCRIPT_EXPR;
-
     TSFieldId ID_COND;
     TSFieldId ID_THEN;
     TSFieldId ID_ELSE;

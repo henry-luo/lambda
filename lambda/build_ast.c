@@ -203,6 +203,16 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     return ast_node;
 }
 
+void push_name(Transpiler* tp, AstAssignNode* node) {
+    printf("pushing name %.*s\n", node->name.length, node->name.str);
+    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
+    entry->name = node->name;  entry->node = node;
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (!tp->current_scope->last) { tp->current_scope->last = entry; }
+    else { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
+}
+
 AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("build assign expr\n");
     AstAssignNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstAssignNode));
@@ -219,13 +229,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     ast_node->type = ast_node->then->type;
 
     // push the name to the name stack
-    printf("pushing name %.*s\n", ast_node->name.length, ast_node->name.str);
-    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
-    entry->name = ast_node->name;  entry->node = ast_node;
-    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
-    if (!tp->current_scope->last) { tp->current_scope->last = entry; }
-    else { tp->current_scope->last->next = entry; }
-    tp->current_scope->last = entry;
+    push_name(tp, ast_node);
     return ast_node;
 }
 
@@ -260,6 +264,63 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     return ast_node;
 }
 
+AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
+    printf("build loop expr\n");
+    AstAssignNode* ast_node = (AstAssignNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstAssignNode));
+
+    TSNode name = ts_node_child_by_field_id(loop_node, tp->ID_NAME);
+    int start_byte = ts_node_start_byte(name);
+    ast_node->name.str = tp->source + start_byte;
+    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+
+    TSNode expr_node = ts_node_child_by_field_id(loop_node, tp->ID_THEN);
+    ast_node->then = build_expr(tp, expr_node);
+
+    // determine the type of the variable
+    ast_node->type = ast_node->then->type;
+
+    // push the name to the name stack
+    push_name(tp, ast_node);
+    return ast_node;
+}
+
+AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
+    printf("build for expr\n");
+    AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
+
+    // for can have multiple loop declarations
+    TSTreeCursor cursor = ts_tree_cursor_new(for_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode *prev_loop = NULL;
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == tp->ID_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode *loop = build_loop_expr(tp, child);
+            printf("got loop type %d\n", loop->node_type);
+            if (prev_loop == NULL) {
+                ast_node->loop = loop;
+            } else {
+                prev_loop->next = loop;
+            }
+            prev_loop = loop;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (!ast_node->loop) { printf("missing for loop declare\n"); }
+
+    TSNode then_node = ts_node_child_by_field_id(for_node, tp->ID_THEN);
+    ast_node->then = build_expr(tp, then_node);
+    if (!ast_node->then) { printf("missing for then\n"); }
+    else { printf("got for then type %d\n", ast_node->then->node_type); }
+
+    // determine for node type
+    ast_node->type = ast_node->then->type;
+    return ast_node;
+}
+
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("infer function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
@@ -290,10 +351,16 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == tp->SYM_LET_STAM) {
         return build_let_stam(tp, expr_node);
-    }    
-    else if (symbol == tp->SYM_ASSIGNMENT_EXPR) {
+    }
+    else if (symbol == tp->SYM_FOR_EXPR) {
+        return build_for_expr(tp, expr_node);
+    }
+    else if (symbol == tp->SYM_ASSIGN_EXPR) {
         return build_assign_expr(tp, expr_node);
     }
+    else if (symbol == tp->SYM_LOOP_EXPR) {
+        return build_loop_expr(tp, expr_node);
+    }    
     else if (symbol == tp->SYM_ARRAY) {
         return build_array_expr(tp, expr_node);
     }
@@ -336,13 +403,41 @@ AstNode* print_ast_node(AstNode *node, int indent) {
             print_ast_node(((AstLetNode*)node)->then, indent + 1);
         }
         break;
+    case AST_NODE_FOR_EXPR:
+        printf("[for %s]\n", node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam");
+        AstNode *loop = ((AstForNode*)node)->loop;
+        while (loop) {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("loop:\n");
+            print_ast_node(loop, indent + 1);
+            loop = loop->next;
+        }
+        if (node->node_type == AST_NODE_FOR_EXPR) {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("then:\n");
+            print_ast_node(((AstForNode*)node)->then, indent + 1);
+        }
+        break;
     case AST_NODE_ASSIGN:
         printf("[assign expr]\n");
         print_ast_node(((AstAssignNode*)node)->then, indent + 1);
         break;
+    case AST_NODE_LOOP:
+        printf("[loop expr]\n");
+        print_ast_node(((AstAssignNode*)node)->then, indent + 1);
+        break;    
     case AST_NODE_ARRAY:
         printf("[array expr]\n");
         print_ast_node(((AstArrayNode*)node)->item, indent + 1);
+        break;
+    case AST_NODE_FIELD_EXPR:
+        printf("[field expr]\n");
+        for (int i = 0; i < indent+1; i++) { printf("  "); }
+        printf("object:\n");        
+        print_ast_node(((AstFieldNode*)node)->object, indent + 1);
+        for (int i = 0; i < indent+1; i++) { printf("  "); }
+        printf("field:\n");        
+        print_ast_node(((AstFieldNode*)node)->field, indent + 1);
         break;
     case AST_NODE_FUNC:
         printf("[function expr]\n");
