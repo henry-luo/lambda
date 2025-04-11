@@ -65,7 +65,7 @@ void* jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *f
             printf("got func: %s\n", func->u.func->name);
             if (strcmp (func->u.func->name, func_name) == 0) mir_func = func;
         }
-        MIR_load_module (ctx, module);
+        MIR_load_module(ctx, module);
     }
 
     // Load the generated MIR module
@@ -86,7 +86,7 @@ void jit_cleanup(MIR_context_t ctx) {
     MIR_finish(ctx);
 }
 
-int main(void) {
+int _main(void) {
     // Step 1: Initialize MIR context
     MIR_context_t ctx = MIR_init();
     // Step 2: Initialize C to MIR

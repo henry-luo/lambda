@@ -213,8 +213,18 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
 }
 
-void transpile_script(Transpiler* tp, AstScript *script) {
-    strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
+void transpile_script(Transpiler* tp, AstScript *script, bool jit_mode) {
+    if (!jit_mode) strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
+    else {
+        StrBuf* source_buf = readTextFile("lambda/lambda.h");        
+        strbuf_append_str(tp->code_buf, source_buf->str);
+        strbuf_free(source_buf);  // free 'lambda.h'
+        strbuf_append_str(tp->code_buf, "\n#define JIT_MODE 1\n");
+        // source_buf = readTextFile("lambda/lambda.c"); 
+        // strbuf_append_str(tp->code_buf, source_buf->str);
+        // strbuf_free(source_buf);  // free 'lambda.c'
+        strbuf_append_char(tp->code_buf, '\n');
+    }
 
     AstNode *node = script->child;
     tp->phase = TP_DECLARE;
@@ -231,11 +241,14 @@ void transpile_script(Transpiler* tp, AstScript *script) {
             transpile_fn(tp, (AstFuncNode*)node);
         }
         node = node->next;
-    }    
-    strbuf_append_str(tp->code_buf, "int main() {void* ret=_main(); printf(\"%s\\n\", (char*)ret); return 0;}\n");
-
+    }
+    strbuf_append_str(tp->code_buf, "int main() {\n"
+        "void* ret=_main(); printf(\"%s\\n\", (char*)ret);\n"
+        "return 0;\n}\n");    
+    if (!jit_mode) {
+        writeTextFile("hello-world.c", tp->code_buf->str);
+    }
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);
-    writeTextFile("hello-world.c", tp->code_buf->str);  
 }
 
 int main(void) {
@@ -312,9 +325,23 @@ int main(void) {
     // transpile the AST to C code
     printf("transpiling...\n");
     tp.code_buf = strbuf_new_cap(1024);
-    transpile_script(&tp, (AstScript*)tp.ast_root);
+    transpile_script(&tp, (AstScript*)tp.ast_root, false);
+
+    // JIT compile the C code
+    MIR_context_t jit_context = jit_init();
+    typedef int (*main_func_t)(void);
+    main_func_t main_func = jit_compile(jit_context, tp.code_buf->str, tp.code_buf->length, "main");
+    // execute it
+    if (!main_func) { printf("Error: Failed to compile the function.\n"); }
+    else {
+        // execute the function
+        printf("Executing JIT compiled code...\n");
+        int ret = main_func();
+        printf("JIT compiled code returned: %d\n", ret);
+    }
 
     // clean up
+    jit_cleanup(jit_context);
     strbuf_free(source_buf);
     strbuf_free(tp.code_buf);
     ts_tree_delete(tree);

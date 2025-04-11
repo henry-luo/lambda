@@ -155,3 +155,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 AstNode* print_ast_node(AstNode *node, int indent);
 void print_ts_node(TSNode node, uint32_t indent);
+
+#include <mir.h>
+#include <mir-gen.h>
+#include <c2mir.h>
+MIR_context_t jit_init();
+void* jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *func_name);
+void jit_cleanup(MIR_context_t ctx);
