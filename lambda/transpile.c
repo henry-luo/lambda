@@ -213,18 +213,8 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
 }
 
-void transpile_script(Transpiler* tp, AstScript *script, bool jit_mode) {
-    if (!jit_mode) strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
-    else {
-        StrBuf* source_buf = readTextFile("lambda/lambda.h");        
-        strbuf_append_str(tp->code_buf, source_buf->str);
-        strbuf_free(source_buf);  // free 'lambda.h'
-        strbuf_append_str(tp->code_buf, "\n#define JIT_MODE 1\n");
-        // source_buf = readTextFile("lambda/lambda.c"); 
-        // strbuf_append_str(tp->code_buf, source_buf->str);
-        // strbuf_free(source_buf);  // free 'lambda.c'
-        strbuf_append_char(tp->code_buf, '\n');
-    }
+void transpile_script(Transpiler* tp, AstScript *script) {
+    strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
 
     AstNode *node = script->child;
     tp->phase = TP_DECLARE;
@@ -244,11 +234,7 @@ void transpile_script(Transpiler* tp, AstScript *script, bool jit_mode) {
     }
     strbuf_append_str(tp->code_buf, "int main() {\n"
         "void* ret=_main(); printf(\"%s\\n\", (char*)ret);\n"
-        "return 0;\n}\n");    
-    if (!jit_mode) {
-        writeTextFile("hello-world.c", tp->code_buf->str);
-    }
-    printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);
+        "return 0;\n}\n");
 }
 
 int main(void) {
@@ -325,16 +311,21 @@ int main(void) {
     // transpile the AST to C code
     printf("transpiling...\n");
     tp.code_buf = strbuf_new_cap(1024);
-    transpile_script(&tp, (AstScript*)tp.ast_root, false);
+    transpile_script(&tp, (AstScript*)tp.ast_root);
 
     // JIT compile the C code
     MIR_context_t jit_context = jit_init();
+    // compile user code to MIR
+    writeTextFile("hello-world.c", tp.code_buf->str);
+    printf("transpiled code:\n----------------\n%s\n", tp.code_buf->str);    
+    jit_compile(jit_context, tp.code_buf->str, tp.code_buf->length, "main.c");
+    
+    // generate the native code and return the function
     typedef int (*main_func_t)(void);
-    main_func_t main_func = jit_compile(jit_context, tp.code_buf->str, tp.code_buf->length, "main");
-    // execute it
+    main_func_t main_func = jit_gen_func(jit_context, "main");
+    // execute the function
     if (!main_func) { printf("Error: Failed to compile the function.\n"); }
     else {
-        // execute the function
         printf("Executing JIT compiled code...\n");
         int ret = main_func();
         printf("JIT compiled code returned: %d\n", ret);

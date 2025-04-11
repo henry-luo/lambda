@@ -1,8 +1,6 @@
 #ifndef JIT_MODE
 #include "lambda.h"
 #endif
-#include <stdlib.h>
-#include <stdarg.h>
 
 Array array(int count, ...) {
     if (count <= 0) { return NULL; }
