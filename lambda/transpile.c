@@ -176,8 +176,9 @@ void transpile_loop_expr(Transpiler* tp, AstAssignNode *loop_node, AstNode* for_
     else {
         strbuf_append_str(tp->code_buf, "list_long_push(ls,");
         transpile_expr(tp, for_then);
-        strbuf_append_str(tp->code_buf, ");}\n");
+        strbuf_append_str(tp->code_buf, ");");
     }
+    strbuf_append_str(tp->code_buf, "}\n");
 }
 
 void transpile_for_expr(Transpiler* tp, AstLetNode *for_node) {
@@ -190,7 +191,7 @@ void transpile_for_expr(Transpiler* tp, AstLetNode *for_node) {
         transpile_loop_expr(tp, (AstAssignNode*)loop, for_node->then);
     }
     // return the list
-    strbuf_append_str(tp->code_buf, " ls;})\n");
+    strbuf_append_str(tp->code_buf, "ls;})");
 }
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
