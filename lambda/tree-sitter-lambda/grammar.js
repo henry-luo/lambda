@@ -92,12 +92,13 @@ module.exports = grammar({
       )), '}',
     ),
 
+    pair: $ => seq(
+      field('name', choice($.string, $.symbol, $.identifier)),
+      ':',
+      field('then', $._expression),
+    ),
     map: $ => seq(
-      '{', commaSep(seq(
-        field('name', choice($.string, $.symbol, $.identifier)),
-        ':',
-        field('then', $._expression),
-      )), '}',
+      '{', commaSep($.pair), '}',
     ),    
 
     lit_array: $ => seq(

@@ -67,6 +67,7 @@ typedef enum AstNodeType {
     AST_NODE_PRIMARY,
     AST_NODE_BINARY,
     AST_NODE_ARRAY,
+    AST_NODE_MAP,
     AST_NODE_ASSIGN,
     AST_NODE_LOOP,
     AST_NODE_IF_EXPR,
@@ -104,7 +105,7 @@ typedef struct {
     AstNode;  // extends AstNode
     StrView name;
     AstNode *then;
-} AstAssignNode;
+} AstNamedNode;
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -129,6 +130,11 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *item;  // first item in the array
 } AstArrayNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNamedNode *item;  // first item in the map
+} AstMapNode;
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -165,6 +171,7 @@ typedef struct {
     TSSymbol SYM_NUMBER;
     TSSymbol SYM_STRING;
     TSSymbol SYM_ARRAY;
+    TSSymbol SYM_MAP;
     TSSymbol SYM_PRIMARY_EXPR;
     TSSymbol SYM_BINARY_EXPR;
     TSSymbol SYM_IF_EXPR;
@@ -172,7 +179,6 @@ typedef struct {
     TSSymbol SYM_FOR_EXPR;
     TSSymbol SYM_LET_STAM;
     TSSymbol SYM_ASSIGN_EXPR;
-    TSSymbol SYM_LOOP_EXPR;
     TSSymbol SYM_FUNC;
     TSSymbol SYM_IDENTIFIER;
     TSSymbol SYM_MEMBER_EXPR;
@@ -191,6 +197,7 @@ typedef struct {
 } Transpiler;
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
+AstNode* build_map_expr(Transpiler* tp, TSNode map_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 AstNode* print_ast_node(AstNode *node, int indent);
