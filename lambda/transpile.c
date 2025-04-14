@@ -359,10 +359,9 @@ int main(void) {
     // build the AST from the syntax tree
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
-    printf("init view pool\n");
-    if (MEM_POOL_ERR_OK != pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent)) {
-        printf("Failed to initialize AST node pool\n");  return 1;
-    }
+    printf("init AST node pool\n");
+    pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent);
+    pool_variable_init(&tp.shape_pool, grow_size, tolerance_percent);    
 
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");

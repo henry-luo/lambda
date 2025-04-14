@@ -39,15 +39,6 @@ typedef struct Shape {
     int byte_size;  // size of the shape
 } Shape;
 
-// pack based on virtual memory
-typedef struct VirtualPack {
-    size_t page_size;       // Size of each page (e.g., 4K)
-    size_t total_size;      // Total reserved memory size (e.g., 64K)
-    size_t committed_size;  // Currently committed memory size
-    size_t used_size;       // Used memory size within committed pages
-    void* base_address;     // Base address of the reserved memory
-} VirtualPack;
-
 typedef struct Pack {
     size_t size;           // Current used size of the pack
     size_t capacity;       // Total capacity of the pack
@@ -166,6 +157,7 @@ typedef struct {
     // todo: have a hashmap to speed up name lookup
     TranspilePhase phase;
     NameScope* current_scope;  // current name scope
+    VariableMemPool* shape_pool;  // shape pool
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;
@@ -185,12 +177,13 @@ typedef struct {
     TSSymbol SYM_IDENTIFIER;
     TSSymbol SYM_MEMBER_EXPR;
     TSSymbol SYM_SUBSCRIPT_EXPR;
+
+    TSFieldId ID_NAME;
     TSFieldId ID_COND;
     TSFieldId ID_THEN;
     TSFieldId ID_ELSE;
     TSFieldId ID_LEFT;
-    TSFieldId ID_RIGHT;
-    TSFieldId ID_NAME;
+    TSFieldId ID_RIGHT;   
     TSFieldId ID_BODY;
     TSFieldId ID_DECLARE;
     TSFieldId ID_OBJECT;

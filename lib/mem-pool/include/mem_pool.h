@@ -17,6 +17,7 @@ static const uint16_t MEM_POOL_NO_BEST_FIT = 101;
 
 typedef struct FixedMemPool FixedMemPool;
 
+// allocates memory in blocks
 typedef struct VariableMemPool VariableMemPool;
 
 /**

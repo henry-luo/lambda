@@ -58,3 +58,24 @@ void list_long_push(ListLong *list, long item) {
     }
     list->items[list->length++] = item;
 }
+
+Map* map() {
+    Map *map = malloc(sizeof(Map));
+    map->shape = NULL;
+    map->data = NULL;
+    return map;
+}
+Map* map_new(int count, ...) {
+    if (count <= 0) { return NULL; }
+    va_list args;
+    va_start(args, count);
+    Map *map = malloc(sizeof(Map));
+    // map->shape = malloc(count * sizeof(void*));
+    // for (int i = 0; i < count; i++) {
+    //     map->shape[i] = va_arg(args, void*);
+    // }
+    map->shape = NULL;  // Placeholder for shape
+    map->data = NULL;
+    va_end(args);
+    return map;
+}

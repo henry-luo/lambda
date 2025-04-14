@@ -29,20 +29,20 @@ module.exports = grammar({
 
   word: $ => $.identifier,
 
-  // an array of hidden rule names
+  // an array of hidden rule names for the generated node types
   supertypes: $ => [
-    $.expression,
+    $._expression,
+    $._statement,
   ],
 
   inline: $ => [
-    $._value,
+    $._literal,
     $._parenthesized_expr,
   ],
 
   precedences: $ => [[
-    'member',
-    'template_call',
-    'call',
+    $._literal,
+    $.primary_expr,
     $.unary_expr,
     'binary_exp',
     'binary_times',
@@ -61,17 +61,27 @@ module.exports = grammar({
     $.let_expr,
     $.if_expr,
     $.for_expr
-  ]],  
+  ]],
 
-  // conflicts: $ => [],
+  conflicts: $ => [
+    [$.lit_array, $.array],
+    [$.lit_map, $.map],
+    [$.lit_array, $.primary_expr],
+    [$.lit_map, $.primary_expr],
+    [$.primary_expr, $._statement],  
+  ],
 
   rules: {
-    document: $ => repeat(choice($._value, $.fn_definition, $.let_stam)),
+    // $._literal at top-level for JSON and Mark compatibility
+    document: $ => repeat($._statement),
 
-    _value: $ => choice(
-      $.object,
-      $.array,
-      // $.range,
+    _statement: $ => choice($._literal, $.expr_stam, $.fn_definition, $.let_stam),
+
+    expr_stam: $ => seq($._expression, ';'),
+
+    _literal: $ => choice(
+      $.lit_map,
+      $.lit_array,
       $.number,
       $.string,
       $.symbol,      
@@ -80,31 +90,36 @@ module.exports = grammar({
       $.null,
     ),
 
-    object: $ => seq(
-      '{', commaSep($.pair), '}',
+    lit_map: $ => seq(
+      '{', commaSep(seq(
+        field('name', choice($.string, $.symbol, $.identifier)),
+        ':',
+        field('then', $._literal),
+      )), '}',
     ),
 
-    pair: $ => seq(
-      field('key', choice($.string, $.symbol, $.identifier)),
-      ':',
-      field('value', $._value),
+    map: $ => seq(
+      '{', commaSep(seq(
+        field('name', choice($.string, $.symbol, $.identifier)),
+        ':',
+        field('then', $._expression),
+      )), '}',
+    ),    
+
+    lit_array: $ => seq(
+      '[', commaSep(optional($._literal)), ']',
     ),
 
     array: $ => seq(
-      '[',
-      commaSep(optional(choice(
-        $.expression,
-        // $.spread_element,
-      ))),
-      ']',
+      '[', commaSep(optional($._expression)), ']',
     ),    
 
     range: $ => seq(
       $.number, 'to', $.number,
     ),
 
+    // no empty strings under Mark/Lambda
     string: $ => seq('"', $._string_content, '"'),
-      // seq('"', '"'), - no empty strings under Mark/Lambda
 
     _string_content: $ => repeat1(choice(
       $.string_content,
@@ -166,10 +181,10 @@ module.exports = grammar({
 
     // Expressions
     _parenthesized_expr: $ => seq(
-      '(', $.expression, ')',
+      '(', $._expression, ')',
     ),
 
-    expression: $ => choice(
+    _expression: $ => choice(
       $.primary_expr,
       // $.await_expression,
       $.unary_expr,
@@ -195,8 +210,8 @@ module.exports = grammar({
       $.true,
       $.false,
       $.null,
-      $.object,
       $.array,
+      $.map,
       // $.function_expression,
       // $.arrow_function,
       // $.generator_function,
@@ -208,7 +223,7 @@ module.exports = grammar({
     subscript_expr: $ => seq(
       field('object', $.primary_expr),
       // optional(field('optional_chain', $.optional_chain)),
-      '[', field('field', $.expression), ']',
+      '[', field('field', $._expression), ']',
     ),
     
     member_expr: $ => seq(
@@ -236,16 +251,16 @@ module.exports = grammar({
         ['in', 'binary_relation'],
       ].map(([operator, precedence, associativity]) =>
         (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-          field('left', $.expression), // operator === 'in' ? choice($.expression, $.private_property_identifier) : $.expression),
+          field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
           field('operator', operator),
-          field('right', $.expression),
+          field('right', $._expression),
         )),
       ),
     ),
 
     unary_expr: $ => seq(
       field('operator', choice('not', '-', '+')),
-      field('then', $.expression),
+      field('then', $._expression),
     ),
 
     identifier: _ => {
@@ -258,32 +273,32 @@ module.exports = grammar({
     fn_definition: $ => seq(
       'fn', 
       field('name', $.identifier), '(', ')', '{', 
-      field('body', $.expression), '}',
+      field('body', $._expression), '}',
     ),
 
     assign_expr: $ => seq(
-      field('name', $.identifier), '=', field('then', $.expression),
+      field('name', $.identifier), '=', field('then', $._expression),
     ),
 
     let_expr: $ => seq(
       'let', repeat1(seq(field('declare', $.assign_expr), ',')), 
-      field('then', $.expression),
+      field('then', $._expression),
     ),
 
     if_expr: $ => prec.right(seq(
-      'if', '(', field('cond', $.expression), ')',
-      field('then', $.expression),
-      optional(seq('else', field('else', $.expression))),
+      'if', '(', field('cond', $._expression), ')',
+      field('then', $._expression),
+      optional(seq('else', field('else', $._expression))),
     )),
 
     loop_expr: $ => seq(
-      field('name', $.identifier), 'in', field('then', $.expression),
+      field('name', $.identifier), 'in', field('then', $._expression),
     ),
     
     for_expr: $ => seq(
       'for', '(', field('declare', $.loop_expr), 
       repeat(seq(',', field('declare', $.loop_expr))), ')', 
-      field('then', $.expression),
+      field('then', $._expression),
     ),    
 
     let_stam: $ => seq(
