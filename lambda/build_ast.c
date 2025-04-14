@@ -86,11 +86,11 @@ LambdaType build_identifier(Transpiler* tp, TSNode id_node) {
             scope = tp->current_scope->parent;
             goto FIND_VAR_NAME;
         }
-        printf("missing identifier %.*s\n", var_name.length, var_name.str);
+        printf("missing identifier %.*s\n", (int)var_name.length, var_name.str);
         return NULL_TYPE;
     }
     else {
-        printf("found identifier %.*s\n", entry->name.length, entry->name.str);
+        printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
         return entry->node->type;
     }
 }
@@ -208,7 +208,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
 }
 
 void push_name(Transpiler* tp, AstNamedNode* node) {
-    printf("pushing name %.*s\n", node->name.length, node->name.str);
+    printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
     NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
     entry->name = node->name;  entry->node = node;
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
@@ -238,7 +238,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
 }
 
 AstNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset) {
-    printf("build pair expr %p\n", pair_node);
+    printf("build pair expr\n");
     AstNamedNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(pair_node, tp->ID_NAME);
@@ -247,7 +247,7 @@ AstNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset) {
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
     TSNode val_node = ts_node_child_by_field_id(pair_node, tp->ID_THEN);
-    printf("build pair then %p\n", val_node);
+    printf("build pair then\n");
     ast_node->then = build_expr(tp, val_node);
 
     // determine the type of the field
