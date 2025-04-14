@@ -63,13 +63,7 @@ module.exports = grammar({
     $.for_expr
   ]],
 
-  conflicts: $ => [
-    [$.lit_array, $.array],
-    [$.lit_map, $.map],
-    [$.lit_array, $.primary_expr],
-    [$.lit_map, $.primary_expr],
-    [$.primary_expr, $._statement],  
-  ],
+  // conflicts: $ => [],
 
   rules: {
     // $._literal at top-level for JSON and Mark compatibility
@@ -77,7 +71,7 @@ module.exports = grammar({
 
     _statement: $ => choice($._literal, $.expr_stam, $.fn_definition, $.let_stam),
 
-    expr_stam: $ => seq($._expression, ';'),
+    expr_stam: $ => seq('{', $._expression, '}'),
 
     _literal: $ => choice(
       $.lit_map,

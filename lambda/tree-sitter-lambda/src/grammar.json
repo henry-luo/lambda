@@ -35,12 +35,16 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
           "type": "SYMBOL",
           "name": "_expression"
         },
         {
           "type": "STRING",
-          "value": ";"
+          "value": "}"
         }
       ]
     },
@@ -1899,28 +1903,7 @@
       "name": "comment"
     }
   ],
-  "conflicts": [
-    [
-      "lit_array",
-      "array"
-    ],
-    [
-      "lit_map",
-      "map"
-    ],
-    [
-      "lit_array",
-      "primary_expr"
-    ],
-    [
-      "lit_map",
-      "primary_expr"
-    ],
-    [
-      "primary_expr",
-      "_statement"
-    ]
-  ],
+  "conflicts": [],
   "precedences": [
     [
       {
