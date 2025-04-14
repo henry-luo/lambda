@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #define null 0
+
 typedef void* Item;
+typedef uint64_t Handle;
 
 typedef struct Array {
     Item* items;
@@ -34,9 +37,16 @@ void list_push(List *list, Item item);
 ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);
 
+// script runtime context
+typedef struct Context {
+    void* ast_pool;
+    void* type_list;
+} Context;
+
 typedef struct Map {
-    void* shape;  // data shape of the map
+    void* ast;  // ast node of the map
     void* data;  // packed data struct of the map
 } Map;
-Map* map();  // constructs an empty list
-Map* map_new(int count, ...);
+Map* map();  // constructs an empty map
+Map* map_new(Context *rt, int type_index, ...);
+

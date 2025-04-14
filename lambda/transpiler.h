@@ -21,23 +21,31 @@ typedef enum LambdaTypeId {
     LMD_TYPE_FUNC,
 } LambdaTypeId;
 
+typedef struct ShapeMap ShapeMap;
+
 typedef struct LambdaType {
     LambdaTypeId type;
-    struct LambdaType* nested;  // nested type
-    int length;  // length of array
+    union {
+        struct LambdaType* nested;  // nested type for array
+        int type_index;  // index of the type in the type list
+    };
+    union {
+        int length;  // no. of items in the array/map
+        int byte_offset;  // byte offset of the map field
+    };
 } LambdaType;
 
-typedef struct ShapeField {
-    StrView name;  // field name
-    LambdaType type;  // field type
-    struct ShapeField* next;  // next field
-} ShapeField;
+// typedef struct ShapeField {
+//     StrView name;  // field name
+//     LambdaType type;  // field type
+//     struct ShapeField* next;  // next field
+// } ShapeField;
 
-typedef struct Shape {
-    ShapeField* first_field;  // field list
-    int field_count;  // number of fields
-    int byte_size;  // size of the shape
-} Shape;
+// typedef struct ShapeMap {
+//     ShapeField* first_field;  // field list
+//     int field_count;  // number of fields
+//     int byte_size;  // size of the shape
+// } ShapeMap;
 
 typedef struct Pack {
     size_t size;           // Current used size of the pack
@@ -45,6 +53,10 @@ typedef struct Pack {
     size_t committed_size; // Currently committed memory size - non-zero indicates virtual memory mode
     void* data;            // Pointer to the allocated memory
 } Pack;
+Pack* pack_init();
+void* pack_alloc(Pack* pack, size_t size);
+void* pack_calloc(Pack* pack, size_t size);
+void pack_free(Pack* pack);
 
 typedef struct AstNode AstNode;
 
@@ -163,7 +175,7 @@ typedef struct {
     // todo: have a hashmap to speed up name lookup
     TranspilePhase phase;
     NameScope* current_scope;  // current name scope
-    VariableMemPool* shape_pool;  // shape pool
+    ArrayList* type_list;  // list of types
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;

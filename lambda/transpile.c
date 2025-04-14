@@ -1,5 +1,6 @@
 
 #include "transpiler.h"
+#include "lambda.h"
 
 // Function to read and display the content of a text file
 StrBuf* readTextFile(const char *filename) {
@@ -184,11 +185,11 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
     strbuf_append_str(tp->code_buf, "}\n");
 }
 
-void transpile_for_expr(Transpiler* tp, AstLetNode *for_node) {
+void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
     printf("transpile for expr\n");
     // init a list
     strbuf_append_str(tp->code_buf, "({ListLong* ls=list_long();\n");
-    AstNode *loop = for_node->declare;
+    AstNode *loop = for_node->loop;
     if (loop) {
         printf("transpile for loop\n");
         transpile_loop_expr(tp, (AstNamedNode*)loop, for_node->then);
@@ -216,8 +217,8 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     printf("transpile map expr\n");
-    strbuf_append_str(tp->code_buf, "map_new(");
-    strbuf_append_int(tp->code_buf, map_node->type.length * 2);
+    strbuf_append_str(tp->code_buf, "map_new(rt,");
+    strbuf_append_int(tp->code_buf, map_node->type.type_index);
     strbuf_append_char(tp->code_buf, ',');
     AstNamedNode *item = map_node->item;
     while (item) {
@@ -285,7 +286,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
     writeNodeSource(tp, fn_node->name);
-    strbuf_append_str(tp->code_buf, " (){\n");
+    strbuf_append_str(tp->code_buf, "(Context *rt){\n");
    
     // get the function body
     tp->phase = TP_DECLARE;
@@ -317,8 +318,8 @@ void transpile_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }
-    strbuf_append_str(tp->code_buf, "int main() {\n"
-        "void* ret=_main(); printf(\"%s\\n\", (char*)ret);\n"
+    strbuf_append_str(tp->code_buf, "int main(Context *rt) {\n"
+        "void* ret=_main(rt); printf(\"%s\\n\", (char*)ret);\n"
         "return 0;\n}\n");
 }
 
@@ -385,7 +386,7 @@ int main(void) {
     size_t tolerance_percent = 20;
     printf("init AST node pool\n");
     pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent);
-    pool_variable_init(&tp.shape_pool, grow_size, tolerance_percent);    
+    tp.type_list = arraylist_new(16);    
 
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
@@ -411,13 +412,14 @@ int main(void) {
     jit_compile(jit_context, tp.code_buf->str, tp.code_buf->length, "main.c");
     
     // generate the native code and return the function
-    typedef int (*main_func_t)(void);
+    typedef int (*main_func_t)(Context*);
     main_func_t main_func = jit_gen_func(jit_context, "main");
     // execute the function
     if (!main_func) { printf("Error: Failed to compile the function.\n"); }
     else {
         printf("Executing JIT compiled code...\n");
-        int ret = main_func();
+        Context runtime_context = {.ast_pool = tp.ast_node_pool, .type_list = tp.type_list};
+        int ret = main_func(&runtime_context);
         printf("JIT compiled code returned: %d\n", ret);
     }
 

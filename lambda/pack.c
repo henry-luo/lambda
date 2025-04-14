@@ -2,9 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <unistd.h>
+#endif
+
 #define INITIAL_PACK_SIZE 64
 #define VIRTUAL_PACK_THRESHOLD 4096
 #define DEFAULT_PAGE_SIZE 4096
+
+// Forward declarations for platform-specific functions
+static int convert_to_virtual_impl(Pack* pack);
+static void vm_grow(Pack* pack, size_t needed_size);
 
 // Global page size variable
 static size_t g_page_size = 0;

@@ -1,6 +1,5 @@
-#ifndef JIT_MODE
+#include "transpiler.h"
 #include "lambda.h"
-#endif
 
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
@@ -61,21 +60,27 @@ void list_long_push(ListLong *list, long item) {
 
 Map* map() {
     Map *map = malloc(sizeof(Map));
-    map->shape = NULL;
+    map->ast = NULL;
     map->data = NULL;
     return map;
 }
-Map* map_new(int count, ...) {
-    if (count <= 0) { return NULL; }
+Map* map_new(Context *rt, int type_index, ...) {
+    if (!rt) { return NULL; }
+    printf("map_new %p at %d\n", rt, type_index);
+    AstNode* node = (AstNode*)((ArrayList*)rt->type_list)->data + type_index;
+    Map *map = malloc(sizeof(Map));
+    map->ast = node;
+    printf("init pack\n");
+    map->data = pack_init();
+
+    // set the fields
+    int count = node->type.length;
+    printf("map length: %d\n", count);
     va_list args;
     va_start(args, count);
-    Map *map = malloc(sizeof(Map));
-    // map->shape = malloc(count * sizeof(void*));
-    // for (int i = 0; i < count; i++) {
-    //     map->shape[i] = va_arg(args, void*);
-    // }
-    map->shape = NULL;  // Placeholder for shape
-    map->data = NULL;
+    for (int i = 0; i < count; i++) {
+        // map->shape[i] = va_arg(args, void*);
+    }
     va_end(args);
     return map;
 }

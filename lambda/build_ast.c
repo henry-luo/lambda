@@ -237,7 +237,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     return ast_node;
 }
 
-AstNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
+AstNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset) {
     printf("build pair expr %p\n", pair_node);
     AstNamedNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
 
@@ -250,10 +250,21 @@ AstNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
     printf("build pair then %p\n", val_node);
     ast_node->then = build_expr(tp, val_node);
 
-    // determine the type of the pair
+    // determine the type of the field
     ast_node->type = ast_node->then->type;
+    ast_node->type.byte_offset = prev_offset;
     return ast_node;
 }
+
+int byte_size[] = {
+    [LMD_TYPE_NULL] = 0,
+    [LMD_TYPE_INT] = sizeof(long),
+    [LMD_TYPE_FLOAT] = sizeof(double),
+    [LMD_TYPE_STRING] = sizeof(char*),
+    [LMD_TYPE_BOOL] = sizeof(bool),
+    [LMD_TYPE_ARRAY] = sizeof(void*),
+    [LMD_TYPE_MAP] = sizeof(void*),
+};
 
 AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
     printf("build map expr\n");
@@ -261,15 +272,19 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
     ast_node->type.type = LMD_TYPE_MAP;
 
     TSNode child = ts_node_named_child(map_node, 0);
-    AstNode* prev_item = NULL;
+    AstNode* prev_item = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
-        AstNode* item = build_pair_expr(tp, child);
+        AstNode* item = build_pair_expr(tp, child, byte_offset);
         if (!prev_item) { ast_node->item = item; } 
         else { prev_item->next = item; }
         prev_item = item;
         ast_node->type.length++;
+        byte_offset += byte_size[item->type.type];
         child = ts_node_next_named_sibling(child);
     }
+
+    arraylist_append(tp->type_list, ast_node);
+    ast_node->type.type_index = tp->type_list->length - 1;
     return ast_node;
 }
 
