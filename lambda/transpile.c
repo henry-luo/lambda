@@ -197,7 +197,7 @@ void transpile_for_expr(Transpiler* tp, AstLetNode *for_node) {
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
     strbuf_append_str(tp->code_buf, (array_node->type.nested && array_node->type.nested->type == LMD_TYPE_INT) 
-        ? "array_long(" : "array(");
+        ? "array_long_new(" : "array_new(");
     strbuf_append_int(tp->code_buf, array_node->type.length);
     strbuf_append_char(tp->code_buf, ',');
     AstNode *item = array_node->item;

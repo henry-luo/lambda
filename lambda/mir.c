@@ -24,8 +24,8 @@ typedef struct {
 
 func_obj_t func_list[] = {
     {"printf", (void (*)(void))printf},
-    {"array", (void (*)(void))array},
-    {"array_long", (void (*)(void))array_long},
+    {"array_new", (void (*)(void))array_new},
+    {"array_long_new", (void (*)(void))array_long_new},
     {"list", (void (*)(void))list},
     {"list_long", (void (*)(void))list_long},
     {"list_push", (void (*)(void))list_push},

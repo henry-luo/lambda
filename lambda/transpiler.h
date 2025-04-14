@@ -27,6 +27,34 @@ typedef struct LambdaType {
     int length;  // length of array
 } LambdaType;
 
+typedef struct ShapeField {
+    StrView name;  // field name
+    LambdaType type;  // field type
+    struct ShapeField* next;  // next field
+} ShapeField;
+
+typedef struct Shape {
+    ShapeField* first_field;  // field list
+    int field_count;  // number of fields
+    int byte_size;  // size of the shape
+} Shape;
+
+// pack based on virtual memory
+typedef struct VirtualPack {
+    size_t page_size;       // Size of each page (e.g., 4K)
+    size_t total_size;      // Total reserved memory size (e.g., 64K)
+    size_t committed_size;  // Currently committed memory size
+    size_t used_size;       // Used memory size within committed pages
+    void* base_address;     // Base address of the reserved memory
+} VirtualPack;
+
+typedef struct Pack {
+    size_t size;           // Current used size of the pack
+    size_t capacity;       // Total capacity of the pack
+    size_t committed_size; // Currently committed memory size - non-zero indicates virtual memory mode
+    void* data;            // Pointer to the allocated memory
+} Pack;
+
 typedef struct AstNode AstNode;
 
 // entry in the name_stack

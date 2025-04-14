@@ -2,7 +2,7 @@
 #include "lambda.h"
 #endif
 
-Array* array(int count, ...) {
+Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
@@ -16,7 +16,7 @@ Array* array(int count, ...) {
     return arr;
 }
 
-ArrayLong* array_long(int count, ...) {
+ArrayLong* array_long_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);

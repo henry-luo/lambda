@@ -15,9 +15,10 @@ typedef struct ArrayLong {
     int length;
 } ArrayLong;
 
-Array* array(int count, ...);
-ArrayLong* array_long(int count, ...);
+Array* array_new(int count, ...);
+ArrayLong* array_long_new(int count, ...);
 
+// for for-expr result
 typedef struct List {
     Item* items;
     int length;
@@ -28,7 +29,14 @@ typedef struct ListLong {
     int length;
     int capacity;
 } ListLong;
-List* list();  // construct an empty list
+List* list();  // constructs an empty list
 void list_push(List *list, Item item);
 ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);
+
+typedef struct Map {
+    void* shape;  // data shape of the map
+    void* data;  // packed data struct of the map
+} Map;
+Map* map();  // constructs an empty list
+Map* map_new(int count, ...);

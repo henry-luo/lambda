@@ -96,7 +96,6 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_no
     // note: this function navigates to parenets through laid out view tree, 
     // and siblings through non-processed html nodes
     printf("check if view has line filled\n");
-    float current_advance_x = lycon->line.advance_x;
     node = lxb_dom_node_next(node);
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
@@ -162,7 +161,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
             wd = lycon->font.space_width;
         }
         else {
-            uint32_t codepoint = *str;  FT_Error error;
+            uint32_t codepoint = *str;
             if (codepoint >= 128) { // unicode char
                 int bytes = utf8_to_codepoint(str, &codepoint);
                 if (bytes <= 0) { // invalid utf8 char
