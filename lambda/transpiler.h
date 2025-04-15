@@ -219,6 +219,6 @@ void print_ts_node(TSNode node, uint32_t indent);
 #include <mir-gen.h>
 #include <c2mir.h>
 MIR_context_t jit_init();
-void* jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
+void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 void jit_cleanup(MIR_context_t ctx);

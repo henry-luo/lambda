@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <zlog.h> 
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
@@ -50,13 +51,12 @@ MIR_context_t jit_init() {
     return ctx;
 }
 
-void* jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name) {
+void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name) {
     struct c2mir_options ops = {0}; // Default options
     printf("compiling C code in '%s' to MIR\n", file_name);
     jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
     if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
         printf("failed to compile '%s'!", file_name);
-        return NULL;
     }
 }
 
@@ -65,15 +65,11 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
     MIR_item_t mir_func = NULL;
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Wformat"
-        printf("Loaded module: %p, items: %p\n", module, module->items);
-        #pragma clang diagnostic pop
-        for (MIR_item_t func = DLIST_HEAD (MIR_item_t, module->items); func != NULL;
-            func = DLIST_NEXT (MIR_item_t, func)) {
-            printf("got func: %p\n", func);
+        MIR_item_t func = DLIST_HEAD (MIR_item_t, module->items);
+        dzlog_debug("Loaded module: %p, items: %p\n", module, func);
+        for (; func != NULL; func = DLIST_NEXT (MIR_item_t, func)) {
             if (func->item_type != MIR_func_item) continue;
-            printf("got func: %s\n", func->u.func->name);
+            dzlog_debug("got func: %s\n", func->u.func->name);
             if (strcmp(func->u.func->name, func_name) == 0) mir_func = func;
         }
         MIR_load_module(ctx, module);
