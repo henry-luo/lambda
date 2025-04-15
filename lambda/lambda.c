@@ -109,3 +109,10 @@ Map* map_new(Context *rt, int type_index, ...) {
     va_end(args);
     return map;
 }
+
+void* map_get(Context *rt, char *key) {
+    if (!rt || !key) {
+        return NULL;
+    }
+    return NULL;
+}

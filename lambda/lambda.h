@@ -50,4 +50,5 @@ typedef struct Map {
 } Map;
 Map* map();  // constructs an empty map
 Map* map_new(Context *rt, int type_index, ...);
+void* map_get(Context *rt, char *key);
 

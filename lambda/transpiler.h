@@ -90,6 +90,7 @@ typedef enum AstNodeType {
     AST_NODE_FUNC,
     AST_SCRIPT,
     AST_NODE_FIELD_EXPR,
+    AST_NODE_IDENT,
 } AstNodeType;
 
 struct AstNode {
@@ -194,7 +195,7 @@ typedef struct {
     TSSymbol SYM_LET_STAM;
     TSSymbol SYM_ASSIGN_EXPR;
     TSSymbol SYM_FUNC;
-    TSSymbol SYM_IDENTIFIER;
+    TSSymbol SYM_IDENT;
     TSSymbol SYM_MEMBER_EXPR;
     TSSymbol SYM_SUBSCRIPT_EXPR;
 

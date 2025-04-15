@@ -88,12 +88,16 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
-LambdaType* build_identifier(Transpiler* tp, TSNode id_node) {
+AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     printf("building identifier\n");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstNamedNode));
+
     // get the identifier name
-    // check if the name is in the name stack
     StrView var_name = {tp->source + ts_node_start_byte(id_node), 
         ts_node_end_byte(id_node) - ts_node_start_byte(id_node)};
+    ast_node->name = var_name;
+
+    // lookup the name
     NameScope *scope = tp->current_scope;
     FIND_VAR_NAME:
     NameEntry *entry = scope->first;
@@ -107,12 +111,13 @@ LambdaType* build_identifier(Transpiler* tp, TSNode id_node) {
             goto FIND_VAR_NAME;
         }
         printf("missing identifier %.*s\n", (int)var_name.length, var_name.str);
-        return &NULL_TYPE;
     }
     else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
-        return entry->node->type;
+        ast_node->then = entry->node;
+        ast_node->type = entry->node->type;
     }
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
@@ -136,8 +141,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == tp->SYM_STRING) {
         ast_node->type = &STRING_TYPE;
     }
-    else if (symbol == tp->SYM_IDENTIFIER) {
-        ast_node->type = build_identifier(tp, child);
+    else if (symbol == tp->SYM_IDENT) {
+        ast_node->expr = build_identifier(tp, child);
+        ast_node->type = ast_node->expr->type;
     }
     else if (symbol == tp->SYM_ARRAY) {
         ast_node->expr = build_array_expr(tp, child);
@@ -432,7 +438,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == tp->SYM_MAP) {
         return build_map_expr(tp, expr_node);
-    }    
+    }
+    else if (symbol == tp->SYM_IDENT) {
+        return build_identifier(tp, expr_node);
+    }
     else if (symbol == tp->SYM_FUNC) {
         return build_func(tp, expr_node);
     }
@@ -448,6 +457,8 @@ char* formatType(LambdaType *type) {
     switch (type_id) {
     case LMD_TYPE_NULL:
         return "void*";
+    case LMD_TYPE_ANY:
+        return "any";
     case LMD_TYPE_INT:
         return "long";
     case LMD_TYPE_FLOAT:
@@ -561,6 +572,10 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
         }
+        break;
+    case AST_NODE_IDENT:
+        printf("[ident:%.*s:%s]\n", (int)((AstNamedNode*)node)->name.length, 
+            ((AstNamedNode*)node)->name.str, formatType(node->type));
         break;
     case AST_SCRIPT:
         printf("[script:%s]\n", formatType(node->type));

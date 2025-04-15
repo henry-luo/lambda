@@ -60,6 +60,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_NULL:
         strbuf_append_str(tp->code_buf, "void*");
         break;
+    case LMD_TYPE_ANY:
+        strbuf_append_str(tp->code_buf, "void*");
+        break;
     case LMD_TYPE_INT:
         strbuf_append_str(tp->code_buf, "long");
         break;
@@ -90,7 +93,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     printf("transpile primary expr\n");
-    if (pri_node->expr) {
+    if (pri_node->expr && pri_node->expr->node_type != AST_NODE_IDENT) {
         transpile_expr(tp, pri_node->expr);
         return;
     } else {
@@ -239,11 +242,36 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 }
 
 void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
-    printf("transpile field expr!!\n");
-    transpile_expr(tp, field_node->object);
-    strbuf_append_str(tp->code_buf, "->items[");
-    writeNodeSource(tp, field_node->field->node);
-    strbuf_append_char(tp->code_buf, ']');
+    printf("transpile field expr\n");
+    if (field_node->object->type->type_id == LMD_TYPE_MAP) {
+        strbuf_append_str(tp->code_buf, "map_get(");
+        if (field_node->field && field_node->field->node_type == AST_NODE_PRIMARY &&
+            ((AstPrimaryNode*)field_node->field)->expr && 
+            ((AstPrimaryNode*)field_node->field)->expr->node_type == AST_NODE_IDENT) {
+            strbuf_append_str(tp->code_buf, "rt,\"");
+            writeNodeSource(tp, field_node->field->node);
+            strbuf_append_str(tp->code_buf, "\")");
+        }
+        else {
+            strbuf_append_str(tp->code_buf, "rt,");
+            writeNodeSource(tp, field_node->object->node);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+    } 
+    else if (field_node->object->type->type_id == LMD_TYPE_ARRAY) {
+        transpile_expr(tp, field_node->object);
+        strbuf_append_str(tp->code_buf, "->items[");
+        writeNodeSource(tp, field_node->field->node);
+        strbuf_append_char(tp->code_buf, ']');
+    } 
+    else {
+        strbuf_append_str(tp->code_buf, "field(");
+        transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        writeNodeSource(tp, field_node->field->node);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
@@ -365,7 +393,7 @@ int main(void) {
     tp.SYM_PRIMARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "primary_expr", 12, true);
     tp.SYM_BINARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "binary_expr", 11, true);
     tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
-    tp.SYM_IDENTIFIER = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
+    tp.SYM_IDENT = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
     tp.SYM_ARRAY = ts_language_symbol_for_name(ts_tree_language(tree), "array", 5, true);
     tp.SYM_MEMBER_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "member_expr", 11, true);
     tp.SYM_SUBSCRIPT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "subscript_expr", 14, true);

@@ -32,6 +32,7 @@ func_obj_t func_list[] = {
     {"list_push", (void (*)(void))list_push},
     {"list_long_push", (void (*)(void))list_long_push},
     {"map_new", (void (*)(void))map_new},
+    {"map_get", (void (*)(void))map_get},
     {NULL, NULL}
 };
 
