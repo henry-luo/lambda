@@ -176,6 +176,7 @@ typedef struct {
     TranspilePhase phase;
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
+    VariableMemPool* heap;
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;

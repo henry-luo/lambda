@@ -72,8 +72,9 @@ Map* map_new(Context *rt, int type_index, ...) {
     printf("map node: %p, type: %p, node_type: %d\n", node, node->type, node->node_type);
     Map *map = malloc(sizeof(Map));
     map->ast = node;
-    printf("init pack\n");
-    // map->data = pack_init();
+    VariableMemPool *pool = (VariableMemPool*)rt->heap;
+    pool_variable_alloc(pool, ((LambdaTypeMap*)node->type)->byte_size, (void**)&map->data);
+    printf("map data: %p, byte_size: %d\n", map->data, ((LambdaTypeMap*)node->type)->byte_size);
 
     // set the fields
     LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
@@ -81,9 +82,29 @@ Map* map_new(Context *rt, int type_index, ...) {
     int count = map_type->length;
     printf("map length: %d\n", count);
     va_list args;  AstNamedNode *field = node->item;
+    printf("map field: %p\n", field);
     va_start(args, count);
     for (int i = 0; i < count; i++) {
-        // map->shape[i] = va_arg(args, void*);
+        LambdaTypeField *field_type = (LambdaTypeField*)field->type;
+        printf("field type: %d, offset: %d\n", field_type->type, field_type->byte_offset);
+        void* field_ptr = (char*)map->data + field_type->byte_offset;
+        switch (field_type->type) {
+            case LMD_TYPE_INT:
+                *(long*)field_ptr = va_arg(args, long);
+                break;
+            case LMD_TYPE_FLOAT:
+                *(double*)field_ptr = va_arg(args, double);
+                break;
+            case LMD_TYPE_STRING:
+                *(char**)field_ptr = va_arg(args, char*);
+                break;
+            case LMD_TYPE_BOOL:
+                *(bool*)field_ptr = va_arg(args, bool);
+                break;
+            default:
+                printf("unknown type %d\n", field_type->type);
+        }
+        field = (AstNamedNode*)field->next;
     }
     va_end(args);
     return map;

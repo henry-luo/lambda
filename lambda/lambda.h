@@ -41,6 +41,7 @@ void list_long_push(ListLong *list, long item);
 typedef struct Context {
     void* ast_pool;
     void* type_list;
+    void* heap;
 } Context;
 
 typedef struct Map {

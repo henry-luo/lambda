@@ -326,6 +326,7 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
 
     arraylist_append(tp->type_list, ast_node);
     type->type_index = tp->type_list->length - 1;
+    type->byte_size = byte_offset;
     return (AstNode*)ast_node;
 }
 

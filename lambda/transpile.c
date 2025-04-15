@@ -228,9 +228,9 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     strbuf_append_char(tp->code_buf, ',');
     AstNamedNode *item = map_node->item;
     while (item) {
-        strbuf_append_char(tp->code_buf, '"');
-        strbuf_append_str_n(tp->code_buf, item->name.str, item->name.length);
-        strbuf_append_str(tp->code_buf, "\",");
+        // strbuf_append_char(tp->code_buf, '"');
+        // strbuf_append_str_n(tp->code_buf, item->name.str, item->name.length);
+        // strbuf_append_str(tp->code_buf, "\",");
         transpile_expr(tp, item->then);
         if (item->next) { strbuf_append_char(tp->code_buf, ','); }
         item = (AstNamedNode*)item->next;
@@ -428,7 +428,8 @@ int main(void) {
     if (!main_func) { printf("Error: Failed to compile the function.\n"); }
     else {
         printf("Executing JIT compiled code...\n");
-        Context runtime_context = {.ast_pool = tp.ast_node_pool, .type_list = tp.type_list};
+        pool_variable_init(&tp.heap, grow_size, tolerance_percent);
+        Context runtime_context = {.ast_pool = tp.ast_node_pool, .type_list = tp.type_list, .heap = tp.heap};
         int ret = main_func(&runtime_context);
         printf("JIT compiled code returned: %d\n", ret);
     }
