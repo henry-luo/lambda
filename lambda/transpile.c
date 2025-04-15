@@ -107,7 +107,18 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     transpile_expr(tp, bi_node->left);
 
     TSNode op_node = ts_node_child_by_field_name(bi_node->node, "operator", 8);
-    writeNodeSource(tp, op_node);
+    StrView op = ts_node_source(tp, op_node);
+    printf("op: %.*s\n", (int)op.length, op.str);
+    if (strncmp(op.str, "and", 3) == 0) {
+        strbuf_append_str(tp->code_buf, "&&");
+    } 
+    else if (strncmp(op.str, "or", 2) == 0) {
+        strbuf_append_str(tp->code_buf, "||");
+    } else {
+        strbuf_append_char(tp->code_buf, ' ');
+        strbuf_append_str_n(tp->code_buf, op.str, op.length);
+        strbuf_append_char(tp->code_buf, ' ');
+    }
 
     transpile_expr(tp, bi_node->right);
     strbuf_append_char(tp->code_buf, ')');

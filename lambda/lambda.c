@@ -114,5 +114,5 @@ void* map_get(Context *rt, char *key) {
     if (!rt || !key) {
         return NULL;
     }
-    return NULL;
+    return key;
 }

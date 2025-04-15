@@ -93,8 +93,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstNamedNode));
 
     // get the identifier name
-    StrView var_name = {tp->source + ts_node_start_byte(id_node), 
-        ts_node_end_byte(id_node) - ts_node_start_byte(id_node)};
+    StrView var_name = ts_node_source(tp, id_node);
     ast_node->name = var_name;
 
     // lookup the name
