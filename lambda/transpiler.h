@@ -14,6 +14,7 @@
 
 typedef enum TypeId {
     LMD_TYPE_NULL,
+    LMD_TYPE_ANY,
     LMD_TYPE_INT,
     LMD_TYPE_FLOAT,
     LMD_TYPE_STRING,
@@ -26,7 +27,7 @@ typedef enum TypeId {
 } TypeId;
 
 typedef struct LambdaType {
-    TypeId type;
+    TypeId type_id;
 } LambdaType;
 
 typedef struct LambdaTypeArray {

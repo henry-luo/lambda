@@ -1,12 +1,13 @@
 #include "transpiler.h"
 #include "../lib/hashmap.h"
 
-LambdaType NULL_TYPE = {.type = LMD_TYPE_NULL};
-LambdaType BOOL_TYPE = {.type = LMD_TYPE_BOOL};
-LambdaType INT_TYPE = {.type = LMD_TYPE_INT};
-LambdaType FLOAT_TYPE = {.type = LMD_TYPE_FLOAT};
-LambdaType STRING_TYPE = {.type = LMD_TYPE_STRING};
-LambdaType FUNC_TYPE = {.type = LMD_TYPE_FUNC};
+LambdaType NULL_TYPE = {.type_id = LMD_TYPE_NULL};
+LambdaType ANY_TYPE = {.type_id = LMD_TYPE_ANY};
+LambdaType BOOL_TYPE = {.type_id = LMD_TYPE_BOOL};
+LambdaType INT_TYPE = {.type_id = LMD_TYPE_INT};
+LambdaType FLOAT_TYPE = {.type_id = LMD_TYPE_FLOAT};
+LambdaType STRING_TYPE = {.type_id = LMD_TYPE_STRING};
+LambdaType FUNC_TYPE = {.type_id = LMD_TYPE_FUNC};
 
 int byte_size[] = {
     [LMD_TYPE_NULL] = 0,
@@ -37,7 +38,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     LambdaType* t;
     pool_variable_alloc(tp->ast_node_pool, size, (void**)&t);
     memset(t, 0, size);
-    t->type = type;
+    t->type_id = type;
     return t;
 }
 
@@ -54,7 +55,7 @@ AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
             ast_node->item = item;  nested_type = item->type;
         } else {  
             prev_item->next = item;
-            if (nested_type && item->type->type != nested_type->type) {
+            if (nested_type && item->type->type_id != nested_type->type_id) {
                 nested_type = NULL;  // type mismatch, reset the nested type to NULL
             }
         }
@@ -71,16 +72,18 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_FIELD_EXPR, array_node, sizeof(AstFieldNode));
     TSNode object_node = ts_node_child_by_field_id(array_node, tp->ID_OBJECT);
     ast_node->object = build_expr(tp, object_node);
+
     TSNode field_node = ts_node_child_by_field_id(array_node, tp->ID_FIELD);
     ast_node->field = build_expr(tp, field_node);
-    if (ast_node->object->type->type == LMD_TYPE_ARRAY) {
+
+    if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
         ast_node->type = ((LambdaTypeArray*)ast_node->object->type)->nested;
     }
-    // else if (ast_node->object->type.type == LMD_TYPE_MAP) {
-    //     ast_node->type = *ast_node->object->type.nested;
-    // }
+    else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
+        ast_node->type = &ANY_TYPE;
+    }
     else {
-        ast_node->type = ast_node->object->type;
+        ast_node->type = &ANY_TYPE;
     }
     return (AstNode*)ast_node;
 }
@@ -301,7 +304,7 @@ AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset)
     ast_node->then = build_expr(tp, val_node);
 
     // determine the type of the field
-    type->type = ast_node->then->type->type;
+    type->type_id = ast_node->then->type->type_id;
     type->byte_offset = prev_offset;
     return ast_node;
 }
@@ -320,7 +323,7 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
         else { prev_item->next = (AstNode*)item; }
         prev_item = item;
         type->length++;
-        byte_offset += byte_size[item->type->type];
+        byte_offset += byte_size[item->type->type_id];
         child = ts_node_next_named_sibling(child);
     }
 
@@ -441,7 +444,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
 
 char* formatType(LambdaType *type) {
     if (!type) { return "null*"; }
-    TypeId type_id = type->type;
+    TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
         return "void*";
@@ -455,7 +458,7 @@ char* formatType(LambdaType *type) {
         return "bool";
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type == LMD_TYPE_INT) {
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             return "ArrayLong*";
         } else {
             return "Array*";

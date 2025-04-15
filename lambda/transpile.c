@@ -55,7 +55,7 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
 }
 
 void writeType(Transpiler* tp, LambdaType *type) {
-    TypeId type_id = type->type;
+    TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
         strbuf_append_str(tp->code_buf, "void*");
@@ -74,7 +74,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type == LMD_TYPE_INT) {
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
@@ -126,7 +126,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     // declare the type
     LambdaType *type = asn_node->then->type;
     printf("assigned type: %p\n", type);
-    printf("assigned type id: %d\n", type->type);
+    printf("assigned type id: %d\n", type->type_id);
     writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
     // declare the variable
@@ -206,7 +206,7 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
-    strbuf_append_str(tp->code_buf, (type->nested && type->nested->type == LMD_TYPE_INT) 
+    strbuf_append_str(tp->code_buf, (type->nested && type->nested->type_id == LMD_TYPE_INT) 
         ? "array_long_new(" : "array_new(");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
