@@ -245,9 +245,7 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     printf("transpile field expr\n");
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
         strbuf_append_str(tp->code_buf, "map_get(");
-        if (field_node->field && field_node->field->node_type == AST_NODE_PRIMARY &&
-            ((AstPrimaryNode*)field_node->field)->expr && 
-            ((AstPrimaryNode*)field_node->field)->expr->node_type == AST_NODE_IDENT) {
+        if (field_node->field && field_node->field->node_type == AST_NODE_IDENT) {
             strbuf_append_str(tp->code_buf, "rt,\"");
             writeNodeSource(tp, field_node->field->node);
             strbuf_append_str(tp->code_buf, "\")");
