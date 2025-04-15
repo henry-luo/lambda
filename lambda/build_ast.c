@@ -1,52 +1,69 @@
 #include "transpiler.h"
 #include "../lib/hashmap.h"
 
-LambdaType NULL_TYPE = {.type = LMD_TYPE_NULL, .nested = NULL, .length = 0};
-LambdaType BOOL_TYPE = {.type = LMD_TYPE_BOOL, .nested = NULL, .length = 0};
-LambdaType INT_TYPE = {.type = LMD_TYPE_INT, .nested = NULL, .length = 0};
-LambdaType FLOAT_TYPE = {.type = LMD_TYPE_FLOAT, .nested = NULL, .length = 0};
-LambdaType STRING_TYPE = {.type = LMD_TYPE_STRING, .nested = NULL, .length = 0};
+LambdaType NULL_TYPE = {.type = LMD_TYPE_NULL};
+LambdaType BOOL_TYPE = {.type = LMD_TYPE_BOOL};
+LambdaType INT_TYPE = {.type = LMD_TYPE_INT};
+LambdaType FLOAT_TYPE = {.type = LMD_TYPE_FLOAT};
+LambdaType STRING_TYPE = {.type = LMD_TYPE_STRING};
+LambdaType FUNC_TYPE = {.type = LMD_TYPE_FUNC};
+
+int byte_size[] = {
+    [LMD_TYPE_NULL] = 0,
+    [LMD_TYPE_INT] = sizeof(long),
+    [LMD_TYPE_FLOAT] = sizeof(double),
+    [LMD_TYPE_STRING] = sizeof(char*),
+    [LMD_TYPE_BOOL] = sizeof(bool),
+    [LMD_TYPE_ARRAY] = sizeof(void*),
+    [LMD_TYPE_MAP] = sizeof(void*),
+};
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
     AstNode* ast_node;
-    pool_variable_alloc(tp->ast_node_pool, size, &ast_node);
-    if (!ast_node) { return NULL; }
+    pool_variable_alloc(tp->ast_node_pool, size, (void**)&ast_node);
     memset(ast_node, 0, size);
-    ast_node->node_type = node_type;  ast_node->node = node;  
-    // ast_node->type = NULL_TYPE;
+    ast_node->node_type = node_type;  ast_node->node = node;
     return ast_node;
 }
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size) {
     void* bytes;
     pool_variable_alloc(tp->ast_node_pool, size, &bytes);
-    if (!bytes) { return NULL; }
     memset(bytes, 0, size);
     return bytes;
+}
+
+LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
+    LambdaType* t;
+    pool_variable_alloc(tp->ast_node_pool, size, (void**)&t);
+    memset(t, 0, size);
+    t->type = type;
+    return t;
 }
 
 AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
     printf("build array expr\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
-    ast_node->type.type = LMD_TYPE_ARRAY;
+    ast_node->type = alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
+    LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  LambdaType *nested_type = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
         if (!prev_item) { 
-            ast_node->item = item;  nested_type = &item->type;
+            ast_node->item = item;  nested_type = item->type;
         } else {  
             prev_item->next = item;
-            if (nested_type && item->type.type != nested_type->type) {
+            if (nested_type && item->type->type != nested_type->type) {
                 nested_type = NULL;  // type mismatch, reset the nested type to NULL
             }
         }
         prev_item = item;
-        ast_node->type.length++;
+        type->length++;
         child = ts_node_next_named_sibling(child);
     }
-    ast_node->type.nested = nested_type;
-    return ast_node;
+    type->nested = nested_type;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
@@ -56,19 +73,19 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     ast_node->object = build_expr(tp, object_node);
     TSNode field_node = ts_node_child_by_field_id(array_node, tp->ID_FIELD);
     ast_node->field = build_expr(tp, field_node);
-    if (ast_node->object->type.type == LMD_TYPE_ARRAY) {
-        ast_node->type = *ast_node->object->type.nested;
+    if (ast_node->object->type->type == LMD_TYPE_ARRAY) {
+        ast_node->type = ((LambdaTypeArray*)ast_node->object->type)->nested;
     }
-    else if (ast_node->object->type.type == LMD_TYPE_MAP) {
-        ast_node->type = *ast_node->object->type.nested;
-    }
+    // else if (ast_node->object->type.type == LMD_TYPE_MAP) {
+    //     ast_node->type = *ast_node->object->type.nested;
+    // }
     else {
         ast_node->type = ast_node->object->type;
     }
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
-LambdaType build_identifier(Transpiler* tp, TSNode id_node) {
+LambdaType* build_identifier(Transpiler* tp, TSNode id_node) {
     printf("building identifier\n");
     // get the identifier name
     // check if the name is in the name stack
@@ -87,7 +104,7 @@ LambdaType build_identifier(Transpiler* tp, TSNode id_node) {
             goto FIND_VAR_NAME;
         }
         printf("missing identifier %.*s\n", (int)var_name.length, var_name.str);
-        return NULL_TYPE;
+        return &NULL_TYPE;
     }
     else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
@@ -99,22 +116,22 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     printf("build primary expr\n");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
     TSNode child = ts_node_named_child(pri_node, 0);
-    if (ts_node_is_null(child)) { return ast_node; }
+    if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
 
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
     printf("primary expr symbol %d\n", symbol);
     if (symbol == tp->SYM_NULL) {
-        ast_node->type = NULL_TYPE;
+        ast_node->type = &NULL_TYPE;
     }
     else if (symbol == tp->SYM_TRUE || symbol == tp->SYM_FALSE) {
-        ast_node->type = BOOL_TYPE;
+        ast_node->type = &BOOL_TYPE;
     }
     else if (symbol == tp->SYM_NUMBER) {
-        ast_node->type = INT_TYPE;
+        ast_node->type = &INT_TYPE;
     }
     else if (symbol == tp->SYM_STRING) {
-        ast_node->type = STRING_TYPE;
+        ast_node->type = &STRING_TYPE;
     }
     else if (symbol == tp->SYM_IDENTIFIER) {
         ast_node->type = build_identifier(tp, child);
@@ -136,9 +153,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else {
-        ast_node->type = NULL_TYPE;
+        ast_node->type = &NULL_TYPE;
     }
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
@@ -153,7 +170,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     ast_node->right = build_expr(tp, right_node);
 
     ast_node->type = ast_node->left->type;
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
@@ -167,7 +184,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     ast_node->otherwise = build_expr(tp, else_node);
     // determine the type of the if expression
     ast_node->type = ast_node->then->type;
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
@@ -204,92 +221,11 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
 
     // determine let node type
     ast_node->type = ast_node->then->type;
-    return ast_node;
-}
-
-void push_name(Transpiler* tp, AstNamedNode* node) {
-    printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
-    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
-    entry->name = node->name;  entry->node = node;
-    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
-    if (!tp->current_scope->last) { tp->current_scope->last = entry; }
-    else { tp->current_scope->last->next = entry; }
-    tp->current_scope->last = entry;
-}
-
-AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
-    printf("build assign expr\n");
-    AstNamedNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
-
-    TSNode name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
-    int start_byte = ts_node_start_byte(name);
-    ast_node->name.str = tp->source + start_byte;
-    ast_node->name.length = ts_node_end_byte(name) - start_byte;
-
-    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_THEN);
-    ast_node->then = build_expr(tp, val_node);
-
-    // determine the type of the variable
-    ast_node->type = ast_node->then->type;
-
-    // push the name to the name stack
-    push_name(tp, ast_node);
-    return ast_node;
-}
-
-AstNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset) {
-    printf("build pair expr\n");
-    AstNamedNode* ast_node = alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
-
-    TSNode name = ts_node_child_by_field_id(pair_node, tp->ID_NAME);
-    int start_byte = ts_node_start_byte(name);
-    ast_node->name.str = tp->source + start_byte;
-    ast_node->name.length = ts_node_end_byte(name) - start_byte;
-
-    TSNode val_node = ts_node_child_by_field_id(pair_node, tp->ID_THEN);
-    printf("build pair then\n");
-    ast_node->then = build_expr(tp, val_node);
-
-    // determine the type of the field
-    ast_node->type = ast_node->then->type;
-    ast_node->type.byte_offset = prev_offset;
-    return ast_node;
-}
-
-int byte_size[] = {
-    [LMD_TYPE_NULL] = 0,
-    [LMD_TYPE_INT] = sizeof(long),
-    [LMD_TYPE_FLOAT] = sizeof(double),
-    [LMD_TYPE_STRING] = sizeof(char*),
-    [LMD_TYPE_BOOL] = sizeof(bool),
-    [LMD_TYPE_ARRAY] = sizeof(void*),
-    [LMD_TYPE_MAP] = sizeof(void*),
-};
-
-AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
-    printf("build map expr\n");
-    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
-    ast_node->type.type = LMD_TYPE_MAP;
-
-    TSNode child = ts_node_named_child(map_node, 0);
-    AstNode* prev_item = NULL;  int byte_offset = 0;
-    while (!ts_node_is_null(child)) {
-        AstNode* item = build_pair_expr(tp, child, byte_offset);
-        if (!prev_item) { ast_node->item = item; } 
-        else { prev_item->next = item; }
-        prev_item = item;
-        ast_node->type.length++;
-        byte_offset += byte_size[item->type.type];
-        child = ts_node_next_named_sibling(child);
-    }
-
-    arraylist_append(tp->type_list, ast_node);
-    ast_node->type.type_index = tp->type_list->length - 1;
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
-    printf("build let expr\n");
+    printf("build let stam\n");
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
 
     // let can have multiple cond declarations
@@ -316,7 +252,81 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     if (!ast_node->declare) { printf("missing let declare\n"); }
 
     // let statement does not have 'then' clause
+    return (AstNode*)ast_node;
+}
+
+void push_name(Transpiler* tp, AstNamedNode* node) {
+    printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
+    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
+    entry->name = node->name;  entry->node = (AstNode*)node;
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (!tp->current_scope->last) { tp->current_scope->last = entry; }
+    else { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
+}
+
+AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
+    printf("build assign expr\n");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
+    int start_byte = ts_node_start_byte(name);
+    ast_node->name.str = tp->source + start_byte;
+    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+
+    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_THEN);
+    ast_node->then = build_expr(tp, val_node);
+
+    // determine the type of the variable
+    ast_node->type = ast_node->then->type;
+
+    // push the name to the name stack
+    push_name(tp, ast_node);
+    return (AstNode*)ast_node;
+}
+
+AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset) {
+    printf("build pair expr\n");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_FIELD, sizeof(LambdaTypeField));
+    LambdaTypeField *type = (LambdaTypeField*)ast_node->type;
+
+    TSNode name = ts_node_child_by_field_id(pair_node, tp->ID_NAME);
+    int start_byte = ts_node_start_byte(name);
+    ast_node->name.str = tp->source + start_byte;
+    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+
+    TSNode val_node = ts_node_child_by_field_id(pair_node, tp->ID_THEN);
+    printf("build pair then\n");
+    ast_node->then = build_expr(tp, val_node);
+
+    // determine the type of the field
+    type->type = ast_node->then->type->type;
+    type->byte_offset = prev_offset;
     return ast_node;
+}
+
+AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
+    printf("build map expr\n");
+    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
+
+    TSNode child = ts_node_named_child(map_node, 0);
+    AstNamedNode* prev_item = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        AstNamedNode* item = build_pair_expr(tp, child, byte_offset);
+        if (!prev_item) { ast_node->item = item; } 
+        else { prev_item->next = (AstNode*)item; }
+        prev_item = item;
+        type->length++;
+        byte_offset += byte_size[item->type->type];
+        child = ts_node_next_named_sibling(child);
+    }
+
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
@@ -336,7 +346,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 
     // push the name to the name stack
     push_name(tp, ast_node);
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
@@ -373,20 +383,20 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
 
     // determine for node type
     ast_node->type = ast_node->then->type;
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("infer function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
-    ast_node->type.type = LMD_TYPE_FUNC;
+    ast_node->type = &FUNC_TYPE;
     // get the function name
     TSNode fn_name_node = ts_node_child_by_field_id(func_node, tp->ID_NAME);
     ast_node->name = fn_name_node;
     // get the function body
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, tp->ID_BODY);
     ast_node->body = build_expr(tp, fn_body_node);    
-    return ast_node;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
@@ -428,23 +438,51 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
 }
 
+char* formatType(LambdaType *type) {
+    if (!type) { return "null*"; }
+    TypeId type_id = type->type;
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        return "void*";
+    case LMD_TYPE_INT:
+        return "long";
+    case LMD_TYPE_FLOAT:
+        return "double";
+    case LMD_TYPE_STRING:
+        return "char*";
+    case LMD_TYPE_BOOL:
+        return "bool";
+    case LMD_TYPE_ARRAY:
+        LambdaTypeArray *array_type = (LambdaTypeArray*)type;
+        if (array_type->nested && array_type->nested->type == LMD_TYPE_INT) {
+            return "ArrayLong*";
+        } else {
+            return "Array*";
+        }
+    case LMD_TYPE_MAP:
+        return "Map*";
+    default:
+        return "unknown";
+    }
+}
+
 AstNode* print_ast_node(AstNode *node, int indent) {
     for (int i = 0; i < indent; i++) { printf("  "); }
     // get the function name
     switch(node->node_type) {
     case AST_NODE_IF_EXPR:
-        printf("[if expr]\n");
+        printf("[if expr:%s]\n", formatType(node->type));
         print_ast_node(((AstIfExprNode*)node)->cond, indent + 1);
         print_ast_node(((AstIfExprNode*)node)->then, indent + 1);
         print_ast_node(((AstIfExprNode*)node)->otherwise, indent + 1);
         break;
     case AST_NODE_BINARY:
-        printf("[binary expr]\n");
+        printf("[binary expr:%s]\n", formatType(node->type));
         print_ast_node(((AstBinaryNode*)node)->left, indent + 1);
         print_ast_node(((AstBinaryNode*)node)->right, indent + 1);
         break;
     case AST_NODE_LET_EXPR:  case AST_NODE_LET_STAM:
-        printf("[let %s]\n", node->node_type == AST_NODE_LET_EXPR ? "expr" : "stam");
+        printf("[let %s:%s]\n", node->node_type == AST_NODE_LET_EXPR ? "expr" : "stam", formatType(node->type));
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             for (int i = 0; i < indent+1; i++) { printf("  "); }
@@ -459,7 +497,7 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_FOR_EXPR:
-        printf("[for %s]\n", node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam");
+        printf("[for %s:%s]\n", node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", formatType(node->type));
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             for (int i = 0; i < indent+1; i++) { printf("  "); }
@@ -474,15 +512,15 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_ASSIGN:
-        printf("[assign expr]\n");
+        printf("[assign expr:%s]\n", formatType(node->type));
         print_ast_node(((AstNamedNode*)node)->then, indent + 1);
         break;
     case AST_NODE_LOOP:
-        printf("[loop expr]\n");
+        printf("[loop expr:%s]\n", formatType(node->type));
         print_ast_node(((AstNamedNode*)node)->then, indent + 1);
         break;
     case AST_NODE_ARRAY:
-        printf("[array expr]\n");
+        printf("[array expr:%s]\n", formatType(node->type));
         AstNode *item = ((AstArrayNode*)node)->item;
         while (item) {
             for (int i = 0; i < indent+1; i++) { printf("  "); }
@@ -492,17 +530,17 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         }        
         break;
     case AST_NODE_MAP:
-        printf("[map expr]\n");
+        printf("[map expr:%s]\n", formatType(node->type));
         AstNamedNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
             for (int i = 0; i < indent+1; i++) { printf("  "); }
             printf("item:\n");
-            print_ast_node(nm_item, indent + 1);
-            nm_item = nm_item->next;
+            print_ast_node((AstNode*)nm_item, indent + 1);
+            nm_item = (AstNamedNode*)nm_item->next;
         }
         break;        
     case AST_NODE_FIELD_EXPR:
-        printf("[field expr]\n");
+        printf("[field expr:%s]\n", formatType(node->type));
         for (int i = 0; i < indent+1; i++) { printf("  "); }
         printf("object:\n");        
         print_ast_node(((AstFieldNode*)node)->object, indent + 1);
@@ -511,18 +549,18 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         print_ast_node(((AstFieldNode*)node)->field, indent + 1);
         break;
     case AST_NODE_FUNC:
-        printf("[function expr]\n");
+        printf("[function expr:%s]\n", formatType(node->type));
         print_ast_node(((AstFuncNode*)node)->body, indent + 1);
         break;
     case AST_NODE_PRIMARY:
-        printf("[primary expr]\n");
+        printf("[primary expr:%s]\n", formatType(node->type));
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
         }
         break;
     case AST_SCRIPT:
-        printf("[script]\n");
-        AstScript* child = ((AstScript*)node)->child;
+        printf("[script:%s]\n", formatType(node->type));
+        AstNode* child = ((AstScript*)node)->child;
         while (child) {
             print_ast_node(child, indent + 1);
             child = child->next;
@@ -549,5 +587,5 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         prev = ast;
         child = ts_node_next_named_sibling(child);
     }
-    return ast_node;
+    return (AstNode*)ast_node;
 }

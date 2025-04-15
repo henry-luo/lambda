@@ -50,12 +50,12 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node);
 
 void writeNodeSource(Transpiler* tp, TSNode node) {
     int start_byte = ts_node_start_byte(node);
-    char* start = tp->source + start_byte;
+    const char* start = tp->source + start_byte;
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
 void writeType(Transpiler* tp, LambdaType *type) {
-    LambdaTypeId type_id = type->type;
+    TypeId type_id = type->type;
     switch (type_id) {
     case LMD_TYPE_NULL:
         strbuf_append_str(tp->code_buf, "void*");
@@ -73,7 +73,8 @@ void writeType(Transpiler* tp, LambdaType *type) {
         strbuf_append_str(tp->code_buf, "bool");
         break;
     case LMD_TYPE_ARRAY:
-        if (type->nested && type->nested->type == LMD_TYPE_INT) {
+        LambdaTypeArray *array_type = (LambdaTypeArray*)type;
+        if (array_type->nested && array_type->nested->type == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
@@ -121,8 +122,10 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
 }
 
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
+    printf("transpile assign expr\n");
     // declare the type
-    LambdaType *type = &asn_node->then->type;
+    LambdaType *type = asn_node->then->type;
+    printf("assigned type: %p\n", type);
     printf("assigned type id: %d\n", type->type);
     writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
@@ -149,6 +152,7 @@ void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
         transpile_expr(tp, let_node->then);
     }
 }
+
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     printf("transpile let stam\n");
     if (tp->phase == TP_DECLARE) {
@@ -164,6 +168,7 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
         transpile_expr(tp, let_node->then);
     }
 }
+
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_then) {
     printf("transpile loop expr\n");
     // todo: prefix var name with '_'
@@ -175,7 +180,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
     AstNode *next_loop = loop_node->next;
     if (next_loop) {
         printf("transpile nested loop\n");
-        transpile_loop_expr(tp, next_loop, for_then);
+        transpile_loop_expr(tp, (AstNamedNode*)next_loop, for_then);
     }
     else {
         strbuf_append_str(tp->code_buf, "list_long_push(ls,");
@@ -200,9 +205,10 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
-    strbuf_append_str(tp->code_buf, (array_node->type.nested && array_node->type.nested->type == LMD_TYPE_INT) 
+    LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
+    strbuf_append_str(tp->code_buf, (type->nested && type->nested->type == LMD_TYPE_INT) 
         ? "array_long_new(" : "array_new(");
-    strbuf_append_int(tp->code_buf, array_node->type.length);
+    strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     AstNode *item = array_node->item;
     while (item) {
@@ -218,7 +224,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     printf("transpile map expr\n");
     strbuf_append_str(tp->code_buf, "map_new(rt,");
-    strbuf_append_int(tp->code_buf, map_node->type.type_index);
+    strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)map_node->type)->type_index);
     strbuf_append_char(tp->code_buf, ',');
     AstNamedNode *item = map_node->item;
     while (item) {
@@ -227,7 +233,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
         strbuf_append_str(tp->code_buf, "\",");
         transpile_expr(tp, item->then);
         if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-        item = item->next;
+        item = (AstNamedNode*)item->next;
     }
     strbuf_append_char(tp->code_buf, ')');
 }
@@ -258,6 +264,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_LET_EXPR:
         transpile_let_expr(tp, (AstLetNode*)expr_node);
         break;
+    case AST_NODE_LET_STAM:
+        transpile_let_stam(tp, (AstLetNode*)expr_node);
+        break;
     case AST_NODE_FOR_EXPR:
         transpile_for_expr(tp, (AstForNode*)expr_node);
         break;        
@@ -281,7 +290,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 
 void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // use function body type as the return type for the time being
-    LambdaType *ret_type = &fn_node->body->type;
+    LambdaType *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
@@ -330,7 +339,7 @@ int main(void) {
     printf("Starting transpiler...\n");
 
     // create a parser.
-    const TSParser* parser = lambda_parser();
+    TSParser* parser = lambda_parser();
     if (parser == NULL) { return 1; }
     // read the source and parse it
     StrBuf* source_buf = readTextFile("test/hello-world.ls");
@@ -397,6 +406,7 @@ int main(void) {
     // build the AST
     tp.ast_root = build_script(&tp, root_node);
     // print the AST for debugging
+    printf("AST: ---------\n");
     print_ast_node(tp.ast_root, 0);
 
     // transpile the AST to C code

@@ -9,7 +9,10 @@
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 
-typedef enum LambdaTypeId {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
+
+typedef enum TypeId {
     LMD_TYPE_NULL,
     LMD_TYPE_INT,
     LMD_TYPE_FLOAT,
@@ -17,35 +20,32 @@ typedef enum LambdaTypeId {
     LMD_TYPE_BOOL,
     LMD_TYPE_ARRAY,
     LMD_TYPE_MAP,
+    LMD_TYPE_FIELD,
     LMD_TYPE_ELEMENT,
     LMD_TYPE_FUNC,
-} LambdaTypeId;
-
-typedef struct ShapeMap ShapeMap;
+} TypeId;
 
 typedef struct LambdaType {
-    LambdaTypeId type;
-    union {
-        struct LambdaType* nested;  // nested type for array
-        int type_index;  // index of the type in the type list
-    };
-    union {
-        int length;  // no. of items in the array/map
-        int byte_offset;  // byte offset of the map field
-    };
+    TypeId type;
 } LambdaType;
 
-// typedef struct ShapeField {
-//     StrView name;  // field name
-//     LambdaType type;  // field type
-//     struct ShapeField* next;  // next field
-// } ShapeField;
+typedef struct LambdaTypeArray {
+    LambdaType;  // extends LambdaType
+    LambdaType* nested;  // nested item type for the array
+    int length;  // no. of items in the array/map
+} LambdaTypeArray;
 
-// typedef struct ShapeMap {
-//     ShapeField* first_field;  // field list
-//     int field_count;  // number of fields
-//     int byte_size;  // size of the shape
-// } ShapeMap;
+typedef struct LambdaTypeField {
+    LambdaType;  // extends LambdaType
+    int byte_offset;  // byte offset of the map field
+} LambdaTypeField;
+
+typedef struct LambdaTypeMap {
+    LambdaType;  // extends LambdaType
+    int length;  // no. of items in the array/map
+    int type_index;  // index of the type in the type list
+    int byte_size;  // byte size of the struct that the map is tranpiled to
+} LambdaTypeMap;
 
 typedef struct Pack {
     size_t size;           // Current used size of the pack
@@ -93,9 +93,9 @@ typedef enum AstNodeType {
 
 struct AstNode {
     AstNodeType node_type;
-    TSNode node;
-    LambdaType type;
+    LambdaType *type;
     struct AstNode* next;
+    TSNode node;
 };
 
 typedef struct {
@@ -209,6 +209,7 @@ typedef struct {
 } Transpiler;
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
+LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
 AstNode* build_map_expr(Transpiler* tp, TSNode map_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
@@ -222,3 +223,5 @@ MIR_context_t jit_init();
 void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 void jit_cleanup(MIR_context_t ctx);
+
+#pragma clang diagnostic pop

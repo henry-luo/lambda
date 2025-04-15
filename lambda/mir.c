@@ -7,7 +7,7 @@
 #include "lambda.h"
 
 typedef struct jit_item {
-    char *code;
+    const char *code;
     size_t code_size;
     size_t curr;
 } jit_item_t;
@@ -66,7 +66,7 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
         MIR_item_t func = DLIST_HEAD (MIR_item_t, module->items);
-        dzlog_debug("Loaded module: %p, items: %p\n", module, func);
+        dzlog_debug("Loaded module: %p, items: %p\n", module, (void*)func);
         for (; func != NULL; func = DLIST_NEXT (MIR_item_t, func)) {
             if (func->item_type != MIR_func_item) continue;
             dzlog_debug("got func: %s\n", func->u.func->name);

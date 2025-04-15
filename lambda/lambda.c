@@ -74,9 +74,10 @@ Map* map_new(Context *rt, int type_index, ...) {
     map->data = pack_init();
 
     // set the fields
-    int count = node->type.length;
+    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    int count = map_type->length;
     printf("map length: %d\n", count);
-    va_list args;  AstNode *field = node->item;
+    va_list args;  AstNamedNode *field = node->item;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
         // map->shape[i] = va_arg(args, void*);

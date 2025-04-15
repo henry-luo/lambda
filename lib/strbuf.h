@@ -8,10 +8,15 @@
 #include <stdbool.h>
 #include "strview.h"
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 typedef struct {
-    StrView; // extends StrView
+    // extends StrView
+    char* str;        // pointer to string data (may or may-not be null-terminated)
+    size_t length;    // length excluding null terminator    
     size_t capacity;
 } StrBuf;
+#pragma clang diagnostic pop
 
 #ifndef ROUNDUP2POW
   #define ROUNDUP2POW(x) _rndup2pow64(x)

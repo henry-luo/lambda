@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 typedef struct {
-    char* str;      // pointer to string data (may or may-not be null-terminated)
+    const char* str;    // pointer to string data (may or may-not be null-terminated)
     size_t length;      // length excluding null terminator
 } StrView;
 
