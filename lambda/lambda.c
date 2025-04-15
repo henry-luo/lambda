@@ -67,14 +67,17 @@ Map* map() {
 Map* map_new(Context *rt, int type_index, ...) {
     if (!rt) { return NULL; }
     printf("map_new %p at %d\n", rt, type_index);
-    AstMapNode* node = (AstMapNode*)((ArrayList*)rt->type_list)->data + type_index;
+    ArrayList* type_list = (ArrayList*)rt->type_list;
+    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
+    printf("map node: %p, type: %p, node_type: %d\n", node, node->type, node->node_type);
     Map *map = malloc(sizeof(Map));
     map->ast = node;
     printf("init pack\n");
-    map->data = pack_init();
+    // map->data = pack_init();
 
     // set the fields
     LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    printf("map type: %d\n", map_type->type);
     int count = map_type->length;
     printf("map length: %d\n", count);
     va_list args;  AstNamedNode *field = node->item;
