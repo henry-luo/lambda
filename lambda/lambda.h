@@ -5,7 +5,17 @@
 #include <stdarg.h>
 #define null 0
 
-typedef void* Item;
+typedef struct Item {
+    int type_id;  // type id of the item
+    union {
+        long long_val;
+        double double_val;
+        bool bool_val;
+        char* str;
+        void* data;
+    };
+} Item;
+
 typedef uint64_t Handle;
 
 typedef struct Array {
@@ -50,5 +60,6 @@ typedef struct Map {
 } Map;
 Map* map();  // constructs an empty map
 Map* map_new(Context *rt, int type_index, ...);
-void* map_get(Context *rt, char *key);
+Item* map_get(Context *rt, Map* map, char *key);
 
+bool item_true(Item* item);

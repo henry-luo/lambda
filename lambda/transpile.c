@@ -61,7 +61,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
         strbuf_append_str(tp->code_buf, "void*");
         break;
     case LMD_TYPE_ANY:
-        strbuf_append_str(tp->code_buf, "void*");
+        strbuf_append_str(tp->code_buf, "Item*");
         break;
     case LMD_TYPE_INT:
         strbuf_append_str(tp->code_buf, "long");
@@ -104,23 +104,43 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     printf("transpile binary expr\n");
     strbuf_append_char(tp->code_buf, '(');
-    transpile_expr(tp, bi_node->left);
-
+    
     TSNode op_node = ts_node_child_by_field_name(bi_node->node, "operator", 8);
     StrView op = ts_node_source(tp, op_node);
     printf("op: %.*s\n", (int)op.length, op.str);
-    if (strncmp(op.str, "and", 3) == 0) {
-        strbuf_append_str(tp->code_buf, "&&");
-    } 
-    else if (strncmp(op.str, "or", 2) == 0) {
-        strbuf_append_str(tp->code_buf, "||");
-    } else {
+    if (strncmp(op.str, "and", 3) == 0 || strncmp(op.str, "or", 2) == 0) {
+        // left operand
+        if (bi_node->left->type->type_id == LMD_TYPE_ANY) {
+            strbuf_append_str(tp->code_buf, "item_true(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        else {
+            transpile_expr(tp, bi_node->left);
+        }
+        // operator
+        if (strncmp(op.str, "or", 2) == 0) {
+            strbuf_append_str(tp->code_buf, "||");
+        } else {
+            strbuf_append_str(tp->code_buf, "&&");
+        }
+        // right operand
+        if (bi_node->right->type->type_id == LMD_TYPE_ANY) {
+            strbuf_append_str(tp->code_buf, "item_true(");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        else {
+            transpile_expr(tp, bi_node->right);
+        }        
+    }
+    else {
+        transpile_expr(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ' ');
         strbuf_append_str_n(tp->code_buf, op.str, op.length);
         strbuf_append_char(tp->code_buf, ' ');
+        transpile_expr(tp, bi_node->right);
     }
-
-    transpile_expr(tp, bi_node->right);
     strbuf_append_char(tp->code_buf, ')');
 }
 
@@ -255,17 +275,18 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     printf("transpile field expr\n");
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
-        strbuf_append_str(tp->code_buf, "map_get(");
+        strbuf_append_str(tp->code_buf, "map_get(rt,");
+        transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
         if (field_node->field && field_node->field->node_type == AST_NODE_IDENT) {
-            strbuf_append_str(tp->code_buf, "rt,\"");
+            strbuf_append_char(tp->code_buf, '"');
             writeNodeSource(tp, field_node->field->node);
-            strbuf_append_str(tp->code_buf, "\")");
+            strbuf_append_char(tp->code_buf, '"');
         }
         else {
-            strbuf_append_str(tp->code_buf, "rt,");
-            writeNodeSource(tp, field_node->object->node);
-            strbuf_append_str(tp->code_buf, ")");
+            writeNodeSource(tp, field_node->field->node);
         }
+        strbuf_append_char(tp->code_buf, ')');
     } 
     else if (field_node->object->type->type_id == LMD_TYPE_ARRAY) {
         transpile_expr(tp, field_node->object);
