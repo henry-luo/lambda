@@ -4,8 +4,8 @@
  * @license MIT
  */
 
-/// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
+/// <reference types="../tree-sitter-dsl.d.ts" />
 
 // Creates a rule to match one or more of the rules separated by a comma
 function commaSep1(rule) {

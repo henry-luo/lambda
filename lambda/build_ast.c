@@ -293,11 +293,9 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     return (AstNode*)ast_node;
 }
 
-AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset) {
+AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
     printf("build pair expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_FIELD, sizeof(LambdaTypeField));
-    LambdaTypeField *type = (LambdaTypeField*)ast_node->type;
 
     TSNode name = ts_node_child_by_field_id(pair_node, tp->ID_NAME);
     int start_byte = ts_node_start_byte(name);
@@ -309,8 +307,7 @@ AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node, int prev_offset)
     ast_node->then = build_expr(tp, val_node);
 
     // determine the type of the field
-    type->type_id = ast_node->then->type->type_id;
-    type->byte_offset = prev_offset;
+    ast_node->type = ast_node->then->type;
     return ast_node;
 }
 
@@ -321,12 +318,24 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
     LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
 
     TSNode child = ts_node_named_child(map_node, 0);
-    AstNamedNode* prev_item = NULL;  int byte_offset = 0;
+    AstNamedNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
-        AstNamedNode* item = build_pair_expr(tp, child, byte_offset);
+        AstNamedNode* item = build_pair_expr(tp, child);
         if (!prev_item) { ast_node->item = item; } 
         else { prev_item->next = (AstNode*)item; }
         prev_item = item;
+
+        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+        shape_entry->name = item->name;
+        shape_entry->type = item->type;
+        shape_entry->byte_offset = byte_offset;
+        if (!prev_entry) {
+            type->shape = shape_entry;
+        } else {
+            prev_entry->next = shape_entry;
+        }
+        prev_entry = shape_entry;
+
         type->length++;
         byte_offset += byte_size[item->type->type_id];
         child = ts_node_next_named_sibling(child);

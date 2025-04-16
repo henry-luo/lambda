@@ -81,14 +81,13 @@ Map* map_new(Context *rt, int type_index, ...) {
     printf("map type: %d\n", map_type->type_id);
     int count = map_type->length;
     printf("map length: %d\n", count);
-    va_list args;  AstNamedNode *field = node->item;
+    va_list args;  ShapeEntry *field = map_type->shape;
     printf("map field: %p\n", field);
     va_start(args, count);
     for (int i = 0; i < count; i++) {
-        LambdaTypeField *field_type = (LambdaTypeField*)field->type;
-        printf("field type: %d, offset: %d\n", field_type->type_id, field_type->byte_offset);
-        void* field_ptr = (char*)map->data + field_type->byte_offset;
-        switch (field_type->type_id) {
+        printf("field type: %d, offset: %d\n", field->type->type_id, field->byte_offset);
+        void* field_ptr = (char*)map->data + field->byte_offset;
+        switch (field->type->type_id) {
             case LMD_TYPE_INT:
                 *(long*)field_ptr = va_arg(args, long);
                 break;
@@ -102,9 +101,9 @@ Map* map_new(Context *rt, int type_index, ...) {
                 *(bool*)field_ptr = va_arg(args, bool);
                 break;
             default:
-                printf("unknown type %d\n", field_type->type_id);
+                printf("unknown type %d\n", field->type->type_id);
         }
-        field = (AstNamedNode*)field->next;
+        field = field->next;
     }
     va_end(args);
     return map;

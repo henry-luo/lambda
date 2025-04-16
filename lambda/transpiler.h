@@ -36,16 +36,19 @@ typedef struct LambdaTypeArray {
     int length;  // no. of items in the array/map
 } LambdaTypeArray;
 
-typedef struct LambdaTypeField {
-    LambdaType;  // extends LambdaType
+typedef struct ShapeEntry {
+    StrView name;
+    LambdaType* type;  // type of the field
     int byte_offset;  // byte offset of the map field
-} LambdaTypeField;
+    struct ShapeEntry* next;
+} ShapeEntry;
 
 typedef struct LambdaTypeMap {
     LambdaType;  // extends LambdaType
     int length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
-    int byte_size;  // byte size of the struct that the map is tranpiled to
+    int byte_size;  // byte size of the struct that the map is transpiled to
+    ShapeEntry* shape;  // shape of the map
 } LambdaTypeMap;
 
 typedef struct Pack {
