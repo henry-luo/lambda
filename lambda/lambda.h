@@ -5,18 +5,7 @@
 #include <stdarg.h>
 #define null 0
 
-typedef struct Item {
-    int type_id;  // type id of the item
-    union {
-        long long_val;
-        double double_val;
-        bool bool_val;
-        char* str;
-        void* data;
-    };
-} Item;
-
-typedef uint64_t Handle;
+typedef uint64_t Item;
 
 typedef struct Array {
     Item* items;
@@ -48,10 +37,11 @@ ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);
 
 // script runtime context
+typedef struct Heap Heap;
 typedef struct Context {
     void* ast_pool;
     void* type_list;
-    void* heap;
+    Heap* heap;
 } Context;
 
 typedef struct Map {
@@ -60,6 +50,6 @@ typedef struct Map {
 } Map;
 Map* map();  // constructs an empty map
 Map* map_new(Context *rt, int type_index, ...);
-Item* map_get(Context *rt, Map* map, char *key);
+Item map_get(Context *rt, Map* map, char *key);
 
-bool item_true(Item* item);
+bool item_true(Item item);

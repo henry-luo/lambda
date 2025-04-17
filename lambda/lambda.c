@@ -1,7 +1,7 @@
 #include "transpiler.h"
 #include "lambda.h"
 
-Item ITEM_NULL = {.type_id = LMD_TYPE_NULL, .data = NULL};
+Item ITEM_NULL = LMD_TYPE_NULL << 56;
 
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
@@ -74,8 +74,7 @@ Map* map_new(Context *rt, int type_index, ...) {
     printf("map node: %p, type: %p, node_type: %d\n", node, node->type, node->node_type);
     Map *map = malloc(sizeof(Map));
     map->ast = node;
-    VariableMemPool *pool = (VariableMemPool*)rt->heap;
-    pool_variable_alloc(pool, ((LambdaTypeMap*)node->type)->byte_size, (void**)&map->data);
+    map->data = heap_alloc(rt->heap, ((LambdaTypeMap*)node->type)->byte_size);
     printf("map data: %p, byte_size: %d\n", map->data, ((LambdaTypeMap*)node->type)->byte_size);
 
     // set the fields
@@ -111,8 +110,8 @@ Map* map_new(Context *rt, int type_index, ...) {
     return map;
 }
 
-Item* map_get(Context *rt, Map* map, char *key) {
-    if (!rt || !map || !key) { return &ITEM_NULL; }
+Item map_get(Context *rt, Map* map, char *key) {
+    if (!rt || !map || !key) { return ITEM_NULL; }
     ShapeEntry *field = ((LambdaTypeMap*)((AstMapNode*)map->ast)->type)->shape;
     while (field) {
         if (strncmp(field->name.str, key, field->name.length) == 0) {
@@ -120,13 +119,13 @@ Item* map_get(Context *rt, Map* map, char *key) {
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
                 case LMD_TYPE_INT:
-                    return &(Item){.type_id = LMD_TYPE_INT, .long_val = *(long*)field_ptr};
-                case LMD_TYPE_FLOAT:
-                    return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
+                    return (((uint64_t)LMD_TYPE_INT)<<56) | (*(int*)field_ptr);
+                // case LMD_TYPE_FLOAT:
+                //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
                 case LMD_TYPE_STRING:
-                    return &(Item){.type_id = LMD_TYPE_STRING, .str = *(char**)field_ptr};
+                    return (((uint64_t)LMD_TYPE_STRING)<<56) | (*(char*)field_ptr);
                 case LMD_TYPE_BOOL:
-                    return &(Item){.type_id = LMD_TYPE_BOOL, .bool_val = *(bool*)field_ptr};
+                    return (((uint64_t)LMD_TYPE_BOOL)<<56) | (*(bool*)field_ptr);
                 default:
                     printf("unknown type %d\n", type_id);
             }
@@ -134,15 +133,20 @@ Item* map_get(Context *rt, Map* map, char *key) {
         field = field->next;
     }
     printf("key %s not found\n", key);
-    return &ITEM_NULL;
+    return ITEM_NULL;
 }
 
-bool item_true(Item* item) {
-    if (item->type_id == LMD_TYPE_NULL) {
+bool item_true(Item itm) {
+    LambdaItem item = {.item = itm};
+    printf("item type: %d, val: %llu\n", item.type_id, item.value);
+    switch (item.type_id) {
+    case LMD_TYPE_NULL:
         return false;
+    case LMD_TYPE_ERROR:
+        return false;
+    case LMD_TYPE_BOOL:
+        return item.bool_val;
+    default:
+        return true;
     }
-    if (item->type_id == LMD_TYPE_BOOL) {
-        return item->data;
-    }
-    return true;
 }

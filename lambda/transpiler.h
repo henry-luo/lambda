@@ -15,6 +15,7 @@
 typedef enum TypeId {
     LMD_TYPE_NULL,
     LMD_TYPE_ANY,
+    LMD_TYPE_ERROR,
     LMD_TYPE_INT,
     LMD_TYPE_FLOAT,
     LMD_TYPE_STRING,
@@ -57,7 +58,7 @@ typedef struct Pack {
     size_t committed_size; // Currently committed memory size - non-zero indicates virtual memory mode
     void* data;            // Pointer to the allocated memory
 } Pack;
-Pack* pack_init();
+Pack* pack_init(size_t initial_size);
 void* pack_alloc(Pack* pack, size_t size);
 void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
@@ -172,6 +173,47 @@ typedef enum {
     TP_COMPOSE,  // expr composition phase
 } TranspilePhase;
 
+typedef struct Heap {
+    Pack; // extends Pack
+} Heap;
+Heap* heap_init(size_t initial_size);
+void* heap_alloc(Heap* heap, size_t size);
+void* heap_calloc(Heap* heap, size_t size);
+void heap_free(Heap* heap);
+
+// uses the high byte to tag the pointer
+typedef union LambdaItem {
+    // union {
+    //     long long_val;
+    //     double double_val;
+    //     bool bool_val;
+    //     char* str;
+    //     void* data;
+    // };
+    struct {
+        #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        uint64_t type_id : 8;
+        uint64_t value   : 56;
+        #else
+        union {
+            struct {
+                uint64_t int_val: 32;
+                uint64_t _32: 32;
+            };
+            struct {
+                uint64_t bool_val: 8;
+                uint64_t _56: 56;
+            };
+            struct {
+                uint64_t value   : 56;
+                uint64_t type_id : 8;                
+            };
+        };
+        #endif
+    };
+    uint64_t item;
+} LambdaItem;
+
 typedef struct {
     StrBuf* code_buf;
     const char* source;
@@ -181,7 +223,7 @@ typedef struct {
     TranspilePhase phase;
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
-    VariableMemPool* heap;
+    Heap* heap;
 
     TSSymbol SYM_NULL;
     TSSymbol SYM_TRUE;

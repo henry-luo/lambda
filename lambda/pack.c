@@ -10,9 +10,11 @@
 #define VIRTUAL_PACK_THRESHOLD 4096
 #define DEFAULT_PAGE_SIZE 4096
 
-// Forward declarations for platform-specific functions
 static int convert_to_virtual_impl(Pack* pack);
 static void vm_grow(Pack* pack, size_t needed_size);
+static void* vm_reserve(size_t size);
+static int vm_commit(void* addr, size_t size);
+static void vm_release(void* addr, size_t size);
 
 // Global page size variable
 static size_t g_page_size = 0;
@@ -31,18 +33,63 @@ static size_t get_page_size() {
     return g_page_size;
 }
 
-Pack* pack_init() {
+Pack* pack_init(size_t initial_size) {
     Pack* pack = (Pack*)malloc(sizeof(Pack));
     if (!pack) return NULL;
     
+    // Use the provided initial size or default if 0
+    size_t actual_size = initial_size > 0 ? initial_size : INITIAL_PACK_SIZE;
+    
     pack->size = 0;
-    pack->capacity = INITIAL_PACK_SIZE;
-    // Initialize committed_size to 0 (non-virtual)
-    pack->committed_size = 0;
-    pack->data = malloc(INITIAL_PACK_SIZE);
-    if (!pack->data) {
-        free(pack);
-        return NULL;
+    
+    // Check if we should use virtual memory directly
+    if (actual_size >= VIRTUAL_PACK_THRESHOLD) {
+        // Get system page size
+        size_t page_size = get_page_size();
+        
+        // Align capacity to page size
+        size_t aligned_capacity = ((actual_size + page_size - 1) / page_size) * page_size;
+        
+        // Reserve 4x for future growth (same as in convert_to_virtual_impl)
+        size_t reserve_size = aligned_capacity * 4;
+        
+        #if defined(__APPLE__) || defined(__linux__)
+        // Reserve virtual memory
+        void* mem = vm_reserve(reserve_size);
+        if (!mem) {
+            free(pack);
+            return NULL;
+        }
+        
+        // Commit initial portion
+        if (!vm_commit(mem, aligned_capacity)) {
+            vm_release(mem, reserve_size);
+            free(pack);
+            return NULL;
+        }
+        
+        pack->data = mem;
+        pack->capacity = reserve_size;       // Total reserved size
+        pack->committed_size = aligned_capacity; // Currently committed size
+        #else
+        // Fallback for unsupported platforms
+        pack->data = malloc(actual_size);
+        if (!pack->data) {
+            free(pack);
+            return NULL;
+        }
+        pack->capacity = actual_size;
+        pack->committed_size = 0; // Non-virtual
+        #endif
+    } else {
+        // Standard allocation for smaller sizes
+        pack->capacity = actual_size;
+        pack->committed_size = 0; // Non-virtual
+        pack->data = malloc(actual_size);
+        if (!pack->data) {
+            free(pack);
+            return NULL;
+        }
     }
     
     return pack;
@@ -242,3 +289,19 @@ void pack_free(Pack* pack) {
     free(pack);
 }
 #endif
+
+Heap* heap_init(size_t initial_size) {
+    return (Heap*)pack_init(initial_size);
+}
+
+void* heap_alloc(Heap* heap, size_t size) {
+    return pack_alloc((Pack*)heap, size);
+}
+
+void* heap_calloc(Heap* heap, size_t size) {
+    return heap_calloc(heap, size);
+}
+
+void heap_free(Heap* heap) {
+    pack_free((Pack*)heap);
+}
