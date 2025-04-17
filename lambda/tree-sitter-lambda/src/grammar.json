@@ -1586,6 +1586,15 @@
         ]
       }
     },
+    "parameter": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        }
+      ]
+    },
     "fn_definition": {
       "type": "SEQ",
       "members": [
@@ -1604,6 +1613,17 @@
         {
           "type": "STRING",
           "value": "("
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "FIELD",
+            "name": "param",
+            "content": {
+              "type": "SYMBOL",
+              "name": "parameter"
+            }
+          }
         },
         {
           "type": "STRING",

@@ -1,4 +1,9 @@
 let g = 2;
+
+fn multiple(a, b) {
+    123
+}
+
 fn main() {
     // comment
     let a = 8 + 5, b = true, c = null, d = "hello", e = [1, 2, 3], h=["123", "true", "str"],

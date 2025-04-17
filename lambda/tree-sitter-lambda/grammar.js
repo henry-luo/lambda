@@ -265,10 +265,16 @@ module.exports = grammar({
       return token(seq(alpha, repeat(alphanumeric)));
     },  
 
+    // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
+    parameter: $ => choice(
+      $.identifier,
+      // $.array, $.map,
+    ),
+
     fn_definition: $ => seq(
-      'fn', 
-      field('name', $.identifier), '(', ')', '{', 
-      field('body', $._expression), '}',
+      'fn', field('name', $.identifier), 
+      '(', repeat(field('param', $.parameter)), ')', 
+      '{', field('body', $._expression), '}',
     ),
 
     assign_expr: $ => seq(

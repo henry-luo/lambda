@@ -3,6 +3,7 @@
 
 LambdaType NULL_TYPE = {.type_id = LMD_TYPE_NULL};
 LambdaType ANY_TYPE = {.type_id = LMD_TYPE_ANY};
+LambdaType ERROR_TYPE = {.type_id = LMD_TYPE_ERROR};
 LambdaType BOOL_TYPE = {.type_id = LMD_TYPE_BOOL};
 LambdaType INT_TYPE = {.type_id = LMD_TYPE_INT};
 LambdaType FLOAT_TYPE = {.type_id = LMD_TYPE_FLOAT};
@@ -10,13 +11,17 @@ LambdaType STRING_TYPE = {.type_id = LMD_TYPE_STRING};
 LambdaType FUNC_TYPE = {.type_id = LMD_TYPE_FUNC};
 
 int byte_size[] = {
-    [LMD_TYPE_NULL] = 0,
+    [LMD_TYPE_NULL] = sizeof(bool),
+    [LMD_TYPE_ANY] = sizeof(void*),
+    [LMD_TYPE_ERROR] = sizeof(void*),
+    [LMD_TYPE_BOOL] = sizeof(bool),
     [LMD_TYPE_INT] = sizeof(long),
     [LMD_TYPE_FLOAT] = sizeof(double),
     [LMD_TYPE_STRING] = sizeof(char*),
-    [LMD_TYPE_BOOL] = sizeof(bool),
     [LMD_TYPE_ARRAY] = sizeof(void*),
     [LMD_TYPE_MAP] = sizeof(void*),
+    [LMD_TYPE_ELEMENT] = sizeof(void*),
+    [LMD_TYPE_FUNC] = sizeof(void*),
 };
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
@@ -110,6 +115,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             goto FIND_VAR_NAME;
         }
         printf("missing identifier %.*s\n", (int)var_name.length, var_name.str);
+        ast_node->type = &ERROR_TYPE;
     }
     else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
@@ -467,14 +473,17 @@ char* formatType(LambdaType *type) {
         return "void*";
     case LMD_TYPE_ANY:
         return "any";
+    case LMD_TYPE_ERROR:
+        return "ERROR";        
+    case LMD_TYPE_BOOL:
+        return "bool";        
     case LMD_TYPE_INT:
         return "long";
     case LMD_TYPE_FLOAT:
         return "double";
     case LMD_TYPE_STRING:
         return "char*";
-    case LMD_TYPE_BOOL:
-        return "bool";
+
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
@@ -484,8 +493,12 @@ char* formatType(LambdaType *type) {
         }
     case LMD_TYPE_MAP:
         return "Map*";
+    case LMD_TYPE_ELEMENT:
+        return "Elmt*";
+    case LMD_TYPE_FUNC:
+        return "Func*";
     default:
-        return "unknown";
+        return "UNKNOWN";
     }
 }
 

@@ -23,6 +23,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_ANY:
         strbuf_append_str(tp->code_buf, "Item*");
         break;
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(tp->code_buf, "bool");
+        break;        
     case LMD_TYPE_INT:
         strbuf_append_str(tp->code_buf, "long");
         break;
@@ -31,9 +34,6 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;
     case LMD_TYPE_STRING:
         strbuf_append_str(tp->code_buf, "char*");
-        break;
-    case LMD_TYPE_BOOL:
-        strbuf_append_str(tp->code_buf, "bool");
         break;
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
@@ -317,12 +317,15 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
    
     // get the function body
     tp->phase = TP_DECLARE;
-    transpile_expr(tp, fn_node->body);
+    AstNode *body = fn_node->body;
+    if (body->node_type == AST_NODE_LET_EXPR) {
+        transpile_let_expr(tp, (AstLetNode*)body);
+    }
     
     tp->phase = TP_COMPOSE;
     writeType(tp, ret_type);
     strbuf_append_str(tp->code_buf, " ret=");
-    transpile_expr(tp, fn_node->body);
+    transpile_expr(tp, body);
     strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
 }
 
