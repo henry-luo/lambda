@@ -2,50 +2,10 @@
 #include "transpiler.h"
 #include "lambda.h"
 
-// Function to read and display the content of a text file
-StrBuf* readTextFile(const char *filename) {
-    FILE *file = fopen(filename, "r"); // open the file in read mode
-    if (file == NULL) { // handle error when file cannot be opened
-        perror("Error opening file"); 
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);  // move the file pointer to the end to determine file size
-    long fileSize = ftell(file);
-    rewind(file); // reset file pointer to the beginning
-
-    StrBuf* buf = strbuf_new_cap(fileSize + 1);
-    if (buf == NULL) {
-        perror("Memory allocation failed");
-        fclose(file);
-        return NULL;
-    }
-
-    // read the file content into the buffer
-    size_t bytesRead = fread(buf->str, 1, fileSize, file);
-    buf->str[bytesRead] = '\0'; // Null-terminate the buffer
-
-    // clean up
-    fclose(file);
-    return buf;
-}
-
-void writeTextFile(const char *filename, const char *content) {
-    FILE *file = fopen(filename, "w"); // Open the file in write mode
-    if (file == NULL) {
-        perror("Error opening file"); // Handle error if file cannot be opened
-        return;
-    }
-    // Write the string to the file
-    if (fprintf(file, "%s", content) < 0) {
-        perror("Error writing to file");
-    }
-    fclose(file); // Close the file
-}
-
+char* read_text_file(const char *filename);
+void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 
 void writeNodeSource(Transpiler* tp, TSNode node) {
@@ -400,14 +360,11 @@ int main(void) {
     TSParser* parser = lambda_parser();
     if (parser == NULL) { return 1; }
     // read the source and parse it
-    StrBuf* source_buf = readTextFile("test/hello-world.ls");
-    // printf("%s\n", buf->str); // print the file content
-    tp.source = source_buf->str;
+    tp.source = read_text_file("test/hello-world.ls");
     TSTree* tree = lambda_parse_source(parser, tp.source);
     if (tree == NULL) {
         printf("Error: Failed to parse the source code.\n");
-        strbuf_free(source_buf);  ts_parser_delete(parser);
-        return 1;
+        goto CLEAN_UP;
     }
 
     tp.SYM_NULL = ts_language_symbol_for_name(ts_tree_language(tree), "null", 4, true);
@@ -457,9 +414,7 @@ int main(void) {
 
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
-        strbuf_free(source_buf);  ts_parser_delete(parser);
-        ts_tree_delete(tree);
-        return 1;
+        goto CLEAN_UP;
     }
     // build the AST
     tp.ast_root = build_script(&tp, root_node);
@@ -475,7 +430,7 @@ int main(void) {
     // JIT compile the C code
     MIR_context_t jit_context = jit_init();
     // compile user code to MIR
-    writeTextFile("hello-world.c", tp.code_buf->str);
+    write_text_file("hello-world.c", tp.code_buf->str);
     printf("transpiled code:\n----------------\n%s\n", tp.code_buf->str);    
     jit_compile(jit_context, tp.code_buf->str, tp.code_buf->length, "main.c");
     
@@ -493,10 +448,11 @@ int main(void) {
     }
 
     // clean up
+    CLEAN_UP:
     jit_cleanup(jit_context);
-    strbuf_free(source_buf);
+    free((void*)tp.source);
     strbuf_free(tp.code_buf);
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
+    if (tree) ts_tree_delete(tree);
+    if (parser) ts_parser_delete(parser);
     return 0;
 }

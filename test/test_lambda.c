@@ -6,6 +6,8 @@ int main() {
     printf("sizeof(LambdaItem) = %zu\n", sizeof(item));
     assert(sizeof(item) == 8);
 
+    // directly shift LMD_TYPE_BOOL without casting to uint64_t first will hang on Mac
+    // uint64_t val = (LMD_TYPE_BOOL<<56) | 1;  // this will hang on Mac
     uint64_t val = (((uint64_t)LMD_TYPE_BOOL)<<56) | 1;
     printf("val: %llu\n", val);
     return 0;

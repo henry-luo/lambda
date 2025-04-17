@@ -4,7 +4,7 @@ void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node);
-char* readTextFile(const char *filename);
+char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
 
 bool is_space(char c) {
@@ -319,7 +319,7 @@ void apply_header_style(LayoutContext* lycon) {
                             printf("not stylesheet\n");  goto NEXT;
                         }
 
-                        char* sty_source = readTextFile(file_path); // Use the constructed path
+                        char* sty_source = read_text_file(file_path); // Use the constructed path
                         if (!sty_source) {
                             fprintf(stderr, "Failed to read CSS file\n");
                         }

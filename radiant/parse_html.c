@@ -1,5 +1,28 @@
 #include "dom.h"
 
+char* read_text_file(const char *filename);
+
+char* read_text_doc(lxb_url_t *url) {
+    printf("Reading file: %.*s\n", (int)url->path.length, url->path.str.data);
+    // read the file content into the buffer
+    // assuming the URL is a valid file:// URL
+    if (url && url->path.length) {
+        char* local_path = url_to_local_path(url);
+        if (!local_path) {
+            fprintf(stderr, "Invalid file URL: %.*s\n", (int)url->path.length, url->path.str.data);
+            return NULL;
+        }
+        char* text = read_text_file(local_path);
+        free(local_path);
+        if (!text) {
+            fprintf(stderr, "Failed to read file: %s\n", local_path);
+            return NULL;
+        }
+        return text;
+    }
+    return NULL;
+}
+
 static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
     // Append data to string buffer
     lxb_char_t **output = (lxb_char_t **)ctx;
@@ -13,34 +36,6 @@ static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void 
     (*output)[old_len + len] = '\0';
     
     return LXB_STATUS_OK;
-}
-
-// Function to read and display the content of a text file
-char* readTextFile(const char *filename) {
-    FILE *file = fopen(filename, "r"); // open the file in read mode
-    if (file == NULL) { // handle error when file cannot be opened
-        perror("Error opening file"); 
-        return NULL;
-    }
-
-    fseek(file, 0, SEEK_END);  // move the file pointer to the end to determine file size
-    long fileSize = ftell(file);
-    rewind(file); // reset file pointer to the beginning
-
-    char* buf = (char*)malloc(fileSize + 1); // allocate memory for the file content
-    if (!buf) {
-        perror("Memory allocation failed");
-        fclose(file);
-        return NULL;
-    }
-
-    // read the file content into the buffer
-    size_t bytesRead = fread(buf, 1, fileSize, file);
-    buf[bytesRead] = '\0'; // Null-terminate the buffer
-
-    // clean up
-    fclose(file);
-    return buf;
 }
 
 static lxb_status_t
@@ -63,27 +58,6 @@ char* url_to_local_path(lxb_url_t *url) {
     return path;
 }
 
-char* read_text_file(lxb_url_t *url) {
-    printf("Reading file: %.*s\n", (int)url->path.length, url->path.str.data);
-    // read the file content into the buffer
-    // assuming the URL is a valid file:// URL
-    if (url && url->path.length) {
-        char* local_path = url_to_local_path(url);
-        if (!local_path) {
-            fprintf(stderr, "Invalid file URL: %.*s\n", (int)url->path.length, url->path.str.data);
-            return NULL;
-        }
-        char* buf = readTextFile(local_path);
-        free(local_path);
-        if (!buf) {
-            fprintf(stderr, "Failed to read file: %s\n", local_path);
-            return NULL;
-        }
-        return buf;
-    }
-    return NULL;
-}
-
 void parse_html_doc(Document* doc) {
     if (!doc->url) { return; }
     // create HTML document object
@@ -101,7 +75,7 @@ void parse_html_doc(Document* doc) {
     }
 
     // parse the HTML source
-    char* html_source = read_text_file(doc->url);
+    char* html_source = read_text_doc(doc->url);
     if (!html_source) {
         fprintf(stderr, "Failed to read HTML file\n");
         lxb_html_document_destroy(document);
