@@ -19,32 +19,11 @@
         },
         {
           "type": "SYMBOL",
-          "name": "expr_stam"
-        },
-        {
-          "type": "SYMBOL",
           "name": "fn_definition"
         },
         {
           "type": "SYMBOL",
           "name": "let_stam"
-        }
-      ]
-    },
-    "expr_stam": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "{"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_expression"
-        },
-        {
-          "type": "STRING",
-          "value": "}"
         }
       ]
     },
@@ -934,6 +913,144 @@
         {
           "type": "SYMBOL",
           "name": "map"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "call_expr"
+        }
+      ]
+    },
+    "import": {
+      "type": "TOKEN",
+      "content": {
+        "type": "STRING",
+        "value": "import"
+      }
+    },
+    "spread_element": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "..."
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_expression"
+        }
+      ]
+    },
+    "_arguments": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "FIELD",
+                      "name": "argument",
+                      "content": {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "SYMBOL",
+                            "name": "_expression"
+                          },
+                          {
+                            "type": "SYMBOL",
+                            "name": "spread_element"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
+                },
+                {
+                  "type": "REPEAT",
+                  "content": {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": ","
+                      },
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "FIELD",
+                            "name": "argument",
+                            "content": {
+                              "type": "CHOICE",
+                              "members": [
+                                {
+                                  "type": "SYMBOL",
+                                  "name": "_expression"
+                                },
+                                {
+                                  "type": "SYMBOL",
+                                  "name": "spread_element"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "type": "BLANK"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ")"
+        }
+      ]
+    },
+    "call_expr": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "FIELD",
+          "name": "function",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "_expression"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "import"
+              }
+            ]
+          }
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_arguments"
         }
       ]
     },
@@ -1906,6 +2023,10 @@
       },
       {
         "type": "SYMBOL",
+        "name": "call_expr"
+      },
+      {
+        "type": "SYMBOL",
         "name": "primary_expr"
       },
       {
@@ -1985,7 +2106,8 @@
   "externals": [],
   "inline": [
     "_literal",
-    "_parenthesized_expr"
+    "_parenthesized_expr",
+    "_arguments"
   ],
   "supertypes": [
     "_expression",

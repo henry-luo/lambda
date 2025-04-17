@@ -93,6 +93,37 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_call_expr(Transpiler* tp, TSNode call_node) {
+    printf("build call expr\n");
+    AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
+    TSNode function_node = ts_node_child_by_field_id(call_node, tp->ID_FUNCTION);
+    ast_node->function = build_expr(tp, function_node);
+
+    TSTreeCursor cursor = ts_tree_cursor_new(call_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode *prev_argument = NULL;
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == tp->ID_ARGUMENT) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNode *argument = build_expr(tp, child);
+            printf("got argument type %d\n", argument->node_type);
+            if (prev_argument == NULL) {
+                ast_node->argument = argument;
+            } else {
+                prev_argument->next = argument;
+            }
+            prev_argument = argument;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    ast_node->type = &ANY_TYPE;
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     printf("building identifier\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstNamedNode));
@@ -164,6 +195,10 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }
     else if (symbol == tp->SYM_SUBSCRIPT_EXPR) {
         ast_node->expr = build_field_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == tp->SYM_CALL_EXPR) {
+        ast_node->expr = build_call_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else {
@@ -624,6 +659,17 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         for (int i = 0; i < indent+1; i++) { printf("  "); }
         printf("field:\n");        
         print_ast_node(((AstFieldNode*)node)->field, indent + 1);
+        break;
+    case AST_NODE_CALL_EXPR:
+        printf("[call expr:%s]\n", formatType(node->type));
+        print_ast_node(((AstCallNode*)node)->function, indent + 1);
+        for (int i = 0; i < indent+1; i++) { printf("  "); }
+        printf("args:\n"); 
+        AstNode* arg = ((AstCallNode*)node)->argument;
+        while (arg) {
+            print_ast_node(arg, indent + 1);
+            arg = arg->next;
+        }
         break;
     case AST_NODE_FUNC:
         printf("[function expr:%s]\n", formatType(node->type));

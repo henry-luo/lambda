@@ -90,11 +90,12 @@ typedef enum AstNodeType {
     AST_NODE_LET_EXPR,
     AST_NODE_FOR_EXPR,
     AST_NODE_LET_STAM,
-    AST_NODE_FUNC,
-    AST_SCRIPT,
     AST_NODE_FIELD_EXPR,
+    AST_NODE_CALL_EXPR,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
+    AST_NODE_FUNC,
+    AST_SCRIPT,
 } AstNodeType;
 
 struct AstNode {
@@ -108,6 +109,11 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *object, *field;
 } AstFieldNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *function, *argument;
+} AstCallNode;
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -244,6 +250,7 @@ typedef struct {
     TSSymbol SYM_IDENT;
     TSSymbol SYM_MEMBER_EXPR;
     TSSymbol SYM_SUBSCRIPT_EXPR;
+    TSSymbol SYM_CALL_EXPR;
 
     TSFieldId ID_NAME;
     TSFieldId ID_COND;
@@ -255,6 +262,8 @@ typedef struct {
     TSFieldId ID_DECLARE;
     TSFieldId ID_OBJECT;
     TSFieldId ID_FIELD;
+    TSFieldId ID_FUNCTION;
+    TSFieldId ID_ARGUMENT;
 } Transpiler;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \

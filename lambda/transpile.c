@@ -23,6 +23,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_ANY:
         strbuf_append_str(tp->code_buf, "Item");
         break;
+    case LMD_TYPE_ERROR:
+        strbuf_append_str(tp->code_buf, "Item");
+        break;        
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "bool");
         break;        
@@ -231,6 +234,22 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
+void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
+    printf("transpile call expr\n");
+    strbuf_append_char(tp->code_buf, '_');
+    transpile_expr(tp, call_node->function);
+    strbuf_append_str(tp->code_buf, "(rt,");
+    AstNode* arg = call_node->argument;
+    while (arg) {
+        transpile_expr(tp, arg);
+        if (arg->next) {
+            strbuf_append_char(tp->code_buf, ',');
+        }
+        arg = arg->next;
+    }
+    strbuf_append_char(tp->code_buf, ')');
+}
+
 void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     printf("transpile field expr\n");
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
@@ -299,6 +318,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_FIELD_EXPR:
         transpile_field_expr(tp, (AstFieldNode*)expr_node);
         break;
+    case AST_NODE_CALL_EXPR:
+        transpile_call_expr(tp, (AstCallNode*)expr_node);
+        break;     
     default:
         printf("unknown expression type\n");
         break;
@@ -397,6 +419,7 @@ int main(void) {
     tp.SYM_MEMBER_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "member_expr", 11, true);
     tp.SYM_SUBSCRIPT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "subscript_expr", 14, true);
     tp.SYM_MAP = ts_language_symbol_for_name(ts_tree_language(tree), "map", 3, true);
+    tp.SYM_CALL_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "call_expr", 9, true);
     
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
@@ -408,6 +431,8 @@ int main(void) {
     tp.ID_DECLARE = ts_language_field_id_for_name(ts_tree_language(tree), "declare", 7);
     tp.ID_OBJECT = ts_language_field_id_for_name(ts_tree_language(tree), "object", 6);
     tp.ID_FIELD = ts_language_field_id_for_name(ts_tree_language(tree), "field", 5);
+    tp.ID_FUNCTION = ts_language_field_id_for_name(ts_tree_language(tree), "function", 8);
+    tp.ID_ARGUMENT = ts_language_field_id_for_name(ts_tree_language(tree), "argument", 8);
 
     // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");

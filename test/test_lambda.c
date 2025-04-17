@@ -1,6 +1,10 @@
 #include "../lambda/lambda.h"
 #include "../lambda/transpiler.h"
 
+int add(int a, int b) {
+    return a + b;
+}
+
 int main() {
     LambdaItem item;
     printf("sizeof(LambdaItem) = %zu\n", sizeof(item));
@@ -10,6 +14,10 @@ int main() {
     // uint64_t val = (LMD_TYPE_BOOL<<56) | 1;  // this will hang on Mac
     uint64_t val = (((uint64_t)LMD_TYPE_BOOL)<<56) | 1;
     printf("val: %llu\n", val);
+    
+    int result = add(3, 4);
+    printf("3 + 4 = %d\n", result);
+    
     return 0;
 }
 

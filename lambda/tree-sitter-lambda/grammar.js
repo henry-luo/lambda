@@ -38,10 +38,12 @@ module.exports = grammar({
   inline: $ => [
     $._literal,
     $._parenthesized_expr,
+    $._arguments,
   ],
 
   precedences: $ => [[
     $._literal,
+    $.call_expr,
     $.primary_expr,
     $.unary_expr,
     'binary_exp',
@@ -69,9 +71,7 @@ module.exports = grammar({
     // $._literal at top-level for JSON and Mark compatibility
     document: $ => repeat($._statement),
 
-    _statement: $ => choice($._literal, $.expr_stam, $.fn_definition, $.let_stam),
-
-    expr_stam: $ => seq('{', $._expression, '}'),
+    _statement: $ => choice($._literal, $.fn_definition, $.let_stam),
 
     _literal: $ => choice(
       $.lit_map,
@@ -196,11 +196,9 @@ module.exports = grammar({
       $.identifier,
       // alias($._reserved_identifier, $.identifier),
       // $.this,
-      // $.super,
       $.number,
       $.string,
       $.symbol,
-      // $.template_string,
       // $.regex,
       $.true,
       $.false,
@@ -212,7 +210,21 @@ module.exports = grammar({
       // $.generator_function,
       // $.class,
       // $.meta_property,
-      // $.call_expression,
+      $.call_expr,
+    ),
+
+    import: _ => token('import'),
+
+    spread_element: $ => seq('...', $._expression),
+
+    _arguments: $ => seq(
+      '(', commaSep(optional(
+      field('argument', choice($._expression, $.spread_element)))), ')',
+    ),    
+
+    call_expr: $ => seq(
+      field('function', choice($._expression, $.import)),
+      $._arguments,
     ),
 
     subscript_expr: $ => seq(
