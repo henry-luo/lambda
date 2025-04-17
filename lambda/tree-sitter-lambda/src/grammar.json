@@ -1590,8 +1590,12 @@
       "type": "CHOICE",
       "members": [
         {
-          "type": "SYMBOL",
-          "name": "identifier"
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
         }
       ]
     },
@@ -1618,7 +1622,7 @@
           "type": "REPEAT",
           "content": {
             "type": "FIELD",
-            "name": "param",
+            "name": "declare",
             "content": {
               "type": "SYMBOL",
               "name": "parameter"

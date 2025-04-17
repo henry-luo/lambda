@@ -267,13 +267,13 @@ module.exports = grammar({
 
     // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
     parameter: $ => choice(
-      $.identifier,
+      field('name', $.identifier),
       // $.array, $.map,
     ),
 
     fn_definition: $ => seq(
       'fn', field('name', $.identifier), 
-      '(', repeat(field('param', $.parameter)), ')', 
+      '(', repeat(field('declare', $.parameter)), ')', 
       '{', field('body', $._expression), '}',
     ),
 

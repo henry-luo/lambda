@@ -21,7 +21,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
         strbuf_append_str(tp->code_buf, "void*");
         break;
     case LMD_TYPE_ANY:
-        strbuf_append_str(tp->code_buf, "Item*");
+        strbuf_append_str(tp->code_buf, "Item");
         break;
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "bool");
@@ -119,8 +119,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     printf("transpile assign expr\n");
     // declare the type
     LambdaType *type = asn_node->then->type;
-    printf("assigned type: %p\n", type);
-    printf("assigned type id: %d\n", type->type_id);
+    strbuf_append_char(tp->code_buf, ' ');
     writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
     // declare the variable
@@ -313,7 +312,16 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
     writeNodeSource(tp, fn_node->name);
-    strbuf_append_str(tp->code_buf, "(Context *rt){\n");
+    strbuf_append_str(tp->code_buf, "(Context *rt");
+    AstNamedNode *param = fn_node->param;
+    while (param) {
+        strbuf_append_str(tp->code_buf, ", ");
+        writeType(tp, param->type);
+        strbuf_append_char(tp->code_buf, ' ');
+        writeNodeSource(tp, param->node);
+        param = (AstNamedNode*)param->next;
+    }
+    strbuf_append_str(tp->code_buf, "){\n");
    
     // get the function body
     tp->phase = TP_DECLARE;
@@ -323,10 +331,11 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     }
     
     tp->phase = TP_COMPOSE;
+    strbuf_append_char(tp->code_buf, ' ');
     writeType(tp, ret_type);
     strbuf_append_str(tp->code_buf, " ret=");
     transpile_expr(tp, body);
-    strbuf_append_str(tp->code_buf, ";\nreturn ret;\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n return ret;\n}\n");
 }
 
 void transpile_script(Transpiler* tp, AstScript *script) {

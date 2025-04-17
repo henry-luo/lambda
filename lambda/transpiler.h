@@ -94,6 +94,7 @@ typedef enum AstNodeType {
     AST_SCRIPT,
     AST_NODE_FIELD_EXPR,
     AST_NODE_IDENT,
+    AST_NODE_PARAM,
 } AstNodeType;
 
 struct AstNode {
@@ -156,6 +157,7 @@ typedef struct {
 typedef struct {
     AstNode;  // extends AstNode
     TSNode name;
+    AstNamedNode *param; // first parameter of the function
     AstNode *body;
     NameScope *params;  // params for the function
     NameScope *locals;  // local variables in the function

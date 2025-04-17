@@ -410,6 +410,24 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     return (AstNode*)ast_node;
 }
 
+AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
+    printf("build param expr\n");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_PARAM, param_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(param_node, tp->ID_NAME);
+    int start_byte = ts_node_start_byte(name);
+    ast_node->name.str = tp->source + start_byte;
+    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+
+    // TSNode val_node = ts_node_child_by_field_id(param_node, tp->ID_THEN);
+    // printf("build param then\n");
+    // ast_node->then = build_expr(tp, val_node);
+
+    // determine the type of the field
+    ast_node->type = &ANY_TYPE; // ast_node->then->type;
+    return ast_node;
+}
+
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("infer function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
@@ -417,7 +435,30 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     // get the function name
     TSNode fn_name_node = ts_node_child_by_field_id(func_node, tp->ID_NAME);
     ast_node->name = fn_name_node;
-    // get the function body
+    // build the params
+    // let can have multiple cond declarations
+    TSTreeCursor cursor = ts_tree_cursor_new(func_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNamedNode *prev_param = NULL;
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == tp->ID_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNamedNode *param = build_param_expr(tp, child);
+            printf("got param type %d\n", param->node_type);
+            if (prev_param == NULL) {
+                ast_node->param = param;
+            } else {
+                prev_param->next = (AstNode*)param;
+            }
+            prev_param = param;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);    
+
+    // build the function body
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, tp->ID_BODY);
     ast_node->body = build_expr(tp, fn_body_node);    
     return (AstNode*)ast_node;
