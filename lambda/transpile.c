@@ -397,7 +397,7 @@ int main(void) {
     tp.ID_OBJECT = ts_language_field_id_for_name(ts_tree_language(tree), "object", 6);
     tp.ID_FIELD = ts_language_field_id_for_name(ts_tree_language(tree), "field", 5);
 
-    // print the syntax tree as an S-expression.
+    // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");
     TSNode root_node = ts_tree_root_node(tree);
     print_ts_node(root_node, 0);
