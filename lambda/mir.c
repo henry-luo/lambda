@@ -40,8 +40,10 @@ func_obj_t func_list[] = {
 void *import_resolver(const char *name) {
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) 
-        if (!strcmp(func_list[i].name, name))
+        if (strcmp(func_list[i].name, name) == 0)
             return func_list[i].func;
+    printf("failed to resolve: %s\n", name);
+    // probably should resolve to a default error handling function
     return NULL;
 }
 
