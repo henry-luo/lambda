@@ -58,8 +58,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     printf("transpile primary expr\n");
     if (pri_node->expr && pri_node->expr->node_type != AST_NODE_IDENT) {
         transpile_expr(tp, pri_node->expr);
-        return;
     } else {
+        if (pri_node->expr && pri_node->expr->node_type == AST_NODE_IDENT) {
+            // user var name starts with '_'
+            strbuf_append_char(tp->code_buf, '_');
+        }
         writeNodeSource(tp, pri_node->node);
     }
 }
@@ -124,7 +127,8 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     LambdaType *type = asn_node->then->type;
     strbuf_append_char(tp->code_buf, ' ');
     writeType(tp, type);
-    strbuf_append_char(tp->code_buf, ' ');
+    // user var name starts with '_'
+    strbuf_append_str(tp->code_buf, " _");
     // declare the variable
     strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
     strbuf_append_char(tp->code_buf, '=');
@@ -170,7 +174,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
     // todo: prefix var name with '_'
     strbuf_append_str(tp->code_buf, "ArrayLong *arr=");
     transpile_expr(tp, loop_node->then);
-    strbuf_append_str(tp->code_buf, ";\nfor (int i=0; i<arr->length; i++){\nlong ");
+    strbuf_append_str(tp->code_buf, ";\nfor (int i=0; i<arr->length; i++){\nlong _");
     strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
     strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
     AstNode *next_loop = loop_node->next;
@@ -236,7 +240,6 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     printf("transpile call expr\n");
-    strbuf_append_char(tp->code_buf, '_');
     transpile_expr(tp, call_node->function);
     strbuf_append_str(tp->code_buf, "(rt,");
     AstNode* arg = call_node->argument;
@@ -339,7 +342,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     while (param) {
         strbuf_append_str(tp->code_buf, ", ");
         writeType(tp, param->type);
-        strbuf_append_char(tp->code_buf, ' ');
+        strbuf_append_str(tp->code_buf, " _");
         writeNodeSource(tp, param->node);
         param = (AstNamedNode*)param->next;
     }

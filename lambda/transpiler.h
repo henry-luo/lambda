@@ -190,13 +190,6 @@ void heap_free(Heap* heap);
 
 // uses the high byte to tag the pointer
 typedef union LambdaItem {
-    // union {
-    //     long long_val;
-    //     double double_val;
-    //     bool bool_val;
-    //     char* str;
-    //     void* data;
-    // };
     struct {
         #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
         uint64_t type_id : 8;
@@ -212,8 +205,8 @@ typedef union LambdaItem {
                 uint64_t _56: 56;
             };
             struct {
-                uint64_t value   : 56;
-                uint64_t type_id : 8;                
+                uint64_t value   : 48;
+                uint64_t type_id : 16;                
             };
         };
         #endif
