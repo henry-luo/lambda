@@ -125,7 +125,6 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     printf("transpile assign expr\n");
     // declare the type
     LambdaType *type = asn_node->then->type;
-    strbuf_append_char(tp->code_buf, ' ');
     writeType(tp, type);
     // user var name starts with '_'
     strbuf_append_str(tp->code_buf, " _");
@@ -142,8 +141,9 @@ void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
     if (tp->phase == TP_DECLARE) {
         AstNode *declare = let_node->declare;
         while (declare) {
-            printf("transpile let declare\n");
-            transpile_expr(tp, declare);
+            assert(declare->node_type == AST_NODE_ASSIGN);
+            strbuf_append_char(tp->code_buf, ' ');
+            transpile_assign_expr(tp, (AstNamedNode*)declare);
             declare = declare->next;
         }
     }
@@ -158,23 +158,22 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     if (tp->phase == TP_DECLARE) {
         AstNode *declare = let_node->declare;
         while (declare) {
-            printf("transpile let declare\n");
-            transpile_expr(tp, declare);
+            assert(declare->node_type == AST_NODE_ASSIGN);
+            transpile_assign_expr(tp, (AstNamedNode*)declare);
             declare = declare->next;
         }
     }
     else if (tp->phase == TP_COMPOSE) {
-        printf("transpile let then\n");
-        transpile_expr(tp, let_node->then);
+        // let stam does not have then clause
     }
 }
 
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_then) {
     printf("transpile loop expr\n");
     // todo: prefix var name with '_'
-    strbuf_append_str(tp->code_buf, "ArrayLong *arr=");
+    strbuf_append_str(tp->code_buf, " ArrayLong *arr=");
     transpile_expr(tp, loop_node->then);
-    strbuf_append_str(tp->code_buf, ";\nfor (int i=0; i<arr->length; i++){\nlong _");
+    strbuf_append_str(tp->code_buf, ";\n for (int i=0; i<arr->length; i++){\n long _");
     strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
     strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
     AstNode *next_loop = loop_node->next;
@@ -183,11 +182,11 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
         transpile_loop_expr(tp, (AstNamedNode*)next_loop, for_then);
     }
     else {
-        strbuf_append_str(tp->code_buf, "list_long_push(ls,");
+        strbuf_append_str(tp->code_buf, " list_long_push(ls,");
         transpile_expr(tp, for_then);
         strbuf_append_str(tp->code_buf, ");");
     }
-    strbuf_append_str(tp->code_buf, "}\n");
+    strbuf_append_str(tp->code_buf, " }\n");
 }
 
 void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
@@ -200,7 +199,7 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
         transpile_loop_expr(tp, (AstNamedNode*)loop, for_node->then);
     }
     // return the list
-    strbuf_append_str(tp->code_buf, "ls;})");
+    strbuf_append_str(tp->code_buf, " ls;})");
 }
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
@@ -370,7 +369,7 @@ void transpile_script(Transpiler* tp, AstScript *script) {
     tp->phase = TP_DECLARE;
     while (node) {
         if (node->node_type == AST_NODE_LET_STAM) {
-            transpile_let_expr(tp, (AstLetNode*)node);
+            transpile_let_stam(tp, (AstLetNode*)node);
         }
         node = node->next;
     }
@@ -383,8 +382,8 @@ void transpile_script(Transpiler* tp, AstScript *script) {
         node = node->next;
     }
     strbuf_append_str(tp->code_buf, "int main(Context *rt) {\n"
-        "void* ret=_main(rt); printf(\"%s\\n\", (char*)ret);\n"
-        "return 0;\n}\n");
+        " void* ret=_main(rt); printf(\"%s\\n\", (char*)ret);\n"
+        " return 0;\n}\n");
 }
 
 int main(void) {

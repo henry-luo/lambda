@@ -541,6 +541,24 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
 }
 
+AstNode* build_script(Transpiler* tp, TSNode script_node) {
+    printf("build script\n");
+    AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
+    tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+
+    // build the script body
+    TSNode child = ts_node_named_child(script_node, 0);
+    AstNode* prev = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* ast = build_expr(tp, child);
+        if (!prev) ast_node->child = ast;
+        else { prev->next = ast; }
+        prev = ast;
+        child = ts_node_next_named_sibling(child);
+    }
+    return (AstNode*)ast_node;
+}
+
 char* formatType(LambdaType *type) {
     if (!type) { return "null*"; }
     TypeId type_id = type->type_id;
@@ -699,20 +717,3 @@ AstNode* print_ast_node(AstNode *node, int indent) {
     }
 }
 
-AstNode* build_script(Transpiler* tp, TSNode script_node) {
-    printf("build script\n");
-    AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
-    tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
-
-    // build the script body
-    TSNode child = ts_node_named_child(script_node, 0);
-    AstNode* prev = NULL;
-    while (!ts_node_is_null(child)) {
-        AstNode* ast = build_expr(tp, child);
-        if (!prev) ast_node->child = ast;
-        else { prev->next = ast; }
-        prev = ast;
-        child = ts_node_next_named_sibling(child);
-    }
-    return (AstNode*)ast_node;
-}
