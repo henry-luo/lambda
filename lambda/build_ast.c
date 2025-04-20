@@ -26,7 +26,7 @@ int byte_size[] = {
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
     AstNode* ast_node;
-    pool_variable_alloc(tp->ast_node_pool, size, (void**)&ast_node);
+    pool_variable_alloc(tp->ast_pool, size, (void**)&ast_node);
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;  ast_node->node = node;
     return ast_node;
@@ -34,14 +34,14 @@ AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size) {
     void* bytes;
-    pool_variable_alloc(tp->ast_node_pool, size, &bytes);
+    pool_variable_alloc(tp->ast_pool, size, &bytes);
     memset(bytes, 0, size);
     return bytes;
 }
 
 LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     LambdaType* t;
-    pool_variable_alloc(tp->ast_node_pool, size, (void**)&t);
+    pool_variable_alloc(tp->ast_pool, size, (void**)&t);
     memset(t, 0, size);
     t->type_id = type;
     return t;

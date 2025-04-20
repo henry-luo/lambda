@@ -217,7 +217,7 @@ typedef union LambdaItem {
 typedef struct {
     StrBuf* code_buf;
     const char* source;
-    VariableMemPool* ast_node_pool;
+    VariableMemPool* ast_pool;
     AstNode *ast_root;
     // todo: have a hashmap to speed up name lookup
     TranspilePhase phase;
@@ -258,6 +258,13 @@ typedef struct {
     TSFieldId ID_FUNCTION;
     TSFieldId ID_ARGUMENT;
 } Transpiler;
+
+typedef struct {
+    const char* source;
+    VariableMemPool* ast_pool;
+    AstNode *ast_root;
+    ArrayList* type_list;
+} Script;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }

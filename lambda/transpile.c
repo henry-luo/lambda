@@ -449,7 +449,7 @@ int main(void) {
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
     printf("init AST node pool\n");
-    pool_variable_init(&tp.ast_node_pool, grow_size, tolerance_percent);
+    pool_variable_init(&tp.ast_pool, grow_size, tolerance_percent);
     tp.type_list = arraylist_new(16);    
 
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
@@ -482,7 +482,7 @@ int main(void) {
     else {
         printf("Executing JIT compiled code...\n");
         tp.heap = heap_init(4096 * 16);  // 64k
-        Context runtime_context = {.ast_pool = tp.ast_node_pool, .type_list = tp.type_list, .heap = tp.heap};
+        Context runtime_context = {.ast_pool = tp.ast_pool, .type_list = tp.type_list, .heap = tp.heap};
         int ret = main_func(&runtime_context);
         printf("JIT compiled code returned: %d\n", ret);
     }
