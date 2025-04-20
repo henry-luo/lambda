@@ -402,19 +402,6 @@ int main(void) {
         printf("Error: Failed to parse the source code.\n");
         goto CLEAN_UP;
     }
-    
-    tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
-    tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);
-    tp.ID_ELSE = ts_language_field_id_for_name(ts_tree_language(tree), "else", 4);
-    tp.ID_LEFT = ts_language_field_id_for_name(ts_tree_language(tree), "left", 4);
-    tp.ID_RIGHT = ts_language_field_id_for_name(ts_tree_language(tree), "right", 5);
-    tp.ID_NAME = ts_language_field_id_for_name(ts_tree_language(tree), "name", 4);
-    tp.ID_BODY = ts_language_field_id_for_name(ts_tree_language(tree), "body", 4);
-    tp.ID_DECLARE = ts_language_field_id_for_name(ts_tree_language(tree), "declare", 7);
-    tp.ID_OBJECT = ts_language_field_id_for_name(ts_tree_language(tree), "object", 6);
-    tp.ID_FIELD = ts_language_field_id_for_name(ts_tree_language(tree), "field", 5);
-    tp.ID_FUNCTION = ts_language_field_id_for_name(ts_tree_language(tree), "function", 8);
-    tp.ID_ARGUMENT = ts_language_field_id_for_name(ts_tree_language(tree), "argument", 8);
 
     // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");

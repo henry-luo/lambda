@@ -75,10 +75,10 @@ AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
 AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     printf("build field expr\n");
     AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_FIELD_EXPR, array_node, sizeof(AstFieldNode));
-    TSNode object_node = ts_node_child_by_field_id(array_node, tp->ID_OBJECT);
+    TSNode object_node = ts_node_child_by_field_id(array_node, FIELD_OBJECT);
     ast_node->object = build_expr(tp, object_node);
 
-    TSNode field_node = ts_node_child_by_field_id(array_node, tp->ID_FIELD);
+    TSNode field_node = ts_node_child_by_field_id(array_node, FIELD_FIELD);
     ast_node->field = build_expr(tp, field_node);
 
     if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
@@ -96,7 +96,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
 AstNode* build_call_expr(Transpiler* tp, TSNode call_node) {
     printf("build call expr\n");
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
-    TSNode function_node = ts_node_child_by_field_id(call_node, tp->ID_FUNCTION);
+    TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
     ast_node->function = build_expr(tp, function_node);
 
     TSTreeCursor cursor = ts_tree_cursor_new(call_node);
@@ -105,7 +105,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node) {
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == tp->ID_ARGUMENT) {
+        if (field_id == FIELD_ARGUMENT) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *argument = build_expr(tp, child);
             printf("got argument type %d\n", argument->node_type);
@@ -210,12 +210,12 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     printf("build binary expr\n");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
-    TSNode left_node = ts_node_child_by_field_id(bi_node, tp->ID_LEFT);
+    TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
     ast_node->left = build_expr(tp, left_node);
 
     // TSNode op_node = ts_node_child_by_field_name(bi_node, "operator", 8);
 
-    TSNode right_node = ts_node_child_by_field_id(bi_node, tp->ID_RIGHT);
+    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
     ast_node->right = build_expr(tp, right_node);
 
     ast_node->type = ast_node->left->type;
@@ -225,11 +225,11 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     printf("build if expr\n");
     AstIfExprNode* ast_node = (AstIfExprNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfExprNode));
-    TSNode cond_node = ts_node_child_by_field_id(if_node, tp->ID_COND);
+    TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
-    TSNode then_node = ts_node_child_by_field_id(if_node, tp->ID_THEN);
+    TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
-    TSNode else_node = ts_node_child_by_field_id(if_node, tp->ID_ELSE);
+    TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
     ast_node->otherwise = build_expr(tp, else_node);
     // determine the type of the if expression
     ast_node->type = ast_node->then->type;
@@ -247,7 +247,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == tp->ID_DECLARE) {
+        if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *declare = build_expr(tp, child);
             printf("got declare type %d\n", declare->node_type);
@@ -263,7 +263,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     ts_tree_cursor_delete(&cursor);
     if (!ast_node->declare) { printf("missing let declare\n"); }
 
-    TSNode then_node = ts_node_child_by_field_id(let_node, tp->ID_THEN);
+    TSNode then_node = ts_node_child_by_field_id(let_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
     if (!ast_node->then) { printf("missing let then\n"); }
     else { printf("got let then type %d\n", ast_node->then->node_type); }
@@ -284,7 +284,7 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == tp->ID_DECLARE) {
+        if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *declare = build_expr(tp, child);
             printf("got declare type %d\n", declare->node_type);
@@ -318,12 +318,12 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("build assign expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
 
-    TSNode name = ts_node_child_by_field_id(asn_node, tp->ID_NAME);
+    TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode val_node = ts_node_child_by_field_id(asn_node, tp->ID_THEN);
+    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_THEN);
     ast_node->then = build_expr(tp, val_node);
 
     // determine the type of the variable
@@ -338,12 +338,12 @@ AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
     printf("build pair expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
 
-    TSNode name = ts_node_child_by_field_id(pair_node, tp->ID_NAME);
+    TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode val_node = ts_node_child_by_field_id(pair_node, tp->ID_THEN);
+    TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_THEN);
     printf("build pair then\n");
     ast_node->then = build_expr(tp, val_node);
 
@@ -392,12 +392,12 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     printf("build loop expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_LOOP, loop_node, sizeof(AstNamedNode));
 
-    TSNode name = ts_node_child_by_field_id(loop_node, tp->ID_NAME);
+    TSNode name = ts_node_child_by_field_id(loop_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode expr_node = ts_node_child_by_field_id(loop_node, tp->ID_THEN);
+    TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_THEN);
     ast_node->then = build_expr(tp, expr_node);
 
     // determine the type of the variable
@@ -419,7 +419,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == tp->ID_DECLARE) {
+        if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *loop = build_loop_expr(tp, child);
             printf("got loop type %d\n", loop->node_type);
@@ -435,7 +435,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     ts_tree_cursor_delete(&cursor);
     if (!ast_node->loop) { printf("missing for loop declare\n"); }
 
-    TSNode then_node = ts_node_child_by_field_id(for_node, tp->ID_THEN);
+    TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
     if (!ast_node->then) { printf("missing for then\n"); }
     else { printf("got for then type %d\n", ast_node->then->node_type); }
@@ -449,12 +449,12 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     printf("build param expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_PARAM, param_node, sizeof(AstNamedNode));
 
-    TSNode name = ts_node_child_by_field_id(param_node, tp->ID_NAME);
+    TSNode name = ts_node_child_by_field_id(param_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    // TSNode val_node = ts_node_child_by_field_id(param_node, tp->ID_THEN);
+    // TSNode val_node = ts_node_child_by_field_id(param_node, FIELD_THEN);
     // printf("build param then\n");
     // ast_node->then = build_expr(tp, val_node);
 
@@ -468,7 +468,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
     ast_node->type = &FUNC_TYPE;
     // get the function name
-    TSNode fn_name_node = ts_node_child_by_field_id(func_node, tp->ID_NAME);
+    TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
     ast_node->name = fn_name_node;
     // build the params
     // let can have multiple cond declarations
@@ -478,7 +478,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     while (has_node) {
         // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == tp->ID_DECLARE) {
+        if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNamedNode *param = build_param_expr(tp, child);
             printf("got param type %d\n", param->node_type);
@@ -494,7 +494,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     ts_tree_cursor_delete(&cursor);    
 
     // build the function body
-    TSNode fn_body_node = ts_node_child_by_field_id(func_node, tp->ID_BODY);
+    TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
     ast_node->body = build_expr(tp, fn_body_node);    
     return (AstNode*)ast_node;
 }

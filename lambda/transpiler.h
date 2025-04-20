@@ -95,6 +95,22 @@ enum ts_symbol_identifiers {
     aux_sym_for_expr_repeat1 = 83,
 };
 
+enum ts_field_identifiers {
+    field_argument = 1,
+    field_body = 2,
+    field_cond = 3,
+    field_declare = 4,
+    field_else = 5,
+    field_field = 6,
+    field_function = 7,
+    field_left = 8,
+    field_name = 9,
+    field_object = 10,
+    field_operator = 11,
+    field_right = 12,
+    field_then = 13,
+};
+
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
 #define SYM_FALSE sym_false
@@ -114,6 +130,19 @@ enum ts_symbol_identifiers {
 #define SYM_MEMBER_EXPR sym_member_expr
 #define SYM_SUBSCRIPT_EXPR sym_subscript_expr
 #define SYM_CALL_EXPR sym_call_expr
+
+#define FIELD_COND field_cond
+#define FIELD_THEN field_then
+#define FIELD_ELSE field_else
+#define FIELD_LEFT field_left
+#define FIELD_RIGHT field_right
+#define FIELD_NAME field_name
+#define FIELD_OBJECT field_object
+#define FIELD_FIELD field_field
+#define FIELD_BODY field_body
+#define FIELD_DECLARE field_declare
+#define FIELD_FUNCTION field_function
+#define FIELD_ARGUMENT field_argument
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
@@ -330,19 +359,6 @@ typedef struct {
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
     Heap* heap;
-
-    TSFieldId ID_NAME;
-    TSFieldId ID_COND;
-    TSFieldId ID_THEN;
-    TSFieldId ID_ELSE;
-    TSFieldId ID_LEFT;
-    TSFieldId ID_RIGHT;   
-    TSFieldId ID_BODY;
-    TSFieldId ID_DECLARE;
-    TSFieldId ID_OBJECT;
-    TSFieldId ID_FIELD;
-    TSFieldId ID_FUNCTION;
-    TSFieldId ID_ARGUMENT;
 } Transpiler;
 
 typedef struct {
