@@ -403,26 +403,6 @@ int main(void) {
         printf("Error: Failed to parse the source code.\n");
         goto CLEAN_UP;
     }
-
-    tp.SYM_NULL = ts_language_symbol_for_name(ts_tree_language(tree), "null", 4, true);
-    tp.SYM_TRUE = ts_language_symbol_for_name(ts_tree_language(tree), "true", 4, true);
-    tp.SYM_FALSE = ts_language_symbol_for_name(ts_tree_language(tree), "false", 5, true);
-    tp.SYM_NUMBER = ts_language_symbol_for_name(ts_tree_language(tree), "number", 6, true);
-    tp.SYM_STRING = ts_language_symbol_for_name(ts_tree_language(tree), "string", 6, true);
-    tp.SYM_IF_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "if_expr", 7, true);
-    tp.SYM_LET_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "let_expr", 8, true);
-    tp.SYM_FOR_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "for_expr", 8, true);
-    tp.SYM_LET_STAM = ts_language_symbol_for_name(ts_tree_language(tree), "let_stam", 8, true);
-    tp.SYM_ASSIGN_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "assign_expr", 11, true);
-    tp.SYM_PRIMARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "primary_expr", 12, true);
-    tp.SYM_BINARY_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "binary_expr", 11, true);
-    tp.SYM_FUNC = ts_language_symbol_for_name(ts_tree_language(tree), "fn_definition", 13, true);
-    tp.SYM_IDENT = ts_language_symbol_for_name(ts_tree_language(tree), "identifier", 10, true);
-    tp.SYM_ARRAY = ts_language_symbol_for_name(ts_tree_language(tree), "array", 5, true);
-    tp.SYM_MEMBER_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "member_expr", 11, true);
-    tp.SYM_SUBSCRIPT_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "subscript_expr", 14, true);
-    tp.SYM_MAP = ts_language_symbol_for_name(ts_tree_language(tree), "map", 3, true);
-    tp.SYM_CALL_EXPR = ts_language_symbol_for_name(ts_tree_language(tree), "call_expr", 9, true);
     
     tp.ID_COND = ts_language_field_id_for_name(ts_tree_language(tree), "cond", 4);
     tp.ID_THEN = ts_language_field_id_for_name(ts_tree_language(tree), "then", 4);

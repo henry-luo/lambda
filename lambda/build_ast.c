@@ -165,39 +165,39 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
     printf("primary expr symbol %d\n", symbol);
-    if (symbol == tp->SYM_NULL) {
+    if (symbol == SYM_NULL) {
         ast_node->type = &NULL_TYPE;
     }
-    else if (symbol == tp->SYM_TRUE || symbol == tp->SYM_FALSE) {
+    else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
         ast_node->type = &BOOL_TYPE;
     }
-    else if (symbol == tp->SYM_NUMBER) {
+    else if (symbol == SYM_NUMBER) {
         ast_node->type = &INT_TYPE;
     }
-    else if (symbol == tp->SYM_STRING) {
+    else if (symbol == SYM_STRING) {
         ast_node->type = &STRING_TYPE;
     }
-    else if (symbol == tp->SYM_IDENT) {
+    else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == tp->SYM_ARRAY) {
+    else if (symbol == SYM_ARRAY) {
         ast_node->expr = build_array_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == tp->SYM_MAP) {
+    else if (symbol == SYM_MAP) {
         ast_node->expr = build_map_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == tp->SYM_MEMBER_EXPR) {
+    else if (symbol == SYM_MEMBER_EXPR) {
         ast_node->expr = build_field_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == tp->SYM_SUBSCRIPT_EXPR) {
+    else if (symbol == SYM_SUBSCRIPT_EXPR) {
         ast_node->expr = build_field_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == tp->SYM_CALL_EXPR) {
+    else if (symbol == SYM_CALL_EXPR) {
         ast_node->expr = build_call_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
@@ -502,37 +502,37 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
-    if (symbol == tp->SYM_IF_EXPR) {
+    if (symbol == SYM_IF_EXPR) {
         return build_if_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_BINARY_EXPR) {
+    else if (symbol == SYM_BINARY_EXPR) {
         return build_binary_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_PRIMARY_EXPR) {
+    else if (symbol == SYM_PRIMARY_EXPR) {
         return build_primary_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_LET_EXPR) {
+    else if (symbol == SYM_LET_EXPR) {
         return build_let_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_LET_STAM) {
+    else if (symbol == SYM_LET_STAM) {
         return build_let_stam(tp, expr_node);
     }
-    else if (symbol == tp->SYM_FOR_EXPR) {
+    else if (symbol == SYM_FOR_EXPR) {
         return build_for_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_ASSIGN_EXPR) {
+    else if (symbol == SYM_ASSIGN_EXPR) {
         return build_assign_expr(tp, expr_node);
     }  
-    else if (symbol == tp->SYM_ARRAY) {
+    else if (symbol == SYM_ARRAY) {
         return build_array_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_MAP) {
+    else if (symbol == SYM_MAP) {
         return build_map_expr(tp, expr_node);
     }
-    else if (symbol == tp->SYM_IDENT) {
+    else if (symbol == SYM_IDENT) {
         return build_identifier(tp, expr_node);
     }
-    else if (symbol == tp->SYM_FUNC) {
+    else if (symbol == SYM_FUNC) {
         return build_func(tp, expr_node);
     }
     else {

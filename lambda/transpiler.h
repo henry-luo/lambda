@@ -9,6 +9,112 @@
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 
+enum ts_symbol_identifiers {
+    sym_identifier = 1,
+    anon_sym_LBRACE = 2,
+    anon_sym_COLON = 3,
+    anon_sym_COMMA = 4,
+    anon_sym_RBRACE = 5,
+    anon_sym_LBRACK = 6,
+    anon_sym_RBRACK = 7,
+    anon_sym_DQUOTE = 8,
+    sym_string_content = 9,
+    anon_sym_SQUOTE = 10,
+    sym_symbol_content = 11,
+    sym_escape_sequence = 12,
+    sym_number = 13,
+    sym_integer = 14,
+    sym_true = 15,
+    sym_false = 16,
+    sym_null = 17,
+    sym_comment = 18,
+    anon_sym_LPAREN = 19,
+    anon_sym_RPAREN = 20,
+    sym_import = 21,
+    anon_sym_DOT_DOT_DOT = 22,
+    anon_sym_DOT = 23,
+    anon_sym_and = 24,
+    anon_sym_or = 25,
+    anon_sym_PLUS = 26,
+    anon_sym_DASH = 27,
+    anon_sym_STAR = 28,
+    anon_sym_SLASH = 29,
+    anon_sym_PERCENT = 30,
+    anon_sym_STAR_STAR = 31,
+    anon_sym_LT = 32,
+    anon_sym_LT_EQ = 33,
+    anon_sym_EQ_EQ = 34,
+    anon_sym_BANG_EQ = 35,
+    anon_sym_GT_EQ = 36,
+    anon_sym_GT = 37,
+    anon_sym_to = 38,
+    anon_sym_in = 39,
+    anon_sym_not = 40,
+    anon_sym_fn = 41,
+    anon_sym_EQ = 42,
+    anon_sym_let = 43,
+    anon_sym_if = 44,
+    anon_sym_else = 45,
+    anon_sym_for = 46,
+    anon_sym_SEMI = 47,
+    sym_document = 48,
+    sym__statement = 49,
+    sym_lit_map = 50,
+    sym_pair = 51,
+    sym_map = 52,
+    sym_lit_array = 53,
+    sym_array = 54,
+    sym_string = 55,
+    aux_sym__string_content = 56,
+    sym_symbol = 57,
+    aux_sym__symbol_content = 58,
+    sym__expression = 59,
+    sym_primary_expr = 60,
+    sym_spread_element = 61,
+    sym_call_expr = 62,
+    sym_subscript_expr = 63,
+    sym_member_expr = 64,
+    sym_binary_expr = 65,
+    sym_unary_expr = 66,
+    sym_parameter = 67,
+    sym_fn_definition = 68,
+    sym_assign_expr = 69,
+    sym_let_expr = 70,
+    sym_if_expr = 71,
+    sym_loop_expr = 72,
+    sym_for_expr = 73,
+    sym_let_stam = 74,
+    aux_sym_document_repeat1 = 75,
+    aux_sym_lit_map_repeat1 = 76,
+    aux_sym_map_repeat1 = 77,
+    aux_sym_lit_array_repeat1 = 78,
+    aux_sym_array_repeat1 = 79,
+    aux_sym__arguments_repeat1 = 80,
+    aux_sym_fn_definition_repeat1 = 81,
+    aux_sym_let_expr_repeat1 = 82,
+    aux_sym_for_expr_repeat1 = 83,
+};
+
+#define SYM_NULL sym_null
+#define SYM_TRUE sym_true
+#define SYM_FALSE sym_false
+#define SYM_NUMBER sym_number
+#define SYM_STRING sym_string
+#define SYM_IDENT sym_identifier
+#define SYM_IF_EXPR sym_if_expr
+#define SYM_LET_EXPR sym_let_expr
+#define SYM_FOR_EXPR sym_for_expr
+#define SYM_LET_STAM sym_let_stam
+#define SYM_ASSIGN_EXPR sym_assign_expr
+#define SYM_PRIMARY_EXPR sym_primary_expr
+#define SYM_BINARY_EXPR sym_binary_expr
+#define SYM_FUNC sym_fn_definition
+#define SYM_ARRAY sym_array
+#define SYM_MAP sym_map
+#define SYM_MEMBER_EXPR sym_member_expr
+#define SYM_SUBSCRIPT_EXPR sym_subscript_expr
+#define SYM_CALL_EXPR sym_call_expr
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 
@@ -224,26 +330,6 @@ typedef struct {
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
     Heap* heap;
-
-    TSSymbol SYM_NULL;
-    TSSymbol SYM_TRUE;
-    TSSymbol SYM_FALSE;
-    TSSymbol SYM_NUMBER;
-    TSSymbol SYM_STRING;
-    TSSymbol SYM_ARRAY;
-    TSSymbol SYM_MAP;
-    TSSymbol SYM_PRIMARY_EXPR;
-    TSSymbol SYM_BINARY_EXPR;
-    TSSymbol SYM_IF_EXPR;
-    TSSymbol SYM_LET_EXPR;
-    TSSymbol SYM_FOR_EXPR;
-    TSSymbol SYM_LET_STAM;
-    TSSymbol SYM_ASSIGN_EXPR;
-    TSSymbol SYM_FUNC;
-    TSSymbol SYM_IDENT;
-    TSSymbol SYM_MEMBER_EXPR;
-    TSSymbol SYM_SUBSCRIPT_EXPR;
-    TSSymbol SYM_CALL_EXPR;
 
     TSFieldId ID_NAME;
     TSFieldId ID_COND;
