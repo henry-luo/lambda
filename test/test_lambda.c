@@ -5,6 +5,10 @@ int add(int a, int b) {
     return a + b;
 }
 
+char* get_string(int val) {
+    return val > 100 ? "great":"not great";
+}
+
 int main() {
     LambdaItem item;
     printf("sizeof(LambdaItem) = %zu\n", sizeof(item));
@@ -17,6 +21,10 @@ int main() {
     
     int result = add(3, 4);
     printf("3 + 4 = %d\n", result);
+
+    // test returning const string
+    char* str = get_string(101);
+    printf("Returned string: %s\n", str);
     
     return 0;
 }

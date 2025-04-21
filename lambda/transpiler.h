@@ -376,6 +376,7 @@ typedef struct {
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
+void* alloc_const(Transpiler* tp, size_t size);
 LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
 AstNode* build_map_expr(Transpiler* tp, TSNode map_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);

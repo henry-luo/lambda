@@ -39,6 +39,13 @@ void* alloc_ast_bytes(Transpiler* tp, size_t size) {
     return bytes;
 }
 
+void* alloc_const(Transpiler* tp, size_t size) {
+    void* bytes;
+    pool_variable_alloc(tp->ast_pool, size, &bytes);
+    memset(bytes, 0, size);
+    return bytes;
+}
+
 LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     LambdaType* t;
     pool_variable_alloc(tp->ast_pool, size, (void**)&t);

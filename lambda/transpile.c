@@ -355,11 +355,9 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     }
     
     tp->phase = TP_COMPOSE;
-    strbuf_append_char(tp->code_buf, ' ');
-    writeType(tp, ret_type);
-    strbuf_append_str(tp->code_buf, " ret=");
+    strbuf_append_str(tp->code_buf, " return ");
     transpile_expr(tp, body);
-    strbuf_append_str(tp->code_buf, ";\n return ret;\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 
 void transpile_ast_script(Transpiler* tp, AstScript *script) {
@@ -381,12 +379,9 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }
-    strbuf_append_str(tp->code_buf, "int main(Context *rt) {\n"
-        " void* ret=_main(rt); printf(\"%s\\n\", (char*)ret);\n"
-        " return 0;\n}\n");
 }
 
-typedef int (*main_func_t)(Context*);
+typedef void* (*main_func_t)(Context*);
 
 main_func_t transpile_script(Transpiler *tp, char* script_path) {
     printf("Starting transpiler...\n");
@@ -434,14 +429,14 @@ main_func_t transpile_script(Transpiler *tp, char* script_path) {
     // JIT compile the C code
     tp->jit_context = jit_init();
     // compile user code to MIR
-    write_text_file("hello-world.c", tp->code_buf->str);
+    write_text_file("_transpiled.c", tp->code_buf->str);
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
     jit_compile(tp->jit_context, tp->code_buf->str, tp->code_buf->length, "main.c");
-    strbuf_free(tp->code_buf);
+    // strbuf_free(tp->code_buf);
     
     // generate the native code and return the function
     
-    main_func_t main_func = jit_gen_func(tp->jit_context, "main");
+    main_func_t main_func = jit_gen_func(tp->jit_context, "_main");
     return main_func;
 }
 
@@ -459,8 +454,9 @@ void run_script(char* script_path) {
         runner.heap = heap_init(4096 * 16);  // 64k
         Context runtime_context = {.ast_pool = runner.transpiler->ast_pool, 
             .type_list = runner.transpiler->type_list, .heap = runner.heap};
-        int ret = main_func(&runtime_context);
-        printf("JIT compiled code returned: %d\n", ret);
+        char* ret = (char*)main_func(&runtime_context);
+        printf("JIT compiled code returned: %p\n", ret);
+        printf("returned string: %s\n", ret);
         heap_destroy(runner.heap);
     }
 

@@ -21,3 +21,4 @@ test/test_lexbor
 view_tree.txt
 window3
 log.txt
+_transpiled.c
