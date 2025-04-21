@@ -302,6 +302,6 @@ void* heap_calloc(Heap* heap, size_t size) {
     return heap_calloc(heap, size);
 }
 
-void heap_free(Heap* heap) {
+void heap_destroy(Heap* heap) {
     pack_free((Pack*)heap);
 }

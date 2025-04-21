@@ -321,7 +321,7 @@ typedef struct Heap {
 Heap* heap_init(size_t initial_size);
 void* heap_alloc(Heap* heap, size_t size);
 void* heap_calloc(Heap* heap, size_t size);
-void heap_free(Heap* heap);
+void heap_destroy(Heap* heap);
 
 // uses the high byte to tag the pointer
 typedef union LambdaItem {
@@ -349,24 +349,28 @@ typedef union LambdaItem {
     uint64_t item;
 } LambdaItem;
 
+#include <mir.h>
+#include <mir-gen.h>
+#include <c2mir.h>
+
 typedef struct {
-    StrBuf* code_buf;
     const char* source;
+    TSParser* parser;
+    TSTree* syntax_tree;
     VariableMemPool* ast_pool;
     AstNode *ast_root;
     // todo: have a hashmap to speed up name lookup
     TranspilePhase phase;
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
-    Heap* heap;
+    StrBuf* code_buf;
+    MIR_context_t jit_context;
 } Transpiler;
 
 typedef struct {
-    const char* source;
-    VariableMemPool* ast_pool;
-    AstNode *ast_root;
-    ArrayList* type_list;
-} Script;
+    Transpiler* transpiler;
+    Heap* heap;
+} Runner;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
@@ -379,9 +383,6 @@ AstNode* build_script(Transpiler* tp, TSNode script_node);
 AstNode* print_ast_node(AstNode *node, int indent);
 void print_ts_node(TSNode node, uint32_t indent);
 
-#include <mir.h>
-#include <mir-gen.h>
-#include <c2mir.h>
 MIR_context_t jit_init();
 void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);

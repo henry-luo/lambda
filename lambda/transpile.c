@@ -362,7 +362,7 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, ";\n return ret;\n}\n");
 }
 
-void transpile_script(Transpiler* tp, AstScript *script) {
+void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
 
     AstNode *node = script->child;
@@ -386,26 +386,24 @@ void transpile_script(Transpiler* tp, AstScript *script) {
         " return 0;\n}\n");
 }
 
-int main(void) {
-    Transpiler tp;
-    memset(&tp, 0, sizeof(Transpiler));
+typedef int (*main_func_t)(Context*);
 
+main_func_t transpile_script(Transpiler *tp, char* script_path) {
     printf("Starting transpiler...\n");
-
     // create a parser.
-    TSParser* parser = lambda_parser();
-    if (parser == NULL) { return 1; }
+    tp->parser = lambda_parser();
+    if (tp->parser == NULL) { return NULL; }
     // read the source and parse it
-    tp.source = read_text_file("test/hello-world.ls");
-    TSTree* tree = lambda_parse_source(parser, tp.source);
-    if (tree == NULL) {
+    tp->source = read_text_file(script_path);
+    tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
+    if (tp->syntax_tree == NULL) {
         printf("Error: Failed to parse the source code.\n");
-        goto CLEAN_UP;
+        return NULL;
     }
 
     // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");
-    TSNode root_node = ts_tree_root_node(tree);
+    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
     print_ts_node(root_node, 0);
     
     // todo: verify the source tree, report errors if any
@@ -415,50 +413,71 @@ int main(void) {
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
     printf("init AST node pool\n");
-    pool_variable_init(&tp.ast_pool, grow_size, tolerance_percent);
-    tp.type_list = arraylist_new(16);    
+    pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
+    tp->type_list = arraylist_new(16);    
 
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
-        goto CLEAN_UP;
+        return NULL;
     }
     // build the AST
-    tp.ast_root = build_script(&tp, root_node);
+    tp->ast_root = build_script(tp, root_node);
     // print the AST for debugging
     printf("AST: ---------\n");
-    print_ast_node(tp.ast_root, 0);
+    print_ast_node(tp->ast_root, 0);
 
     // transpile the AST to C code
     printf("transpiling...\n");
-    tp.code_buf = strbuf_new_cap(1024);
-    transpile_script(&tp, (AstScript*)tp.ast_root);
+    tp->code_buf = strbuf_new_cap(1024);
+    transpile_ast_script(tp, (AstScript*)tp->ast_root);
 
     // JIT compile the C code
-    MIR_context_t jit_context = jit_init();
+    tp->jit_context = jit_init();
     // compile user code to MIR
-    write_text_file("hello-world.c", tp.code_buf->str);
-    printf("transpiled code:\n----------------\n%s\n", tp.code_buf->str);    
-    jit_compile(jit_context, tp.code_buf->str, tp.code_buf->length, "main.c");
+    write_text_file("hello-world.c", tp->code_buf->str);
+    printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
+    jit_compile(tp->jit_context, tp->code_buf->str, tp->code_buf->length, "main.c");
+    strbuf_free(tp->code_buf);
     
     // generate the native code and return the function
-    typedef int (*main_func_t)(Context*);
-    main_func_t main_func = jit_gen_func(jit_context, "main");
+    
+    main_func_t main_func = jit_gen_func(tp->jit_context, "main");
+    return main_func;
+}
+
+void run_script(char* script_path) {
+    Runner runner;
+    memset(&runner, 0, sizeof(Runner));
+    runner.transpiler = (Transpiler*)malloc(sizeof(Transpiler));
+    memset(runner.transpiler, 0, sizeof(Transpiler));
+
+    main_func_t main_func = transpile_script(runner.transpiler, script_path);
     // execute the function
     if (!main_func) { printf("Error: Failed to compile the function.\n"); }
     else {
         printf("Executing JIT compiled code...\n");
-        tp.heap = heap_init(4096 * 16);  // 64k
-        Context runtime_context = {.ast_pool = tp.ast_pool, .type_list = tp.type_list, .heap = tp.heap};
+        runner.heap = heap_init(4096 * 16);  // 64k
+        Context runtime_context = {.ast_pool = runner.transpiler->ast_pool, 
+            .type_list = runner.transpiler->type_list, .heap = runner.heap};
         int ret = main_func(&runtime_context);
         printf("JIT compiled code returned: %d\n", ret);
+        heap_destroy(runner.heap);
     }
 
-    // clean up
-    CLEAN_UP:
-    jit_cleanup(jit_context);
-    free((void*)tp.source);
-    strbuf_free(tp.code_buf);
-    if (tree) ts_tree_delete(tree);
-    if (parser) ts_parser_delete(parser);
+    // cleanup
+    Transpiler *tp = runner.transpiler;
+    if (tp) {
+        jit_cleanup(tp->jit_context);
+        free((void*)tp->source);
+        pool_variable_destroy(tp->ast_pool);
+        arraylist_free(tp->type_list);
+        if (tp->syntax_tree) ts_tree_delete(tp->syntax_tree);
+        if (tp->parser) ts_parser_delete(tp->parser);    
+        free(tp);
+    }
+}
+
+int main(void) {
+    run_script("test/hello-world.ls");  
     return 0;
 }
