@@ -280,8 +280,8 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
-    printf("build let stam\n");
+AstNode* build_const_stam(Transpiler* tp, TSNode let_node) {
+    printf("build const stam\n");
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
 
     // let can have multiple cond declarations
@@ -305,9 +305,9 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
-    if (!ast_node->declare) { printf("missing let declare\n"); }
+    if (!ast_node->declare) { printf("missing const declare\n"); }
 
-    // let statement does not have 'then' clause
+    // const statement does not have 'then' clause
     return (AstNode*)ast_node;
 }
 
@@ -471,7 +471,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
 }
 
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
-    printf("infer function\n");
+    printf("build function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
     ast_node->type = &FUNC_TYPE;
     // get the function name
@@ -506,6 +506,27 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_content(Transpiler* tp, TSNode list_node) {
+    printf("build content\n");
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstArrayNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeArray));
+    LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (!prev_item) { 
+            ast_node->item = item;
+        } else {  
+            prev_item->next = item;
+        }
+        prev_item = item;
+        type->length++;
+        child = ts_node_next_named_sibling(child);
+    }
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
@@ -521,8 +542,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_LET_EXPR) {
         return build_let_expr(tp, expr_node);
     }
-    else if (symbol == SYM_LET_STAM) {
-        return build_let_stam(tp, expr_node);
+    else if (symbol == SYM_CONST_STAM) {
+        return build_const_stam(tp, expr_node);
     }
     else if (symbol == SYM_FOR_EXPR) {
         return build_for_expr(tp, expr_node);
@@ -541,6 +562,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == SYM_FUNC) {
         return build_func(tp, expr_node);
+    }
+    else if (symbol == SYM_CONTENT) {
+        return build_content(tp, expr_node);
     }
     else {
         printf("unknown expr %s\n", ts_node_type(expr_node));
@@ -592,6 +616,8 @@ char* formatType(LambdaType *type) {
         } else {
             return "Array*";
         }
+    case LMD_TYPE_LIST:
+        return "List*";
     case LMD_TYPE_MAP:
         return "Map*";
     case LMD_TYPE_ELEMENT:
@@ -666,6 +692,16 @@ AstNode* print_ast_node(AstNode *node, int indent) {
             item = item->next;
         }        
         break;
+    case AST_NODE_LIST:
+        printf("[list expr:%s]\n", formatType(node->type));
+        AstNode *li = ((AstArrayNode*)node)->item;
+        while (li) {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("item:\n");
+            print_ast_node(li, indent + 1);
+            li = li->next;
+        }        
+        break;        
     case AST_NODE_MAP:
         printf("[map expr:%s]\n", formatType(node->type));
         AstNamedNode *nm_item = ((AstMapNode*)node)->item;

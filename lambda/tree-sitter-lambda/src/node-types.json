@@ -34,11 +34,11 @@
     "named": true,
     "subtypes": [
       {
-        "type": "fn_definition",
+        "type": "const_stam",
         "named": true
       },
       {
-        "type": "let_stam",
+        "type": "fn_definition",
         "named": true
       }
     ]
@@ -111,7 +111,23 @@
         "required": true,
         "types": [
           {
-            "type": "content_expr",
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "let_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
             "named": true
           }
         ]
@@ -264,6 +280,22 @@
     }
   },
   {
+    "type": "const_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "content",
     "named": true,
     "fields": {},
@@ -272,28 +304,9 @@
       "required": true,
       "types": [
         {
-          "type": "content_expr",
-          "named": true
-        },
-        {
           "type": "element",
           "named": true
         },
-        {
-          "type": "string",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "content_expr",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
         {
           "type": "for_expr",
           "named": true
@@ -308,6 +321,10 @@
         },
         {
           "type": "primary_expr",
+          "named": true
+        },
+        {
+          "type": "string",
           "named": true
         },
         {
@@ -350,11 +367,35 @@
           "named": true
         },
         {
-          "type": "content",
+          "type": "element",
+          "named": true
+        },
+        {
+          "type": "for_expr",
           "named": true
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_expr",
+          "named": true
+        },
+        {
+          "type": "let_expr",
+          "named": true
+        },
+        {
+          "type": "primary_expr",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "unary_expr",
           "named": true
         }
       ]
@@ -485,15 +526,233 @@
     }
   },
   {
-    "type": "let_stam",
+    "type": "lit_array",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "lit_array",
+          "named": true
+        },
+        {
+          "type": "lit_element",
+          "named": true
+        },
+        {
+          "type": "lit_map",
+          "named": true
+        },
+        {
+          "type": "null",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "lit_attr",
     "named": true,
     "fields": {
-      "declare": {
-        "multiple": true,
+      "name": {
+        "multiple": false,
         "required": true,
         "types": [
           {
-            "type": "assign_expr",
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      },
+      "then": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "lit_array",
+            "named": true
+          },
+          {
+            "type": "lit_element",
+            "named": true
+          },
+          {
+            "type": "lit_map",
+            "named": true
+          },
+          {
+            "type": "null",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "lit_element",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "lit_array",
+          "named": true
+        },
+        {
+          "type": "lit_attr",
+          "named": true
+        },
+        {
+          "type": "lit_element",
+          "named": true
+        },
+        {
+          "type": "lit_map",
+          "named": true
+        },
+        {
+          "type": "null",
+          "named": true
+        },
+        {
+          "type": "number",
+          "named": true
+        },
+        {
+          "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "true",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "lit_map",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          }
+        ]
+      },
+      "then": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "lit_array",
+            "named": true
+          },
+          {
+            "type": "lit_element",
+            "named": true
+          },
+          {
+            "type": "lit_map",
+            "named": true
+          },
+          {
+            "type": "null",
+            "named": true
+          },
+          {
+            "type": "number",
+            "named": true
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "true",
             "named": true
           }
         ]
@@ -651,6 +910,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "lit_element",
           "named": true
         },
         {
@@ -904,6 +1167,10 @@
   {
     "type": "comment",
     "named": true
+  },
+  {
+    "type": "const",
+    "named": false
   },
   {
     "type": "else",

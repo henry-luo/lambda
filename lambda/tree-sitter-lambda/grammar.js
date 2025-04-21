@@ -41,6 +41,8 @@ module.exports = grammar({
     $._arguments,
     $._content_item,
     $._statement,
+    $._content,
+    $._content_expr,
   ],
 
   precedences: $ => [[
@@ -73,15 +75,17 @@ module.exports = grammar({
     // $._literal at top-level for JSON and Mark compatibility
     document: $ => seq(repeat($._statement), optional($.content)),
 
-    _statement: $ => choice($.fn_definition, $.let_stam),
+    _statement: $ => choice($.fn_definition, $.const_stam),
 
     _content_item: $ => prec(100, choice(
-      $.content_expr,
+      $._content_expr,
       // consecutive texts/nodes
       seq(choice($.string, $.element), repeat1(choice($.string, $.element))),
     )),
 
-    content: $ => seq($._content_item, repeat(seq(',', $._content_item))),
+    _content: $ => seq($._content_item, repeat(seq(',', $._content_item))),
+
+    content: $ => $._content,
 
     _literal: $ => choice(
       $.lit_map,
@@ -95,13 +99,13 @@ module.exports = grammar({
       $.null,
     ),
 
-    lit_map: $ => seq(
+    lit_map: $ => prec(101, seq(
       '{', commaSep(seq(
         field('name', choice($.string, $.symbol, $.identifier)),
         ':',
         field('then', $._literal),
       )), '}',
-    ),
+    )),
 
     pair: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
@@ -112,9 +116,9 @@ module.exports = grammar({
       '{', commaSep($.pair), '}',
     ),    
 
-    lit_array: $ => seq(
+    lit_array: $ => prec(101, seq(
       '[', commaSep($._literal), ']',
-    ),
+    )),
 
     array: $ => seq(
       '[', commaSep($._expression), ']',
@@ -124,29 +128,29 @@ module.exports = grammar({
       $.number, 'to', $.number,
     ),
 
-    lit_attr: $ => seq(
+    lit_attr: $ => prec(101, seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
       field('then', $._literal),
-    ),
+    )),
     
     attr: $ => prec(100, seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('then', $.content_expr),
+      field('then', $._content_expr),
     )),
     attrs: $ => prec.left(seq($.attr, repeat(seq(',', $.attr)))),
 
     element: $ => seq('<', $.identifier,
       optional(choice(
-        seq($.attrs, optional(seq(',', $.content))),
-        $.content
+        seq($.attrs, optional(seq(',', $._content))),
+        $._content
       )),
     '>'),
 
-    lit_element: $ => seq('<', $.identifier,
-      repeat($.lit_attr), repeat($._literal),
-    '>'),
+    lit_element: $ => prec(100, seq('<', $.identifier,
+      repeat($.lit_attr), repeat(prec(101,$._literal)),
+    '>')),
 
     // no empty strings under Mark/Lambda
     string: $ => seq('"', $._string_content, '"'),
@@ -225,7 +229,7 @@ module.exports = grammar({
     ),
 
     // exclude binary comparison exprs
-    content_expr: $ => prec(100, choice(
+    _content_expr: $ => prec(100, choice(
       $.primary_expr,
       $.unary_expr,
       // todo: simple binary_expr
@@ -250,6 +254,7 @@ module.exports = grammar({
       $.null,
       $.array,
       $.map,
+      $.lit_element,
       $.element,
       // $.function_expression,
       // $.arrow_function,
@@ -360,8 +365,8 @@ module.exports = grammar({
       field('then', $._expression),
     ),    
 
-    let_stam: $ => seq(
-      'let', repeat1(seq(field('declare', $.assign_expr), ',')), ';'
+    const_stam: $ => seq(
+      'const', repeat1(seq(field('declare', $.assign_expr), ',')), ';'
     ),    
 
   },

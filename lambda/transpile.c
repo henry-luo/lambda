@@ -220,6 +220,20 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
+void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
+    printf("transpile list expr\n");
+    LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
+    strbuf_append_str(tp->code_buf, " ({List ls = list();\n");
+    AstNode *item = array_node->item;
+    while (item) {
+        strbuf_append_str(tp->code_buf, " list_push(ls,");
+        transpile_expr(tp, item);
+        strbuf_append_str(tp->code_buf, ");\n");
+        item = item->next;
+    }
+    strbuf_append_str(tp->code_buf, "\n; ls;})\n");
+}
+
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     printf("transpile map expr\n");
     strbuf_append_str(tp->code_buf, "map_new(rt,");
@@ -284,51 +298,6 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
 
 }
 
-void transpile_expr(Transpiler* tp, AstNode *expr_node) {
-    if (!expr_node) {
-        printf("missing expression node\n");  return;
-    }
-    // get the function name
-    switch (expr_node->node_type) {
-    case AST_NODE_BINARY:
-        transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
-        break;
-    case AST_NODE_PRIMARY:
-        transpile_primary_expr(tp, (AstPrimaryNode*)expr_node);
-        break;
-    case AST_NODE_IF_EXPR:
-        transpile_if_expr(tp, (AstIfExprNode*)expr_node);
-        break;        
-    case AST_NODE_LET_EXPR:
-        transpile_let_expr(tp, (AstLetNode*)expr_node);
-        break;
-    case AST_NODE_LET_STAM:
-        transpile_let_stam(tp, (AstLetNode*)expr_node);
-        break;
-    case AST_NODE_FOR_EXPR:
-        transpile_for_expr(tp, (AstForNode*)expr_node);
-        break;        
-    case AST_NODE_ASSIGN:
-        transpile_assign_expr(tp, (AstNamedNode*)expr_node);
-        break;
-    case AST_NODE_ARRAY:
-        transpile_array_expr(tp, (AstArrayNode*)expr_node);
-        break;
-    case AST_NODE_MAP:
-        transpile_map_expr(tp, (AstMapNode*)expr_node);
-        break;        
-    case AST_NODE_FIELD_EXPR:
-        transpile_field_expr(tp, (AstFieldNode*)expr_node);
-        break;
-    case AST_NODE_CALL_EXPR:
-        transpile_call_expr(tp, (AstCallNode*)expr_node);
-        break;     
-    default:
-        printf("unknown expression type\n");
-        break;
-    }
-}
-
 void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     // use function body type as the return type for the time being
     LambdaType *ret_type = fn_node->body->type;
@@ -360,12 +329,64 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 
+void transpile_expr(Transpiler* tp, AstNode *expr_node) {
+    if (!expr_node) {
+        printf("missing expression node\n");  return;
+    }
+    // get the function name
+    switch (expr_node->node_type) {
+    case AST_NODE_BINARY:
+        transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
+        break;
+    case AST_NODE_PRIMARY:
+        transpile_primary_expr(tp, (AstPrimaryNode*)expr_node);
+        break;
+    case AST_NODE_IF_EXPR:
+        transpile_if_expr(tp, (AstIfExprNode*)expr_node);
+        break;        
+    case AST_NODE_LET_EXPR:
+        transpile_let_expr(tp, (AstLetNode*)expr_node);
+        break;
+    case AST_NODE_LET_STAM:
+        transpile_let_stam(tp, (AstLetNode*)expr_node);
+        break;
+    case AST_NODE_FOR_EXPR:
+        transpile_for_expr(tp, (AstForNode*)expr_node);
+        break;        
+    case AST_NODE_ASSIGN:
+        transpile_assign_expr(tp, (AstNamedNode*)expr_node);
+        break;
+    case AST_NODE_ARRAY:
+        transpile_array_expr(tp, (AstArrayNode*)expr_node);
+        break;
+    case AST_NODE_LIST:
+        transpile_list_expr(tp, (AstArrayNode*)expr_node);
+        break;
+    case AST_NODE_MAP:
+        transpile_map_expr(tp, (AstMapNode*)expr_node);
+        break;        
+    case AST_NODE_FIELD_EXPR:
+        transpile_field_expr(tp, (AstFieldNode*)expr_node);
+        break;
+    case AST_NODE_CALL_EXPR:
+        transpile_call_expr(tp, (AstCallNode*)expr_node);
+        break;
+    case AST_NODE_FUNC:
+        transpile_fn(tp, (AstFuncNode*)expr_node);
+        break;
+    default:
+        printf("unknown expression type\n");
+        break;
+    }
+}
+
 void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
 
     AstNode *node = script->child;
     tp->phase = TP_DECLARE;
     while (node) {
+        // const stam
         if (node->node_type == AST_NODE_LET_STAM) {
             transpile_let_stam(tp, (AstLetNode*)node);
         }
@@ -374,8 +395,8 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
     tp->phase = TP_COMPOSE;
     node = script->child;
     while (node) {
-        if (node->node_type == AST_NODE_FUNC) {
-            transpile_fn(tp, (AstFuncNode*)node);
+        if (node->node_type != AST_NODE_LET_STAM) {
+            transpile_expr(tp, node);
         }
         node = node->next;
     }

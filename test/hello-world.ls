@@ -1,4 +1,4 @@
-let g = 2;
+const g = 2;
 
 fn multiple(a, b) {
     a * b
@@ -12,3 +12,5 @@ fn main() {
     if (f > 15 and q and r==1 and s==6) "great"
     else "not great"  
 }
+
+123, "str"
