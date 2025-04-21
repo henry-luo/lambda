@@ -432,10 +432,9 @@ main_func_t transpile_script(Transpiler *tp, char* script_path) {
     write_text_file("_transpiled.c", tp->code_buf->str);
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
     jit_compile(tp->jit_context, tp->code_buf->str, tp->code_buf->length, "main.c");
-    // strbuf_free(tp->code_buf);
+    strbuf_free(tp->code_buf);
     
     // generate the native code and return the function
-    
     main_func_t main_func = jit_gen_func(tp->jit_context, "_main");
     return main_func;
 }

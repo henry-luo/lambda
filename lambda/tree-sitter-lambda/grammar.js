@@ -39,10 +39,10 @@ module.exports = grammar({
     $._literal,
     $._parenthesized_expr,
     $._arguments,
+    $._list_item,
   ],
 
   precedences: $ => [[
-    $._literal,
     $.call_expr,
     $.primary_expr,
     $.unary_expr,
@@ -69,9 +69,21 @@ module.exports = grammar({
 
   rules: {
     // $._literal at top-level for JSON and Mark compatibility
-    document: $ => repeat($._statement),
+    document: $ => seq(repeat($._statement), optional($.list_stam)),
 
-    _statement: $ => choice($._literal, $.fn_definition, $.let_stam),
+    _statement: $ => choice($.fn_definition, $.let_stam),
+
+    _list_item: $ => choice(
+      $.lit_map,
+      $.lit_array,
+      $.number,
+      repeat1($.string),
+      $.symbol,      
+      $.true,
+      $.false,
+    ),
+
+    list_stam: $ => seq($._list_item, repeat(seq(',', $._list_item))),
 
     _literal: $ => choice(
       $.lit_map,
@@ -248,10 +260,10 @@ module.exports = grammar({
         ['/', 'binary_times'],
         ['%', 'binary_times'],
         ['**', 'binary_exp', 'right'],
+        ['==', 'binary_eq'],
+        ['!=', 'binary_eq'],        
         ['<', 'binary_relation'],
         ['<=', 'binary_relation'],
-        ['==', 'binary_eq'],
-        ['!=', 'binary_eq'],
         ['>=', 'binary_relation'],
         ['>', 'binary_relation'],
         ['to', 'binary_relation'],
