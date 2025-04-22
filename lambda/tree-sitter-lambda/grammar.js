@@ -345,7 +345,7 @@ module.exports = grammar({
     ),
 
     let_expr: $ => seq(
-      'let', repeat1(seq(field('declare', $.assign_expr), ',')), 
+      'let', '(', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr))), ')', 
       field('then', $._expression),
     ),
 

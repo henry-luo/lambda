@@ -2123,10 +2123,26 @@
           "value": "let"
         },
         {
-          "type": "REPEAT1",
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "declare",
+          "content": {
+            "type": "SYMBOL",
+            "name": "assign_expr"
+          }
+        },
+        {
+          "type": "REPEAT",
           "content": {
             "type": "SEQ",
             "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
               {
                 "type": "FIELD",
                 "name": "declare",
@@ -2134,13 +2150,13 @@
                   "type": "SYMBOL",
                   "name": "assign_expr"
                 }
-              },
-              {
-                "type": "STRING",
-                "value": ","
               }
             ]
           }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
         },
         {
           "type": "FIELD",
