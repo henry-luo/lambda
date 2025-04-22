@@ -405,6 +405,7 @@ typedef uint64_t Item;
 void runner_init(Runner* runner);
 void runner_cleanup(Runner* runner);
 Item run_script(Runner *runner, char* source);
+Item run_script_at(Runner *runner, char* script_path);
 void print_item(StrBuf *strbuf, Item item);
 
 #pragma clang diagnostic pop
