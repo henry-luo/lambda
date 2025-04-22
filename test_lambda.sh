@@ -1,0 +1,11 @@
+clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitter.a \
+  lambda/tree-sitter-lambda/src/parser.c lambda/lambda-parser.c\
+  lib/strbuf.c lib/strview.c lib/arraylist.c lib/file.c \
+  lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
+  -I/usr/local/include /usr/local/lib/libmir.a /usr/local/lib/libzlog.a \
+  -lcriterion -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib \
+  lambda/transpile.c lambda/build_ast.c lambda/mir.c lambda/lambda.c lambda/pack.c \
+  test/lambda/test_value.c \
+  -o test_lambda.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types
+
+# ./test_lambda.exe --verbose

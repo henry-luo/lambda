@@ -388,18 +388,22 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }
-    strbuf_append_str(tp->code_buf, ";\n return (Item)(ls);\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n return ls2it(ls);\n}\n");
 }
 
 typedef Item (*main_func_t)(Context*);
 
-main_func_t transpile_script(Transpiler *tp, char* script_path) {
+main_func_t transpile_script(Transpiler *tp, char* source) {
+    if (!source) { 
+        printf("Error: Source code is NULL\n");
+        return NULL; 
+    }
     printf("Starting transpiler...\n");
     // create a parser.
     tp->parser = lambda_parser();
     if (tp->parser == NULL) { return NULL; }
     // read the source and parse it
-    tp->source = read_text_file(script_path);
+    tp->source = source;
     tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
     if (tp->syntax_tree == NULL) {
         printf("Error: Failed to parse the source code.\n");
@@ -448,6 +452,7 @@ main_func_t transpile_script(Transpiler *tp, char* script_path) {
     main_func_t main_func = jit_gen_func(tp->jit_context, "main");
     return main_func;
 }
+
 void runner_init(Runner* runner) {
     memset(runner, 0, sizeof(Runner));
     runner->transpiler = (Transpiler*)malloc(sizeof(Transpiler));
@@ -459,7 +464,6 @@ void runner_cleanup(Runner* runner) {
     Transpiler *tp = runner->transpiler;
     if (tp) {
         jit_cleanup(tp->jit_context);
-        free((void*)tp->source);
         pool_variable_destroy(tp->ast_pool);
         arraylist_free(tp->type_list);
         if (tp->syntax_tree) ts_tree_delete(tp->syntax_tree);
@@ -468,8 +472,8 @@ void runner_cleanup(Runner* runner) {
     }
 }
 
-Item run_script(Runner *runner, char* script_path) {
-    main_func_t main_func = transpile_script(runner->transpiler, script_path);
+Item run_script(Runner *runner, char* source) {
+    main_func_t main_func = transpile_script(runner->transpiler, source);
     // execute the function
     if (!main_func) { printf("Error: Failed to compile the function.\n"); }
     else {
@@ -482,6 +486,11 @@ Item run_script(Runner *runner, char* script_path) {
         return ret;
     }
     return ITEM_NULL;
+}
+
+Item run_script_at(Runner *runner, char* script_path) {
+    char* source = read_text_file(script_path);
+    return run_script(runner, source);
 }
 
 void print_item(StrBuf *strbuf, Item item) {
@@ -531,12 +540,12 @@ void print_item(StrBuf *strbuf, Item item) {
     }
 }
 
-int main(void) {
+int _main(void) {
     Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);
     runner_init(&runner);
 
     // run_script(&runner, "test/hello-world.ls");
-    Item ret = run_script(&runner, "test/lambda/value.ls");
+    Item ret = run_script_at(&runner, "test/lambda/value.ls");
     print_item(strbuf, ret);
     printf("Returned item: %s\n", strbuf->str);
 

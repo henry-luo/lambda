@@ -55,3 +55,4 @@ Map* map_new(Context *rt, int type_index, ...);
 Item map_get(Context *rt, Map* map, char *key);
 
 bool item_true(Item item);
+Item ls2it(List *list);

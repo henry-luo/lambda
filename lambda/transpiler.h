@@ -400,4 +400,11 @@ void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *fi
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 void jit_cleanup(MIR_context_t ctx);
 
+typedef uint64_t Item;
+
+void runner_init(Runner* runner);
+void runner_cleanup(Runner* runner);
+Item run_script(Runner *runner, char* source);
+void print_item(StrBuf *strbuf, Item item);
+
 #pragma clang diagnostic pop

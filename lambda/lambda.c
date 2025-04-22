@@ -155,7 +155,8 @@ bool item_true(Item itm) {
 }
 
 Item ls2it(List* list) {
-    if (!list) { return ITEM_NULL; }
     printf("ls2it %p, length: %d\n", list, list->length);
-    return (((uint64_t)(0xFFFF00 & LMD_TYPE_LIST))<<40) | (uint64_t)list;
+    if (list->length == 0) { return ITEM_NULL; }
+    if (list->length == 1) { return list->items[0]; }
+    return (Item)list;
 }
