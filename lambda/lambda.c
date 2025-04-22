@@ -1,8 +1,6 @@
 #include "transpiler.h"
 #include "lambda.h"
 
-Item ITEM_NULL = (0xFFFF00 & LMD_TYPE_NULL) << 40;
-
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
@@ -32,19 +30,24 @@ ArrayLong* array_long_new(int count, ...) {
 }
 
 List* list() {
-    List *list = malloc(sizeof(List));
-    list->items = NULL;
-    list->length = 0;
-    list->capacity = 0;
+    // todo: alloc from heap
+    List *list = calloc(1, sizeof(List));
+    list->type_id = LMD_TYPE_LIST;
     return list;
 }
 void list_push(List *list, Item item) {
+    printf("push: list %p, item: %llu\n", list, item);
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
-    list->items[list->length++] = item;
+    // LambdaItem ld_item = {.int_val= item, .type_id = LMD_TYPE_INT, ._16 = 0xFFFF};
+    // printf("pushing value: %llu\n", ld_item.item);
+    list->items[list->length++] = // ld_item.item;
+        ((uint64_t)(0xFFFF00 | LMD_TYPE_INT) << 40) | item;
+    printf("pushed value: %llu\n", list->items[list->length - 1]);
 }
+
 ListLong* list_long() {
     ListLong *list = malloc(sizeof(ListLong));
     list->items = NULL;
@@ -153,5 +156,6 @@ bool item_true(Item itm) {
 
 Item ls2it(List* list) {
     if (!list) { return ITEM_NULL; }
+    printf("ls2it %p, length: %d\n", list, list->length);
     return (((uint64_t)(0xFFFF00 & LMD_TYPE_LIST))<<40) | (uint64_t)list;
 }

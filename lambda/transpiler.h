@@ -349,8 +349,9 @@ typedef union LambdaItem {
                 uint64_t _56: 56;
             };
             struct {
-                uint64_t value   : 48;
-                uint64_t type_id : 16;                
+                uint64_t value   : 40;
+                uint64_t type_id : 8;
+                uint64_t _16     : 16;           
             };
         };
         #endif
@@ -379,6 +380,8 @@ typedef struct {
     Transpiler* transpiler;
     Heap* heap;
 } Runner;
+
+#define ITEM_NULL  ((0xFFFF00 & LMD_TYPE_NULL) << 40)
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }

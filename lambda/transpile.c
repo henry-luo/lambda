@@ -388,7 +388,7 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }
-    strbuf_append_str(tp->code_buf, ";\n return ls2it(ls);\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n return (Item)(ls);\n}\n");
 }
 
 typedef Item (*main_func_t)(Context*);
@@ -445,32 +445,18 @@ main_func_t transpile_script(Transpiler *tp, char* script_path) {
     strbuf_free(tp->code_buf);
     
     // generate the native code and return the function
-    main_func_t main_func = jit_gen_func(tp->jit_context, "_main");
+    main_func_t main_func = jit_gen_func(tp->jit_context, "main");
     return main_func;
 }
+void runner_init(Runner* runner) {
+    memset(runner, 0, sizeof(Runner));
+    runner->transpiler = (Transpiler*)malloc(sizeof(Transpiler));
+    memset(runner->transpiler, 0, sizeof(Transpiler));
+}
 
-void run_script(char* script_path) {
-    Runner runner;
-    memset(&runner, 0, sizeof(Runner));
-    runner.transpiler = (Transpiler*)malloc(sizeof(Transpiler));
-    memset(runner.transpiler, 0, sizeof(Transpiler));
-
-    main_func_t main_func = transpile_script(runner.transpiler, script_path);
-    // execute the function
-    if (!main_func) { printf("Error: Failed to compile the function.\n"); }
-    else {
-        printf("Executing JIT compiled code...\n");
-        runner.heap = heap_init(4096 * 16);  // 64k
-        Context runtime_context = {.ast_pool = runner.transpiler->ast_pool, 
-            .type_list = runner.transpiler->type_list, .heap = runner.heap};
-        char* ret = (char*)main_func(&runtime_context);
-        printf("JIT compiled code returned: %p\n", ret);
-        printf("returned string: %s\n", ret);
-        heap_destroy(runner.heap);
-    }
-
-    // cleanup
-    Transpiler *tp = runner.transpiler;
+void runner_cleanup(Runner* runner) {
+    heap_destroy(runner->heap);
+    Transpiler *tp = runner->transpiler;
     if (tp) {
         jit_cleanup(tp->jit_context);
         free((void*)tp->source);
@@ -482,7 +468,79 @@ void run_script(char* script_path) {
     }
 }
 
+Item run_script(Runner *runner, char* script_path) {
+    main_func_t main_func = transpile_script(runner->transpiler, script_path);
+    // execute the function
+    if (!main_func) { printf("Error: Failed to compile the function.\n"); }
+    else {
+        printf("Executing JIT compiled code...\n");
+        runner->heap = heap_init(4096 * 16);  // 64k
+        Context runtime_context = {.ast_pool = runner->transpiler->ast_pool, 
+            .type_list = runner->transpiler->type_list, .heap = runner->heap};
+        Item ret = main_func(&runtime_context);
+        printf("JIT compiled code returned: %llu\n", ret);
+        return ret;
+    }
+    return ITEM_NULL;
+}
+
+void print_item(StrBuf *strbuf, Item item) {
+    printf("print item: %llu\n", item);
+    if (item & 0xFFFF000000000000) { // packed value
+        LambdaItem ld_item = {.item = item};
+        TypeId type_id = ld_item.type_id;
+        printf("packed value: %d\n", type_id);
+        if (type_id == LMD_TYPE_NULL) {
+            strbuf_append_str(strbuf, "null");
+        } else if (type_id == LMD_TYPE_BOOL) {
+            strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
+        }
+        else if (type_id == LMD_TYPE_INT) {
+            strbuf_append_format(strbuf, "%ld", ld_item.int_val);
+        }
+        else {
+            strbuf_append_format(strbuf, "unknown type: %d", type_id);
+        }        
+    }
+    else { // pointer types
+        printf("pointer: %llu\n", item);
+        TypeId type_id = *((uint8_t*)item);
+        printf("pointer type: %d\n", type_id);
+        if (type_id == LMD_TYPE_LIST) {
+            List *list = (List*)item;
+            printf("print list: %p, length: %d\n", list, list->length);
+            strbuf_append_char(strbuf, '(');
+            for (int i = 0; i < list->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                print_item(strbuf, list->items[i]);
+            }
+            strbuf_append_char(strbuf, ')');
+        }
+        else if (type_id == LMD_TYPE_ARRAY) {
+            strbuf_append_str(strbuf, "Array");
+        }
+        else if (type_id == LMD_TYPE_MAP) {
+            strbuf_append_str(strbuf, "Map");
+        }
+        // else if (type_id == LMD_TYPE_STRING) {
+        //     strbuf_append_format(strbuf, "\"%s\"", ld_item.string_val);
+        // }        
+        else {
+            strbuf_append_format(strbuf, "unknown type: %d", type_id);
+        }
+    }
+}
+
 int main(void) {
-    run_script("test/hello-world.ls");  
+    Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);
+    runner_init(&runner);
+
+    // run_script(&runner, "test/hello-world.ls");
+    Item ret = run_script(&runner, "test/lambda/value.ls");
+    print_item(strbuf, ret);
+    printf("Returned item: %s\n", strbuf->str);
+
+    strbuf_free(strbuf);
+    runner_cleanup(&runner);
     return 0;
 }

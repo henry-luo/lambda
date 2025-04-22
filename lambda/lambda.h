@@ -22,10 +22,12 @@ ArrayLong* array_long_new(int count, ...);
 
 // for for-expr result
 typedef struct List {
+    uint64_t type_id:8;
+    uint64_t capacity:56;
     Item* items;
     int length;
-    int capacity;
 } List;
+
 typedef struct ListLong {
     long* items;
     int length;
@@ -53,4 +55,3 @@ Map* map_new(Context *rt, int type_index, ...);
 Item map_get(Context *rt, Map* map, char *key);
 
 bool item_true(Item item);
-Item ls2it(List* list);
