@@ -324,11 +324,6 @@ typedef struct {
     NameScope *global_vars;  // global variables
 } AstScript;
 
-typedef enum {
-    TP_DECLARE,  // var declaration phase
-    TP_COMPOSE,  // expr composition phase
-} TranspilePhase;
-
 typedef struct Heap {
     Pack; // extends Pack
 } Heap;
@@ -374,7 +369,6 @@ typedef struct {
     VariableMemPool* ast_pool;
     AstNode *ast_root;
     // todo: have a hashmap to speed up name lookup
-    TranspilePhase phase;
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
     StrBuf* code_buf;

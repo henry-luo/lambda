@@ -138,33 +138,28 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
 
 void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
     printf("transpile let expr\n");
-    if (tp->phase == TP_DECLARE) {
-        AstNode *declare = let_node->declare;
-        while (declare) {
-            assert(declare->node_type == AST_NODE_ASSIGN);
-            strbuf_append_char(tp->code_buf, ' ');
-            transpile_assign_expr(tp, (AstNamedNode*)declare);
-            declare = declare->next;
-        }
+    strbuf_append_str(tp->code_buf, " ({");
+    AstNode *declare = let_node->declare;
+    while (declare) {
+        assert(declare->node_type == AST_NODE_ASSIGN);
+        transpile_assign_expr(tp, (AstNamedNode*)declare);
+        strbuf_append_char(tp->code_buf, ' ');
+        declare = declare->next;
     }
-    else if (tp->phase == TP_COMPOSE) {
+    if (let_node->then) {
         printf("transpile let then\n");
         transpile_expr(tp, let_node->then);
     }
+    strbuf_append_str(tp->code_buf, ";})");
 }
 
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     printf("transpile let stam\n");
-    if (tp->phase == TP_DECLARE) {
-        AstNode *declare = let_node->declare;
-        while (declare) {
-            assert(declare->node_type == AST_NODE_ASSIGN);
-            transpile_assign_expr(tp, (AstNamedNode*)declare);
-            declare = declare->next;
-        }
-    }
-    else if (tp->phase == TP_COMPOSE) {
-        // let stam does not have then clause
+    AstNode *declare = let_node->declare;
+    while (declare) {
+        assert(declare->node_type == AST_NODE_ASSIGN);
+        transpile_assign_expr(tp, (AstNamedNode*)declare);
+        declare = declare->next;
     }
 }
 
@@ -223,7 +218,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile list expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
-    strbuf_append_str(tp->code_buf, " ({List ls = list();\n");
+    strbuf_append_str(tp->code_buf, " ({List *ls = list();\n");
     AstNode *item = array_node->item;
     while (item) {
         strbuf_append_str(tp->code_buf, " list_push(ls,");
@@ -231,7 +226,7 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
         strbuf_append_str(tp->code_buf, ");\n");
         item = item->next;
     }
-    strbuf_append_str(tp->code_buf, "\n; ls;})\n");
+    strbuf_append_str(tp->code_buf, " ls;})");
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
@@ -295,7 +290,6 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
         writeNodeSource(tp, field_node->field->node);
         strbuf_append_char(tp->code_buf, ')');
     }
-
 }
 
 void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
@@ -314,18 +308,8 @@ void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
         writeNodeSource(tp, param->node);
         param = (AstNamedNode*)param->next;
     }
-    strbuf_append_str(tp->code_buf, "){\n");
-   
-    // get the function body
-    tp->phase = TP_DECLARE;
-    AstNode *body = fn_node->body;
-    if (body->node_type == AST_NODE_LET_EXPR) {
-        transpile_let_expr(tp, (AstLetNode*)body);
-    }
-    
-    tp->phase = TP_COMPOSE;
-    strbuf_append_str(tp->code_buf, " return ");
-    transpile_expr(tp, body);
+    strbuf_append_str(tp->code_buf, "){\n return ");
+    transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 
@@ -384,25 +368,30 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
 
     AstNode *node = script->child;
-    tp->phase = TP_DECLARE;
+    // global declarations
     while (node) {
         // const stam
         if (node->node_type == AST_NODE_LET_STAM) {
             transpile_let_stam(tp, (AstLetNode*)node);
         }
+        else if (node->node_type == AST_NODE_FUNC) {
+            transpile_fn(tp, (AstFuncNode*)node);
+        }
         node = node->next;
     }
-    tp->phase = TP_COMPOSE;
+    // global evaluation, wrapped inside main()
+    strbuf_append_str(tp->code_buf, "Item main(Context *rt){\n List *ls=");
     node = script->child;
     while (node) {
-        if (node->node_type != AST_NODE_LET_STAM) {
+        if (node->node_type != AST_NODE_LET_STAM && node->node_type != AST_NODE_FUNC) {
             transpile_expr(tp, node);
         }
         node = node->next;
     }
+    strbuf_append_str(tp->code_buf, ";\n return ls2it(ls);\n}\n");
 }
 
-typedef void* (*main_func_t)(Context*);
+typedef Item (*main_func_t)(Context*);
 
 main_func_t transpile_script(Transpiler *tp, char* script_path) {
     printf("Starting transpiler...\n");

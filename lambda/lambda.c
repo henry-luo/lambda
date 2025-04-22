@@ -1,7 +1,7 @@
 #include "transpiler.h"
 #include "lambda.h"
 
-Item ITEM_NULL = LMD_TYPE_NULL << 56;
+Item ITEM_NULL = (0xFFFF00 & LMD_TYPE_NULL) << 40;
 
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
@@ -119,13 +119,13 @@ Item map_get(Context *rt, Map* map, char *key) {
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
                 case LMD_TYPE_INT:
-                    return (((uint64_t)LMD_TYPE_INT)<<56) | (*(int*)field_ptr);
+                    return (((uint64_t)(0xFFFF00 & LMD_TYPE_INT))<<40) | (*(int*)field_ptr);
                 // case LMD_TYPE_FLOAT:
                 //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
                 case LMD_TYPE_STRING:
-                    return (((uint64_t)LMD_TYPE_STRING)<<56) | (*(char*)field_ptr);
+                    return (((uint64_t)(0xFFFF00 & LMD_TYPE_STRING))<<40) | (*(char*)field_ptr);
                 case LMD_TYPE_BOOL:
-                    return (((uint64_t)LMD_TYPE_BOOL)<<56) | (*(bool*)field_ptr);
+                    return (((uint64_t)(0xFFFF00 & LMD_TYPE_BOOL))<<40) | (*(bool*)field_ptr);
                 default:
                     printf("unknown type %d\n", type_id);
             }
@@ -149,4 +149,9 @@ bool item_true(Item itm) {
     default:
         return true;
     }
+}
+
+Item ls2it(List* list) {
+    if (!list) { return ITEM_NULL; }
+    return (((uint64_t)(0xFFFF00 & LMD_TYPE_LIST))<<40) | (uint64_t)list;
 }
