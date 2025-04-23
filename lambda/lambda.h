@@ -81,3 +81,4 @@ Item v2x(List *list);
 #define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))
 #define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (double_ptr))
 #define const_d2x(index)    d2x((uint64_t)*(rt->consts + index))
+#define const_s2x(index)    s2x((uint64_t)*(rt->consts + index))

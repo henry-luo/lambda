@@ -191,7 +191,20 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = (LambdaType *)item_type;
     }
     else if (symbol == SYM_STRING) {
-        ast_node->type = &STRING_TYPE;
+        // todo: exclude zero-length string
+        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
+        int len =  end - start - 2;  // exclude the quotes
+        // sizeof(LambdaTypeString) does not include str[]
+        LambdaTypeString *str_type = (LambdaTypeString *)alloc_type(tp, LMD_TYPE_STRING, 
+            sizeof(LambdaTypeString) + len + 1);
+        str_type->length = len;
+        const char* str_content = tp->source + start + 1;
+        // todo: handle escape sequence
+        memcpy(str_type->str, str_content, len);
+        str_type->str[len] = '\0';
+        arraylist_append(tp->const_list, str_type);
+        str_type->const_index = tp->const_list->length - 1;
+        ast_node->type = (LambdaType *)str_type;
     }
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);

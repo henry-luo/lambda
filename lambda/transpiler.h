@@ -64,6 +64,13 @@ typedef struct {
 
 typedef struct {
     LambdaType;  // extends LambdaType
+    int length;
+    int const_index;
+    char str[];
+} LambdaTypeString;
+
+typedef struct {
+    LambdaType;  // extends LambdaType
     LambdaType* nested;  // nested item type for the array
     int length;  // no. of items in the array/map
 } LambdaTypeArray;

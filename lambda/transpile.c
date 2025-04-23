@@ -241,6 +241,12 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_str(tp->code_buf, ")");
         }
+        else if (item->type->type_id == LMD_TYPE_STRING) {
+            strbuf_append_str(tp->code_buf, "const_s2x(");
+            LambdaTypeString *str_type = (LambdaTypeString*)item->type;
+            strbuf_append_int(tp->code_buf, str_type->const_index);
+            strbuf_append_str(tp->code_buf, ")");
+        }
         item = item->next;
         if (item) strbuf_append_char(tp->code_buf, ',');
     }
@@ -533,6 +539,11 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_DOUBLE) {
             strbuf_append_format(strbuf, "%g", *(double*)ld_item.pointer);
+        }
+        else if (type_id == LMD_TYPE_STRING) {
+            LambdaTypeString *str_type = (LambdaTypeString*)ld_item.pointer;
+            // todo: escape the string
+            strbuf_append_format(strbuf, "\"%s\"", str_type->str);
         }
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);
