@@ -15,6 +15,7 @@ typedef enum TypeId {
     LMD_TYPE_FLOAT,
     LMD_TYPE_DOUBLE,
     LMD_TYPE_STRING,
+    LMD_TYPE_SYMBOL,
     LMD_TYPE_ARRAY,
     LMD_TYPE_LIST,
     LMD_TYPE_MAP,
@@ -82,6 +83,8 @@ Item v2x(List *list);
 #define b2x(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
 #define i2x(int_val)        (ITEM_INT | (uint32_t)(int_val))
 #define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))
+#define y2x(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (sym_ptr))
 #define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (double_ptr))
 #define const_d2x(index)    d2x((uint64_t)*(rt->consts + index))
 #define const_s2x(index)    s2x((uint64_t)*(rt->consts + index))
+#define const_y2x(index)    y2x((uint64_t)*(rt->consts + index))

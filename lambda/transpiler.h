@@ -18,6 +18,7 @@
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
 #define SYM_STRING sym_string
+#define SYM_SYMBOL sym_symbol
 #define SYM_IDENT sym_identifier
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_LET_EXPR sym_let_expr
@@ -68,6 +69,8 @@ typedef struct {
     int const_index;
     char str[];
 } LambdaTypeString;
+
+typedef LambdaTypeString LambdaTypeSymbol;
 
 typedef struct {
     LambdaType;  // extends LambdaType
