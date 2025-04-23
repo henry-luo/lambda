@@ -320,6 +320,10 @@
           "named": true
         },
         {
+          "type": "map",
+          "named": true
+        },
+        {
           "type": "primary_expr",
           "named": true
         },
@@ -384,6 +388,10 @@
         },
         {
           "type": "let_expr",
+          "named": true
+        },
+        {
+          "type": "map",
           "named": true
         },
         {

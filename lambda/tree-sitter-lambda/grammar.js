@@ -83,7 +83,7 @@ module.exports = grammar({
     _content_item: $ => prec(100, choice(
       $._content_expr,
       // consecutive texts/nodes
-      seq(choice($.string, $.element), repeat1(choice($.string, $.element))),
+      seq(choice($.string, $.map, $.element), repeat1(choice($.string, $.map, $.element))),
     )),
 
     _content: $ => seq($._content_item, repeat(seq(',', $._content_item))),
