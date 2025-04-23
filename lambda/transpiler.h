@@ -1,3 +1,4 @@
+#pragma once
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -9,118 +10,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 
-enum ts_symbol_identifiers {
-    sym_identifier = 1,
-    anon_sym_COMMA = 2,
-    anon_sym_LBRACE = 3,
-    anon_sym_COLON = 4,
-    anon_sym_RBRACE = 5,
-    anon_sym_LBRACK = 6,
-    anon_sym_RBRACK = 7,
-    anon_sym_LT = 8,
-    anon_sym_GT = 9,
-    anon_sym_DQUOTE = 10,
-    sym_string_content = 11,
-    anon_sym_SQUOTE = 12,
-    sym_symbol_content = 13,
-    sym_escape_sequence = 14,
-    sym_number = 15,
-    sym_integer = 16,
-    sym_true = 17,
-    sym_false = 18,
-    sym_null = 19,
-    sym_comment = 20,
-    anon_sym_LPAREN = 21,
-    anon_sym_RPAREN = 22,
-    sym_import = 23,
-    anon_sym_DOT_DOT_DOT = 24,
-    anon_sym_DOT = 25,
-    anon_sym_and = 26,
-    anon_sym_or = 27,
-    anon_sym_PLUS = 28,
-    anon_sym_DASH = 29,
-    anon_sym_STAR = 30,
-    anon_sym_SLASH = 31,
-    anon_sym_PERCENT = 32,
-    anon_sym_STAR_STAR = 33,
-    anon_sym_EQ_EQ = 34,
-    anon_sym_BANG_EQ = 35,
-    anon_sym_LT_EQ = 36,
-    anon_sym_GT_EQ = 37,
-    anon_sym_to = 38,
-    anon_sym_in = 39,
-    anon_sym_not = 40,
-    anon_sym_fn = 41,
-    anon_sym_EQ = 42,
-    anon_sym_let = 43,
-    anon_sym_if = 44,
-    anon_sym_else = 45,
-    anon_sym_for = 46,
-    anon_sym_const = 47,
-    anon_sym_SEMI = 48,
-    sym_document = 49,
-    sym_content = 50,
-    sym_lit_map = 51,
-    sym_pair = 52,
-    sym_map = 53,
-    sym_lit_array = 54,
-    sym_array = 55,
-    sym_lit_attr = 56,
-    sym_attr = 57,
-    sym_attrs = 58,
-    sym_element = 59,
-    sym_lit_element = 60,
-    sym_string = 61,
-    aux_sym__string_content = 62,
-    sym_symbol = 63,
-    aux_sym__symbol_content = 64,
-    sym__expression = 65,
-    sym_primary_expr = 66,
-    sym_spread_element = 67,
-    sym_call_expr = 68,
-    sym_subscript_expr = 69,
-    sym_member_expr = 70,
-    sym_binary_expr = 71,
-    sym_unary_expr = 72,
-    sym_parameter = 73,
-    sym_fn_definition = 74,
-    sym_assign_expr = 75,
-    sym_let_expr = 76,
-    sym_if_expr = 77,
-    sym_loop_expr = 78,
-    sym_for_expr = 79,
-    sym_const_stam = 80,
-    aux_sym_document_repeat1 = 81,
-    aux_sym__content_item_repeat1 = 82,
-    aux_sym__content_repeat1 = 83,
-    aux_sym_lit_map_repeat1 = 84,
-    aux_sym_map_repeat1 = 85,
-    aux_sym_lit_array_repeat1 = 86,
-    aux_sym_array_repeat1 = 87,
-    aux_sym_attrs_repeat1 = 88,
-    aux_sym_lit_element_repeat1 = 89,
-    aux_sym_lit_element_repeat2 = 90,
-    aux_sym__arguments_repeat1 = 91,
-    aux_sym_fn_definition_repeat1 = 92,
-    aux_sym_let_expr_repeat1 = 93,
-    aux_sym_for_expr_repeat1 = 94,
-};
-
-enum ts_field_identifiers {
-    field_argument = 1,
-    field_body = 2,
-    field_cond = 3,
-    field_declare = 4,
-    field_else = 5,
-    field_field = 6,
-    field_function = 7,
-    field_left = 8,
-    field_name = 9,
-    field_object = 10,
-    field_operator = 11,
-    field_right = 12,
-    field_then = 13,
-};
+#include "ts-enum.h"
 
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
@@ -159,20 +49,7 @@ enum ts_field_identifiers {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 
-typedef enum TypeId {
-    LMD_TYPE_NULL,
-    LMD_TYPE_ANY,
-    LMD_TYPE_ERROR,
-    LMD_TYPE_BOOL,
-    LMD_TYPE_INT,
-    LMD_TYPE_FLOAT,
-    LMD_TYPE_STRING,
-    LMD_TYPE_ARRAY,
-    LMD_TYPE_LIST,
-    LMD_TYPE_MAP,
-    LMD_TYPE_ELEMENT,
-    LMD_TYPE_FUNC,
-} TypeId;
+#include "lambda.h"
 
 typedef struct LambdaType {
     TypeId type_id;
@@ -332,13 +209,9 @@ void* heap_alloc(Heap* heap, size_t size);
 void* heap_calloc(Heap* heap, size_t size);
 void heap_destroy(Heap* heap);
 
-// uses the high byte to tag the pointer
+// uses the high byte to tag the pointer, defined for little-endian
 typedef union LambdaItem {
     struct {
-        #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-        uint64_t type_id : 8;
-        uint64_t value   : 56;
-        #else
         union {
             struct {
                 uint64_t int_val: 32;
@@ -349,12 +222,10 @@ typedef union LambdaItem {
                 uint64_t _56: 56;
             };
             struct {
-                uint64_t value   : 40;
-                uint64_t type_id : 8;
-                uint64_t _16     : 16;           
-            };
+                uint64_t pointer : 56;
+                uint64_t type_id : 8;        
+            };           
         };
-        #endif
     };
     uint64_t item;
 } LambdaItem;
@@ -381,7 +252,7 @@ typedef struct {
     Heap* heap;
 } Runner;
 
-#define ITEM_NULL  ((0xFFFF00 & LMD_TYPE_NULL) << 40)
+#define ITEM_NULL  (LMD_TYPE_NULL << 56)
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }

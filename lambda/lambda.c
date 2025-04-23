@@ -1,5 +1,4 @@
 #include "transpiler.h"
-#include "lambda.h"
 
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
@@ -43,8 +42,7 @@ void list_push(List *list, Item item) {
     }
     // LambdaItem ld_item = {.int_val= item, .type_id = LMD_TYPE_INT, ._16 = 0xFFFF};
     // printf("pushing value: %llu\n", ld_item.item);
-    list->items[list->length++] = // ld_item.item;
-        ((uint64_t)(0xFFFF00 | LMD_TYPE_INT) << 40) | item;
+    list->items[list->length++] = i2it(item);
     printf("pushed value: %llu\n", list->items[list->length - 1]);
 }
 
@@ -121,14 +119,14 @@ Item map_get(Context *rt, Map* map, char *key) {
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
+                case LMD_TYPE_BOOL:
+                    return b2it(*(bool*)field_ptr);
                 case LMD_TYPE_INT:
-                    return (((uint64_t)(0xFFFF00 & LMD_TYPE_INT))<<40) | (*(int*)field_ptr);
+                    return i2it(*(int*)field_ptr);
                 // case LMD_TYPE_FLOAT:
                 //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
                 case LMD_TYPE_STRING:
-                    return (((uint64_t)(0xFFFF00 & LMD_TYPE_STRING))<<40) | (*(char*)field_ptr);
-                case LMD_TYPE_BOOL:
-                    return (((uint64_t)(0xFFFF00 & LMD_TYPE_BOOL))<<40) | (*(bool*)field_ptr);
+                    return str2it(*(char*)field_ptr);
                 default:
                     printf("unknown type %d\n", type_id);
             }
@@ -141,7 +139,7 @@ Item map_get(Context *rt, Map* map, char *key) {
 
 bool item_true(Item itm) {
     LambdaItem item = {.item = itm};
-    printf("item type: %d, val: %llu\n", item.type_id, item.value);
+    printf("item type: %d, val: %llu\n", item.type_id, item.pointer);
     switch (item.type_id) {
     case LMD_TYPE_NULL:
         return false;

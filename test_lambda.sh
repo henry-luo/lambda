@@ -8,4 +8,4 @@ clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitter.a \
   test/lambda/test_value.c \
   -o test_lambda.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types
 
-# ./test_lambda.exe --verbose
+./test_lambda.exe --verbose

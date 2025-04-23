@@ -1,6 +1,5 @@
 
 #include "transpiler.h"
-#include "lambda.h"
 
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
@@ -495,8 +494,8 @@ Item run_script_at(Runner *runner, char* script_path) {
 
 void print_item(StrBuf *strbuf, Item item) {
     printf("print item: %llu\n", item);
-    if (item & 0xFFFF000000000000) { // packed value
-        LambdaItem ld_item = {.item = item};
+    LambdaItem ld_item = {.item = item};
+    if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
         printf("packed value: %d\n", type_id);
         if (type_id == LMD_TYPE_NULL) {

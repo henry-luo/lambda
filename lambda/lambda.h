@@ -5,6 +5,22 @@
 #include <stdarg.h>
 #define null 0
 
+typedef enum TypeId {
+    LMD_RAW_POINTER = 0,
+    LMD_TYPE_NULL,
+    LMD_TYPE_ANY,
+    LMD_TYPE_ERROR,
+    LMD_TYPE_BOOL,
+    LMD_TYPE_INT,
+    LMD_TYPE_FLOAT,
+    LMD_TYPE_STRING,
+    LMD_TYPE_ARRAY,
+    LMD_TYPE_LIST,
+    LMD_TYPE_MAP,
+    LMD_TYPE_ELEMENT,
+    LMD_TYPE_FUNC,
+} TypeId;
+
 typedef uint64_t Item;
 
 typedef struct Array {
@@ -56,3 +72,7 @@ Item map_get(Context *rt, Map* map, char *key);
 
 bool item_true(Item item);
 Item ls2it(List *list);
+
+#define b2it(bool_val)   ((((uint64_t)LMD_TYPE_BOOL)<<56) | (bool_val))
+#define i2it(int_val)   ((((uint64_t)LMD_TYPE_INT)<<56) | (int_val))
+#define str2it(str_ptr)   ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))

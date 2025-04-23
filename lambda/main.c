@@ -1,8 +1,8 @@
 
 #include "transpiler.h"
-#include "lambda.h"
 
 int main(void) {
+    assert(sizeof(LambdaItem) == 8);
     Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);
     runner_init(&runner);
 
