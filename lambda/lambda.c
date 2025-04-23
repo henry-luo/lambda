@@ -40,10 +40,7 @@ void list_push(List *list, Item item) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
-    // LambdaItem ld_item = {.int_val= item, .type_id = LMD_TYPE_INT, ._16 = 0xFFFF};
-    // printf("pushing value: %llu\n", ld_item.item);
-    list->items[list->length++] = i2it(item);
-    printf("pushed value: %llu\n", list->items[list->length - 1]);
+    list->items[list->length++] = item;
 }
 
 List* list_new(Context *rt, int count, ...) {
@@ -133,13 +130,13 @@ Item map_get(Context *rt, Map* map, char *key) {
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
                 case LMD_TYPE_BOOL:
-                    return b2it(*(bool*)field_ptr);
+                    return b2x(*(bool*)field_ptr);
                 case LMD_TYPE_INT:
-                    return i2it(*(int*)field_ptr);
+                    return i2x(*(int*)field_ptr);
                 // case LMD_TYPE_FLOAT:
                 //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
                 case LMD_TYPE_STRING:
-                    return str2it(*(char*)field_ptr);
+                    return s2x(*(char*)field_ptr);
                 default:
                     printf("unknown type %d\n", type_id);
             }
@@ -165,8 +162,9 @@ bool item_true(Item itm) {
     }
 }
 
-Item ls2it(List* list) {
-    printf("ls2it %p, length: %d\n", list, list->length);
+// list to item
+Item v2x(List* list) {
+    printf("v2x %p, length: %d\n", list, list->length);
     if (list->length == 0) { return ITEM_NULL; }
     if (list->length == 1) { return list->items[0]; }
     return (Item)list;

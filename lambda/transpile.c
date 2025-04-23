@@ -223,13 +223,13 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     AstNode *item = array_node->item;
     while (item) {
         if (item->type->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "i2it(");
+            strbuf_append_str(tp->code_buf, "i2x(");
         }
         // else if (item->type->type_id == LMD_TYPE_STRING) {
         //     strbuf_append_str(tp->code_buf, "str2it(");
         // }
         else if (item->type->type_id == LMD_TYPE_BOOL) {
-            strbuf_append_str(tp->code_buf, "b2it(");
+            strbuf_append_str(tp->code_buf, "b2x(");
         }
         transpile_expr(tp, item);
         strbuf_append_str(tp->code_buf, ")");
@@ -398,7 +398,7 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }
-    strbuf_append_str(tp->code_buf, ";\n return ls2it(ls);\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n return v2x(ls);\n}\n");
 }
 
 typedef Item (*main_func_t)(Context*);

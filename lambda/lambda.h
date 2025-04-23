@@ -72,8 +72,8 @@ Map* map_new(Context *rt, int type_index, ...);
 Item map_get(Context *rt, Map* map, char *key);
 
 bool item_true(Item item);
-Item ls2it(List *list);
+Item v2x(List *list);
 
-#define b2it(bool_val)   ((((uint64_t)LMD_TYPE_BOOL)<<56) | (bool_val))
-#define i2it(int_val)   ((((uint64_t)LMD_TYPE_INT)<<56) | (int_val))
-#define str2it(str_ptr)   ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))
+#define b2x(bool_val)   ((((uint64_t)LMD_TYPE_BOOL)<<56) | (bool_val))
+#define i2x(int_val)   ((((uint64_t)LMD_TYPE_INT)<<56) | (int_val))
+#define s2x(str_ptr)   ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))

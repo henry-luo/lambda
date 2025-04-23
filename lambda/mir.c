@@ -35,7 +35,7 @@ func_obj_t func_list[] = {
     {"map_new", (void (*)(void))map_new},
     {"map_get", (void (*)(void))map_get},
     {"item_true", (void (*)(void))item_true},
-    {"ls2it", (void (*)(void))ls2it},
+    {"v2x", (void (*)(void))v2x},
     {NULL, NULL}
 };
 
@@ -45,7 +45,6 @@ void *import_resolver(const char *name) {
         if (strcmp(func_list[i].name, name) == 0)
             return func_list[i].func;
     printf("failed to resolve: %s\n", name);
-    // probably should resolve to a default error handling function
     return NULL;
 }
 
