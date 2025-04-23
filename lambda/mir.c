@@ -28,6 +28,7 @@ func_obj_t func_list[] = {
     {"array_new", (void (*)(void))array_new},
     {"array_long_new", (void (*)(void))array_long_new},
     {"list", (void (*)(void))list},
+    {"list_new", (void (*)(void))list_new},
     {"list_long", (void (*)(void))list_long},
     {"list_push", (void (*)(void))list_push},
     {"list_long_push", (void (*)(void))list_long_push},

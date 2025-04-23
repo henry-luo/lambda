@@ -46,6 +46,20 @@ void list_push(List *list, Item item) {
     printf("pushed value: %llu\n", list->items[list->length - 1]);
 }
 
+List* list_new(Context *rt, int count, ...) {
+    printf("list_new cnt: %d\n", count);
+    List *list = calloc(1, sizeof(List));
+    list->type_id = LMD_TYPE_LIST;
+    va_list args;
+    va_start(args, count);
+    for (int i = 0; i < count; i++) {
+        Item item = va_arg(args, uint64_t);
+        list_push(list, item);
+    }
+    va_end(args);
+    return list;
+}
+
 ListLong* list_long() {
     ListLong *list = malloc(sizeof(ListLong));
     list->items = NULL;
@@ -68,7 +82,6 @@ Map* map() {
     return map;
 }
 Map* map_new(Context *rt, int type_index, ...) {
-    if (!rt) { return NULL; }
     printf("map_new %p at %d\n", rt, type_index);
     ArrayList* type_list = (ArrayList*)rt->type_list;
     AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);

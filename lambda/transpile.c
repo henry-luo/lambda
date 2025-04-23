@@ -217,15 +217,26 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile list expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
-    strbuf_append_str(tp->code_buf, " ({List *ls = list();\n");
+    strbuf_append_str(tp->code_buf, "list_new(rt,");
+    strbuf_append_int(tp->code_buf, type->length);
+    strbuf_append_char(tp->code_buf, ',');
     AstNode *item = array_node->item;
     while (item) {
-        strbuf_append_str(tp->code_buf, " list_push(ls,");
+        if (item->type->type_id == LMD_TYPE_INT) {
+            strbuf_append_str(tp->code_buf, "i2it(");
+        }
+        // else if (item->type->type_id == LMD_TYPE_STRING) {
+        //     strbuf_append_str(tp->code_buf, "str2it(");
+        // }
+        else if (item->type->type_id == LMD_TYPE_BOOL) {
+            strbuf_append_str(tp->code_buf, "b2it(");
+        }
         transpile_expr(tp, item);
-        strbuf_append_str(tp->code_buf, ");\n");
+        strbuf_append_str(tp->code_buf, ")");
         item = item->next;
+        if (item) strbuf_append_char(tp->code_buf, ',');
     }
-    strbuf_append_str(tp->code_buf, " ls;})");
+    strbuf_append_str(tp->code_buf, ")");
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
@@ -459,12 +470,13 @@ void runner_init(Runner* runner) {
 }
 
 void runner_cleanup(Runner* runner) {
-    heap_destroy(runner->heap);
+    printf("runner cleanup\n");
+    if (runner->heap) heap_destroy(runner->heap);
     Transpiler *tp = runner->transpiler;
     if (tp) {
         jit_cleanup(tp->jit_context);
         pool_variable_destroy(tp->ast_pool);
-        arraylist_free(tp->type_list);
+        if (tp->type_list) arraylist_free(tp->type_list);
         if (tp->syntax_tree) ts_tree_delete(tp->syntax_tree);
         if (tp->parser) ts_parser_delete(tp->parser);    
         free(tp);
@@ -474,8 +486,10 @@ void runner_cleanup(Runner* runner) {
 Item run_script(Runner *runner, char* source) {
     main_func_t main_func = transpile_script(runner->transpiler, source);
     // execute the function
-    if (!main_func) { printf("Error: Failed to compile the function.\n"); }
-    else {
+    if (!main_func) { 
+        printf("Error: Failed to compile the function.\n"); 
+        return ITEM_NULL;
+    } else {
         printf("Executing JIT compiled code...\n");
         runner->heap = heap_init(4096 * 16);  // 64k
         Context runtime_context = {.ast_pool = runner->transpiler->ast_pool, 
@@ -484,7 +498,6 @@ Item run_script(Runner *runner, char* source) {
         printf("JIT compiled code returned: %llu\n", ret);
         return ret;
     }
-    return ITEM_NULL;
 }
 
 Item run_script_at(Runner *runner, char* script_path) {
@@ -500,7 +513,8 @@ void print_item(StrBuf *strbuf, Item item) {
         printf("packed value: %d\n", type_id);
         if (type_id == LMD_TYPE_NULL) {
             strbuf_append_str(strbuf, "null");
-        } else if (type_id == LMD_TYPE_BOOL) {
+        } 
+        else if (type_id == LMD_TYPE_BOOL) {
             strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
         }
         else if (type_id == LMD_TYPE_INT) {

@@ -23,6 +23,14 @@ typedef enum TypeId {
 
 typedef uint64_t Item;
 
+// script runtime context
+typedef struct Heap Heap;
+typedef struct Context {
+    void* ast_pool;
+    void* type_list;
+    Heap* heap;
+} Context;
+
 typedef struct Array {
     Item* items;
     int length;
@@ -50,17 +58,10 @@ typedef struct ListLong {
     int capacity;
 } ListLong;
 List* list();  // constructs an empty list
+List* list_new(Context *rt, int cnt, ...);  // constructs an empty list
 void list_push(List *list, Item item);
 ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);
-
-// script runtime context
-typedef struct Heap Heap;
-typedef struct Context {
-    void* ast_pool;
-    void* type_list;
-    Heap* heap;
-} Context;
 
 typedef struct Map {
     void* ast;  // ast node of the map

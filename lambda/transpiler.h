@@ -252,7 +252,7 @@ typedef struct {
     Heap* heap;
 } Runner;
 
-#define ITEM_NULL  (LMD_TYPE_NULL << 56)
+#define ITEM_NULL  ((uint64_t)LMD_TYPE_NULL << 56)
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
