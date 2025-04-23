@@ -11,6 +11,7 @@ LambdaType STRING_TYPE = {.type_id = LMD_TYPE_STRING};
 LambdaType FUNC_TYPE = {.type_id = LMD_TYPE_FUNC};
 
 int byte_size[] = {
+    [LMD_RAW_POINTER] = sizeof(void*),
     [LMD_TYPE_NULL] = sizeof(bool),
     [LMD_TYPE_ANY] = sizeof(void*),
     [LMD_TYPE_ERROR] = sizeof(void*),
@@ -178,8 +179,14 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
         ast_node->type = &BOOL_TYPE;
     }
-    else if (symbol == SYM_NUMBER) {
+    else if (symbol == SYM_INT) {
         ast_node->type = &INT_TYPE;
+    }
+    else if (symbol == SYM_FLOAT) {
+        LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
+        const char* num_str = tp->source + ts_node_start_byte(child);
+        item_type->double_val = atof(num_str);
+        ast_node->type = (LambdaType *)item_type;
     }
     else if (symbol == SYM_STRING) {
         ast_node->type = &STRING_TYPE;
@@ -603,8 +610,10 @@ char* formatType(LambdaType *type) {
     case LMD_TYPE_BOOL:
         return "bool";        
     case LMD_TYPE_INT:
-        return "long";
+        return "int";
     case LMD_TYPE_FLOAT:
+        return "float";
+    case LMD_TYPE_DOUBLE:
         return "double";
     case LMD_TYPE_STRING:
         return "char*";

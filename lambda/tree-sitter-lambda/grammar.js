@@ -18,6 +18,8 @@ function commaSep(rule) {
 }
 
 const decimalDigits = /\d+/;
+const integerLiteral = seq(choice('0', seq(/[1-9]/, optional(decimalDigits))));
+const signedIntegerLiteral = seq(optional('-'), integerLiteral);
 
 module.exports = grammar({
   name: "lambda",
@@ -43,6 +45,7 @@ module.exports = grammar({
     $._statement,
     $._content,
     $._content_expr,
+    $._number,
   ],
 
   precedences: $ => [[
@@ -91,7 +94,7 @@ module.exports = grammar({
       $.lit_map,
       $.lit_array,
       $.lit_element,
-      $.number,
+      $._number,
       $.string,
       $.symbol,      
       $.true,
@@ -125,7 +128,7 @@ module.exports = grammar({
     ),    
 
     range: $ => seq(
-      $.number, 'to', $.number,
+      $._expression, 'to', $._expression,
     ),
 
     lit_attr: $ => prec(101, seq(
@@ -178,24 +181,23 @@ module.exports = grammar({
       /(\"|\\|\/|b|f|n|r|t|u)/,
     )),
 
-    number: _ => {
+    _number: $ => choice($.integer, $.float),
+
+    float: _ => {
       const signedInteger = seq(optional('-'), decimalDigits);
       const exponentPart = seq(choice('e', 'E'), signedInteger);
-      const decimalIntegerLiteral = seq(
-        optional('-'),
-        choice('0', seq(/[1-9]/, optional(decimalDigits))),
-      );
       const decimalLiteral = choice(
-        seq(decimalIntegerLiteral, '.', optional(decimalDigits), optional(exponentPart)),
-        seq(decimalIntegerLiteral, optional(exponentPart)),
+        seq(signedIntegerLiteral, '.', optional(decimalDigits), optional(exponentPart)),
+        seq(signedIntegerLiteral, exponentPart),
       );
       return token(decimalLiteral);
     },
 
-    integer: _ => {
-      const integerLiteral = seq(
-        choice('0', seq(/[1-9]/, optional(decimalDigits))),
-      );
+    integer: $ => {
+      return token(signedIntegerLiteral);
+    },
+
+    index: $ => {
       return token(integerLiteral);
     },    
 
@@ -245,7 +247,7 @@ module.exports = grammar({
       $.identifier,
       // alias($._reserved_identifier, $.identifier),
       // $.this,
-      $.number,
+      $._number,
       $.string,
       $.symbol,
       // $.regex,
@@ -286,7 +288,7 @@ module.exports = grammar({
     
     member_expr: $ => seq(
       field('object',$.primary_expr), ".", 
-      field('field', choice($.identifier, $.integer))
+      field('field', choice($.identifier, $.index))
     ),
 
     binary_expr: $ => choice(

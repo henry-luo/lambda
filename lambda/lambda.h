@@ -13,6 +13,7 @@ typedef enum TypeId {
     LMD_TYPE_BOOL,
     LMD_TYPE_INT,
     LMD_TYPE_FLOAT,
+    LMD_TYPE_DOUBLE,
     LMD_TYPE_STRING,
     LMD_TYPE_ARRAY,
     LMD_TYPE_LIST,
@@ -27,6 +28,7 @@ typedef uint64_t Item;
 typedef struct Heap Heap;
 typedef struct Context {
     void* ast_pool;
+    void** consts;
     void* type_list;
     Heap* heap;
 } Context;
@@ -74,6 +76,7 @@ Item map_get(Context *rt, Map* map, char *key);
 bool item_true(Item item);
 Item v2x(List *list);
 
-#define b2x(bool_val)   ((((uint64_t)LMD_TYPE_BOOL)<<56) | (bool_val))
-#define i2x(int_val)   ((((uint64_t)LMD_TYPE_INT)<<56) | (int_val))
-#define s2x(str_ptr)   ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))
+#define b2x(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (bool_val))
+#define i2x(int_val)        ((((uint64_t)LMD_TYPE_INT)<<56) | (int_val))
+#define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))
+#define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (double_ptr))

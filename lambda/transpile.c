@@ -224,15 +224,24 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     while (item) {
         if (item->type->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "i2x(");
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ')');
         }
         // else if (item->type->type_id == LMD_TYPE_STRING) {
         //     strbuf_append_str(tp->code_buf, "str2it(");
         // }
         else if (item->type->type_id == LMD_TYPE_BOOL) {
             strbuf_append_str(tp->code_buf, "b2x(");
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ')');
         }
-        transpile_expr(tp, item);
-        strbuf_append_str(tp->code_buf, ")");
+        else if (item->type->type_id == LMD_TYPE_DOUBLE) {
+            strbuf_append_str(tp->code_buf, "d2x((uint64_t)*(rt->consts+");
+            LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+            arraylist_append(tp->const_list, &item_type->double_val);
+            strbuf_append_int(tp->code_buf, tp->const_list->length - 1);
+            strbuf_append_str(tp->code_buf, "))");
+        }
         item = item->next;
         if (item) strbuf_append_char(tp->code_buf, ',');
     }
@@ -433,7 +442,8 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
     size_t tolerance_percent = 20;
     printf("init AST node pool\n");
     pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
-    tp->type_list = arraylist_new(16);    
+    tp->type_list = arraylist_new(16);
+    tp->const_list = arraylist_new(16);
 
     if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
@@ -493,7 +503,9 @@ Item run_script(Runner *runner, char* source) {
         printf("Executing JIT compiled code...\n");
         runner->heap = heap_init(4096 * 16);  // 64k
         Context runtime_context = {.ast_pool = runner->transpiler->ast_pool, 
-            .type_list = runner->transpiler->type_list, .heap = runner->heap};
+            .type_list = runner->transpiler->type_list, 
+            .consts = runner->transpiler->const_list->data, 
+            .heap = runner->heap};
         Item ret = main_func(&runtime_context);
         printf("JIT compiled code returned: %llu\n", ret);
         return ret;
@@ -519,6 +531,9 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_INT) {
             strbuf_append_format(strbuf, "%ld", ld_item.int_val);
+        }
+        else if (type_id == LMD_TYPE_DOUBLE) {
+            strbuf_append_format(strbuf, "%g", *(double*)ld_item.pointer);
         }
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);

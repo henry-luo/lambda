@@ -15,7 +15,8 @@
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
 #define SYM_FALSE sym_false
-#define SYM_NUMBER sym_number
+#define SYM_INT sym_integer
+#define SYM_FLOAT sym_float
 #define SYM_STRING sym_string
 #define SYM_IDENT sym_identifier
 #define SYM_IF_EXPR sym_if_expr
@@ -55,7 +56,12 @@ typedef struct LambdaType {
     TypeId type_id;
 } LambdaType;
 
-typedef struct LambdaTypeArray {
+typedef struct {
+    TypeId type_id;
+    double double_val;
+} LambdaTypeItem;
+
+typedef struct {
     LambdaType;  // extends LambdaType
     LambdaType* nested;  // nested item type for the array
     int length;  // no. of items in the array/map
@@ -68,7 +74,7 @@ typedef struct ShapeEntry {
     struct ShapeEntry* next;
 } ShapeEntry;
 
-typedef struct LambdaTypeMap {
+typedef struct {
     LambdaType;  // extends LambdaType
     int length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
@@ -76,7 +82,7 @@ typedef struct LambdaTypeMap {
     ShapeEntry* shape;  // shape of the map
 } LambdaTypeMap;
 
-typedef struct Pack {
+typedef struct {
     size_t size;           // Current used size of the pack
     size_t capacity;       // Total capacity of the pack
     size_t committed_size; // Currently committed memory size - non-zero indicates virtual memory mode
@@ -243,6 +249,7 @@ typedef struct {
     // todo: have a hashmap to speed up name lookup
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
+    ArrayList* const_list;  // list of constants
     StrBuf* code_buf;
     MIR_context_t jit_context;
 } Transpiler;
