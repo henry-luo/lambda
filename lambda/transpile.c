@@ -227,9 +227,9 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
-        // else if (item->type->type_id == LMD_TYPE_STRING) {
-        //     strbuf_append_str(tp->code_buf, "str2it(");
-        // }
+        else if (item->type->type_id == LMD_TYPE_NULL) {
+            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        }
         else if (item->type->type_id == LMD_TYPE_BOOL) {
             strbuf_append_str(tp->code_buf, "b2x(");
             transpile_expr(tp, item);
@@ -535,7 +535,8 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
         }
         else if (type_id == LMD_TYPE_INT) {
-            strbuf_append_format(strbuf, "%ld", ld_item.int_val);
+            int int_val = (int32_t)ld_item.int_val;
+            strbuf_append_format(strbuf, "%d", int_val);
         }
         else if (type_id == LMD_TYPE_DOUBLE) {
             strbuf_append_format(strbuf, "%g", *(double*)ld_item.pointer);

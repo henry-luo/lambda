@@ -1,1 +1,1 @@
-123, true, 0.5, "hello"
+123, true, 0.5, "hello", false, -6, 5e-6, null
