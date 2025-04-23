@@ -236,11 +236,10 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             strbuf_append_char(tp->code_buf, ')');
         }
         else if (item->type->type_id == LMD_TYPE_DOUBLE) {
-            strbuf_append_str(tp->code_buf, "d2x((uint64_t)*(rt->consts+");
+            strbuf_append_str(tp->code_buf, "const_d2x(");
             LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
-            arraylist_append(tp->const_list, &item_type->double_val);
-            strbuf_append_int(tp->code_buf, tp->const_list->length - 1);
-            strbuf_append_str(tp->code_buf, "))");
+            strbuf_append_int(tp->code_buf, item_type->const_index);
+            strbuf_append_str(tp->code_buf, ")");
         }
         item = item->next;
         if (item) strbuf_append_char(tp->code_buf, ',');

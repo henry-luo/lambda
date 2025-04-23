@@ -57,7 +57,8 @@ typedef struct LambdaType {
 } LambdaType;
 
 typedef struct {
-    TypeId type_id;
+    LambdaType;  // extends LambdaType
+    int const_index;
     double double_val;
 } LambdaTypeItem;
 

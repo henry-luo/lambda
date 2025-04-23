@@ -186,6 +186,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
         const char* num_str = tp->source + ts_node_start_byte(child);
         item_type->double_val = atof(num_str);
+        arraylist_append(tp->const_list, &item_type->double_val);
+        item_type->const_index = tp->const_list->length - 1;
         ast_node->type = (LambdaType *)item_type;
     }
     else if (symbol == SYM_STRING) {
