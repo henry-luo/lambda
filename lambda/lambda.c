@@ -14,15 +14,15 @@ Array* array_new(int count, ...) {
     return arr;
 }
 
-ArrayLong* array_long_new(int count, ...) {
+ArrayInt* array_int_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    ArrayLong *arr = malloc(sizeof(ArrayLong));
-    arr->items = malloc(count * sizeof(long));
+    ArrayInt *arr = malloc(sizeof(ArrayInt));
+    arr->items = malloc(count * sizeof(int));
     arr->length = count;
     for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, long);
+        arr->items[i] = va_arg(args, int);
     }       
     va_end(args);
     return arr;
@@ -57,14 +57,14 @@ List* list_new(Context *rt, int count, ...) {
     return list;
 }
 
-ListLong* list_long() {
-    ListLong *list = malloc(sizeof(ListLong));
+ListInt* list_int() {
+    ListInt *list = malloc(sizeof(ListInt));
     list->items = NULL;
     list->length = 0;
     list->capacity = 0;
     return list;
 }
-void list_long_push(ListLong *list, long item) {
+void list_int_push(ListInt *list, int item) {
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(long));

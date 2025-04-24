@@ -29,7 +29,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
         strbuf_append_str(tp->code_buf, "bool");
         break;        
     case LMD_TYPE_INT:
-        strbuf_append_str(tp->code_buf, "long");
+        strbuf_append_str(tp->code_buf, "int");
         break;
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "float");
@@ -43,7 +43,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "ArrayLong*");
+            strbuf_append_str(tp->code_buf, "ArrayInt*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
         }
@@ -168,9 +168,9 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_then) {
     printf("transpile loop expr\n");
     // todo: prefix var name with '_'
-    strbuf_append_str(tp->code_buf, " ArrayLong *arr=");
+    strbuf_append_str(tp->code_buf, " ArrayInt *arr=");
     transpile_expr(tp, loop_node->then);
-    strbuf_append_str(tp->code_buf, ";\n for (int i=0; i<arr->length; i++){\n long _");
+    strbuf_append_str(tp->code_buf, ";\n for (int i=0; i<arr->length; i++){\n int _");
     strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
     strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
     AstNode *next_loop = loop_node->next;
@@ -179,7 +179,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
         transpile_loop_expr(tp, (AstNamedNode*)next_loop, for_then);
     }
     else {
-        strbuf_append_str(tp->code_buf, " list_long_push(ls,");
+        strbuf_append_str(tp->code_buf, " list_int_push(ls,");
         transpile_expr(tp, for_then);
         strbuf_append_str(tp->code_buf, ");");
     }
@@ -189,7 +189,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
 void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
     printf("transpile for expr\n");
     // init a list
-    strbuf_append_str(tp->code_buf, "({ListLong* ls=list_long();\n");
+    strbuf_append_str(tp->code_buf, "({ListInt* ls=list_int();\n");
     AstNode *loop = for_node->loop;
     if (loop) {
         printf("transpile for loop\n");
@@ -203,7 +203,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
     strbuf_append_str(tp->code_buf, (type->nested && type->nested->type_id == LMD_TYPE_INT) 
-        ? "array_long_new(" : "array_new(");
+        ? "array_int_new(" : "array_new(");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     AstNode *item = array_node->item;

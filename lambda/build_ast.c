@@ -646,7 +646,7 @@ char* formatType(LambdaType *type) {
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
-            return "ArrayLong*";
+            return "ArrayInt*";
         } else {
             return "Array*";
         }

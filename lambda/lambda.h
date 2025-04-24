@@ -43,13 +43,13 @@ typedef struct Array {
     int length;
 } Array;
 
-typedef struct ArrayLong {
-    long* items;
+typedef struct ArrayInt {
+    int* items;
     int length;
-} ArrayLong;
+} ArrayInt;
 
 Array* array_new(int count, ...);
-ArrayLong* array_long_new(int count, ...);
+ArrayInt* array_int_new(int count, ...);
 
 // for for-expr result
 typedef struct List {
@@ -59,16 +59,16 @@ typedef struct List {
     int length;
 } List;
 
-typedef struct ListLong {
-    long* items;
+typedef struct ListInt {
+    int* items;
     int length;
     int capacity;
-} ListLong;
+} ListInt;
 List* list();  // constructs an empty list
 List* list_new(Context *rt, int cnt, ...);  // constructs an empty list
 void list_push(List *list, Item item);
-ListLong* list_long();  // construct an empty list
-void list_long_push(ListLong *list, long item);
+ListInt* list_int();  // construct an empty list
+void list_int_push(ListInt *list, int item);
 
 typedef struct Map {
     void* ast;  // ast node of the map
