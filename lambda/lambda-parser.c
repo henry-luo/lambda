@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <tree_sitter/api.h>
 
 // Declare the `tree_sitter_lambda` function, which is
@@ -32,7 +33,13 @@ void print_ts_node(TSNode node, uint32_t indent) {
       printf("  ");  // 2 spaces per indent level
   }
   const char *type = ts_node_type(node);
-  printf("(%s", type);
+  if (isalpha(*type)) {
+      printf("(%s", type);
+  } else if (*type == '\'') {
+      printf("(\"%s\"", type);
+  } else {
+      printf("('%s'", type);
+  }
 
   uint32_t child_count = ts_node_child_count(node);
   if (child_count > 0) {

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <tree_sitter/api.h>
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
