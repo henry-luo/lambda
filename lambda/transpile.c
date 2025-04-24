@@ -467,6 +467,17 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, ";\n return v2x(ls);\n}\n");
 }
 
+void find_errors(TSNode node) {
+    if (ts_node_is_error(node)) {
+        TSPoint point = ts_node_start_point(node);
+        printf("Syntax error at Ln %u, Col %u\n", point.row + 1, point.column + 1);
+    }
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; ++i) {
+        find_errors(ts_node_child(node, i));
+    }
+} 
+
 typedef Item (*main_func_t)(Context*);
 
 main_func_t transpile_script(Transpiler *tp, char* source) {
@@ -491,18 +502,22 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
     TSNode root_node = ts_tree_root_node(tp->syntax_tree);
     print_ts_node(root_node, 0);
     
-    // todo: verify the source tree, report errors if any
-    // we'll transpile functions without error, and ignore the rest
+    // check if the syntax tree is valid
+    if (ts_node_has_error(root_node)) {
+        printf("Syntax tree has errors.\n");
+        // find and print syntax errors
+        find_errors(root_node);
+        return NULL;
+    }
 
     // build the AST from the syntax tree
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
-    printf("init AST node pool\n");
     pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
     tp->type_list = arraylist_new(16);
     tp->const_list = arraylist_new(16);
 
-    if (ts_node_is_null(root_node) || strcmp(ts_node_type(root_node), "document") != 0) {
+    if (strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
         return NULL;
     }
@@ -542,8 +557,8 @@ void runner_cleanup(Runner* runner) {
     if (runner->stack) pack_free(runner->stack);
     Transpiler *tp = runner->transpiler;
     if (tp) {
-        jit_cleanup(tp->jit_context);
-        pool_variable_destroy(tp->ast_pool);
+        if (tp->jit_context) jit_cleanup(tp->jit_context);
+        if (tp->ast_pool) pool_variable_destroy(tp->ast_pool);
         if (tp->type_list) arraylist_free(tp->type_list);
         if (tp->syntax_tree) ts_tree_delete(tp->syntax_tree);
         if (tp->parser) ts_parser_delete(tp->parser);    
