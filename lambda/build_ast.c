@@ -1,14 +1,22 @@
 #include "transpiler.h"
 #include "../lib/hashmap.h"
 
-LambdaType NULL_TYPE = {.type_id = LMD_TYPE_NULL};
-LambdaType ANY_TYPE = {.type_id = LMD_TYPE_ANY};
-LambdaType ERROR_TYPE = {.type_id = LMD_TYPE_ERROR};
-LambdaType BOOL_TYPE = {.type_id = LMD_TYPE_BOOL};
-LambdaType INT_TYPE = {.type_id = LMD_TYPE_INT};
-LambdaType FLOAT_TYPE = {.type_id = LMD_TYPE_FLOAT};
-LambdaType STRING_TYPE = {.type_id = LMD_TYPE_STRING};
-LambdaType FUNC_TYPE = {.type_id = LMD_TYPE_FUNC};
+LambdaType TYPE_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 0};
+LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY, .is_const = 0};
+LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR, .is_const = 0};
+LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 0};
+LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT, .is_const = 0};
+LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 0};
+LambdaType TYPE_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 0};
+LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 0};
+LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC, .is_const = 0};
+
+LambdaType CONST_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1};
+LambdaType CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
+LambdaType CONST_INT = {.type_id = LMD_TYPE_INT, .is_const = 1};
+LambdaType CONST_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1};
+LambdaType CONST_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 1};
+LambdaType CONST_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1};
 
 int byte_size[] = {
     [LMD_RAW_POINTER] = sizeof(void*),
@@ -51,7 +59,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     LambdaType* t;
     pool_variable_alloc(tp->ast_pool, size, (void**)&t);
     memset(t, 0, size);
-    t->type_id = type;
+    t->type_id = type;  // t->is_const = 0;
     return t;
 }
 
@@ -93,10 +101,10 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
         ast_node->type = ((LambdaTypeArray*)ast_node->object->type)->nested;
     }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
-        ast_node->type = &ANY_TYPE;
+        ast_node->type = &TYPE_ANY;
     }
     else {
-        ast_node->type = &ANY_TYPE;
+        ast_node->type = &TYPE_ANY;
     }
     return (AstNode*)ast_node;
 }
@@ -128,7 +136,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node) {
     }
     ts_tree_cursor_delete(&cursor);
 
-    ast_node->type = &ANY_TYPE;
+    ast_node->type = &TYPE_ANY;
     return (AstNode*)ast_node;
 }
 
@@ -154,7 +162,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             goto FIND_VAR_NAME;
         }
         printf("missing identifier %.*s\n", (int)var_name.length, var_name.str);
-        ast_node->type = &ERROR_TYPE;
+        ast_node->type = &TYPE_ERROR;
     }
     else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
@@ -174,13 +182,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     TSSymbol symbol = ts_node_symbol(child);
     printf("primary expr symbol %d\n", symbol);
     if (symbol == SYM_NULL) {
-        ast_node->type = &NULL_TYPE;
+        ast_node->type = &CONST_NULL;
     }
     else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
-        ast_node->type = &BOOL_TYPE;
+        ast_node->type = &CONST_BOOL;
     }
     else if (symbol == SYM_INT) {
-        ast_node->type = &INT_TYPE;
+        ast_node->type = &CONST_INT;
     }
     else if (symbol == SYM_FLOAT) {
         LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
@@ -198,6 +206,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         LambdaTypeString *str_type = (LambdaTypeString *)alloc_type(tp, 
             symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, 
             sizeof(LambdaTypeString) + len + 1);
+        str_type->is_const = 1;
         str_type->length = len;
         const char* str_content = tp->source + start + 1;
         // todo: handle escape sequence
@@ -232,7 +241,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else {
-        ast_node->type = &NULL_TYPE;
+        ast_node->type = &TYPE_NULL;
     }
     return (AstNode*)ast_node;
 }
@@ -489,14 +498,14 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     // ast_node->then = build_expr(tp, val_node);
 
     // determine the type of the field
-    ast_node->type = &ANY_TYPE; // ast_node->then->type;
+    ast_node->type = &TYPE_ANY; // ast_node->then->type;
     return ast_node;
 }
 
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("build function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
-    ast_node->type = &FUNC_TYPE;
+    ast_node->type = &TYPE_FUNC;
     // get the function name
     TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
     ast_node->name = fn_name_node;

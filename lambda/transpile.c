@@ -32,6 +32,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
         strbuf_append_str(tp->code_buf, "long");
         break;
     case LMD_TYPE_FLOAT:
+        strbuf_append_str(tp->code_buf, "float");
+        break;
+    case LMD_TYPE_DOUBLE:
         strbuf_append_str(tp->code_buf, "double");
         break;
     case LMD_TYPE_STRING:
@@ -236,10 +239,17 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             strbuf_append_char(tp->code_buf, ')');
         }
         else if (item->type->type_id == LMD_TYPE_DOUBLE) {
-            strbuf_append_str(tp->code_buf, "const_d2x(");
-            LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
-            strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
+            if (item->type->is_const) {
+                strbuf_append_str(tp->code_buf, "const_d2x(");
+                LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+                strbuf_append_int(tp->code_buf, item_type->const_index);
+                strbuf_append_str(tp->code_buf, ")");
+            }
+            else {
+                strbuf_append_str(tp->code_buf, "push_d(rt,");
+                transpile_expr(tp, item);
+                strbuf_append_char(tp->code_buf, ')');
+            }
         }
         else if (item->type->type_id == LMD_TYPE_STRING) {
             strbuf_append_str(tp->code_buf, "const_s2x(");
@@ -493,6 +503,7 @@ void runner_init(Runner* runner) {
 void runner_cleanup(Runner* runner) {
     printf("runner cleanup\n");
     if (runner->heap) heap_destroy(runner->heap);
+    if (runner->stack) pack_free(runner->stack);
     Transpiler *tp = runner->transpiler;
     if (tp) {
         jit_cleanup(tp->jit_context);
@@ -513,10 +524,12 @@ Item run_script(Runner *runner, char* source) {
     } else {
         printf("Executing JIT compiled code...\n");
         runner->heap = heap_init(4096 * 16);  // 64k
+        runner->stack = pack_init(256);
         Context runtime_context = {.ast_pool = runner->transpiler->ast_pool, 
             .type_list = runner->transpiler->type_list, 
             .consts = runner->transpiler->const_list->data, 
-            .heap = runner->heap};
+            .heap = runner->heap, .stack = runner->stack,
+        };
         Item ret = main_func(&runtime_context);
         printf("JIT compiled code returned: %llu\n", ret);
         return ret;

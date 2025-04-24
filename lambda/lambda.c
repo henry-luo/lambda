@@ -169,3 +169,10 @@ Item v2x(List* list) {
     if (list->length == 1) { return list->items[0]; }
     return (Item)list;
 }
+
+Item push_d(Context *rt, double dval) {
+    printf("push_d: %g\n", dval);
+    double *dptr = pack_alloc(rt->stack, sizeof(double));
+    *dptr = dval;
+    return (Item) d2x(dptr);
+}

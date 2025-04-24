@@ -36,6 +36,7 @@ func_obj_t func_list[] = {
     {"map_get", (void (*)(void))map_get},
     {"item_true", (void (*)(void))item_true},
     {"v2x", (void (*)(void))v2x},
+    {"push_d", (void (*)(void))push_d},
     {NULL, NULL}
 };
 

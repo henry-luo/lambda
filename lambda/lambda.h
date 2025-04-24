@@ -21,17 +21,21 @@ typedef enum TypeId {
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
     LMD_TYPE_FUNC,
-} TypeId;
+};
+typedef uint8_t TypeId;
 
 typedef uint64_t Item;
 
 // script runtime context
 typedef struct Heap Heap;
+typedef struct Pack Pack;
+
 typedef struct Context {
     void* ast_pool;
     void** consts;
     void* type_list;
     Heap* heap;
+    Pack* stack;  // eval stack
 } Context;
 
 typedef struct Array {
@@ -77,14 +81,16 @@ Item map_get(Context *rt, Map* map, char *key);
 bool item_true(Item item);
 Item v2x(List *list);
 
+Item push_d(Context *rt, double dval);
+
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 
 #define b2x(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
 #define i2x(int_val)        (ITEM_INT | (uint32_t)(int_val))
-#define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (str_ptr))
-#define y2x(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (sym_ptr))
-#define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (double_ptr))
+#define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
+#define y2x(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
+#define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (uint64_t)(double_ptr))
 #define const_d2x(index)    d2x((uint64_t)*(rt->consts + index))
 #define const_s2x(index)    s2x((uint64_t)*(rt->consts + index))
 #define const_y2x(index)    y2x((uint64_t)*(rt->consts + index))

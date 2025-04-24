@@ -7,7 +7,7 @@ int main(void) {
     runner_init(&runner);
 
     // run_script(&runner, "test/hello-world.ls");
-    Item ret = run_script_at(&runner, "test/lambda/value.ls");
+    Item ret = run_script_at(&runner, "test/lambda/expr.ls");
     print_item(strbuf, ret);
     printf("Returned item: %s\n", strbuf->str);
 

@@ -55,6 +55,7 @@
 
 typedef struct LambdaType {
     TypeId type_id;
+    uint8_t is_const:1;  // is a constant
 } LambdaType;
 
 typedef struct {
@@ -93,12 +94,12 @@ typedef struct {
     ShapeEntry* shape;  // shape of the map
 } LambdaTypeMap;
 
-typedef struct {
+struct Pack {
     size_t size;           // Current used size of the pack
     size_t capacity;       // Total capacity of the pack
     size_t committed_size; // Currently committed memory size - non-zero indicates virtual memory mode
     void* data;            // Pointer to the allocated memory
-} Pack;
+};
 Pack* pack_init(size_t initial_size);
 void* pack_alloc(Pack* pack, size_t size);
 void* pack_calloc(Pack* pack, size_t size);
@@ -268,6 +269,7 @@ typedef struct {
 typedef struct {
     Transpiler* transpiler;
     Heap* heap;
+    Pack* stack; // eval stack
 } Runner;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
