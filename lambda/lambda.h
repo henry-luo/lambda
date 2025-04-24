@@ -3,7 +3,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdarg.h>
+// #include <math.h>  // MIR has problem parsing math.h
 #define null 0
+
+double pow(double x, double y);
 
 typedef enum TypeId {
     LMD_RAW_POINTER = 0,

@@ -259,13 +259,45 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
     ast_node->left = build_expr(tp, left_node);
 
-    // TSNode op_node = ts_node_child_by_field_name(bi_node, "operator", 8);
+    TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);  
+    ast_node->operator = op;
+    if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
+    else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
+    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
+    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
+    else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
+    else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
+    else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
+    else if (strview_equal(&op, "//")) { ast_node->op = OPERATOR_IDIV; }
+    else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
+    else if (strview_equal(&op, "==")) { ast_node->op = OPERATOR_EQ; }
+    else if (strview_equal(&op, "!=")) { ast_node->op = OPERATOR_NE; }
+    else if (strview_equal(&op, "<")) { ast_node->op = OPERATOR_LT; }
+    else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
+    else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
+    else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
+    else { printf("unknown operator: %.*s\n", (int)op.length, op.str); }
 
     TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
     ast_node->right = build_expr(tp, right_node);
 
-    ast_node->type = alloc_type(tp, 
-        max(ast_node->left->type->type_id, ast_node->right->type->type_id), sizeof(LambdaType));
+    TypeId type_id;
+    if (ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
+        type_id = LMD_TYPE_DOUBLE;
+    } else if (ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MOD) {
+        type_id = max(ast_node->left->type->type_id, ast_node->right->type->type_id);
+    } else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
+        ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE || 
+        ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE || 
+        ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE) {
+        type_id = LMD_TYPE_BOOL;
+    } else if (ast_node->op == OPERATOR_IDIV) {
+        type_id = LMD_TYPE_INT;
+    } else {
+        type_id = LMD_TYPE_ANY;
+    }
+    ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
     return (AstNode*)ast_node;
 }
 

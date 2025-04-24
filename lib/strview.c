@@ -25,6 +25,11 @@ bool strview_eq(const StrView* a, const StrView* b) {
     return strncmp(a->str, b->str, a->length) == 0;
 }
 
+bool strview_equal(const StrView* a, const char* b) {
+    if (!a || !b) { return false; }
+    return strncmp(a->str, b, a->length) == 0; 
+}
+
 bool strview_start_with(const StrView* s, const char* prefix) {
     if (!s || !prefix) {
         return false;

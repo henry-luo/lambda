@@ -25,6 +25,7 @@ typedef struct {
 
 func_obj_t func_list[] = {
     {"printf", (void (*)(void))printf},
+    {"pow", (void (*)(void))pow},
     {"array_new", (void (*)(void))array_new},
     {"array_int_new", (void (*)(void))array_int_new},
     {"list", (void (*)(void))list},

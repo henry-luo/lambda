@@ -111,6 +111,10 @@
         "required": true,
         "types": [
           {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
             "type": "for_expr",
             "named": true
           },
@@ -193,6 +197,10 @@
           },
           {
             "type": "/",
+            "named": false
+          },
+          {
+            "type": "//",
             "named": false
           },
           {
@@ -304,6 +312,10 @@
       "required": true,
       "types": [
         {
+          "type": "binary_expr",
+          "named": true
+        },
+        {
           "type": "element",
           "named": true
         },
@@ -368,6 +380,10 @@
       "types": [
         {
           "type": "attrs",
+          "named": true
+        },
+        {
+          "type": "binary_expr",
           "named": true
         },
         {
@@ -1146,6 +1162,10 @@
   },
   {
     "type": "/",
+    "named": false
+  },
+  {
+    "type": "//",
     "named": false
   },
   {

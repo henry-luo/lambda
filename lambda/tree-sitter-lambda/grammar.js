@@ -21,6 +21,35 @@ const decimalDigits = /\d+/;
 const integerLiteral = seq(choice('0', seq(/[1-9]/, optional(decimalDigits))));
 const signedIntegerLiteral = seq(optional('-'), integerLiteral);
 
+function binary_expr($, exclude_relation) { 
+  return [
+    ['and', 'logical_and'],
+    ['or', 'logical_or'],
+    ['+', 'binary_plus'],
+    ['-', 'binary_plus'],
+    ['*', 'binary_times'],
+    ['/', 'binary_times'],
+    ['//', 'binary_times'],
+    ['%', 'binary_times'],
+    ['**', 'binary_pow', 'right'],
+    ['==', 'binary_eq'],
+    ['!=', 'binary_eq'],        
+    ...(exclude_relation ? []:
+    [['<', 'binary_relation'],
+    ['<=', 'binary_relation'],
+    ['>=', 'binary_relation'],
+    ['>', 'binary_relation']]),
+    ['to', 'binary_relation'],
+    ['in', 'binary_relation'],
+  ].map(([operator, precedence, associativity]) =>
+    (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
+      field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
+      field('operator', operator),
+      field('right', $._expression),
+    )),
+  );
+}
+
 module.exports = grammar({
   name: "lambda",
 
@@ -54,7 +83,7 @@ module.exports = grammar({
     $.call_expr,
     $.primary_expr,
     $.unary_expr,
-    'binary_exp',
+    'binary_pow',
     'binary_times',
     'binary_plus',
     'binary_shift',
@@ -73,7 +102,9 @@ module.exports = grammar({
     $.for_expr
   ]],
 
-  // conflicts: $ => [],
+  conflicts: $ => [
+    [$.binary_expr, $.binary_no_relation_expr],
+  ],
 
   rules: {
     // $._literal at top-level for JSON and Mark compatibility
@@ -235,7 +266,7 @@ module.exports = grammar({
     _content_expr: $ => prec(100, choice(
       $.primary_expr,
       $.unary_expr,
-      // todo: simple binary_expr
+      alias($.binary_no_relation_expr, $.binary_expr),
       $.let_expr,
       $.if_expr,
       $.for_expr,
@@ -293,31 +324,12 @@ module.exports = grammar({
     ),
 
     binary_expr: $ => choice(
-      ...[
-        ['and', 'logical_and'],
-        ['or', 'logical_or'],
-        ['+', 'binary_plus'],
-        ['-', 'binary_plus'],
-        ['*', 'binary_times'],
-        ['/', 'binary_times'],
-        ['%', 'binary_times'],
-        ['**', 'binary_exp', 'right'],
-        ['==', 'binary_eq'],
-        ['!=', 'binary_eq'],        
-        ['<', 'binary_relation'],
-        ['<=', 'binary_relation'],
-        ['>=', 'binary_relation'],
-        ['>', 'binary_relation'],
-        ['to', 'binary_relation'],
-        ['in', 'binary_relation'],
-      ].map(([operator, precedence, associativity]) =>
-        (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-          field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
-          field('operator', operator),
-          field('right', $._expression),
-        )),
-      ),
+      ...binary_expr($),
     ),
+
+    binary_no_relation_expr: $ => prec(100, choice(
+      ...binary_expr($, true),
+    )),
 
     unary_expr: $ => seq(
       field('operator', choice('not', '-', '+')),

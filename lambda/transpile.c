@@ -71,12 +71,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     printf("transpile binary expr\n");
-    strbuf_append_char(tp->code_buf, '(');
     
-    TSNode op_node = ts_node_child_by_field_name(bi_node->node, "operator", 8);
-    StrView op = ts_node_source(tp, op_node);
-    printf("op: %.*s\n", (int)op.length, op.str);
-    if (strncmp(op.str, "and", 3) == 0 || strncmp(op.str, "or", 2) == 0) {
+    
+    if (bi_node->op == OPERATOR_AND || bi_node->op == OPERATOR_OR) {
+        strbuf_append_char(tp->code_buf, '(');
         // left operand
         if (bi_node->left->type->type_id == LMD_TYPE_ANY) {
             strbuf_append_str(tp->code_buf, "item_true(");
@@ -87,7 +85,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_expr(tp, bi_node->left);
         }
         // operator
-        if (strncmp(op.str, "or", 2) == 0) {
+        if (bi_node->op == OPERATOR_OR) {
             strbuf_append_str(tp->code_buf, "||");
         } else {
             strbuf_append_str(tp->code_buf, "&&");
@@ -100,16 +98,33 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
         else {
             transpile_expr(tp, bi_node->right);
-        }        
+        }
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    else if (bi_node->op == OPERATOR_POW) {
+        strbuf_append_str(tp->code_buf, "pow(");
+        transpile_expr(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_INT && 
+        bi_node->right->type->type_id == LMD_TYPE_INT) {
+        strbuf_append_str(tp->code_buf, "((double)");
+        transpile_expr(tp, bi_node->left);
+        strbuf_append_str(tp->code_buf, "/");
+        transpile_expr(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
     }
     else {
+        strbuf_append_char(tp->code_buf, '(');
         transpile_expr(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ' ');
-        strbuf_append_str_n(tp->code_buf, op.str, op.length);
+        strbuf_append_str_n(tp->code_buf, bi_node->operator.str, bi_node->operator.length);
         strbuf_append_char(tp->code_buf, ' ');
         transpile_expr(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
     }
-    strbuf_append_char(tp->code_buf, ')');
 }
 
 void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {

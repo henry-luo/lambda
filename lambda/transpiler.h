@@ -47,6 +47,27 @@
 #define FIELD_DECLARE field_declare
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
+#define FIELD_OPERATOR field_operator
+
+typedef enum {
+    OPERATOR_ADD,
+    OPERATOR_SUB,
+    OPERATOR_MUL,
+    OPERATOR_POW,
+    OPERATOR_DIV,
+    OPERATOR_IDIV,
+    OPERATOR_MOD,
+
+    OPERATOR_AND,
+    OPERATOR_OR,
+
+    OPERATOR_EQ,
+    OPERATOR_NE,
+    OPERATOR_LT,
+    OPERATOR_LE,
+    OPERATOR_GT,
+    OPERATOR_GE,
+} Operator ;
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -171,6 +192,8 @@ typedef struct {
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *left, *right;
+    StrView operator;
+    Operator op;
 } AstBinaryNode;
 
 typedef struct {
