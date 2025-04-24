@@ -32,6 +32,7 @@ module.exports = grammar({
   word: $ => $.identifier,
 
   // an array of hidden rule names for the generated node types
+  // supertype symbols must always have a single visible child
   supertypes: $ => [
     $._expression,
     $._statement,

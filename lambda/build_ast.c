@@ -1,7 +1,6 @@
 #include "transpiler.h"
 #include "../lib/hashmap.h"
 
-LambdaType TYPE_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 0};
 LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY, .is_const = 0};
 LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR, .is_const = 0};
 LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 0};
@@ -11,12 +10,18 @@ LambdaType TYPE_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 0};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 0};
 LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC, .is_const = 0};
 
-LambdaType CONST_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1};
 LambdaType CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
 LambdaType CONST_INT = {.type_id = LMD_TYPE_INT, .is_const = 1};
 LambdaType CONST_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1};
 LambdaType CONST_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 1};
 LambdaType CONST_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1};
+
+LambdaType LIT_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1, .is_literal = 1};
+LambdaType LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1, .is_literal = 1};
+LambdaType LIT_INT = {.type_id = LMD_TYPE_INT, .is_const = 1, .is_literal = 1};
+LambdaType LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
+LambdaType LIT_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 1, .is_literal = 1};
+LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
 
 int byte_size[] = {
     [LMD_RAW_POINTER] = sizeof(void*),
@@ -182,13 +187,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     TSSymbol symbol = ts_node_symbol(child);
     printf("primary expr symbol %d\n", symbol);
     if (symbol == SYM_NULL) {
-        ast_node->type = &CONST_NULL;
+        ast_node->type = &LIT_NULL;
     }
     else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
-        ast_node->type = &CONST_BOOL;
+        ast_node->type = &LIT_BOOL;
     }
     else if (symbol == SYM_INT) {
-        ast_node->type = &CONST_INT;
+        ast_node->type = &LIT_INT;
     }
     else if (symbol == SYM_FLOAT) {
         LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
@@ -196,6 +201,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         item_type->double_val = atof(num_str);
         arraylist_append(tp->const_list, &item_type->double_val);
         item_type->const_index = tp->const_list->length - 1;
+        item_type->is_const = 1;  item_type->is_literal = 1;
         ast_node->type = (LambdaType *)item_type;
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL) {
@@ -206,7 +212,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         LambdaTypeString *str_type = (LambdaTypeString *)alloc_type(tp, 
             symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, 
             sizeof(LambdaTypeString) + len + 1);
-        str_type->is_const = 1;
+        str_type->is_const = 1;  str_type->is_literal = 1;
         str_type->length = len;
         const char* str_content = tp->source + start + 1;
         // todo: handle escape sequence
@@ -240,8 +246,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_call_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else {
-        ast_node->type = &TYPE_NULL;
+    else { // from _parenthesized_expr
+        ast_node->expr = build_expr(tp, child);
+        ast_node->type = ast_node->expr->type;
     }
     return (AstNode*)ast_node;
 }
@@ -257,7 +264,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
     ast_node->right = build_expr(tp, right_node);
 
-    ast_node->type = ast_node->left->type;
+    ast_node->type = alloc_type(tp, 
+        max(ast_node->left->type->type_id, ast_node->right->type->type_id), sizeof(LambdaType));
     return (AstNode*)ast_node;
 }
 

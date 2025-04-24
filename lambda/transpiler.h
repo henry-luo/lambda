@@ -48,6 +48,9 @@
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
 
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 
@@ -55,7 +58,8 @@
 
 typedef struct LambdaType {
     TypeId type_id;
-    uint8_t is_const:1;  // is a constant
+    uint8_t is_literal:1;  // is a literal value
+    uint8_t is_const:1;  // is a constant expr
 } LambdaType;
 
 typedef struct {

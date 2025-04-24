@@ -239,7 +239,7 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             strbuf_append_char(tp->code_buf, ')');
         }
         else if (item->type->type_id == LMD_TYPE_DOUBLE) {
-            if (item->type->is_const) {
+            if (item->type->is_literal) {
                 strbuf_append_str(tp->code_buf, "const_d2x(");
                 LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
                 strbuf_append_int(tp->code_buf, item_type->const_index);

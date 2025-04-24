@@ -2532,6 +2532,7 @@
   ],
   "supertypes": [
     "_expression",
-    "_statement"
+    "_statement",
+    "_parenthesized_expr"
   ]
 }
