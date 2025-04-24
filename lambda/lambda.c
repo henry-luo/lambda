@@ -1,4 +1,5 @@
 #include "transpiler.h"
+#include <stdarg.h>
 
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
@@ -175,4 +176,13 @@ Item push_d(Context *rt, double dval) {
     double *dptr = pack_alloc(rt->stack, sizeof(double));
     *dptr = dval;
     return (Item) d2x(dptr);
+}
+
+const char *str_cat(const char *left, const char *right) {
+    size_t left_len = strlen(left);
+    size_t right_len = strlen(right);
+    char *result = malloc(left_len + right_len + 1);
+    memcpy(result, left, left_len);
+    memcpy(result + left_len, right, right_len + 1);
+    return result;
 }

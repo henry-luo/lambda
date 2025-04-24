@@ -106,6 +106,21 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_expr(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
+    else if (bi_node->op == OPERATOR_ADD && bi_node->left->type->type_id == LMD_TYPE_STRING) {
+        strbuf_append_str(tp->code_buf, "str_cat(");
+        transpile_expr(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    else if (bi_node->op == OPERATOR_SUB && bi_node->left->type->type_id == LMD_TYPE_STRING) {
+        strbuf_append_str(tp->code_buf, "str_sub(");
+        transpile_expr(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+
+    }
     else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_INT && 
         bi_node->right->type->type_id == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "((double)");
@@ -266,10 +281,17 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             }
         }
         else if (item->type->type_id == LMD_TYPE_STRING) {
-            strbuf_append_str(tp->code_buf, "const_s2x(");
-            LambdaTypeString *str_type = (LambdaTypeString*)item->type;
-            strbuf_append_int(tp->code_buf, str_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
+            if (item->type->is_literal) {
+                strbuf_append_str(tp->code_buf, "const_s2x(");
+                LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+                strbuf_append_int(tp->code_buf, item_type->const_index);
+                strbuf_append_str(tp->code_buf, ")");
+            }
+            else {
+                strbuf_append_str(tp->code_buf, "s2x(");
+                transpile_expr(tp, item);
+                strbuf_append_char(tp->code_buf, ')');
+            }
         }
         else if (item->type->type_id == LMD_TYPE_SYMBOL) {
             strbuf_append_str(tp->code_buf, "const_y2x(");

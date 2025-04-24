@@ -1,12 +1,15 @@
-#include <stdio.h>
-#include <stdbool.h>
+
 #include <stdint.h>
-#include <stdlib.h>
-#include <stdarg.h>
 // #include <math.h>  // MIR has problem parsing math.h
+#ifndef bool
+#define bool uint8_t
+#endif
+#define true 1
+#define false 0
 #define null 0
 
 double pow(double x, double y);
+const char *str_cat(const char *left, const char *right);
 
 typedef enum TypeId {
     LMD_RAW_POINTER = 0,
