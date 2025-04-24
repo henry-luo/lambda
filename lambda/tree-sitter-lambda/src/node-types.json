@@ -200,7 +200,7 @@
             "named": false
           },
           {
-            "type": "//",
+            "type": "/_",
             "named": false
           },
           {
@@ -1165,7 +1165,7 @@
     "named": false
   },
   {
-    "type": "//",
+    "type": "/_",
     "named": false
   },
   {

@@ -269,7 +269,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
     else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
     else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
-    else if (strview_equal(&op, "//")) { ast_node->op = OPERATOR_IDIV; }
+    else if (strview_equal(&op, "/_")) { ast_node->op = OPERATOR_IDIV; }
     else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
     else if (strview_equal(&op, "==")) { ast_node->op = OPERATOR_EQ; }
     else if (strview_equal(&op, "!=")) { ast_node->op = OPERATOR_NE; }

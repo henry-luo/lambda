@@ -71,8 +71,6 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     printf("transpile binary expr\n");
-    
-    
     if (bi_node->op == OPERATOR_AND || bi_node->op == OPERATOR_OR) {
         strbuf_append_char(tp->code_buf, '(');
         // left operand
@@ -112,7 +110,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         bi_node->right->type->type_id == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "((double)");
         transpile_expr(tp, bi_node->left);
-        strbuf_append_str(tp->code_buf, "/");
+        strbuf_append_char(tp->code_buf, '/');
         transpile_expr(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
@@ -120,7 +118,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, '(');
         transpile_expr(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ' ');
-        strbuf_append_str_n(tp->code_buf, bi_node->operator.str, bi_node->operator.length);
+        if (bi_node->op == OPERATOR_IDIV) strbuf_append_str(tp->code_buf, "/");
+        else strbuf_append_str_n(tp->code_buf, bi_node->operator.str, bi_node->operator.length);        
         strbuf_append_char(tp->code_buf, ' ');
         transpile_expr(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');

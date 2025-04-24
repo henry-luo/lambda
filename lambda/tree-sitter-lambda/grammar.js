@@ -29,7 +29,7 @@ function binary_expr($, exclude_relation) {
     ['-', 'binary_plus'],
     ['*', 'binary_times'],
     ['/', 'binary_times'],
-    ['//', 'binary_times'],
+    ['/_', 'binary_times'],
     ['%', 'binary_times'],
     ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
