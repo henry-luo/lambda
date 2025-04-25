@@ -150,7 +150,7 @@ void print_item(StrBuf *strbuf, Item item) {
             double num = *(double*)ld_item.pointer;
             int exponent;
             double mantissa = frexp(num, &exponent);
-            if (-30 < exponent && exponent < 30) {
+            if (-20 < exponent && exponent < 30) {
                 printf("num f: %.10f, g: %g, exponent: %d\n", num, num, exponent);
                 strbuf_append_format(strbuf, "%.10f", num);
                 // trim trailing zeros
@@ -159,10 +159,20 @@ void print_item(StrBuf *strbuf, Item item) {
                 // if it ends with a dot, remove that too
                 if (*end == '.') { *end-- = '\0'; }
                 strbuf->length = end - strbuf->str + 1;
-            } 
+            }
+            else if (-30 < exponent && exponent <= -20) {
+                printf("num g: %g, exp: %d\n", num, exponent);
+                strbuf_append_format(strbuf, "%.g", num);
+                // remove the zero in exponent, like 'e07'
+                char *end = strbuf->str + strbuf->length - 1;
+                if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
+                    *(end-1) = *end;  *end = '\0';
+                    strbuf->length = end - strbuf->str; 
+                }
+            }
             else {
-                strbuf_append_format(strbuf, "%g", num);
                 printf("num g: %g, exponent: %d\n", num, exponent);
+                strbuf_append_format(strbuf, "%g", num);
             }
         }
         else if (type_id == LMD_TYPE_STRING) {
