@@ -151,14 +151,14 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_format(strbuf, "%g", *(double*)ld_item.pointer);
         }
         else if (type_id == LMD_TYPE_STRING) {
-            LambdaTypeString *str_type = (LambdaTypeString*)ld_item.pointer;
+            String *string = (String*)ld_item.pointer;
             // todo: escape the string
-            strbuf_append_format(strbuf, "\"%s\"", str_type->str);
+            strbuf_append_format(strbuf, "\"%s\"", string->str);
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
-            LambdaTypeSymbol *str_type = (LambdaTypeSymbol*)ld_item.pointer;
+            String *string = (String*)ld_item.pointer;
             // todo: escape the string
-            strbuf_append_format(strbuf, "'%s'", str_type->str);
+            strbuf_append_format(strbuf, "'%s'", string->str);
         }        
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);

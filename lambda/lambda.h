@@ -32,10 +32,16 @@ typedef uint8_t TypeId;
 
 typedef uint64_t Item;
 
-// script runtime context
+// a FAT string: null-terminated and prefixed with length
+typedef struct String {
+    int32_t len;  // int instead of uint, to align with default Lambda int literal type
+    char str[];
+} String;
+
 typedef struct Heap Heap;
 typedef struct Pack Pack;
 
+// script runtime context
 typedef struct Context {
     void* ast_pool;
     void** consts;

@@ -92,10 +92,19 @@ typedef struct {
 
 typedef struct {
     LambdaType;  // extends LambdaType
-    int length;
     int const_index;
-    char str[];
+    String *string;
 } LambdaTypeString;
+
+typedef struct HeapString {
+    LambdaType type;
+    // 0: external, const;
+    // 1: object itself;
+    // 2+: got references;    
+    uint16_t ref_cnt;
+    void* next; // next heap object
+    String; // extends String
+} HeapString;
 
 typedef LambdaTypeString LambdaTypeSymbol;
 

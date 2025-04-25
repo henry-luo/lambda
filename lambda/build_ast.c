@@ -207,20 +207,20 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL) {
         // todo: exclude zero-length string
         int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        int len =  end - start - 2;  // exclude the quotes
-        // sizeof(LambdaTypeString) does not include str[]
-        LambdaTypeString *str_type = (LambdaTypeString *)alloc_type(tp, 
-            symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, 
-            sizeof(LambdaTypeString) + len + 1);
+        int len =  end - start - 2;  // -2 to exclude the quotes
+        LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp, 
+            symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
         str_type->is_const = 1;  str_type->is_literal = 1;
-        str_type->length = len;
-        const char* str_content = tp->source + start + 1;
-        // todo: handle escape sequence
-        memcpy(str_type->str, str_content, len);
-        str_type->str[len] = '\0';
-        arraylist_append(tp->const_list, str_type);
-        str_type->const_index = tp->const_list->length - 1;
         ast_node->type = (LambdaType *)str_type;
+        // copy the string, todo: handle escape sequence
+        pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str_type->string);
+        const char* str_content = tp->source + start + 1;
+        memcpy(str_type->string->str, str_content, len);  // memcpy is probably faster than strcpy
+        str_type->string->str[len] = '\0';
+        str_type->string->len = len;
+        // add to const list
+        arraylist_append(tp->const_list, str_type->string);
+        str_type->const_index = tp->const_list->length - 1;        
     }
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
