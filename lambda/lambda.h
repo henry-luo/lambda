@@ -8,9 +8,6 @@
 #define false 0
 #define null 0
 
-double pow(double x, double y);
-const char *str_cat(const char *left, const char *right);
-
 typedef enum TypeId {
     LMD_RAW_POINTER = 0,
     LMD_TYPE_NULL,
@@ -37,6 +34,8 @@ typedef struct String {
     int32_t len;  // int instead of uint, to align with default Lambda int literal type
     char str[];
 } String;
+
+String *str_cat(String *left, String *right);
 
 typedef struct Heap Heap;
 typedef struct Pack Pack;
@@ -103,6 +102,11 @@ Item push_d(Context *rt, double dval);
 #define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
 #define y2x(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (uint64_t)(double_ptr))
+
 #define const_d2x(index)    d2x((uint64_t)*(rt->consts + index))
 #define const_s2x(index)    s2x((uint64_t)*(rt->consts + index))
 #define const_y2x(index)    y2x((uint64_t)*(rt->consts + index))
+
+#define const_s(index)      ((String*)*(rt->consts + index))
+
+double pow(double x, double y);

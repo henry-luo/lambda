@@ -53,20 +53,28 @@ void writeType(Transpiler* tp, LambdaType *type) {
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
-    printf("transpile primary expr\n");
-    if (pri_node->expr && pri_node->expr->node_type != AST_NODE_IDENT) {
-        transpile_expr(tp, pri_node->expr);
-    } else {
-        if (pri_node->expr && pri_node->expr->node_type == AST_NODE_IDENT) {
+    if (pri_node->expr) {
+        if (pri_node->expr->node_type == AST_NODE_IDENT) {
             // user var name starts with '_'
             strbuf_append_char(tp->code_buf, '_');
+            writeNodeSource(tp, pri_node->node);
+        } else { 
+            transpile_expr(tp, pri_node->expr);
         }
-        writeNodeSource(tp, pri_node->node);
+    } else { // literals
+        if (pri_node->type->is_literal && (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL)) {
+            // loads the const string without boxing
+            strbuf_append_str(tp->code_buf, "const_s(");
+            LambdaTypeString *str_type = (LambdaTypeString*)pri_node->type;
+            strbuf_append_int(tp->code_buf, str_type->const_index);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            writeNodeSource(tp, pri_node->node);
+        }
     }
 }
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
-    printf("transpile binary expr\n");
     if (bi_node->op == OPERATOR_AND || bi_node->op == OPERATOR_OR) {
         strbuf_append_char(tp->code_buf, '(');
         // left operand

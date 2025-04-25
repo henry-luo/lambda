@@ -220,7 +220,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         str_type->string->len = len;
         // add to const list
         arraylist_append(tp->const_list, str_type->string);
-        str_type->const_index = tp->const_list->length - 1;        
+        str_type->const_index = tp->const_list->length - 1;
+        printf("const string: %p, len %d, index %d\n", str_type->string, len, str_type->const_index);
     }
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
