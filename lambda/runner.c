@@ -1,4 +1,5 @@
 #include "transpiler.h"
+#include <math.h>
 
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
@@ -132,11 +133,9 @@ Item run_script_at(Runner *runner, char* script_path) {
 }
 
 void print_item(StrBuf *strbuf, Item item) {
-    printf("print item: %llu\n", item);
     LambdaItem ld_item = {.item = item};
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
-        printf("packed value: %d\n", type_id);
         if (type_id == LMD_TYPE_NULL) {
             strbuf_append_str(strbuf, "null");
         } 
@@ -148,7 +147,23 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_format(strbuf, "%d", int_val);
         }
         else if (type_id == LMD_TYPE_DOUBLE) {
-            strbuf_append_format(strbuf, "%g", *(double*)ld_item.pointer);
+            double num = *(double*)ld_item.pointer;
+            int exponent;
+            double mantissa = frexp(num, &exponent);
+            if (-30 < exponent && exponent < 30) {
+                printf("num f: %.10f, g: %g, exponent: %d\n", num, num, exponent);
+                strbuf_append_format(strbuf, "%.10f", num);
+                // trim trailing zeros
+                char *end = strbuf->str + strbuf->length - 1;
+                while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
+                // if it ends with a dot, remove that too
+                if (*end == '.') { *end-- = '\0'; }
+                strbuf->length = end - strbuf->str + 1;
+            } 
+            else {
+                strbuf_append_format(strbuf, "%g", num);
+                printf("num g: %g, exponent: %d\n", num, exponent);
+            }
         }
         else if (type_id == LMD_TYPE_STRING) {
             String *string = (String*)ld_item.pointer;
@@ -165,9 +180,7 @@ void print_item(StrBuf *strbuf, Item item) {
         }        
     }
     else { // pointer types
-        printf("pointer: %llu\n", item);
         TypeId type_id = *((uint8_t*)item);
-        printf("pointer type: %d\n", type_id);
         if (type_id == LMD_TYPE_LIST) {
             List *list = (List*)item;
             printf("print list: %p, length: %d\n", list, list->length);
@@ -183,10 +196,7 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_MAP) {
             strbuf_append_str(strbuf, "Map");
-        }
-        // else if (type_id == LMD_TYPE_STRING) {
-        //     strbuf_append_format(strbuf, "\"%s\"", ld_item.string_val);
-        // }        
+        }        
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);
         }

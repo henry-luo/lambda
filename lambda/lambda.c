@@ -36,7 +36,10 @@ List* list() {
     return list;
 }
 void list_push(List *list, Item item) {
-    printf("push: list %p, item: %llu\n", list, item);
+    LambdaItem itm = {.item = item};
+    if (itm.type_id == LMD_TYPE_NULL) { 
+        return;  // skip NULL value
+    }
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(Item));
@@ -51,8 +54,11 @@ List* list_new(Context *rt, int count, ...) {
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
-        Item item = va_arg(args, uint64_t);
-        list_push(list, item);
+        LambdaItem itm = {.item = va_arg(args, uint64_t)};
+        if (itm.type_id == LMD_TYPE_NULL) { 
+            continue;  // skip NULL value
+        }        
+        list_push(list, itm.item);
     }
     va_end(args);
     return list;
