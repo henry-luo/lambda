@@ -284,25 +284,22 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
                 strbuf_append_char(tp->code_buf, ')');
             }
         }
-        else if (item->type->type_id == LMD_TYPE_STRING) {
+        else if (item->type->type_id == LMD_TYPE_STRING || item->type->type_id == LMD_TYPE_SYMBOL || 
+            item->type->type_id == LMD_TYPE_DTIME) {
+            char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
+                (item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 'k');
             if (item->type->is_literal) {
-                strbuf_append_str(tp->code_buf, "const_s2x(");
+                strbuf_append_format(tp->code_buf, "const_%c2x(", t);
                 LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
                 strbuf_append_int(tp->code_buf, item_type->const_index);
                 strbuf_append_str(tp->code_buf, ")");
             }
             else {
-                strbuf_append_str(tp->code_buf, "s2x(");
+                strbuf_append_format(tp->code_buf, "%c2x(", t);
                 transpile_expr(tp, item);
                 strbuf_append_char(tp->code_buf, ')');
             }
-        }
-        else if (item->type->type_id == LMD_TYPE_SYMBOL) {
-            strbuf_append_str(tp->code_buf, "const_y2x(");
-            LambdaTypeSymbol *sym_type = (LambdaTypeSymbol*)item->type;
-            strbuf_append_int(tp->code_buf, sym_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
-        }        
+        }       
         item = item->next;
         if (item) strbuf_append_char(tp->code_buf, ',');
     }

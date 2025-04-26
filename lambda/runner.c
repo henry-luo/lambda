@@ -184,6 +184,11 @@ void print_item(StrBuf *strbuf, Item item) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the string
             strbuf_append_format(strbuf, "'%s'", string->str);
+        } 
+        else if (type_id == LMD_TYPE_DTIME) {
+            String *string = (String*)ld_item.pointer;
+            // todo: escape the string
+            strbuf_append_format(strbuf, "t'%s'", string->str);
         }        
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);

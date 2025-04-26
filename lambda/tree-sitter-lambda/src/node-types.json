@@ -351,6 +351,11 @@
     }
   },
   {
+    "type": "datetime",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "document",
     "named": true,
     "root": true,
@@ -941,6 +946,10 @@
           "named": true
         },
         {
+          "type": "datetime",
+          "named": true
+        },
+        {
           "type": "element",
           "named": true
         },
@@ -1291,6 +1300,10 @@
   {
     "type": "symbol_content",
     "named": true
+  },
+  {
+    "type": "t'",
+    "named": false
   },
   {
     "type": "to",

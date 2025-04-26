@@ -17,6 +17,7 @@ typedef enum TypeId {
     LMD_TYPE_INT,
     LMD_TYPE_FLOAT,
     LMD_TYPE_DOUBLE,
+    LMD_TYPE_DTIME,
     LMD_TYPE_STRING,
     LMD_TYPE_SYMBOL,
     LMD_TYPE_ARRAY,
@@ -102,10 +103,12 @@ Item push_d(Context *rt, double dval);
 #define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
 #define y2x(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (uint64_t)(double_ptr))
+#define k2x(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
 
 #define const_d2x(index)    d2x((uint64_t)*(rt->consts + index))
 #define const_s2x(index)    s2x((uint64_t)*(rt->consts + index))
 #define const_y2x(index)    y2x((uint64_t)*(rt->consts + index))
+#define const_k2x(index)    k2x((uint64_t)*(rt->consts + index))
 
 #define const_s(index)      ((String*)*(rt->consts + index))
 

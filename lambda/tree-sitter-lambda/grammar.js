@@ -17,6 +17,8 @@ function commaSep(rule) {
   return optional(commaSep1(rule));
 }
 
+const digit = /\d/;
+const space = /\s/;
 const decimalDigits = /\d+/;
 const integerLiteral = seq(choice('0', seq(/[1-9]/, optional(decimalDigits))));
 const signedIntegerLiteral = seq(optional('-'), integerLiteral);
@@ -50,6 +52,15 @@ function binary_expr($, exclude_relation) {
   );
 }
 
+function time() { 
+  // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
+  return seq(digit, digit, optional(seq(':', digit, digit)), optional(seq(':', digit, digit)), 
+    optional((seq('.', digit, digit, digit))),
+    // timezone
+    optional(choice('z', 'Z', seq(choice('+', '-'), digit, digit, optional(seq(':', digit, digit)))))
+  );
+}
+
 module.exports = grammar({
   name: "lambda",
 
@@ -79,6 +90,7 @@ module.exports = grammar({
   ],
 
   precedences: $ => [[
+    $.datetime,
     $.attr,
     $.call_expr,
     $.primary_expr,
@@ -229,6 +241,17 @@ module.exports = grammar({
       return token(signedIntegerLiteral);
     },
 
+    // datetime: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
+    datetime: _ => {
+      return seq("t'", token.immediate(seq(/\s*/, choice(
+      // date-time
+      seq(optional('-'), digit, digit, digit, digit, optional(seq('-', digit, digit)), optional(seq('-', digit, digit)),
+        optional(seq(/\s+/, time()))),
+      // time only
+      time()
+    ), /\s*/)), "'");
+  },
+
     index: $ => {
       return token(integerLiteral);
     },    
@@ -279,20 +302,19 @@ module.exports = grammar({
       $.identifier,
       // alias($._reserved_identifier, $.identifier),
       // $.this,
-      $._number,
-      $.string,
-      $.symbol,
-      // $.regex,
+      $.null,
       $.true,
       $.false,
-      $.null,
+      $._number,
+      $.datetime,
+      $.string,
+      $.symbol,
       $.array,
       $.map,
       $.lit_element,
       $.element,
       // $.function_expression,
       // $.arrow_function,
-      // $.generator_function,
       // $.class,
       // $.meta_property,
       $.call_expr,
