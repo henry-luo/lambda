@@ -53,6 +53,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
+    printf("transpile primary expr\n");
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             // user var name starts with '_'
@@ -146,6 +147,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
 }
 
 void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
+    printf("transpile if expr\n");
     // transpile as C conditional expr
     strbuf_append_str(tp->code_buf, "(");
     transpile_expr(tp, if_node->cond);
@@ -154,6 +156,7 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
     strbuf_append_str(tp->code_buf, "):(");
     transpile_expr(tp, if_node->otherwise);
     strbuf_append_str(tp->code_buf, ")");
+    printf("end if expr\n");
 }
 
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
@@ -253,11 +256,24 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile list expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
+    strbuf_append_str(tp->code_buf, "({");
+    // let declare first
+    AstNode *item = array_node->item;
+    while (item) {
+        if (item->node_type == AST_NODE_LET_STAM) {
+            type->length--;
+            transpile_let_stam(tp, (AstLetNode*)item);
+        }
+        item = item->next;
+    }
     strbuf_append_str(tp->code_buf, "list_new(rt,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
-    AstNode *item = array_node->item;
+    item = array_node->item;  bool is_first = true;
     while (item) {
+        if (item->node_type == AST_NODE_LET_STAM) { item = item->next; continue; }
+        if (is_first) { is_first = false; } 
+        else { strbuf_append_char(tp->code_buf, ','); }
         if (item->type->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "i2it(");
             transpile_expr(tp, item);
@@ -299,11 +315,10 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
                 transpile_expr(tp, item);
                 strbuf_append_char(tp->code_buf, ')');
             }
-        }       
+        }
         item = item->next;
-        if (item) strbuf_append_char(tp->code_buf, ',');
     }
-    strbuf_append_str(tp->code_buf, ")");
+    strbuf_append_str(tp->code_buf, ");})");
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
