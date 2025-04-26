@@ -351,11 +351,6 @@
     }
   },
   {
-    "type": "datetime",
-    "named": true,
-    "fields": {}
-  },
-  {
     "type": "document",
     "named": true,
     "root": true,
@@ -998,6 +993,10 @@
           "named": true
         },
         {
+          "type": "time",
+          "named": true
+        },
+        {
           "type": "true",
           "named": true
         }
@@ -1230,6 +1229,10 @@
     "named": false
   },
   {
+    "type": "datetime",
+    "named": true
+  },
+  {
     "type": "else",
     "named": false
   },
@@ -1304,6 +1307,10 @@
   {
     "type": "t'",
     "named": false
+  },
+  {
+    "type": "time",
+    "named": true
   },
   {
     "type": "to",

@@ -87,10 +87,10 @@ module.exports = grammar({
     $._content,
     $._content_expr,
     $._number,
+    $._datetime,
   ],
 
   precedences: $ => [[
-    $.datetime,
     $.attr,
     $.call_expr,
     $.primary_expr,
@@ -241,16 +241,15 @@ module.exports = grammar({
       return token(signedIntegerLiteral);
     },
 
-    // datetime: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS
-    datetime: _ => {
-      return seq("t'", token.immediate(seq(/\s*/, choice(
-      // date-time
+    // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
+    time: _ => token.immediate(seq(/\s*/, time(), /\s*/)),
+    // date-time
+    datetime: _ => token.immediate(seq(/\s*/,
       seq(optional('-'), digit, digit, digit, digit, optional(seq('-', digit, digit)), optional(seq('-', digit, digit)),
         optional(seq(/\s+/, time()))),
-      // time only
-      time()
-    ), /\s*/)), "'");
-  },
+      /\s*/)),
+
+    _datetime: $ => seq("t'", choice($.datetime, $.time), "'"),
 
     index: $ => {
       return token(integerLiteral);
@@ -306,7 +305,7 @@ module.exports = grammar({
       $.true,
       $.false,
       $._number,
-      $.datetime,
+      $._datetime,
       $.string,
       $.symbol,
       $.array,

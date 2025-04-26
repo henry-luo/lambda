@@ -36,6 +36,7 @@
 #define SYM_CALL_EXPR sym_call_expr
 #define SYM_CONTENT sym_content
 #define SYM_DATETIME sym_datetime
+#define SYM_TIME sym_time
 
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
