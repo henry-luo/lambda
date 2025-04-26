@@ -312,8 +312,9 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     ast_node->then = build_expr(tp, then_node);
     TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
     ast_node->otherwise = build_expr(tp, else_node);
-    // determine the type of the if expression
-    ast_node->type = ast_node->then->type;
+    // determine the type of the if expression, should be union of then and else
+    TypeId type_id = max(ast_node->then->type->type_id, ast_node->otherwise->type->type_id);
+    ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
     return (AstNode*)ast_node;
 }
 
@@ -354,7 +355,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_const_stam(Transpiler* tp, TSNode let_node) {
+AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     printf("build const stam\n");
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
 
@@ -616,8 +617,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_LET_EXPR) {
         return build_let_expr(tp, expr_node);
     }
-    else if (symbol == SYM_CONST_STAM) {
-        return build_const_stam(tp, expr_node);
+    else if (symbol == SYM_LET_STAM) {
+        return build_let_stam(tp, expr_node);
     }
     else if (symbol == SYM_FOR_EXPR) {
         return build_for_expr(tp, expr_node);

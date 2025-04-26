@@ -23,8 +23,8 @@
 #define SYM_IDENT sym_identifier
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_LET_EXPR sym_let_expr
+#define SYM_LET_STAM sym_let_stam
 #define SYM_FOR_EXPR sym_for_expr
-#define SYM_CONST_STAM sym_const_stam
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_BINARY_EXPR sym_binary_expr

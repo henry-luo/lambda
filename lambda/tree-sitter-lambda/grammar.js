@@ -110,7 +110,8 @@ module.exports = grammar({
     'in',
     $.let_expr,
     $.if_expr,
-    $.for_expr
+    $.for_expr,
+    $.assign_expr
   ]],
 
   conflicts: $ => [
@@ -121,10 +122,11 @@ module.exports = grammar({
     // $._literal at top-level for JSON and Mark compatibility
     document: $ => seq(repeat($._statement), optional($.content)),
 
-    _statement: $ => choice($.fn_definition, $.const_stam),
+    _statement: $ => choice($.fn_definition),
 
     _content_item: $ => prec(100, choice(
       $._content_expr,
+      $.let_stam,
       // consecutive texts/nodes
       seq(choice($.string, $.map, $.element), repeat1(choice($.string, $.map, $.element))),
     )),
@@ -139,7 +141,8 @@ module.exports = grammar({
       $.lit_element,
       $._number,
       $.string,
-      $.symbol,      
+      $.symbol,
+      $._datetime,
       $.true,
       $.false,
       $.null,
@@ -384,6 +387,10 @@ module.exports = grammar({
       field('then', $._expression),
     ),
 
+    let_stam: $ => prec.right(seq(
+      'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    )),      
+
     if_expr: $ => prec.right(seq(
       'if', '(', field('cond', $._expression), ')',
       field('then', $._expression),
@@ -398,11 +405,7 @@ module.exports = grammar({
       'for', '(', field('declare', $.loop_expr), 
       repeat(seq(',', field('declare', $.loop_expr))), ')', 
       field('then', $._expression),
-    ),    
-
-    const_stam: $ => seq(
-      'const', repeat1(seq(field('declare', $.assign_expr), ',')), ';'
-    ),    
+    ),  
 
   },
 });

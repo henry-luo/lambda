@@ -34,10 +34,6 @@
     "named": true,
     "subtypes": [
       {
-        "type": "const_stam",
-        "named": true
-      },
-      {
         "type": "fn_definition",
         "named": true
       }
@@ -288,22 +284,6 @@
     }
   },
   {
-    "type": "const_stam",
-    "named": true,
-    "fields": {
-      "declare": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "assign_expr",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "content",
     "named": true,
     "fields": {},
@@ -329,6 +309,10 @@
         },
         {
           "type": "let_expr",
+          "named": true
+        },
+        {
+          "type": "let_stam",
           "named": true
         },
         {
@@ -404,6 +388,10 @@
         },
         {
           "type": "let_expr",
+          "named": true
+        },
+        {
+          "type": "let_stam",
           "named": true
         },
         {
@@ -550,6 +538,22 @@
     }
   },
   {
+    "type": "let_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "lit_array",
     "named": true,
     "fields": {},
@@ -557,6 +561,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "datetime",
+          "named": true
+        },
         {
           "type": "false",
           "named": true
@@ -594,6 +602,10 @@
           "named": true
         },
         {
+          "type": "time",
+          "named": true
+        },
+        {
           "type": "true",
           "named": true
         }
@@ -623,9 +635,17 @@
         ]
       },
       "then": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
+          {
+            "type": "'",
+            "named": false
+          },
+          {
+            "type": "datetime",
+            "named": true
+          },
           {
             "type": "false",
             "named": true
@@ -663,6 +683,14 @@
             "named": true
           },
           {
+            "type": "t'",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": true
+          },
+          {
             "type": "true",
             "named": true
           }
@@ -678,6 +706,10 @@
       "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "datetime",
+          "named": true
+        },
         {
           "type": "false",
           "named": true
@@ -723,6 +755,10 @@
           "named": true
         },
         {
+          "type": "time",
+          "named": true
+        },
+        {
           "type": "true",
           "named": true
         }
@@ -755,6 +791,14 @@
         "multiple": true,
         "required": false,
         "types": [
+          {
+            "type": "'",
+            "named": false
+          },
+          {
+            "type": "datetime",
+            "named": true
+          },
           {
             "type": "false",
             "named": true
@@ -789,6 +833,14 @@
           },
           {
             "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "t'",
+            "named": false
+          },
+          {
+            "type": "time",
             "named": true
           },
           {
@@ -1177,10 +1229,6 @@
     "named": false
   },
   {
-    "type": ";",
-    "named": false
-  },
-  {
     "type": "<",
     "named": false
   },
@@ -1223,10 +1271,6 @@
   {
     "type": "comment",
     "named": true
-  },
-  {
-    "type": "const",
-    "named": false
   },
   {
     "type": "datetime",
