@@ -91,24 +91,24 @@ Map* map_new(Context *rt, int type_index, ...);
 Item map_get(Context *rt, Map* map, char *key);
 
 bool item_true(Item item);
-Item v2x(List *list);
+Item z2v(List *list);
 
 Item push_d(Context *rt, double dval);
 
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 
-#define b2x(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
-#define i2x(int_val)        (ITEM_INT | (uint32_t)(int_val))
-#define s2x(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
-#define y2x(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
-#define d2x(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (uint64_t)(double_ptr))
-#define k2x(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
+#define b2v(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
+#define i2v(int_val)        (ITEM_INT | (uint32_t)(int_val))
+#define s2v(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
+#define y2v(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
+#define d2v(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (uint64_t)(double_ptr))
+#define k2v(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
 
-#define const_d2x(index)    d2x((uint64_t)*(rt->consts + index))
-#define const_s2x(index)    s2x((uint64_t)*(rt->consts + index))
-#define const_y2x(index)    y2x((uint64_t)*(rt->consts + index))
-#define const_k2x(index)    k2x((uint64_t)*(rt->consts + index))
+#define const_d2v(index)    d2v((uint64_t)*(rt->consts + index))
+#define const_s2v(index)    s2v((uint64_t)*(rt->consts + index))
+#define const_y2v(index)    y2v((uint64_t)*(rt->consts + index))
+#define const_k2v(index)    k2v((uint64_t)*(rt->consts + index))
 
 #define const_s(index)      ((String*)*(rt->consts + index))
 
