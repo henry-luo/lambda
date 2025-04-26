@@ -35,7 +35,7 @@ func_obj_t func_list[] = {
     {"map_new", (void (*)(void))map_new},
     {"map_get", (void (*)(void))map_get},
     {"item_true", (void (*)(void))item_true},
-    {"z2v", (void (*)(void))z2v},
+    {"v2it", (void (*)(void))v2it},
     {"push_d", (void (*)(void))push_d},
     {"str_cat", (void (*)(void))str_cat},
     {NULL, NULL}

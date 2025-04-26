@@ -259,7 +259,7 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     AstNode *item = array_node->item;
     while (item) {
         if (item->type->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "i2v(");
+            strbuf_append_str(tp->code_buf, "i2it(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
@@ -267,13 +267,13 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             strbuf_append_str(tp->code_buf, "ITEM_NULL");
         }
         else if (item->type->type_id == LMD_TYPE_BOOL) {
-            strbuf_append_str(tp->code_buf, "b2v(");
+            strbuf_append_str(tp->code_buf, "b2it(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
         else if (item->type->type_id == LMD_TYPE_DOUBLE) {
             if (item->type->is_literal) {
-                strbuf_append_str(tp->code_buf, "const_d2v(");
+                strbuf_append_str(tp->code_buf, "const_d2it(");
                 LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
                 strbuf_append_int(tp->code_buf, item_type->const_index);
                 strbuf_append_str(tp->code_buf, ")");
@@ -289,13 +289,13 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
                 (item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 'k');
             if (item->type->is_literal) {
-                strbuf_append_format(tp->code_buf, "const_%c2v(", t);
+                strbuf_append_format(tp->code_buf, "const_%c2it(", t);
                 LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
                 strbuf_append_int(tp->code_buf, item_type->const_index);
                 strbuf_append_str(tp->code_buf, ")");
             }
             else {
-                strbuf_append_format(tp->code_buf, "%c2v(", t);
+                strbuf_append_format(tp->code_buf, "%c2it(", t);
                 transpile_expr(tp, item);
                 strbuf_append_char(tp->code_buf, ')');
             }
@@ -465,7 +465,7 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
         }
         node = node->next;
     }
-    strbuf_append_str(tp->code_buf, ";\n return z2v(ls);\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n return v2it(ls);\n}\n");
 }
 
 

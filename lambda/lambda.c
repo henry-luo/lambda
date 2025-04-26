@@ -137,13 +137,13 @@ Item map_get(Context *rt, Map* map, char *key) {
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
                 case LMD_TYPE_BOOL:
-                    return b2v(*(bool*)field_ptr);
+                    return b2it(*(bool*)field_ptr);
                 case LMD_TYPE_INT:
-                    return i2v(*(int*)field_ptr);
+                    return i2it(*(int*)field_ptr);
                 // case LMD_TYPE_FLOAT:
                 //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
                 case LMD_TYPE_STRING:
-                    return s2v(*(char*)field_ptr);
+                    return s2it(*(char*)field_ptr);
                 default:
                     printf("unknown type %d\n", type_id);
             }
@@ -170,8 +170,8 @@ bool item_true(Item itm) {
 }
 
 // list to item
-Item z2v(List* list) {
-    printf("z2v %p, length: %d\n", list, list->length);
+Item v2it(List* list) {
+    printf("v2it %p, length: %d\n", list, list->length);
     if (list->length == 0) { return ITEM_NULL; }
     if (list->length == 1) { return list->items[0]; }
     return (Item)list;
@@ -181,7 +181,7 @@ Item push_d(Context *rt, double dval) {
     printf("push_d: %g\n", dval);
     double *dptr = pack_alloc(rt->stack, sizeof(double));
     *dptr = dval;
-    return (Item) d2v(dptr);
+    return (Item) d2it(dptr);
 }
 
 String *str_cat(String *left, String *right) {
