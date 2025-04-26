@@ -18,7 +18,6 @@ function commaSep(rule) {
 }
 
 const digit = /\d/;
-const space = /\s/;
 const decimalDigits = /\d+/;
 const integerLiteral = seq(choice('0', seq(/[1-9]/, optional(decimalDigits))));
 const signedIntegerLiteral = seq(optional('-'), integerLiteral);
@@ -242,14 +241,14 @@ module.exports = grammar({
     },
 
     // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
-    time: _ => token.immediate(seq(/\s*/, time(), /\s*/)),
+    time: _ => token.immediate(time()),
     // date-time
-    datetime: _ => token.immediate(seq(/\s*/,
+    datetime: _ => token.immediate(
       seq(optional('-'), digit, digit, digit, digit, optional(seq('-', digit, digit)), optional(seq('-', digit, digit)),
-        optional(seq(/\s+/, time()))),
-      /\s*/)),
+        optional(seq(/\s+/, time()))
+      )),
 
-    _datetime: $ => seq("t'", choice($.datetime, $.time), "'"),
+    _datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
 
     index: $ => {
       return token(integerLiteral);

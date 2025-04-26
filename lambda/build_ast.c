@@ -207,7 +207,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_DATETIME || symbol == SYM_TIME) {
         // todo: exclude zero-length string
         int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        int len =  end - start - (symbol == SYM_DATETIME ? 3 : 2);  // -2 to exclude the quotes
+        int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : 2);  // -2 to exclude the quotes
         LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp, 
             (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
             symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
@@ -215,7 +215,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = (LambdaType *)str_type;
         // copy the string, todo: handle escape sequence
         pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str_type->string);
-        const char* str_content = tp->source + start + (symbol == SYM_DATETIME || symbol == SYM_TIME ? 2:1);
+        const char* str_content = tp->source + start + (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0:1);
         memcpy(str_type->string->str, str_content, len);  // memcpy is probably faster than strcpy
         str_type->string->str[len] = '\0';
         str_type->string->len = len;
