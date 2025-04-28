@@ -389,9 +389,10 @@ module.exports = grammar({
       field('then', $._expression),
     ),
 
-    let_stam: $ => prec.left(seq(
-      'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
-    )),      
+    let_stam: $ => choice(
+        prec(50, seq('let', field('declare', $.assign_expr), repeat1(seq(',', field('declare', $.assign_expr))))),
+        seq('let', field('declare', $.assign_expr))
+    ),      
 
     if_expr: $ => prec.right(seq(
       'if', '(', field('cond', $._expression), ')',
