@@ -317,9 +317,14 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
     TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
-    ast_node->otherwise = build_expr(tp, else_node);
+    if (ts_node_is_null(else_node)) {
+        ast_node->otherwise = NULL;
+    } else {
+        ast_node->otherwise = build_expr(tp, else_node);
+    }
     // determine the type of the if expression, should be union of then and else
-    TypeId type_id = max(ast_node->then->type->type_id, ast_node->otherwise->type->type_id);
+    TypeId type_id = max(ast_node->then->type->type_id, 
+        ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL);
     ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
     return (AstNode*)ast_node;
 }
@@ -612,15 +617,12 @@ AstNode* build_content(Transpiler* tp, TSNode list_node) {
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
-    if (symbol == SYM_IF_EXPR) {
-        return build_if_expr(tp, expr_node);
+    if (symbol == SYM_PRIMARY_EXPR) {
+        return build_primary_expr(tp, expr_node);
     }
     else if (symbol == SYM_BINARY_EXPR) {
         return build_binary_expr(tp, expr_node);
-    }
-    else if (symbol == SYM_PRIMARY_EXPR) {
-        return build_primary_expr(tp, expr_node);
-    }
+    }    
     else if (symbol == SYM_LET_EXPR) {
         return build_let_expr(tp, expr_node);
     }
@@ -630,6 +632,12 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_FOR_EXPR) {
         return build_for_expr(tp, expr_node);
     }
+    else if (symbol == SYM_IF_EXPR) {
+        return build_if_expr(tp, expr_node);
+    }    
+    else if (symbol == SYM_IF_STAM) {
+        return build_if_expr(tp, expr_node);
+    }    
     else if (symbol == SYM_ASSIGN_EXPR) {
         return build_assign_expr(tp, expr_node);
     }  
@@ -722,16 +730,33 @@ AstNode* print_ast_node(AstNode *node, int indent) {
     for (int i = 0; i < indent; i++) { printf("  "); }
     // get the function name
     switch(node->node_type) {
-    case AST_NODE_IF_EXPR:
-        printf("[if expr:%s]\n", formatType(node->type));
-        print_ast_node(((AstIfExprNode*)node)->cond, indent + 1);
-        print_ast_node(((AstIfExprNode*)node)->then, indent + 1);
-        print_ast_node(((AstIfExprNode*)node)->otherwise, indent + 1);
+    case AST_NODE_IDENT:
+        printf("[ident:%.*s:%s]\n", (int)((AstNamedNode*)node)->name.length, 
+            ((AstNamedNode*)node)->name.str, formatType(node->type));
+        break;
+    case AST_NODE_PRIMARY:
+        printf("[primary expr:%s]\n", formatType(node->type));
+        if (((AstPrimaryNode*)node)->expr) {
+            print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
+        }
         break;
     case AST_NODE_BINARY:
         printf("[binary expr:%s]\n", formatType(node->type));
         print_ast_node(((AstBinaryNode*)node)->left, indent + 1);
         print_ast_node(((AstBinaryNode*)node)->right, indent + 1);
+        break;
+    case AST_NODE_IF_EXPR:
+        printf("[if expr:%s]\n", formatType(node->type));
+        AstIfExprNode* if_node = (AstIfExprNode*)node;
+        print_ast_node(if_node->cond, indent + 1);
+        for (int i = 0; i < indent+1; i++) { printf("  "); }
+        printf("then:\n");
+        print_ast_node(if_node->then, indent + 1);
+        if (if_node->otherwise) {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("else:\n");            
+            print_ast_node(if_node->otherwise, indent + 1);
+        }
         break;
     case AST_NODE_LET_EXPR:  case AST_NODE_LET_STAM:
         printf("[let %s:%s]\n", node->node_type == AST_NODE_LET_EXPR ? "expr" : "stam", formatType(node->type));
@@ -824,16 +849,6 @@ AstNode* print_ast_node(AstNode *node, int indent) {
     case AST_NODE_FUNC:
         printf("[function expr:%s]\n", formatType(node->type));
         print_ast_node(((AstFuncNode*)node)->body, indent + 1);
-        break;
-    case AST_NODE_PRIMARY:
-        printf("[primary expr:%s]\n", formatType(node->type));
-        if (((AstPrimaryNode*)node)->expr) {
-            print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
-        }
-        break;
-    case AST_NODE_IDENT:
-        printf("[ident:%.*s:%s]\n", (int)((AstNamedNode*)node)->name.length, 
-            ((AstNamedNode*)node)->name.str, formatType(node->type));
         break;
     case AST_SCRIPT:
         printf("[script:%s]\n", formatType(node->type));

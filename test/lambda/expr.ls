@@ -1,2 +1,5 @@
 (let (a=12) a+10)
-"hello"
+let b=" world",
+("hello" + b)
+let c=12,
+if (c > 10) { "great" }

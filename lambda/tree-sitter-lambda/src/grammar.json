@@ -58,6 +58,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "if_stam"
+        },
+        {
+          "type": "SYMBOL",
           "name": "string"
         },
         {
@@ -3163,7 +3167,7 @@
       ]
     },
     "let_stam": {
-      "type": "PREC_RIGHT",
+      "type": "PREC_LEFT",
       "value": 0,
       "content": {
         "type": "SEQ",
@@ -3254,6 +3258,76 @@
                       "type": "SYMBOL",
                       "name": "_expression"
                     }
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "if_stam": {
+      "type": "PREC_RIGHT",
+      "value": 0,
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "if"
+          },
+          {
+            "type": "FIELD",
+            "name": "cond",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_expression"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "{"
+          },
+          {
+            "type": "FIELD",
+            "name": "then",
+            "content": {
+              "type": "SYMBOL",
+              "name": "content"
+            }
+          },
+          {
+            "type": "STRING",
+            "value": "}"
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "else"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "{"
+                  },
+                  {
+                    "type": "FIELD",
+                    "name": "else",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "content"
+                    }
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "}"
                   }
                 ]
               },
@@ -3362,10 +3436,6 @@
   ],
   "precedences": [
     [
-      {
-        "type": "SYMBOL",
-        "name": "_content"
-      },
       {
         "type": "SYMBOL",
         "name": "attr"

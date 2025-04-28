@@ -300,6 +300,10 @@
           "named": true
         },
         {
+          "type": "if_stam",
+          "named": true
+        },
+        {
           "type": "let_stam",
           "named": true
         },
@@ -356,6 +360,10 @@
         },
         {
           "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "if_stam",
           "named": true
         },
         {
@@ -465,6 +473,42 @@
         "types": [
           {
             "type": "_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "if_stam",
+    "named": true,
+    "fields": {
+      "cond": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      },
+      "else": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "content",
+            "named": true
+          }
+        ]
+      },
+      "then": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "content",
             "named": true
           }
         ]

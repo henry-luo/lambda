@@ -149,13 +149,14 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
 void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
     printf("transpile if expr\n");
     // transpile as C conditional expr
-    strbuf_append_str(tp->code_buf, "(");
+    strbuf_append_char(tp->code_buf, '(');
     transpile_expr(tp, if_node->cond);
-    strbuf_append_str(tp->code_buf, ")?(");
+    strbuf_append_char(tp->code_buf, '?');
     transpile_expr(tp, if_node->then);
-    strbuf_append_str(tp->code_buf, "):(");
-    transpile_expr(tp, if_node->otherwise);
-    strbuf_append_str(tp->code_buf, ")");
+    strbuf_append_char(tp->code_buf, ':');
+    if (if_node->otherwise) transpile_expr(tp, if_node->otherwise);
+    else strbuf_append_str(tp->code_buf, "null");
+    strbuf_append_char(tp->code_buf, ')');
     printf("end if expr\n");
 }
 
@@ -278,6 +279,7 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
         if (item->node_type == AST_NODE_LET_STAM) { item = item->next; continue; }
         if (is_first) { is_first = false; } 
         else { strbuf_append_char(tp->code_buf, ','); }
+
         if (item->type->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "i2it(");
             transpile_expr(tp, item);
@@ -319,6 +321,12 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
                 transpile_expr(tp, item);
                 strbuf_append_char(tp->code_buf, ')');
             }
+        }
+        else if (item->type->type_id == LMD_TYPE_LIST) {
+            transpile_expr(tp, item);
+        }
+        else {
+            printf("unknown list type %d\n", item->type->type_id);
         }
         item = item->next;
     }
