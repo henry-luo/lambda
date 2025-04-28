@@ -177,6 +177,29 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     return (AstNode*)ast_node;
 }
 
+LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
+    TSSymbol symbol = ts_node_symbol(node);
+    // todo: exclude zero-length string
+    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+    int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : 2);  // -2 to exclude the quotes
+    LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp, 
+        (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
+        symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
+    str_type->is_const = 1;  str_type->is_literal = 1;
+    // copy the string, todo: handle escape sequence
+    pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str_type->string);
+    const char* str_content = tp->source + start + (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0:1);
+    memcpy(str_type->string->str, str_content, len);  // memcpy is probably faster than strcpy
+    str_type->string->str[len] = '\0';
+    str_type->string->len = len;
+    // add to const list
+    arraylist_append(tp->const_list, str_type->string);
+    str_type->const_index = tp->const_list->length - 1;
+    printf("const string: %p, len %d, index %d\n", str_type->string, len, str_type->const_index);
+    // ast_node->type = (LambdaType *)str_type;
+    return (LambdaType *)str_type;
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     printf("build primary expr\n");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
@@ -205,24 +228,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = (LambdaType *)item_type;
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_DATETIME || symbol == SYM_TIME) {
-        // todo: exclude zero-length string
-        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
-        int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : 2);  // -2 to exclude the quotes
-        LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp, 
-            (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
-            symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
-        str_type->is_const = 1;  str_type->is_literal = 1;
-        ast_node->type = (LambdaType *)str_type;
-        // copy the string, todo: handle escape sequence
-        pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str_type->string);
-        const char* str_content = tp->source + start + (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0:1);
-        memcpy(str_type->string->str, str_content, len);  // memcpy is probably faster than strcpy
-        str_type->string->str[len] = '\0';
-        str_type->string->len = len;
-        // add to const list
-        arraylist_append(tp->const_list, str_type->string);
-        str_type->const_index = tp->const_list->length - 1;
-        printf("const string: %p, len %d, index %d\n", str_type->string, len, str_type->const_index);
+        ast_node->type = build_lit_string(tp, child);
     }
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
@@ -383,6 +389,7 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     if (!ast_node->declare) { printf("missing const declare\n"); }
 
     // const statement does not have 'then' clause
+    ast_node->type = &LIT_NULL;
     return (AstNode*)ast_node;
 }
 
@@ -640,6 +647,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == SYM_CONTENT) {
         return build_content(tp, expr_node);
+    }
+    else if (symbol == SYM_STRING) {
+        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        ast_node->type = build_lit_string(tp, expr_node);
+        return (AstNode*)ast_node;
     }
     else {
         printf("unknown expr %s\n", ts_node_type(expr_node));

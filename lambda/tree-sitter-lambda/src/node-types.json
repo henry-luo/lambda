@@ -292,23 +292,11 @@
       "required": true,
       "types": [
         {
-          "type": "binary_expr",
+          "type": "_expression",
           "named": true
         },
         {
           "type": "element",
-          "named": true
-        },
-        {
-          "type": "for_expr",
-          "named": true
-        },
-        {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "let_expr",
           "named": true
         },
         {
@@ -320,15 +308,7 @@
           "named": true
         },
         {
-          "type": "primary_expr",
-          "named": true
-        },
-        {
           "type": "string",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
           "named": true
         }
       ]
@@ -363,11 +343,11 @@
       "required": true,
       "types": [
         {
-          "type": "attrs",
+          "type": "_expression",
           "named": true
         },
         {
-          "type": "binary_expr",
+          "type": "attrs",
           "named": true
         },
         {
@@ -375,19 +355,7 @@
           "named": true
         },
         {
-          "type": "for_expr",
-          "named": true
-        },
-        {
           "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "if_expr",
-          "named": true
-        },
-        {
-          "type": "let_expr",
           "named": true
         },
         {
@@ -399,15 +367,7 @@
           "named": true
         },
         {
-          "type": "primary_expr",
-          "named": true
-        },
-        {
           "type": "string",
-          "named": true
-        },
-        {
-          "type": "unary_expr",
           "named": true
         }
       ]

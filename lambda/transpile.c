@@ -266,6 +266,10 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
         }
         item = item->next;
     }
+    if (type->length == 0) {
+        strbuf_append_str(tp->code_buf, "null;})");
+        return;
+    }
     strbuf_append_str(tp->code_buf, "list_new(rt,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');

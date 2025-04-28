@@ -171,6 +171,7 @@ bool item_true(Item itm) {
 
 // list to item
 Item v2it(List* list) {
+    if (!list) { return ITEM_NULL; }
     printf("v2it %p, length: %d\n", list, list->length);
     if (list->length == 0) { return ITEM_NULL; }
     if (list->length == 1) { return list->items[0]; }

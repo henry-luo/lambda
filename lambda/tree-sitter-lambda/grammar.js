@@ -90,6 +90,7 @@ module.exports = grammar({
   ],
 
   precedences: $ => [[
+    $._content,
     $.attr,
     $.call_expr,
     $.primary_expr,
@@ -124,14 +125,16 @@ module.exports = grammar({
 
     _statement: $ => choice($.fn_definition),
 
-    _content_item: $ => prec(100, choice(
-      $._content_expr,
-      $.let_stam,
-      // consecutive texts/nodes
-      seq(choice($.string, $.map, $.element), repeat1(choice($.string, $.map, $.element))),
-    )),
+    _content_item: $ => choice(
+      $._parenthesized_expr,
+      seq($.let_stam, ','),
+      // if_stam, for_stam
+      // consecutive nodes without ','
+      $.string, // may allow other literals
+      $.map, $.element,
+    ),
 
-    _content: $ => seq($._content_item, repeat(seq(',', $._content_item))),
+    _content: $ => repeat1($._content_item),
 
     content: $ => $._content,
 
@@ -191,10 +194,10 @@ module.exports = grammar({
     attrs: $ => prec.left(seq($.attr, repeat(seq(',', $.attr)))),
 
     element: $ => seq('<', $.identifier,
-      optional(choice(
-        seq($.attrs, optional(seq(',', $._content))),
-        $._content
-      )),
+      choice(
+        seq($.attrs, optional(seq(',', repeat1($._content_item)))),
+        optional($._content)
+      ),
     '>'),
 
     lit_element: $ => prec(100, seq('<', $.identifier,
