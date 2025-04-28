@@ -9,7 +9,7 @@
 #define null 0
 
 typedef enum TypeId {
-    LMD_RAW_POINTER = 0,
+    LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,

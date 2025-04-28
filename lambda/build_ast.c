@@ -24,7 +24,7 @@ LambdaType LIT_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 1, .is_literal 
 LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
 
 int byte_size[] = {
-    [LMD_RAW_POINTER] = sizeof(void*),
+    [LMD_TYPE_RAW_POINTER] = sizeof(void*),
     [LMD_TYPE_NULL] = sizeof(bool),
     [LMD_TYPE_ANY] = sizeof(void*),
     [LMD_TYPE_ERROR] = sizeof(void*),

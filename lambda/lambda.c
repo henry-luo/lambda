@@ -35,11 +35,20 @@ List* list() {
     list->type_id = LMD_TYPE_LIST;
     return list;
 }
+
 void list_push(List *list, Item item) {
     LambdaItem itm = {.item = item};
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
     }
+    if (itm.type_id == LMD_TYPE_RAW_POINTER && *((uint8_t*)itm.raw_pointer) == LMD_TYPE_LIST) {
+        List *nest_list = (List*)itm.raw_pointer;
+        for (int i = 0; i < nest_list->length; i++) {
+            Item item = nest_list->items[i];
+            list_push(list, item);
+        }
+        return;
+    }  
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(Item));
@@ -57,7 +66,7 @@ List* list_new(Context *rt, int count, ...) {
         LambdaItem itm = {.item = va_arg(args, uint64_t)};
         if (itm.type_id == LMD_TYPE_NULL) { 
             continue;  // skip NULL value
-        }        
+        }
         list_push(list, itm.item);
     }
     va_end(args);

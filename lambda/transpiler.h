@@ -280,12 +280,13 @@ typedef union LambdaItem {
                 uint64_t _56: 56;
             };
             struct {
-                uint64_t pointer : 56;
+                uint64_t pointer : 56;  // tagged pointer
                 uint64_t type_id : 8;        
             };           
         };
     };
     uint64_t item;
+    void* raw_pointer;
 } LambdaItem;
 
 #include <mir.h>
