@@ -44,25 +44,8 @@
           "name": "_parenthesized_expr"
         },
         {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "let_stam"
-            },
-            {
-              "type": "STRING",
-              "value": ","
-            }
-          ]
-        },
-        {
           "type": "SYMBOL",
           "name": "if_stam"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "string"
         },
         {
           "type": "SYMBOL",
@@ -71,14 +54,60 @@
         {
           "type": "SYMBOL",
           "name": "element"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "string"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "symbol"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_number"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_datetime"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "true"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "false"
         }
       ]
     },
     "_content": {
       "type": "REPEAT1",
       "content": {
-        "type": "SYMBOL",
-        "name": "_content_item"
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SYMBOL",
+            "name": "_content_item"
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "let_stam"
+              },
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_content_item"
+              }
+            ]
+          }
+        ]
       }
     },
     "content": {
@@ -590,11 +619,8 @@
                           "value": ","
                         },
                         {
-                          "type": "REPEAT1",
-                          "content": {
-                            "type": "SYMBOL",
-                            "name": "_content_item"
-                          }
+                          "type": "SYMBOL",
+                          "name": "_content"
                         }
                       ]
                     },

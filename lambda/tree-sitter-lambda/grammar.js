@@ -125,15 +125,21 @@ module.exports = grammar({
     _statement: $ => choice($.fn_definition),
 
     _content_item: $ => choice(
-      $._parenthesized_expr,
-      seq($.let_stam, ','),
+      $._parenthesized_expr,  // should be list
       $.if_stam, // for_stam
-      // consecutive nodes without ','
-      $.string, // may allow other literals
       $.map, $.element,
+      $.string,
+      $.symbol,
+      $._number,
+      $._datetime,
+      $.true,
+      $.false,
     ),
 
-    _content: $ => repeat1($._content_item),
+    _content: $ => repeat1(choice(
+      $._content_item, 
+      seq($.let_stam, ',', $._content_item)
+    )),
 
     content: $ => $._content,
 
@@ -194,7 +200,7 @@ module.exports = grammar({
 
     element: $ => seq('<', $.identifier,
       choice(
-        seq($.attrs, optional(seq(',', repeat1($._content_item)))),
+        seq($.attrs, optional(seq(',', $._content))),
         optional($._content)
       ),
     '>'),

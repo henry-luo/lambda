@@ -2,3 +2,5 @@
 let b=" world", c=12,
 ("hello" + b)
 if (c > 10) { "great" }
+'symbol'
+true false 123 3.14159

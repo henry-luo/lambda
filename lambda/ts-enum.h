@@ -95,13 +95,12 @@ enum ts_symbol_identifiers {
   aux_sym_lit_array_repeat1 = 91,
   aux_sym_array_repeat1 = 92,
   aux_sym_attrs_repeat1 = 93,
-  aux_sym_element_repeat1 = 94,
-  aux_sym_lit_element_repeat1 = 95,
-  aux_sym_lit_element_repeat2 = 96,
-  aux_sym__arguments_repeat1 = 97,
-  aux_sym_fn_definition_repeat1 = 98,
-  aux_sym_let_expr_repeat1 = 99,
-  aux_sym_for_expr_repeat1 = 100,
+  aux_sym_lit_element_repeat1 = 94,
+  aux_sym_lit_element_repeat2 = 95,
+  aux_sym__arguments_repeat1 = 96,
+  aux_sym_fn_definition_repeat1 = 97,
+  aux_sym_let_expr_repeat1 = 98,
+  aux_sym_for_expr_repeat1 = 99,
 };
 
 enum ts_field_identifiers {

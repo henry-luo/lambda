@@ -200,6 +200,17 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
     return (LambdaType *)str_type;
 }
 
+LambdaType* build_lit_float(Transpiler* tp, TSNode node) {
+    LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
+    const char* num_str = tp->source + ts_node_start_byte(node);
+    item_type->double_val = atof(num_str);
+    arraylist_append(tp->const_list, &item_type->double_val);
+    item_type->const_index = tp->const_list->length - 1;
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    // ast_node->type = (LambdaType *)item_type;
+    return (LambdaType *)item_type;
+}
+
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     printf("build primary expr\n");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
@@ -219,13 +230,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = &LIT_INT;
     }
     else if (symbol == SYM_FLOAT) {
-        LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
-        const char* num_str = tp->source + ts_node_start_byte(child);
-        item_type->double_val = atof(num_str);
-        arraylist_append(tp->const_list, &item_type->double_val);
-        item_type->const_index = tp->const_list->length - 1;
-        item_type->is_const = 1;  item_type->is_literal = 1;
-        ast_node->type = (LambdaType *)item_type;
+        ast_node->type = build_lit_float(tp, child);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_DATETIME || symbol == SYM_TIME) {
         ast_node->type = build_lit_string(tp, child);
@@ -656,11 +661,26 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_CONTENT) {
         return build_content(tp, expr_node);
     }
-    else if (symbol == SYM_STRING) {
+    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         ast_node->type = build_lit_string(tp, expr_node);
         return (AstNode*)ast_node;
     }
+    else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
+        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        ast_node->type = &LIT_BOOL;
+        return (AstNode*)ast_node;
+    }
+    else if (symbol == SYM_INT) {
+        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        ast_node->type = &LIT_INT;
+        return (AstNode*)ast_node;
+    }
+    else if (symbol == SYM_FLOAT) {
+        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        ast_node->type = build_lit_float(tp, expr_node);
+        return (AstNode*)ast_node;
+    }    
     else {
         printf("unknown expr %s\n", ts_node_type(expr_node));
         return NULL;

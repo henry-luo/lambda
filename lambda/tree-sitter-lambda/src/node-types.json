@@ -296,11 +296,27 @@
           "named": true
         },
         {
+          "type": "datetime",
+          "named": true
+        },
+        {
           "type": "element",
           "named": true
         },
         {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float",
+          "named": true
+        },
+        {
           "type": "if_stam",
+          "named": true
+        },
+        {
+          "type": "integer",
           "named": true
         },
         {
@@ -313,6 +329,18 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "time",
+          "named": true
+        },
+        {
+          "type": "true",
           "named": true
         }
       ]
@@ -355,7 +383,19 @@
           "named": true
         },
         {
+          "type": "datetime",
+          "named": true
+        },
+        {
           "type": "element",
+          "named": true
+        },
+        {
+          "type": "false",
+          "named": true
+        },
+        {
+          "type": "float",
           "named": true
         },
         {
@@ -364,6 +404,10 @@
         },
         {
           "type": "if_stam",
+          "named": true
+        },
+        {
+          "type": "integer",
           "named": true
         },
         {
@@ -376,6 +420,18 @@
         },
         {
           "type": "string",
+          "named": true
+        },
+        {
+          "type": "symbol",
+          "named": true
+        },
+        {
+          "type": "time",
+          "named": true
+        },
+        {
+          "type": "true",
           "named": true
         }
       ]
