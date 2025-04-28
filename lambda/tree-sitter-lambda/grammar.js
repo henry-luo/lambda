@@ -212,7 +212,7 @@ module.exports = grammar({
     )),
 
     // no empty string, and string can span multiple lines
-    string_content: _ => token.immediate(prec(1, /[^\\"]+/)),
+    string_content: _ => token.immediate(/[^\\"]+/),
 
     // no empty symbol under Mark/Lambda
     symbol: $ => seq("'", $._symbol_content, "'"),
@@ -222,7 +222,7 @@ module.exports = grammar({
       $.escape_sequence,
     )),
 
-    symbol_content: _ => token.immediate(prec(1, /[^\\'\n]+/)),    
+    symbol_content: _ => token.immediate(/[^\\'\n]+/),    
 
     escape_sequence: _ => token.immediate(seq(
       '\\',

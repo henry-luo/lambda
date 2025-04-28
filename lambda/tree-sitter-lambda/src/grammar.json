@@ -700,12 +700,8 @@
     "string_content": {
       "type": "IMMEDIATE_TOKEN",
       "content": {
-        "type": "PREC",
-        "value": 1,
-        "content": {
-          "type": "PATTERN",
-          "value": "[^\\\\\"]+"
-        }
+        "type": "PATTERN",
+        "value": "[^\\\\\"]+"
       }
     },
     "symbol": {
@@ -744,12 +740,8 @@
     "symbol_content": {
       "type": "IMMEDIATE_TOKEN",
       "content": {
-        "type": "PREC",
-        "value": 1,
-        "content": {
-          "type": "PATTERN",
-          "value": "[^\\\\'\\n]+"
-        }
+        "type": "PATTERN",
+        "value": "[^\\\\'\\n]+"
       }
     },
     "escape_sequence": {
