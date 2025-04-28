@@ -87,6 +87,7 @@ module.exports = grammar({
     $._content_expr,
     $._number,
     $._datetime,
+    $._list_expr,
   ],
 
   precedences: $ => [[
@@ -125,7 +126,7 @@ module.exports = grammar({
     _statement: $ => choice($.fn_definition),
 
     _content_item: $ => choice(
-      $._parenthesized_expr,  // should be list
+      $._list_expr,  // should be list
       $.if_stam, // for_stam
       $.map, $.element,
       $.string,
@@ -142,6 +143,8 @@ module.exports = grammar({
     )),
 
     content: $ => $._content,
+
+    _list_expr: $ => seq('(', $._expression, repeat(seq(',', $._expression)), ')'),
 
     _literal: $ => choice(
       $.lit_map,

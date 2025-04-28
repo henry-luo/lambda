@@ -661,7 +661,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_CONTENT) {
         return build_content(tp, expr_node);
     }
-    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL) {
+    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_DATETIME || symbol == SYM_TIME) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         ast_node->type = build_lit_string(tp, expr_node);
         return (AstNode*)ast_node;

@@ -63,7 +63,8 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             transpile_expr(tp, pri_node->expr);
         }
     } else { // literals
-        if (pri_node->type->is_literal && (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL)) {
+        if (pri_node->type->is_literal && (pri_node->type->type_id == LMD_TYPE_STRING || 
+            pri_node->type->type_id == LMD_TYPE_SYMBOL || pri_node->type->type_id == LMD_TYPE_DTIME)) {
             // loads the const string without boxing
             strbuf_append_str(tp->code_buf, "const_s(");
             LambdaTypeString *str_type = (LambdaTypeString*)pri_node->type;
