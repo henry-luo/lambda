@@ -126,8 +126,9 @@ module.exports = grammar({
     _statement: $ => choice($.fn_definition),
 
     _content_item: $ => choice(
-      $._list_expr,  // should be list
-      $.if_stam, // for_stam
+      $._list_expr,
+      $.if_stam, 
+      $.for_stam,
       $.map, $.element,
       $.string,
       $.symbol,
@@ -312,8 +313,6 @@ module.exports = grammar({
       $.member_expr,
       $._parenthesized_expr,
       $.identifier,
-      // alias($._reserved_identifier, $.identifier),
-      // $.this,
       $.null,
       $.true,
       $.false,
@@ -424,6 +423,12 @@ module.exports = grammar({
       repeat(seq(',', field('declare', $.loop_expr))), ')', 
       field('then', $._expression),
     ),  
+
+    for_stam: $ => seq(
+      'for', field('declare', $.loop_expr), 
+      repeat(seq(',', field('declare', $.loop_expr))), 
+      '{', field('then', $.content), '}'
+    ),     
 
   },
 });

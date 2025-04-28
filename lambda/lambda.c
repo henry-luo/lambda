@@ -74,13 +74,16 @@ List* list_new(Context *rt, int count, ...) {
 }
 
 ListInt* list_int() {
+    printf("list_int");
     ListInt *list = malloc(sizeof(ListInt));
     list->items = NULL;
     list->length = 0;
     list->capacity = 0;
     return list;
 }
+
 void list_int_push(ListInt *list, int item) {
+    printf("list_int_push: %d", item);
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(long));

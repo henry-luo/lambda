@@ -637,6 +637,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_FOR_EXPR) {
         return build_for_expr(tp, expr_node);
     }
+    else if (symbol == SYM_FOR_STAM) {
+        return build_for_expr(tp, expr_node);
+    }    
     else if (symbol == SYM_IF_EXPR) {
         return build_if_expr(tp, expr_node);
     }    

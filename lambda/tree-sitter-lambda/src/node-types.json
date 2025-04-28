@@ -312,6 +312,10 @@
           "named": true
         },
         {
+          "type": "for_stam",
+          "named": true
+        },
+        {
           "type": "if_stam",
           "named": true
         },
@@ -396,6 +400,10 @@
         },
         {
           "type": "float",
+          "named": true
+        },
+        {
+          "type": "for_stam",
           "named": true
         },
         {
@@ -493,6 +501,32 @@
         "types": [
           {
             "type": "_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "for_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "loop_expr",
+            "named": true
+          }
+        ]
+      },
+      "then": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "content",
             "named": true
           }
         ]

@@ -30,6 +30,7 @@ func_obj_t func_list[] = {
     {"array_int_new", (void (*)(void))array_int_new},
     {"list", (void (*)(void))list},
     {"list_new", (void (*)(void))list_new},
+    {"list_push", (void (*)(void))list_push},
     {"list_int", (void (*)(void))list_int},
     {"list_int_push", (void (*)(void))list_int_push},
     {"map_new", (void (*)(void))map_new},
