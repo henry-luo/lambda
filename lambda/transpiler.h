@@ -39,6 +39,7 @@
 #define SYM_CONTENT sym_content
 #define SYM_DATETIME sym_datetime
 #define SYM_TIME sym_time
+#define SYM_COMMENT sym_comment
 
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then

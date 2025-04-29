@@ -78,6 +78,16 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "type_annotation",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1017,6 +1027,11 @@
     }
   },
   {
+    "type": "null",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "pair",
     "named": true,
     "fields": {
@@ -1229,6 +1244,11 @@
     }
   },
   {
+    "type": "type_annotation",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "unary_expr",
     "named": true,
     "fields": {
@@ -1363,15 +1383,47 @@
     "named": false
   },
   {
+    "type": "any",
+    "named": false
+  },
+  {
+    "type": "array",
+    "named": false
+  },
+  {
+    "type": "boolean",
+    "named": false
+  },
+  {
     "type": "comment",
     "named": true
+  },
+  {
+    "type": "date",
+    "named": false
+  },
+  {
+    "type": "datetime",
+    "named": false
   },
   {
     "type": "datetime",
     "named": true
   },
   {
+    "type": "decimal",
+    "named": false
+  },
+  {
+    "type": "element",
+    "named": false
+  },
+  {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "error",
     "named": false
   },
   {
@@ -1387,11 +1439,19 @@
     "named": true
   },
   {
+    "type": "float",
+    "named": false
+  },
+  {
     "type": "fn",
     "named": false
   },
   {
     "type": "for",
+    "named": false
+  },
+  {
+    "type": "function",
     "named": false
   },
   {
@@ -1415,6 +1475,10 @@
     "named": true
   },
   {
+    "type": "int",
+    "named": false
+  },
+  {
     "type": "integer",
     "named": true
   },
@@ -1423,15 +1487,31 @@
     "named": false
   },
   {
+    "type": "list",
+    "named": false
+  },
+  {
+    "type": "map",
+    "named": false
+  },
+  {
     "type": "not",
     "named": false
   },
   {
     "type": "null",
-    "named": true
+    "named": false
+  },
+  {
+    "type": "number",
+    "named": false
   },
   {
     "type": "or",
+    "named": false
+  },
+  {
+    "type": "string",
     "named": false
   },
   {
@@ -1439,11 +1519,19 @@
     "named": true
   },
   {
+    "type": "symbol",
+    "named": false
+  },
+  {
     "type": "symbol_content",
     "named": true
   },
   {
     "type": "t'",
+    "named": false
+  },
+  {
+    "type": "time",
     "named": false
   },
   {
@@ -1457,6 +1545,10 @@
   {
     "type": "true",
     "named": true
+  },
+  {
+    "type": "type",
+    "named": false
   },
   {
     "type": "{",

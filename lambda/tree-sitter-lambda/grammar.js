@@ -117,6 +117,7 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$.binary_expr, $.binary_no_relation_expr],
+    [$.let_stam],
   ],
 
   rules: {
@@ -388,19 +389,41 @@ module.exports = grammar({
       '{', field('body', $._expression), '}',
     ),
 
+    type_annotation: $ => choice(
+      'null',
+      'any',
+      'error',
+      'boolean',
+      'int',  // int64
+      'float',  // float64
+      'decimal',  // big decimal
+      'number',
+      'string',
+      'symbol',
+      'date',
+      'time',
+      'datetime',
+      'list',
+      'array',
+      'map',
+      'element',
+      // 'object',
+      'type',
+      'function',
+    ),
+
     assign_expr: $ => seq(
-      field('name', $.identifier), '=', field('then', $._expression),
+      field('name', $.identifier), optional(seq(':', $.type_annotation)), '=', field('then', $._expression),
     ),
 
     let_expr: $ => seq(
       'let', '(', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr))), ')', 
       field('then', $._expression),
     ),
-
-    let_stam: $ => choice(
-        prec(50, seq('let', field('declare', $.assign_expr), repeat1(seq(',', field('declare', $.assign_expr))))),
-        seq('let', field('declare', $.assign_expr))
-    ),      
+    
+    let_stam: $ => seq('let', 
+      field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    ),
 
     if_expr: $ => prec.right(seq(
       'if', '(', field('cond', $._expression), ')',

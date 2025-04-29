@@ -683,10 +683,17 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         ast_node->type = build_lit_float(tp, expr_node);
         return (AstNode*)ast_node;
-    }    
+    }
+    else if (symbol == SYM_COMMENT) {
+        AstNode* ast_node = (AstNode*)alloc_ast_node(tp, AST_NODE_NULL, expr_node, sizeof(AstNode));
+        ast_node->type = &LIT_NULL;
+        return ast_node;
+    }
     else {
-        printf("unknown expr %s\n", ts_node_type(expr_node));
-        return NULL;
+        printf("unknown syntax node: %s\n", ts_node_type(expr_node));
+        AstNode* ast_node = (AstNode*)alloc_ast_node(tp, AST_NODE_NULL, expr_node, sizeof(AstNode));
+        ast_node->type = &LIT_NULL;
+        return ast_node;
     }
 }
 

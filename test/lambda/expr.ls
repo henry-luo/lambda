@@ -10,4 +10,8 @@ true false 123 3.14159 t'2025-06-10'
 t'2025', t'2025-06', t'2025-04-26', t' 2025-05-01  10:30 ', t'-1000-12-25', t' 10:08:05.125z ', t'10:08+08',
 if (100>90) "great" else "not great")
 
+// test for statement
 for a in ["a", "b", "c"] { "ha!" }
+
+let d:float = 123,
+(d+4)
