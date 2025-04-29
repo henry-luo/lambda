@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <math.h>
 #include <tree_sitter/api.h>
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"

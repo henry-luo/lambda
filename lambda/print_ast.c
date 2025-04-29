@@ -50,6 +50,92 @@ void writeType(Transpiler* tp, LambdaType *type) {
     }
 }
 
+void print_item(StrBuf *strbuf, Item item) {
+    LambdaItem ld_item = {.item = item};
+    if (ld_item.type_id) { // packed value
+        TypeId type_id = ld_item.type_id;
+        if (type_id == LMD_TYPE_NULL) {
+            strbuf_append_str(strbuf, "null");
+        } 
+        else if (type_id == LMD_TYPE_BOOL) {
+            strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
+        }
+        else if (type_id == LMD_TYPE_INT) {
+            int int_val = (int32_t)ld_item.int_val;
+            strbuf_append_format(strbuf, "%d", int_val);
+        }
+        else if (type_id == LMD_TYPE_DOUBLE) {
+            double num = *(double*)ld_item.pointer;
+            int exponent;
+            double mantissa = frexp(num, &exponent);
+            if (-20 < exponent && exponent < 30) {
+                printf("num f: %.10f, g: %g, exponent: %d\n", num, num, exponent);
+                strbuf_append_format(strbuf, "%.10f", num);
+                // trim trailing zeros
+                char *end = strbuf->str + strbuf->length - 1;
+                while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
+                // if it ends with a dot, remove that too
+                if (*end == '.') { *end-- = '\0'; }
+                strbuf->length = end - strbuf->str + 1;
+            }
+            else if (-30 < exponent && exponent <= -20) {
+                printf("num g: %g, exp: %d\n", num, exponent);
+                strbuf_append_format(strbuf, "%.g", num);
+                // remove the zero in exponent, like 'e07'
+                char *end = strbuf->str + strbuf->length - 1;
+                if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
+                    *(end-1) = *end;  *end = '\0';
+                    strbuf->length = end - strbuf->str; 
+                }
+            }
+            else {
+                printf("num g: %g, exponent: %d\n", num, exponent);
+                strbuf_append_format(strbuf, "%g", num);
+            }
+        }
+        else if (type_id == LMD_TYPE_STRING) {
+            String *string = (String*)ld_item.pointer;
+            // todo: escape the string
+            strbuf_append_format(strbuf, "\"%s\"", string->str);
+        }
+        else if (type_id == LMD_TYPE_SYMBOL) {
+            String *string = (String*)ld_item.pointer;
+            // todo: escape the string
+            strbuf_append_format(strbuf, "'%s'", string->str);
+        } 
+        else if (type_id == LMD_TYPE_DTIME) {
+            String *string = (String*)ld_item.pointer;
+            // todo: escape the string
+            strbuf_append_format(strbuf, "t'%s'", string->str);
+        }        
+        else {
+            strbuf_append_format(strbuf, "unknown type: %d", type_id);
+        }        
+    }
+    else { // pointer types
+        TypeId type_id = *((uint8_t*)item);
+        if (type_id == LMD_TYPE_LIST) {
+            List *list = (List*)item;
+            printf("print list: %p, length: %d\n", list, list->length);
+            strbuf_append_char(strbuf, '(');
+            for (int i = 0; i < list->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                print_item(strbuf, list->items[i]);
+            }
+            strbuf_append_char(strbuf, ')');
+        }
+        else if (type_id == LMD_TYPE_ARRAY) {
+            strbuf_append_str(strbuf, "Array");
+        }
+        else if (type_id == LMD_TYPE_MAP) {
+            strbuf_append_str(strbuf, "Map");
+        }        
+        else {
+            strbuf_append_format(strbuf, "unknown type: %d", type_id);
+        }
+    }
+}
+
 char* formatType(LambdaType *type) {
     if (!type) { return "null*"; }
     TypeId type_id = type->type_id;
