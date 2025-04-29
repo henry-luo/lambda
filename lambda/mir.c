@@ -39,6 +39,7 @@ func_obj_t func_list[] = {
     {"v2it", (void (*)(void))v2it},
     {"push_d", (void (*)(void))push_d},
     {"str_cat", (void (*)(void))str_cat},
+    {"add", (void (*)(void))add},
     {NULL, NULL}
 };
 

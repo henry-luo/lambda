@@ -37,6 +37,7 @@ List* list() {
 }
 
 void list_push(List *list, Item item) {
+    if (!item) { return; }  // NULL value
     LambdaItem itm = {.item = item};
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
@@ -208,4 +209,20 @@ String *str_cat(String *left, String *right) {
     // copy the string and '\0'
     memcpy(result->str + left_len, right->str, right_len + 1);
     return result;
+}
+
+Item add(Item a, Item b) {
+    LambdaItem item_a = {.item = a};  LambdaItem item_b = {.item = b};
+    if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_STRING) {
+        String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
+        String *result = str_cat(str_a, str_b);
+        return s2it(result);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        return i2it(item_a.int_val + item_b.int_val);
+    }
+    else if (item_a.type_id == LMD_TYPE_DOUBLE && item_b.type_id == LMD_TYPE_DOUBLE) {
+        return d2it(*(double*)item_a.pointer + *(double*)item_b.pointer);
+    }
+    return ITEM_ERROR;
 }

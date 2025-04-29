@@ -113,20 +113,26 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_expr(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
     }
-    else if (bi_node->op == OPERATOR_ADD && bi_node->left->type->type_id == LMD_TYPE_STRING) {
-        strbuf_append_str(tp->code_buf, "str_cat(");
-        transpile_expr(tp, bi_node->left);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_expr(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');
-    }
-    else if (bi_node->op == OPERATOR_SUB && bi_node->left->type->type_id == LMD_TYPE_STRING) {
-        strbuf_append_str(tp->code_buf, "str_sub(");
-        transpile_expr(tp, bi_node->left);
-        strbuf_append_char(tp->code_buf, ',');
-        transpile_expr(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');
-
+    else if (bi_node->op == OPERATOR_ADD) {
+        if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
+            if (bi_node->left->type->type_id == LMD_TYPE_STRING) {
+                strbuf_append_str(tp->code_buf, "str_cat(");
+                transpile_expr(tp, bi_node->left);
+                strbuf_append_char(tp->code_buf, ',');
+                transpile_expr(tp, bi_node->right);
+                strbuf_append_char(tp->code_buf, ')');
+                return;
+            }
+            else if (bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->right->type->type_id == LMD_TYPE_DOUBLE) {
+                strbuf_append_str(tp->code_buf, "(");
+                transpile_expr(tp, bi_node->left);
+                strbuf_append_char(tp->code_buf, '+');
+                transpile_expr(tp, bi_node->right);
+                strbuf_append_char(tp->code_buf, ')');
+                return;
+            }
+        }
+        strbuf_append_str(tp->code_buf, "null");  // not able to handle yet
     }
     else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_INT && 
         bi_node->right->type->type_id == LMD_TYPE_INT) {
@@ -285,10 +291,13 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
     strbuf_append_char(tp->code_buf, ',');
     item = array_node->item;  bool is_first = true;
     while (item) {
+        // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM) { item = item->next; continue; }
+
         if (is_first) { is_first = false; } 
         else { strbuf_append_char(tp->code_buf, ','); }
 
+        printf("list item type:%d\n", item->type->type_id);
         if (item->type->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "i2it(");
             transpile_expr(tp, item);
@@ -332,7 +341,10 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             }
         }
         else if (item->type->type_id == LMD_TYPE_LIST) {
-            transpile_expr(tp, item);
+            transpile_expr(tp, item);  // raw pointer
+        }
+        else if (item->type->type_id == LMD_TYPE_ANY) {
+            transpile_expr(tp, item);  // item
         }
         else {
             printf("unknown list type %d\n", item->type->type_id);
@@ -362,6 +374,8 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     printf("transpile call expr\n");
     transpile_expr(tp, call_node->function);
+
+    // write the params
     strbuf_append_str(tp->code_buf, "(rt,");
     AstNode* arg = call_node->argument;
     while (arg) {
@@ -405,20 +419,20 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
 }
 
-void transpile_fn(Transpiler* tp, AstFuncNode *fn_node) {
+void transpile_func(Transpiler* tp, AstFuncNode *fn_node) {
     // use function body type as the return type for the time being
     LambdaType *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
-    writeNodeSource(tp, fn_node->name);
+    strbuf_append_str_n(tp->code_buf, fn_node->name.str, fn_node->name.length);
     strbuf_append_str(tp->code_buf, "(Context *rt");
     AstNamedNode *param = fn_node->param;
     while (param) {
         strbuf_append_str(tp->code_buf, ", ");
         writeType(tp, param->type);
         strbuf_append_str(tp->code_buf, " _");
-        writeNodeSource(tp, param->node);
+        strbuf_append_str_n(tp->code_buf, param->name.str, param->name.length);
         param = (AstNamedNode*)param->next;
     }
     strbuf_append_str(tp->code_buf, "){\n return ");
@@ -469,7 +483,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
     case AST_NODE_FUNC:
-        transpile_fn(tp, (AstFuncNode*)expr_node);
+        transpile_func(tp, (AstFuncNode*)expr_node);
         break;
     default:
         printf("unknown expression type\n");
@@ -488,7 +502,7 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
             transpile_let_stam(tp, (AstLetNode*)node);
         }
         else if (node->node_type == AST_NODE_FUNC) {
-            transpile_fn(tp, (AstFuncNode*)node);
+            transpile_func(tp, (AstFuncNode*)node);
         }
         node = node->next;
     }

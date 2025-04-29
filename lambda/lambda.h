@@ -101,6 +101,7 @@ Item push_d(Context *rt, double dval);
 
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
+#define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
 #define i2it(int_val)        (ITEM_INT | (uint32_t)(int_val))
@@ -117,3 +118,4 @@ Item push_d(Context *rt, double dval);
 #define const_s(index)      ((String*)*(rt->consts + index))
 
 double pow(double x, double y);
+Item add(Item a, Item b);

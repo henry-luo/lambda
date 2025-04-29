@@ -471,7 +471,7 @@
       },
       "declare": {
         "multiple": true,
-        "required": false,
+        "required": true,
         "types": [
           {
             "type": "parameter",
@@ -1075,6 +1075,16 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_annotation",
             "named": true
           }
         ]
