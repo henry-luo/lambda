@@ -413,6 +413,65 @@ void push_name(Transpiler* tp, AstNamedNode* node) {
     tp->current_scope->last = entry;
 }
 
+LambdaType *build_type_annotation(Transpiler* tp, TSNode type_node) {
+    printf("build type annotation\n");
+    LambdaType *type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
+    StrView type_name = ts_node_source(tp, type_node);
+    if (strview_equal(&type_name, "null")) {
+        type->type_id = LMD_TYPE_NULL;
+    }
+    else if (strview_equal(&type_name, "error")) {
+        type->type_id = LMD_TYPE_ERROR;
+    }
+    else if (strview_equal(&type_name, "any")) {
+        type->type_id = LMD_TYPE_ANY;
+    }       
+    else if (strview_equal(&type_name, "int")) {
+        type->type_id = LMD_TYPE_LONG;
+    }
+    else if (strview_equal(&type_name, "float")) {
+        type->type_id = LMD_TYPE_DOUBLE;
+    }
+    else if (strview_equal(&type_name, "number")) {
+        type->type_id = LMD_TYPE_NUMBER;
+    }    
+    else if (strview_equal(&type_name, "string")) {
+        type->type_id = LMD_TYPE_STRING;
+    }
+    else if (strview_equal(&type_name, "symbol")) {
+        type->type_id = LMD_TYPE_SYMBOL;
+    }    
+    else if (strview_equal(&type_name, "boolean")) {
+        type->type_id = LMD_TYPE_BOOL;
+    }
+    else if (strview_equal(&type_name, "list")) {
+        type->type_id = LMD_TYPE_LIST;
+    }    
+    else if (strview_equal(&type_name, "array")) {
+        type->type_id = LMD_TYPE_ARRAY;
+    }
+    else if (strview_equal(&type_name, "map")) {
+        type->type_id = LMD_TYPE_MAP;
+    }
+    else if (strview_equal(&type_name, "function")) {
+        type->type_id = LMD_TYPE_FUNC;
+    }
+    else if (strview_equal(&type_name, "datetime")) {
+        type->type_id = LMD_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        type->type_id = LMD_TYPE_TIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        type->type_id = LMD_TYPE_DATE;
+    }
+    else {
+        printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
+        type->type_id = LMD_TYPE_ERROR;
+    }
+    return type;
+}
+
 AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("build assign expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
@@ -422,11 +481,19 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
+    TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
+
+    
+
     TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
     ast_node->as = build_expr(tp, val_node);
 
     // determine the type of the variable
-    ast_node->type = ast_node->as->type;
+    if (ts_node_is_null(type_node)) {
+        ast_node->type = ast_node->as->type;
+    } else {
+        ast_node->type = build_type_annotation(tp, type_node);
+    }
 
     // push the name to the name stack
     push_name(tp, ast_node);

@@ -15,8 +15,12 @@ typedef enum TypeId {
     LMD_TYPE_ERROR,
     LMD_TYPE_BOOL,
     LMD_TYPE_INT,
+    LMD_TYPE_LONG,  // lambda: int
     LMD_TYPE_FLOAT,
-    LMD_TYPE_DOUBLE,
+    LMD_TYPE_DOUBLE,  // lambda: float
+    LMD_TYPE_NUMBER,
+    LMD_TYPE_DATE,
+    LMD_TYPE_TIME,
     LMD_TYPE_DTIME,
     LMD_TYPE_STRING,
     LMD_TYPE_SYMBOL,

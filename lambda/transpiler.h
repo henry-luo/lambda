@@ -48,6 +48,7 @@
 #define FIELD_LEFT field_left
 #define FIELD_RIGHT field_right
 #define FIELD_NAME field_name
+#define FIELD_TYPE field_type
 #define FIELD_OBJECT field_object
 #define FIELD_FIELD field_field
 #define FIELD_BODY field_body

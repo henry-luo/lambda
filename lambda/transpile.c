@@ -165,7 +165,7 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     printf("transpile assign expr\n");
     // declare the type
-    LambdaType *type = asn_node->as->type;
+    LambdaType *type = asn_node->type;
     writeType(tp, type);
     // user var name starts with '_'
     strbuf_append_str(tp->code_buf, " _");
