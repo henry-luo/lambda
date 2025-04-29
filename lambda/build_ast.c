@@ -171,7 +171,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     }
     else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
-        ast_node->then = entry->node;
+        ast_node->as = entry->node;
         ast_node->type = entry->node->type;
     }
     return (AstNode*)ast_node;
@@ -422,11 +422,11 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_THEN);
-    ast_node->then = build_expr(tp, val_node);
+    TSNode val_node = ts_node_child_by_field_id(asn_node, FIELD_AS);
+    ast_node->as = build_expr(tp, val_node);
 
     // determine the type of the variable
-    ast_node->type = ast_node->then->type;
+    ast_node->type = ast_node->as->type;
 
     // push the name to the name stack
     push_name(tp, ast_node);
@@ -442,12 +442,12 @@ AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_THEN);
-    printf("build pair then\n");
-    ast_node->then = build_expr(tp, val_node);
+    TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+    printf("build pair as\n");
+    ast_node->as = build_expr(tp, val_node);
 
     // determine the type of the field
-    ast_node->type = ast_node->then->type;
+    ast_node->type = ast_node->as->type;
     return ast_node;
 }
 
@@ -496,11 +496,11 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_THEN);
-    ast_node->then = build_expr(tp, expr_node);
+    TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_AS);
+    ast_node->as = build_expr(tp, expr_node);
 
     // determine the type of the variable
-    ast_node->type = ast_node->then->type;
+    ast_node->type = ast_node->as->type;
 
     // push the name to the name stack
     push_name(tp, ast_node);
@@ -553,7 +553,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     ast_node->name.str = tp->source + start_byte;
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
-    // TSNode val_node = ts_node_child_by_field_id(param_node, FIELD_THEN);
+    // TSNode val_node = ts_node_child_by_field_id(param_node, FIELD_AS);
     // printf("build param then\n");
     // ast_node->then = build_expr(tp, val_node);
 
@@ -820,11 +820,11 @@ AstNode* print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_ASSIGN:
         printf("[assign expr:%s]\n", formatType(node->type));
-        print_ast_node(((AstNamedNode*)node)->then, indent + 1);
+        print_ast_node(((AstNamedNode*)node)->as, indent + 1);
         break;
     case AST_NODE_LOOP:
         printf("[loop expr:%s]\n", formatType(node->type));
-        print_ast_node(((AstNamedNode*)node)->then, indent + 1);
+        print_ast_node(((AstNamedNode*)node)->as, indent + 1);
         break;
     case AST_NODE_ARRAY:
         printf("[array expr:%s]\n", formatType(node->type));

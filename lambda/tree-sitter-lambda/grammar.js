@@ -165,14 +165,14 @@ module.exports = grammar({
       '{', commaSep(seq(
         field('name', choice($.string, $.symbol, $.identifier)),
         ':',
-        field('then', $._literal),
+        field('as', $._literal),
       )), '}',
     )),
 
     pair: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('then', $._expression),
+      field('as', $._expression),
     ),
     map: $ => seq(
       '{', commaSep($.pair), '}',
@@ -193,13 +193,13 @@ module.exports = grammar({
     lit_attr: $ => prec(101, seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('then', $._literal),
+      field('as', $._literal),
     )),
     
     attr: $ => prec(100, seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('then', $._content_expr),
+      field('as', $._content_expr),
     )),
     attrs: $ => prec.left(seq($.attr, repeat(seq(',', $.attr)))),
 
@@ -367,7 +367,7 @@ module.exports = grammar({
 
     unary_expr: $ => seq(
       field('operator', choice('not', '-', '+')),
-      field('then', $._expression),
+      field('expr', $._expression),
     ),
 
     identifier: _ => {
@@ -413,7 +413,8 @@ module.exports = grammar({
     ),
 
     assign_expr: $ => seq(
-      field('name', $.identifier), optional(seq(':', $.type_annotation)), '=', field('then', $._expression),
+      field('name', $.identifier), 
+      optional(seq(':', field('type', $.type_annotation))), '=', field('as', $._expression),
     ),
 
     let_expr: $ => seq(
@@ -438,7 +439,7 @@ module.exports = grammar({
     )),
 
     loop_expr: $ => seq(
-      field('name', $.identifier), 'in', field('then', $._expression),
+      field('name', $.identifier), 'in', field('as', $._expression),
     ),
     
     for_expr: $ => seq(

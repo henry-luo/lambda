@@ -242,7 +242,7 @@
                       },
                       {
                         "type": "FIELD",
-                        "name": "then",
+                        "name": "as",
                         "content": {
                           "type": "SYMBOL",
                           "name": "_literal"
@@ -289,7 +289,7 @@
                             },
                             {
                               "type": "FIELD",
-                              "name": "then",
+                              "name": "as",
                               "content": {
                                 "type": "SYMBOL",
                                 "name": "_literal"
@@ -344,7 +344,7 @@
         },
         {
           "type": "FIELD",
-          "name": "then",
+          "name": "as",
           "content": {
             "type": "SYMBOL",
             "name": "_expression"
@@ -544,7 +544,7 @@
           },
           {
             "type": "FIELD",
-            "name": "then",
+            "name": "as",
             "content": {
               "type": "SYMBOL",
               "name": "_literal"
@@ -586,7 +586,7 @@
           },
           {
             "type": "FIELD",
-            "name": "then",
+            "name": "as",
             "content": {
               "type": "SYMBOL",
               "name": "_content_expr"
@@ -3051,7 +3051,7 @@
         },
         {
           "type": "FIELD",
-          "name": "then",
+          "name": "expr",
           "content": {
             "type": "SYMBOL",
             "name": "_expression"
@@ -3246,8 +3246,12 @@
                   "value": ":"
                 },
                 {
-                  "type": "SYMBOL",
-                  "name": "type_annotation"
+                  "type": "FIELD",
+                  "name": "type",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
                 }
               ]
             },
@@ -3262,7 +3266,7 @@
         },
         {
           "type": "FIELD",
-          "name": "then",
+          "name": "as",
           "content": {
             "type": "SYMBOL",
             "name": "_expression"
@@ -3509,7 +3513,7 @@
         },
         {
           "type": "FIELD",
-          "name": "then",
+          "name": "as",
           "content": {
             "type": "SYMBOL",
             "name": "_expression"

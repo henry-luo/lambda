@@ -41,6 +41,7 @@
 #define SYM_TIME sym_time
 #define SYM_COMMENT sym_comment
 
+#define FIELD_AS field_as
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
 #define FIELD_ELSE field_else
@@ -214,7 +215,7 @@ typedef struct {
 typedef struct {
     AstNode;  // extends AstNode
     StrView name;
-    AstNode *then;
+    AstNode *as;
 } AstNamedNode;
 
 typedef struct {

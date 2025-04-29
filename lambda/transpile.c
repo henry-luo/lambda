@@ -165,7 +165,7 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     printf("transpile assign expr\n");
     // declare the type
-    LambdaType *type = asn_node->then->type;
+    LambdaType *type = asn_node->as->type;
     writeType(tp, type);
     // user var name starts with '_'
     strbuf_append_str(tp->code_buf, " _");
@@ -173,7 +173,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
     strbuf_append_char(tp->code_buf, '=');
 
-    transpile_expr(tp, asn_node->then);
+    transpile_expr(tp, asn_node->as);
     strbuf_append_str(tp->code_buf, ";\n");
 }
 
@@ -207,10 +207,10 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_then) {
     printf("transpile loop expr\n");
     // todo: prefix var name with '_'
-    LambdaType *item_type = loop_node->then->type->type_id == LMD_TYPE_ARRAY ? 
-        ((LambdaTypeArray*)loop_node->then->type)->nested : &TYPE_ANY;
+    LambdaType *item_type = loop_node->as->type->type_id == LMD_TYPE_ARRAY ? 
+        ((LambdaTypeArray*)loop_node->as->type)->nested : &TYPE_ANY;
     strbuf_append_str(tp->code_buf, (item_type->type_id == LMD_TYPE_INT) ? " ArrayInt *arr=" : " Array *arr=");
-    transpile_expr(tp, loop_node->then);
+    transpile_expr(tp, loop_node->as);
     strbuf_append_str(tp->code_buf, ";\n for (int i=0; i<arr->length; i++){\n ");
     writeType(tp, item_type);
     strbuf_append_str(tp->code_buf, " _");
@@ -352,7 +352,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
         // strbuf_append_char(tp->code_buf, '"');
         // strbuf_append_str_n(tp->code_buf, item->name.str, item->name.length);
         // strbuf_append_str(tp->code_buf, "\",");
-        transpile_expr(tp, item->then);
+        transpile_expr(tp, item->as);
         if (item->next) { strbuf_append_char(tp->code_buf, ','); }
         item = (AstNamedNode*)item->next;
     }
