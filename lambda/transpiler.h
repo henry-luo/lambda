@@ -333,7 +333,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
 AstNode* build_map_expr(Transpiler* tp, TSNode map_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
-AstNode* print_ast_node(AstNode *node, int indent);
+void print_ast_node(AstNode *node, int indent);
 void print_ts_node(TSNode node, uint32_t indent);
 void writeNodeSource(Transpiler* tp, TSNode node);
 void writeType(Transpiler* tp, LambdaType *type);

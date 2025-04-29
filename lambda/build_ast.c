@@ -1,14 +1,14 @@
 #include "transpiler.h"
 #include "../lib/hashmap.h"
 
-LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY, .is_const = 0};
-LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR, .is_const = 0};
-LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 0};
-LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT, .is_const = 0};
-LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 0};
-LambdaType TYPE_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 0};
-LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 0};
-LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC, .is_const = 0};
+LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY};
+LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
+LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
+LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
+LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
+LambdaType TYPE_DOUBLE = {.type_id = LMD_TYPE_DOUBLE};
+LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
+LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 
 LambdaType CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
 LambdaType CONST_INT = {.type_id = LMD_TYPE_INT, .is_const = 1};

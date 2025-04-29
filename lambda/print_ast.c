@@ -96,7 +96,7 @@ void print_label(int indent, const char *label) {
     printf("%s\n", label);
 }
 
-AstNode* print_ast_node(AstNode *node, int indent) {
+void print_ast_node(AstNode *node, int indent) {
     for (int i = 0; i < indent; i++) { printf("  "); }
     // get the function name
     switch(node->node_type) {

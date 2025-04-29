@@ -2,7 +2,7 @@
 #include "transpiler.h"
 
 int main(void) {
-    assert(sizeof(LambdaItem) == 8);
+    _Static_assert(sizeof(LambdaItem) == 8, "LambdaItem size mismatch");
     Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
 
     runner_init(&runner);
