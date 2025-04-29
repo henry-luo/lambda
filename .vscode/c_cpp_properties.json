@@ -27,6 +27,9 @@
             "compileCommands": [
                 "${default}"
             ],
+            "compilerArgs": [
+                "-fms-extensions"
+            ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
                 "databaseFilename": "${default}",
@@ -35,8 +38,8 @@
                 ]
             },
             "intelliSenseMode": "${default}",
-            "cStandard": "${default}",
-            "cppStandard": "${default}",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
             "compilerPath": "${default}"
         }
     ],

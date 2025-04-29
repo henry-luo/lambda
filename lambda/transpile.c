@@ -4,55 +4,6 @@
 extern LambdaType TYPE_ANY;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 
-void writeNodeSource(Transpiler* tp, TSNode node) {
-    int start_byte = ts_node_start_byte(node);
-    const char* start = tp->source + start_byte;
-    strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
-}
-
-void writeType(Transpiler* tp, LambdaType *type) {
-    TypeId type_id = type->type_id;
-    switch (type_id) {
-    case LMD_TYPE_NULL:
-        strbuf_append_str(tp->code_buf, "void*");
-        break;
-    case LMD_TYPE_ANY:
-        strbuf_append_str(tp->code_buf, "Item");
-        break;
-    case LMD_TYPE_ERROR:
-        strbuf_append_str(tp->code_buf, "Item");
-        break;        
-    case LMD_TYPE_BOOL:
-        strbuf_append_str(tp->code_buf, "bool");
-        break;        
-    case LMD_TYPE_INT:
-        strbuf_append_str(tp->code_buf, "int");
-        break;
-    case LMD_TYPE_FLOAT:
-        strbuf_append_str(tp->code_buf, "float");
-        break;
-    case LMD_TYPE_DOUBLE:
-        strbuf_append_str(tp->code_buf, "double");
-        break;
-    case LMD_TYPE_STRING:
-        strbuf_append_str(tp->code_buf, "char*");
-        break;
-    case LMD_TYPE_ARRAY:
-        LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "ArrayInt*");
-        } else {
-            strbuf_append_str(tp->code_buf, "Array*");
-        }
-        break;
-    case LMD_TYPE_MAP:
-        strbuf_append_str(tp->code_buf, "Map*");
-        break;
-    default:
-        printf("unknown type %d\n", type_id);
-    }
-}
-
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     printf("transpile primary expr\n");
     if (pri_node->expr) {
