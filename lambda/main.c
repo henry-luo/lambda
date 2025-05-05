@@ -5,27 +5,29 @@ int main(void) {
     _Static_assert(sizeof(LambdaItem) == 8, "LambdaItem size mismatch");
     Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
 
+    strbuf_append_str(strbuf, "Test result ===============\n");
     runner_init(&runner);
     ret = run_script_at(&runner, "test/lambda/value.ls");
+    strbuf_append_str(strbuf, "Script 'value.ls' result: ");
     print_item(strbuf, ret);
-    printf("Returned item: %s\n", strbuf->str);
+    strbuf_append_str(strbuf, "\n");
     runner_cleanup(&runner);
-    strbuf_reset(strbuf);
 
     runner_init(&runner);
     ret = run_script_at(&runner, "test/lambda/func.ls");
+    strbuf_append_str(strbuf, "Script 'func.ls' result: ");
     print_item(strbuf, ret);
-    printf("Returned item: %s\n", strbuf->str);
+    strbuf_append_str(strbuf, "\n");
     runner_cleanup(&runner);
-    strbuf_reset(strbuf);
 
     runner_init(&runner);
     ret = run_script_at(&runner, "test/lambda/expr.ls");
+    strbuf_append_str(strbuf, "Script 'expr.ls' result: ");
     print_item(strbuf, ret);
-    printf("Returned item: %s\n", strbuf->str);
+    strbuf_append_str(strbuf, "\n");
     runner_cleanup(&runner);
-    strbuf_reset(strbuf);    
 
+    printf("%s", strbuf->str);
     strbuf_free(strbuf);
     return 0;
 }
