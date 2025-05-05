@@ -1,5 +1,5 @@
 (let (a=12) a+10)
-let b=" world", c=12,
+let b=" world", c=12;
 ("hello" + b)
 if (c > 10) { "great" }
 'symbol'
@@ -13,5 +13,5 @@ if (100>90) "great" else "not great")
 // test for statement
 for a in ["a", "b", "c"] { "ha!" }
 
-let d:float = 123,
+let d:float = 123
 (d+4)

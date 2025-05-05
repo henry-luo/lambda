@@ -803,6 +803,8 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
     tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
 
+    // first iteration to declare the global variables
+
     // build the script body
     TSNode child = ts_node_named_child(script_node, 0);
     AstNode* prev = NULL;

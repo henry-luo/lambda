@@ -102,12 +102,21 @@
                 "name": "let_stam"
               },
               {
-                "type": "STRING",
-                "value": ","
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "PATTERN",
+                    "value": "\\r\\n|\\n"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": ";"
+                  }
+                ]
               },
               {
                 "type": "SYMBOL",
-                "name": "_content_item"
+                "name": "_content"
               }
             ]
           }
@@ -3684,9 +3693,6 @@
     [
       "binary_expr",
       "binary_no_relation_expr"
-    ],
-    [
-      "let_stam"
     ]
   ],
   "precedences": [

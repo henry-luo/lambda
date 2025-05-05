@@ -28,6 +28,7 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
   return tree;
 }
 
+// print the syntax tree as an s-expr
 void print_ts_node(TSNode node, uint32_t indent) {
   for (uint32_t i = 0; i < indent; i++) {
       printf("  ");  // 2 spaces per indent level

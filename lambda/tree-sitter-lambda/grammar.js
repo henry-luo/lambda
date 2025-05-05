@@ -18,6 +18,7 @@ function commaSep(rule) {
 }
 
 const digit = /\d/;
+const linebreak = /\r\n|\n/;
 const decimalDigits = /\d+/;
 const integerLiteral = seq(choice('0', seq(/[1-9]/, optional(decimalDigits))));
 const signedIntegerLiteral = seq(optional('-'), integerLiteral);
@@ -117,7 +118,6 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$.binary_expr, $.binary_no_relation_expr],
-    [$.let_stam],
   ],
 
   rules: {
@@ -140,8 +140,9 @@ module.exports = grammar({
     ),
 
     _content: $ => repeat1(choice(
-      $._content_item, 
-      seq($.let_stam, ',', $._content_item)
+      $._content_item,
+      // we require one item to follow 'let' statement
+      seq($.let_stam, choice(linebreak, ';'), $._content)
     )),
 
     content: $ => $._content,

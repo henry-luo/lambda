@@ -74,7 +74,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            else if (bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->right->type->type_id == LMD_TYPE_DOUBLE) {
+            else if (bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->left->type->type_id == LMD_TYPE_DOUBLE) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, '+');
@@ -82,6 +82,16 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
+            // else error
+        }
+        else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_DOUBLE &&
+            LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_DOUBLE) {
+            strbuf_append_str(tp->code_buf, "(");
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, '+');
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
         }
         strbuf_append_str(tp->code_buf, "null");  // not able to handle yet
     }
