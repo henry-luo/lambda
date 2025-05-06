@@ -1151,6 +1151,10 @@
           "named": true
         },
         {
+          "type": "binary",
+          "named": true
+        },
+        {
           "type": "call_expr",
           "named": true
         },

@@ -880,8 +880,16 @@
         "type": "SEQ",
         "members": [
           {
-            "type": "STRING",
-            "value": "\\x"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "\\x"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           },
           {
             "type": "REPEAT1",
@@ -1920,6 +1928,10 @@
         {
           "type": "SYMBOL",
           "name": "symbol"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "binary"
         },
         {
           "type": "SYMBOL",
