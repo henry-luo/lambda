@@ -77,6 +77,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "binary"
+        },
+        {
+          "type": "SYMBOL",
           "name": "true"
         },
         {
@@ -190,6 +194,10 @@
         {
           "type": "SYMBOL",
           "name": "_datetime"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "binary"
         },
         {
           "type": "SYMBOL",
@@ -828,6 +836,108 @@
           {
             "type": "PATTERN",
             "value": "(\\\"|\\\\|\\/|b|f|n|r|t|u)"
+          }
+        ]
+      }
+    },
+    "binary": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "b'"
+        },
+        {
+          "type": "PATTERN",
+          "value": "\\s*"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "hex_binary"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "base64_binary"
+            }
+          ]
+        },
+        {
+          "type": "PATTERN",
+          "value": "\\s*"
+        },
+        {
+          "type": "STRING",
+          "value": "'"
+        }
+      ]
+    },
+    "hex_binary": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "\\x"
+          },
+          {
+            "type": "REPEAT1",
+            "content": {
+              "type": "PATTERN",
+              "value": "[0-9a-fA-F\\s]"
+            }
+          }
+        ]
+      }
+    },
+    "base64_binary": {
+      "type": "TOKEN",
+      "content": {
+        "type": "SEQ",
+        "members": [
+          {
+            "type": "STRING",
+            "value": "\\64"
+          },
+          {
+            "type": "REPEAT1",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "PATTERN",
+                  "value": "[A-Za-z0-9+/]{4}"
+                },
+                {
+                  "type": "PATTERN",
+                  "value": "\\s+"
+                }
+              ]
+            }
+          },
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "PATTERN",
+                    "value": "[A-Za-z0-9+/]{2}=="
+                  },
+                  {
+                    "type": "PATTERN",
+                    "value": "[A-Za-z0-9+/]{3}="
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
           }
         ]
       }

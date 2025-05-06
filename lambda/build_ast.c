@@ -32,6 +32,7 @@ int byte_size[] = {
     [LMD_TYPE_INT] = sizeof(long),
     [LMD_TYPE_FLOAT] = sizeof(double),
     [LMD_TYPE_STRING] = sizeof(char*),
+    [LMD_TYPE_BINARY] = sizeof(char*),
     [LMD_TYPE_ARRAY] = sizeof(void*),
     [LMD_TYPE_MAP] = sizeof(void*),
     [LMD_TYPE_ELEMENT] = sizeof(void*),
@@ -198,14 +199,17 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
     TSSymbol symbol = ts_node_symbol(node);
     // todo: exclude zero-length string
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : 2);  // -2 to exclude the quotes
+    int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : symbol == SYM_BINARY ? 3:2);  // -2 to exclude the quotes
     LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp, 
         (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
-        symbol == SYM_STRING ? LMD_TYPE_STRING : LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
+        symbol == SYM_STRING ? LMD_TYPE_STRING : 
+        symbol == SYM_BINARY ? LMD_TYPE_BINARY : 
+        LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
     // copy the string, todo: handle escape sequence
     pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str_type->string);
-    const char* str_content = tp->source + start + (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0:1);
+    const char* str_content = tp->source + start + 
+        (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0: symbol == SYM_BINARY ? 2:1);
     memcpy(str_type->string->str, str_content, len);  // memcpy is probably faster than strcpy
     str_type->string->str[len] = '\0';
     str_type->string->len = len;
@@ -249,7 +253,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_FLOAT) {
         ast_node->type = build_lit_float(tp, child);
     }
-    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_DATETIME || symbol == SYM_TIME) {
+    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
+        symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {
         ast_node->type = build_lit_string(tp, child);
     }
     else if (symbol == SYM_IDENT) {
@@ -765,7 +770,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_CONTENT) {
         return build_content(tp, expr_node);
     }
-    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_DATETIME || symbol == SYM_TIME) {
+    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
+        symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         ast_node->type = build_lit_string(tp, expr_node);
         return (AstNode*)ast_node;

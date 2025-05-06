@@ -16,7 +16,8 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
         }
     } else { // literals
         if (pri_node->type->is_literal && (pri_node->type->type_id == LMD_TYPE_STRING || 
-            pri_node->type->type_id == LMD_TYPE_SYMBOL || pri_node->type->type_id == LMD_TYPE_DTIME)) {
+            pri_node->type->type_id == LMD_TYPE_SYMBOL || pri_node->type->type_id == LMD_TYPE_DTIME ||
+            pri_node->type->type_id == LMD_TYPE_BINARY)) {
             // loads the const string without boxing
             strbuf_append_str(tp->code_buf, "const_s(");
             LambdaTypeString *str_type = (LambdaTypeString*)pri_node->type;
@@ -97,6 +98,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_INT && 
         bi_node->right->type->type_id == LMD_TYPE_INT) {
+        // division is always carried out in double
         strbuf_append_str(tp->code_buf, "((double)");
         transpile_expr(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, '/');
@@ -286,9 +288,10 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
             }
         }
         else if (item->type->type_id == LMD_TYPE_STRING || item->type->type_id == LMD_TYPE_SYMBOL || 
-            item->type->type_id == LMD_TYPE_DTIME) {
+            item->type->type_id == LMD_TYPE_DTIME || item->type->type_id == LMD_TYPE_BINARY) {
             char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
-                (item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 'k');
+                item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
+                item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
             if (item->type->is_literal) {
                 strbuf_append_format(tp->code_buf, "const_%c2it(", t);
                 LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;

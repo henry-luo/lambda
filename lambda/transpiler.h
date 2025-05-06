@@ -40,6 +40,7 @@
 #define SYM_CONTENT sym_content
 #define SYM_DATETIME sym_datetime
 #define SYM_TIME sym_time
+#define SYM_BINARY sym_binary
 #define SYM_COMMENT sym_comment
 
 #define FIELD_AS field_as

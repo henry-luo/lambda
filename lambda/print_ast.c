@@ -34,6 +34,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_STRING:
         strbuf_append_str(tp->code_buf, "char*");
         break;
+    case LMD_TYPE_BINARY:
+        strbuf_append_str(tp->code_buf, "uint8_t*");
+        break;
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
@@ -100,14 +103,17 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
             String *string = (String*)ld_item.pointer;
-            // todo: escape the string
+            // todo: escape the symbol chars
             strbuf_append_format(strbuf, "'%s'", string->str);
         } 
         else if (type_id == LMD_TYPE_DTIME) {
             String *string = (String*)ld_item.pointer;
-            // todo: escape the string
             strbuf_append_format(strbuf, "t'%s'", string->str);
-        }        
+        }
+        else if (type_id == LMD_TYPE_BINARY) {
+            String *string = (String*)ld_item.pointer;
+            strbuf_append_format(strbuf, "b'%s'", string->str);
+        }               
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);
         }        

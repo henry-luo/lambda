@@ -160,6 +160,25 @@
     }
   },
   {
+    "type": "binary",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "base64_binary",
+          "named": true
+        },
+        {
+          "type": "hex_binary",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "binary_expr",
     "named": true,
     "fields": {
@@ -306,6 +325,10 @@
           "named": true
         },
         {
+          "type": "binary",
+          "named": true
+        },
+        {
           "type": "datetime",
           "named": true
         },
@@ -394,6 +417,10 @@
         },
         {
           "type": "attrs",
+          "named": true
+        },
+        {
+          "type": "binary",
           "named": true
         },
         {
@@ -666,6 +693,10 @@
       "required": false,
       "types": [
         {
+          "type": "binary",
+          "named": true
+        },
+        {
           "type": "datetime",
           "named": true
         },
@@ -727,6 +758,10 @@
           {
             "type": "'",
             "named": false
+          },
+          {
+            "type": "binary",
+            "named": true
           },
           {
             "type": "datetime",
@@ -811,6 +846,10 @@
       "required": true,
       "types": [
         {
+          "type": "binary",
+          "named": true
+        },
+        {
           "type": "datetime",
           "named": true
         },
@@ -880,6 +919,10 @@
           {
             "type": "'",
             "named": false
+          },
+          {
+            "type": "binary",
+            "named": true
           },
           {
             "type": "datetime",
@@ -1405,6 +1448,14 @@
     "named": false
   },
   {
+    "type": "b'",
+    "named": false
+  },
+  {
+    "type": "base64_binary",
+    "named": true
+  },
+  {
     "type": "boolean",
     "named": false
   },
@@ -1450,11 +1501,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -1467,6 +1518,10 @@
   {
     "type": "function",
     "named": false
+  },
+  {
+    "type": "hex_binary",
+    "named": true
   },
   {
     "type": "identifier",

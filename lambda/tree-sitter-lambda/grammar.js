@@ -8,20 +8,22 @@
 /// <reference types="../tree-sitter-dsl.d.ts" />
 
 // Creates a rule to match one or more of the rules separated by a comma
-function commaSep1(rule) {
+function comma_sep1(rule) {
   return seq(rule, repeat(seq(',', rule)));
 }
 
 // Creates a rule to optionally match one or more of the rules separated by a comma
-function commaSep(rule) {
-  return optional(commaSep1(rule));
+function comma_sep(rule) {
+  return optional(comma_sep1(rule));
 }
 
 const digit = /\d/;
 const linebreak = /\r\n|\n/;
-const decimalDigits = /\d+/;
-const integerLiteral = seq(choice('0', seq(/[1-9]/, optional(decimalDigits))));
-const signedIntegerLiteral = seq(optional('-'), integerLiteral);
+const decimal_digits = /\d+/;
+const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
+const signed_integer_literal = seq(optional('-'), integer_literal);
+const base64_unit = /[A-Za-z0-9+/]{4}/;
+const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
 function binary_expr($, exclude_relation) { 
   return [
@@ -135,6 +137,7 @@ module.exports = grammar({
       $.symbol,
       $._number,
       $._datetime,
+      $.binary,
       $.true,
       $.false,
     ),
@@ -157,13 +160,14 @@ module.exports = grammar({
       $.string,
       $.symbol,
       $._datetime,
+      $.binary,
       $.true,
       $.false,
       $.null,
     ),
 
     lit_map: $ => prec(101, seq(
-      '{', commaSep(seq(
+      '{', comma_sep(seq(
         field('name', choice($.string, $.symbol, $.identifier)),
         ':',
         field('as', $._literal),
@@ -176,15 +180,15 @@ module.exports = grammar({
       field('as', $._expression),
     ),
     map: $ => seq(
-      '{', commaSep($.pair), '}',
+      '{', comma_sep($.pair), '}',
     ),    
 
     lit_array: $ => prec(101, seq(
-      '[', commaSep($._literal), ']',
+      '[', comma_sep($._literal), ']',
     )),
 
     array: $ => seq(
-      '[', commaSep($._expression), ']',
+      '[', comma_sep($._expression), ']',
     ),    
 
     range: $ => seq(
@@ -241,20 +245,28 @@ module.exports = grammar({
       /(\"|\\|\/|b|f|n|r|t|u)/,
     )),
 
+    binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
+    // whitespace allowed in hex and base64 binary
+    hex_binary: _ => token(seq("\\x", repeat1(/[0-9a-fA-F\s]/))),
+
+    base64_binary: $ => token(seq("\\64",
+      repeat1(choice(base64_unit, /\s+/)), optional(base64_padding)
+    )),
+
     _number: $ => choice($.integer, $.float),
 
     float: _ => {
-      const signedInteger = seq(optional('-'), decimalDigits);
-      const exponentPart = seq(choice('e', 'E'), signedInteger);
-      const decimalLiteral = choice(
-        seq(signedIntegerLiteral, '.', optional(decimalDigits), optional(exponentPart)),
-        seq(signedIntegerLiteral, exponentPart),
+      const signed_integer = seq(optional('-'), decimal_digits);
+      const exponent_part = seq(choice('e', 'E'), signed_integer);
+      const decimal_literal = choice(
+        seq(signed_integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
+        seq(signed_integer_literal, exponent_part),
       );
-      return token(decimalLiteral);
+      return token(decimal_literal);
     },
 
     integer: $ => {
-      return token(signedIntegerLiteral);
+      return token(signed_integer_literal);
     },
 
     // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
@@ -268,7 +280,7 @@ module.exports = grammar({
     _datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
 
     index: $ => {
-      return token(integerLiteral);
+      return token(integer_literal);
     },    
 
     true: _ => 'true',
@@ -338,7 +350,7 @@ module.exports = grammar({
     spread_element: $ => seq('...', $._expression),
 
     _arguments: $ => seq(
-      '(', commaSep(optional(
+      '(', comma_sep(optional(
       field('argument', choice($._expression, $.spread_element)))), ')',
     ),    
 
