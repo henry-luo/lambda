@@ -22,3 +22,8 @@ view_tree.txt
 window3
 log.txt
 _transpiled.c
+node_modules
+lambda/vsce/lambda-highlighter-0.0.1.vsix
+lambda/vsce/dist/extension.js
+.gitignore
+lambda/vsce/dist/extension.js.map
