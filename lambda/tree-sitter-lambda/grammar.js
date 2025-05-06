@@ -246,10 +246,11 @@ module.exports = grammar({
     )),
 
     binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
+
     // whitespace allowed in hex and base64 binary
     hex_binary: _ => token(seq("\\x", repeat1(/[0-9a-fA-F\s]/))),
 
-    base64_binary: $ => token(seq("\\64",
+    base64_binary: _ => token(seq("\\64", 
       repeat1(choice(base64_unit, /\s+/)), optional(base64_padding)
     )),
 
