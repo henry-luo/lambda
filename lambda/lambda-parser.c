@@ -29,7 +29,7 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
 }
 
 // print the syntax tree as an s-expr
-void print_ts_node(TSNode node, uint32_t indent) {
+void print_ts_node(const char *source, TSNode node, uint32_t indent) {
   for (uint32_t i = 0; i < indent; i++) {
       printf("  ");  // 2 spaces per indent level
   }
@@ -38,7 +38,7 @@ void print_ts_node(TSNode node, uint32_t indent) {
       printf("(%s", type);
   } else if (*type == '\'') {
       printf("(\"%s\"", type);
-  } else {
+  } else { // special char
       printf("('%s'", type);
   }
 
@@ -47,11 +47,17 @@ void print_ts_node(TSNode node, uint32_t indent) {
       printf("\n");
       for (uint32_t i = 0; i < child_count; i++) {
           TSNode child = ts_node_child(node, i);
-          print_ts_node(child, indent + 1);
+          print_ts_node(source, child, indent + 1);
       }
       for (uint32_t i = 0; i < indent; i++) {
           printf("  ");
       }
+  }
+  else {
+    int start_byte = ts_node_start_byte(node);
+    int end_byte = ts_node_end_byte(node);
+    const char* start = source + start_byte;
+    printf(" '%.*s'", end_byte - start_byte, start);
   }
   printf(")\n");
 }

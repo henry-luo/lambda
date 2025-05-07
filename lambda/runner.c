@@ -39,7 +39,7 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
     // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");
     TSNode root_node = ts_tree_root_node(tp->syntax_tree);
-    print_ts_node(root_node, 0);
+    print_ts_node(tp->source, root_node, 0);
     
     // check if the syntax tree is valid
     if (ts_node_has_error(root_node)) {

@@ -99,27 +99,7 @@
         "required": true,
         "types": [
           {
-            "type": "binary_expr",
-            "named": true
-          },
-          {
-            "type": "for_expr",
-            "named": true
-          },
-          {
-            "type": "if_expr",
-            "named": true
-          },
-          {
-            "type": "let_expr",
-            "named": true
-          },
-          {
-            "type": "primary_expr",
-            "named": true
-          },
-          {
-            "type": "unary_expr",
+            "type": "_expression",
             "named": true
           }
         ]
@@ -325,26 +305,6 @@
           "named": true
         },
         {
-          "type": "binary",
-          "named": true
-        },
-        {
-          "type": "datetime",
-          "named": true
-        },
-        {
-          "type": "element",
-          "named": true
-        },
-        {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float",
-          "named": true
-        },
-        {
           "type": "for_stam",
           "named": true
         },
@@ -353,31 +313,7 @@
           "named": true
         },
         {
-          "type": "integer",
-          "named": true
-        },
-        {
           "type": "let_stam",
-          "named": true
-        },
-        {
-          "type": "map",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        },
-        {
-          "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
           "named": true
         }
       ]
@@ -412,71 +348,15 @@
       "required": true,
       "types": [
         {
-          "type": "_expression",
-          "named": true
-        },
-        {
           "type": "attrs",
           "named": true
         },
         {
-          "type": "binary",
-          "named": true
-        },
-        {
-          "type": "datetime",
-          "named": true
-        },
-        {
-          "type": "element",
-          "named": true
-        },
-        {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float",
-          "named": true
-        },
-        {
-          "type": "for_stam",
+          "type": "content",
           "named": true
         },
         {
           "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "if_stam",
-          "named": true
-        },
-        {
-          "type": "integer",
-          "named": true
-        },
-        {
-          "type": "let_stam",
-          "named": true
-        },
-        {
-          "type": "map",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        },
-        {
-          "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
           "named": true
         }
       ]
@@ -685,160 +565,7 @@
     }
   },
   {
-    "type": "lit_array",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": false,
-      "types": [
-        {
-          "type": "binary",
-          "named": true
-        },
-        {
-          "type": "datetime",
-          "named": true
-        },
-        {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float",
-          "named": true
-        },
-        {
-          "type": "integer",
-          "named": true
-        },
-        {
-          "type": "lit_array",
-          "named": true
-        },
-        {
-          "type": "lit_element",
-          "named": true
-        },
-        {
-          "type": "lit_map",
-          "named": true
-        },
-        {
-          "type": "null",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        },
-        {
-          "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
-    "type": "lit_attr",
-    "named": true,
-    "fields": {
-      "as": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "'",
-            "named": false
-          },
-          {
-            "type": "binary",
-            "named": true
-          },
-          {
-            "type": "datetime",
-            "named": true
-          },
-          {
-            "type": "false",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "lit_array",
-            "named": true
-          },
-          {
-            "type": "lit_element",
-            "named": true
-          },
-          {
-            "type": "lit_map",
-            "named": true
-          },
-          {
-            "type": "null",
-            "named": true
-          },
-          {
-            "type": "string",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "t'",
-            "named": false
-          },
-          {
-            "type": "time",
-            "named": true
-          },
-          {
-            "type": "true",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "string",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "lit_element",
+    "type": "list",
     "named": true,
     "fields": {},
     "children": {
@@ -846,156 +573,10 @@
       "required": true,
       "types": [
         {
-          "type": "binary",
-          "named": true
-        },
-        {
-          "type": "datetime",
-          "named": true
-        },
-        {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float",
-          "named": true
-        },
-        {
-          "type": "identifier",
-          "named": true
-        },
-        {
-          "type": "integer",
-          "named": true
-        },
-        {
-          "type": "lit_array",
-          "named": true
-        },
-        {
-          "type": "lit_attr",
-          "named": true
-        },
-        {
-          "type": "lit_element",
-          "named": true
-        },
-        {
-          "type": "lit_map",
-          "named": true
-        },
-        {
-          "type": "null",
-          "named": true
-        },
-        {
-          "type": "string",
-          "named": true
-        },
-        {
-          "type": "symbol",
-          "named": true
-        },
-        {
-          "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
+          "type": "_expression",
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "lit_map",
-    "named": true,
-    "fields": {
-      "as": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "'",
-            "named": false
-          },
-          {
-            "type": "binary",
-            "named": true
-          },
-          {
-            "type": "datetime",
-            "named": true
-          },
-          {
-            "type": "false",
-            "named": true
-          },
-          {
-            "type": "float",
-            "named": true
-          },
-          {
-            "type": "integer",
-            "named": true
-          },
-          {
-            "type": "lit_array",
-            "named": true
-          },
-          {
-            "type": "lit_element",
-            "named": true
-          },
-          {
-            "type": "lit_map",
-            "named": true
-          },
-          {
-            "type": "null",
-            "named": true
-          },
-          {
-            "type": "string",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          },
-          {
-            "type": "t'",
-            "named": false
-          },
-          {
-            "type": "time",
-            "named": true
-          },
-          {
-            "type": "true",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          },
-          {
-            "type": "string",
-            "named": true
-          },
-          {
-            "type": "symbol",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {
@@ -1183,7 +764,7 @@
           "named": true
         },
         {
-          "type": "lit_element",
+          "type": "list",
           "named": true
         },
         {

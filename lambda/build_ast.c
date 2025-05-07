@@ -725,6 +725,27 @@ AstNode* build_content(Transpiler* tp, TSNode list_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_list(Transpiler* tp, TSNode list_node) {
+    printf("build list\n");
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstArrayNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeArray));
+    LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (!prev_item) { 
+            ast_node->item = item;
+        } else {  
+            prev_item->next = item;
+        }
+        prev_item = item;
+        type->length++;
+        child = ts_node_next_named_sibling(child);
+    }
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
@@ -769,6 +790,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == SYM_CONTENT) {
         return build_content(tp, expr_node);
+    }
+    else if (symbol == SYM_LIST) {
+        return build_list(tp, expr_node);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
         symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {

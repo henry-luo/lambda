@@ -86,9 +86,11 @@ module.exports = grammar({
     $._arguments,
     $._content_item,
     $._statement,
+    $._content,
+    $._content_expr,
     $._number,
     $._datetime,
-    $._unsigned_number,
+    $._list_expr,
   ],
 
   precedences: $ => [[
@@ -117,7 +119,7 @@ module.exports = grammar({
   ]],
 
   conflicts: $ => [
-    [$.content, $.binary_expr]
+    [$.binary_expr, $.binary_no_relation_expr],
   ],
 
   rules: {
@@ -127,19 +129,33 @@ module.exports = grammar({
     _statement: $ => choice($.fn_definition),
 
     _content_item: $ => choice(
-      $.let_stam,
+      $._list_expr,
       $.if_stam, 
       $.for_stam,
+      $.map, $.element,
+      $.string,
+      $.symbol,
+      $._number,
+      $._datetime,
+      $.binary,
+      $.true,
+      $.false,
     ),
 
-    content: $ => seq(
-      choice($._expression, $._content_item), 
-      repeat(seq(choice(linebreak, ';'), optional(choice($._expression, $._content_item))))
-    ),
+    _content: $ => repeat1(choice(
+      $._content_item,
+      // we require one item to follow 'let' statement
+      seq($.let_stam, choice(linebreak, ';'), $._content)
+    )),
 
-    list: $ => seq('(', $._expression, repeat1(seq(',', $._expression)), ')'),
+    content: $ => $._content,
+
+    _list_expr: $ => seq('(', $._expression, repeat(seq(',', $._expression)), ')'),
 
     _literal: $ => choice(
+      $.lit_map,
+      $.lit_array,
+      $.lit_element,
       $._number,
       $.string,
       $.symbol,
@@ -150,6 +166,14 @@ module.exports = grammar({
       $.null,
     ),
 
+    lit_map: $ => prec(101, seq(
+      '{', comma_sep(seq(
+        field('name', choice($.string, $.symbol, $.identifier)),
+        ':',
+        field('as', $._literal),
+      )), '}',
+    )),
+
     pair: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
@@ -157,7 +181,11 @@ module.exports = grammar({
     ),
     map: $ => seq(
       '{', comma_sep($.pair), '}',
-    ),
+    ),    
+
+    lit_array: $ => prec(101, seq(
+      '[', comma_sep($._literal), ']',
+    )),
 
     array: $ => seq(
       '[', comma_sep($._expression), ']',
@@ -166,20 +194,30 @@ module.exports = grammar({
     range: $ => seq(
       $._expression, 'to', $._expression,
     ),
+
+    lit_attr: $ => prec(101, seq(
+      field('name', choice($.string, $.symbol, $.identifier)),
+      ':',
+      field('as', $._literal),
+    )),
     
     attr: $ => prec(100, seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('as', $._expression),
+      field('as', $._content_expr),
     )),
     attrs: $ => prec.left(seq($.attr, repeat(seq(',', $.attr)))),
 
     element: $ => seq('<', $.identifier,
       choice(
-        seq($.attrs, optional(seq(choice(linebreak, ';'), $.content))),
-        optional($.content)
+        seq($.attrs, optional(seq(',', $._content))),
+        optional($._content)
       ),
     '>'),
+
+    lit_element: $ => prec(100, seq('<', $.identifier,
+      repeat($.lit_attr), repeat(prec(101,$._literal)),
+    '>')),
 
     // no empty strings under Mark/Lambda
     string: $ => seq('"', $._string_content, '"'),
@@ -232,18 +270,6 @@ module.exports = grammar({
       return token(signed_integer_literal);
     },
 
-    unsigned_float: _ => {
-      const signed_integer = seq(optional('-'), decimal_digits);
-      const exponent_part = seq(choice('e', 'E'), signed_integer);
-      const decimal_literal = choice(
-        seq(integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
-        seq(integer_literal, exponent_part),
-      );
-      return token(decimal_literal);
-    },    
-
-    _unsigned_number: $ => choice(alias(integer_literal, $.integer), alias($.unsigned_float, $.float)),
-
     // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
     time: _ => token.immediate(time()),
     // date-time
@@ -287,6 +313,16 @@ module.exports = grammar({
       $.for_expr,
     ),
 
+    // exclude binary comparison exprs
+    _content_expr: $ => prec(100, choice(
+      $.primary_expr,
+      $.unary_expr,
+      alias($.binary_no_relation_expr, $.binary_expr),
+      $.let_expr,
+      $.if_expr,
+      $.for_expr,
+    )),
+
     primary_expr: $ => choice(
       $.subscript_expr,
       $.member_expr,
@@ -300,9 +336,9 @@ module.exports = grammar({
       $.string,
       $.symbol,
       $.binary,
-      $.list,
       $.array,
       $.map,
+      $.lit_element,
       $.element,
       // $.function_expression,
       // $.arrow_function,
@@ -340,6 +376,10 @@ module.exports = grammar({
       ...binary_expr($),
     ),
 
+    binary_no_relation_expr: $ => prec(100, choice(
+      ...binary_expr($, true),
+    )),
+
     unary_expr: $ => seq(
       field('operator', choice('not', '-', '+')),
       field('expr', $._expression),
@@ -347,7 +387,7 @@ module.exports = grammar({
 
     identifier: _ => {
       // copied from JS grammar
-      const alpha = /[a-zA-Z_]/;
+      const alpha = /[^\x00-\x1F\s\p{Zs}0-9:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       return token(seq(alpha, repeat(alphanumeric)));
     },  

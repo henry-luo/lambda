@@ -21,26 +21,32 @@
 #define SYM_FLOAT sym_float
 #define SYM_STRING sym_string
 #define SYM_SYMBOL sym_symbol
+#define SYM_DATETIME sym_datetime
+#define SYM_TIME sym_time
+#define SYM_BINARY sym_binary
+
+#define SYM_CONTENT sym_content
+#define SYM_LIST sym_list
+#define SYM_ARRAY sym_array
+#define SYM_MAP sym_map
+
 #define SYM_IDENT sym_identifier
+#define SYM_MEMBER_EXPR sym_member_expr
+#define SYM_SUBSCRIPT_EXPR sym_subscript_expr
+#define SYM_CALL_EXPR sym_call_expr
+#define SYM_PRIMARY_EXPR sym_primary_expr
+#define SYM_BINARY_EXPR sym_binary_expr
+
+#define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
 #define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
-#define SYM_ASSIGN_EXPR sym_assign_expr
-#define SYM_PRIMARY_EXPR sym_primary_expr
-#define SYM_BINARY_EXPR sym_binary_expr
+
 #define SYM_FUNC sym_fn_definition
-#define SYM_ARRAY sym_array
-#define SYM_MAP sym_map
-#define SYM_MEMBER_EXPR sym_member_expr
-#define SYM_SUBSCRIPT_EXPR sym_subscript_expr
-#define SYM_CALL_EXPR sym_call_expr
-#define SYM_CONTENT sym_content
-#define SYM_DATETIME sym_datetime
-#define SYM_TIME sym_time
-#define SYM_BINARY sym_binary
+
 #define SYM_COMMENT sym_comment
 
 #define FIELD_AS field_as
@@ -336,7 +342,7 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_node(AstNode *node, int indent);
-void print_ts_node(TSNode node, uint32_t indent);
+void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void writeNodeSource(Transpiler* tp, TSNode node);
 void writeType(Transpiler* tp, LambdaType *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
