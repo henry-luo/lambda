@@ -76,7 +76,7 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
     // compile user code to MIR
     write_text_file("_transpiled.c", tp->code_buf->str);
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
-    jit_compile(tp->jit_context, tp->code_buf->str, tp->code_buf->length, "main.c");
+    jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, "main.c");
     strbuf_free(tp->code_buf);
     
     // generate the native code and return the function

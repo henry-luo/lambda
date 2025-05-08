@@ -60,7 +60,8 @@ MIR_context_t jit_init() {
     return ctx;
 }
 
-void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name) {
+// compile C code to MIR
+void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, char *file_name) {
     struct c2mir_options ops = {0}; // Default options
     ops.message_file = stdout;  ops.verbose_p = 1;  ops.debug_p = 0;
     printf("compiling C code in '%s' to MIR\n", file_name);
@@ -70,6 +71,7 @@ void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *fi
     }
 }
 
+// compile MIR code to native code
 void* jit_gen_func(MIR_context_t ctx, char *func_name) {
     printf("loading modules\n");
     MIR_item_t mir_func = NULL;
@@ -84,14 +86,15 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
         }
         MIR_load_module(ctx, module);
     }
-
-    printf("generating native code...\n");
-    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
     if (!mir_func) {
         printf("Failed to find function '%s'\n", func_name);
         return NULL;
     }
-    printf("generating function code...\n");
+
+    printf("generating native code...\n");
+    // link MIR code with external functions
+    MIR_link(ctx, MIR_set_gen_interface, import_resolver);
+    // generate native code
     return MIR_gen(ctx, mir_func);
 }
 

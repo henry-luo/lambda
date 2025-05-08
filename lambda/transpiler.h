@@ -351,7 +351,7 @@ void writeType(Transpiler* tp, LambdaType *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 
 MIR_context_t jit_init();
-void jit_compile(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
+void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 void jit_cleanup(MIR_context_t ctx);
 
