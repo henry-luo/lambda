@@ -26,6 +26,7 @@ enum TypeId {
     LMD_TYPE_BINARY,
     LMD_TYPE_SYMBOL,
     LMD_TYPE_ARRAY,
+    LMD_TYPE_ARRAY_INT,
     LMD_TYPE_LIST,
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
@@ -56,11 +57,15 @@ typedef struct Context {
 } Context;
 
 typedef struct Array {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
     Item* items;
     int length;
 } Array;
 
 typedef struct ArrayInt {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
     int* items;
     int length;
 } ArrayInt;
@@ -68,7 +73,6 @@ typedef struct ArrayInt {
 Array* array_new(int count, ...);
 ArrayInt* array_int_new(int count, ...);
 
-// for for-expr result
 typedef struct List {
     uint64_t type_id:8;
     uint64_t capacity:56;
@@ -77,10 +81,12 @@ typedef struct List {
 } List;
 
 typedef struct ListInt {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
     int* items;
     int length;
-    int capacity;
 } ListInt;
+
 List* list();  // constructs an empty list
 List* list_new(Context *rt, int cnt, ...);  // constructs an empty list
 void list_push(List *list, Item item);

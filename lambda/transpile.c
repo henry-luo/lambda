@@ -268,7 +268,7 @@ void transpile_items(Transpiler* tp, AstListNode *list_node) {
                 strbuf_append_char(tp->code_buf, ')');
             }
         }
-        else if (item->type->type_id == LMD_TYPE_LIST) {
+        else if (item->type->type_id == LMD_TYPE_LIST || item->type->type_id == LMD_TYPE_ARRAY) {
             transpile_expr(tp, item);  // raw pointer
         }
         else if (item->type->type_id == LMD_TYPE_ANY) {

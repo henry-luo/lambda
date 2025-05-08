@@ -6,6 +6,7 @@ Array* array_new(int count, ...) {
     va_list args;
     va_start(args, count);
     Array *arr = malloc(sizeof(Array));
+    arr->type_id = LMD_TYPE_ARRAY;  arr->capacity = count;
     arr->items = malloc(count * sizeof(Item));
     for (int i = 0; i < count; i++) {
         arr->items[i] = va_arg(args, Item);
@@ -20,10 +21,12 @@ ArrayInt* array_int_new(int count, ...) {
     va_list args;
     va_start(args, count);
     ArrayInt *arr = malloc(sizeof(ArrayInt));
+    arr->type_id = LMD_TYPE_ARRAY_INT;  arr->capacity = count;
     arr->items = malloc(count * sizeof(int));
     arr->length = count;
     for (int i = 0; i < count; i++) {
         arr->items[i] = va_arg(args, int);
+        printf("array int: %d\n", arr->items[i]);
     }       
     va_end(args);
     return arr;

@@ -164,8 +164,15 @@ void print_item(StrBuf *strbuf, Item item) {
             }
             strbuf_append_char(strbuf, ')');
         }
-        else if (type_id == LMD_TYPE_ARRAY) {
-            strbuf_append_str(strbuf, "Array");
+        else if (type_id == LMD_TYPE_ARRAY_INT) {
+            strbuf_append_char(strbuf, '[');
+            ArrayInt *array = (ArrayInt*)item;
+            printf("print array int: %p, length: %d\n", array, array->length);
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                strbuf_append_format(strbuf, "%d", array->items[i]);
+            }
+            strbuf_append_char(strbuf, ']');            
         }
         else if (type_id == LMD_TYPE_MAP) {
             strbuf_append_str(strbuf, "Map");
