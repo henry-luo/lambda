@@ -239,12 +239,6 @@ typedef struct {
 
 typedef struct {
     AstNode;  // extends AstNode
-    AstNode *declare;  // declarations in the list
-    AstNode *item;  // first item in the array
-} AstListNode;
-
-typedef struct {
-    AstNode;  // extends AstNode
     AstNode *loop;
     AstNode *then;
 } AstForNode;
@@ -260,6 +254,11 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *item;  // first item in the array
 } AstArrayNode;
+
+typedef struct {
+    AstArrayNode;  // extends AstArrayNode
+    AstNode *declare;  // declarations in the list
+} AstListNode;
 
 typedef struct {
     AstNode;  // extends AstNode

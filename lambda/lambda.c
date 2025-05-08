@@ -45,6 +45,7 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
     }
+    // list is flattened
     if (itm.type_id == LMD_TYPE_RAW_POINTER && *((uint8_t*)itm.raw_pointer) == LMD_TYPE_LIST) {
         List *nest_list = (List*)itm.raw_pointer;
         for (int i = 0; i < nest_list->length; i++) {
