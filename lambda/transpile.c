@@ -146,23 +146,6 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     strbuf_append_str(tp->code_buf, ";\n");
 }
 
-void transpile_let_expr(Transpiler* tp, AstLetNode *let_node) {
-    printf("transpile let expr\n");
-    strbuf_append_str(tp->code_buf, " ({");
-    AstNode *declare = let_node->declare;
-    while (declare) {
-        assert(declare->node_type == AST_NODE_ASSIGN);
-        transpile_assign_expr(tp, (AstNamedNode*)declare);
-        strbuf_append_char(tp->code_buf, ' ');
-        declare = declare->next;
-    }
-    if (let_node->then) {
-        printf("transpile let then\n");
-        transpile_expr(tp, let_node->then);
-    }
-    strbuf_append_str(tp->code_buf, ";})");
-}
-
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     printf("transpile let stam\n");
     AstNode *declare = let_node->declare;
@@ -232,27 +215,8 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
-void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
-    printf("transpile list expr\n");
-    LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
-    strbuf_append_str(tp->code_buf, "({");
-    // let declare first
-    AstNode *item = array_node->item;
-    while (item) {
-        if (item->node_type == AST_NODE_LET_STAM) {
-            type->length--;
-            transpile_let_stam(tp, (AstLetNode*)item);
-        }
-        item = item->next;
-    }
-    if (type->length == 0) {
-        strbuf_append_str(tp->code_buf, "null;})");
-        return;
-    }
-    strbuf_append_str(tp->code_buf, "list_new(rt,");
-    strbuf_append_int(tp->code_buf, type->length);
-    strbuf_append_char(tp->code_buf, ',');
-    item = array_node->item;  bool is_first = true;
+void transpile_items(Transpiler* tp, AstListNode *list_node) {
+    AstNode *item = list_node->item;  bool is_first = true;
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM) { item = item->next; continue; }
@@ -315,6 +279,53 @@ void transpile_list_expr(Transpiler* tp, AstArrayNode *array_node) {
         }
         item = item->next;
     }
+}
+
+void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
+    printf("transpile list expr: dec - %p, itm - %p\n", list_node->declare, list_node->item);
+    LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
+    strbuf_append_str(tp->code_buf, "({");
+    // let declare first
+    AstNode *declare = list_node->declare;
+    while (declare) {
+        assert(declare->node_type == AST_NODE_ASSIGN);
+        transpile_assign_expr(tp, (AstNamedNode*)declare);
+        strbuf_append_char(tp->code_buf, ' ');
+        declare = declare->next;
+    }
+    if (type->length == 0) {
+        strbuf_append_str(tp->code_buf, "null;})");
+        return;
+    }    
+    strbuf_append_str(tp->code_buf, "list_new(rt,");
+    strbuf_append_int(tp->code_buf, type->length);
+    strbuf_append_char(tp->code_buf, ',');
+    transpile_items(tp, list_node);
+    strbuf_append_str(tp->code_buf, ");})");
+}
+
+void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
+    printf("transpile content expr\n");
+    LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
+    strbuf_append_str(tp->code_buf, "({");
+    // let declare first
+    AstNode *item = list_node->item;
+    while (item) {
+        if (item->node_type == AST_NODE_LET_STAM) {
+            type->length--;
+            transpile_let_stam(tp, (AstLetNode*)item);
+        }
+        item = item->next;
+    }
+    if (type->length == 0) {
+        strbuf_append_str(tp->code_buf, "null;})");
+        return;
+    }
+    strbuf_append_str(tp->code_buf, "list_new(rt,");
+    strbuf_append_int(tp->code_buf, type->length);
+    strbuf_append_char(tp->code_buf, ',');
+
+    transpile_items(tp, list_node);
     strbuf_append_str(tp->code_buf, ");})");
 }
 
@@ -418,9 +429,6 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_IF_EXPR:
         transpile_if_expr(tp, (AstIfExprNode*)expr_node);
-        break;        
-    case AST_NODE_LET_EXPR:
-        transpile_let_expr(tp, (AstLetNode*)expr_node);
         break;
     case AST_NODE_LET_STAM:
         transpile_let_stam(tp, (AstLetNode*)expr_node);
@@ -435,7 +443,10 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_array_expr(tp, (AstArrayNode*)expr_node);
         break;
     case AST_NODE_LIST:
-        transpile_list_expr(tp, (AstArrayNode*)expr_node);
+        transpile_list_expr(tp, (AstListNode*)expr_node);
+        break;
+    case AST_NODE_CONTENT:
+        transpile_content_expr(tp, (AstListNode*)expr_node);
         break;
     case AST_NODE_MAP:
         transpile_map_expr(tp, (AstMapNode*)expr_node);

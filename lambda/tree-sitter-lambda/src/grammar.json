@@ -121,8 +121,17 @@
           "value": "("
         },
         {
-          "type": "SYMBOL",
-          "name": "_expression"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "_expression"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "assign_expr"
+            }
+          ]
         },
         {
           "type": "REPEAT1",
@@ -134,8 +143,17 @@
                 "value": ","
               },
               {
-                "type": "SYMBOL",
-                "name": "_expression"
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_expression"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "assign_expr"
+                  }
+                ]
               }
             ]
           }
@@ -1806,10 +1824,6 @@
         },
         {
           "type": "SYMBOL",
-          "name": "let_expr"
-        },
-        {
-          "type": "SYMBOL",
           "name": "if_expr"
         },
         {
@@ -2945,59 +2959,6 @@
         }
       ]
     },
-    "let_expr": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "let"
-        },
-        {
-          "type": "STRING",
-          "value": "("
-        },
-        {
-          "type": "FIELD",
-          "name": "declare",
-          "content": {
-            "type": "SYMBOL",
-            "name": "assign_expr"
-          }
-        },
-        {
-          "type": "REPEAT",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": ","
-              },
-              {
-                "type": "FIELD",
-                "name": "declare",
-                "content": {
-                  "type": "SYMBOL",
-                  "name": "assign_expr"
-                }
-              }
-            ]
-          }
-        },
-        {
-          "type": "STRING",
-          "value": ")"
-        },
-        {
-          "type": "FIELD",
-          "name": "then",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_expression"
-          }
-        }
-      ]
-    },
     "let_stam": {
       "type": "SEQ",
       "members": [
@@ -3388,10 +3349,6 @@
       {
         "type": "STRING",
         "value": "in"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "let_expr"
       },
       {
         "type": "SYMBOL",

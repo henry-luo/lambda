@@ -16,10 +16,6 @@
         "named": true
       },
       {
-        "type": "let_expr",
-        "named": true
-      },
-      {
         "type": "primary_expr",
         "named": true
       },
@@ -523,32 +519,6 @@
     }
   },
   {
-    "type": "let_expr",
-    "named": true,
-    "fields": {
-      "declare": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "assign_expr",
-            "named": true
-          }
-        ]
-      },
-      "then": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "_expression",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "let_stam",
     "named": true,
     "fields": {
@@ -574,6 +544,10 @@
       "types": [
         {
           "type": "_expression",
+          "named": true
+        },
+        {
+          "type": "assign_expr",
           "named": true
         }
       ]
@@ -1086,11 +1060,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -1186,11 +1160,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

@@ -110,7 +110,6 @@ module.exports = grammar({
     'logical_or',
     'to',
     'in',
-    $.let_expr,
     $.if_expr,
     $.for_expr,
     $.assign_expr
@@ -137,7 +136,10 @@ module.exports = grammar({
       repeat(seq(choice(linebreak, ';'), optional(choice($._expression, $._content_item))))
     ),
 
-    list: $ => seq('(', $._expression, repeat1(seq(',', $._expression)), ')'),
+    list: $ => seq('(', 
+      choice($._expression, $.assign_expr), 
+      repeat1(seq(',', choice($._expression, $.assign_expr))), ')'
+    ),
 
     _literal: $ => choice(
       $._number,
@@ -282,7 +284,6 @@ module.exports = grammar({
       // $.await_expression,
       $.unary_expr,
       $.binary_expr,
-      $.let_expr,
       $.if_expr,
       $.for_expr,
     ),
@@ -389,11 +390,6 @@ module.exports = grammar({
     assign_expr: $ => seq(
       field('name', $.identifier), 
       optional(seq(':', field('type', $.type_annotation))), '=', field('as', $._expression),
-    ),
-
-    let_expr: $ => seq(
-      'let', '(', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr))), ')', 
-      field('then', $._expression),
     ),
     
     let_stam: $ => seq('let', 

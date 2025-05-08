@@ -40,7 +40,6 @@
 #define SYM_ASSIGN_EXPR sym_assign_expr
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
-#define SYM_LET_EXPR sym_let_expr
 #define SYM_LET_STAM sym_let_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
@@ -183,11 +182,11 @@ typedef enum AstNodeType {
     AST_NODE_BINARY,
     AST_NODE_ARRAY,
     AST_NODE_LIST,
+    AST_NODE_CONTENT,
     AST_NODE_MAP,
     AST_NODE_ASSIGN,
     AST_NODE_LOOP,
     AST_NODE_IF_EXPR,
-    AST_NODE_LET_EXPR,
     AST_NODE_FOR_EXPR,
     AST_NODE_LET_STAM,
     AST_NODE_FIELD_EXPR,
@@ -236,8 +235,13 @@ typedef struct {
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *declare;  // declarations in let expression
-    AstNode *then;
 } AstLetNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *declare;  // declarations in the list
+    AstNode *item;  // first item in the array
+} AstListNode;
 
 typedef struct {
     AstNode;  // extends AstNode

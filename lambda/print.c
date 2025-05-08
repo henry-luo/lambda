@@ -1,6 +1,40 @@
 
 #include "transpiler.h"
 
+// print the syntax tree as an s-expr
+void print_ts_node(const char *source, TSNode node, uint32_t indent) {
+    for (uint32_t i = 0; i < indent; i++) {
+        printf("  ");  // 2 spaces per indent level
+    }
+    const char *type = ts_node_type(node);
+    if (isalpha(*type)) {
+        printf("(%s", type);
+    } else if (*type == '\'') {
+        printf("(\"%s\"", type);
+    } else { // special char
+        printf("('%s'", type);
+    }
+  
+    uint32_t child_count = ts_node_child_count(node);
+    if (child_count > 0) {
+        printf("\n");
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            print_ts_node(source, child, indent + 1);
+        }
+        for (uint32_t i = 0; i < indent; i++) {
+            printf("  ");
+        }
+    }
+    else if (isalpha(*type)) {
+      int start_byte = ts_node_start_byte(node);
+      int end_byte = ts_node_end_byte(node);
+      const char* start = source + start_byte;
+      printf(" '%.*s'", end_byte - start_byte, start);
+    }
+    printf(")\n");
+}
+
 void writeNodeSource(Transpiler* tp, TSNode node) {
     int start_byte = ts_node_start_byte(node);
     const char* start = tp->source + start_byte;
@@ -218,17 +252,13 @@ void print_ast_node(AstNode *node, int indent) {
             print_ast_node(if_node->otherwise, indent + 1);
         }
         break;
-    case AST_NODE_LET_EXPR:  case AST_NODE_LET_STAM:
-        printf("[let %s:%s]\n", node->node_type == AST_NODE_LET_EXPR ? "expr" : "stam", formatType(node->type));
+    case AST_NODE_LET_STAM:
+        printf("[let stam:%s]\n", formatType(node->type));
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             print_label(indent + 1, "declare:");
             print_ast_node(declare, indent + 1);
             declare = declare->next;
-        }
-        if (node->node_type == AST_NODE_LET_EXPR) {
-            print_label(indent + 1, "then:");
-            print_ast_node(((AstLetNode*)node)->then, indent + 1);
         }
         break;
     case AST_NODE_FOR_EXPR:
@@ -263,13 +293,28 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_LIST:
         printf("[list expr:%s]\n", formatType(node->type));
-        AstNode *li = ((AstArrayNode*)node)->item;
+        AstNode *ld = ((AstListNode*)node)->declare;
+        while (ld) {
+            print_label(indent + 1, "declare:");
+            print_ast_node(ld, indent + 1);
+            ld = ld->next;
+        }        
+        AstNode *li = ((AstListNode*)node)->item;
         while (li) {
             print_label(indent + 1, "item:");
             print_ast_node(li, indent + 1);
             li = li->next;
         }        
-        break;        
+        break;
+    case AST_NODE_CONTENT:
+        printf("[content:%s]\n", formatType(node->type));
+        AstNode *ci = ((AstListNode*)node)->item;
+        while (ci) {
+            print_label(indent + 1, "item:");
+            print_ast_node(ci, indent + 1);
+            ci = ci->next;
+        }        
+        break;  
     case AST_NODE_MAP:
         printf("[map expr:%s]\n", formatType(node->type));
         AstNamedNode *nm_item = ((AstMapNode*)node)->item;
