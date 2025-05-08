@@ -397,16 +397,15 @@ module.exports = grammar({
     ),
 
     if_expr: $ => prec.right(seq(
-      'if', '(', field('cond', $._expression), ')',
-      field('then', $._expression),
-      optional(seq('else', field('else', $._expression))),
+      'if', '(', field('cond', $._expression), ')', field('then', $._expression),
+      // 'else' clause is not optional for if_expr
+      seq('else', field('else', $._expression)),
     )),
 
     if_stam: $ => prec.right(seq(
-      'if', field('cond', $._expression),
-      '{', field('then', $.content), '}',
+      'if', field('cond', $._expression), '{', field('then', $.content), '}',
       optional(seq('else', '{', field('else', $.content), '}')),
-    )),
+    )),    
 
     loop_expr: $ => seq(
       field('name', $.identifier), 'in', field('as', $._expression),
@@ -419,8 +418,10 @@ module.exports = grammar({
     ),  
 
     for_stam: $ => seq(
-      'for', field('declare', $.loop_expr), 
-      repeat(seq(',', field('declare', $.loop_expr))), 
+      'for', choice(
+        seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))), 
+        seq('(', field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr))), ')'), 
+      ),
       '{', field('then', $.content), '}'
     ),     
 
