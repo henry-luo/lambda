@@ -121,7 +121,6 @@ Item run_script(Runner *runner, char* source) {
             .heap = runner->heap, .stack = runner->stack,
         };
         Item ret = main_func(&runtime_context);
-        printf("JIT compiled code returned: %llu\n", ret);
         return ret;
     }
 }

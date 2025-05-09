@@ -11,8 +11,6 @@
 enum TypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
-    LMD_TYPE_ANY,
-    LMD_TYPE_ERROR,
     LMD_TYPE_BOOL,
     LMD_TYPE_IMP_INT,  // implicit int, 56-bit
     LMD_TYPE_INT,  // lambda: explicit int, 64-bit
@@ -31,6 +29,8 @@ enum TypeId {
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
     LMD_TYPE_FUNC,
+    LMD_TYPE_ANY,
+    LMD_TYPE_ERROR,
 };
 typedef uint8_t TypeId;
 
@@ -127,4 +127,4 @@ Item push_d(Context *rt, double dval);
 #define const_s(index)      ((String*)*(rt->consts + index))
 
 double pow(double x, double y);
-Item add(Item a, Item b);
+Item add(Context *rt, Item a, Item b);

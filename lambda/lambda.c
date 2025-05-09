@@ -215,7 +215,7 @@ String *str_cat(String *left, String *right) {
     return result;
 }
 
-Item add(Item a, Item b) {
+Item add(Context *rt, Item a, Item b) {
     LambdaItem item_a = {.item = a};  LambdaItem item_b = {.item = b};
     if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_STRING) {
         String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
@@ -226,13 +226,14 @@ Item add(Item a, Item b) {
         return i2it(item_a.long_val + item_b.long_val);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
-        return d2it(*(double*)item_a.pointer + *(double*)item_b.pointer);
+        printf("add float: %g + %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        return d2it(push_d(rt, *(double*)item_a.pointer + *(double*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_FLOAT) {
-        return d2it((double)item_a.long_val + *(double*)item_b.pointer);
+        return d2it(push_d(rt, (double)item_a.long_val + *(double*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_IMP_INT) {
-        return d2it(*(double*)item_a.pointer + (double)item_b.long_val);
+        return d2it(push_d(rt, *(double*)item_a.pointer + (double)item_b.long_val));
     }
     else {
         printf("unknown add type: %d, %d\n", item_a.type_id, item_b.type_id);

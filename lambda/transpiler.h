@@ -143,9 +143,14 @@ typedef struct {
     ShapeEntry* shape;  // shape of the map
 } LambdaTypeMap;
 
+typedef struct LambdaTypeParam {
+    LambdaType;  // extends LambdaType
+    struct LambdaTypeParam *next;
+} LambdaTypeParam;
+
 typedef struct {
     LambdaType;  // extends LambdaType
-    LambdaType *param;
+    LambdaTypeParam *param;
     LambdaType *returned;
 } LambdaTypeFunc;
 
