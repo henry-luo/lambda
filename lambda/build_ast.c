@@ -152,14 +152,16 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
     FIND_VAR_NAME:
     NameEntry *entry = scope->first;
     while (entry) {
-        printf("checking name: %.*s, %p\n", (int)entry->name.length, entry->name.str, entry);
+        printf("checking name: %.*s vs. %.*s\n", 
+            (int)entry->name.length, entry->name.str, (int)var_name.length, var_name.str);
         if (strview_eq(&entry->name, &var_name)) { break; }
         entry = entry->next;
     }
     if (!entry) {
-        if (tp->current_scope->parent) {
-            scope = tp->current_scope->parent;
-            printf("checking parent scope: %p", scope);
+        if (scope->parent) {
+            assert(scope != scope->parent);
+            scope = scope->parent;
+            printf("checking parent scope: %p\n", scope);
             goto FIND_VAR_NAME;
         }
         printf("missing identifier %.*s\n", (int)var_name.length, var_name.str);
@@ -178,9 +180,9 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     // get the identifier name
     StrView var_name = ts_node_source(tp, id_node);
     ast_node->name = var_name;
-    printf("looking up name %.*s\n", (int)var_name.length, var_name.str);
-
+    
     // lookup the name
+    printf("looking up name: %.*s\n", (int)var_name.length, var_name.str);
     NameEntry *entry = lookup_name(tp, var_name);
     if (!entry) {
         ast_node->type = &TYPE_ERROR;
