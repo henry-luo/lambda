@@ -372,7 +372,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     AstNode* arg = call_node->argument;  LambdaTypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
         // boxing based on arg type and fn definition type
-        if (param_type && param_type->type_id == arg->type->type_id) {
+        if (param_type && (param_type->type_id == arg->type->type_id ||
+            param_type->type_id == LMD_TYPE_FLOAT && arg->type->type_id == LMD_TYPE_IMP_INT)) {
             transpile_expr(tp, arg);
         }
         else transpile_box_item(tp, arg);
