@@ -41,6 +41,7 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
     strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
 }
 
+// write the native C type for the lambda type
 void writeType(Transpiler* tp, LambdaType *type) {
     TypeId type_id = type->type_id;
     switch (type_id) {
@@ -55,14 +56,11 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;        
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "bool");
-        break;        
-    case LMD_TYPE_INT:
-        strbuf_append_str(tp->code_buf, "int");
+        break;
+    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "long");
         break;
     case LMD_TYPE_FLOAT:
-        strbuf_append_str(tp->code_buf, "float");
-        break;
-    case LMD_TYPE_DOUBLE:
         strbuf_append_str(tp->code_buf, "double");
         break;
     case LMD_TYPE_STRING:
@@ -73,8 +71,8 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "ArrayInt*");
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_IMP_INT) {
+            strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
         }
@@ -97,11 +95,11 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_BOOL) {
             strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
         }
-        else if (type_id == LMD_TYPE_INT) {
+        else if (type_id == LMD_TYPE_IMP_INT) {
             int int_val = (int32_t)ld_item.int_val;
             strbuf_append_format(strbuf, "%d", int_val);
         }
-        else if (type_id == LMD_TYPE_DOUBLE) {
+        else if (type_id == LMD_TYPE_FLOAT) {
             double num = *(double*)ld_item.pointer;
             int exponent;
             double mantissa = frexp(num, &exponent);
@@ -156,7 +154,7 @@ void print_item(StrBuf *strbuf, Item item) {
         TypeId type_id = *((uint8_t*)item);
         if (type_id == LMD_TYPE_LIST) {
             List *list = (List*)item;
-            printf("print list: %p, length: %d\n", list, list->length);
+            printf("print list: %p, length: %ld\n", list, list->length);
             strbuf_append_char(strbuf, '(');
             for (int i = 0; i < list->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
@@ -166,7 +164,7 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_ARRAY) {
             Array *array = (Array*)item;
-            printf("print array: %p, length: %d\n", array, array->length);
+            printf("print array: %p, length: %ld\n", array, array->length);
             strbuf_append_char(strbuf, '[');
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
@@ -176,11 +174,11 @@ void print_item(StrBuf *strbuf, Item item) {
         }        
         else if (type_id == LMD_TYPE_ARRAY_INT) {
             strbuf_append_char(strbuf, '[');
-            ArrayInt *array = (ArrayInt*)item;
-            printf("print array int: %p, length: %d\n", array, array->length);
+            ArrayLong *array = (ArrayLong*)item;
+            printf("print array int: %p, length: %ld\n", array, array->length);
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
-                strbuf_append_format(strbuf, "%d", array->items[i]);
+                strbuf_append_format(strbuf, "%ld", array->items[i]);
             }
             strbuf_append_char(strbuf, ']');            
         }
@@ -193,6 +191,7 @@ void print_item(StrBuf *strbuf, Item item) {
     }
 }
 
+// print the type of the AST node
 char* formatType(LambdaType *type) {
     if (!type) { return "null*"; }
     TypeId type_id = type->type_id;
@@ -204,20 +203,20 @@ char* formatType(LambdaType *type) {
     case LMD_TYPE_ERROR:
         return "ERROR";        
     case LMD_TYPE_BOOL:
-        return "bool";        
+        return "bool";
+    case LMD_TYPE_IMP_INT:
+        return "int?";
     case LMD_TYPE_INT:
         return "int";
     case LMD_TYPE_FLOAT:
         return "float";
-    case LMD_TYPE_DOUBLE:
-        return "double";
     case LMD_TYPE_STRING:
         return "char*";
 
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
-            return "ArrayInt*";
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_IMP_INT) {
+            return "ArrayLong*";
         } else {
             return "Array*";
         }

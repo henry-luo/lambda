@@ -14,11 +14,11 @@ enum TypeId {
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
     LMD_TYPE_BOOL,
-    LMD_TYPE_INT,
-    LMD_TYPE_LONG,  // lambda: int
-    LMD_TYPE_FLOAT,
-    LMD_TYPE_DOUBLE,  // lambda: float
-    LMD_TYPE_NUMBER,
+    LMD_TYPE_IMP_INT,  // implicit int, 48-bit
+    LMD_TYPE_INT,  // lambda: explicit int, 64-bit
+    LMD_TYPE_FLOAT,  // lambda: explicit float, 64-bit
+    LMD_TYPE_DECIMAL,
+    LMD_TYPE_NUMBER,  // lambda: explicit number, which includes decimal
     LMD_TYPE_DATE,
     LMD_TYPE_TIME,
     LMD_TYPE_DTIME,
@@ -60,38 +60,38 @@ typedef struct Array {
     uint64_t type_id:8;
     uint64_t capacity:56;    
     Item* items;
-    int length;
+    long length;
 } Array;
 
-typedef struct ArrayInt {
+typedef struct ArrayLong {
     uint64_t type_id:8;
     uint64_t capacity:56;    
-    int* items;
-    int length;
-} ArrayInt;
+    long* items;
+    long length;
+} ArrayLong;
 
 Array* array_new(int count, ...);
-ArrayInt* array_int_new(int count, ...);
+ArrayLong* array_long_new(int count, ...);
 
 typedef struct List {
     uint64_t type_id:8;
     uint64_t capacity:56;
     Item* items;
-    int length;
+    long length;
 } List;
 
-typedef struct ListInt {
+typedef struct ListLong {
     uint64_t type_id:8;
     uint64_t capacity:56;    
-    int* items;
-    int length;
-} ListInt;
+    long* items;
+    long length;
+} ListLong;
 
 List* list();  // constructs an empty list
 List* list_new(Context *rt, int cnt, ...);  // constructs an empty list
 void list_push(List *list, Item item);
-ListInt* list_int();  // construct an empty list
-void list_int_push(ListInt *list, int item);
+ListLong* list_long();  // construct an empty list
+void list_long_push(ListLong *list, long item);
 
 typedef struct Map {
     void* ast;  // ast node of the map
@@ -107,7 +107,7 @@ Item v2it(List *list);
 Item push_d(Context *rt, double dval);
 
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
-#define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
+#define ITEM_INT            ((uint64_t)LMD_TYPE_IMP_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
@@ -115,7 +115,7 @@ Item push_d(Context *rt, double dval);
 #define s2it(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
-#define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_DOUBLE)<<56) | (uint64_t)(double_ptr))
+#define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
 #define k2it(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))

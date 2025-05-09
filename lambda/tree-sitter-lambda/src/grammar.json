@@ -2849,7 +2849,31 @@
         },
         {
           "type": "STRING",
+          "value": "int8"
+        },
+        {
+          "type": "STRING",
+          "value": "int16"
+        },
+        {
+          "type": "STRING",
+          "value": "int32"
+        },
+        {
+          "type": "STRING",
+          "value": "int64"
+        },
+        {
+          "type": "STRING",
           "value": "int"
+        },
+        {
+          "type": "STRING",
+          "value": "float32"
+        },
+        {
+          "type": "STRING",
+          "value": "float64"
         },
         {
           "type": "STRING",
@@ -2865,14 +2889,6 @@
         },
         {
           "type": "STRING",
-          "value": "string"
-        },
-        {
-          "type": "STRING",
-          "value": "symbol"
-        },
-        {
-          "type": "STRING",
           "value": "date"
         },
         {
@@ -2882,6 +2898,18 @@
         {
           "type": "STRING",
           "value": "datetime"
+        },
+        {
+          "type": "STRING",
+          "value": "symbol"
+        },
+        {
+          "type": "STRING",
+          "value": "string"
+        },
+        {
+          "type": "STRING",
+          "value": "binary"
         },
         {
           "type": "STRING",
@@ -2898,6 +2926,10 @@
         {
           "type": "STRING",
           "value": "element"
+        },
+        {
+          "type": "STRING",
+          "value": "object"
         },
         {
           "type": "STRING",

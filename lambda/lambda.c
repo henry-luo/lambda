@@ -16,17 +16,17 @@ Array* array_new(int count, ...) {
     return arr;
 }
 
-ArrayInt* array_int_new(int count, ...) {
+ArrayLong* array_long_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    ArrayInt *arr = malloc(sizeof(ArrayInt));
+    ArrayLong *arr = malloc(sizeof(ArrayLong));
     arr->type_id = LMD_TYPE_ARRAY_INT;  arr->capacity = count;
-    arr->items = malloc(count * sizeof(int));
+    arr->items = malloc(count * sizeof(long));
     arr->length = count;
     for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, int);
-        printf("array int: %d\n", arr->items[i]);
+        arr->items[i] = va_arg(args, long);
+        printf("array int: %ld\n", arr->items[i]);
     }       
     va_end(args);
     return arr;
@@ -78,17 +78,17 @@ List* list_new(Context *rt, int count, ...) {
     return list;
 }
 
-ListInt* list_int() {
-    printf("list_int");
-    ListInt *list = malloc(sizeof(ListInt));
+ListLong* list_long() {
+    printf("list_long");
+    ListLong *list = malloc(sizeof(ListLong));
     list->items = NULL;
     list->length = 0;
     list->capacity = 0;
     return list;
 }
 
-void list_int_push(ListInt *list, int item) {
-    printf("list_int_push: %d", item);
+void list_long_push(ListLong *list, long item) {
+    printf("list_long_push: %ld", item);
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(long));
@@ -124,7 +124,7 @@ Map* map_new(Context *rt, int type_index, ...) {
         printf("field type: %d, offset: %d\n", field->type->type_id, field->byte_offset);
         void* field_ptr = (char*)map->data + field->byte_offset;
         switch (field->type->type_id) {
-            case LMD_TYPE_INT:
+            case LMD_TYPE_IMP_INT:
                 *(long*)field_ptr = va_arg(args, long);
                 break;
             case LMD_TYPE_FLOAT:
@@ -155,7 +155,7 @@ Item map_get(Context *rt, Map* map, char *key) {
             switch (type_id) {
                 case LMD_TYPE_BOOL:
                     return b2it(*(bool*)field_ptr);
-                case LMD_TYPE_INT:
+                case LMD_TYPE_IMP_INT:
                     return i2it(*(int*)field_ptr);
                 // case LMD_TYPE_FLOAT:
                 //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
@@ -189,7 +189,7 @@ bool item_true(Item itm) {
 // list to item
 Item v2it(List* list) {
     if (!list) { return ITEM_NULL; }
-    printf("v2it %p, length: %d\n", list, list->length);
+    printf("v2it %p, length: %ld\n", list, list->length);
     if (list->length == 0) { return ITEM_NULL; }
     if (list->length == 1) { return list->items[0]; }
     return (Item)list;
@@ -222,10 +222,10 @@ Item add(Item a, Item b) {
         String *result = str_cat(str_a, str_b);
         return s2it(result);
     }
-    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+    else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_IMP_INT) {
         return i2it(item_a.int_val + item_b.int_val);
     }
-    else if (item_a.type_id == LMD_TYPE_DOUBLE && item_b.type_id == LMD_TYPE_DOUBLE) {
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
         return d2it(*(double*)item_a.pointer + *(double*)item_b.pointer);
     }
     return ITEM_ERROR;

@@ -1015,6 +1015,10 @@
     "named": true
   },
   {
+    "type": "binary",
+    "named": false
+  },
+  {
     "type": "boolean",
     "named": false
   },
@@ -1028,11 +1032,11 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
@@ -1065,6 +1069,14 @@
   {
     "type": "float",
     "named": true
+  },
+  {
+    "type": "float32",
+    "named": false
+  },
+  {
+    "type": "float64",
+    "named": false
   },
   {
     "type": "fn",
@@ -1107,6 +1119,22 @@
     "named": false
   },
   {
+    "type": "int16",
+    "named": false
+  },
+  {
+    "type": "int32",
+    "named": false
+  },
+  {
+    "type": "int64",
+    "named": false
+  },
+  {
+    "type": "int8",
+    "named": false
+  },
+  {
     "type": "integer",
     "named": true
   },
@@ -1132,6 +1160,10 @@
   },
   {
     "type": "number",
+    "named": false
+  },
+  {
+    "type": "object",
     "named": false
   },
   {

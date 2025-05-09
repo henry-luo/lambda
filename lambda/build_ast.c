@@ -4,23 +4,20 @@
 LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY};
 LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
 LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
-LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
+LambdaType TYPE_IMP_INT = {.type_id = LMD_TYPE_IMP_INT};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
-LambdaType TYPE_DOUBLE = {.type_id = LMD_TYPE_DOUBLE};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 
 LambdaType CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
-LambdaType CONST_INT = {.type_id = LMD_TYPE_INT, .is_const = 1};
+LambdaType CONST_IMP_INT = {.type_id = LMD_TYPE_IMP_INT, .is_const = 1};
 LambdaType CONST_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1};
-LambdaType CONST_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 1};
 LambdaType CONST_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1};
 
 LambdaType LIT_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1, .is_literal = 1};
 LambdaType LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1, .is_literal = 1};
-LambdaType LIT_INT = {.type_id = LMD_TYPE_INT, .is_const = 1, .is_literal = 1};
+LambdaType LIT_IMP_INT = {.type_id = LMD_TYPE_IMP_INT, .is_const = 1, .is_literal = 1};
 LambdaType LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
-LambdaType LIT_DOUBLE = {.type_id = LMD_TYPE_DOUBLE, .is_const = 1, .is_literal = 1};
 LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
 
 int byte_size[] = {
@@ -29,7 +26,7 @@ int byte_size[] = {
     [LMD_TYPE_ANY] = sizeof(void*),
     [LMD_TYPE_ERROR] = sizeof(void*),
     [LMD_TYPE_BOOL] = sizeof(bool),
-    [LMD_TYPE_INT] = sizeof(long),
+    [LMD_TYPE_IMP_INT] = sizeof(long),
     [LMD_TYPE_FLOAT] = sizeof(double),
     [LMD_TYPE_STRING] = sizeof(char*),
     [LMD_TYPE_BINARY] = sizeof(char*),
@@ -222,7 +219,7 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
 }
 
 LambdaType* build_lit_float(Transpiler* tp, TSNode node) {
-    LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_DOUBLE, sizeof(LambdaTypeItem));
+    LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_FLOAT, sizeof(LambdaTypeItem));
     const char* num_str = tp->source + ts_node_start_byte(node);
     item_type->double_val = atof(num_str);
     arraylist_append(tp->const_list, &item_type->double_val);
@@ -248,7 +245,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = &LIT_BOOL;
     }
     else if (symbol == SYM_INT) {
-        ast_node->type = &LIT_INT;
+        ast_node->type = &LIT_IMP_INT;
     }
     else if (symbol == SYM_FLOAT) {
         ast_node->type = build_lit_float(tp, child);
@@ -319,7 +316,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
 
     TypeId type_id;
     if (ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
-        type_id = LMD_TYPE_DOUBLE;
+        type_id = LMD_TYPE_FLOAT;
     } else if (ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MOD) {
         type_id = max(ast_node->left->type->type_id, ast_node->right->type->type_id);
     } else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
@@ -328,7 +325,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE) {
         type_id = LMD_TYPE_BOOL;
     } else if (ast_node->op == OPERATOR_IDIV) {
-        type_id = LMD_TYPE_INT;
+        type_id = LMD_TYPE_IMP_INT;
     } else {
         type_id = LMD_TYPE_ANY;
     }
@@ -447,10 +444,10 @@ LambdaType *build_type_annotation(Transpiler* tp, TSNode type_node) {
         type->type_id = LMD_TYPE_ANY;
     }       
     else if (strview_equal(&type_name, "int")) {
-        type->type_id = LMD_TYPE_LONG;
+        type->type_id = LMD_TYPE_IMP_INT;
     }
     else if (strview_equal(&type_name, "float")) {
-        type->type_id = LMD_TYPE_DOUBLE;
+        type->type_id = LMD_TYPE_FLOAT;
     }
     else if (strview_equal(&type_name, "number")) {
         type->type_id = LMD_TYPE_NUMBER;
@@ -786,7 +783,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == SYM_INT) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        ast_node->type = &LIT_INT;
+        ast_node->type = &LIT_IMP_INT;
         return (AstNode*)ast_node;
     }
     else if (symbol == SYM_FLOAT) {

@@ -75,7 +75,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            else if (bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->left->type->type_id == LMD_TYPE_DOUBLE) {
+            else if (bi_node->left->type->type_id == LMD_TYPE_IMP_INT || bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, '+');
@@ -85,8 +85,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             }
             // else error
         }
-        else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_DOUBLE &&
-            LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_DOUBLE) {
+        else if (LMD_TYPE_IMP_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_IMP_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
             strbuf_append_str(tp->code_buf, "(");
             transpile_expr(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, '+');
@@ -96,8 +96,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
         strbuf_append_str(tp->code_buf, "null");  // not able to handle yet
     }
-    else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_INT && 
-        bi_node->right->type->type_id == LMD_TYPE_INT) {
+    else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_IMP_INT && 
+        bi_node->right->type->type_id == LMD_TYPE_IMP_INT) {
         // division is always carried out in double
         strbuf_append_str(tp->code_buf, "((double)");
         transpile_expr(tp, bi_node->left);
@@ -161,7 +161,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
     // todo: prefix var name with '_'
     LambdaType *item_type = loop_node->as->type->type_id == LMD_TYPE_ARRAY ? 
         ((LambdaTypeArray*)loop_node->as->type)->nested : &TYPE_ANY;
-    strbuf_append_str(tp->code_buf, (item_type->type_id == LMD_TYPE_INT) ? " ArrayInt *arr=" : " Array *arr=");
+    strbuf_append_str(tp->code_buf, (item_type->type_id == LMD_TYPE_IMP_INT) ? " ArrayLong *arr=" : " Array *arr=");
     transpile_expr(tp, loop_node->as);
     strbuf_append_str(tp->code_buf, ";\n for (int i=0; i<arr->length; i++){\n ");
     writeType(tp, item_type);
@@ -174,8 +174,8 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* for_t
         transpile_loop_expr(tp, (AstNamedNode*)next_loop, for_then);
     }
     else {
-        strbuf_append_str(tp->code_buf, (item_type->type_id == LMD_TYPE_INT) ? 
-            " list_int_push(ls," : " list_push(ls,");
+        strbuf_append_str(tp->code_buf, (item_type->type_id == LMD_TYPE_IMP_INT) ? 
+            " list_long_push(ls," : " list_push(ls,");
         transpile_expr(tp, for_then);
         strbuf_append_str(tp->code_buf, ");");
     }
@@ -186,8 +186,8 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
     printf("transpile for expr\n");
     // init a list
     strbuf_append_str(tp->code_buf, 
-        (for_node->then->type->type_id == LMD_TYPE_INT) ?
-        "({ListInt* ls=list_int();\n" : "({List* ls=list(); \n");
+        (for_node->then->type->type_id == LMD_TYPE_IMP_INT) ?
+        "({ListLong* ls=list_long();\n" : "({List* ls=list(); \n");
     AstNode *loop = for_node->loop;
     if (loop) {
         printf("transpile for loop\n");
@@ -207,7 +207,7 @@ void transpile_items(Transpiler* tp, AstArrayNode *array_node) {
         else { strbuf_append_char(tp->code_buf, ','); }
 
         printf("list item type:%d\n", item->type->type_id);
-        if (item->type->type_id == LMD_TYPE_INT) {
+        if (item->type->type_id == LMD_TYPE_IMP_INT) {
             strbuf_append_str(tp->code_buf, "i2it(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
@@ -220,7 +220,7 @@ void transpile_items(Transpiler* tp, AstArrayNode *array_node) {
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
-        else if (item->type->type_id == LMD_TYPE_DOUBLE) {
+        else if (item->type->type_id == LMD_TYPE_FLOAT) {
             if (item->type->is_literal) {
                 strbuf_append_str(tp->code_buf, "const_d2it(");
                 LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
@@ -266,8 +266,8 @@ void transpile_items(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
-    bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
-    strbuf_append_str(tp->code_buf, is_int_array ? "array_int_new(" : "array_new(");
+    bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_IMP_INT;
+    strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : "array_new(");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     if (is_int_array) {
