@@ -96,7 +96,7 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
         }
         else if (type_id == LMD_TYPE_IMP_INT) {
-            int int_val = (int32_t)ld_item.int_val;
+            int int_val = (int32_t)ld_item.long_val;
             strbuf_append_format(strbuf, "%d", int_val);
         }
         else if (type_id == LMD_TYPE_FLOAT) {
@@ -145,7 +145,10 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_BINARY) {
             String *string = (String*)ld_item.pointer;
             strbuf_append_format(strbuf, "b'%s'", string->str);
-        }               
+        }
+        else if (type_id == LMD_TYPE_ERROR) {
+            strbuf_append_str(strbuf, "ERROR");
+        }
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);
         }        

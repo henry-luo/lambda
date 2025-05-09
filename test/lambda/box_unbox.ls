@@ -1,5 +1,5 @@
-// fn add(a, b) { a + b }
-// (add(1, 1))
+fn add(a, b) { a + b }
+add(1, 1)
 
 // let a = fn();
 // let a = fn():int;

@@ -223,10 +223,19 @@ Item add(Item a, Item b) {
         return s2it(result);
     }
     else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_IMP_INT) {
-        return i2it(item_a.int_val + item_b.int_val);
+        return i2it(item_a.long_val + item_b.long_val);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
         return d2it(*(double*)item_a.pointer + *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_FLOAT) {
+        return d2it((double)item_a.long_val + *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_IMP_INT) {
+        return d2it(*(double*)item_a.pointer + (double)item_b.long_val);
+    }
+    else {
+        printf("unknown add type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
     return ITEM_ERROR;
 }

@@ -294,8 +294,8 @@ typedef union LambdaItem {
     struct {
         union {
             struct {
-                uint64_t int_val: 32;
-                uint64_t _32: 32;
+                uint64_t long_val: 56;
+                uint64_t _8: 8;
             };
             struct {
                 uint64_t bool_val: 8;

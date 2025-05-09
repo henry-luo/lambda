@@ -111,7 +111,7 @@ Item push_d(Context *rt, double dval);
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
-#define i2it(int_val)        (ITEM_IMP_INT | (uint32_t)(int_val))
+#define i2it(int_val)        (ITEM_IMP_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
 #define s2it(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
