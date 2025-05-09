@@ -14,7 +14,7 @@ enum TypeId {
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
     LMD_TYPE_BOOL,
-    LMD_TYPE_IMP_INT,  // implicit int, 48-bit
+    LMD_TYPE_IMP_INT,  // implicit int, 56-bit
     LMD_TYPE_INT,  // lambda: explicit int, 64-bit
     LMD_TYPE_FLOAT,  // lambda: explicit float, 64-bit
     LMD_TYPE_DECIMAL,
@@ -107,11 +107,11 @@ Item v2it(List *list);
 Item push_d(Context *rt, double dval);
 
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
-#define ITEM_INT            ((uint64_t)LMD_TYPE_IMP_INT << 56)
+#define ITEM_IMP_INT        ((uint64_t)LMD_TYPE_IMP_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
-#define i2it(int_val)        (ITEM_INT | (uint32_t)(int_val))
+#define i2it(int_val)        (ITEM_IMP_INT | (uint32_t)(int_val))
 #define s2it(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))

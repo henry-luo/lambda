@@ -17,4 +17,4 @@
 // any(n % 5 == 0 for n in numbers) 
 
 // let a=123, b=a*2, c=a+2
-[1]
+(-7, true)
