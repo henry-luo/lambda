@@ -1,8 +1,10 @@
 fn add(a, b) { a + b }
+fn add_i(a:int, b:int) { a + b }
 fn add_f(a:float, b:float) { a + b }
 fn add_f2(a, b:float) { a + b }
 
 add(1, 1)
+add_i(1, 2)
 add_f(1, 1.5)
 add_f(1.0, 2.0)
 add_f2(1.0, 3.5)

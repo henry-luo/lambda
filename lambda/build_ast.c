@@ -446,7 +446,7 @@ LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
         type.type_id = LMD_TYPE_ANY;
     }       
     else if (strview_equal(&type_name, "int")) {
-        type.type_id = LMD_TYPE_IMP_INT;
+        type.type_id = LMD_TYPE_INT;
     }
     else if (strview_equal(&type_name, "float")) {
         type.type_id = LMD_TYPE_FLOAT;

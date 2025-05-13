@@ -38,6 +38,7 @@ func_obj_t func_list[] = {
     {"item_true", (void (*)(void))item_true},
     {"v2it", (void (*)(void))v2it},
     {"push_d", (void (*)(void))push_d},
+    {"push_l", (void (*)(void))push_l},
     {"str_cat", (void (*)(void))str_cat},
     {"add", (void (*)(void))add},
     {NULL, NULL}

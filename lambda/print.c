@@ -99,6 +99,10 @@ void print_item(StrBuf *strbuf, Item item) {
             int int_val = (int32_t)ld_item.long_val;
             strbuf_append_format(strbuf, "%d", int_val);
         }
+        else if (type_id == LMD_TYPE_INT) {
+            long long_val = *(long*)ld_item.pointer;
+            strbuf_append_format(strbuf, "%ld", long_val);
+        }
         else if (type_id == LMD_TYPE_FLOAT) {
             double num = *(double*)ld_item.pointer;
             int exponent;
@@ -208,7 +212,7 @@ char* formatType(LambdaType *type) {
     case LMD_TYPE_BOOL:
         return "bool";
     case LMD_TYPE_IMP_INT:
-        return "int?";
+        return "int^";
     case LMD_TYPE_INT:
         return "int";
     case LMD_TYPE_FLOAT:

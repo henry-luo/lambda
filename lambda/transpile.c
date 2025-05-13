@@ -18,6 +18,19 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
     }
+    else if (item->type->type_id == LMD_TYPE_INT) {
+        if (item->type->is_literal) {
+            strbuf_append_str(tp->code_buf, "const_l2it(");
+            LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+            strbuf_append_int(tp->code_buf, item_type->const_index);
+            strbuf_append_str(tp->code_buf, ")");
+        }
+        else {
+            strbuf_append_str(tp->code_buf, "push_l(rt,");
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+    }    
     else if (item->type->type_id == LMD_TYPE_FLOAT) {
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_d2it(");
@@ -130,7 +143,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            else if (bi_node->left->type->type_id == LMD_TYPE_IMP_INT || bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
+            else if (bi_node->left->type->type_id == LMD_TYPE_IMP_INT || bi_node->left->type->type_id == LMD_TYPE_INT ||
+                bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, '+');
@@ -372,9 +386,32 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     AstNode* arg = call_node->argument;  LambdaTypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
         // boxing based on arg type and fn definition type
-        if (param_type && (param_type->type_id == arg->type->type_id ||
-            param_type->type_id == LMD_TYPE_FLOAT && arg->type->type_id == LMD_TYPE_IMP_INT)) {
-            transpile_expr(tp, arg);
+        if (param_type) {
+            if ((param_type->type_id == arg->type->type_id ||
+                param_type->type_id == LMD_TYPE_FLOAT &&
+                (arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT))) {
+                transpile_expr(tp, arg);
+            }
+            else if (param_type->type_id == LMD_TYPE_INT) {
+                if (arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT) {
+                    transpile_expr(tp, arg);
+                }
+                else if (arg->type->type_id == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "((long)");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else if (arg->type->type_id == LMD_TYPE_ANY) {
+                    strbuf_append_str(tp->code_buf, "it2i(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else {
+                    // todo: raise error
+                    strbuf_append_str(tp->code_buf, "null");
+                }
+            }
+            else transpile_box_item(tp, arg);
         }
         else transpile_box_item(tp, arg);
         if (arg->next) {

@@ -202,6 +202,13 @@ Item push_d(Context *rt, double dval) {
     return (Item) d2it(dptr);
 }
 
+Item push_l(Context *rt, long lval) {
+    printf("push_l: %ld\n", lval);
+    long *lptr = pack_alloc(rt->stack, sizeof(long));
+    *lptr = lval;
+    return (Item) l2it(lptr);
+}
+
 String *str_cat(String *left, String *right) {
     printf("str_cat %p, %p\n", left, right);
     size_t left_len = left->len;
@@ -224,6 +231,9 @@ Item add(Context *rt, Item a, Item b) {
     }
     else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_IMP_INT) {
         return i2it(item_a.long_val + item_b.long_val);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        return l2it(push_l(rt, *(long*)item_a.pointer + *(long*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
         printf("add float: %g + %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
