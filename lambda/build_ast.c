@@ -317,9 +317,10 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     ast_node->right = build_expr(tp, right_node);
 
     TypeId type_id;
-    if (ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
+    if (ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
         type_id = LMD_TYPE_FLOAT;
-    } else if (ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MOD) {
+    } else if (ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB || 
+        ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_MOD) {
         type_id = max(ast_node->left->type->type_id, ast_node->right->type->type_id);
     } else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
         ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE || 

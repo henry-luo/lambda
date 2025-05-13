@@ -250,3 +250,35 @@ Item add(Context *rt, Item a, Item b) {
     }
     return ITEM_ERROR;
 }
+
+long it2l(Item item) {
+    LambdaItem itm = {.item = item};
+    if (itm.type_id == LMD_TYPE_IMP_INT) {
+        return itm.long_val;
+    }
+    else if (itm.type_id == LMD_TYPE_INT) {
+        return *(long*)itm.pointer;
+    }
+    else if (itm.type_id == LMD_TYPE_FLOAT) {
+        return (long)*(double*)itm.pointer;
+    }
+    printf("invalid type %d\n", itm.type_id);
+    // todo: push error
+    return 0;
+}
+
+double it2d(Item item) {
+    LambdaItem itm = {.item = item};
+    if (itm.type_id == LMD_TYPE_IMP_INT) {
+        return (double)itm.long_val;
+    }
+    else if (itm.type_id == LMD_TYPE_INT) {
+        return (double)*(long*)itm.pointer;
+    }
+    else if (itm.type_id == LMD_TYPE_FLOAT) {
+        return *(double*)itm.pointer;
+    }
+    printf("invalid type %d\n", itm.type_id);
+    // todo: push error
+    return 0;
+}

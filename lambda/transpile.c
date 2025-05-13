@@ -387,10 +387,23 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     while (arg) {
         // boxing based on arg type and fn definition type
         if (param_type) {
-            if ((param_type->type_id == arg->type->type_id ||
-                param_type->type_id == LMD_TYPE_FLOAT &&
-                (arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT))) {
+            if (param_type->type_id == arg->type->type_id) {
                 transpile_expr(tp, arg);
+            }
+            else if (param_type->type_id == LMD_TYPE_FLOAT) {
+                if ((arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT || 
+                    arg->type->type_id == LMD_TYPE_FLOAT)) {
+                    transpile_expr(tp, arg);
+                }
+                else if (arg->type->type_id == LMD_TYPE_ANY) {
+                    strbuf_append_str(tp->code_buf, "it2d(");
+                    transpile_expr(tp, arg);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else {
+                    // todo: raise error
+                    strbuf_append_str(tp->code_buf, "null");
+                }
             }
             else if (param_type->type_id == LMD_TYPE_INT) {
                 if (arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT) {
@@ -402,7 +415,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     strbuf_append_char(tp->code_buf, ')');
                 }
                 else if (arg->type->type_id == LMD_TYPE_ANY) {
-                    strbuf_append_str(tp->code_buf, "it2i(");
+                    strbuf_append_str(tp->code_buf, "it2l(");
                     transpile_expr(tp, arg);
                     strbuf_append_char(tp->code_buf, ')');
                 }

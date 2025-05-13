@@ -41,6 +41,8 @@ func_obj_t func_list[] = {
     {"push_l", (void (*)(void))push_l},
     {"str_cat", (void (*)(void))str_cat},
     {"add", (void (*)(void))add},
+    {"it2l", (void (*)(void))it2l},
+    {"it2d", (void (*)(void))it2d},
     {NULL, NULL}
 };
 

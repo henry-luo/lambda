@@ -129,5 +129,8 @@ Item push_l(Context *rt, long lval);
 
 #define const_s(index)      ((String*)*(rt->consts + index))
 
+long it2l(Item item);
+double it2d(Item item);
+
 double pow(double x, double y);
 Item add(Context *rt, Item a, Item b);

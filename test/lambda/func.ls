@@ -8,3 +8,8 @@ fn strcat(a: string, b: string) { a + b }
 
 strcat("hello", " world")
 factorial(5.0)
+
+// fm: all(), any()
+// numbers = [2, 5, 7, 9]
+// all(n > 0 for n in numbers) 
+// any(n % 5 == 0 for n in numbers) 
