@@ -43,10 +43,10 @@ func_obj_t func_list[] = {
     {"add", (void (*)(void))add},
     {"it2l", (void (*)(void))it2l},
     {"it2d", (void (*)(void))it2d},
-    {NULL, NULL}
 };
 
 void *import_resolver(const char *name) {
+    printf("resolving func: %s\n", name);
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) 
         if (strcmp(func_list[i].name, name) == 0)
