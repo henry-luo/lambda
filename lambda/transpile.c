@@ -61,14 +61,15 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
     }
-    else if (item->type->type_id == LMD_TYPE_LIST || item->type->type_id == LMD_TYPE_ARRAY) {
+    else if (item->type->type_id == LMD_TYPE_LIST || item->type->type_id == LMD_TYPE_ARRAY || 
+        item->type->type_id == LMD_TYPE_MAP) {
         transpile_expr(tp, item);  // raw pointer
     }
     else if (item->type->type_id == LMD_TYPE_ANY) {
         transpile_expr(tp, item);  // no boxing needed
     }
     else {
-        printf("unknown item type %d\n", item->type->type_id);
+        printf("unknown box item type: %d\n", item->type->type_id);
     }
 }
 

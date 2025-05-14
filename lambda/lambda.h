@@ -94,10 +94,10 @@ ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);
 
 typedef struct Map {
-    void* ast;  // ast node of the map
+    uint8_t type_id;   
+    void* type;  // map type/shape
     void* data;  // packed data struct of the map
 } Map;
-Map* map();  // constructs an empty map
 Map* map_new(Context *rt, int type_index, ...);
 Item map_get(Context *rt, Map* map, char *key);
 

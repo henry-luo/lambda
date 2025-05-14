@@ -96,24 +96,18 @@ void list_long_push(ListLong *list, long item) {
     list->items[list->length++] = item;
 }
 
-Map* map() {
-    Map *map = malloc(sizeof(Map));
-    map->ast = NULL;
-    map->data = NULL;
-    return map;
-}
 Map* map_new(Context *rt, int type_index, ...) {
-    printf("map_new %p at %d\n", rt, type_index);
+    printf("map_new with shape %d\n", type_index);
     ArrayList* type_list = (ArrayList*)rt->type_list;
     AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
-    printf("map node: %p, type: %p, node_type: %d\n", node, node->type, node->node_type);
-    Map *map = malloc(sizeof(Map));
-    map->ast = node;
-    map->data = heap_alloc(rt->heap, ((LambdaTypeMap*)node->type)->byte_size);
-    printf("map data: %p, byte_size: %d\n", map->data, ((LambdaTypeMap*)node->type)->byte_size);
+    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    printf("map node: %p, type: %p\n", node, map_type);
+    Map *map = calloc(1, sizeof(Map));
+    map->type_id = LMD_TYPE_MAP;  map->type = map_type;
+    map->data = heap_alloc(rt->heap, map_type->byte_size);
+    printf("map data: %p, byte_size: %d\n", map->data, map_type->byte_size);
 
     // set the fields
-    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
     printf("map type: %d\n", map_type->type_id);
     int count = map_type->length;
     printf("map length: %d\n", count);
@@ -124,7 +118,7 @@ Map* map_new(Context *rt, int type_index, ...) {
         printf("field type: %d, offset: %d\n", field->type->type_id, field->byte_offset);
         void* field_ptr = (char*)map->data + field->byte_offset;
         switch (field->type->type_id) {
-            case LMD_TYPE_IMP_INT:
+            case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
                 *(long*)field_ptr = va_arg(args, long);
                 break;
             case LMD_TYPE_FLOAT:
@@ -147,7 +141,7 @@ Map* map_new(Context *rt, int type_index, ...) {
 
 Item map_get(Context *rt, Map* map, char *key) {
     if (!rt || !map || !key) { return ITEM_NULL; }
-    ShapeEntry *field = ((LambdaTypeMap*)((AstMapNode*)map->ast)->type)->shape;
+    ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
     while (field) {
         if (strncmp(field->name.str, key, field->name.length) == 0) {
             TypeId type_id = field->type->type_id;

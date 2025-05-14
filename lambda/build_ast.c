@@ -519,9 +519,9 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     return (AstNode*)ast_node;
 }
 
-AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
-    printf("build pair expr\n");
-    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, pair_node, sizeof(AstNamedNode));
+AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
+    printf("build key expr\n");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
@@ -529,7 +529,7 @@ AstNamedNode* build_pair_expr(Transpiler* tp, TSNode pair_node) {
     ast_node->name.length = ts_node_end_byte(name) - start_byte;
 
     TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
-    printf("build pair as\n");
+    printf("build key as\n");
     ast_node->as = build_expr(tp, val_node);
 
     // determine the type of the field
@@ -546,7 +546,7 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
     TSNode child = ts_node_named_child(map_node, 0);
     AstNamedNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
-        AstNamedNode* item = build_pair_expr(tp, child);
+        AstNamedNode* item = build_key_expr(tp, child);
         if (!prev_item) { ast_node->item = item; } 
         else { prev_item->next = (AstNode*)item; }
         prev_item = item;

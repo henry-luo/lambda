@@ -190,7 +190,43 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_char(strbuf, ']');            
         }
         else if (type_id == LMD_TYPE_MAP) {
-            strbuf_append_str(strbuf, "Map");
+            Map *map = (Map*)item;
+            LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
+            printf("print map: %p, length: %d\n", map, map_type->length);
+            strbuf_append_char(strbuf, '{');
+            ShapeEntry *field = map_type->shape;  void* data = map->data;
+            for (int i = 0; i < map_type->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                strbuf_append_format(strbuf, "%.*s:", (int)field->name.length, field->name.str);
+                switch (field->type->type_id) {
+                case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+                    strbuf_append_format(strbuf, "%ld", *(long*)data);
+                    break;
+                case LMD_TYPE_BOOL:
+                    strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
+                    break;
+                case LMD_TYPE_FLOAT:
+                    strbuf_append_format(strbuf, "%g", *(double*)data);
+                    break;
+                case LMD_TYPE_STRING:
+                    strbuf_append_format(strbuf, "\"%s\"", *(char**)data);
+                    break;
+                case LMD_TYPE_SYMBOL:
+                    strbuf_append_format(strbuf, "'%s'", *(char**)data);
+                    break;
+                case LMD_TYPE_DTIME:
+                    strbuf_append_format(strbuf, "t'%s'", *(char**)data);
+                    break;
+                case LMD_TYPE_BINARY:
+                    strbuf_append_format(strbuf, "b'%s'",  *(char**)data);
+                    break;
+                default:
+                    strbuf_append_format(strbuf, "unknown");
+                }
+                data = (uint8_t*)data + field->byte_offset;
+                field = field->next;
+            }
+            strbuf_append_char(strbuf, '}');
         }        
         else {
             strbuf_append_format(strbuf, "unknown type: %d", type_id);
@@ -298,8 +334,14 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_ASSIGN:
-        printf("[assign expr:%s]\n", formatType(node->type));
-        print_ast_node(((AstNamedNode*)node)->as, indent + 1);
+        AstNamedNode* assign = (AstNamedNode*)node;
+        printf("[assign expr:%.*s:%s]\n", (int)assign->name.length, assign->name.str, formatType(node->type));
+        print_ast_node(assign->as, indent + 1);
+        break;
+    case AST_NODE_KEY_EXPR:
+        AstNamedNode* key = (AstNamedNode*)node;
+        printf("[key expr:%.*s:%s]\n", (int)key->name.length, key->name.str, formatType(node->type));
+        print_ast_node(key->as, indent + 1);
         break;
     case AST_NODE_LOOP:
         printf("[loop expr:%s]\n", formatType(node->type));

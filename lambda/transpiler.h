@@ -189,6 +189,7 @@ typedef enum AstNodeType {
     AST_NODE_LIST,
     AST_NODE_CONTENT,
     AST_NODE_MAP,
+    AST_NODE_KEY_EXPR,
     AST_NODE_ASSIGN,
     AST_NODE_LOOP,
     AST_NODE_IF_EXPR,
