@@ -598,7 +598,8 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     ast_node->as = build_expr(tp, expr_node);
 
     // determine the type of the variable
-    ast_node->type = ast_node->as->type;
+    ast_node->type = ast_node->as->type->type_id == LMD_TYPE_ARRAY || ast_node->as->type->type_id == LMD_TYPE_LIST ?
+        ((LambdaTypeArray*)ast_node->as->type)->nested : ast_node->as->type;
 
     // push the name to the name stack
     push_name(tp, ast_node);
@@ -681,9 +682,9 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     push_name(tp, (AstNamedNode*)ast_node);
 
     // build the params
-    ast_node->params = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
-    ast_node->params->parent = tp->current_scope;
-    tp->current_scope = ast_node->params;
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
     // let can have multiple cond declarations
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
@@ -715,15 +716,15 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     ts_tree_cursor_delete(&cursor);
     
     // build the function body
-    ast_node->locals = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
-    ast_node->locals->parent = tp->current_scope;
-    tp->current_scope = ast_node->locals;
+    // ast_node->locals = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    // ast_node->locals->parent = tp->current_scope;
+    // tp->current_scope = ast_node->locals;
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
     ast_node->body = build_expr(tp, fn_body_node);
     if (!fn_type->returned) fn_type->returned = ast_node->body->type;
 
     // restore parent namescope
-    tp->current_scope = ast_node->params->parent;
+    tp->current_scope = ast_node->vars->parent;
     printf("end building function %.*s\n", (int)name.length, name.str);
     return (AstNode*)ast_node;
 }

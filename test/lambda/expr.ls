@@ -11,7 +11,7 @@ if (c > 10) { "great" }
 // test for statement
 for a in ["a", "b", "c"] { "ha!" }
 for (a in ["a"]) { "wah!" }
-for (b in ['b']) { b } // b+1
+for (b in [123]) { b+1 }
 
 let d:float = 123
 (d+4)

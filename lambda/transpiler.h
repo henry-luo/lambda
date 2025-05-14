@@ -281,8 +281,7 @@ typedef struct {
     StrView name;
     AstNode *body;
     AstNamedNode *param; // first parameter of the function
-    NameScope *params;  // params for the function
-    NameScope *locals;  // local variables in the function
+    NameScope *vars;  // vars including params and local variables
 } AstFuncNode;
 
 typedef struct {
