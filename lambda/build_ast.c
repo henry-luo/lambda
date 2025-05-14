@@ -362,7 +362,10 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeArray));
     LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
 
-    // build declarations in the list first
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
+
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode *prev_declare = NULL, *prev_item = NULL;
     while (!ts_node_is_null(child)) {
@@ -391,7 +394,8 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         child = ts_node_next_named_sibling(child);
     }
     // determine the list type; handle special case of one item list
-    // ast_node->type = ast_node->then->type;    
+    // ast_node->type = ast_node->then->type;
+    tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
 
@@ -597,6 +601,9 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     printf("build for expr\n");
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
 
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
     // for can have multiple loop declarations
     TSTreeCursor cursor = ts_tree_cursor_new(for_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
@@ -627,6 +634,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
 
     // determine for node type
     ast_node->type = ast_node->then->type;
+    tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
 
@@ -653,7 +661,6 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
 
 AstNode* build_func(Transpiler* tp, TSNode func_node) {
     printf("build function\n");
-    NameScope* pa_namescope = tp->current_scope;
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
@@ -702,7 +709,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
     fn_type->returned = ast_node->body->type;
 
     // restore parent namescope
-    tp->current_scope = pa_namescope;
+    tp->current_scope = ast_node->params->parent;
     return (AstNode*)ast_node;
 }
 

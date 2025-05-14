@@ -7,7 +7,7 @@ fn factorial(n: float) {
 fn strcat(a: string, b: string) { a + b }
 
 strcat("hello", " world")
-factorial(5.0)
+// factorial(5.0)
 
 // fm: all(), any()
 // numbers = [2, 5, 7, 9]

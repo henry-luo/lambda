@@ -247,6 +247,7 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *loop;
     AstNode *then;
+    NameScope *vars;  // scope for the variables in the loop
 } AstForNode;
 
 typedef struct {
@@ -264,6 +265,7 @@ typedef struct {
 typedef struct {
     AstArrayNode;  // extends AstArrayNode
     AstNode *declare;  // declarations in the list
+    NameScope *vars;  // scope for the variables in the list
 } AstListNode;
 
 typedef struct {
