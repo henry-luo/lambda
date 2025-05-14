@@ -101,34 +101,39 @@ Map* map_new(Context *rt, int type_index, ...) {
     ArrayList* type_list = (ArrayList*)rt->type_list;
     AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
     LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
-    printf("map node: %p, type: %p\n", node, map_type);
     Map *map = calloc(1, sizeof(Map));
     map->type_id = LMD_TYPE_MAP;  map->type = map_type;
-    map->data = heap_alloc(rt->heap, map_type->byte_size);
-    printf("map data: %p, byte_size: %d\n", map->data, map_type->byte_size);
+    map->data = calloc(1, map_type->byte_size);  // heap_alloc(rt->heap, map_type->byte_size);
+    printf("map byte_size: %d\n", map_type->byte_size);
+    printf("map data: %d\n", *(uint8_t*)(((uint8_t*)map->data) + map_type->byte_size - 1));
 
     // set the fields
-    printf("map type: %d\n", map_type->type_id);
     int count = map_type->length;
     printf("map length: %d\n", count);
     va_list args;  ShapeEntry *field = map_type->shape;
-    printf("map field: %p\n", field);
     va_start(args, count);
     for (int i = 0; i < count; i++) {
         printf("field type: %d, offset: %d\n", field->type->type_id, field->byte_offset);
-        void* field_ptr = (char*)map->data + field->byte_offset;
+        void* field_ptr = ((uint8_t*)map->data) + field->byte_offset;
         switch (field->type->type_id) {
-            case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
-                *(long*)field_ptr = va_arg(args, long);
-                break;
-            case LMD_TYPE_FLOAT:
-                *(double*)field_ptr = va_arg(args, double);
-                break;
-            case LMD_TYPE_STRING:
-                *(char**)field_ptr = va_arg(args, char*);
+            case LMD_TYPE_NULL:
+                *(bool*)field_ptr = va_arg(args, bool);
                 break;
             case LMD_TYPE_BOOL:
                 *(bool*)field_ptr = va_arg(args, bool);
+                break;                
+            case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+                *(long*)field_ptr = va_arg(args, long);
+                printf("field int value: %ld\n", *(long*)field_ptr);
+                break;
+            case LMD_TYPE_FLOAT:
+                *(double*)field_ptr = va_arg(args, double);
+                printf("field float value: %f\n", *(double*)field_ptr);
+                break;
+            case LMD_TYPE_STRING:
+                String *str = va_arg(args, String*);
+                printf("field string value: %s\n", str->str);
+                *(String**)field_ptr = str;
                 break;
             default:
                 printf("unknown type %d\n", field->type->type_id);

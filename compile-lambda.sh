@@ -1,4 +1,4 @@
-zig cc -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitter.a \
+clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitter.a \
   lambda/tree-sitter-lambda/src/parser.c lambda/parse.c\
   lib/strbuf.c lib/strview.c lib/arraylist.c lib/file.c \
   lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \

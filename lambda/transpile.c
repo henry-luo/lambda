@@ -84,14 +84,21 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             transpile_expr(tp, pri_node->expr);
         }
     } else { // literals
-        if (pri_node->type->is_literal && (pri_node->type->type_id == LMD_TYPE_STRING || 
-            pri_node->type->type_id == LMD_TYPE_SYMBOL || pri_node->type->type_id == LMD_TYPE_DTIME ||
-            pri_node->type->type_id == LMD_TYPE_BINARY)) {
-            // loads the const string without boxing
-            strbuf_append_str(tp->code_buf, "const_s(");
-            LambdaTypeString *str_type = (LambdaTypeString*)pri_node->type;
-            strbuf_append_int(tp->code_buf, str_type->const_index);
-            strbuf_append_char(tp->code_buf, ')');
+        if (pri_node->type->is_literal) {
+            if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL ||
+                pri_node->type->type_id == LMD_TYPE_DTIME || pri_node->type->type_id == LMD_TYPE_BINARY) {
+                // loads the const string without boxing
+                strbuf_append_str(tp->code_buf, "const_s(");
+                LambdaTypeString *str_type = (LambdaTypeString*)pri_node->type;
+                strbuf_append_int(tp->code_buf, str_type->const_index);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_IMP_INT || pri_node->type->type_id == LMD_TYPE_INT) {
+                writeNodeSource(tp, pri_node->node);
+                strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
+            }
+            // bool, null, float
+            else writeNodeSource(tp, pri_node->node);
         } else {
             writeNodeSource(tp, pri_node->node);
         }

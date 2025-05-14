@@ -27,4 +27,4 @@ add_f(d, 3)
 // fn concat(a, b) { a + b }
 // fn concat(a:string, b:int) { a + str(b) }
 
-{a:123}
+{a:123, b:-456, c:0.5};

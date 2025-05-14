@@ -13,19 +13,19 @@ int main(void) {
     strbuf_append_str(strbuf, "\n");
     runner_cleanup(&runner);
 
-    runner_init(&runner);
-    ret = run_script_at(&runner, "test/lambda/expr.ls");
-    strbuf_append_str(strbuf, "Script 'expr.ls' result: ");
-    print_item(strbuf, ret);
-    strbuf_append_str(strbuf, "\n");
-    runner_cleanup(&runner);    
+    // runner_init(&runner);
+    // ret = run_script_at(&runner, "test/lambda/expr.ls");
+    // strbuf_append_str(strbuf, "Script 'expr.ls' result: ");
+    // print_item(strbuf, ret);
+    // strbuf_append_str(strbuf, "\n");
+    // runner_cleanup(&runner);    
 
-    runner_init(&runner);
-    ret = run_script_at(&runner, "test/lambda/box_unbox.ls");
-    strbuf_append_str(strbuf, "Script 'box_unbox.ls' result: ");
-    print_item(strbuf, ret);
-    strbuf_append_str(strbuf, "\n");
-    runner_cleanup(&runner);
+    // runner_init(&runner);
+    // ret = run_script_at(&runner, "test/lambda/box_unbox.ls");
+    // strbuf_append_str(strbuf, "Script 'box_unbox.ls' result: ");
+    // print_item(strbuf, ret);
+    // strbuf_append_str(strbuf, "\n");
+    // runner_cleanup(&runner);
 
     // runner_init(&runner);
     // ret = run_script_at(&runner, "test/lambda/func.ls");
