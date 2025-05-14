@@ -1,4 +1,4 @@
-fn factorial(n: float) {
+fn factorial(n: float) :float {
     if (n == 0.0) 1.0
     else if (n < 0.0) 0.0
     else n * factorial(n - 1.0)
@@ -6,8 +6,8 @@ fn factorial(n: float) {
 
 fn strcat(a: string, b: string) { a + b }
 
+factorial(5.0)
 strcat("hello", " world")
-// factorial(5.0)
 
 // fm: all(), any()
 // numbers = [2, 5, 7, 9]

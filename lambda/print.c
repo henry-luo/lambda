@@ -356,9 +356,13 @@ void print_ast_node(AstNode *node, int indent) {
             item = item->next;
         }        
         break;
-    case AST_NODE_LIST:
-        printf("[list expr:%s]\n", formatType(node->type));
+    case AST_NODE_LIST:  case AST_NODE_CONTENT:
+        printf("[%s:%s[%d]]\n", node->node_type == AST_NODE_CONTENT ? "content" : "list", 
+            formatType(node->type), ((LambdaTypeList*)node->type)->length);
         AstNode *ld = ((AstListNode*)node)->declare;
+        if (!ld) {
+            print_label(indent + 1, "no declare");
+        }
         while (ld) {
             print_label(indent + 1, "declare:");
             print_ast_node(ld, indent + 1);
@@ -370,16 +374,7 @@ void print_ast_node(AstNode *node, int indent) {
             print_ast_node(li, indent + 1);
             li = li->next;
         }        
-        break;
-    case AST_NODE_CONTENT:
-        printf("[content:%s]\n", formatType(node->type));
-        AstNode *ci = ((AstListNode*)node)->item;
-        while (ci) {
-            print_label(indent + 1, "item:");
-            print_ast_node(ci, indent + 1);
-            ci = ci->next;
-        }        
-        break;  
+        break; 
     case AST_NODE_MAP:
         printf("[map expr:%s]\n", formatType(node->type));
         AstNamedNode *nm_item = ((AstMapNode*)node)->item;

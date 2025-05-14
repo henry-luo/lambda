@@ -128,6 +128,8 @@ typedef struct {
     int length;  // no. of items in the array/map
 } LambdaTypeArray;
 
+typedef LambdaTypeArray LambdaTypeList;
+
 typedef struct ShapeEntry {
     StrView name;
     LambdaType* type;  // type of the field

@@ -361,6 +361,8 @@ module.exports = grammar({
     fn_definition: $ => seq(
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+      // return type
+      optional(seq(':', field('type', $.type_annotation))),      
       '{', field('body', $._expression), '}',
     ),
 
