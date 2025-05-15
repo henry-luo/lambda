@@ -5,6 +5,6 @@ clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitter.a \
   -I/usr/local/include /usr/local/lib/libmir.a /usr/local/lib/libzlog.a \
   lambda/main.c lambda/runner.c \
   lambda/transpile.c lambda/build_ast.c lambda/mir.c lambda/lambda.c lambda/pack.c lambda/print.c \
-  -o transpile.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types
+  -o transpile.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types -Werror=multichar
 
   # todo:  -Werror=incompatible-pointer-types

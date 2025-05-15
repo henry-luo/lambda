@@ -160,16 +160,26 @@ Item map_get(Context *rt, Map* map, char *key) {
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
+                case LMD_TYPE_NULL:
+                    return ITEM_NULL;
                 case LMD_TYPE_BOOL:
                     return b2it(*(bool*)field_ptr);
                 case LMD_TYPE_IMP_INT:
                     return i2it(*(int*)field_ptr);
-                // case LMD_TYPE_FLOAT:
-                //     return &(Item){.type_id = LMD_TYPE_FLOAT, .double_val = *(double*)field_ptr};
+                case LMD_TYPE_FLOAT:
+                    double dval = *(double*)field_ptr;
+                    return push_d(rt, dval);
+                case LMD_TYPE_DTIME:
+                    return k2it(*(char**)field_ptr);
                 case LMD_TYPE_STRING:
-                    return s2it(*(char*)field_ptr);
+                    return s2it(*(char**)field_ptr);
+                case LMD_TYPE_SYMBOL:
+                    return y2it(*(char**)field_ptr);
+                case LMD_TYPE_BINARY:
+                    return x2it(*(char**)field_ptr);
                 default:
                     printf("unknown type %d\n", type_id);
+                    return ITEM_ERROR;
             }
         }
         field = field->next;

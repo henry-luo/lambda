@@ -154,7 +154,7 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_str(strbuf, "ERROR");
         }
         else {
-            strbuf_append_format(strbuf, "unknown type: %d", type_id);
+            strbuf_append_format(strbuf, "unknown type:: %d", type_id);
         }        
     }
     else { // pointer types
@@ -241,7 +241,7 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_char(strbuf, '}');
         }        
         else {
-            strbuf_append_format(strbuf, "unknown type: %d", type_id);
+            strbuf_append_format(strbuf, "unknown type! %d", type_id);
         }
     }
 }

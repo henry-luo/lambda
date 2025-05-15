@@ -17,8 +17,6 @@ enum TypeId {
     LMD_TYPE_FLOAT,  // lambda: explicit float, 64-bit
     LMD_TYPE_DECIMAL,
     LMD_TYPE_NUMBER,  // lambda: explicit number, which includes decimal
-    LMD_TYPE_DATE,
-    LMD_TYPE_TIME,
     LMD_TYPE_DTIME,
     LMD_TYPE_STRING,
     LMD_TYPE_SYMBOL,
@@ -41,8 +39,6 @@ typedef struct String {
     int32_t len;  // int instead of uint, to align with default Lambda int literal type
     char str[];
 } String;
-
-String *str_cat(String *left, String *right);
 
 typedef struct Heap Heap;
 typedef struct Pack Pack;
@@ -134,3 +130,4 @@ double it2d(Item item);
 
 double pow(double x, double y);
 Item add(Context *rt, Item a, Item b);
+String *str_cat(String *left, String *right);

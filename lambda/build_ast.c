@@ -29,8 +29,6 @@ int byte_size[] = {
     [LMD_TYPE_FLOAT] = sizeof(double),
     [LMD_TYPE_DECIMAL] = sizeof(void*),
     [LMD_TYPE_NUMBER] = sizeof(double),
-    [LMD_TYPE_DATE] = sizeof(char*),
-    [LMD_TYPE_TIME] = sizeof(char*),
     [LMD_TYPE_DTIME] = sizeof(char*),
     [LMD_TYPE_STRING] = sizeof(char*),
     [LMD_TYPE_SYMBOL] = sizeof(char*),
@@ -501,10 +499,10 @@ LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
         type.type_id = LMD_TYPE_DTIME;
     }
     else if (strview_equal(&type_name, "time")) {
-        type.type_id = LMD_TYPE_TIME;
+        type.type_id = LMD_TYPE_DTIME;
     }
     else if (strview_equal(&type_name, "date")) {
-        type.type_id = LMD_TYPE_DATE;
+        type.type_id = LMD_TYPE_DTIME;
     }
     else {
         printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
