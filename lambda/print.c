@@ -198,6 +198,7 @@ void print_item(StrBuf *strbuf, Item item) {
             for (int i = 0; i < map_type->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
                 strbuf_append_format(strbuf, "%.*s:", (int)field->name.length, field->name.str);
+                printf("field %.*s:%d\n", (int)field->name.length, field->name.str, field->type->type_id);
                 void* data = ((char*)map->data) + field->byte_offset;
                 switch (field->type->type_id) {
                 case LMD_TYPE_NULL:
@@ -217,13 +218,20 @@ void print_item(StrBuf *strbuf, Item item) {
                     strbuf_append_format(strbuf, "\"%s\"", string->str);
                     break;
                 case LMD_TYPE_SYMBOL:
-                    strbuf_append_format(strbuf, "'%s'", *(char**)data);
+                    String *symbol = *(String**)data;
+                    strbuf_append_format(strbuf, "'%s'", symbol->str);
                     break;
                 case LMD_TYPE_DTIME:
-                    strbuf_append_format(strbuf, "t'%s'", *(char**)data);
+                    String *dt = *(String**)data;
+                    strbuf_append_format(strbuf, "t'%s'", dt->str);
                     break;
                 case LMD_TYPE_BINARY:
-                    strbuf_append_format(strbuf, "b'%s'",  *(char**)data);
+                    String *bin = *(String**)data;
+                    strbuf_append_format(strbuf, "b'%s'", bin->str);
+                    break;
+                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
+                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  
+                    print_item(strbuf, *(Item*)data);
                     break;
                 default:
                     strbuf_append_format(strbuf, "unknown");

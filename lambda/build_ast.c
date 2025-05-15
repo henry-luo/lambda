@@ -23,17 +23,26 @@ LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal 
 int byte_size[] = {
     [LMD_TYPE_RAW_POINTER] = sizeof(void*),
     [LMD_TYPE_NULL] = sizeof(bool),
-    [LMD_TYPE_ANY] = sizeof(void*),
-    [LMD_TYPE_ERROR] = sizeof(void*),
     [LMD_TYPE_BOOL] = sizeof(bool),
     [LMD_TYPE_IMP_INT] = sizeof(long),
+    [LMD_TYPE_INT] = sizeof(long),
     [LMD_TYPE_FLOAT] = sizeof(double),
+    [LMD_TYPE_DECIMAL] = sizeof(void*),
+    [LMD_TYPE_NUMBER] = sizeof(double),
+    [LMD_TYPE_DATE] = sizeof(char*),
+    [LMD_TYPE_TIME] = sizeof(char*),
+    [LMD_TYPE_DTIME] = sizeof(char*),
     [LMD_TYPE_STRING] = sizeof(char*),
+    [LMD_TYPE_SYMBOL] = sizeof(char*),
     [LMD_TYPE_BINARY] = sizeof(char*),
     [LMD_TYPE_ARRAY] = sizeof(void*),
+    [LMD_TYPE_ARRAY_INT] = sizeof(void*),
+    [LMD_TYPE_LIST] = sizeof(void*),
     [LMD_TYPE_MAP] = sizeof(void*),
     [LMD_TYPE_ELEMENT] = sizeof(void*),
     [LMD_TYPE_FUNC] = sizeof(void*),
+    [LMD_TYPE_ANY] = sizeof(void*),
+    [LMD_TYPE_ERROR] = sizeof(void*),
 };
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {

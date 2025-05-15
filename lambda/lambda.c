@@ -96,6 +96,7 @@ void list_long_push(ListLong *list, long item) {
     list->items[list->length++] = item;
 }
 
+// zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_new(Context *rt, int type_index, ...) {
     printf("map_new with shape %d\n", type_index);
     ArrayList* type_list = (ArrayList*)rt->type_list;
@@ -130,10 +131,17 @@ Map* map_new(Context *rt, int type_index, ...) {
                 *(double*)field_ptr = va_arg(args, double);
                 printf("field float value: %f\n", *(double*)field_ptr);
                 break;
-            case LMD_TYPE_STRING:
+            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  
+            case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
                 String *str = va_arg(args, String*);
                 printf("field string value: %s\n", str->str);
                 *(String**)field_ptr = str;
+                break;
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
+                Array *arr = va_arg(args, Array*);
+                printf("field array value: %p\n", arr);
+                *(Array**)field_ptr = arr;
                 break;
             default:
                 printf("unknown type %d\n", field->type->type_id);
