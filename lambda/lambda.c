@@ -177,6 +177,9 @@ Item map_get(Context *rt, Map* map, char *key) {
                     return y2it(*(char**)field_ptr);
                 case LMD_TYPE_BINARY:
                     return x2it(*(char**)field_ptr);
+                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
+                    return (Item)*(Map**)field_ptr;
                 default:
                     printf("unknown type %d\n", type_id);
                     return ITEM_ERROR;
