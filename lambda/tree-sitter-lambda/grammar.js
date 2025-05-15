@@ -25,7 +25,7 @@ const signed_integer_literal = seq(optional('-'), integer_literal);
 const base64_unit = /[A-Za-z0-9+/]{4}/;
 const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
-function binary_expr($, exclude_relation) { 
+function binary_expr($) { 
   return [
     ['and', 'logical_and'],
     ['or', 'logical_or'],
@@ -38,11 +38,10 @@ function binary_expr($, exclude_relation) {
     ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],        
-    ...(exclude_relation ? []:
-    [['<', 'binary_relation'],
+    ['<', 'binary_relation'],
     ['<=', 'binary_relation'],
     ['>=', 'binary_relation'],
-    ['>', 'binary_relation']]),
+    ['>', 'binary_relation'],
     ['to', 'binary_relation'],
     ['in', 'binary_relation'],
   ].map(([operator, precedence, associativity]) =>
@@ -50,6 +49,21 @@ function binary_expr($, exclude_relation) {
       field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
       field('operator', operator),
       field('right', $._expression),
+    )),
+  );
+}
+
+function pattern_expr($) { 
+  return [
+    ['|', 'union'],
+    ['&', 'intersect'],
+    ['!', 'exclude'],  // set1 ! set2, elements in set1 but not in set2.
+    ['^', 'exclude'],  // set1 ^ set2, elements in either set, but not both.
+  ].map(([operator, precedence, associativity]) =>
+    (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
+      field('left', $.primary_type), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
+      field('operator', operator),
+      field('right', $.primary_type),
     )),
   );
 }
@@ -96,6 +110,9 @@ module.exports = grammar({
     $.call_expr,
     $.primary_expr,
     $.unary_expr,
+    'intersect',
+    'exclude',
+    'union',
     'binary_pow',
     'binary_times',
     'binary_plus',
@@ -112,10 +129,13 @@ module.exports = grammar({
     'in',
     $.if_expr,
     $.for_expr,
-    $.assign_expr
+    $.assign_expr,
+    $.primary_type,
+    $.binary_type,
   ]],
 
   conflicts: $ => [
+    [$.null, $.built_in_type],
     [$.content, $.binary_expr]
   ],
 
@@ -366,14 +386,14 @@ module.exports = grammar({
       '{', field('body', $._expression), '}',
     ),
 
-    type_annotation: $ => choice(
+    built_in_type: $ => choice(
       'null',
       'any',
       'error',
       'boolean',
-      'int8', 'int16', 'int32', 'int64',
+      // 'int8', 'int16', 'int32', 'int64',
       'int',  // int64
-      'float32', 'float64',
+      // 'float32', 'float64',
       'float',  // float64
       'decimal',  // big decimal
       'number',
@@ -391,6 +411,39 @@ module.exports = grammar({
       'type',
       'function',
     ),
+
+    occurrence: $ => choice('?', '+', '*'),
+
+    map_item_type: $=> seq(
+      field('key', choice($.identifier, $.symbol)), ':', field('value', $.type_annotation)
+    ),
+
+    map_type: $ => seq('{', 
+      $.map_item_type, repeat(seq(choice(linebreak, ';'), $.map_item_type)), '}'
+    ),
+
+    primary_type: $ => prec.left(seq(choice(
+      $.built_in_type,
+      $.identifier,
+      $._literal,
+      // array type
+      $.map_type,
+      // entity type
+      // fn type
+    ), optional($.occurrence))),
+
+    binary_type: $ => choice(
+      ...pattern_expr($),
+    ),
+
+    type_annotation: $ => choice(
+      $.primary_type,
+      $.binary_type
+    ),
+
+    type_definition: $ => seq(
+      'type', field('name', $.identifier), '=', $.type_annotation,
+    ),    
 
     assign_expr: $ => seq(
       field('name', $.identifier), 
