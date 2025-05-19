@@ -19,4 +19,4 @@ let m = {a:123, b:-456, c:0.5, d:true, e:false, f:null,
 m.a; m.b; m.c; m.d; m.e; [m.f]; m.g; m.h; m.i; m.j; m.k; m.l; m.m; m.n;
 
 let d:float = 123
-(d+4)
+(d+4, not true, not(1>2), -(-2),+(-2))

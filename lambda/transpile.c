@@ -122,9 +122,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
 void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
     printf("transpile unary expr\n");
-    strbuf_append_char(tp->code_buf, '(');
     if (unary_node->op == OPERATOR_NOT) { strbuf_append_str(tp->code_buf, "!"); }
     else strbuf_append_str_n(tp->code_buf, unary_node->operator.str, unary_node->operator.length);
+    strbuf_append_char(tp->code_buf, '(');
     transpile_expr(tp, unary_node->operand);
     strbuf_append_char(tp->code_buf, ')');
 }

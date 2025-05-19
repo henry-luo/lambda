@@ -6,12 +6,10 @@ fn factorial(n: float) :float {
 
 fn strcat(a: string, b: string) { a + b }
 
-//factorial(5.0)
-//strcat("hello", " world")
+factorial(5.0)
+strcat("hello", " world")
 
 // fm: all(), any()
 // numbers = [2, 5, 7, 9]
 // all(n > 0 for n in numbers) 
 // any(n % 5 == 0 for n in numbers) 
-
-inf; nan; -inf;
