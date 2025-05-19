@@ -1740,6 +1740,10 @@
         ]
       }
     },
+    "null": {
+      "type": "STRING",
+      "value": "null"
+    },
     "true": {
       "type": "STRING",
       "value": "true"
@@ -1748,9 +1752,13 @@
       "type": "STRING",
       "value": "false"
     },
-    "null": {
+    "inf": {
       "type": "STRING",
-      "value": "null"
+      "value": "inf"
+    },
+    "nan": {
+      "type": "STRING",
+      "value": "nan"
     },
     "comment": {
       "type": "TOKEN",
@@ -1862,6 +1870,14 @@
         {
           "type": "SYMBOL",
           "name": "false"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "inf"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "nan"
         },
         {
           "type": "SYMBOL",
@@ -2694,7 +2710,7 @@
         },
         {
           "type": "FIELD",
-          "name": "expr",
+          "name": "operand",
           "content": {
             "type": "SYMBOL",
             "name": "_expression"

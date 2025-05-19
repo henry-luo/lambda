@@ -76,6 +76,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     printf("transpile primary expr\n");
     if (pri_node->expr) {
+        printf("transpile_expr\n");
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             // user var name starts with '_'
             strbuf_append_char(tp->code_buf, '_');
@@ -83,8 +84,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
         } else { 
             transpile_expr(tp, pri_node->expr);
         }
-    } else { // literals
-        if (pri_node->type->is_literal) {
+    } else { // const
+        if (pri_node->type->is_literal) {  // literal
+            printf("transpile_literal: %d\n", pri_node->type->type_id);
             if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL ||
                 pri_node->type->type_id == LMD_TYPE_DTIME || pri_node->type->type_id == LMD_TYPE_BINARY) {
                 // loads the const string without boxing
@@ -97,12 +99,34 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 writeNodeSource(tp, pri_node->node);
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
-            // bool, null, float
-            else writeNodeSource(tp, pri_node->node);
+            else { // bool, null, float
+                TSNode child = ts_node_named_child(pri_node->node, 0);
+                TSSymbol symbol = ts_node_symbol(child);
+                printf("literal symbol: %d\n", symbol);
+                if (symbol == SYM_INF) {
+                    strbuf_append_str(tp->code_buf, "infinity");
+                }
+                else if (symbol == SYM_NAN) {
+                    strbuf_append_str(tp->code_buf, "not_a_number");
+                }
+                else {
+                    printf("literal type: %d\n", pri_node->type->type_id);
+                    writeNodeSource(tp, pri_node->node);
+                }
+            }
         } else {
             writeNodeSource(tp, pri_node->node);
         }
     }
+}
+
+void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
+    printf("transpile unary expr\n");
+    strbuf_append_char(tp->code_buf, '(');
+    if (unary_node->op == OPERATOR_NOT) { strbuf_append_str(tp->code_buf, "!"); }
+    else strbuf_append_str_n(tp->code_buf, unary_node->operator.str, unary_node->operator.length);
+    transpile_expr(tp, unary_node->operand);
+    strbuf_append_char(tp->code_buf, ')');
 }
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
@@ -507,11 +531,14 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
     // get the function name
     switch (expr_node->node_type) {
-    case AST_NODE_BINARY:
-        transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
-        break;
     case AST_NODE_PRIMARY:
         transpile_primary_expr(tp, (AstPrimaryNode*)expr_node);
+        break;
+    case AST_NODE_UNARY:
+        transpile_unary_expr(tp, (AstUnaryNode*)expr_node);
+        break;
+    case AST_NODE_BINARY:
+        transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
         break;
     case AST_NODE_IF_EXPR:
         transpile_if_expr(tp, (AstIfExprNode*)expr_node);

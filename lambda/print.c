@@ -265,6 +265,8 @@ char* formatType(LambdaType *type) {
         return "int";
     case LMD_TYPE_FLOAT:
         return "float";
+    case LMD_TYPE_NUMBER:
+        return "number";
     case LMD_TYPE_STRING:
         return "char*";
 
@@ -306,6 +308,11 @@ void print_ast_node(AstNode *node, int indent) {
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
         }
+        break;
+    case AST_NODE_UNARY:
+        printf("[unary expr %.*s:%s]\n", (int)((AstUnaryNode*)node)->operator.length, 
+            ((AstUnaryNode*)node)->operator.str, formatType(node->type));
+        print_ast_node(((AstUnaryNode*)node)->operand, indent + 1);
         break;
     case AST_NODE_BINARY:
         printf("[binary expr:%s]\n", formatType(node->type));

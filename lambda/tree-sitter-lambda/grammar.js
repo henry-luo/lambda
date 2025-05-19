@@ -278,12 +278,13 @@ module.exports = grammar({
 
     index: $ => {
       return token(integer_literal);
-    },    
-
-    true: _ => 'true',
-    false: _ => 'false',
+    },
 
     null: _ => 'null',
+    true: _ => 'true',
+    false: _ => 'false',
+    inf: _ => 'inf',
+    nan: _ => 'nan',
 
     comment: _ => token(choice(
       seq('//', /[^\r\n\u2028\u2029]*/),
@@ -316,6 +317,8 @@ module.exports = grammar({
       $.null,
       $.true,
       $.false,
+      $.inf,
+      $.nan,
       $._number,
       $._datetime,
       $.string,
@@ -363,7 +366,7 @@ module.exports = grammar({
 
     unary_expr: $ => seq(
       field('operator', choice('not', '-', '+')),
-      field('expr', $._expression),
+      field('operand', $._expression),
     ),
 
     identifier: _ => {

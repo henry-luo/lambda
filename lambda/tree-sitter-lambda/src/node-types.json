@@ -847,6 +847,10 @@
           "named": true
         },
         {
+          "type": "inf",
+          "named": true
+        },
+        {
           "type": "integer",
           "named": true
         },
@@ -860,6 +864,10 @@
         },
         {
           "type": "member_expr",
+          "named": true
+        },
+        {
+          "type": "nan",
           "named": true
         },
         {
@@ -1058,7 +1066,7 @@
     "type": "unary_expr",
     "named": true,
     "fields": {
-      "expr": {
+      "operand": {
         "multiple": false,
         "required": true,
         "types": [
@@ -1242,11 +1250,11 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
@@ -1274,11 +1282,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -1317,6 +1325,10 @@
     "named": true
   },
   {
+    "type": "inf",
+    "named": true
+  },
+  {
     "type": "int",
     "named": false
   },
@@ -1335,6 +1347,10 @@
   {
     "type": "map",
     "named": false
+  },
+  {
+    "type": "nan",
+    "named": true
   },
   {
     "type": "not",

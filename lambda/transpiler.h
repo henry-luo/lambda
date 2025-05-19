@@ -17,6 +17,8 @@
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
 #define SYM_FALSE sym_false
+#define SYM_INF sym_inf
+#define SYM_NAN sym_nan
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
 #define SYM_STRING sym_string
@@ -35,6 +37,7 @@
 #define SYM_SUBSCRIPT_EXPR sym_subscript_expr
 #define SYM_CALL_EXPR sym_call_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
+#define SYM_UNARY_EXPR sym_unary_expr
 #define SYM_BINARY_EXPR sym_binary_expr
 
 #define SYM_ASSIGN_EXPR sym_assign_expr
@@ -63,8 +66,15 @@
 #define FIELD_FUNCTION field_function
 #define FIELD_ARGUMENT field_argument
 #define FIELD_OPERATOR field_operator
+#define FIELD_OPERAND field_operand
 
 typedef enum {
+    // unary
+    OPERATOR_NOT,
+    OPERATOR_NEG,
+    OPERATOR_POS,
+
+    // binary
     OPERATOR_ADD,
     OPERATOR_SUB,
     OPERATOR_MUL,
@@ -186,6 +196,7 @@ typedef struct NameScope {
 typedef enum AstNodeType {
     AST_NODE_NULL,
     AST_NODE_PRIMARY,
+    AST_NODE_UNARY,
     AST_NODE_BINARY,
     AST_NODE_ARRAY,
     AST_NODE_LIST,
@@ -226,6 +237,13 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *expr;
 } AstPrimaryNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    AstNode *operand;
+    StrView operator;
+    Operator op;
+} AstUnaryNode;
 
 typedef struct {
     AstNode;  // extends AstNode

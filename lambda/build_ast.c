@@ -6,6 +6,7 @@ LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
 LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 LambdaType TYPE_IMP_INT = {.type_id = LMD_TYPE_IMP_INT};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
+LambdaType TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 
@@ -231,10 +232,18 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
     return (LambdaType *)str_type;
 }
 
-LambdaType* build_lit_float(Transpiler* tp, TSNode node) {
+LambdaType* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
     LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_FLOAT, sizeof(LambdaTypeItem));
-    const char* num_str = tp->source + ts_node_start_byte(node);
-    item_type->double_val = atof(num_str);
+    if (symbol == SYM_INF) {
+        item_type->double_val = INFINITY;
+    }
+    else if (symbol == SYM_NAN) {
+        item_type->double_val = NAN;
+    }
+    else {
+        const char* num_str = tp->source + ts_node_start_byte(node);
+        item_type->double_val = atof(num_str);
+    }
     arraylist_append(tp->const_list, &item_type->double_val);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
@@ -259,8 +268,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_INT) {
         ast_node->type = &LIT_IMP_INT;
     }
-    else if (symbol == SYM_FLOAT) {
-        ast_node->type = build_lit_float(tp, child);
+    else if (symbol == SYM_FLOAT || symbol == SYM_INF || symbol == SYM_NAN) {
+        ast_node->type = build_lit_float(tp, child, symbol);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
         symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {
@@ -295,6 +304,25 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     printf("end build primary expr\n");
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
+    printf("build unary expr\n");
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
+    TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->operator = op;
+    if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
+    else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
+    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
+
+    TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+    // ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
+    ast_node->type = ast_node->op == OPERATOR_NOT ? &TYPE_BOOL : &TYPE_FLOAT;
+
+    printf("end build unary expr\n");
     return (AstNode*)ast_node;
 }
 
@@ -768,6 +796,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     if (symbol == SYM_PRIMARY_EXPR) {
         return build_primary_expr(tp, expr_node);
     }
+    else if (symbol == SYM_UNARY_EXPR) {
+        return build_unary_expr(tp, expr_node);
+    }    
     else if (symbol == SYM_BINARY_EXPR) {
         return build_binary_expr(tp, expr_node);
     }
@@ -825,7 +856,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == SYM_FLOAT) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        ast_node->type = build_lit_float(tp, expr_node);
+        ast_node->type = build_lit_float(tp, expr_node, symbol);
         return (AstNode*)ast_node;
     }
     else if (symbol == SYM_COMMENT) {

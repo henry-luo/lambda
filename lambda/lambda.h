@@ -7,6 +7,8 @@
 #define true 1
 #define false 0
 #define null 0
+#define infinity (1.0 / 0.0)
+#define not_a_number (0.0 / 0.0)
 
 enum TypeId {
     LMD_TYPE_RAW_POINTER = 0,
