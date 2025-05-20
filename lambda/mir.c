@@ -43,6 +43,7 @@ func_obj_t func_list[] = {
     {"add", (void (*)(void))add},
     {"it2l", (void (*)(void))it2l},
     {"it2d", (void (*)(void))it2d},
+    {"fn", (void (*)(void))fn},
 };
 
 void *import_resolver(const char *name) {

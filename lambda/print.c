@@ -80,6 +80,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_MAP:
         strbuf_append_str(tp->code_buf, "Map*");
         break;
+    case LMD_TYPE_FUNC:
+        strbuf_append_str(tp->code_buf, "Function*");
+        break;
     default:
         printf("unknown type %d\n", type_id);
     }
@@ -149,6 +152,36 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_BINARY) {
             String *string = (String*)ld_item.pointer;
             strbuf_append_format(strbuf, "b'%s'", string->str);
+        }
+        else if (type_id == LMD_TYPE_LIST) {
+            List *list = (List*)ld_item.pointer;
+            printf("print list: %p, length: %ld\n", list, list->length);
+            strbuf_append_char(strbuf, '(');
+            for (int i = 0; i < list->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                print_item(strbuf, list->items[i]);
+            }
+            strbuf_append_char(strbuf, ')');
+        }
+        else if (type_id == LMD_TYPE_ARRAY) {
+            Array *array = (Array*)ld_item.pointer;
+            printf("print array: %p, length: %ld\n", array, array->length);
+            strbuf_append_char(strbuf, '[');
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                print_item(strbuf, array->items[i]);
+            }
+            strbuf_append_char(strbuf, ']');
+        }        
+        else if (type_id == LMD_TYPE_ARRAY_INT) {
+            strbuf_append_char(strbuf, '[');
+            ArrayLong *array = (ArrayLong*)ld_item.pointer;
+            printf("print array int: %p, length: %ld\n", array, array->length);
+            for (int i = 0; i < array->length; i++) {
+                if (i) strbuf_append_char(strbuf, ',');
+                strbuf_append_format(strbuf, "%ld", array->items[i]);
+            }
+            strbuf_append_char(strbuf, ']');
         }
         else if (type_id == LMD_TYPE_ERROR) {
             strbuf_append_str(strbuf, "ERROR");
@@ -239,7 +272,11 @@ void print_item(StrBuf *strbuf, Item item) {
                 field = field->next;
             }
             strbuf_append_char(strbuf, '}');
-        }        
+        }
+        else if (type_id == LMD_TYPE_FUNC) {
+            Function *func = (Function*)ld_item.pointer;
+            strbuf_append_format(strbuf, "fn %p", func);
+        }               
         else {
             strbuf_append_format(strbuf, "unknown type! %d", type_id);
         }

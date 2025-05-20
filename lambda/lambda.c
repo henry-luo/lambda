@@ -138,10 +138,10 @@ Map* map_new(Context *rt, int type_index, ...) {
                 *(String**)field_ptr = str;
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
-                Array *arr = va_arg(args, Array*);
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_FUNC:
+                void *arr = va_arg(args, void*);
                 printf("field array value: %p\n", arr);
-                *(Array**)field_ptr = arr;
+                *(void**)field_ptr = arr;
                 break;
             default:
                 printf("unknown type %d\n", field->type->type_id);
@@ -301,4 +301,12 @@ double it2d(Item item) {
     printf("invalid type %d\n", itm.type_id);
     // todo: push error
     return 0;
+}
+
+Function* fn(fn_ptr ptr) {
+    printf("create fn %p\n", ptr);
+    Function *fn = calloc(1, sizeof(Function));
+    fn->type_id = LMD_TYPE_FUNC;
+    fn->ptr = ptr;
+    return fn;
 }

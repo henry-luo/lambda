@@ -12,7 +12,5 @@ factorial(5.0)
 strcat("hello", " world")
 mul(2, 3.0)
 
-// fn: all(), any()
-// numbers = [2, 5, 7, 9]
-// all(n > 0 for n in numbers) 
-// any(n % 5 == 0 for n in numbers) 
+let f = fn(a, b) { a + b }
+f;

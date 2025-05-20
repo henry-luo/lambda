@@ -6,20 +6,21 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node);
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
-    if (item->type->type_id == LMD_TYPE_NULL) {
+    switch (item->type->type_id) {
+    case LMD_TYPE_NULL:
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
-    }
-    else if (item->type->type_id == LMD_TYPE_BOOL) {
+        break;
+    case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "b2it(");
         transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
-    }
-    else if (item->type->type_id == LMD_TYPE_IMP_INT) {
+        break;
+    case LMD_TYPE_IMP_INT:
         strbuf_append_str(tp->code_buf, "i2it(");
         transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
-    }    
-    else if (item->type->type_id == LMD_TYPE_INT) {
+        break;
+    case LMD_TYPE_INT: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_l2it(");
             LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
@@ -31,8 +32,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
-    }    
-    else if (item->type->type_id == LMD_TYPE_FLOAT) {
+        break;
+    case LMD_TYPE_FLOAT: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_d2it(");
             LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
@@ -44,9 +45,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
-    }
-    else if (item->type->type_id == LMD_TYPE_STRING || item->type->type_id == LMD_TYPE_SYMBOL || 
-        item->type->type_id == LMD_TYPE_DTIME || item->type->type_id == LMD_TYPE_BINARY) {
+        break;
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
             item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
@@ -61,15 +61,14 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
-    }
-    else if (item->type->type_id == LMD_TYPE_LIST || item->type->type_id == LMD_TYPE_ARRAY || 
-        item->type->type_id == LMD_TYPE_MAP) {
+        break;
+    case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_FUNC:
         transpile_expr(tp, item);  // raw pointer
-    }
-    else if (item->type->type_id == LMD_TYPE_ANY) {
+        break;
+    case LMD_TYPE_ANY:
         transpile_expr(tp, item);  // no boxing needed
-    }
-    else {
+        break;
+    default:
         printf("unknown box item type: %d\n", item->type->type_id);
     }
 }
