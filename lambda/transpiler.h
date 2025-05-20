@@ -166,6 +166,7 @@ typedef struct {
     LambdaType;  // extends LambdaType
     LambdaTypeParam *param;
     LambdaType *returned;
+    bool is_anonymous;
 } LambdaTypeFunc;
 
 struct Pack {

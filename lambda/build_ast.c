@@ -709,6 +709,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
         is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
+    fn_type->is_anonymous = !is_named;
     
     // get the function name
     if (is_named) {

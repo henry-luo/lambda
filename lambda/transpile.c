@@ -421,14 +421,20 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     printf("transpile call expr\n");
+    // write the function name/ptr
     transpile_expr(tp, call_node->function);
-
-    // write the params
     LambdaTypeFunc *fn_type = NULL;
     if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
         fn_type = (LambdaTypeFunc*)call_node->function->type;
-    } 
+        if (fn_type->is_anonymous) {
+            strbuf_append_str(tp->code_buf, "->ptr");
+        }
+    } else { // handle Item
+        printf("call function type is not func\n");
+        assert(0);
+    }
 
+    // write the params
     strbuf_append_str(tp->code_buf, "(rt,");
     AstNode* arg = call_node->argument;  LambdaTypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {

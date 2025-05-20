@@ -13,4 +13,4 @@ strcat("hello", " world")
 mul(2, 3.0)
 
 let f = fn(a, b) { a + b }
-f;
+f; f(1,2);
