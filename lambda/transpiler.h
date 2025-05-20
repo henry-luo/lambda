@@ -47,7 +47,9 @@
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
 
-#define SYM_FUNC sym_fn_definition
+#define SYM_FUNC_STAM sym_fn_stam
+#define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
+#define SYM_FUNC_EXPR sym_fn_expr
 
 #define SYM_COMMENT sym_comment
 

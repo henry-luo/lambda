@@ -6,8 +6,11 @@ fn factorial(n: float) :float {
 
 fn strcat(a: string, b: string) { a + b }
 
+fn mul(a: float, b: float) :float => a * b
+
 factorial(5.0)
 strcat("hello", " world")
+mul(2, 3.0)
 
 // fm: all(), any()
 // numbers = [2, 5, 7, 9]

@@ -98,13 +98,15 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._content_item,
+    $._content_expr,
     $._number,
     $._datetime,
     $._unsigned_number,
   ],
 
   precedences: $ => [[
-    $.attr,   
+    $.attr,
+    $.fn_expr_stam,
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
@@ -142,19 +144,25 @@ module.exports = grammar({
     _content_item: $ => choice(
       $.if_stam, 
       $.for_stam,
-      $.fn_definition
+      $.fn_stam,
     ),
+
+    _content_expr: $ => choice(
+      $._expression, 
+      $.let_stam,
+      $.fn_expr_stam,
+    ),    
 
     content: $ => seq(
       repeat(
         choice( 
-          seq(choice($._expression, $.let_stam), choice(linebreak, ';')), 
+          seq($._content_expr, choice(linebreak, ';')), 
           $._content_item
         )
       ), 
       // for last expr, ';' is optional
       choice(
-        seq(choice($._expression, $.let_stam), optional(choice(linebreak, ';'))), 
+        seq($._content_expr, optional(choice(linebreak, ';'))), 
         $._content_item
       )
     ),
@@ -384,12 +392,35 @@ module.exports = grammar({
       field('name', $.identifier), optional(seq(':', field('type', $.type_annotation))),
     ),
 
-    fn_definition: $ => seq(
+    fn_stam: $ => seq(
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
       optional(seq(':', field('type', $.type_annotation))),      
       '{', field('body', $._expression), '}',
+    ),
+
+    // anonymous function
+    fn_expr: $ => choice(
+      seq('fn', 
+        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+        // return type
+        optional(seq(':', field('type', $.type_annotation))),      
+        '{', field('body', $._expression), '}'
+      ),
+      seq(
+        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+        // return type
+        optional(seq(':', field('type', $.type_annotation))),      
+        '=>', field('body', $._expression)
+      ),      
+    ),    
+
+    fn_expr_stam: $ => seq('fn', field('name', $.identifier), 
+      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+      // return type
+      optional(seq(':', field('type', $.type_annotation))),      
+      '=>', field('body', $._expression)
     ),
 
     built_in_type: $ => choice(

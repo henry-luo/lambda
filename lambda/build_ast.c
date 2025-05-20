@@ -828,7 +828,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_IDENT) {
         return build_identifier(tp, expr_node);
     }
-    else if (symbol == SYM_FUNC) {
+    else if (symbol == SYM_FUNC_STAM) {
+        return build_func(tp, expr_node);
+    }
+    else if (symbol == SYM_FUNC_EXPR_STAM) {
         return build_func(tp, expr_node);
     }
     else if (symbol == SYM_CONTENT) {

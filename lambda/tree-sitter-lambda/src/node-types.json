@@ -344,7 +344,11 @@
           "named": true
         },
         {
-          "type": "fn_definition",
+          "type": "fn_expr_stam",
+          "named": true
+        },
+        {
+          "type": "fn_stam",
           "named": true
         },
         {
@@ -402,7 +406,53 @@
     }
   },
   {
-    "type": "fn_definition",
+    "type": "fn_expr_stam",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      },
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "parameter",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "fn_stam",
     "named": true,
     "fields": {
       "body": {
@@ -1172,6 +1222,10 @@
   },
   {
     "type": "==",
+    "named": false
+  },
+  {
+    "type": "=>",
     "named": false
   },
   {
