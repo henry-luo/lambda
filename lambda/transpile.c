@@ -80,7 +80,12 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             // user var name starts with '_'
             strbuf_append_char(tp->code_buf, '_');
-            writeNodeSource(tp, pri_node->node);
+            AstNamedNode* ident_node = (AstNamedNode*)pri_node->expr;
+            writeNodeSource(tp, ident_node->node);
+            if (ident_node->as->node_type == AST_NODE_FUNC) {
+                strbuf_append_char(tp->code_buf, '_');
+                strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)ident_node->type)->param_count);
+            }
         } else { 
             transpile_expr(tp, pri_node->expr);
         }
@@ -422,10 +427,25 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     printf("transpile call expr\n");
     // write the function name/ptr
-    transpile_expr(tp, call_node->function);
     LambdaTypeFunc *fn_type = NULL;
     if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
         fn_type = (LambdaTypeFunc*)call_node->function->type;
+        AstPrimaryNode *fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+            (AstPrimaryNode*)call_node->function:null;
+        if (fn_node && fn_node->expr->node_type == AST_NODE_IDENT) {
+            strbuf_append_char(tp->code_buf, '_');
+            writeNodeSource(tp, fn_node->expr->node);
+            // todo: lookup the function definition
+            AstNamedNode* ident_node = (AstNamedNode*)fn_node->expr;
+            if (ident_node->as->node_type == AST_NODE_FUNC) {
+                strbuf_append_char(tp->code_buf, '_');
+                strbuf_append_int(tp->code_buf, fn_type->param_count);
+            }
+            // else variable
+        }
+        else {
+            transpile_expr(tp, call_node->function);
+        }
         if (fn_type->is_anonymous) {
             strbuf_append_str(tp->code_buf, "->ptr");
         }
@@ -533,6 +553,8 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node) {
     else { // use byte offset for fn name
         strbuf_append_int(tp->code_buf, ts_node_start_byte(fn_node->node));
     }
+    strbuf_append_char(tp->code_buf, '_');
+    strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)fn_node->type)->param_count);
     strbuf_append_str(tp->code_buf, "(Context *rt");
     AstNamedNode *param = fn_node->param;
     while (param) {
@@ -548,7 +570,8 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
-    strbuf_append_format(tp->code_buf, "fn(_%d)", ts_node_start_byte(fn_node->node));
+    strbuf_append_format(tp->code_buf, "fn(_%d_%d)", ts_node_start_byte(fn_node->node), 
+        ((LambdaTypeFunc*)fn_node->type)->param_count);
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {

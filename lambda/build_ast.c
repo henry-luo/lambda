@@ -726,7 +726,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNamedNode *prev_param = NULL;
+    AstNamedNode *prev_param = NULL;  int param_count = 0;
     while (has_node) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_DECLARE) {  // param declaration
@@ -740,7 +740,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
                 prev_param->next = (AstNode*)param;
                 ((LambdaTypeParam*)prev_param->type)->next = (LambdaTypeParam*)param->type;
             }
-            prev_param = param;
+            prev_param = param;  param_count++;
         }
         else if (field_id == FIELD_TYPE) {  // return type
             TSNode child = ts_tree_cursor_current_node(&cursor);
@@ -751,7 +751,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
-    
+    fn_type->param_count = param_count;
+
     // build the function body
     // ast_node->locals = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
     // ast_node->locals->parent = tp->current_scope;
