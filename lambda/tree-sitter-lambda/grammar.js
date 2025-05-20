@@ -107,6 +107,7 @@ module.exports = grammar({
   precedences: $ => [[
     $.attr,
     $.fn_expr_stam,
+    $.fn_expr,
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
@@ -134,7 +135,8 @@ module.exports = grammar({
 
   conflicts: $ => [
     [$.null, $.built_in_type],
-    [$.content, $.binary_expr]
+    [$.content, $.binary_expr],
+    [$.primary_expr, $.parameter]
   ],
 
   rules: {
@@ -318,6 +320,7 @@ module.exports = grammar({
       $.binary_expr,
       $.if_expr,
       $.for_expr,
+      $.fn_expr,
     )),
 
     primary_expr: $ => choice(
@@ -397,9 +400,16 @@ module.exports = grammar({
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
       optional(seq(':', field('type', $.type_annotation))),      
-      '{', field('body', $._expression), '}',
+      '{', field('body', $.content), '}',
     ),
 
+    fn_expr_stam: $ => seq('fn', field('name', $.identifier), 
+      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+      // return type
+      optional(seq(':', field('type', $.type_annotation))),      
+      '=>', field('body', $._expression)
+    ),
+        
     // anonymous function
     fn_expr: $ => choice(
       seq('fn', 
@@ -414,13 +424,6 @@ module.exports = grammar({
         optional(seq(':', field('type', $.type_annotation))),      
         '=>', field('body', $._expression)
       ),      
-    ),    
-
-    fn_expr_stam: $ => seq('fn', field('name', $.identifier), 
-      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
-      // return type
-      optional(seq(':', field('type', $.type_annotation))),      
-      '=>', field('body', $._expression)
     ),
 
     built_in_type: $ => choice(

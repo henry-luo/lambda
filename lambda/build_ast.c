@@ -703,31 +703,31 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     return ast_node;
 }
 
-AstNode* build_func(Transpiler* tp, TSNode func_node) {
+AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
     printf("build function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
     
     // get the function name
-    TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
-    StrView name = ts_node_source(tp, fn_name_node);
-    ast_node->name = name;
-    // add fn name to current scope
-    push_name(tp, (AstNamedNode*)ast_node);
+    if (is_named) {
+        TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
+        StrView name = ts_node_source(tp, fn_name_node);
+        ast_node->name = name;
+        // add fn name to current scope
+        push_name(tp, (AstNamedNode*)ast_node);
+    }
 
     // build the params
     ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
-    // let can have multiple cond declarations
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
     AstNamedNode *prev_param = NULL;
     while (has_node) {
-        // Check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_DECLARE) {
+        if (field_id == FIELD_DECLARE) {  // param declaration
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNamedNode *param = build_param_expr(tp, child);
             printf("got param type %d\n", param->node_type);
@@ -740,7 +740,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
             }
             prev_param = param;
         }
-        else if (field_id == FIELD_TYPE) {
+        else if (field_id == FIELD_TYPE) {  // return type
             TSNode child = ts_tree_cursor_current_node(&cursor);
             LambdaType *type = (LambdaType*)alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
             *type = build_type_annotation(tp, child);
@@ -760,7 +760,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node) {
 
     // restore parent namescope
     tp->current_scope = ast_node->vars->parent;
-    printf("end building function %.*s\n", (int)name.length, name.str);
+    printf("end building fn\n");
     return (AstNode*)ast_node;
 }
 
@@ -786,6 +786,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node) {
         child = ts_node_next_named_sibling(child);
     }
     printf("end building content item: %p, %d\n", ast_node->item, type->length);
+    if (type->length == 1) { return ast_node->item;}
     return (AstNode*)ast_node;
 }
 
@@ -829,11 +830,14 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_identifier(tp, expr_node);
     }
     else if (symbol == SYM_FUNC_STAM) {
-        return build_func(tp, expr_node);
+        return build_func(tp, expr_node, true);
     }
     else if (symbol == SYM_FUNC_EXPR_STAM) {
-        return build_func(tp, expr_node);
+        return build_func(tp, expr_node, true);
     }
+    else if (symbol == SYM_FUNC_EXPR) {
+        return build_func(tp, expr_node, false);
+    }    
     else if (symbol == SYM_CONTENT) {
         return build_content(tp, expr_node);
     }

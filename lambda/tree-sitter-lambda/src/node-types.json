@@ -8,6 +8,10 @@
         "named": true
       },
       {
+        "type": "fn_expr",
+        "named": true
+      },
+      {
         "type": "for_expr",
         "named": true
       },
@@ -406,6 +410,42 @@
     }
   },
   {
+    "type": "fn_expr",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      },
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "parameter",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "fn_expr_stam",
     "named": true,
     "fields": {
@@ -460,7 +500,7 @@
         "required": true,
         "types": [
           {
-            "type": "_expression",
+            "type": "content",
             "named": true
           }
         ]
