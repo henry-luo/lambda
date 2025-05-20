@@ -3065,7 +3065,7 @@
               "name": "body",
               "content": {
                 "type": "SYMBOL",
-                "name": "_expression"
+                "name": "content"
               }
             },
             {

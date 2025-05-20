@@ -3,7 +3,7 @@
 
 extern LambdaType TYPE_ANY;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
-void transpile_func(Transpiler* tp, AstFuncNode *fn_node);
+void define_func(Transpiler* tp, AstFuncNode *fn_node);
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (item->type->type_id == LMD_TYPE_NULL) {
@@ -388,7 +388,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         }
         else if (item->node_type == AST_NODE_FUNC) {
             type->length--;
-            // transpile_func(tp, (AstFuncNode*)item);
+            // already transpiled
         }
         item = item->next;
     }
@@ -514,14 +514,20 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
 }
 
-void transpile_func(Transpiler* tp, AstFuncNode *fn_node) {
-    printf("transpile func: %.*s\n", (int)fn_node->name.length, fn_node->name.str);
+void define_func(Transpiler* tp, AstFuncNode *fn_node) {
+    printf("transpile func\n");
     // use function body type as the return type for the time being
     LambdaType *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
-    strbuf_append_str_n(tp->code_buf, fn_node->name.str, fn_node->name.length);
+    if (fn_node->name.str) {
+        printf("fn name: %.*s\n", (int)fn_node->name.length, fn_node->name.str);
+        strbuf_append_str_n(tp->code_buf, fn_node->name.str, fn_node->name.length);
+    }
+    else { // use byte offset for fn name
+        strbuf_append_int(tp->code_buf, ts_node_start_byte(fn_node->node));
+    }
     strbuf_append_str(tp->code_buf, "(Context *rt");
     AstNamedNode *param = fn_node->param;
     while (param) {
@@ -534,6 +540,10 @@ void transpile_func(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_str(tp->code_buf, "){\n return ");
     transpile_expr(tp, fn_node->body);
     strbuf_append_str(tp->code_buf, ";\n}\n");
+}
+
+void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
+    strbuf_append_format(tp->code_buf, "fn(_%d)", ts_node_start_byte(fn_node->node));
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
@@ -553,9 +563,6 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_IF_EXPR:
         transpile_if_expr(tp, (AstIfExprNode*)expr_node);
-        break;
-    case AST_NODE_LET_STAM:
-        transpile_let_stam(tp, (AstLetNode*)expr_node);
         break;
     case AST_NODE_FOR_EXPR:
         transpile_for_expr(tp, (AstForNode*)expr_node);
@@ -581,8 +588,11 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
-    case AST_NODE_FUNC:
-        // transpile_func(tp, (AstFuncNode*)expr_node);
+    case AST_NODE_FUNC:  case AST_NODE_LET_STAM:
+        // already transpiled
+        break;
+    case AST_NODE_FUNC_EXPR:
+        transpile_fn_expr(tp, (AstFuncNode*)expr_node);
         break;
     default:
         printf("unknown expression type\n");
@@ -683,8 +693,8 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             arg = arg->next;
         }
         break;
-    case AST_NODE_FUNC:
-        transpile_func(tp, (AstFuncNode*)node);
+    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
+        define_func(tp, (AstFuncNode*)node);
         AstFuncNode* func = (AstFuncNode*)node;
         AstNode* fn_param = (AstNode*)func->param;
         while (fn_param) {
@@ -712,9 +722,7 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n List *ls=");
     AstNode *node = script->child;
     while (node) {
-        if (node->node_type != AST_NODE_LET_STAM && node->node_type != AST_NODE_FUNC) {
-            transpile_expr(tp, node);
-        }
+        transpile_expr(tp, node);
         node = node->next;
     }
     strbuf_append_str(tp->code_buf, ";\n return v2it(ls);\n}\n");

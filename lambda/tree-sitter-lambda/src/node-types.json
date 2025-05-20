@@ -420,6 +420,10 @@
           {
             "type": "_expression",
             "named": true
+          },
+          {
+            "type": "content",
+            "named": true
           }
         ]
       },

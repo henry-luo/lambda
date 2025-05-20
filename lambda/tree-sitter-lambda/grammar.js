@@ -409,14 +409,14 @@ module.exports = grammar({
       optional(seq(':', field('type', $.type_annotation))),      
       '=>', field('body', $._expression)
     ),
-        
+
     // anonymous function
     fn_expr: $ => choice(
       seq('fn', 
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
         // return type
         optional(seq(':', field('type', $.type_annotation))),      
-        '{', field('body', $._expression), '}'
+        '{', field('body', $.content), '}'
       ),
       seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 

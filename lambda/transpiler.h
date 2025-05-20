@@ -215,6 +215,7 @@ typedef enum AstNodeType {
     AST_NODE_IDENT,
     AST_NODE_PARAM,
     AST_NODE_FUNC,
+    AST_NODE_FUNC_EXPR,
     AST_SCRIPT,
 } AstNodeType;
 

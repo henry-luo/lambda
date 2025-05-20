@@ -424,9 +424,13 @@ void print_ast_node(AstNode *node, int indent) {
             arg = arg->next;
         }
         break;
-    case AST_NODE_FUNC:
+    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
         AstFuncNode* func = (AstFuncNode*)node;
-        printf("[function: %.*s:%s]\n", (int)func->name.length, func->name.str, formatType(node->type));
+        if (node->node_type == AST_NODE_FUNC_EXPR) {
+            printf("[function expr:%s]\n", formatType(node->type));
+        } else {
+            printf("[function: %.*s:%s]\n", (int)func->name.length, func->name.str, formatType(node->type));
+        }
         print_label(indent + 1, "params:"); 
         AstNode* fn_param = (AstNode*)func->param;
         while (fn_param) {

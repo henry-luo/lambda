@@ -705,7 +705,8 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
 
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
     printf("build function\n");
-    AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC, func_node, sizeof(AstFuncNode));
+    AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
+        is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
     
