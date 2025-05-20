@@ -773,7 +773,6 @@ AstNode* build_content(Transpiler* tp, TSNode list_node) {
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* item = build_expr(tp, child);
-        printf("got content item %p\n", item);
         if (item) {
             if (!prev_item) { 
                 ast_node->item = item;
@@ -786,7 +785,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node) {
         // else comment or error
         child = ts_node_next_named_sibling(child);
     }
-    printf("end building content item: %p\n", ast_node->item);
+    printf("end building content item: %p, %d\n", ast_node->item, type->length);
     return (AstNode*)ast_node;
 }
 
@@ -873,18 +872,19 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
     tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
 
-    // first iteration to declare the global variables
-
     // build the script body
     TSNode child = ts_node_named_child(script_node, 0);
     AstNode* prev = NULL;
     while (!ts_node_is_null(child)) {
         AstNode* ast = build_expr(tp, child);
-        if (!prev) ast_node->child = ast;
-        else { prev->next = ast; }
-        prev = ast;
+        if (ast) {
+            if (!prev) ast_node->child = ast;
+            else { prev->next = ast; }
+            prev = ast;
+        }
         child = ts_node_next_named_sibling(child);
     }
     if (ast_node->child) ast_node->type = ast_node->child->type;
+    printf("build script child: %p\n", ast_node->child);
     return (AstNode*)ast_node;
 }

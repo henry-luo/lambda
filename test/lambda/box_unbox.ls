@@ -28,4 +28,4 @@ add_f(d, 3)
 // fn concat(a:string, b:int) { a + str(b) }
 
 {a:123, b:-456, c:0.5};
-10*add(1,1)
+10+add(1,1)  // 10*add(1,1)

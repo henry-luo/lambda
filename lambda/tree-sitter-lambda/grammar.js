@@ -104,9 +104,9 @@ module.exports = grammar({
   ],
 
   precedences: $ => [[
-    $.attr,
-    $.call_expr,
+    $.attr,   
     $.primary_expr,
+    $.primary_type,
     $.unary_expr,
     'intersect',
     'exclude',
@@ -125,11 +125,9 @@ module.exports = grammar({
     'logical_or',
     'to',
     'in',
-    $.if_expr,
-    $.for_expr,
     $.assign_expr,
-    $.primary_type,
-    $.binary_type,
+    $.if_expr,
+    $.for_expr,     
   ]],
 
   conflicts: $ => [
@@ -139,18 +137,26 @@ module.exports = grammar({
 
   rules: {
     // $._literal at top-level for JSON and Mark compatibility
-    document: $ => seq(optional($.content)),
+    document: $ => optional($.content),
 
     _content_item: $ => choice(
-      $.let_stam,
       $.if_stam, 
       $.for_stam,
       $.fn_definition
     ),
 
     content: $ => seq(
-      choice($._expression, $._content_item), 
-      repeat(seq(choice(linebreak, ';'), optional(choice($._expression, $._content_item))))
+      repeat(
+        choice( 
+          seq(choice($._expression, $.let_stam), choice(linebreak, ';')), 
+          $._content_item
+        )
+      ), 
+      // for last expr, ';' is optional
+      choice(
+        seq(choice($._expression, $.let_stam), optional(choice(linebreak, ';'))), 
+        $._content_item
+      )
     ),
 
     list: $ => seq('(', 
@@ -297,14 +303,14 @@ module.exports = grammar({
       '(', $._expression, ')',
     ),
 
-    _expression: $ => choice(
+    _expression: $ => prec.left(choice(
       $.primary_expr,
       // $.await_expression,
       $.unary_expr,
       $.binary_expr,
       $.if_expr,
       $.for_expr,
-    ),
+    )),
 
     primary_expr: $ => choice(
       $.subscript_expr,
@@ -342,7 +348,7 @@ module.exports = grammar({
     ),    
 
     call_expr: $ => seq(
-      field('function', choice($._expression, $.import)),
+      field('function', choice($.primary_expr, $.import)),
       $._arguments,
     ),
 
@@ -361,10 +367,10 @@ module.exports = grammar({
       ...binary_expr($),
     ),
 
-    unary_expr: $ => seq(
+    unary_expr: $ => prec.left(seq(
       field('operator', choice('not', '-', '+')),
       field('operand', $._expression),
-    ),
+    )),
 
     identifier: _ => {
       // copied from JS grammar
@@ -476,10 +482,7 @@ module.exports = grammar({
     ),  
 
     for_stam: $ => seq(
-      'for', choice(
-        seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))), 
-        seq('(', field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr))), ')'), 
-      ),
+      'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
       '{', field('then', $.content), '}'
     ),     
 

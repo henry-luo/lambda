@@ -320,11 +320,11 @@
         "required": true,
         "types": [
           {
-            "type": "_expression",
+            "type": "import",
             "named": true
           },
           {
-            "type": "import",
+            "type": "primary_expr",
             "named": true
           }
         ]
