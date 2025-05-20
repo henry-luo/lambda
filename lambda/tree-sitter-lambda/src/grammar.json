@@ -7,13 +7,6 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "REPEAT",
-          "content": {
-            "type": "SYMBOL",
-            "name": "_statement"
-          }
-        },
-        {
           "type": "CHOICE",
           "members": [
             {
@@ -24,15 +17,6 @@
               "type": "BLANK"
             }
           ]
-        }
-      ]
-    },
-    "_statement": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "fn_definition"
         }
       ]
     },
@@ -50,6 +34,10 @@
         {
           "type": "SYMBOL",
           "name": "for_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "fn_definition"
         }
       ]
     },
@@ -3796,13 +3784,11 @@
     "_parenthesized_expr",
     "_arguments",
     "_content_item",
-    "_statement",
     "_number",
     "_datetime",
     "_unsigned_number"
   ],
   "supertypes": [
-    "_expression",
-    "_statement"
+    "_expression"
   ]
 }

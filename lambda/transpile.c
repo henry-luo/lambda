@@ -3,6 +3,7 @@
 
 extern LambdaType TYPE_ANY;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
+void transpile_func(Transpiler* tp, AstFuncNode *fn_node);
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (item->type->type_id == LMD_TYPE_NULL) {
@@ -313,7 +314,9 @@ void transpile_items(Transpiler* tp, AstArrayNode *array_node) {
     AstNode *item = array_node->item;  bool is_first = true;
     while (item) {
         // skip let declaration
-        if (item->node_type == AST_NODE_LET_STAM) { item = item->next; continue; }
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_FUNC) { 
+            item = item->next; continue; 
+        }
 
         if (is_first) { is_first = false; } 
         else { strbuf_append_char(tp->code_buf, ','); }
@@ -375,10 +378,16 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     strbuf_append_str(tp->code_buf, "({");
     // let declare first
     AstNode *item = list_node->item;
+    printf("content item cnt:%d,%p\n", type->length, item);
     while (item) {
+        printf("content item type:%d\n", item->node_type);
         if (item->node_type == AST_NODE_LET_STAM) {
             type->length--;
             transpile_let_stam(tp, (AstLetNode*)item);
+        }
+        else if (item->node_type == AST_NODE_FUNC) {
+            type->length--;
+            // transpile_func(tp, (AstFuncNode*)item);
         }
         item = item->next;
     }
@@ -505,6 +514,7 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
 }
 
 void transpile_func(Transpiler* tp, AstFuncNode *fn_node) {
+    printf("transpile func: %.*s\n", (int)fn_node->name.length, fn_node->name.str);
     // use function body type as the return type for the time being
     LambdaType *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
@@ -571,7 +581,116 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
     case AST_NODE_FUNC:
-        transpile_func(tp, (AstFuncNode*)expr_node);
+        // transpile_func(tp, (AstFuncNode*)expr_node);
+        break;
+    default:
+        printf("unknown expression type\n");
+        break;
+    }
+}
+
+void define_ast_node(Transpiler* tp, AstNode *node) {
+    // get the function name
+    printf("declare ast node: %d\n", node->node_type);
+    switch(node->node_type) {
+    case AST_NODE_IDENT:  case AST_NODE_PARAM:
+        break;
+        break;
+    case AST_NODE_PRIMARY:
+        if (((AstPrimaryNode*)node)->expr) {
+            define_ast_node(tp, ((AstPrimaryNode*)node)->expr);
+        }
+        break;
+    case AST_NODE_UNARY:
+        define_ast_node(tp, ((AstUnaryNode*)node)->operand);
+        break;
+    case AST_NODE_BINARY:
+        define_ast_node(tp, ((AstBinaryNode*)node)->left);
+        define_ast_node(tp, ((AstBinaryNode*)node)->right);
+        break;
+    case AST_NODE_IF_EXPR:
+        AstIfExprNode* if_node = (AstIfExprNode*)node;
+        define_ast_node(tp, if_node->cond);
+        define_ast_node(tp, if_node->then);
+        if (if_node->otherwise) {
+            define_ast_node(tp, if_node->otherwise);
+        }
+        break;
+    case AST_NODE_LET_STAM:
+        AstNode *declare = ((AstLetNode*)node)->declare;
+        while (declare) {
+            define_ast_node(tp, declare);
+            declare = declare->next;
+        }
+        break;
+    case AST_NODE_FOR_EXPR:
+        AstNode *loop = ((AstForNode*)node)->loop;
+        while (loop) {
+            define_ast_node(tp, loop);
+            loop = loop->next;
+        }
+        if (node->node_type == AST_NODE_FOR_EXPR) {
+            define_ast_node(tp, ((AstForNode*)node)->then);
+        }
+        break;
+    case AST_NODE_ASSIGN:
+        AstNamedNode* assign = (AstNamedNode*)node;
+        define_ast_node(tp, assign->as);
+        break;
+    case AST_NODE_KEY_EXPR:
+        AstNamedNode* key = (AstNamedNode*)node;
+        define_ast_node(tp, key->as);
+        break;
+    case AST_NODE_LOOP:
+        define_ast_node(tp, ((AstNamedNode*)node)->as);
+        break;
+    case AST_NODE_ARRAY:
+        AstNode *item = ((AstArrayNode*)node)->item;
+        while (item) {
+            define_ast_node(tp, item);
+            item = item->next;
+        }        
+        break;
+    case AST_NODE_LIST:  case AST_NODE_CONTENT:
+        AstNode *ld = ((AstListNode*)node)->declare;
+        while (ld) {
+            define_ast_node(tp, ld);
+            ld = ld->next;
+        }        
+        AstNode *li = ((AstListNode*)node)->item;
+        while (li) {
+            define_ast_node(tp, li);
+            li = li->next;
+        }        
+        break; 
+    case AST_NODE_MAP:
+        AstNamedNode *nm_item = ((AstMapNode*)node)->item;
+        while (nm_item) {
+            define_ast_node(tp, (AstNode*)nm_item);
+            nm_item = (AstNamedNode*)nm_item->next;
+        }
+        break;
+    case AST_NODE_FIELD_EXPR:
+        define_ast_node(tp, ((AstFieldNode*)node)->object);
+        define_ast_node(tp, ((AstFieldNode*)node)->field);
+        break;
+    case AST_NODE_CALL_EXPR:
+        define_ast_node(tp, ((AstCallNode*)node)->function);
+        AstNode* arg = ((AstCallNode*)node)->argument;
+        while (arg) {
+            define_ast_node(tp, arg);
+            arg = arg->next;
+        }
+        break;
+    case AST_NODE_FUNC:
+        transpile_func(tp, (AstFuncNode*)node);
+        AstFuncNode* func = (AstFuncNode*)node;
+        AstNode* fn_param = (AstNode*)func->param;
+        while (fn_param) {
+            define_ast_node(tp, fn_param);
+            fn_param = fn_param->next;
+        }        
+        define_ast_node(tp, func->body);
         break;
     default:
         printf("unknown expression type\n");
@@ -581,22 +700,16 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 
 void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
+    // all (nested) function definitions need to be hoisted to global level
+    AstNode* child = script->child;
+    while (child) {
+        define_ast_node(tp, child);
+        child = child->next;
+    }    
 
-    AstNode *node = script->child;
-    // global declarations
-    while (node) {
-        // const stam
-        if (node->node_type == AST_NODE_LET_STAM) {
-            transpile_let_stam(tp, (AstLetNode*)node);
-        }
-        else if (node->node_type == AST_NODE_FUNC) {
-            transpile_func(tp, (AstFuncNode*)node);
-        }
-        node = node->next;
-    }
     // global evaluation, wrapped inside main()
-    strbuf_append_str(tp->code_buf, "Item main(Context *rt){\n List *ls=");
-    node = script->child;
+    strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n List *ls=");
+    AstNode *node = script->child;
     while (node) {
         if (node->node_type != AST_NODE_LET_STAM && node->node_type != AST_NODE_FUNC) {
             transpile_expr(tp, node);

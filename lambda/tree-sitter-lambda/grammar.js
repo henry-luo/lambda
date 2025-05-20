@@ -91,7 +91,6 @@ module.exports = grammar({
   // supertype symbols must always have a single visible child
   supertypes: $ => [
     $._expression,
-    $._statement,
   ],
 
   inline: $ => [
@@ -99,7 +98,6 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._content_item,
-    $._statement,
     $._number,
     $._datetime,
     $._unsigned_number,
@@ -141,14 +139,13 @@ module.exports = grammar({
 
   rules: {
     // $._literal at top-level for JSON and Mark compatibility
-    document: $ => seq(repeat($._statement), optional($.content)),
-
-    _statement: $ => choice($.fn_definition),
+    document: $ => seq(optional($.content)),
 
     _content_item: $ => choice(
       $.let_stam,
       $.if_stam, 
       $.for_stam,
+      $.fn_definition
     ),
 
     content: $ => seq(

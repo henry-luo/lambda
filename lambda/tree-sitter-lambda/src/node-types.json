@@ -26,16 +26,6 @@
     ]
   },
   {
-    "type": "_statement",
-    "named": true,
-    "subtypes": [
-      {
-        "type": "fn_definition",
-        "named": true
-      }
-    ]
-  },
-  {
     "type": "array",
     "named": true,
     "fields": {},
@@ -354,6 +344,10 @@
           "named": true
         },
         {
+          "type": "fn_definition",
+          "named": true
+        },
+        {
           "type": "for_stam",
           "named": true
         },
@@ -374,13 +368,9 @@
     "root": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": false,
       "types": [
-        {
-          "type": "_statement",
-          "named": true
-        },
         {
           "type": "content",
           "named": true
