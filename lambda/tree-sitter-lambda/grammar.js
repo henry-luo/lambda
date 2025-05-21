@@ -42,8 +42,12 @@ function binary_expr($) {
     ['<=', 'binary_relation'],
     ['>=', 'binary_relation'],
     ['>', 'binary_relation'],
-    ['to', 'binary_relation'],
-    ['in', 'binary_relation'],
+    ['to', 'to'],
+    ['|', 'union'],
+    ['&', 'intersect'],
+    ['!', 'exclude'],  // set1 ! set2, elements in set1 but not in set2.
+    ['^', 'exclude'],  // set1 ^ set2, elements in either set, but not both.    
+    ['in', 'in'],
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
       field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
@@ -138,9 +142,7 @@ module.exports = grammar({
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
-    'intersect',
-    'exclude',
-    'union',
+    // binary operators
     'binary_pow',
     'binary_times',
     'binary_plus',
@@ -148,12 +150,13 @@ module.exports = grammar({
     'binary_compare',
     'binary_relation',
     'binary_eq',
-    'bitwise_and',
-    'bitwise_xor',
-    'bitwise_or',
     'logical_and',
     'logical_or',
+    // set operators
     'to',
+    'intersect',
+    'exclude',
+    'union',
     'in',
     $.assign_expr,
     $.if_expr,
@@ -482,16 +485,9 @@ module.exports = grammar({
 
     type_definition: $ => seq(
       'type', field('name', $.identifier), '=', $.type_annotation,
-    ),    
+    ),
 
-    type_expr: $ => prec.left(choice(
-      built_in_types(false),
-      ...type_pattern(choice(
-        built_in_types(true),
-        $.identifier,
-        $._non_null_literal,
-      )),
-    )),
+    type_expr: $ => built_in_types(false),
 
     assign_expr: $ => seq(
       field('name', $.identifier), 
