@@ -104,12 +104,6 @@ typedef enum {
 
 #include "lambda.h"
 
-typedef struct LambdaType {
-    TypeId type_id;
-    uint8_t is_literal:1;  // is a literal value
-    uint8_t is_const:1;  // is a constant expr
-} LambdaType;
-
 typedef struct {
     LambdaType;  // extends LambdaType
     int const_index;
