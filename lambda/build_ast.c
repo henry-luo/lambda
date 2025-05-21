@@ -552,6 +552,12 @@ LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
     return type;
 }
 
+AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
+    ast_node->type = &LIT_TYPE;
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("build assign expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
@@ -818,7 +824,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_BINARY_EXPR) {
         return build_binary_expr(tp, expr_node);
     }
-    else if (symbol == SYM_LET_STAM) {
+    else if (symbol == SYM_LET_STAM || symbol == SYM_TYPE_DEFINE) {
         return build_let_stam(tp, expr_node);
     }
     else if (symbol == SYM_FOR_EXPR) {
@@ -884,7 +890,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     else if (symbol == SYM_BASE_TYPE) {
         AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, expr_node, sizeof(AstTypeNode));
         ast_node->type = &LIT_TYPE;
-        return (AstNode*)ast_node;    
+        return (AstNode*)ast_node;
+    }
+    else if (symbol == SYM_TYPE_ANNOTE) {
+        return build_type_annote(tp, expr_node);
     }
     else if (symbol == SYM_COMMENT) {
         return NULL;

@@ -183,6 +183,7 @@ module.exports = grammar({
       $._expression, 
       $.let_stam,
       $.fn_expr_stam,
+      $.type_definition,
     ),    
 
     content: $ => seq(
@@ -486,8 +487,10 @@ module.exports = grammar({
       $.binary_type,
     ),
 
+    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $.type_annotation)),
+
     type_definition: $ => seq(
-      'type', field('name', $.identifier), '=', $.type_annotation,
+      'type', field('declare', alias($.type_assign, $.assign_expr)),
     ),
 
     assign_expr: $ => seq(
@@ -495,8 +498,8 @@ module.exports = grammar({
       optional(seq(':', field('type', $.type_annotation))), '=', field('as', $._expression),
     ),
     
-    let_stam: $ => seq('let', 
-      field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    let_stam: $ => seq(
+      'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
     if_expr: $ => prec.right(seq(

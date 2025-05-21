@@ -55,6 +55,10 @@
           {
             "type": "_expression",
             "named": true
+          },
+          {
+            "type": "type_annotation",
+            "named": true
           }
         ]
       },
@@ -385,6 +389,10 @@
         },
         {
           "type": "let_stam",
+          "named": true
+        },
+        {
+          "type": "type_definition",
           "named": true
         }
       ]
@@ -1163,6 +1171,22 @@
     }
   },
   {
+    "type": "type_definition",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "type_occurrence",
     "named": true,
     "fields": {},
@@ -1373,11 +1397,11 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
@@ -1405,11 +1429,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -1521,11 +1545,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

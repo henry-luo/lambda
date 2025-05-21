@@ -46,6 +46,10 @@
         {
           "type": "SYMBOL",
           "name": "fn_expr_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "type_definition"
         }
       ]
     },
@@ -3783,13 +3787,9 @@
         }
       ]
     },
-    "type_definition": {
+    "type_assign": {
       "type": "SEQ",
       "members": [
-        {
-          "type": "STRING",
-          "value": "type"
-        },
         {
           "type": "FIELD",
           "name": "name",
@@ -3803,8 +3803,34 @@
           "value": "="
         },
         {
-          "type": "SYMBOL",
-          "name": "type_annotation"
+          "type": "FIELD",
+          "name": "as",
+          "content": {
+            "type": "SYMBOL",
+            "name": "type_annotation"
+          }
+        }
+      ]
+    },
+    "type_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "type"
+        },
+        {
+          "type": "FIELD",
+          "name": "declare",
+          "content": {
+            "type": "ALIAS",
+            "content": {
+              "type": "SYMBOL",
+              "name": "type_assign"
+            },
+            "named": true,
+            "value": "assign_expr"
+          }
         }
       ]
     },
