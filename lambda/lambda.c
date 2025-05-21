@@ -311,7 +311,28 @@ Function* fn(fn_ptr ptr) {
     return fn;
 }
 
-extern LambdaTypeType LIT_TYPE_INT; 
+extern LambdaTypeType LIT_TYPE_INT;
+extern LambdaTypeType LIT_TYPE_FLOAT;
+extern LambdaTypeType LIT_TYPE_STRING;
+
 LambdaType *type_int() {
     return (LambdaType *)&LIT_TYPE_INT;
+}
+LambdaType *type_float() {
+    return (LambdaType *)&LIT_TYPE_FLOAT;
+}
+LambdaType *type_string() {
+    return (LambdaType *)&LIT_TYPE_STRING;
+}
+
+Item is(Context *rt, Item a, Item b) {
+    printf("is expr\n");
+    LambdaItem a_item = {.item = a};
+    LambdaItem b_item = {.item = b};
+    if (b_item.type_id || *((uint8_t*)b) != LMD_TYPE_TYPE) {
+        return ITEM_ERROR;
+    }
+    LambdaTypeType *type_b = (LambdaTypeType *)b;
+    printf("is type %d, %d\n", a_item.type_id, type_b->type->type_id);
+    return b2it(a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id);
 }

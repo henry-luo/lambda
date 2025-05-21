@@ -24,6 +24,8 @@ LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal 
 LambdaType LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
 
 LambdaTypeType LIT_TYPE_INT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_INT};
+LambdaTypeType LIT_TYPE_FLOAT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FLOAT};
+LambdaTypeType LIT_TYPE_STRING = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_STRING};
 
 TypeInfo type_info[] = {
     [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer"},
@@ -355,6 +357,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "<=")) { ast_node->op = OPERATOR_LE; }
     else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
     else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
+    else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
+    else if (strview_equal(&op, "union")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "intersect")) { ast_node->op = OPERATOR_INTERSECT; }
+    else if (strview_equal(&op, "exclude")) { ast_node->op = OPERATOR_EXCLUDE; }
+    else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
+    else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
     else { printf("unknown operator: %.*s\n", (int)op.length, op.str); }
 
     TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);

@@ -99,6 +99,13 @@ typedef enum {
     OPERATOR_LE,
     OPERATOR_GT,
     OPERATOR_GE,
+
+    OPERATOR_TO,
+    OPERATOR_UNION,
+    OPERATOR_INTERSECT,
+    OPERATOR_EXCLUDE,
+    OPERATOR_IS,
+    OPERATOR_IN,
 } Operator ;
 
 typedef struct TypeInfo {
@@ -344,7 +351,7 @@ typedef union LambdaItem {
                 uint64_t _56: 56;
             };
             struct {
-                uint64_t pointer : 56;  // tagged pointer
+                uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
                 uint64_t type_id : 8;        
             };           
         };

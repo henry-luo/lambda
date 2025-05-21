@@ -44,7 +44,10 @@ func_obj_t func_list[] = {
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
     {"fn", (fn_ptr) fn},
+    {"is", (fn_ptr) is},
     {"type_int", (fn_ptr) type_int},
+    {"type_float", (fn_ptr) type_float},
+    {"type_string", (fn_ptr) type_string},
 };
 
 void *import_resolver(const char *name) {

@@ -202,7 +202,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             return;
         }
         // call runtime add()
-        strbuf_append_str(tp->code_buf, "add(rt,");  // not able to handle yet
+        strbuf_append_str(tp->code_buf, "add(rt,");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
@@ -216,6 +216,13 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, '/');
         transpile_expr(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');
+    }
+    else if (bi_node->op == OPERATOR_IS) {
+        strbuf_append_str(tp->code_buf, "is(rt,");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');   
     }
     else {
         strbuf_append_char(tp->code_buf, '(');
@@ -579,6 +586,13 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
     StrView type_name = ts_node_source(tp, type_node->node);
     if (strview_equal(&type_name, "int")) {
         strbuf_append_str(tp->code_buf, "type_int()");
+    } else if (strview_equal(&type_name, "float")) {
+        strbuf_append_str(tp->code_buf, "type_float()");
+    } else if (strview_equal(&type_name, "string")) {
+        strbuf_append_str(tp->code_buf, "type_string()");
+    } else {
+        printf("base type not supported yet: %.*s\n", (int)type_name.length, type_name.str);
+        assert(0);
     }
 }
 
