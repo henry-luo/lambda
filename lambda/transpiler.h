@@ -14,6 +14,9 @@
 
 #include "ts-enum.h"
 
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
 #define SYM_FALSE sym_false
@@ -46,6 +49,8 @@
 #define SYM_LET_STAM sym_let_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
+
+#define SYM_BASE_TYPE sym_base_type
 
 #define SYM_FUNC_STAM sym_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
@@ -96,8 +101,11 @@ typedef enum {
     OPERATOR_GE,
 } Operator ;
 
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define min(a, b) ((a) < (b) ? (a) : (b))
+typedef struct TypeInfo {
+    int byte_size;  // byte size of the type
+    char* name;  // name of the type
+    // char* c_type;  // C type of the type
+} TypeInfo;
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
@@ -164,6 +172,11 @@ typedef struct {
     bool is_anonymous;
 } LambdaTypeFunc;
 
+typedef struct {
+    LambdaType;  // extends LambdaType
+    LambdaType *type;
+} LambdaTypeType;
+
 struct Pack {
     size_t size;           // Current used size of the pack
     size_t capacity;       // Total capacity of the pack
@@ -210,6 +223,7 @@ typedef enum AstNodeType {
     AST_NODE_CALL_EXPR,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
+    AST_NODE_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
     AST_SCRIPT,
@@ -236,6 +250,8 @@ typedef struct {
     AstNode;  // extends AstNode
     AstNode *expr;
 } AstPrimaryNode;
+
+typedef AstNode AstTypeNode;
 
 typedef struct {
     AstNode;  // extends AstNode

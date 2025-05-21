@@ -1,6 +1,8 @@
 
 #include "transpiler.h"
 
+extern TypeInfo type_info[];
+
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     for (uint32_t i = 0; i < indent; i++) {
@@ -82,6 +84,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;
     case LMD_TYPE_FUNC:
         strbuf_append_str(tp->code_buf, "Function*");
+        break;
+    case LMD_TYPE_TYPE:
+        strbuf_append_str(tp->code_buf, "LambdaType*");
         break;
     default:
         printf("unknown type %d\n", type_id);
@@ -276,7 +281,11 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_FUNC) {
             Function *func = (Function*)ld_item.pointer;
             strbuf_append_format(strbuf, "fn %p", func);
-        }               
+        }
+        else if (type_id == LMD_TYPE_TYPE) {
+            LambdaTypeType *type = (LambdaTypeType*)ld_item.pointer;
+            strbuf_append_format(strbuf, "type %s", type_info[type->type->type_id].name);
+        }
         else {
             strbuf_append_format(strbuf, "unknown type! %d", type_id);
         }
@@ -322,6 +331,8 @@ char* formatType(LambdaType *type) {
         return "Elmt*";
     case LMD_TYPE_FUNC:
         return "Func*";
+    case LMD_TYPE_TYPE:
+        return "Type*";
     default:
         return "UNKNOWN";
     }
@@ -475,6 +486,9 @@ void print_ast_node(AstNode *node, int indent) {
             fn_param = fn_param->next;
         }
         print_ast_node(func->body, indent + 1);
+        break;
+    case AST_NODE_TYPE:
+        printf("[type:%s]\n", formatType(node->type));
         break;
     case AST_SCRIPT:
         printf("[script:%s]\n", formatType(node->type));

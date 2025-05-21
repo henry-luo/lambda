@@ -1,4 +1,5 @@
 
+#pragma once
 #include <stdint.h>
 // #include <math.h>  // MIR has problem parsing math.h
 #ifndef bool
@@ -28,6 +29,7 @@ enum TypeId {
     LMD_TYPE_LIST,
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
+    LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
@@ -148,3 +150,5 @@ typedef struct LambdaType {
     uint8_t is_literal:1;  // is a literal value
     uint8_t is_const:1;  // is a constant expr
 } LambdaType;
+
+LambdaType *type_int();

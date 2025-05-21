@@ -5,6 +5,7 @@ LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY};
 LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
 LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 LambdaType TYPE_IMP_INT = {.type_id = LMD_TYPE_IMP_INT};
+LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 LambdaType TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
@@ -20,28 +21,32 @@ LambdaType LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1, .is_literal = 1}
 LambdaType LIT_IMP_INT = {.type_id = LMD_TYPE_IMP_INT, .is_const = 1, .is_literal = 1};
 LambdaType LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
 LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
+LambdaType LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
 
-int byte_size[] = {
-    [LMD_TYPE_RAW_POINTER] = sizeof(void*),
-    [LMD_TYPE_NULL] = sizeof(bool),
-    [LMD_TYPE_BOOL] = sizeof(bool),
-    [LMD_TYPE_IMP_INT] = sizeof(long),
-    [LMD_TYPE_INT] = sizeof(long),
-    [LMD_TYPE_FLOAT] = sizeof(double),
-    [LMD_TYPE_DECIMAL] = sizeof(void*),
-    [LMD_TYPE_NUMBER] = sizeof(double),
-    [LMD_TYPE_DTIME] = sizeof(char*),
-    [LMD_TYPE_STRING] = sizeof(char*),
-    [LMD_TYPE_SYMBOL] = sizeof(char*),
-    [LMD_TYPE_BINARY] = sizeof(char*),
-    [LMD_TYPE_ARRAY] = sizeof(void*),
-    [LMD_TYPE_ARRAY_INT] = sizeof(void*),
-    [LMD_TYPE_LIST] = sizeof(void*),
-    [LMD_TYPE_MAP] = sizeof(void*),
-    [LMD_TYPE_ELEMENT] = sizeof(void*),
-    [LMD_TYPE_FUNC] = sizeof(void*),
-    [LMD_TYPE_ANY] = sizeof(void*),
-    [LMD_TYPE_ERROR] = sizeof(void*),
+LambdaTypeType LIT_TYPE_INT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_INT};
+
+TypeInfo type_info[] = {
+    [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer"},
+    [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null"},
+    [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool"},
+    [LMD_TYPE_IMP_INT] = {.byte_size = sizeof(long), .name = "number"},
+    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "int"},
+    [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float"},
+    [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal"},
+    [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number"},
+    [LMD_TYPE_DTIME] = {.byte_size = sizeof(char*), .name = "datetime"},
+    [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string"},
+    [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol"},
+    [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary"},
+    [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array"},
+    [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array"},
+    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list"},
+    [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map"},
+    [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element"},
+    [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type"},
+    [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function"},
+    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any"},
+    [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error"},
 };
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
@@ -610,7 +615,7 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
         prev_entry = shape_entry;
 
         type->length++;
-        byte_offset += byte_size[item->type->type_id];
+        byte_offset += type_info[item->type->type_id].byte_size;
         child = ts_node_next_named_sibling(child);
     }
 
@@ -867,6 +872,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         ast_node->type = build_lit_float(tp, expr_node, symbol);
         return (AstNode*)ast_node;
+    }
+    else if (symbol == SYM_BASE_TYPE) {
+        AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, expr_node, sizeof(AstTypeNode));
+        ast_node->type = &LIT_TYPE;
+        return (AstNode*)ast_node;    
     }
     else if (symbol == SYM_COMMENT) {
         return NULL;

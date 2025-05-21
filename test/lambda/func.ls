@@ -14,3 +14,6 @@ mul(2, 3.0)
 
 let f = fn(a, b) { a + b }
 f; f(1,2);
+
+let t = int
+t;

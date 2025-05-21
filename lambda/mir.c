@@ -20,34 +20,35 @@ int getc_func(void *data) {
 
 typedef struct {
     char *name;
-    void (*func)(void);
+    fn_ptr func;
 } func_obj_t;
 
 func_obj_t func_list[] = {
-    {"printf", (void (*)(void))printf},
-    {"pow", (void (*)(void))pow},
-    {"array_new", (void (*)(void))array_new},
-    {"array_long_new", (void (*)(void))array_long_new},
-    {"list", (void (*)(void))list},
-    {"list_new", (void (*)(void))list_new},
-    {"list_push", (void (*)(void))list_push},
-    {"list_long", (void (*)(void))list_long},
-    {"list_long_push", (void (*)(void))list_long_push},
-    {"map_new", (void (*)(void))map_new},
-    {"map_get", (void (*)(void))map_get},
-    {"item_true", (void (*)(void))item_true},
-    {"v2it", (void (*)(void))v2it},
-    {"push_d", (void (*)(void))push_d},
-    {"push_l", (void (*)(void))push_l},
-    {"str_cat", (void (*)(void))str_cat},
-    {"add", (void (*)(void))add},
-    {"it2l", (void (*)(void))it2l},
-    {"it2d", (void (*)(void))it2d},
-    {"fn", (void (*)(void))fn},
+    {"printf", (fn_ptr) printf},
+    {"pow", (fn_ptr) pow},
+    {"array_new", (fn_ptr) array_new},
+    {"array_long_new", (fn_ptr) array_long_new},
+    {"list", (fn_ptr) list},
+    {"list_new", (fn_ptr) list_new},
+    {"list_push", (fn_ptr) list_push},
+    {"list_long", (fn_ptr) list_long},
+    {"list_long_push", (fn_ptr) list_long_push},
+    {"map_new", (fn_ptr) map_new},
+    {"map_get", (fn_ptr) map_get},
+    {"item_true", (fn_ptr) item_true},
+    {"v2it", (fn_ptr) v2it},
+    {"push_d", (fn_ptr) push_d},
+    {"push_l", (fn_ptr) push_l},
+    {"str_cat", (fn_ptr) str_cat},
+    {"add", (fn_ptr) add},
+    {"it2l", (fn_ptr) it2l},
+    {"it2d", (fn_ptr) it2d},
+    {"fn", (fn_ptr) fn},
+    {"type_int", (fn_ptr) type_int},
 };
 
 void *import_resolver(const char *name) {
-    printf("resolving func: %s\n", name);
+    printf("resolving name: %s\n", name);
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) 
         if (strcmp(func_list[i].name, name) == 0)

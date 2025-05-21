@@ -310,3 +310,8 @@ Function* fn(fn_ptr ptr) {
     fn->ptr = ptr;
     return fn;
 }
+
+extern LambdaTypeType LIT_TYPE_INT; 
+LambdaType *type_int() {
+    return (LambdaType *)&LIT_TYPE_INT;
+}

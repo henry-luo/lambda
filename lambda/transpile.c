@@ -62,7 +62,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
-    case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_FUNC:
+    case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  
+    case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
         transpile_expr(tp, item);  // raw pointer
         break;
     case LMD_TYPE_ANY:
@@ -574,6 +575,13 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
         ((LambdaTypeFunc*)fn_node->type)->param_count);
 }
 
+void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
+    StrView type_name = ts_node_source(tp, type_node->node);
+    if (strview_equal(&type_name, "int")) {
+        strbuf_append_str(tp->code_buf, "type_int()");
+    }
+}
+
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     if (!expr_node) {
         printf("missing expression node\n");  return;
@@ -621,6 +629,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_FUNC_EXPR:
         transpile_fn_expr(tp, (AstFuncNode*)expr_node);
+        break;
+    case AST_NODE_TYPE:
+        transpile_base_type(tp, (AstTypeNode*)expr_node);
         break;
     default:
         printf("unknown expression type\n");

@@ -27,8 +27,6 @@ const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
 function binary_expr($) { 
   return [
-    ['and', 'logical_and'],
-    ['or', 'logical_or'],
     ['+', 'binary_plus'],
     ['-', 'binary_plus'],
     ['*', 'binary_times'],
@@ -42,12 +40,15 @@ function binary_expr($) {
     ['<=', 'binary_relation'],
     ['>=', 'binary_relation'],
     ['>', 'binary_relation'],
-    ['to', 'to'],
-    ['|', 'union'],
-    ['&', 'intersect'],
-    ['!', 'exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    ['^', 'exclude'],  // set1 ^ set2, elements in either set, but not both.    
-    ['in', 'in'],
+    ['and', 'logical_and'],
+    ['or', 'logical_or'],
+    ['to', 'range_to'],
+    ['|', 'set_union'],
+    ['&', 'set_intersect'],
+    ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
+    ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.    
+    ['is', 'set_is_in'],
+    ['in', 'set_is_in'],
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
       field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
@@ -59,10 +60,10 @@ function binary_expr($) {
 
 function type_pattern(primary_type) { 
   return [
-    ['|', 'union'],
-    ['&', 'intersect'],
-    ['!', 'exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    ['^', 'exclude'],  // set1 ^ set2, elements in either set, but not both.
+    ['|', 'set_union'],
+    ['&', 'set_intersect'],
+    ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
+    ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
       field('left', primary_type), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
@@ -153,16 +154,15 @@ module.exports = grammar({
     'logical_and',
     'logical_or',
     // set operators
-    'to',
-    'intersect',
-    'exclude',
-    'union',
-    'in',
+    'range_to',
+    'set_intersect',
+    'set_exclude',
+    'set_union',
+    'set_is_in',
     $.assign_expr,
     $.if_expr,
     $.for_expr,
     $.fn_expr,
-    $.type_expr,
   ]],
 
   conflicts: $ => [
@@ -367,7 +367,7 @@ module.exports = grammar({
       $.array,
       $.map,
       $.element,
-      $.type_expr,
+      alias($._non_null_base_type, $.base_type),
       $.identifier,
       $.subscript_expr,
       $.member_expr,
@@ -462,8 +462,11 @@ module.exports = grammar({
       $.map_item_type, repeat(seq(choice(linebreak, ';'), $.map_item_type)), '}'
     ),
 
+    base_type: $ => built_in_types(true),
+    _non_null_base_type: $ => built_in_types(false),
+
     primary_type: $ => choice(
-      built_in_types(true),
+      $.base_type,
       $.identifier,
       $._non_null_literal,
       // array type
@@ -486,8 +489,6 @@ module.exports = grammar({
     type_definition: $ => seq(
       'type', field('name', $.identifier), '=', $.type_annotation,
     ),
-
-    type_expr: $ => built_in_types(false),
 
     assign_expr: $ => seq(
       field('name', $.identifier), 
