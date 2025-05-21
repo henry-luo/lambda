@@ -53,7 +53,7 @@ function binary_expr($) {
   );
 }
 
-function pattern_expr($) { 
+function type_pattern(primary_type) { 
   return [
     ['|', 'union'],
     ['&', 'intersect'],
@@ -61,9 +61,9 @@ function pattern_expr($) {
     ['^', 'exclude'],  // set1 ^ set2, elements in either set, but not both.
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-      field('left', $.primary_type), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
+      field('left', primary_type), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
       field('operator', operator),
-      field('right', $.primary_type),
+      field('right', primary_type),
     )),
   );
 }
@@ -75,6 +75,34 @@ function time() {
     // timezone
     optional(choice('z', 'Z', seq(choice('+', '-'), digit, digit, optional(seq(':', digit, digit)))))
   );
+}
+
+function built_in_types(include_null) { 
+  let types = [
+    'any',
+    'error',
+    'boolean',
+    // 'int8', 'int16', 'int32', 'int64',
+    'int',  // int64
+    // 'float32', 'float64',
+    'float',  // float64
+    'decimal',  // big decimal
+    'number',
+    'date',
+    'time',
+    'datetime',
+    'symbol',  
+    'string',
+    'binary',
+    'list',
+    'array',
+    'map',
+    'element',
+    'object',
+    'type',
+    'function',
+  ];
+  return include_null ? choice('null', ...types) : choice(...types);
 }
 
 module.exports = grammar({
@@ -94,7 +122,7 @@ module.exports = grammar({
   ],
 
   inline: $ => [
-    $._literal,
+    $._non_null_literal,
     $._parenthesized_expr,
     $._arguments,
     $._content_item,
@@ -107,7 +135,6 @@ module.exports = grammar({
   precedences: $ => [[
     $.attr,
     $.fn_expr_stam,
-    $.fn_expr,
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
@@ -130,17 +157,17 @@ module.exports = grammar({
     'in',
     $.assign_expr,
     $.if_expr,
-    $.for_expr,     
+    $.for_expr,
+    $.fn_expr,
+    $.type_expr,
   ]],
 
   conflicts: $ => [
-    [$.null, $.built_in_type],
     [$.content, $.binary_expr],
-    [$.primary_expr, $.parameter]
+    [$.primary_expr, $.parameter],
   ],
 
   rules: {
-    // $._literal at top-level for JSON and Mark compatibility
     document: $ => optional($.content),
 
     _content_item: $ => choice(
@@ -174,7 +201,7 @@ module.exports = grammar({
       repeat1(seq(',', choice($._expression, $.assign_expr))), ')'
     ),
 
-    _literal: $ => choice(
+    _non_null_literal: $ => choice(
       $._number,
       $.string,
       $.symbol,
@@ -182,7 +209,6 @@ module.exports = grammar({
       $.binary,
       $.true,
       $.false,
-      $.null,
     ),
 
     pair: $ => seq(
@@ -324,10 +350,6 @@ module.exports = grammar({
     )),
 
     primary_expr: $ => choice(
-      $.subscript_expr,
-      $.member_expr,
-      $._parenthesized_expr,
-      $.identifier,
       $.null,
       $.true,
       $.false,
@@ -342,11 +364,12 @@ module.exports = grammar({
       $.array,
       $.map,
       $.element,
-      // $.function_expression,
-      // $.arrow_function,
-      // $.class,
-      // $.meta_property,
+      $.type_expr,
+      $.identifier,
+      $.subscript_expr,
+      $.member_expr,
       $.call_expr,
+      $._parenthesized_expr,
     ),
 
     import: _ => token('import'),
@@ -426,64 +449,49 @@ module.exports = grammar({
       ),      
     ),
 
-    built_in_type: $ => choice(
-      'null',
-      'any',
-      'error',
-      'boolean',
-      // 'int8', 'int16', 'int32', 'int64',
-      'int',  // int64
-      // 'float32', 'float64',
-      'float',  // float64
-      'decimal',  // big decimal
-      'number',
-      'date',
-      'time',
-      'datetime',
-      'symbol',  
-      'string',
-      'binary',
-      'list',
-      'array',
-      'map',
-      'element',
-      'object',
-      'type',
-      'function',
-    ),
-
     occurrence: $ => choice('?', '+', '*'),
 
     map_item_type: $=> seq(
-      field('key', choice($.identifier, $.symbol)), ':', field('value', $.type_annotation)
+      field('name', choice($.identifier, $.symbol)), ':', field('as', $.type_annotation)
     ),
 
     map_type: $ => seq('{', 
       $.map_item_type, repeat(seq(choice(linebreak, ';'), $.map_item_type)), '}'
     ),
 
-    primary_type: $ => prec.left(seq(choice(
-      $.built_in_type,
+    primary_type: $ => choice(
+      built_in_types(true),
       $.identifier,
-      $._literal,
+      $._non_null_literal,
       // array type
       $.map_type,
       // entity type
       // fn type
-    ), optional($.occurrence))),
+    ),
+
+    type_occurrence: $ => seq($.primary_type, optional($.occurrence)),
 
     binary_type: $ => choice(
-      ...pattern_expr($),
+      ...type_pattern($.type_occurrence),
     ),
 
     type_annotation: $ => choice(
       $.primary_type,
-      $.binary_type
+      $.binary_type,
     ),
 
     type_definition: $ => seq(
       'type', field('name', $.identifier), '=', $.type_annotation,
     ),    
+
+    type_expr: $ => prec.left(choice(
+      built_in_types(false),
+      ...type_pattern(choice(
+        built_in_types(true),
+        $.identifier,
+        $._non_null_literal,
+      )),
+    )),
 
     assign_expr: $ => seq(
       field('name', $.identifier), 

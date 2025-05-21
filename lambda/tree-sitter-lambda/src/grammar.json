@@ -178,7 +178,7 @@
         }
       ]
     },
-    "_literal": {
+    "_non_null_literal": {
       "type": "CHOICE",
       "members": [
         {
@@ -208,10 +208,6 @@
         {
           "type": "SYMBOL",
           "name": "false"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "null"
         }
       ]
     },
@@ -1867,22 +1863,6 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "subscript_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "member_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_parenthesized_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "identifier"
-        },
-        {
-          "type": "SYMBOL",
           "name": "null"
         },
         {
@@ -1939,7 +1919,27 @@
         },
         {
           "type": "SYMBOL",
+          "name": "type_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "subscript_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "member_expr"
+        },
+        {
+          "type": "SYMBOL",
           "name": "call_expr"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_parenthesized_expr"
         }
       ]
     },
@@ -3154,95 +3154,6 @@
         }
       ]
     },
-    "built_in_type": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "null"
-        },
-        {
-          "type": "STRING",
-          "value": "any"
-        },
-        {
-          "type": "STRING",
-          "value": "error"
-        },
-        {
-          "type": "STRING",
-          "value": "boolean"
-        },
-        {
-          "type": "STRING",
-          "value": "int"
-        },
-        {
-          "type": "STRING",
-          "value": "float"
-        },
-        {
-          "type": "STRING",
-          "value": "decimal"
-        },
-        {
-          "type": "STRING",
-          "value": "number"
-        },
-        {
-          "type": "STRING",
-          "value": "date"
-        },
-        {
-          "type": "STRING",
-          "value": "time"
-        },
-        {
-          "type": "STRING",
-          "value": "datetime"
-        },
-        {
-          "type": "STRING",
-          "value": "symbol"
-        },
-        {
-          "type": "STRING",
-          "value": "string"
-        },
-        {
-          "type": "STRING",
-          "value": "binary"
-        },
-        {
-          "type": "STRING",
-          "value": "list"
-        },
-        {
-          "type": "STRING",
-          "value": "array"
-        },
-        {
-          "type": "STRING",
-          "value": "map"
-        },
-        {
-          "type": "STRING",
-          "value": "element"
-        },
-        {
-          "type": "STRING",
-          "value": "object"
-        },
-        {
-          "type": "STRING",
-          "value": "type"
-        },
-        {
-          "type": "STRING",
-          "value": "function"
-        }
-      ]
-    },
     "occurrence": {
       "type": "CHOICE",
       "members": [
@@ -3265,7 +3176,7 @@
       "members": [
         {
           "type": "FIELD",
-          "name": "key",
+          "name": "name",
           "content": {
             "type": "CHOICE",
             "members": [
@@ -3286,7 +3197,7 @@
         },
         {
           "type": "FIELD",
-          "name": "value",
+          "name": "as",
           "content": {
             "type": "SYMBOL",
             "name": "type_annotation"
@@ -3337,46 +3248,131 @@
       ]
     },
     "primary_type": {
-      "type": "PREC_LEFT",
-      "value": 0,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "built_in_type"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "identifier"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "_literal"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "map_type"
-              }
-            ]
-          },
-          {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SYMBOL",
-                "name": "occurrence"
-              },
-              {
-                "type": "BLANK"
-              }
-            ]
-          }
-        ]
-      }
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "null"
+            },
+            {
+              "type": "STRING",
+              "value": "any"
+            },
+            {
+              "type": "STRING",
+              "value": "error"
+            },
+            {
+              "type": "STRING",
+              "value": "boolean"
+            },
+            {
+              "type": "STRING",
+              "value": "int"
+            },
+            {
+              "type": "STRING",
+              "value": "float"
+            },
+            {
+              "type": "STRING",
+              "value": "decimal"
+            },
+            {
+              "type": "STRING",
+              "value": "number"
+            },
+            {
+              "type": "STRING",
+              "value": "date"
+            },
+            {
+              "type": "STRING",
+              "value": "time"
+            },
+            {
+              "type": "STRING",
+              "value": "datetime"
+            },
+            {
+              "type": "STRING",
+              "value": "symbol"
+            },
+            {
+              "type": "STRING",
+              "value": "string"
+            },
+            {
+              "type": "STRING",
+              "value": "binary"
+            },
+            {
+              "type": "STRING",
+              "value": "list"
+            },
+            {
+              "type": "STRING",
+              "value": "array"
+            },
+            {
+              "type": "STRING",
+              "value": "map"
+            },
+            {
+              "type": "STRING",
+              "value": "element"
+            },
+            {
+              "type": "STRING",
+              "value": "object"
+            },
+            {
+              "type": "STRING",
+              "value": "type"
+            },
+            {
+              "type": "STRING",
+              "value": "function"
+            }
+          ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "identifier"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_non_null_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "map_type"
+        }
+      ]
+    },
+    "type_occurrence": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "primary_type"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "occurrence"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
     },
     "binary_type": {
       "type": "CHOICE",
@@ -3392,7 +3388,7 @@
                 "name": "left",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               },
               {
@@ -3408,7 +3404,7 @@
                 "name": "right",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               }
             ]
@@ -3425,7 +3421,7 @@
                 "name": "left",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               },
               {
@@ -3441,7 +3437,7 @@
                 "name": "right",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               }
             ]
@@ -3458,7 +3454,7 @@
                 "name": "left",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               },
               {
@@ -3474,7 +3470,7 @@
                 "name": "right",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               }
             ]
@@ -3491,7 +3487,7 @@
                 "name": "left",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               },
               {
@@ -3507,7 +3503,7 @@
                 "name": "right",
                 "content": {
                   "type": "SYMBOL",
-                  "name": "primary_type"
+                  "name": "type_occurrence"
                 }
               }
             ]
@@ -3552,6 +3548,1016 @@
           "name": "type_annotation"
         }
       ]
+    },
+    "type_expr": {
+      "type": "PREC_LEFT",
+      "value": 0,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "any"
+              },
+              {
+                "type": "STRING",
+                "value": "error"
+              },
+              {
+                "type": "STRING",
+                "value": "boolean"
+              },
+              {
+                "type": "STRING",
+                "value": "int"
+              },
+              {
+                "type": "STRING",
+                "value": "float"
+              },
+              {
+                "type": "STRING",
+                "value": "decimal"
+              },
+              {
+                "type": "STRING",
+                "value": "number"
+              },
+              {
+                "type": "STRING",
+                "value": "date"
+              },
+              {
+                "type": "STRING",
+                "value": "time"
+              },
+              {
+                "type": "STRING",
+                "value": "datetime"
+              },
+              {
+                "type": "STRING",
+                "value": "symbol"
+              },
+              {
+                "type": "STRING",
+                "value": "string"
+              },
+              {
+                "type": "STRING",
+                "value": "binary"
+              },
+              {
+                "type": "STRING",
+                "value": "list"
+              },
+              {
+                "type": "STRING",
+                "value": "array"
+              },
+              {
+                "type": "STRING",
+                "value": "map"
+              },
+              {
+                "type": "STRING",
+                "value": "element"
+              },
+              {
+                "type": "STRING",
+                "value": "object"
+              },
+              {
+                "type": "STRING",
+                "value": "type"
+              },
+              {
+                "type": "STRING",
+                "value": "function"
+              }
+            ]
+          },
+          {
+            "type": "PREC_LEFT",
+            "value": "union",
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "left",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "operator",
+                  "content": {
+                    "type": "STRING",
+                    "value": "|"
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "right",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "PREC_LEFT",
+            "value": "intersect",
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "left",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "operator",
+                  "content": {
+                    "type": "STRING",
+                    "value": "&"
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "right",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "PREC_LEFT",
+            "value": "exclude",
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "left",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "operator",
+                  "content": {
+                    "type": "STRING",
+                    "value": "!"
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "right",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "PREC_LEFT",
+            "value": "exclude",
+            "content": {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "left",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "operator",
+                  "content": {
+                    "type": "STRING",
+                    "value": "^"
+                  }
+                },
+                {
+                  "type": "FIELD",
+                  "name": "right",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "CHOICE",
+                        "members": [
+                          {
+                            "type": "STRING",
+                            "value": "null"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "any"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "error"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "boolean"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "int"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "float"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "decimal"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "number"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "date"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "time"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "datetime"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "symbol"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "string"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "binary"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "list"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "array"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "map"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "element"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "object"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "type"
+                          },
+                          {
+                            "type": "STRING",
+                            "value": "function"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "_non_null_literal"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
     },
     "assign_expr": {
       "type": "SEQ",
@@ -3913,10 +4919,6 @@
   ],
   "conflicts": [
     [
-      "null",
-      "built_in_type"
-    ],
-    [
       "content",
       "binary_expr"
     ],
@@ -3934,10 +4936,6 @@
       {
         "type": "SYMBOL",
         "name": "fn_expr_stam"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "fn_expr"
       },
       {
         "type": "SYMBOL",
@@ -4030,12 +5028,20 @@
       {
         "type": "SYMBOL",
         "name": "for_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "fn_expr"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "type_expr"
       }
     ]
   ],
   "externals": [],
   "inline": [
-    "_literal",
+    "_non_null_literal",
     "_parenthesized_expr",
     "_arguments",
     "_content_item",

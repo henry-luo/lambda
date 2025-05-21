@@ -257,7 +257,7 @@
         "required": true,
         "types": [
           {
-            "type": "primary_type",
+            "type": "type_occurrence",
             "named": true
           }
         ]
@@ -289,17 +289,12 @@
         "required": true,
         "types": [
           {
-            "type": "primary_type",
+            "type": "type_occurrence",
             "named": true
           }
         ]
       }
     }
-  },
-  {
-    "type": "built_in_type",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "call_expr",
@@ -745,7 +740,17 @@
     "type": "map_item_type",
     "named": true,
     "fields": {
-      "key": {
+      "as": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type_annotation",
+            "named": true
+          }
+        ]
+      },
+      "name": {
         "multiple": false,
         "required": true,
         "types": [
@@ -755,16 +760,6 @@
           },
           {
             "type": "symbol",
-            "named": true
-          }
-        ]
-      },
-      "value": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "type_annotation",
             "named": true
           }
         ]
@@ -977,6 +972,10 @@
         {
           "type": "true",
           "named": true
+        },
+        {
+          "type": "type_expr",
+          "named": true
         }
       ]
     }
@@ -986,15 +985,11 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
-      "required": true,
+      "multiple": false,
+      "required": false,
       "types": [
         {
           "type": "binary",
-          "named": true
-        },
-        {
-          "type": "built_in_type",
           "named": true
         },
         {
@@ -1019,14 +1014,6 @@
         },
         {
           "type": "map_type",
-          "named": true
-        },
-        {
-          "type": "null",
-          "named": true
-        },
-        {
-          "type": "occurrence",
           "named": true
         },
         {
@@ -1137,6 +1124,329 @@
       "types": [
         {
           "type": "binary_type",
+          "named": true
+        },
+        {
+          "type": "primary_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "type_expr",
+    "named": true,
+    "fields": {
+      "left": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "'",
+            "named": false
+          },
+          {
+            "type": "any",
+            "named": false
+          },
+          {
+            "type": "array",
+            "named": false
+          },
+          {
+            "type": "binary",
+            "named": false
+          },
+          {
+            "type": "binary",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": false
+          },
+          {
+            "type": "date",
+            "named": false
+          },
+          {
+            "type": "datetime",
+            "named": false
+          },
+          {
+            "type": "datetime",
+            "named": true
+          },
+          {
+            "type": "decimal",
+            "named": false
+          },
+          {
+            "type": "element",
+            "named": false
+          },
+          {
+            "type": "error",
+            "named": false
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": false
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "function",
+            "named": false
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "int",
+            "named": false
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "list",
+            "named": false
+          },
+          {
+            "type": "map",
+            "named": false
+          },
+          {
+            "type": "null",
+            "named": false
+          },
+          {
+            "type": "number",
+            "named": false
+          },
+          {
+            "type": "object",
+            "named": false
+          },
+          {
+            "type": "string",
+            "named": false
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": false
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "t'",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "type",
+            "named": false
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "!",
+            "named": false
+          },
+          {
+            "type": "&",
+            "named": false
+          },
+          {
+            "type": "^",
+            "named": false
+          },
+          {
+            "type": "|",
+            "named": false
+          }
+        ]
+      },
+      "right": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "'",
+            "named": false
+          },
+          {
+            "type": "any",
+            "named": false
+          },
+          {
+            "type": "array",
+            "named": false
+          },
+          {
+            "type": "binary",
+            "named": false
+          },
+          {
+            "type": "binary",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": false
+          },
+          {
+            "type": "date",
+            "named": false
+          },
+          {
+            "type": "datetime",
+            "named": false
+          },
+          {
+            "type": "datetime",
+            "named": true
+          },
+          {
+            "type": "decimal",
+            "named": false
+          },
+          {
+            "type": "element",
+            "named": false
+          },
+          {
+            "type": "error",
+            "named": false
+          },
+          {
+            "type": "false",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": false
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "function",
+            "named": false
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "int",
+            "named": false
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "list",
+            "named": false
+          },
+          {
+            "type": "map",
+            "named": false
+          },
+          {
+            "type": "null",
+            "named": false
+          },
+          {
+            "type": "number",
+            "named": false
+          },
+          {
+            "type": "object",
+            "named": false
+          },
+          {
+            "type": "string",
+            "named": false
+          },
+          {
+            "type": "string",
+            "named": true
+          },
+          {
+            "type": "symbol",
+            "named": false
+          },
+          {
+            "type": "symbol",
+            "named": true
+          },
+          {
+            "type": "t'",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": false
+          },
+          {
+            "type": "time",
+            "named": true
+          },
+          {
+            "type": "true",
+            "named": true
+          },
+          {
+            "type": "type",
+            "named": false
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_occurrence",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "occurrence",
           "named": true
         },
         {
@@ -1370,11 +1680,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "fn",
@@ -1482,11 +1792,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",
