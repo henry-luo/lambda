@@ -20,3 +20,5 @@ m.a; m.b; m.c; m.d; m.e; [m.f]; m.g; m.h; m.i; m.j; m.k; m.l; m.m; m.n;
 
 let d:float = 123
 (d+4, not true, not(1>2), -(-2),+(-2))
+
+1+"str"; 1/0; -1/0; 0/0;

@@ -369,19 +369,36 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     ast_node->right = build_expr(tp, right_node);
 
     printf("get binary type\n");
-    printf("left type: %d, right type: %d\n", ast_node->left->type->type_id, ast_node->right->type->type_id);
+    TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
+    printf("left type: %d, right type: %d\n", left_type, right_type);
     TypeId type_id;
     if (ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
-        type_id = LMD_TYPE_FLOAT;
-    } else if (ast_node->op == OPERATOR_ADD || ast_node->op == OPERATOR_SUB || 
-        ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_MOD) {
-        type_id = max(ast_node->left->type->type_id, ast_node->right->type->type_id);
-    } else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
+        type_id = LMD_TYPE_IMP_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
+            LMD_TYPE_IMP_INT <= right_type && right_type <= LMD_TYPE_NUMBER ? LMD_TYPE_FLOAT:LMD_TYPE_ANY;
+    } 
+    else if (ast_node->op == OPERATOR_ADD) {
+        if (left_type == right_type && (left_type == LMD_TYPE_STRING || left_type == LMD_TYPE_BINARY ||
+            left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST || left_type == LMD_TYPE_MAP)) {
+            type_id = left_type;
+        } 
+        else if (LMD_TYPE_IMP_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
+            LMD_TYPE_IMP_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
+            type_id = max(left_type, right_type);
+        }
+        else {
+            type_id = LMD_TYPE_ANY;
+        }
+    } 
+    else if (ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_MOD) {
+        type_id = max(left_type, right_type);
+    } 
+    else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
         ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE || 
         ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE || 
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE) {
         type_id = LMD_TYPE_BOOL;
-    } else if (ast_node->op == OPERATOR_IDIV) {
+    } 
+    else if (ast_node->op == OPERATOR_IDIV) {
         type_id = LMD_TYPE_IMP_INT;
     } else {
         type_id = LMD_TYPE_ANY;

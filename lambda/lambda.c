@@ -244,6 +244,7 @@ String *str_cat(String *left, String *right) {
 
 Item add(Context *rt, Item a, Item b) {
     LambdaItem item_a = {.item = a};  LambdaItem item_b = {.item = b};
+    // todo: join binary, list, array, map
     if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_STRING) {
         String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
         String *result = str_cat(str_a, str_b);
