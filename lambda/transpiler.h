@@ -195,11 +195,16 @@ typedef struct ShapeEntry {
 
 typedef struct {
     LambdaType;  // extends LambdaType
-    int length;  // no. of items in the array/map
+    int length;  // no. of items in the map
     int type_index;  // index of the type in the type list
     int byte_size;  // byte size of the struct that the map is transpiled to
     ShapeEntry* shape;  // shape of the map
 } LambdaTypeMap;
+
+typedef struct {
+    LambdaTypeMap; // extends LambdaTypeMap
+    StrView name;  // name of the element
+} LambdaTypeElmt;
 
 typedef struct LambdaTypeParam {
     LambdaType;  // extends LambdaType
@@ -365,7 +370,6 @@ typedef struct {
 
 typedef struct {
     AstNode;  // extends AstNode
-    StrView name;
     AstNamedNode *item;  // first item in the map
 } AstElementNode;
 

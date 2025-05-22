@@ -96,26 +96,13 @@ void list_long_push(ListLong *list, long item) {
     list->items[list->length++] = item;
 }
 
-// zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
-Map* map_new(Context *rt, int type_index, ...) {
-    printf("map_new with shape %d\n", type_index);
-    ArrayList* type_list = (ArrayList*)rt->type_list;
-    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
-    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
-    Map *map = calloc(1, sizeof(Map));
-    map->type_id = LMD_TYPE_MAP;  map->type = map_type;
-    map->data = calloc(1, map_type->byte_size);  // heap_alloc(rt->heap, map_type->byte_size);
-    printf("map byte_size: %d\n", map_type->byte_size);
-    printf("map data: %d\n", *(uint8_t*)(((uint8_t*)map->data) + map_type->byte_size - 1));
-
-    // set the fields
+void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
     int count = map_type->length;
     printf("map length: %d\n", count);
-    va_list args;  ShapeEntry *field = map_type->shape;
-    va_start(args, count);
+    ShapeEntry *field = map_type->shape;
     for (int i = 0; i < count; i++) {
         printf("field type: %d, offset: %d\n", field->type->type_id, field->byte_offset);
-        void* field_ptr = ((uint8_t*)map->data) + field->byte_offset;
+        void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 *(bool*)field_ptr = va_arg(args, bool);
@@ -148,25 +135,43 @@ Map* map_new(Context *rt, int type_index, ...) {
         }
         field = field->next;
     }
+}
+
+// zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
+Map* map_new(Context *rt, int type_index, ...) {
+    printf("map_new with shape %d\n", type_index);
+    ArrayList* type_list = (ArrayList*)rt->type_list;
+    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
+    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    Map *map = calloc(1, sizeof(Map));
+    map->type_id = LMD_TYPE_MAP;  map->type = map_type;
+    map->data = calloc(1, map_type->byte_size);  // heap_alloc(rt->heap, map_type->byte_size);
+    printf("map byte_size: %d\n", map_type->byte_size);
+    // set map fields
+    va_list args;
+    va_start(args, map_type->length);
+    set_fields(map_type, map->data, args);
     va_end(args);
     return map;
 }
 
+
+
 Element* elmt_new(Context *rt, int type_index, ...) {
     printf("elmt_new with shape %d\n", type_index);
     ArrayList* type_list = (ArrayList*)rt->type_list;
-    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
-    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    AstElementNode* node = (AstElementNode*)((AstNode*)type_list->data[type_index]);
+    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
     Element *elmt = calloc(1, sizeof(Element));
-    elmt->type_id = LMD_TYPE_ELEMENT;  elmt->type = map_type;
-    elmt->data = calloc(1, map_type->byte_size);  // heap_alloc(rt->heap, map_type->byte_size);
-    printf("elmt byte_size: %d\n", map_type->byte_size);
-    printf("elmt data: %d\n", *(uint8_t*)(((uint8_t*)elmt->data) + map_type->byte_size - 1));
-
-    int count = map_type->length;
-    printf("map length: %d\n", count);
-    va_list args;  ShapeEntry *field = map_type->shape;
+    elmt->type_id = LMD_TYPE_ELEMENT;  elmt->type = elmt_type;
+    elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
+    printf("elmt byte_size: %d\n", elmt_type->byte_size);
+    // set attributes
+    int count = elmt_type->length;
+    printf("elmt length: %d\n", count);
+    va_list args;
     va_start(args, count);
+    set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);
     va_end(args);
     return elmt;
 }

@@ -93,6 +93,53 @@ void writeType(Transpiler* tp, LambdaType *type) {
     }
 }
 
+void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) {
+    ShapeEntry *field = map_type->shape;
+    for (int i = 0; i < map_type->length; i++) {
+        if (i) strbuf_append_char(strbuf, ',');
+        strbuf_append_format(strbuf, "%.*s:", (int)field->name.length, field->name.str);
+        printf("field %.*s:%d\n", (int)field->name.length, field->name.str, field->type->type_id);
+        void* data = ((char*)map_data) + field->byte_offset;
+        switch (field->type->type_id) {
+        case LMD_TYPE_NULL:
+            strbuf_append_str(strbuf, "null");
+            break;
+        case LMD_TYPE_BOOL:
+            strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
+            break;                    
+        case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+            strbuf_append_format(strbuf, "%ld", *(long*)data);
+            break;
+        case LMD_TYPE_FLOAT:
+            strbuf_append_format(strbuf, "%g", *(double*)data);
+            break;
+        case LMD_TYPE_STRING:
+            String *string = *(String**)data;
+            strbuf_append_format(strbuf, "\"%s\"", string->str);
+            break;
+        case LMD_TYPE_SYMBOL:
+            String *symbol = *(String**)data;
+            strbuf_append_format(strbuf, "'%s'", symbol->str);
+            break;
+        case LMD_TYPE_DTIME:
+            String *dt = *(String**)data;
+            strbuf_append_format(strbuf, "t'%s'", dt->str);
+            break;
+        case LMD_TYPE_BINARY:
+            String *bin = *(String**)data;
+            strbuf_append_format(strbuf, "b'%s'", bin->str);
+            break;
+        case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  
+            print_item(strbuf, *(Item*)data);
+            break;
+        default:
+            strbuf_append_format(strbuf, "unknown");
+        }
+        field = field->next;
+    }
+}
+
 void print_item(StrBuf *strbuf, Item item) {
     LambdaItem ld_item = {.item = item};
     if (ld_item.type_id) { // packed value
@@ -202,55 +249,16 @@ void print_item(StrBuf *strbuf, Item item) {
             LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
             printf("print map: %p, length: %d\n", map, map_type->length);
             strbuf_append_char(strbuf, '{');
-            ShapeEntry *field = map_type->shape;
-            for (int i = 0; i < map_type->length; i++) {
-                if (i) strbuf_append_char(strbuf, ',');
-                strbuf_append_format(strbuf, "%.*s:", (int)field->name.length, field->name.str);
-                printf("field %.*s:%d\n", (int)field->name.length, field->name.str, field->type->type_id);
-                void* data = ((char*)map->data) + field->byte_offset;
-                switch (field->type->type_id) {
-                case LMD_TYPE_NULL:
-                    strbuf_append_str(strbuf, "null");
-                    break;
-                case LMD_TYPE_BOOL:
-                    strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
-                    break;                    
-                case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
-                    strbuf_append_format(strbuf, "%ld", *(long*)data);
-                    break;
-                case LMD_TYPE_FLOAT:
-                    strbuf_append_format(strbuf, "%g", *(double*)data);
-                    break;
-                case LMD_TYPE_STRING:
-                    String *string = *(String**)data;
-                    strbuf_append_format(strbuf, "\"%s\"", string->str);
-                    break;
-                case LMD_TYPE_SYMBOL:
-                    String *symbol = *(String**)data;
-                    strbuf_append_format(strbuf, "'%s'", symbol->str);
-                    break;
-                case LMD_TYPE_DTIME:
-                    String *dt = *(String**)data;
-                    strbuf_append_format(strbuf, "t'%s'", dt->str);
-                    break;
-                case LMD_TYPE_BINARY:
-                    String *bin = *(String**)data;
-                    strbuf_append_format(strbuf, "b'%s'", bin->str);
-                    break;
-                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
-                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  
-                    print_item(strbuf, *(Item*)data);
-                    break;
-                default:
-                    strbuf_append_format(strbuf, "unknown");
-                }
-                field = field->next;
-            }
+            print_named_items(strbuf, map_type, map->data);
             strbuf_append_char(strbuf, '}');
         }
         else if (type_id == LMD_TYPE_ELEMENT) {
             Element *element = (Element*)item;
-            strbuf_append_format(strbuf, "elmt %p", element);
+            LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)element->type;
+            strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
+            print_named_items(strbuf, (LambdaTypeMap*)elmt_type, element->data);
+            // print content
+            strbuf_append_char(strbuf, '>');
         }
         else if (type_id == LMD_TYPE_FUNC) {
             strbuf_append_str(strbuf, "function");

@@ -24,7 +24,11 @@ RESET="\033[0m"
 
 echo
 echo -e "${YELLOW}Summary:${RESET}"
-echo -e "${RED}Errors:   $num_errors${RESET}"
+if [ "$num_errors" -gt 0 ]; then
+    echo -e "${RED}Errors:   $num_errors${RESET}"
+else
+    echo -e "Errors:   $num_errors"
+fi
 echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
 
 

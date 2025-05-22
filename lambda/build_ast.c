@@ -730,8 +730,8 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
     printf("build element expr\n");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
         AST_NODE_ELEMENT, elmt_node, sizeof(AstElementNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
-    LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
+    LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+    ast_node->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(elmt_node, 0);
     AstNamedNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
@@ -739,7 +739,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
         TSSymbol symbol = ts_node_symbol(child);
         if (symbol == SYM_IDENT) {  // element name
             StrView name = ts_node_source(tp, child);
-            ast_node->name = name;
+            type->name = name;
         }
         else if (symbol == SYM_ATTR) {  // attrs
             AstNamedNode* item = build_key_expr(tp, child);
