@@ -156,3 +156,4 @@ LambdaType *type_float();
 LambdaType *type_string();
 
 Item is(Context *rt, Item a, Item b);
+String* string(Context *rt, Item item);

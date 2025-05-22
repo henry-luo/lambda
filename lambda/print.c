@@ -442,6 +442,9 @@ void print_ast_node(AstNode *node, int indent) {
             arg = arg->next;
         }
         break;
+    case AST_NODE_SYS_FUNC:
+        printf("[sys func:%d:%s]\n", ((AstSysFuncNode*)node)->fn, formatType(node->type));
+        break;
     case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
         AstFuncNode* func = (AstFuncNode*)node;
         if (node->node_type == AST_NODE_FUNC_EXPR) {

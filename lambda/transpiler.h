@@ -57,6 +57,7 @@
 #define SYM_FUNC_STAM sym_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
 #define SYM_FUNC_EXPR sym_fn_expr
+#define SYM_SYS_FUNC sym_sys_func
 
 #define SYM_COMMENT sym_comment
 
@@ -109,6 +110,36 @@ typedef enum {
     OPERATOR_IS,
     OPERATOR_IN,
 } Operator ;
+
+typedef enum {
+    SYSFUNC_LENGTH,
+    SYSFUNC_TYPE,
+    SYSFUNC_INT,
+    SYSFUNC_FLOAT,
+    SYSFUNC_NUMBER,
+    SYSFUNC_STRING,
+    SYSFUNC_CHAR,
+    SYSFUNC_SYMBOL,
+    SYSFUNC_DATETIME,
+    SYSFUNC_DATE,
+    SYSFUNC_TIME,
+    SYSFUNC_TODAY,
+    SYSFUNC_JUSTNOW,
+    SYSFUNC_SET,
+    SYSFUNC_SLICE,    
+    SYSFUNC_ALL,
+    SYSFUNC_ANY,
+    SYSFUNC_MIN,
+    SYSFUNC_MAX,
+    SYSFUNC_SUM,
+    SYSFUNC_AVG,
+    SYSFUNC_ABS,
+    SYSFUNC_ROUND,
+    SYSFUNC_FLOOR,
+    SYSFUNC_CEIL,
+    SYSFUNC_PRINT,
+    SYSFUNC_ERROR,
+} SysFunc;
 
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type
@@ -182,6 +213,11 @@ typedef struct {
 } LambdaTypeFunc;
 
 typedef struct {
+    LambdaType;
+    SysFunc *fn;
+} LambdaTypeSysFunc;
+
+typedef struct {
     LambdaType;  // extends LambdaType
     LambdaType *type;
 } LambdaTypeType;
@@ -230,6 +266,7 @@ typedef enum AstNodeType {
     AST_NODE_LET_STAM,
     AST_NODE_FIELD_EXPR,
     AST_NODE_CALL_EXPR,
+    AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
     AST_NODE_TYPE,
@@ -252,8 +289,14 @@ typedef struct {
 
 typedef struct {
     AstNode;  // extends AstNode
-    AstNode *function, *argument;
+    AstNode *function;
+    AstNode *argument;
 } AstCallNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    SysFunc fn;
+} AstSysFuncNode;
 
 typedef struct {
     AstNode;  // extends AstNode

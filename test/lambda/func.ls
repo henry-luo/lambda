@@ -20,3 +20,6 @@ t;  "abc" is t;  123 is t;  true is string;
 
 type t2 = string
 t2;  "abc" is t2;  123 is t2;
+
+let str = string(123)
+str; str is string;

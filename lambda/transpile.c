@@ -332,7 +332,7 @@ void transpile_items(Transpiler* tp, AstArrayNode *array_node) {
         }
 
         if (is_first) { is_first = false; } 
-        else { strbuf_append_char(tp->code_buf, ','); }
+        else { strbuf_append_str(tp->code_buf, ", "); }
 
         printf("list item type:%d\n", item->type->type_id);
         transpile_box_item(tp, item);
@@ -378,7 +378,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }    
-    strbuf_append_str(tp->code_buf, "list_new(rt,");
+    strbuf_append_str(tp->code_buf, "\n list_new(rt,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     transpile_items(tp, (AstArrayNode*)list_node);
@@ -408,7 +408,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }
-    strbuf_append_str(tp->code_buf, "list_new(rt,");
+    strbuf_append_str(tp->code_buf, "\n list_new(rt,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     transpile_items(tp, (AstArrayNode*)list_node);
@@ -436,30 +436,36 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     printf("transpile call expr\n");
     // write the function name/ptr
     LambdaTypeFunc *fn_type = NULL;
-    if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
-        fn_type = (LambdaTypeFunc*)call_node->function->type;
-        AstPrimaryNode *fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
-            (AstPrimaryNode*)call_node->function:null;
-        if (fn_node && fn_node->expr->node_type == AST_NODE_IDENT) {
-            strbuf_append_char(tp->code_buf, '_');
-            writeNodeSource(tp, fn_node->expr->node);
-            // todo: lookup the function definition
-            AstNamedNode* ident_node = (AstNamedNode*)fn_node->expr;
-            if (ident_node->as->node_type == AST_NODE_FUNC) {
+    if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
+        StrView fn = ts_node_source(tp, call_node->function->node);
+        strbuf_append_str_n(tp->code_buf, fn.str, fn.length);
+    }
+    else {
+        if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
+            fn_type = (LambdaTypeFunc*)call_node->function->type;
+            AstPrimaryNode *fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
+                (AstPrimaryNode*)call_node->function:null;
+            if (fn_node && fn_node->expr->node_type == AST_NODE_IDENT) {
                 strbuf_append_char(tp->code_buf, '_');
-                strbuf_append_int(tp->code_buf, fn_type->param_count);
+                writeNodeSource(tp, fn_node->expr->node);
+                // todo: lookup the function definition
+                AstNamedNode* ident_node = (AstNamedNode*)fn_node->expr;
+                if (ident_node->as->node_type == AST_NODE_FUNC) {
+                    strbuf_append_char(tp->code_buf, '_');
+                    strbuf_append_int(tp->code_buf, fn_type->param_count);
+                }
+                // else variable
             }
-            // else variable
-        }
-        else {
-            transpile_expr(tp, call_node->function);
-        }
-        if (fn_type->is_anonymous) {
-            strbuf_append_str(tp->code_buf, "->ptr");
-        }
-    } else { // handle Item
-        printf("call function type is not func\n");
-        assert(0);
+            else {
+                transpile_expr(tp, call_node->function);
+            }
+            if (fn_type->is_anonymous) {
+                strbuf_append_str(tp->code_buf, "->ptr");
+            }
+        } else { // handle Item
+            printf("call function type is not func\n");
+            assert(0);
+        }       
     }
 
     // write the params

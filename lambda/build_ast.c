@@ -1,15 +1,19 @@
 #include "transpiler.h"
 #include "../lib/hashmap.h"
 
-LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY};
-LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
+LambdaType TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 LambdaType TYPE_IMP_INT = {.type_id = LMD_TYPE_IMP_INT};
 LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 LambdaType TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
+LambdaType TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
+LambdaType TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
+LambdaType TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
 LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
+LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY};
+LambdaType TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
 
 LambdaType CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
 LambdaType CONST_IMP_INT = {.type_id = LMD_TYPE_IMP_INT, .is_const = 1};
@@ -127,18 +131,80 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_call_expr(Transpiler* tp, TSNode call_node) {
-    printf("build call expr\n");
-    AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
+AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
+    printf("build call expr: %d\n", symbol);
+    AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, 
+        AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
-    ast_node->function = build_expr(tp, function_node);
-    if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
-        ast_node->type = ((LambdaTypeFunc*)ast_node->function->type)->returned;
-        if (!ast_node->type) { // e.g. recursive fn
+    if (symbol == SYM_SYS_FUNC) {
+        printf("build sys call\n");
+        AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, 
+            AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
+        StrView func_name = ts_node_source(tp, function_node);
+        if (strview_equal(&func_name, "length")) {
+            fn_node->fn = SYSFUNC_LENGTH;
+            fn_node->type = &TYPE_IMP_INT;
+        }
+        else if (strview_equal(&func_name, "type")) {
+            fn_node->fn = SYSFUNC_TYPE;
+            fn_node->type = &TYPE_TYPE;
+        }
+        else if (strview_equal(&func_name, "int")) {
+            fn_node->fn = SYSFUNC_INT;
+            fn_node->type = &TYPE_INT;
+        }
+        else if (strview_equal(&func_name, "float")) {
+            fn_node->fn = SYSFUNC_FLOAT;
+            fn_node->type = &TYPE_FLOAT;
+        }
+        else if (strview_equal(&func_name, "number")) {
+            fn_node->fn = SYSFUNC_NUMBER;
+            fn_node->type = &TYPE_NUMBER;
+        }
+        else if (strview_equal(&func_name, "string")) {
+            fn_node->fn = SYSFUNC_STRING;
+            fn_node->type = &TYPE_STRING;
+        }
+        // else if (strview_eq(&func_name, "char")) {
+        //     ast_node->sys_func = SYSFUNC_CHAR;
+        // }
+        else if (strview_equal(&func_name, "symbol")) {
+            fn_node->fn = SYSFUNC_SYMBOL;
+            fn_node->type = &TYPE_SYMBOL;
+        }
+        else if (strview_equal(&func_name, "datetime")) {
+            fn_node->fn = SYSFUNC_DATETIME;
+            fn_node->type = &TYPE_DTIME;
+        }
+        else if (strview_equal(&func_name, "date")) {
+            fn_node->fn = SYSFUNC_DATE;
+            fn_node->type = &TYPE_DTIME;
+        }
+        else if (strview_equal(&func_name, "time")) {
+            fn_node->fn = SYSFUNC_TIME;
+            fn_node->type = &TYPE_DTIME;
+        }
+        else if (strview_equal(&func_name, "print")) {
+            fn_node->fn = SYSFUNC_PRINT;
+            fn_node->type = &TYPE_NULL;
+        }
+        else if (strview_equal(&func_name, "error")) {
+            fn_node->fn = SYSFUNC_ERROR;
+            fn_node->type = &TYPE_ERROR;
+        }
+        ast_node->function = (AstNode*)fn_node;
+        ast_node->type = fn_node->type;
+    }
+    else {
+        ast_node->function = build_expr(tp, function_node);
+        if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
+            ast_node->type = ((LambdaTypeFunc*)ast_node->function->type)->returned;
+            if (!ast_node->type) { // e.g. recursive fn
+                ast_node->type = &TYPE_ANY;
+            }
+        } else {
             ast_node->type = &TYPE_ANY;
         }
-    } else {
-        ast_node->type = &TYPE_ANY;
     }
 
     TSTreeCursor cursor = ts_tree_cursor_new(call_node);
@@ -302,8 +368,8 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_field_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == SYM_CALL_EXPR) {
-        ast_node->expr = build_call_expr(tp, child);
+    else if (symbol == SYM_CALL_EXPR || symbol == SYM_SYS_FUNC) {
+        ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
     else { // from _parenthesized_expr

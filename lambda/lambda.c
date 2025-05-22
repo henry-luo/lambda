@@ -337,3 +337,50 @@ Item is(Context *rt, Item a, Item b) {
     printf("is type %d, %d\n", a_item.type_id, type_b->type->type_id);
     return b2it(a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id);
 }
+
+String STR_NULL = {.str = "null", .len = 4};
+String STR_TRUE = {.str = "true", .len = 4};
+String STR_FALSE = {.str = "false", .len = 5};
+
+String* string(Context *rt, Item item) {
+    LambdaItem itm = {.item = item};
+    if (itm.type_id == LMD_TYPE_NULL) {
+        return &STR_NULL;
+    }
+    else if (itm.type_id == LMD_TYPE_BOOL) {
+        return itm.bool_val ? &STR_TRUE : &STR_FALSE;
+    }    
+    else if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+        itm.type_id == LMD_TYPE_BINARY || itm.type_id == LMD_TYPE_DTIME) {
+        return (String*)itm.pointer;
+    }
+    else if (itm.type_id == LMD_TYPE_IMP_INT) {
+        char buf[32];
+        int int_val = (int32_t)itm.long_val;
+        snprintf(buf, sizeof(buf), "%d", int_val);
+        String *str = malloc(strlen(buf) + 1 + sizeof(int32_t));
+        strcpy(str->str, buf);
+        str->len = strlen(buf);
+        return str;
+    }
+    else if (itm.type_id == LMD_TYPE_INT) {
+        char buf[32];
+        long long_val = *(long*)itm.pointer;
+        snprintf(buf, sizeof(buf), "%ld", long_val);
+        String *str = malloc(strlen(buf) + 1 + sizeof(int32_t));
+        strcpy(str->str, buf);
+        str->len = strlen(buf);
+        return str;
+    }
+    else if (itm.type_id == LMD_TYPE_FLOAT) {
+        char buf[32];
+        double dval = *(double*)itm.pointer;
+        snprintf(buf, sizeof(buf), "%g", dval);
+        String *str = malloc(strlen(buf) + 1 + sizeof(int32_t));
+        strcpy(str->str, buf);
+        str->len = strlen(buf);
+        return str;
+    }
+    printf("unhandled type %d\n", itm.type_id);
+    return NULL;
+}

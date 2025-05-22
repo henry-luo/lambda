@@ -140,6 +140,7 @@ module.exports = grammar({
   precedences: $ => [[
     $.attr,
     $.fn_expr_stam,
+    $.sys_func,
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
@@ -373,6 +374,7 @@ module.exports = grammar({
       $.subscript_expr,
       $.member_expr,
       $.call_expr,
+      $.sys_func,
       $._parenthesized_expr,
     ),
 
@@ -430,7 +432,8 @@ module.exports = grammar({
       '{', field('body', $.content), '}',
     ),
 
-    fn_expr_stam: $ => seq('fn', field('name', $.identifier), 
+    fn_expr_stam: $ => seq(
+      'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
       optional(seq(':', field('type', $.type_annotation))),      
@@ -452,6 +455,17 @@ module.exports = grammar({
         '=>', field('body', $._expression)
       ),      
     ),
+
+    // system function call
+    sys_func: $ => prec(50, seq(
+      field('function', choice(
+        'length', 'type', 'int', 'float', 'number', 'string', 'char', 'symbol',
+        'datetime', 'date', 'time', 'today', 'justnow',
+        'set', 'slice',
+        'all', 'any', 'min', 'max', 'sum', 'avg', 'abs', 'round', 'floor', 'ceil',
+        'print', 'error',
+      )), $._arguments,
+    )),
 
     occurrence: $ => choice('?', '+', '*'),
 
