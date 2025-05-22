@@ -153,7 +153,7 @@ typedef struct Function {
     fn_ptr ptr;
 } Function;
 
-Function* fn(fn_ptr ptr);
+Function* to_fn(fn_ptr ptr);
 
 typedef struct LambdaType {
     TypeId type_id;
@@ -167,3 +167,4 @@ LambdaType *type_string();
 
 Item is(Context *rt, Item a, Item b);
 String* string(Context *rt, Item item);
+LambdaType* type(Context *rt, Item item);

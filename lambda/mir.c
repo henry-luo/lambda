@@ -35,6 +35,7 @@ func_obj_t func_list[] = {
     {"list_long_push", (fn_ptr) list_long_push},
     {"map_new", (fn_ptr) map_new},
     {"map_get", (fn_ptr) map_get},
+    {"elmt_new", (fn_ptr) elmt_new},
     {"item_true", (fn_ptr) item_true},
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
@@ -43,13 +44,13 @@ func_obj_t func_list[] = {
     {"add", (fn_ptr) add},
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
-    {"fn", (fn_ptr) fn},
+    {"to_fn", (fn_ptr) to_fn},
     {"is", (fn_ptr) is},
     {"type_int", (fn_ptr) type_int},
     {"type_float", (fn_ptr) type_float},
     {"type_string", (fn_ptr) type_string},
     {"string", (fn_ptr) string},
-    {"elmt_new", (fn_ptr) elmt_new},
+    {"type", (fn_ptr) type},
 };
 
 void *import_resolver(const char *name) {

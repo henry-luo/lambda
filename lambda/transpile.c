@@ -63,9 +63,13 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         break;
     case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
-    case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:
         transpile_expr(tp, item);  // raw pointer
+        break;
+    case LMD_TYPE_FUNC:
+        strbuf_append_str(tp->code_buf, "to_fn(");
+        transpile_expr(tp, item);
+        strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_ANY:
         transpile_expr(tp, item);  // no boxing needed
@@ -596,7 +600,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
-    strbuf_append_format(tp->code_buf, "fn(_%d_%d)", ts_node_start_byte(fn_node->node), 
+    strbuf_append_format(tp->code_buf, "to_fn(_%d_%d)", ts_node_start_byte(fn_node->node), 
         ((LambdaTypeFunc*)fn_node->type)->param_count);
 }
 

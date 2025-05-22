@@ -24,4 +24,4 @@ t2;  "abc" is t2;  123 is t2;
 let str = string(123)
 str; str is string;
 
-<elmt a:123>
+type("string");  type(123);  type(true);  type(0.5);  type(null);  type([123]);  type({a:123});  type(t);  type(factorial);

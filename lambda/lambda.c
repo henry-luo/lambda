@@ -328,7 +328,7 @@ double it2d(Item item) {
     return 0;
 }
 
-Function* fn(fn_ptr ptr) {
+Function* to_fn(fn_ptr ptr) {
     printf("create fn %p\n", ptr);
     Function *fn = calloc(1, sizeof(Function));
     fn->type_id = LMD_TYPE_FUNC;
@@ -407,4 +407,18 @@ String* string(Context *rt, Item item) {
     }
     printf("unhandled type %d\n", itm.type_id);
     return NULL;
+}
+
+LambdaType* type(Context *rt, Item item) {
+    LambdaItem itm = {.item = item};
+    LambdaTypeType *type = calloc(1, sizeof(LambdaTypeType) + sizeof(LambdaType)); 
+    LambdaType *item_type = (LambdaType *)((uint8_t *)type + sizeof(LambdaTypeType));
+    type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
+    if (itm.type_id) {
+        item_type->type_id = itm.type_id;
+    }
+    else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+        item_type->type_id = *((uint8_t*)item);
+    }
+    return (LambdaType*)type;
 }
