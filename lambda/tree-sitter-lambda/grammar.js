@@ -233,16 +233,15 @@ module.exports = grammar({
       $._expression, 'to', $._expression,
     ),
     
-    attr: $ => prec(100, seq(
+    attr: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
       field('as', $._expression),
-    )),
-    attrs: $ => prec.left(seq($.attr, repeat(seq(',', $.attr)))),
+    ),
 
     element: $ => seq('<', $.identifier,
       choice(
-        seq($.attrs, optional(seq(choice(linebreak, ';'), $.content))),
+        seq($.attr, repeat(seq(',', $.attr)), optional(seq(choice(linebreak, ';'), $.content))),
         optional($.content)
       ),
     '>'),
@@ -380,12 +379,12 @@ module.exports = grammar({
 
     import: _ => token('import'),
 
-    spread_element: $ => seq('...', $._expression),
+    spread_argument: $ => seq('...', $._expression),
 
     _arguments: $ => seq(
       '(', comma_sep(optional(
-      field('argument', choice($._expression, $.spread_element)))), ')',
-    ),    
+      field('argument', choice($._expression, $.spread_argument)))), ')',
+    ),
 
     call_expr: $ => seq(
       field('function', choice($.primary_expr, $.import)),
@@ -457,6 +456,7 @@ module.exports = grammar({
     ),
 
     // system function call
+    // prec(50) to make it higher priority than base types
     sys_func: $ => prec(50, seq(
       field('function', choice(
         'length', 'type', 'int', 'float', 'number', 'string', 'char', 'symbol',

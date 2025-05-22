@@ -152,6 +152,25 @@ Map* map_new(Context *rt, int type_index, ...) {
     return map;
 }
 
+Element* elmt_new(Context *rt, int type_index, ...) {
+    printf("elmt_new with shape %d\n", type_index);
+    ArrayList* type_list = (ArrayList*)rt->type_list;
+    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
+    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    Element *elmt = calloc(1, sizeof(Element));
+    elmt->type_id = LMD_TYPE_ELEMENT;  elmt->type = map_type;
+    elmt->data = calloc(1, map_type->byte_size);  // heap_alloc(rt->heap, map_type->byte_size);
+    printf("elmt byte_size: %d\n", map_type->byte_size);
+    printf("elmt data: %d\n", *(uint8_t*)(((uint8_t*)elmt->data) + map_type->byte_size - 1));
+
+    int count = map_type->length;
+    printf("map length: %d\n", count);
+    va_list args;  ShapeEntry *field = map_type->shape;
+    va_start(args, count);
+    va_end(args);
+    return elmt;
+}
+
 Item map_get(Context *rt, Map* map, char *key) {
     if (!rt || !map || !key) { return ITEM_NULL; }
     ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;

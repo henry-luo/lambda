@@ -248,6 +248,13 @@ void print_item(StrBuf *strbuf, Item item) {
             }
             strbuf_append_char(strbuf, '}');
         }
+        else if (type_id == LMD_TYPE_ELEMENT) {
+            Element *element = (Element*)item;
+            strbuf_append_format(strbuf, "elmt %p", element);
+        }
+        else if (type_id == LMD_TYPE_FUNC) {
+            strbuf_append_str(strbuf, "function");
+        }
         else if (type_id == LMD_TYPE_FUNC) {
             Function *func = (Function*)item;
             strbuf_append_format(strbuf, "fn %p", func);

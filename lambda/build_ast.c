@@ -85,7 +85,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     return t;
 }
 
-AstNode* build_array_expr(Transpiler* tp, TSNode array_node) {
+AstNode* build_array(Transpiler* tp, TSNode array_node) {
     printf("build array expr\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
@@ -353,11 +353,15 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_ARRAY) {
-        ast_node->expr = build_array_expr(tp, child);
+        ast_node->expr = build_array(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_MAP) {
-        ast_node->expr = build_map_expr(tp, child);
+        ast_node->expr = build_map(tp, child);
+        ast_node->type = ast_node->expr->type;
+    }
+    else if (symbol == SYM_ELEMENT) {
+        ast_node->expr = build_element(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_MEMBER_EXPR) {
@@ -686,7 +690,7 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     return ast_node;
 }
 
-AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
+AstNode* build_map(Transpiler* tp, TSNode map_node) {
     printf("build map expr\n");
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
@@ -713,6 +717,56 @@ AstNode* build_map_expr(Transpiler* tp, TSNode map_node) {
 
         type->length++;
         byte_offset += type_info[item->type->type_id].byte_size;
+        child = ts_node_next_named_sibling(child);
+    }
+
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
+    type->byte_size = byte_offset;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
+    printf("build element expr\n");
+    AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
+        AST_NODE_ELEMENT, elmt_node, sizeof(AstElementNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
+
+    TSNode child = ts_node_named_child(elmt_node, 0);
+    AstNamedNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_IDENT) {  // element name
+            StrView name = ts_node_source(tp, child);
+            ast_node->name = name;
+        }
+        else if (symbol == SYM_ATTR) {  // attrs
+            AstNamedNode* item = build_key_expr(tp, child);
+            if (!prev_item) { ast_node->item = item; } 
+            else { prev_item->next = (AstNode*)item; }
+            prev_item = item;
+
+            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+            shape_entry->name = item->name;
+            shape_entry->type = item->type;
+            shape_entry->byte_offset = byte_offset;
+            if (!prev_entry) {
+                type->shape = shape_entry;
+            } else {
+                prev_entry->next = shape_entry;
+            }
+            prev_entry = shape_entry;
+
+            type->length++;
+            byte_offset += type_info[item->type->type_id].byte_size;            
+        }
+        else if (symbol == SYM_CONTENT) {  // element content
+            
+        }
+        else {
+            printf("unknown element type %d\n", symbol);
+        }
         child = ts_node_next_named_sibling(child);
     }
 
@@ -926,11 +980,20 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_assign_expr(tp, expr_node);
     }  
     else if (symbol == SYM_ARRAY) {
-        return build_array_expr(tp, expr_node);
+        return build_array(tp, expr_node);
     }
     else if (symbol == SYM_MAP) {
-        return build_map_expr(tp, expr_node);
+        return build_map(tp, expr_node);
     }
+    else if (symbol == SYM_ELEMENT) {
+        return build_element(tp, expr_node);
+    }
+    else if (symbol == SYM_CONTENT) {
+        return build_content(tp, expr_node);
+    }
+    else if (symbol == SYM_LIST) {
+        return build_list(tp, expr_node);
+    }    
     else if (symbol == SYM_IDENT) {
         return build_identifier(tp, expr_node);
     }
@@ -942,12 +1005,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     else if (symbol == SYM_FUNC_EXPR) {
         return build_func(tp, expr_node, false);
-    }    
-    else if (symbol == SYM_CONTENT) {
-        return build_content(tp, expr_node);
-    }
-    else if (symbol == SYM_LIST) {
-        return build_list(tp, expr_node);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
         symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {

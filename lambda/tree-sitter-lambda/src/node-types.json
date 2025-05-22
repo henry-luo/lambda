@@ -119,21 +119,6 @@
     }
   },
   {
-    "type": "attrs",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "attr",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "base_type",
     "named": true,
     "fields": {}
@@ -338,7 +323,7 @@
             "named": true
           },
           {
-            "type": "spread_element",
+            "type": "spread_argument",
             "named": true
           }
         ]
@@ -423,7 +408,7 @@
       "required": true,
       "types": [
         {
-          "type": "attrs",
+          "type": "attr",
           "named": true
         },
         {
@@ -1077,7 +1062,7 @@
     }
   },
   {
-    "type": "spread_element",
+    "type": "spread_argument",
     "named": true,
     "fields": {},
     "children": {
@@ -1168,7 +1153,7 @@
             "named": true
           },
           {
-            "type": "spread_element",
+            "type": "spread_argument",
             "named": true
           }
         ]
@@ -1555,11 +1540,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -1587,11 +1572,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "floor",
@@ -1743,11 +1728,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

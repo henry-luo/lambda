@@ -34,6 +34,8 @@
 #define SYM_LIST sym_list
 #define SYM_ARRAY sym_array
 #define SYM_MAP sym_map
+#define SYM_ELEMENT sym_element
+#define SYM_ATTR sym_attr
 
 #define SYM_IDENT sym_identifier
 #define SYM_MEMBER_EXPR sym_member_expr
@@ -61,13 +63,13 @@
 
 #define SYM_COMMENT sym_comment
 
-#define FIELD_AS field_as
 #define FIELD_COND field_cond
 #define FIELD_THEN field_then
 #define FIELD_ELSE field_else
 #define FIELD_LEFT field_left
 #define FIELD_RIGHT field_right
 #define FIELD_NAME field_name
+#define FIELD_AS field_as
 #define FIELD_TYPE field_type
 #define FIELD_OBJECT field_object
 #define FIELD_FIELD field_field
@@ -254,10 +256,11 @@ typedef enum AstNodeType {
     AST_NODE_PRIMARY,
     AST_NODE_UNARY,
     AST_NODE_BINARY,
-    AST_NODE_ARRAY,
     AST_NODE_LIST,
     AST_NODE_CONTENT,
+    AST_NODE_ARRAY,
     AST_NODE_MAP,
+    AST_NODE_ELEMENT,
     AST_NODE_KEY_EXPR,
     AST_NODE_ASSIGN,
     AST_NODE_LOOP,
@@ -360,6 +363,12 @@ typedef struct {
     AstNamedNode *item;  // first item in the map
 } AstMapNode;
 
+typedef struct {
+    AstNode;  // extends AstNode
+    StrView name;
+    AstNamedNode *item;  // first item in the map
+} AstElementNode;
+
 // aligned with AstNamedNode
 typedef struct {
     AstNode;  // extends AstNode
@@ -435,7 +444,8 @@ typedef struct {
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
 void* alloc_const(Transpiler* tp, size_t size);
 LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
-AstNode* build_map_expr(Transpiler* tp, TSNode map_node);
+AstNode* build_map(Transpiler* tp, TSNode map_node);
+AstNode* build_element(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_node(AstNode *node, int indent);

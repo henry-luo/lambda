@@ -62,7 +62,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
-    case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  
+    case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
     case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
         transpile_expr(tp, item);  // raw pointer
         break;
@@ -422,9 +423,20 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     strbuf_append_char(tp->code_buf, ',');
     AstNamedNode *item = map_node->item;
     while (item) {
-        // strbuf_append_char(tp->code_buf, '"');
-        // strbuf_append_str_n(tp->code_buf, item->name.str, item->name.length);
-        // strbuf_append_str(tp->code_buf, "\",");
+        transpile_expr(tp, item->as);
+        if (item->next) { strbuf_append_char(tp->code_buf, ','); }
+        item = (AstNamedNode*)item->next;
+    }
+    strbuf_append_char(tp->code_buf, ')');
+}
+
+void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
+    printf("transpile element expr\n");
+    strbuf_append_str(tp->code_buf, "elmt_new(rt,");
+    strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)elmt_node->type)->type_index);
+    strbuf_append_char(tp->code_buf, ',');
+    AstNamedNode *item = elmt_node->item;
+    while (item) {
         transpile_expr(tp, item->as);
         if (item->next) { strbuf_append_char(tp->code_buf, ','); }
         item = (AstNamedNode*)item->next;
@@ -637,7 +649,10 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         break;
     case AST_NODE_MAP:
         transpile_map_expr(tp, (AstMapNode*)expr_node);
-        break;        
+        break;
+    case AST_NODE_ELEMENT:
+        transpile_element(tp, (AstElementNode*)expr_node);
+        break;
     case AST_NODE_FIELD_EXPR:
         transpile_field_expr(tp, (AstFieldNode*)expr_node);
         break;
@@ -733,7 +748,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             li = li->next;
         }        
         break; 
-    case AST_NODE_MAP:
+    case AST_NODE_MAP:  case AST_NODE_ELEMENT:
         AstNamedNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
             define_ast_node(tp, (AstNode*)nm_item);

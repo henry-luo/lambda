@@ -101,6 +101,16 @@ typedef struct Map {
 Map* map_new(Context *rt, int type_index, ...);
 Item map_get(Context *rt, Map* map, char *key);
 
+typedef struct Element {
+    uint8_t type_id;
+    // attributes
+    void* type;  // attr type/shape
+    void* data;  // packed data struct of the attrs
+    // content
+    Item* items;  // items should be packed instead of a list
+} Element;
+Element* elmt_new(Context *rt, int type_index, ...);
+
 bool item_true(Item item);
 Item v2it(List *list);
 

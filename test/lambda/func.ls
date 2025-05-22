@@ -23,3 +23,5 @@ t2;  "abc" is t2;  123 is t2;
 
 let str = string(123)
 str; str is string;
+
+<elmt a:123>
