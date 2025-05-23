@@ -37,7 +37,7 @@
       "members": [
         {
           "type": "SYMBOL",
-          "name": "_expression"
+          "name": "_attr_expr"
         },
         {
           "type": "SYMBOL",
@@ -5596,10 +5596,6 @@
   ],
   "conflicts": [
     [
-      "content",
-      "binary_expr"
-    ],
-    [
       "primary_expr",
       "parameter"
     ]
@@ -5709,9 +5705,9 @@
     "_content_expr",
     "_number",
     "_datetime",
-    "_unsigned_number"
+    "_unsigned_number",
+    "_expression",
+    "_attr_expr"
   ],
-  "supertypes": [
-    "_expression"
-  ]
+  "supertypes": []
 }

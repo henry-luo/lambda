@@ -126,8 +126,7 @@ module.exports = grammar({
   // an array of hidden rule names for the generated node types
   // supertype symbols must always have a single visible child
   supertypes: $ => [
-    $._expression,
-    //$._attr_expr,
+    // $._expression,
   ],
 
   inline: $ => [
@@ -139,6 +138,8 @@ module.exports = grammar({
     $._number,
     $._datetime,
     $._unsigned_number,
+    $._expression,
+    $._attr_expr,
   ],
 
   precedences: $ => [[
@@ -170,7 +171,7 @@ module.exports = grammar({
   ]],
 
   conflicts: $ => [
-    [$.content, $.binary_expr],
+    // [$.content, $.binary_expr],
     [$.primary_expr, $.parameter],
   ],
 
@@ -184,7 +185,7 @@ module.exports = grammar({
     ),
 
     _content_expr: $ => choice(
-      $._expression, 
+      $._attr_expr, 
       $.let_stam,
       $.fn_expr_stam,
       $.type_definition,
