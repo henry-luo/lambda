@@ -38,6 +38,10 @@ List* list() {
     // todo: alloc from heap
     List *list = calloc(1, sizeof(List));
     list->type_id = LMD_TYPE_LIST;
+    EntryStart *entry_start = malloc(sizeof(EntryStart));
+    entry_start->parent = context->heap->entry_start;
+    entry_start->start = context->heap->entries->length;
+    context->heap->entry_start = entry_start;
     return list;
 }
 
@@ -61,12 +65,24 @@ void list_push(List *list, Item item) {
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
     list->items[list->length++] = item;
+    if (itm.type_id == LMD_TYPE_STRING) {
+        String *str = (String*)itm.pointer;
+        if (str->in_heap) {  // remove string from heap entries
+            str->in_heap = false;
+            int entry = context->heap->entries->length-1;  int start = context->heap->entry_start->start;
+            for (; entry >= start; entry--) {
+                void *data = context->heap->entries->data[entry];
+                if (data == str) {
+                    printf("removing string from heap entries: %p\n", str);
+                    context->heap->entries->data[entry] = NULL;  break;
+                }
+            }
+        }
+    }
 }
 
-List* list_new(Context *rt, int count, ...) {
-    printf("list_new cnt: %d\n", count);
-    List *list = calloc(1, sizeof(List));
-    list->type_id = LMD_TYPE_LIST;
+List* list_fill(List *list, int count, ...) {
+    printf("list_fill cnt: %d\n", count);
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
@@ -77,6 +93,18 @@ List* list_new(Context *rt, int count, ...) {
         list_push(list, itm.item);
     }
     va_end(args);
+    ArrayList *entries = context->heap->entries;
+    int start = context->heap->entry_start->start;
+    if (entries->length > start) {
+        // free heap allocations
+        printf("free list heap entries\n");
+        for (int i = start; i < entries->length; i++) {
+            void *data = entries->data[i];
+            if (data) pool_variable_free(context->heap->pool, data);
+        }
+        entries->length = start;
+    }
+    context->heap->entry_start = context->heap->entry_start->parent;
     return list;
 }
 
@@ -259,6 +287,7 @@ String *str_cat(String *left, String *right) {
     size_t right_len = right->len;
     printf("left len %zu, right len %zu\n", left_len, right_len);
     FatString *result = (FatString *)heap_alloc(sizeof(FatString) + left_len + right_len + 1);
+    printf("str result %p\n", result);
     result->in_heap = true;  result->len = left_len + right_len;
     result->str = result->chars;
     memcpy(result->chars, left->str, left_len);

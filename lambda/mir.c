@@ -29,7 +29,7 @@ func_obj_t func_list[] = {
     {"array_new", (fn_ptr) array_new},
     {"array_long_new", (fn_ptr) array_long_new},
     {"list", (fn_ptr) list},
-    {"list_new", (fn_ptr) list_new},
+    {"list_fill", (fn_ptr) list_fill},
     {"list_push", (fn_ptr) list_push},
     {"list_long", (fn_ptr) list_long},
     {"list_long_push", (fn_ptr) list_long_push},

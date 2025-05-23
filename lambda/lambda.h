@@ -44,14 +44,6 @@ typedef struct String {
     int32_t in_heap:1;
 } String;
 
-// a FAT string: null-terminated and prefixed with length
-typedef struct FatString {
-    char *str;
-    int32_t len:31;  // int instead of uint, to align with default Lambda int literal type
-    int32_t in_heap:1;
-    char chars[];
-} FatString;
-
 typedef struct Heap Heap;
 typedef struct Pack Pack;
 
@@ -95,7 +87,7 @@ typedef struct ListLong {
 } ListLong;
 
 List* list();  // constructs an empty list
-List* list_new(Context *rt, int cnt, ...);  // constructs an empty list
+List* list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
 ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);

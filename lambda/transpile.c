@@ -383,7 +383,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }    
-    strbuf_append_str(tp->code_buf, "\n list_new(rt,");
+    strbuf_append_str(tp->code_buf, "\n List* ls = list(); list_fill(ls,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     transpile_items(tp, (AstArrayNode*)list_node);
@@ -413,7 +413,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }
-    strbuf_append_str(tp->code_buf, "\n list_new(rt,");
+    strbuf_append_str(tp->code_buf, "\n List* ls = list(); list_fill(ls,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     transpile_items(tp, (AstArrayNode*)list_node);

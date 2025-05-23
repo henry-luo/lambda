@@ -154,6 +154,14 @@ typedef struct TypeInfo {
 
 #include "lambda.h"
 
+// a FAT string: null-terminated and prefixed with length
+typedef struct FatString {
+    char *str;
+    int32_t len:31;  // int instead of uint, to align with default Lambda int literal type
+    int32_t in_heap:1;
+    char chars[];
+} FatString;
+
 typedef struct {
     LambdaType;  // extends LambdaType
     int const_index;
@@ -378,14 +386,21 @@ typedef struct {
     NameScope *global_vars;  // global variables
 } AstScript;
 
-typedef struct HeapEntry {
-    struct HeapEntry* next;  // next heap entry
-    uint8_t data[];
-} HeapEntry;
+// typedef struct HeapEntry {
+//     struct HeapEntry* next;  // next heap entry
+//     uint8_t data[];
+// } HeapEntry;
+
+typedef struct EntryStart {
+    struct EntryStart *parent;
+    int start;  // heap entry start of current container
+} EntryStart;
 
 typedef struct Heap {
     VariableMemPool *pool;  // memory pool for the heap
-    HeapEntry *first, *last;  // first and last heap entry
+    // HeapEntry *first, *last;  // first and last heap entry
+    ArrayList *entries;  // list of allocation entries
+    EntryStart* entry_start;
 } Heap;
 
 void heap_init();

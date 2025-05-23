@@ -1,1 +1,1 @@
-"hello" + " world"
+(123, "hello" + " world",  "a" + "b" is string)

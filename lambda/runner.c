@@ -93,20 +93,19 @@ void heap_init() {
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
     pool_variable_init(&context->heap->pool, grow_size, tolerance_percent);
+    context->heap->entries = arraylist_new(1024);
 }
 
 void* heap_alloc(size_t size) {
     Heap *heap = context->heap;
-    HeapEntry *entry;
-    pool_variable_alloc(heap->pool, size + sizeof(HeapEntry), (void**)&entry);
-    if (!entry) {
+    void *data;
+    pool_variable_alloc(heap->pool, size, (void**)&data);
+    if (!data) {
         printf("Error: Failed to allocate memory for heap entry.\n");
         return NULL;
     }
-    if (!heap->first) { heap->first = entry; }
-    else { heap->last->next = entry; }
-    heap->last = entry;
-    return entry->data;
+    arraylist_append(heap->entries, data);
+    return data;
 }
 
 void* heap_calloc(size_t size) {
@@ -115,7 +114,7 @@ void* heap_calloc(size_t size) {
     return ptr;
 }
 
-void heap_free(HeapEntry* entry) {
+// void heap_free(HeapEntry* entry) {
     // HeapEntry *entry = (HeapEntry*)((uint8_t*)ptr - sizeof(HeapEntry));
     // if (entry == heap->first) {
     //     heap->first = entry->next;
@@ -126,7 +125,7 @@ void heap_free(HeapEntry* entry) {
     //     if (prev) { prev->next = entry->next; }
     //     if (!prev->next) { heap->last = prev; }
     // }
-}
+// }
 
 void heap_destroy() {
     if (context->heap) {
