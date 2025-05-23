@@ -222,13 +222,19 @@ Map* map_fill(Map* map, int type_index, ...) {
     return map;
 }
 
-Element* elmt_new(Context *rt, int type_index, ...) {
-    printf("elmt_new with shape %d\n", type_index);
-    ArrayList* type_list = (ArrayList*)rt->type_list;
+Element* elmt() {
+    Element *elmt = calloc(1, sizeof(Element));
+    elmt->type_id = LMD_TYPE_ELEMENT;
+    entry_start();
+    return elmt;
+}
+
+Element* elmt_fill(Element* elmt, int type_index, ...) {
+    printf("elmt_fill with shape %d\n", type_index);
+    ArrayList* type_list = (ArrayList*)context->type_list;
     AstElementNode* node = (AstElementNode*)((AstNode*)type_list->data[type_index]);
     LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
-    Element *elmt = calloc(1, sizeof(Element));
-    elmt->type_id = LMD_TYPE_ELEMENT;  elmt->type = elmt_type;
+    elmt->type = elmt_type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
     printf("elmt byte_size: %d\n", elmt_type->byte_size);
     // set attributes
@@ -238,6 +244,7 @@ Element* elmt_new(Context *rt, int type_index, ...) {
     va_start(args, count);
     set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);
     va_end(args);
+    entry_end();
     return elmt;
 }
 

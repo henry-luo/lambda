@@ -438,7 +438,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 
 void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     printf("transpile element expr\n");
-    strbuf_append_str(tp->code_buf, "elmt_new(rt,");
+    strbuf_append_str(tp->code_buf, "({Element* el=elmt(); elmt_fill(el,");
     strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)elmt_node->type)->type_index);
     strbuf_append_char(tp->code_buf, ',');
     AstNamedNode *item = elmt_node->item;
@@ -447,7 +447,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         if (item->next) { strbuf_append_char(tp->code_buf, ','); }
         item = (AstNamedNode*)item->next;
     }
-    strbuf_append_char(tp->code_buf, ')');
+    strbuf_append_str(tp->code_buf, ");})");
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {

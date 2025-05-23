@@ -110,7 +110,8 @@ typedef struct Element {
     // content
     Item* items;  // items should be packed instead of a list
 } Element;
-Element* elmt_new(Context *rt, int type_index, ...);
+Element* elmt();
+Element* elmt_fill(Element *elmt, int type_index, ...);
 
 bool item_true(Item item);
 Item v2it(List *list);
