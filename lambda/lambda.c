@@ -186,21 +186,28 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
     }
 }
 
+Map* map() {
+    Map *map = calloc(1, sizeof(Map));
+    map->type_id = LMD_TYPE_MAP;
+    entry_start();
+    return map;
+}
+
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
-Map* map_new(Context *rt, int type_index, ...) {
-    printf("map_new with shape %d\n", type_index);
-    ArrayList* type_list = (ArrayList*)rt->type_list;
+Map* map_fill(Map* map, int type_index, ...) {
+    printf("map_fill with shape %d\n", type_index);
+    ArrayList* type_list = (ArrayList*)context->type_list;
     AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
     LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
-    Map *map = calloc(1, sizeof(Map));
-    map->type_id = LMD_TYPE_MAP;  map->type = map_type;
-    map->data = calloc(1, map_type->byte_size);  // heap_alloc(rt->heap, map_type->byte_size);
+    map->type = map_type;
+    map->data = calloc(1, map_type->byte_size);
     printf("map byte_size: %d\n", map_type->byte_size);
     // set map fields
     va_list args;
     va_start(args, map_type->length);
     set_fields(map_type, map->data, args);
     va_end(args);
+    entry_end();
     return map;
 }
 
@@ -223,8 +230,8 @@ Element* elmt_new(Context *rt, int type_index, ...) {
     return elmt;
 }
 
-Item map_get(Context *rt, Map* map, char *key) {
-    if (!rt || !map || !key) { return ITEM_NULL; }
+Item map_get(Map* map, char *key) {
+    if (!map || !key) { return ITEM_NULL; }
     ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
     while (field) {
         if (strncmp(field->name.str, key, field->name.length) == 0) {
@@ -239,7 +246,7 @@ Item map_get(Context *rt, Map* map, char *key) {
                     return i2it(*(int*)field_ptr);
                 case LMD_TYPE_FLOAT:
                     double dval = *(double*)field_ptr;
-                    return push_d(rt, dval);
+                    return push_d(context, dval);
                 case LMD_TYPE_DTIME:
                     return k2it(*(char**)field_ptr);
                 case LMD_TYPE_STRING:

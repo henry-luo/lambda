@@ -98,8 +98,9 @@ typedef struct Map {
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
 } Map;
-Map* map_new(Context *rt, int type_index, ...);
-Item map_get(Context *rt, Map* map, char *key);
+Map* map();
+Map* map_fill(Map* map, int type_index, ...);
+Item map_get(Map* map, char *key);
 
 typedef struct Element {
     uint8_t type_id;

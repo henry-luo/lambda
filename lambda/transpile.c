@@ -424,7 +424,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     printf("transpile map expr\n");
-    strbuf_append_str(tp->code_buf, "map_new(rt,");
+    strbuf_append_str(tp->code_buf, "({Map* m = map(); map_fill(m,");
     strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)map_node->type)->type_index);
     strbuf_append_char(tp->code_buf, ',');
     AstNamedNode *item = map_node->item;
@@ -433,7 +433,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
         if (item->next) { strbuf_append_char(tp->code_buf, ','); }
         item = (AstNamedNode*)item->next;
     }
-    strbuf_append_char(tp->code_buf, ')');
+    strbuf_append_str(tp->code_buf, ");})");
 }
 
 void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
@@ -543,7 +543,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     printf("transpile field expr\n");
     if (field_node->object->type->type_id == LMD_TYPE_MAP) {
-        strbuf_append_str(tp->code_buf, "map_get(rt,");
+        strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         if (field_node->field && field_node->field->node_type == AST_NODE_IDENT) {
