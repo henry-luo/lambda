@@ -47,7 +47,6 @@ typedef struct String {
 typedef struct Heap Heap;
 typedef struct Pack Pack;
 
-// script runtime context
 typedef struct Context {
     void* ast_pool;
     void** consts;

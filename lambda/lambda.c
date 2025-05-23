@@ -1,6 +1,8 @@
 #include "transpiler.h"
 #include <stdarg.h>
 
+extern __thread Context* context;
+
 Array* array_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
@@ -258,7 +260,7 @@ String *str_cat(String *left, String *right) {
     size_t left_len = left->len;
     size_t right_len = right->len;
     printf("left len %zu, right len %zu\n", left_len, right_len);
-    String *result = malloc(sizeof(String) + left_len + right_len + 1);
+    String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1);
     result->len = left_len + right_len;
     memcpy(result->str, left->str, left_len);
     // copy the string and '\0'

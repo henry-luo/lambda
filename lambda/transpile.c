@@ -797,13 +797,10 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
     }    
 
     // global evaluation, wrapped inside main()
-    strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n List *ls=");
+    strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n return ");
     AstNode *node = script->child;
-    while (node) {
-        transpile_expr(tp, node);
-        node = node->next;
-    }
-    strbuf_append_str(tp->code_buf, ";\n return v2it(ls);\n}\n");
+    transpile_box_item(tp, node);
+    strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 
 

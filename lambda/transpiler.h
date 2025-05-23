@@ -388,13 +388,20 @@ typedef struct {
     NameScope *global_vars;  // global variables
 } AstScript;
 
+typedef struct HeapEntry {
+    struct HeapEntry* next;  // next heap entry
+    uint8_t data[];
+} HeapEntry;
+
 typedef struct Heap {
-    Pack; // extends Pack
+    VariableMemPool *pool;  // memory pool for the heap
+    HeapEntry *first, *last;  // first and last heap entry
 } Heap;
-Heap* heap_init(size_t initial_size);
-void* heap_alloc(Heap* heap, size_t size);
-void* heap_calloc(Heap* heap, size_t size);
-void heap_destroy(Heap* heap);
+
+void heap_init();
+void* heap_alloc(size_t size);
+void* heap_calloc(size_t size);
+void heap_destroy();
 
 // uses the high byte to tag the pointer, defined for little-endian
 typedef union LambdaItem {
@@ -438,8 +445,7 @@ typedef struct {
 
 typedef struct {
     Transpiler* transpiler;
-    Heap* heap;
-    Pack* stack; // eval stack
+    Context context;  // execution context
 } Runner;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \

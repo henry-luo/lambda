@@ -84,16 +84,75 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
     return main_func;
 }
 
+// thread-specific runtime context
+__thread Context* context = NULL;
+
+void heap_init() {
+    printf("heap init: %p\n", context);
+    context->heap = (Heap*)calloc(1, sizeof(Heap));
+    size_t grow_size = 4096;  // 4k
+    size_t tolerance_percent = 20;
+    pool_variable_init(&context->heap->pool, grow_size, tolerance_percent);
+}
+
+void* heap_alloc(size_t size) {
+    Heap *heap = context->heap;
+    HeapEntry *entry;
+    pool_variable_alloc(heap->pool, size + sizeof(HeapEntry), (void**)&entry);
+    if (!entry) {
+        printf("Error: Failed to allocate memory for heap entry.\n");
+        return NULL;
+    }
+    if (!heap->first) { heap->first = entry; }
+    else { heap->last->next = entry; }
+    heap->last = entry;
+    return entry->data;
+}
+
+void* heap_calloc(size_t size) {
+    void* ptr = heap_alloc(size);
+    memset(ptr, 0, size);
+    return ptr;
+}
+
+void heap_free(HeapEntry* entry) {
+    // HeapEntry *entry = (HeapEntry*)((uint8_t*)ptr - sizeof(HeapEntry));
+    // if (entry == heap->first) {
+    //     heap->first = entry->next;
+    //     if (!heap->first) { heap->last = NULL; }
+    // } else {
+    //     HeapEntry *prev = heap->first;
+    //     while (prev && prev->next != entry) { prev = prev->next; }
+    //     if (prev) { prev->next = entry->next; }
+    //     if (!prev->next) { heap->last = prev; }
+    // }
+}
+
+void heap_destroy() {
+    if (context->heap) {
+        if (context->heap->pool) pool_variable_destroy(context->heap->pool);
+        free(context->heap);
+    }
+}
+
 void runner_init(Runner* runner) {
     memset(runner, 0, sizeof(Runner));
     runner->transpiler = (Transpiler*)malloc(sizeof(Transpiler));
     memset(runner->transpiler, 0, sizeof(Transpiler));
 }
 
+void runner_setup_context(Runner* runner) {
+    printf("runner setup exec context\n");
+    runner->context.ast_pool = runner->transpiler->ast_pool;
+    runner->context.type_list = runner->transpiler->type_list;
+    runner->context.consts = runner->transpiler->const_list->data;
+    runner->context.stack = pack_init(256);
+    context = &runner->context;
+    heap_init();
+}
+
 void runner_cleanup(Runner* runner) {
     printf("runner cleanup\n");
-    if (runner->heap) heap_destroy(runner->heap);
-    if (runner->stack) pack_free(runner->stack);
     Transpiler *tp = runner->transpiler;
     if (tp) {
         if (tp->jit_context) jit_cleanup(tp->jit_context);
@@ -103,6 +162,8 @@ void runner_cleanup(Runner* runner) {
         if (tp->parser) ts_parser_delete(tp->parser);    
         free(tp);
     }
+    heap_destroy();
+    if (runner->context.stack) pack_free(runner->context.stack);    
 }
 
 Item run_script(Runner *runner, char* source) {
@@ -113,14 +174,8 @@ Item run_script(Runner *runner, char* source) {
         return ITEM_NULL;
     } else {
         printf("Executing JIT compiled code...\n");
-        runner->heap = heap_init(4096 * 16);  // 64k
-        runner->stack = pack_init(256);
-        Context runtime_context = {.ast_pool = runner->transpiler->ast_pool, 
-            .type_list = runner->transpiler->type_list, 
-            .consts = runner->transpiler->const_list->data, 
-            .heap = runner->heap, .stack = runner->stack,
-        };
-        Item ret = main_func(&runtime_context);
+        runner_setup_context(runner);
+        Item ret = main_func(context);
         return ret;
     }
 }

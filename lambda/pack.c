@@ -289,19 +289,3 @@ void pack_free(Pack* pack) {
     free(pack);
 }
 #endif
-
-Heap* heap_init(size_t initial_size) {
-    return (Heap*)pack_init(initial_size);
-}
-
-void* heap_alloc(Heap* heap, size_t size) {
-    return pack_alloc((Pack*)heap, size);
-}
-
-void* heap_calloc(Heap* heap, size_t size) {
-    return heap_calloc(heap, size);
-}
-
-void heap_destroy(Heap* heap) {
-    pack_free((Pack*)heap);
-}
