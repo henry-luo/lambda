@@ -25,7 +25,9 @@ const signed_integer_literal = seq(optional('-'), integer_literal);
 const base64_unit = /[A-Za-z0-9+/]{4}/;
 const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
-function binary_expr($, no_relational) { 
+// need to exclude relational exprs in attr
+function binary_expr($, in_attr) {
+  let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr)) : $._expression;
   return [
     ['+', 'binary_plus'],
     ['-', 'binary_plus'],
@@ -36,7 +38,7 @@ function binary_expr($, no_relational) {
     ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],
-    ...(no_relational ?[]:
+    ...(in_attr ?[]:
     [['<', 'binary_relation'],
     ['<=', 'binary_relation'],
     ['>=', 'binary_relation'],
@@ -52,9 +54,9 @@ function binary_expr($, no_relational) {
     ['in', 'set_is_in'],
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-      field('left', $._expression), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
+      field('left', operand),
       field('operator', operator),
-      field('right', $._expression),
+      field('right', operand),
     )),
   );
 }
@@ -170,8 +172,6 @@ module.exports = grammar({
   conflicts: $ => [
     [$.content, $.binary_expr],
     [$.primary_expr, $.parameter],
-    //[$._attr_expr, $._expression],
-    //[$.attr_binary_expr, $.binary_expr],
   ],
 
   rules: {
@@ -236,23 +236,23 @@ module.exports = grammar({
       $._expression, 'to', $._expression,
     ),
     
-    // attr_binary_expr: $ => choice(
-    //   ...binary_expr($, true),
-    // ),
+    attr_binary_expr: $ => choice(
+      ...binary_expr($, true),
+    ),
 
-    // _attr_expr: $ => prec.left(choice(
-    //   $.primary_expr,
-    //   $.unary_expr,
-    //   alias($.attr_binary_expr, $.binary_expr),
-    //   $.if_expr,
-    //   $.for_expr,
-    //   $.fn_expr,
-    // )),
+    _attr_expr: $ => prec.left(choice(
+      $.primary_expr,
+      $.unary_expr,
+      alias($.attr_binary_expr, $.binary_expr),
+      $.if_expr,
+      $.for_expr,
+      $.fn_expr,
+    )),
 
     attr: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('as', choice($.primary_expr, $.unary_expr)),
+      field('as', $._attr_expr),
     ),
 
     element: $ => seq('<', $.identifier,

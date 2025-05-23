@@ -93,6 +93,22 @@
         "required": true,
         "types": [
           {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fn_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
             "type": "primary_expr",
             "named": true
           },
@@ -1544,11 +1560,11 @@
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
@@ -1732,11 +1748,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
