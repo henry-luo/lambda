@@ -157,8 +157,6 @@ Map* map_new(Context *rt, int type_index, ...) {
     return map;
 }
 
-
-
 Element* elmt_new(Context *rt, int type_index, ...) {
     printf("elmt_new with shape %d\n", type_index);
     ArrayList* type_list = (ArrayList*)rt->type_list;
@@ -260,12 +258,13 @@ String *str_cat(String *left, String *right) {
     size_t left_len = left->len;
     size_t right_len = right->len;
     printf("left len %zu, right len %zu\n", left_len, right_len);
-    String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1);
-    result->len = left_len + right_len;
-    memcpy(result->str, left->str, left_len);
+    FatString *result = (FatString *)heap_alloc(sizeof(FatString) + left_len + right_len + 1);
+    result->in_heap = true;  result->len = left_len + right_len;
+    result->str = result->chars;
+    memcpy(result->chars, left->str, left_len);
     // copy the string and '\0'
-    memcpy(result->str + left_len, right->str, right_len + 1);
-    return result;
+    memcpy(result->chars + left_len, right->str, right_len + 1);
+    return (String*)result;
 }
 
 Item add(Context *rt, Item a, Item b) {
@@ -384,28 +383,35 @@ String* string(Context *rt, Item item) {
         char buf[32];
         int int_val = (int32_t)itm.long_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
-        String *str = malloc(strlen(buf) + 1 + sizeof(int32_t));
-        strcpy(str->str, buf);
-        str->len = strlen(buf);
-        return str;
+        int len = strlen(buf);
+        FatString *str = malloc(len + 1 + sizeof(FatString));
+        str->str = str->chars;
+        strcpy(str->chars, buf);
+        str->len = len;  str->in_heap = true;
+        return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_INT) {
         char buf[32];
         long long_val = *(long*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
-        String *str = malloc(strlen(buf) + 1 + sizeof(int32_t));
-        strcpy(str->str, buf);
-        str->len = strlen(buf);
-        return str;
+        int len = strlen(buf);
+        FatString *str = malloc(len + 1 + sizeof(FatString));
+        str->str = str->chars;
+        strcpy(str->chars, buf);
+        str->len = len;
+        str->in_heap = true;
+        return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         char buf[32];
         double dval = *(double*)itm.pointer;
         snprintf(buf, sizeof(buf), "%g", dval);
-        String *str = malloc(strlen(buf) + 1 + sizeof(int32_t));
-        strcpy(str->str, buf);
-        str->len = strlen(buf);
-        return str;
+        int len = strlen(buf);
+        FatString *str = malloc(len + 1 + sizeof(FatString));
+        str->str = str->chars;
+        strcpy(str->chars, buf);
+        str->len = len;  str->in_heap = true;
+        return (String*)str;
     }
     printf("unhandled type %d\n", itm.type_id);
     return NULL;

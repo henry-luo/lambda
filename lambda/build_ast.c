@@ -291,12 +291,14 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
         LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
     // copy the string, todo: handle escape sequence
-    pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str_type->string);
+    FatString *str;
+    pool_variable_alloc(tp->ast_pool, sizeof(FatString) + len + 1, (void **)&str);
+    str_type->string = (String*)str;
     const char* str_content = tp->source + start + 
         (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0: symbol == SYM_BINARY ? 2:1);
-    memcpy(str_type->string->str, str_content, len);  // memcpy is probably faster than strcpy
-    str_type->string->str[len] = '\0';
-    str_type->string->len = len;
+    str->str = str->chars;
+    memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
+    str->chars[len] = '\0';  str->len = len;  str->in_heap = false;
     // add to const list
     arraylist_append(tp->const_list, str_type->string);
     str_type->const_index = tp->const_list->length - 1;

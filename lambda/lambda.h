@@ -38,11 +38,19 @@ typedef uint8_t TypeId;
 
 typedef uint64_t Item;
 
-// a FAT string: null-terminated and prefixed with length
 typedef struct String {
-    int32_t len;  // int instead of uint, to align with default Lambda int literal type
-    char str[];
+    char *str;
+    int32_t len:31;  // int instead of uint, to align with default Lambda int literal type
+    int32_t in_heap:1;
 } String;
+
+// a FAT string: null-terminated and prefixed with length
+typedef struct FatString {
+    char *str;
+    int32_t len:31;  // int instead of uint, to align with default Lambda int literal type
+    int32_t in_heap:1;
+    char chars[];
+} FatString;
 
 typedef struct Heap Heap;
 typedef struct Pack Pack;
