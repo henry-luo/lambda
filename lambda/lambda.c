@@ -27,6 +27,20 @@ void entry_end() {
     free(entry_start);
 }
 
+void retain_string(String *str) {
+    if (str->in_heap) {  // remove string from heap entries
+        str->in_heap = false;
+        int entry = context->heap->entries->length-1;  int start = context->heap->entry_start->start;
+        for (; entry >= start; entry--) {
+            void *data = context->heap->entries->data[entry];
+            if (data == str) {
+                printf("removing string from heap entries: %p\n", str);
+                context->heap->entries->data[entry] = NULL;  break;
+            }
+        }
+    }
+}
+
 Array* array() {
     Array *arr = calloc(1, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
@@ -41,7 +55,13 @@ Array* array_fill(Array* arr, int count, ...) {
         arr->capacity = count;
         arr->items = malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
-            arr->items[i] = va_arg(args, Item);
+            Item item = arr->items[i] = va_arg(args, Item);
+            LambdaItem itm = {.item = item};
+            if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+                itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+                String *str = (String*)itm.pointer;
+                retain_string(str);
+            }            
         }
         arr->length = count;
         va_end(args);
@@ -97,17 +117,7 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;
-        if (str->in_heap) {  // remove string from heap entries
-            str->in_heap = false;
-            int entry = context->heap->entries->length-1;  int start = context->heap->entry_start->start;
-            for (; entry >= start; entry--) {
-                void *data = context->heap->entries->data[entry];
-                if (data == str) {
-                    printf("removing string from heap entries: %p\n", str);
-                    context->heap->entries->data[entry] = NULL;  break;
-                }
-            }
-        }
+        retain_string(str);
     }
 }
 
@@ -172,6 +182,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 String *str = va_arg(args, String*);
                 printf("field string value: %s\n", str->str);
                 *(String**)field_ptr = str;
+                retain_string(str);
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_FUNC:
