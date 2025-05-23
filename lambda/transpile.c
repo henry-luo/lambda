@@ -349,7 +349,8 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_IMP_INT;
-    strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : "array_new(");
+    strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : 
+        "({Array* arr = array(); array_fill(arr,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     if (is_int_array) {
@@ -360,9 +361,10 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
                 strbuf_append_char(tp->code_buf, ',');
             }
             item = item->next;
-        }        
+        }
     } else {
         transpile_items(tp, array_node);
+        strbuf_append_str(tp->code_buf, ");}");
     }
     strbuf_append_char(tp->code_buf, ')');
 }

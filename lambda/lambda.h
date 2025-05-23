@@ -69,7 +69,8 @@ typedef struct ArrayLong {
     long length;
 } ArrayLong;
 
-Array* array_new(int count, ...);
+Array* array();
+Array* array_fill(Array* arr, int count, ...);
 ArrayLong* array_long_new(int count, ...);
 
 typedef struct List {

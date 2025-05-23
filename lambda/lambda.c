@@ -3,18 +3,50 @@
 
 extern __thread Context* context;
 
-Array* array_new(int count, ...) {
-    if (count <= 0) { return NULL; }
-    va_list args;
-    va_start(args, count);
-    Array *arr = malloc(sizeof(Array));
-    arr->type_id = LMD_TYPE_ARRAY;  arr->capacity = count;
-    arr->items = malloc(count * sizeof(Item));
-    for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, Item);
+void entry_start() {
+    EntryStart *entry_start = malloc(sizeof(EntryStart));
+    entry_start->parent = context->heap->entry_start;
+    entry_start->start = context->heap->entries->length;
+    context->heap->entry_start = entry_start;
+}
+
+void entry_end() {
+    EntryStart *entry_start = context->heap->entry_start;
+    ArrayList *entries = context->heap->entries;
+    int start = entry_start->start;
+    if (entries->length > start) {
+        // free heap allocations
+        printf("free list heap entries\n");
+        for (int i = start; i < entries->length; i++) {
+            void *data = entries->data[i];
+            if (data) pool_variable_free(context->heap->pool, data);
+        }
+        entries->length = start;
     }
-    arr->length = count;
-    va_end(args);
+    context->heap->entry_start = entry_start->parent;
+    free(entry_start);
+}
+
+Array* array() {
+    Array *arr = calloc(1, sizeof(Array));
+    arr->type_id = LMD_TYPE_ARRAY;
+    entry_start();
+    return arr;
+}
+
+Array* array_fill(Array* arr, int count, ...) {
+    if (count > 0) {
+        va_list args;
+        va_start(args, count);
+        arr->capacity = count;
+        arr->items = malloc(count * sizeof(Item));
+        for (int i = 0; i < count; i++) {
+            arr->items[i] = va_arg(args, Item);
+        }
+        arr->length = count;
+        va_end(args);
+    }
+    entry_end();
     return arr;
 }
 
@@ -38,10 +70,7 @@ List* list() {
     // todo: alloc from heap
     List *list = calloc(1, sizeof(List));
     list->type_id = LMD_TYPE_LIST;
-    EntryStart *entry_start = malloc(sizeof(EntryStart));
-    entry_start->parent = context->heap->entry_start;
-    entry_start->start = context->heap->entries->length;
-    context->heap->entry_start = entry_start;
+    entry_start();
     return list;
 }
 
@@ -65,7 +94,8 @@ void list_push(List *list, Item item) {
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
     list->items[list->length++] = item;
-    if (itm.type_id == LMD_TYPE_STRING) {
+    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;
         if (str->in_heap) {  // remove string from heap entries
             str->in_heap = false;
@@ -93,18 +123,7 @@ List* list_fill(List *list, int count, ...) {
         list_push(list, itm.item);
     }
     va_end(args);
-    ArrayList *entries = context->heap->entries;
-    int start = context->heap->entry_start->start;
-    if (entries->length > start) {
-        // free heap allocations
-        printf("free list heap entries\n");
-        for (int i = start; i < entries->length; i++) {
-            void *data = entries->data[i];
-            if (data) pool_variable_free(context->heap->pool, data);
-        }
-        entries->length = start;
-    }
-    context->heap->entry_start = context->heap->entry_start->parent;
+    entry_end();
     return list;
 }
 
