@@ -25,7 +25,7 @@ const signed_integer_literal = seq(optional('-'), integer_literal);
 const base64_unit = /[A-Za-z0-9+/]{4}/;
 const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
-function binary_expr($) { 
+function binary_expr($, no_relational) { 
   return [
     ['+', 'binary_plus'],
     ['-', 'binary_plus'],
@@ -35,11 +35,12 @@ function binary_expr($) {
     ['%', 'binary_times'],
     ['**', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
-    ['!=', 'binary_eq'],        
-    ['<', 'binary_relation'],
+    ['!=', 'binary_eq'],
+    ...(no_relational ?[]:
+    [['<', 'binary_relation'],
     ['<=', 'binary_relation'],
     ['>=', 'binary_relation'],
-    ['>', 'binary_relation'],
+    ['>', 'binary_relation']]),
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
@@ -124,6 +125,7 @@ module.exports = grammar({
   // supertype symbols must always have a single visible child
   supertypes: $ => [
     $._expression,
+    //$._attr_expr,
   ],
 
   inline: $ => [
@@ -138,7 +140,6 @@ module.exports = grammar({
   ],
 
   precedences: $ => [[
-    $.attr,
     $.fn_expr_stam,
     $.sys_func,
     $.primary_expr,
@@ -169,6 +170,8 @@ module.exports = grammar({
   conflicts: $ => [
     [$.content, $.binary_expr],
     [$.primary_expr, $.parameter],
+    //[$._attr_expr, $._expression],
+    //[$.attr_binary_expr, $.binary_expr],
   ],
 
   rules: {
@@ -233,10 +236,23 @@ module.exports = grammar({
       $._expression, 'to', $._expression,
     ),
     
+    // attr_binary_expr: $ => choice(
+    //   ...binary_expr($, true),
+    // ),
+
+    // _attr_expr: $ => prec.left(choice(
+    //   $.primary_expr,
+    //   $.unary_expr,
+    //   alias($.attr_binary_expr, $.binary_expr),
+    //   $.if_expr,
+    //   $.for_expr,
+    //   $.fn_expr,
+    // )),
+
     attr: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
-      field('as', $._expression),
+      field('as', choice($.primary_expr, $.unary_expr)),
     ),
 
     element: $ => seq('<', $.identifier,
@@ -345,7 +361,6 @@ module.exports = grammar({
 
     _expression: $ => prec.left(choice(
       $.primary_expr,
-      // $.await_expression,
       $.unary_expr,
       $.binary_expr,
       $.if_expr,
@@ -403,7 +418,7 @@ module.exports = grammar({
     ),
 
     binary_expr: $ => choice(
-      ...binary_expr($),
+      ...binary_expr($, false),
     ),
 
     unary_expr: $ => prec.left(seq(

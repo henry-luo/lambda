@@ -93,7 +93,11 @@
         "required": true,
         "types": [
           {
-            "type": "_expression",
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
             "named": true
           }
         ]

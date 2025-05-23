@@ -394,8 +394,17 @@
           "type": "FIELD",
           "name": "as",
           "content": {
-            "type": "SYMBOL",
-            "name": "_expression"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "primary_expr"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "unary_expr"
+              }
+            ]
           }
         }
       ]
@@ -4321,10 +4330,6 @@
   ],
   "precedences": [
     [
-      {
-        "type": "SYMBOL",
-        "name": "attr"
-      },
       {
         "type": "SYMBOL",
         "name": "fn_expr_stam"
