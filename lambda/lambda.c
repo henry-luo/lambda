@@ -168,6 +168,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 break;
             case LMD_TYPE_BOOL:
                 *(bool*)field_ptr = va_arg(args, bool);
+                printf("field bool value: %s\n", *(bool*)field_ptr ? "true" : "false");
                 break;                
             case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
                 *(long*)field_ptr = va_arg(args, long);
@@ -185,9 +186,9 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 retain_string(str);
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_FUNC:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
+            case LMD_TYPE_FUNC:  case LMD_TYPE_ANY:
                 void *arr = va_arg(args, void*);
-                printf("field array value: %p\n", arr);
                 *(void**)field_ptr = arr;
                 break;
             default:

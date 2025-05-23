@@ -129,8 +129,8 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
             String *bin = *(String**)data;
             strbuf_append_format(strbuf, "b'%s'", bin->str);
             break;
-        case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
-        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
+        case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
             print_item(strbuf, *(Item*)data);
             break;
         default:
