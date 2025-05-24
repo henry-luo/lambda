@@ -1,4 +1,5 @@
 #include "transpiler.h"
+#include <time.h>
 
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
@@ -19,13 +20,28 @@ void find_errors(TSNode node) {
 
 typedef Item (*main_func_t)(Context*);
 
+void print_time_elapsed(char* label, struct timespec start, struct timespec end) {
+    // Calculate elapsed time in milliseconds
+    long seconds = end.tv_sec - start.tv_sec;
+    long nanoseconds = end.tv_nsec - start.tv_nsec;
+    if (nanoseconds < 0) {
+        seconds--;
+        nanoseconds += 1000000000;
+    }
+    double elapsed_ms = seconds * 1000.0 + nanoseconds / 1e6;
+    printf("%s took %.3f ms\n", label, elapsed_ms);
+}
+
 main_func_t transpile_script(Transpiler *tp, char* source) {
     if (!source) { 
         printf("Error: Source code is NULL\n");
         return NULL; 
     }
     printf("Starting transpiler...\n");
-    // create a parser.
+    struct timespec start, end;
+    
+    // create a parser
+    clock_gettime(CLOCK_MONOTONIC, &start);
     tp->parser = lambda_parser();
     if (tp->parser == NULL) { return NULL; }
     // read the source and parse it
@@ -35,6 +51,8 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
         printf("Error: Failed to parse the source code.\n");
         return NULL;
     }
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    print_time_elapsed("parsing", start, end);
 
     // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");
@@ -50,37 +68,45 @@ main_func_t transpile_script(Transpiler *tp, char* source) {
     }
 
     // build the AST from the syntax tree
+    clock_gettime(CLOCK_MONOTONIC, &start);
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
     pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
     tp->type_list = arraylist_new(16);
     tp->const_list = arraylist_new(16);
-
     if (strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
         return NULL;
     }
     // build the AST
     tp->ast_root = build_script(tp, root_node);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    print_time_elapsed("building AST", start, end);
     // print the AST for debugging
     printf("AST: ---------\n");
     print_ast_node(tp->ast_root, 0);
 
     // transpile the AST to C code
     printf("transpiling...\n");
+    clock_gettime(CLOCK_MONOTONIC, &start);
     tp->code_buf = strbuf_new_cap(1024);
     transpile_ast_script(tp, (AstScript*)tp->ast_root);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    print_time_elapsed("transpiling", start, end);
 
     // JIT compile the C code
+    clock_gettime(CLOCK_MONOTONIC, &start);
     tp->jit_context = jit_init();
     // compile user code to MIR
     write_text_file("_transpiled.c", tp->code_buf->str);
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, "main.c");
     strbuf_free(tp->code_buf);
-    
     // generate the native code and return the function
     main_func_t main_func = jit_gen_func(tp->jit_context, "main");
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    print_time_elapsed("JIT compiling", start, end);
+
     return main_func;
 }
 
