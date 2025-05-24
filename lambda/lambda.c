@@ -425,16 +425,16 @@ LambdaType *type_string() {
     return (LambdaType *)&LIT_TYPE_STRING;
 }
 
-Item is(Context *rt, Item a, Item b) {
+bool is(Item a, Item b) {
     printf("is expr\n");
     LambdaItem a_item = {.item = a};
     LambdaItem b_item = {.item = b};
     if (b_item.type_id || *((uint8_t*)b) != LMD_TYPE_TYPE) {
-        return ITEM_ERROR;
+        return false;
     }
     LambdaTypeType *type_b = (LambdaTypeType *)b;
     printf("is type %d, %d\n", a_item.type_id, type_b->type->type_id);
-    return b2it(a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id);
+    return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
 }
 
 String STR_NULL = {.str = "null", .len = 4};

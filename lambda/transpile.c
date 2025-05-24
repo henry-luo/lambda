@@ -223,7 +223,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IS) {
-        strbuf_append_str(tp->code_buf, "is(rt,");
+        strbuf_append_str(tp->code_buf, "is(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);

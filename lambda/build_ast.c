@@ -467,12 +467,17 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
         ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE || 
         ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE || 
-        ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE) {
+        ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE || 
+        ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {
         type_id = LMD_TYPE_BOOL;
     } 
     else if (ast_node->op == OPERATOR_IDIV) {
         type_id = LMD_TYPE_IMP_INT;
-    } else {
+    }
+    else if (ast_node->op == OPERATOR_TO) {
+        type_id = LMD_TYPE_ARRAY;
+    }
+    else {
         type_id = LMD_TYPE_ANY;
     }
     ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
