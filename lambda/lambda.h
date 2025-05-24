@@ -168,5 +168,6 @@ LambdaType *type_float();
 LambdaType *type_string();
 
 bool is(Item a, Item b);
+bool in(Item a, Item b);
 String* string(Context *rt, Item item);
 LambdaType* type(Context *rt, Item item);

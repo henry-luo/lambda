@@ -348,9 +348,11 @@ void print_ast_node(AstNode *node, int indent) {
         print_ast_node(((AstUnaryNode*)node)->operand, indent + 1);
         break;
     case AST_NODE_BINARY:
-        printf("[binary expr:%s]\n", formatType(node->type));
-        print_ast_node(((AstBinaryNode*)node)->left, indent + 1);
-        print_ast_node(((AstBinaryNode*)node)->right, indent + 1);
+        AstBinaryNode* bnode = (AstBinaryNode*)node;
+        printf("[binary expr %.*s.%d:%s]\n", (int)bnode->operator.length, bnode->operator.str, 
+            bnode->op, formatType(node->type));
+        print_ast_node(bnode->left, indent + 1);
+        print_ast_node(bnode->right, indent + 1);
         break;
     case AST_NODE_IF_EXPR:
         printf("[if expr:%s]\n", formatType(node->type));

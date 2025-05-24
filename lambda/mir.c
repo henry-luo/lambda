@@ -49,6 +49,7 @@ func_obj_t func_list[] = {
     {"it2d", (fn_ptr) it2d},
     {"to_fn", (fn_ptr) to_fn},
     {"is", (fn_ptr) is},
+    {"in", (fn_ptr) in},
     {"type_int", (fn_ptr) type_int},
     {"type_float", (fn_ptr) type_float},
     {"type_string", (fn_ptr) type_string},

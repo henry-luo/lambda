@@ -437,6 +437,93 @@ bool is(Item a, Item b) {
     return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
 }
 
+bool equal(Item a, Item b) {
+    printf("equal expr\n");
+    LambdaItem a_item = {.item = a};
+    LambdaItem b_item = {.item = b};
+    if (a_item.type_id != b_item.type_id) {
+        // number promotion
+        if (LMD_TYPE_IMP_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+            LMD_TYPE_IMP_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
+            double a_val = it2d(a_item.item);
+            double b_val = it2d(b_item.item);
+            return a_val == b_val;
+        }
+        return false;
+    }
+    if (a_item.type_id == LMD_TYPE_NULL) {
+        return true;
+    }    
+    else if (a_item.type_id == LMD_TYPE_IMP_INT) {
+        return a_item.long_val == b_item.long_val;
+    }
+    else if (a_item.type_id == LMD_TYPE_INT) {
+        return *(long*)a_item.pointer == *(long*)b_item.pointer;
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT) {
+        return *(double*)a_item.pointer == *(double*)b_item.pointer;
+    }
+    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
+        a_item.type_id == LMD_TYPE_BINARY || a_item.type_id == LMD_TYPE_DTIME) {
+        String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        return str_a->len == str_b->len && strncmp(str_a->str, str_b->str, str_a->len) == 0;
+    }
+    printf("unknown comparing type %d\n", a_item.type_id);
+    return false;
+}
+
+bool in(Item a, Item b) {
+    printf("in expr\n");
+    LambdaItem a_item = {.item = a};
+    LambdaItem b_item = {.item = b};
+    if (b_item.type_id) { // b is scalar
+        if (b_item.type_id == LMD_TYPE_STRING && a_item.type_id == LMD_TYPE_STRING) {
+            String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+            return str_a->len <= str_b->len && strstr(str_b->str, str_a->str) != NULL;
+        }
+    }
+    else { // b is container
+        TypeId b_type = *((uint8_t*)b);
+        if (b_type == LMD_TYPE_LIST) {
+            List *list = (List*)b;
+            for (int i = 0; i < list->length; i++) {
+                if (equal(list->items[i], a)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        else if (b_type == LMD_TYPE_ARRAY) {
+            Array *arr = (Array*)b;
+            for (int i = 0; i < arr->length; i++) {
+                if (equal(arr->items[i], a)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        else if (b_type == LMD_TYPE_ARRAY_INT) {
+            ArrayLong *arr = (ArrayLong*)b;
+            for (int i = 0; i < arr->length; i++) {
+                if (arr->items[i] == it2l(a)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        else if (b_type == LMD_TYPE_MAP) {
+            // check if a is in map
+        }
+        else if (b_type == LMD_TYPE_ELEMENT) {
+            // check if a is in element
+        }
+        else {
+            printf("invalid type %d\n", b_type);
+        }
+    }
+    return false;
+}
+
 String STR_NULL = {.str = "null", .len = 4};
 String STR_TRUE = {.str = "true", .len = 4};
 String STR_FALSE = {.str = "false", .len = 5};

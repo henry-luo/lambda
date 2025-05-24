@@ -25,3 +25,7 @@ let str = string(123)
 str; str is string;
 
 type("string");  type(123);  type(true);  type(0.5);  type(null);  type([123]);  type({a:123});  type(t);  type(factorial);
+
+1 in [1, 2, 3];  5 in [1, 2.5, 3, 5.0];  "abc" in ["abc", "def"];
+0 in [1, 2, 3];  6 in [1, 2.5, 3, 5.0];  "ab" in ["abc", "def"];
+"a" in "abc";  "d" in "abc"; 
