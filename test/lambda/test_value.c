@@ -19,7 +19,7 @@ TestSuite(strbuf_tests, .init = setup, .fini = teardown);
 void run_test(Runner *runner, char* source, char* expected) {
     StrBuf *strbuf = strbuf_new_cap(256);
     runner_init(runner);
-    Item ret = run_script(runner, source);
+    Item ret = run_script(runner, source, "test_value.ls");
     print_item(strbuf, ret);
     cr_assert_str_eq(strbuf->str, expected);
     strbuf_free(strbuf);

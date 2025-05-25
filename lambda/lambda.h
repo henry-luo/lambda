@@ -1,7 +1,11 @@
 
 #pragma once
-#include <stdint.h>
 // #include <math.h>  // MIR has problem parsing math.h
+// #include <stdint.h>
+typedef unsigned long long uint64_t;
+typedef unsigned char uint8_t;
+typedef int int32_t;
+typedef long long int64_t;
 #ifndef bool
 #define bool uint8_t
 #endif
