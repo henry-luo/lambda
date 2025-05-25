@@ -59,37 +59,17 @@ typedef struct Context {
     Pack* stack;  // eval stack
 } Context;
 
-typedef struct Array {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
-    Item* items;
-    long length;
-} Array;
+typedef struct Array Array;
 
-typedef struct ArrayLong {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
-    long* items;
-    long length;
-} ArrayLong;
+typedef struct ArrayLong ArrayLong;
 
 Array* array();
 Array* array_fill(Array* arr, int count, ...);
 ArrayLong* array_long_new(int count, ...);
 
-typedef struct List {
-    uint64_t type_id:8;
-    uint64_t capacity:56;
-    Item* items;
-    long length;
-} List;
+typedef struct List List;
 
-typedef struct ListLong {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
-    long* items;
-    long length;
-} ListLong;
+typedef struct ListLong ListLong;
 
 List* list();  // constructs an empty list
 List* list_fill(List *list, int cnt, ...);  // fill the list with the items
@@ -97,23 +77,12 @@ void list_push(List *list, Item item);
 ListLong* list_long();  // construct an empty list
 void list_long_push(ListLong *list, long item);
 
-typedef struct Map {
-    uint8_t type_id;   
-    void* type;  // map type/shape
-    void* data;  // packed data struct of the map
-} Map;
+typedef struct Map Map;
 Map* map();
 Map* map_fill(Map* map, int type_index, ...);
 Item map_get(Map* map, char *key);
 
-typedef struct Element {
-    uint8_t type_id;
-    // attributes
-    void* type;  // attr type/shape
-    void* data;  // packed data struct of the attrs
-    // content
-    Item* items;  // items should be packed instead of a list
-} Element;
+typedef struct Element Element;
 Element* elmt();
 Element* elmt_fill(Element *elmt, int type_index, ...);
 

@@ -162,6 +162,49 @@ typedef struct FatString {
     char chars[];
 } FatString;
 
+struct Array {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
+    Item* items;
+    long length;
+};
+
+struct ArrayLong {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
+    long* items;
+    long length;
+};
+
+struct List {
+    uint64_t type_id:8;
+    uint64_t capacity:56;
+    Item* items;
+    long length;
+};
+
+struct ListLong {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
+    long* items;
+    long length;
+};
+
+struct Map {
+    uint8_t type_id;   
+    void* type;  // map type/shape
+    void* data;  // packed data struct of the map
+};
+
+struct Element {
+    uint8_t type_id;
+    // attributes
+    void* type;  // attr type/shape
+    void* data;  // packed data struct of the attrs
+    // content
+    Item* items;  // items should be packed instead of a list
+};
+
 typedef struct {
     LambdaType;  // extends LambdaType
     int const_index;
