@@ -28,8 +28,8 @@ void entry_end() {
 }
 
 void retain_string(String *str) {
-    if (str->in_heap) {  // remove string from heap entries
-        str->in_heap = false;
+    if (str->heap_owned) {  // remove string from heap entries
+        str->heap_owned = false;
         int entry = context->heap->entries->length-1;  int start = context->heap->entry_start->start;
         for (; entry >= start; entry--) {
             void *data = context->heap->entries->data[entry];
@@ -265,7 +265,7 @@ Item map_get(Map* map, char *key) {
                     return i2it(*(int*)field_ptr);
                 case LMD_TYPE_FLOAT:
                     double dval = *(double*)field_ptr;
-                    return push_d(context, dval);
+                    return push_d(dval);
                 case LMD_TYPE_DTIME:
                     return k2it(*(char**)field_ptr);
                 case LMD_TYPE_STRING:
@@ -312,16 +312,16 @@ Item v2it(List* list) {
     return (Item)list;
 }
 
-Item push_d(Context *rt, double dval) {
+Item push_d(double dval) {
     printf("push_d: %g\n", dval);
-    double *dptr = pack_alloc(rt->stack, sizeof(double));
+    double *dptr = pack_alloc(context->stack, sizeof(double));
     *dptr = dval;
     return (Item) d2it(dptr);
 }
 
-Item push_l(Context *rt, long lval) {
+Item push_l(long lval) {
     printf("push_l: %ld\n", lval);
-    long *lptr = pack_alloc(rt->stack, sizeof(long));
+    long *lptr = pack_alloc(context->stack, sizeof(long));
     *lptr = lval;
     return (Item) l2it(lptr);
 }
@@ -333,7 +333,7 @@ String *str_cat(String *left, String *right) {
     printf("left len %zu, right len %zu\n", left_len, right_len);
     FatString *result = (FatString *)heap_alloc(sizeof(FatString) + left_len + right_len + 1);
     printf("str result %p\n", result);
-    result->in_heap = true;  result->len = left_len + right_len;
+    result->heap_owned = true;  result->len = left_len + right_len;
     result->str = result->chars;
     memcpy(result->chars, left->str, left_len);
     // copy the string and '\0'
@@ -353,17 +353,17 @@ Item add(Context *rt, Item a, Item b) {
         return i2it(item_a.long_val + item_b.long_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
-        return l2it(push_l(rt, *(long*)item_a.pointer + *(long*)item_b.pointer));
+        return l2it(push_l(*(long*)item_a.pointer + *(long*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
         printf("add float: %g + %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
-        return d2it(push_d(rt, *(double*)item_a.pointer + *(double*)item_b.pointer));
+        return d2it(push_d(*(double*)item_a.pointer + *(double*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_FLOAT) {
-        return d2it(push_d(rt, (double)item_a.long_val + *(double*)item_b.pointer));
+        return d2it(push_d((double)item_a.long_val + *(double*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_IMP_INT) {
-        return d2it(push_d(rt, *(double*)item_a.pointer + (double)item_b.long_val));
+        return d2it(push_d(*(double*)item_a.pointer + (double)item_b.long_val));
     }
     else {
         printf("unknown add type: %d, %d\n", item_a.type_id, item_b.type_id);
@@ -548,7 +548,7 @@ String* string(Context *rt, Item item) {
         FatString *str = malloc(len + 1 + sizeof(FatString));
         str->str = str->chars;
         strcpy(str->chars, buf);
-        str->len = len;  str->in_heap = true;
+        str->len = len;  str->heap_owned = true;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_INT) {
@@ -560,7 +560,7 @@ String* string(Context *rt, Item item) {
         str->str = str->chars;
         strcpy(str->chars, buf);
         str->len = len;
-        str->in_heap = true;
+        str->heap_owned = true;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
@@ -571,7 +571,7 @@ String* string(Context *rt, Item item) {
         FatString *str = malloc(len + 1 + sizeof(FatString));
         str->str = str->chars;
         strcpy(str->chars, buf);
-        str->len = len;  str->in_heap = true;
+        str->len = len;  str->heap_owned = true;
         return (String*)str;
     }
     printf("unhandled type %d\n", itm.type_id);

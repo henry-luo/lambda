@@ -28,7 +28,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_str(tp->code_buf, ")");
         }
         else {
-            strbuf_append_str(tp->code_buf, "push_l(rt,");
+            strbuf_append_str(tp->code_buf, "push_l(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
@@ -41,7 +41,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_str(tp->code_buf, ")");
         }
         else {
-            strbuf_append_str(tp->code_buf, "push_d(rt,");
+            strbuf_append_str(tp->code_buf, "push_d(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }

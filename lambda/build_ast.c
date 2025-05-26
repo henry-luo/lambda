@@ -298,7 +298,7 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
         (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0: symbol == SYM_BINARY ? 2:1);
     str->str = str->chars;
     memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
-    str->chars[len] = '\0';  str->len = len;  str->in_heap = false;
+    str->chars[len] = '\0';  str->len = len;  str->heap_owned = false;
     // add to const list
     arraylist_append(tp->const_list, str_type->string);
     str_type->const_index = tp->const_list->length - 1;

@@ -157,8 +157,9 @@ typedef struct TypeInfo {
 // a FAT string: null-terminated and prefixed with length
 typedef struct FatString {
     char *str;
-    int32_t len:31;  // int instead of uint, to align with default Lambda int literal type
-    int32_t in_heap:1;
+    int32_t len:30;  // int instead of uint, to align with default Lambda int literal type
+    int32_t heap_owned:1;
+    int32_t contained:1;
     char chars[];
 } FatString;
 

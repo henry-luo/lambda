@@ -44,8 +44,9 @@ typedef uint64_t Item;
 
 typedef struct String {
     char *str;
-    int32_t len:31;  // int instead of uint, to align with default Lambda int literal type
-    int32_t in_heap:1;
+    int32_t len:30;  // int instead of uint, to align with default Lambda int literal type
+    int32_t heap_owned:1;  // whether it is owned by the heap
+    int32_t contained:1;  // whether it is a reference to a string in containers
 } String;
 
 typedef struct Heap Heap;
@@ -89,8 +90,8 @@ Element* elmt_fill(Element *elmt, int type_index, ...);
 bool item_true(Item item);
 Item v2it(List *list);
 
-Item push_d(Context *rt, double dval);
-Item push_l(Context *rt, long lval);
+Item push_d(double dval);
+Item push_l(long lval);
 
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_IMP_INT        ((uint64_t)LMD_TYPE_IMP_INT << 56)
