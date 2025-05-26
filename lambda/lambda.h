@@ -60,23 +60,39 @@ typedef struct Context {
     Pack* stack;  // eval stack
 } Context;
 
-typedef struct Array Array;
+struct Array {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
+    Item* items;
+    long length;
+};
 
+struct ArrayLong {
+    uint64_t type_id:8;
+    uint64_t capacity:56;    
+    long* items;
+    long length;
+};
+
+
+
+typedef struct Array Array;
 typedef struct ArrayLong ArrayLong;
 
 Array* array();
 Array* array_fill(Array* arr, int count, ...);
 ArrayLong* array_long_new(int count, ...);
 
-typedef struct List List;
-
-typedef struct ListLong ListLong;
+typedef struct List {
+    uint64_t type_id:8;
+    uint64_t capacity:56;
+    Item* items;
+    long length;
+} List;
 
 List* list();  // constructs an empty list
 List* list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
-ListLong* list_long();  // construct an empty list
-void list_long_push(ListLong *list, long item);
 
 typedef struct Map Map;
 Map* map();

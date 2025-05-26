@@ -137,24 +137,6 @@ List* list_fill(List *list, int count, ...) {
     return list;
 }
 
-ListLong* list_long() {
-    printf("list_long");
-    ListLong *list = malloc(sizeof(ListLong));
-    list->items = NULL;
-    list->length = 0;
-    list->capacity = 0;
-    return list;
-}
-
-void list_long_push(ListLong *list, long item) {
-    printf("list_long_push: %ld", item);
-    if (list->length >= list->capacity) {
-        list->capacity = list->capacity ? list->capacity * 2 : 1;
-        list->items = realloc(list->items, list->capacity * sizeof(long));
-    }
-    list->items[list->length++] = item;
-}
-
 void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
     int count = map_type->length;
     printf("map length: %d\n", count);

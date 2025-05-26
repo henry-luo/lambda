@@ -543,8 +543,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         }
         child = ts_node_next_named_sibling(child);
     }
-    // determine the list type; handle special case of one item list
-    // ast_node->type = ast_node->then->type;
+    // if (type->length == 1) { return ast_node->item;}
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
@@ -807,6 +806,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     printf("build for expr\n");
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
 
     ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
@@ -839,8 +839,6 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     if (!ast_node->then) { printf("missing for then\n"); }
     else { printf("got for then type %d\n", ast_node->then->node_type); }
 
-    // determine for node type
-    ast_node->type = ast_node->then->type;
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }

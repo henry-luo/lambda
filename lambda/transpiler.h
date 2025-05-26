@@ -163,34 +163,6 @@ typedef struct FatString {
     char chars[];
 } FatString;
 
-struct Array {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
-    Item* items;
-    long length;
-};
-
-struct ArrayLong {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
-    long* items;
-    long length;
-};
-
-struct List {
-    uint64_t type_id:8;
-    uint64_t capacity:56;
-    Item* items;
-    long length;
-};
-
-struct ListLong {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
-    long* items;
-    long length;
-};
-
 struct Map {
     uint8_t type_id;   
     void* type;  // map type/shape
