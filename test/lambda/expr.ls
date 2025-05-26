@@ -22,4 +22,5 @@ let d:float = 123
 (d+4, not true, not(1>2), -(-2),+(-2))
 
 1+"str"; 1/0; -1/0; 0/0;
+
 (234)  // list with one item

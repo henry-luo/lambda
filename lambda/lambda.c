@@ -121,6 +121,11 @@ void list_push(List *list, Item item) {
     }
 }
 
+Item list_get(List *list, int index) {
+    if (index < 0 || index >= list->length) { return ITEM_NULL; }
+    return list->items[index];
+}
+
 List* list_fill(List *list, int count, ...) {
     printf("list_fill cnt: %d\n", count);
     va_list args;

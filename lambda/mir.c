@@ -32,6 +32,7 @@ func_obj_t func_list[] = {
     {"list", (fn_ptr) list},
     {"list_fill", (fn_ptr) list_fill},
     {"list_push", (fn_ptr) list_push},
+    {"list_get", (fn_ptr) list_get},
     {"map", (fn_ptr) map},
     {"map_fill", (fn_ptr) map_fill},
     {"map_get", (fn_ptr) map_get},

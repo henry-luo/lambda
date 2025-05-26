@@ -71,6 +71,9 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_BINARY:
         strbuf_append_str(tp->code_buf, "uint8_t*");
         break;
+    case LMD_TYPE_LIST:
+        strbuf_append_str(tp->code_buf, "List*");
+        break;
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_IMP_INT) {
