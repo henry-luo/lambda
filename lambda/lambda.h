@@ -60,24 +60,21 @@ typedef struct Context {
     Pack* stack;  // eval stack
 } Context;
 
-struct Array {
+// Array and List struct defintions needed for for-loop
+
+typedef struct Array {
     uint64_t type_id:8;
     uint64_t capacity:56;    
     Item* items;
     long length;
-};
+} Array;
 
-struct ArrayLong {
+typedef struct ArrayLong {
     uint64_t type_id:8;
     uint64_t capacity:56;    
     long* items;
     long length;
-};
-
-
-
-typedef struct Array Array;
-typedef struct ArrayLong ArrayLong;
+} ArrayLong;
 
 Array* array();
 Array* array_fill(Array* arr, int count, ...);

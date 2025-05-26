@@ -543,7 +543,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         }
         child = ts_node_next_named_sibling(child);
     }
-    // if (type->length == 1) { return ast_node->item;}
+    if (!ast_node->declare && type->length == 1) { return ast_node->item;}
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
