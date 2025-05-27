@@ -134,7 +134,7 @@ void heap_init() {
     context->heap->entries = arraylist_new(1024);
 }
 
-void* heap_alloc(size_t size) {
+void* heap_alloc(size_t size, TypeId type_id) {
     Heap *heap = context->heap;
     void *data;
     pool_variable_alloc(heap->pool, size, (void**)&data);
@@ -142,12 +142,14 @@ void* heap_alloc(size_t size) {
         printf("Error: Failed to allocate memory for heap entry.\n");
         return NULL;
     }
-    arraylist_append(heap->entries, data);
+    // scalar pointers needs to be tagged
+    arraylist_append(heap->entries, type_id < LMD_TYPE_ARRAY ?
+        ((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data);
     return data;
 }
 
-void* heap_calloc(size_t size) {
-    void* ptr = heap_alloc(size);
+void* heap_calloc(size_t size, TypeId type_id) {
+    void* ptr = heap_alloc(size, type_id);
     memset(ptr, 0, size);
     return ptr;
 }

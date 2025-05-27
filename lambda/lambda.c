@@ -22,7 +22,15 @@ void entry_end() {
         printf("free list heap entries\n");
         for (int i = start; i < entries->length; i++) {
             void *data = entries->data[i];
-            if (data) pool_variable_free(context->heap->pool, data);
+            if (!data) { continue; }  // skip NULL entries
+            LambdaItem itm = {.raw_pointer = data};
+            if (itm.type_id == LMD_TYPE_STRING) {
+                pool_variable_free(context->heap->pool, (void*)itm.pointer);
+            }
+            else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+                TypeId type_id = *((uint8_t*)data);
+
+            }
         }
         entries->length = start;
     }
@@ -36,7 +44,8 @@ void retain_string(String *str) {
         int entry = context->heap->entries->length-1;  int start = context->heap->entry_start->start;
         for (; entry >= start; entry--) {
             void *data = context->heap->entries->data[entry];
-            if (data == str) {
+            LambdaItem itm = {.raw_pointer = data};
+            if (itm.type_id == LMD_TYPE_STRING && itm.pointer == str) {
                 printf("removing string from heap entries: %p\n", str);
                 context->heap->entries->data[entry] = NULL;  break;
             }
@@ -91,7 +100,7 @@ ArrayLong* array_long_new(int count, ...) {
 
 List* list() {
     // todo: alloc from heap
-    List *list = calloc(1, sizeof(List));
+    List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
     entry_start();
     return list;
@@ -115,6 +124,9 @@ void list_push(List *list, Item item) {
     // store the value in the list
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
+        // list items are allocated from C heap, instead of Lambda heap
+        // to consider: could also alloc from directly from Lambda heap without the heap entry
+        // need to profile to see which is faster
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
     list->items[list->length++] = item;
@@ -340,7 +352,7 @@ String *str_cat(String *left, String *right) {
     size_t left_len = left->len;
     size_t right_len = right->len;
     printf("left len %zu, right len %zu\n", left_len, right_len);
-    String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1);
+    String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     printf("str result %p\n", result);
     result->heap_owned = true;  result->len = left_len + right_len;
     memcpy(result->chars, left->chars, left_len);

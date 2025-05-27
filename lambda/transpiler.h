@@ -417,8 +417,8 @@ typedef struct Heap {
 } Heap;
 
 void heap_init();
-void* heap_alloc(size_t size);
-void* heap_calloc(size_t size);
+void* heap_alloc(size_t size, TypeId type_id);
+void* heap_calloc(size_t size, TypeId type_id);
 void heap_destroy();
 
 // uses the high byte to tag the pointer, defined for little-endian
