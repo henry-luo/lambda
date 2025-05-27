@@ -28,8 +28,31 @@ void entry_end() {
                 pool_variable_free(context->heap->pool, (void*)itm.pointer);
             }
             else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+                printf("freeing raw pointer: %p\n", itm.raw_pointer);
                 TypeId type_id = *((uint8_t*)data);
-
+                if (type_id == LMD_TYPE_LIST) {
+                    List *list = (List *)data;
+                    if (!list->ref_cnt) {
+                        // todo: free the list items
+                        printf("freeing list items: %p, length: %ld\n", list, list->length);
+                        for (int j = 0; j < list->length; j++) {
+                            Item item = list->items[j];
+                            LambdaItem itm = {.item = item};
+                            if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+                                itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+                                String *str = (String*)itm.pointer;
+                                DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
+                                if (owned) {
+                                    Container* owner = owned->owner;
+                                    owner->ref_cnt--;
+                                }
+                                hashmap_delete(context->data_owners, &str);
+                            }
+                        }
+                        // if (list->items) free(list->items);
+                        // pool_variable_free(context->heap->pool, data);
+                    }
+                }
             }
         }
         entries->length = start;
@@ -116,9 +139,11 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_RAW_POINTER && *((uint8_t*)itm.raw_pointer) == LMD_TYPE_LIST) {
         List *nest_list = (List*)itm.raw_pointer;
         for (int i = 0; i < nest_list->length; i++) {
-            Item item = nest_list->items[i];
-            list_push(list, item);
+            Item nest_item = nest_list->items[i];
+            list_push(list, nest_item);
         }
+        free(nest_list->items);  nest_list->items = NULL;
+        nest_list->length = 0;  nest_list->capacity = 0;
         return;
     }
     // store the value in the list
@@ -130,6 +155,7 @@ void list_push(List *list, Item item) {
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
     list->items[list->length++] = item;
+    printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
     // data ownership handling
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
