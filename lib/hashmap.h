@@ -31,6 +31,7 @@ struct hashmap *hashmap_new_with_allocator(void *(*malloc)(size_t),
 void hashmap_free(struct hashmap *map);
 void hashmap_clear(struct hashmap *map, bool update_cap);
 size_t hashmap_count(struct hashmap *map);
+// check if out of memory
 bool hashmap_oom(struct hashmap *map);
 const void *hashmap_get(struct hashmap *map, const void *item);
 const void *hashmap_set(struct hashmap *map, const void *item);

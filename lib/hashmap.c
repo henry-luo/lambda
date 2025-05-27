@@ -770,6 +770,7 @@ uint64_t hashmap_murmur(const void *data, size_t len, uint64_t seed0,
     return MM86128(data, len, seed0);
 }
 
+// xxhash3 is a fast hash function
 uint64_t hashmap_xxhash3(const void *data, size_t len, uint64_t seed0,
     uint64_t seed1)
 {

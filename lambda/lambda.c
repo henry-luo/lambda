@@ -5,6 +5,7 @@ extern __thread Context* context;
 
 #define stack_alloc(size) pack_alloc(context->stack, size)
 
+// heap entry functions
 void entry_start() {
     EntryStart *entry_start = malloc(sizeof(EntryStart));
     entry_start->parent = context->heap->entry_start;
@@ -110,16 +111,27 @@ void list_push(List *list, Item item) {
             list_push(list, item);
         }
         return;
-    }  
+    }
+    // store the value in the list
     if (list->length >= list->capacity) {
         list->capacity = list->capacity ? list->capacity * 2 : 1;
         list->items = realloc(list->items, list->capacity * sizeof(Item));
     }
     list->items[list->length++] = item;
+    // data ownership handling
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;
-        retain_string(str);
+        if (str->heap_owned) retain_string(str);
+        else {
+            // get the data owner
+            printf("getting dataowner hash entry: %llu\n", itm.pointer);
+            DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
+            if (owned) {
+                Container* owner = owned->owner;
+                owner->ref_cnt++;
+            }
+        }
     }
 }
 
@@ -128,10 +140,10 @@ Item list_get(List *list, int index) {
     LambdaItem itm = {.item = list->items[index]};
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+        printf("adding dataowner hash entry: %llu\n", itm.pointer);
         String *str = (String*)itm.pointer;
-        StringRef *ref_str = (StringRef*)stack_alloc(sizeof(StringRef));
-        ref_str->str = str;  ref_str->container = list;
-        return s2it(ref_str);
+        hashmap_set(context->data_owners, &(DataOwner){.data = str, .owner = list});
+        return s2it(str);
     }
     return list->items[index];
 }

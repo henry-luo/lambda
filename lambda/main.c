@@ -13,12 +13,12 @@ void run_test_script(Runner *runner, const char *script, StrBuf *strbuf) {
 }
 
 int main(void) {
-    _Static_assert(sizeof(LambdaItem) == 8, "LambdaItem size mismatch");
+    _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
+    _Static_assert(sizeof(LambdaItem) == 8, "LambdaItem size == 8 bytes");
     LambdaItem itm = {.item = ITEM_ERROR};
     assert(itm.type_id == LMD_TYPE_ERROR);
 
     Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
-
     strbuf_append_str(strbuf, "Test result ===============\n");
     run_test_script(&runner, "value.ls", strbuf);
     run_test_script(&runner, "expr.ls", strbuf);

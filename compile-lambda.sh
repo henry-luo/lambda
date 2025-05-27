@@ -2,7 +2,7 @@
 
 output=$(clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitter.a \
   lambda/tree-sitter-lambda/src/parser.c lambda/parse.c\
-  lib/strbuf.c lib/strview.c lib/arraylist.c lib/file.c \
+  lib/strbuf.c lib/strview.c lib/arraylist.c lib/file.c lib/hashmap.c \
   lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
   -I/usr/local/include /usr/local/lib/libmir.a /usr/local/lib/libzlog.a \
   lambda/main.c lambda/runner.c \

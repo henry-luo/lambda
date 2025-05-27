@@ -2,13 +2,16 @@
 #pragma once
 // #include <math.h>  // MIR has problem parsing math.h
 // #include <stdint.h>
-typedef unsigned long long uint64_t;
+
 typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
 typedef int int32_t;
 typedef long long int64_t;
+typedef unsigned long long uint64_t;
 #ifndef bool
 #define bool uint8_t
 #endif
+
 #define true 1
 #define false 0
 #define null 0
@@ -54,27 +57,37 @@ typedef struct Heap Heap;
 typedef struct Pack Pack;
 
 typedef struct Context {
+    Heap* heap;
+    Pack* stack;  // eval stack    
     void* ast_pool;
     void** consts;
     void* type_list;
-    Heap* heap;
-    Pack* stack;  // eval stack
+    void* data_owners;  // hashmap that maps from data => its owner
 } Context;
 
 // Array and List struct defintions needed for for-loop
+typedef struct Container {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+} Container;
 
 typedef struct Array {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
     Item* items;
     long length;
+    long capacity;
 } Array;
 
 typedef struct ArrayLong {
-    uint64_t type_id:8;
-    uint64_t capacity:56;    
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
     long* items;
     long length;
+    long capacity;
 } ArrayLong;
 
 Array* array();
@@ -82,10 +95,12 @@ Array* array_fill(Array* arr, int count, ...);
 ArrayLong* array_long_new(int count, ...);
 
 typedef struct List {
-    uint64_t type_id:8;
-    uint64_t capacity:56;
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
     Item* items;
     long length;
+    long capacity;
 } List;
 
 List* list();  // constructs an empty list

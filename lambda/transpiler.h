@@ -154,19 +154,20 @@ typedef struct TypeInfo {
 
 #include "lambda.h"
 
-typedef struct StringRef {
-    String *str;
-    void *container;  // element/map/list/array that contains the string
-} StringRef;
+// mapping from data to its owner
+typedef struct DataOwner {
+    void *data;
+    void *owner;  // element/map/list/array that contains/owns the data
+} DataOwner;
 
 struct Map {
-    uint8_t type_id;   
+    Container;  // extends Container
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
 };
 
 struct Element {
-    uint8_t type_id;
+    Container;  // extends Container
     // attributes
     void* type;  // attr type/shape
     void* data;  // packed data struct of the attrs

@@ -114,6 +114,17 @@ main_func_t transpile_script(Transpiler *tp, char* source, char* script_path) {
 // thread-specific runtime context
 __thread Context* context = NULL;
 
+int dataowner_compare(const void *a, const void *b, void *udata) {
+    const DataOwner *da = a;
+    const DataOwner *db = b;
+    return da->data == db->data;
+}
+
+uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const DataOwner *dataowner = item;
+    return hashmap_xxhash3(dataowner->data, sizeof(dataowner->data), seed0, seed1);
+}
+
 void heap_init() {
     printf("heap init: %p\n", context);
     context->heap = (Heap*)calloc(1, sizeof(Heap));
@@ -173,6 +184,8 @@ void runner_setup_context(Runner* runner) {
     runner->context.type_list = runner->transpiler->type_list;
     runner->context.consts = runner->transpiler->const_list->data;
     runner->context.stack = pack_init(256);
+    runner->context.data_owners = hashmap_new(sizeof(DataOwner), 16, 0, 0, 
+        dataowner_hash, dataowner_compare, NULL, NULL);
     context = &runner->context;
     heap_init();
 }
@@ -189,7 +202,8 @@ void runner_cleanup(Runner* runner) {
         free(tp);
     }
     heap_destroy();
-    if (runner->context.stack) pack_free(runner->context.stack);    
+    if (runner->context.stack) pack_free(runner->context.stack);
+    if (runner->context.data_owners) hashmap_free(runner->context.data_owners);
 }
 
 Item run_script(Runner *runner, char* source, char* script_path) {
