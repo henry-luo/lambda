@@ -118,19 +118,19 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
             break;
         case LMD_TYPE_STRING:
             String *string = *(String**)data;
-            strbuf_append_format(strbuf, "\"%s\"", string->str);
+            strbuf_append_format(strbuf, "\"%s\"", string->chars);
             break;
         case LMD_TYPE_SYMBOL:
             String *symbol = *(String**)data;
-            strbuf_append_format(strbuf, "'%s'", symbol->str);
+            strbuf_append_format(strbuf, "'%s'", symbol->chars);
             break;
         case LMD_TYPE_DTIME:
             String *dt = *(String**)data;
-            strbuf_append_format(strbuf, "t'%s'", dt->str);
+            strbuf_append_format(strbuf, "t'%s'", dt->chars);
             break;
         case LMD_TYPE_BINARY:
             String *bin = *(String**)data;
-            strbuf_append_format(strbuf, "b'%s'", bin->str);
+            strbuf_append_format(strbuf, "b'%s'", bin->chars);
             break;
         case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
         case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
@@ -193,20 +193,20 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_STRING) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the string
-            strbuf_append_format(strbuf, "\"%s\"", string->str);
+            strbuf_append_format(strbuf, "\"%s\"", string->chars);
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the symbol chars
-            strbuf_append_format(strbuf, "'%s'", string->str);
+            strbuf_append_format(strbuf, "'%s'", string->chars);
         } 
         else if (type_id == LMD_TYPE_DTIME) {
             String *string = (String*)ld_item.pointer;
-            strbuf_append_format(strbuf, "t'%s'", string->str);
+            strbuf_append_format(strbuf, "t'%s'", string->chars);
         }
         else if (type_id == LMD_TYPE_BINARY) {
             String *string = (String*)ld_item.pointer;
-            strbuf_append_format(strbuf, "b'%s'", string->str);
+            strbuf_append_format(strbuf, "b'%s'", string->chars);
         }
         else if (type_id == LMD_TYPE_ERROR) {
             strbuf_append_str(strbuf, "ERROR");

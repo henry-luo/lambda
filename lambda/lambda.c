@@ -3,6 +3,8 @@
 
 extern __thread Context* context;
 
+#define stack_alloc(size) pack_alloc(context->stack, size)
+
 void entry_start() {
     EntryStart *entry_start = malloc(sizeof(EntryStart));
     entry_start->parent = context->heap->entry_start;
@@ -123,6 +125,14 @@ void list_push(List *list, Item item) {
 
 Item list_get(List *list, int index) {
     if (index < 0 || index >= list->length) { return ITEM_NULL; }
+    LambdaItem itm = {.item = list->items[index]};
+    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
+        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+        String *str = (String*)itm.pointer;
+        StringRef *ref_str = (StringRef*)stack_alloc(sizeof(StringRef));
+        ref_str->str = str;  ref_str->container = list;
+        return s2it(ref_str);
+    }
     return list->items[index];
 }
 
@@ -168,7 +178,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  
             case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
                 String *str = va_arg(args, String*);
-                printf("field string value: %s\n", str->str);
+                printf("field string value: %s\n", str->chars);
                 *(String**)field_ptr = str;
                 retain_string(str);
                 break;
@@ -301,14 +311,14 @@ Item v2it(List* list) {
 
 Item push_d(double dval) {
     printf("push_d: %g\n", dval);
-    double *dptr = pack_alloc(context->stack, sizeof(double));
+    double *dptr = stack_alloc(sizeof(double));
     *dptr = dval;
     return (Item) d2it(dptr);
 }
 
 Item push_l(long lval) {
     printf("push_l: %ld\n", lval);
-    long *lptr = pack_alloc(context->stack, sizeof(long));
+    long *lptr = stack_alloc(sizeof(long));
     *lptr = lval;
     return (Item) l2it(lptr);
 }
@@ -318,13 +328,12 @@ String *str_cat(String *left, String *right) {
     size_t left_len = left->len;
     size_t right_len = right->len;
     printf("left len %zu, right len %zu\n", left_len, right_len);
-    FatString *result = (FatString *)heap_alloc(sizeof(FatString) + left_len + right_len + 1);
+    String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1);
     printf("str result %p\n", result);
     result->heap_owned = true;  result->len = left_len + right_len;
-    result->str = result->chars;
-    memcpy(result->chars, left->str, left_len);
+    memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
-    memcpy(result->chars + left_len, right->str, right_len + 1);
+    memcpy(result->chars + left_len, right->chars, right_len + 1);
     return (String*)result;
 }
 
@@ -453,7 +462,7 @@ bool equal(Item a, Item b) {
     else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
         a_item.type_id == LMD_TYPE_BINARY || a_item.type_id == LMD_TYPE_DTIME) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
-        return str_a->len == str_b->len && strncmp(str_a->str, str_b->str, str_a->len) == 0;
+        return str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0;
     }
     printf("unknown comparing type %d\n", a_item.type_id);
     return false;
@@ -466,7 +475,7 @@ bool in(Item a, Item b) {
     if (b_item.type_id) { // b is scalar
         if (b_item.type_id == LMD_TYPE_STRING && a_item.type_id == LMD_TYPE_STRING) {
             String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
-            return str_a->len <= str_b->len && strstr(str_b->str, str_a->str) != NULL;
+            return str_a->len <= str_b->len && strstr(str_b->chars, str_a->chars) != NULL;
         }
     }
     else { // b is container
@@ -511,9 +520,9 @@ bool in(Item a, Item b) {
     return false;
 }
 
-String STR_NULL = {.str = "null", .len = 4};
-String STR_TRUE = {.str = "true", .len = 4};
-String STR_FALSE = {.str = "false", .len = 5};
+String STR_NULL = {.chars = "null", .len = 4};
+String STR_TRUE = {.chars = "true", .len = 4};
+String STR_FALSE = {.chars = "false", .len = 5};
 
 String* string(Context *rt, Item item) {
     LambdaItem itm = {.item = item};
@@ -532,8 +541,7 @@ String* string(Context *rt, Item item) {
         int int_val = (int32_t)itm.long_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
         int len = strlen(buf);
-        FatString *str = malloc(len + 1 + sizeof(FatString));
-        str->str = str->chars;
+        String *str = malloc(len + 1 + sizeof(String));
         strcpy(str->chars, buf);
         str->len = len;  str->heap_owned = true;
         return (String*)str;
@@ -543,8 +551,7 @@ String* string(Context *rt, Item item) {
         long long_val = *(long*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
-        FatString *str = malloc(len + 1 + sizeof(FatString));
-        str->str = str->chars;
+        String *str = malloc(len + 1 + sizeof(String));
         strcpy(str->chars, buf);
         str->len = len;
         str->heap_owned = true;
@@ -555,8 +562,7 @@ String* string(Context *rt, Item item) {
         double dval = *(double*)itm.pointer;
         snprintf(buf, sizeof(buf), "%g", dval);
         int len = strlen(buf);
-        FatString *str = malloc(len + 1 + sizeof(FatString));
-        str->str = str->chars;
+        String *str = malloc(len + 1 + sizeof(String));
         strcpy(str->chars, buf);
         str->len = len;  str->heap_owned = true;
         return (String*)str;

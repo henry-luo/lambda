@@ -154,14 +154,10 @@ typedef struct TypeInfo {
 
 #include "lambda.h"
 
-// a FAT string: null-terminated and prefixed with length
-typedef struct FatString {
-    char *str;
-    int32_t len:30;  // int instead of uint, to align with default Lambda int literal type
-    int32_t heap_owned:1;
-    int32_t contained:1;
-    char chars[];
-} FatString;
+typedef struct StringRef {
+    String *str;
+    void *container;  // element/map/list/array that contains the string
+} StringRef;
 
 struct Map {
     uint8_t type_id;   
