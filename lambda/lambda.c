@@ -13,6 +13,17 @@ void entry_start() {
     context->heap->entry_start = entry_start;
 }
 
+void print_heap_entries() {
+    ArrayList *entries = context->heap->entries;
+    printf("heap entries: %d\n", entries->length);
+    for (int i = 0; i < entries->length; i++) {
+        void *data = entries->data[i];
+        if (!data) { continue; }  // skip NULL entries
+        LambdaItem itm = {.raw_pointer = data};
+        printf("heap entry index: %d, type: %d, data: %p\n", i, itm.type_id, data);
+    }
+}
+
 void entry_end() {
     EntryStart *entry_start = context->heap->entry_start;
     ArrayList *entries = context->heap->entries;
@@ -20,7 +31,9 @@ void entry_end() {
     if (entries->length > start) {
         // free heap allocations
         printf("free list heap entries\n");
+        print_heap_entries();
         for (int i = start; i < entries->length; i++) {
+            printf("heap entry index: %d\n", i);
             void *data = entries->data[i];
             if (!data) { continue; }  // skip NULL entries
             LambdaItem itm = {.raw_pointer = data};
@@ -49,8 +62,8 @@ void entry_end() {
                                 hashmap_delete(context->data_owners, &str);
                             }
                         }
-                        // if (list->items) free(list->items);
-                        // pool_variable_free(context->heap->pool, data);
+                        if (list->items) free(list->items);
+                        pool_variable_free(context->heap->pool, data);
                     }
                 }
             }
@@ -96,7 +109,15 @@ Array* array_fill(Array* arr, int count, ...) {
                 itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
                 String *str = (String*)itm.pointer;
                 retain_string(str);
-            }            
+            }
+            else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+                TypeId type_id = *((uint8_t*)itm.raw_pointer);
+                if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
+                    type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+                    Container *container = (Container*)itm.raw_pointer;
+                    container->ref_cnt++;
+                }
+            }
         }
         arr->length = count;
         va_end(args);
@@ -136,15 +157,23 @@ void list_push(List *list, Item item) {
         return;  // skip NULL value
     }
     // list is flattened
-    if (itm.type_id == LMD_TYPE_RAW_POINTER && *((uint8_t*)itm.raw_pointer) == LMD_TYPE_LIST) {
-        List *nest_list = (List*)itm.raw_pointer;
-        for (int i = 0; i < nest_list->length; i++) {
-            Item nest_item = nest_list->items[i];
-            list_push(list, nest_item);
+    if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+        TypeId type_id = *((uint8_t*)itm.raw_pointer);
+        if (type_id == LMD_TYPE_LIST) {
+            List *nest_list = (List*)itm.raw_pointer;
+            for (int i = 0; i < nest_list->length; i++) {
+                Item nest_item = nest_list->items[i];
+                list_push(list, nest_item);
+            }
+            free(nest_list->items);  nest_list->items = NULL;
+            nest_list->length = 0;  nest_list->capacity = 0;
+            return;
         }
-        free(nest_list->items);  nest_list->items = NULL;
-        nest_list->length = 0;  nest_list->capacity = 0;
-        return;
+        else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
+            type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+            Container *container = (Container*)itm.raw_pointer;
+            container->ref_cnt++;
+        }
     }
     // store the value in the list
     if (list->length >= list->capacity) {
@@ -233,7 +262,11 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 retain_string(str);
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+                Container *container = va_arg(args, Container*);
+                *(Container**)field_ptr = container;
+                container->ref_cnt++;
+                break;            
             case LMD_TYPE_FUNC:  case LMD_TYPE_ANY:
                 void *arr = va_arg(args, void*);
                 *(void**)field_ptr = arr;
