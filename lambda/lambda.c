@@ -46,7 +46,7 @@ void entry_end() {
                 if (type_id == LMD_TYPE_LIST) {
                     List *list = (List *)data;
                     if (!list->ref_cnt) {
-                        // todo: free the list items
+                        // free list items
                         printf("freeing list items: %p, length: %ld\n", list, list->length);
                         for (int j = 0; j < list->length; j++) {
                             Item item = list->items[j];
@@ -69,8 +69,8 @@ void entry_end() {
                 else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
                     Map *map = (Map*)data;
                     if (!map->ref_cnt) {
-                        // todo: free the container items
-                        printf("freeing map items: %p\n", map);
+                        // todo: free map items
+                        printf("freeing map data: %p\n", map);
                         if (map->data) free(map->data);
                         pool_variable_free(context->heap->pool, data);
                     }
@@ -152,7 +152,6 @@ ArrayLong* array_long_new(int count, ...) {
 }
 
 List* list() {
-    // todo: alloc from heap
     List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
     entry_start();
@@ -288,7 +287,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
 }
 
 Map* map() {
-    Map *map = calloc(1, sizeof(Map));
+    Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     entry_start();
     return map;
@@ -313,7 +312,7 @@ Map* map_fill(Map* map, int type_index, ...) {
 }
 
 Element* elmt() {
-    Element *elmt = calloc(1, sizeof(Element));
+    Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     entry_start();
     return elmt;
