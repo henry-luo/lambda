@@ -4,6 +4,100 @@
 extern __thread Context* context;
 
 #define stack_alloc(size) pack_alloc(context->stack, size)
+#define Malloc malloc 
+
+void free_item(Item item);
+
+void print_heap_entries() {
+    ArrayList *entries = context->heap->entries;
+    printf("after exec heap entries: %d\n", entries->length);
+    for (int i = 0; i < entries->length; i++) {
+        void *data = entries->data[i];
+        if (!data) { continue; }  // skip NULL entries
+        LambdaItem itm = {.raw_pointer = data};
+        printf("heap entry index: %d, type: %d, data: %p\n", i, itm.type_id, data);
+    }
+}
+
+void check_heap_entries() {
+    ArrayList *entries = context->heap->entries;
+    printf("heap entries: %d\n", entries->length);
+    for (int i = 0; i < entries->length; i++) {
+        void *data = entries->data[i];
+        LambdaItem itm = {.raw_pointer = data};
+        printf("heap entry index: %d, type: %d, data: %p\n", i, itm.type_id, data);
+    }
+}
+
+void free_container(Container* cont) {
+    printf("freeing data owner: %p\n", cont);
+    TypeId type_id = cont->type_id;
+    if (type_id == LMD_TYPE_LIST) {
+        List *list = (List *)cont;
+        if (!list->ref_cnt) {
+            // free list items
+            printf("freeing list items: %p, length: %ld\n", list, list->length);
+            for (int j = 0; j < list->length; j++) {
+                free_item(list->items[j]);
+            }
+            if (list->items) free(list->items);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }
+    else if (type_id == LMD_TYPE_ARRAY) {
+        Array *arr = (Array*)cont;
+        if (!arr->ref_cnt) {
+            // free array items
+            printf("freeing array items: %p, length: %ld\n", arr, arr->length);
+            for (int j = 0; j < arr->length; j++) {
+                free_item(arr->items[j]);
+            }
+            if (arr->items) free(arr->items);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }
+    else if (type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayLong *arr = (ArrayLong*)cont;
+        if (!arr->ref_cnt) {
+            printf("freeing array int items: %p, length: %ld\n", arr, arr->length);
+            if (arr->items) free(arr->items);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }
+    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+        Map *map = (Map*)cont;
+        if (!map->ref_cnt) {
+            // todo: free map items
+            printf("freeing map data: %p\n", map);
+            if (map->data) free(map->data);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }
+}
+
+void free_item(Item item) {
+    LambdaItem itm = {.item = item};
+    printf("free item: type: %d, pointer: %llu\n", itm.type_id, itm.pointer);
+    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+        String *str = (String*)itm.pointer;
+        DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
+        if (owned) {
+            Container* owner = owned->owner;
+            owner->ref_cnt--;
+            hashmap_delete(context->data_owners, &str);
+            if (!owner->ref_cnt) {
+                free_container(owner);
+            }            
+        }
+        else if (str->heap_owned) {
+            pool_variable_free(context->heap->pool, str);
+        }
+    }
+    else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+        free_container((Container*)itm.raw_pointer);
+    }
+}
 
 // heap entry functions
 void entry_start() {
@@ -11,17 +105,6 @@ void entry_start() {
     entry_start->parent = context->heap->entry_start;
     entry_start->start = context->heap->entries->length;
     context->heap->entry_start = entry_start;
-}
-
-void print_heap_entries() {
-    ArrayList *entries = context->heap->entries;
-    printf("heap entries: %d\n", entries->length);
-    for (int i = 0; i < entries->length; i++) {
-        void *data = entries->data[i];
-        if (!data) { continue; }  // skip NULL entries
-        LambdaItem itm = {.raw_pointer = data};
-        printf("heap entry index: %d, type: %d, data: %p\n", i, itm.type_id, data);
-    }
 }
 
 void entry_end() {
@@ -41,40 +124,7 @@ void entry_end() {
                 pool_variable_free(context->heap->pool, (void*)itm.pointer);
             }
             else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
-                printf("freeing raw pointer: %p\n", itm.raw_pointer);
-                TypeId type_id = *((uint8_t*)data);
-                if (type_id == LMD_TYPE_LIST) {
-                    List *list = (List *)data;
-                    if (!list->ref_cnt) {
-                        // free list items
-                        printf("freeing list items: %p, length: %ld\n", list, list->length);
-                        for (int j = 0; j < list->length; j++) {
-                            Item item = list->items[j];
-                            LambdaItem itm = {.item = item};
-                            if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
-                                itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
-                                String *str = (String*)itm.pointer;
-                                DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
-                                if (owned) {
-                                    Container* owner = owned->owner;
-                                    owner->ref_cnt--;
-                                }
-                                hashmap_delete(context->data_owners, &str);
-                            }
-                        }
-                        if (list->items) free(list->items);
-                        pool_variable_free(context->heap->pool, data);
-                    }
-                }
-                else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
-                    Map *map = (Map*)data;
-                    if (!map->ref_cnt) {
-                        // todo: free map items
-                        printf("freeing map data: %p\n", map);
-                        if (map->data) free(map->data);
-                        pool_variable_free(context->heap->pool, data);
-                    }
-                }
+                free_container((Container*)itm.raw_pointer);
             }
         }
         entries->length = start;
@@ -110,7 +160,7 @@ Array* array_fill(Array* arr, int count, ...) {
         va_list args;
         va_start(args, count);
         arr->capacity = count;
-        arr->items = malloc(count * sizeof(Item));
+        arr->items = Malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
             Item item = arr->items[i] = va_arg(args, Item);
             LambdaItem itm = {.item = item};
@@ -139,9 +189,9 @@ ArrayLong* array_long_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    ArrayLong *arr = malloc(sizeof(ArrayLong));
+    ArrayLong *arr = heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;  arr->capacity = count;
-    arr->items = malloc(count * sizeof(long));
+    arr->items = Malloc(count * sizeof(long));
     arr->length = count;
     for (int i = 0; i < count; i++) {
         arr->items[i] = va_arg(args, long);
@@ -692,7 +742,7 @@ String* string(Context *rt, Item item) {
         int int_val = (int32_t)itm.long_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
         int len = strlen(buf);
-        String *str = malloc(len + 1 + sizeof(String));
+        String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
         str->len = len;  str->heap_owned = true;
         return (String*)str;
@@ -702,10 +752,9 @@ String* string(Context *rt, Item item) {
         long long_val = *(long*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
-        String *str = malloc(len + 1 + sizeof(String));
+        String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;
-        str->heap_owned = true;
+        str->len = len;  str->heap_owned = true;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
@@ -713,7 +762,7 @@ String* string(Context *rt, Item item) {
         double dval = *(double*)itm.pointer;
         snprintf(buf, sizeof(buf), "%g", dval);
         int len = strlen(buf);
-        String *str = malloc(len + 1 + sizeof(String));
+        String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
         str->len = len;  str->heap_owned = true;
         return (String*)str;

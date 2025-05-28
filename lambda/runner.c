@@ -6,6 +6,8 @@ void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void transpile_ast_script(Transpiler* tp, AstScript *script);
+void check_heap_entries();
+void free_item(Item item);
 
 void find_errors(TSNode node) {
     if (ts_node_is_error(node)) {
@@ -154,19 +156,6 @@ void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
-// void heap_free(HeapEntry* entry) {
-    // HeapEntry *entry = (HeapEntry*)((uint8_t*)ptr - sizeof(HeapEntry));
-    // if (entry == heap->first) {
-    //     heap->first = entry->next;
-    //     if (!heap->first) { heap->last = NULL; }
-    // } else {
-    //     HeapEntry *prev = heap->first;
-    //     while (prev && prev->next != entry) { prev = prev->next; }
-    //     if (prev) { prev->next = entry->next; }
-    //     if (!prev->next) { heap->last = prev; }
-    // }
-// }
-
 void heap_destroy() {
     if (context->heap) {
         if (context->heap->pool) pool_variable_destroy(context->heap->pool);
@@ -188,12 +177,18 @@ void runner_setup_context(Runner* runner) {
     runner->context.stack = pack_init(256);
     runner->context.data_owners = hashmap_new(sizeof(DataOwner), 16, 0, 0, 
         dataowner_hash, dataowner_compare, NULL, NULL);
+    runner->context.result = ITEM_NULL;  // exec result
     context = &runner->context;
     heap_init();
 }
 
 void runner_cleanup(Runner* runner) {
     printf("runner cleanup\n");
+    // free final result
+    printf("freeing final result: %llu\n", runner->context.result);
+    free_item(runner->context.result);
+    // check memory leaks
+    check_heap_entries();
     Transpiler *tp = runner->transpiler;
     if (tp) {
         if (tp->jit_context) jit_cleanup(tp->jit_context);
@@ -211,15 +206,16 @@ void runner_cleanup(Runner* runner) {
 Item run_script(Runner *runner, char* source, char* script_path) {
     main_func_t main_func = transpile_script(runner->transpiler, source, script_path);
     // execute the function
+    Item result;
     if (!main_func) { 
         printf("Error: Failed to compile the function.\n"); 
-        return ITEM_NULL;
+        result = ITEM_NULL;
     } else {
         printf("Executing JIT compiled code...\n");
         runner_setup_context(runner);
-        Item ret = main_func(context);
-        return ret;
+        result = context->result = main_func(context);
     }
+    return result;
 }
 
 Item run_script_at(Runner *runner, char* script_path) {

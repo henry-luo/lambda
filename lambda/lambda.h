@@ -63,6 +63,7 @@ typedef struct Context {
     void** consts;
     void* type_list;
     void* data_owners;  // hashmap that maps from data => its owner
+    Item result; // final exec result
 } Context;
 
 // Array and List struct defintions needed for for-loop
