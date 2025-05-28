@@ -6,6 +6,8 @@ extern __thread Context* context;
 #define stack_alloc(size) pack_alloc(context->stack, size)
 #define Malloc malloc 
 
+Item HEAP_ENTRY_START = ((uint64_t)LMD_TYPE_CONTAINER_START << 56); 
+
 void free_item(Item item);
 
 void print_heap_entries() {
@@ -101,48 +103,45 @@ void free_item(Item item) {
 
 // heap entry functions
 void entry_start() {
-    EntryStart *entry_start = malloc(sizeof(EntryStart));
-    entry_start->parent = context->heap->entry_start;
-    entry_start->start = context->heap->entries->length;
-    context->heap->entry_start = entry_start;
+    arraylist_append(context->heap->entries, (void*)HEAP_ENTRY_START);
 }
 
 void entry_end() {
-    EntryStart *entry_start = context->heap->entry_start;
     ArrayList *entries = context->heap->entries;
-    int start = entry_start->start;
-    if (entries->length > start) {
-        // free heap allocations
-        printf("free list heap entries\n");
-        print_heap_entries();
-        for (int i = start; i < entries->length; i++) {
-            printf("heap entry index: %d\n", i);
-            void *data = entries->data[i];
-            if (!data) { continue; }  // skip NULL entries
-            LambdaItem itm = {.raw_pointer = data};
-            if (itm.type_id == LMD_TYPE_STRING) {
-                pool_variable_free(context->heap->pool, (void*)itm.pointer);
-            }
-            else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
-                free_container((Container*)itm.raw_pointer);
-            }
+    // free heap allocations
+    for (int i = entries->length - 1; i >= 0; i--) {
+        printf("free heap entry index: %d\n", i);
+        void *data = entries->data[i];
+        if (!data) { continue; }  // skip NULL entries
+        LambdaItem itm = {.raw_pointer = data};
+        if (itm.type_id == LMD_TYPE_STRING) {
+            pool_variable_free(context->heap->pool, (void*)itm.pointer);
         }
-        entries->length = start;
+        else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+            free_container((Container*)itm.raw_pointer);
+        }
+        else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
+            printf("reached container start: %d\n", i);
+            entries->length = i;
+            return;
+        }
     }
-    context->heap->entry_start = entry_start->parent;
-    free(entry_start);
 }
 
 void retain_string(String *str) {
     if (str->heap_owned) {  // remove string from heap entries
         str->heap_owned = false;
-        int entry = context->heap->entries->length-1;  int start = context->heap->entry_start->start;
-        for (; entry >= start; entry--) {
+        int entry = context->heap->entries->length-1;  // int start = context->heap->entry_start->start;
+        for (; entry >= 0; entry--) {
             void *data = context->heap->entries->data[entry];
             LambdaItem itm = {.raw_pointer = data};
             if (itm.type_id == LMD_TYPE_STRING && itm.pointer == str) {
                 printf("removing string from heap entries: %p\n", str);
                 context->heap->entries->data[entry] = NULL;  break;
+            }
+            else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
+                printf("found container start, stop searching\n");
+                break;  // stop searching
             }
         }
     }

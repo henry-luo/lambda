@@ -40,6 +40,7 @@ enum TypeId {
     LMD_TYPE_FUNC,
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
+    LMD_TYPE_CONTAINER_START, // special value for container heap entry start
 };
 typedef uint8_t TypeId;
 
