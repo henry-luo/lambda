@@ -66,6 +66,15 @@ void entry_end() {
                         pool_variable_free(context->heap->pool, data);
                     }
                 }
+                else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+                    Map *map = (Map*)data;
+                    if (!map->ref_cnt) {
+                        // todo: free the container items
+                        printf("freeing map items: %p\n", map);
+                        if (map->data) free(map->data);
+                        pool_variable_free(context->heap->pool, data);
+                    }
+                }
             }
         }
         entries->length = start;
@@ -347,12 +356,16 @@ Item map_get(Map* map, char *key) {
                     double dval = *(double*)field_ptr;
                     return push_d(dval);
                 case LMD_TYPE_DTIME:
+                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return k2it(*(char**)field_ptr);
                 case LMD_TYPE_STRING:
+                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return s2it(*(char**)field_ptr);
                 case LMD_TYPE_SYMBOL:
+                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return y2it(*(char**)field_ptr);
                 case LMD_TYPE_BINARY:
+                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return x2it(*(char**)field_ptr);
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
                 case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
@@ -490,18 +503,74 @@ Function* to_fn(fn_ptr ptr) {
     return fn;
 }
 
+extern LambdaTypeType LIT_TYPE_NULL;
+extern LambdaTypeType LIT_TYPE_BOOL;
 extern LambdaTypeType LIT_TYPE_INT;
 extern LambdaTypeType LIT_TYPE_FLOAT;
+extern LambdaTypeType LIT_TYPE_NUMBER;
 extern LambdaTypeType LIT_TYPE_STRING;
+extern LambdaTypeType LIT_TYPE_BINARY;
+extern LambdaTypeType LIT_TYPE_SYMBOL;
+extern LambdaTypeType LIT_TYPE_DTIME;
+extern LambdaTypeType LIT_TYPE_LIST;
+extern LambdaTypeType LIT_TYPE_ARRAY;
+extern LambdaTypeType LIT_TYPE_MAP;
+extern LambdaTypeType LIT_TYPE_ELMT;
+extern LambdaTypeType LIT_TYPE_FUNC;
+extern LambdaTypeType LIT_TYPE_TYPE;
+extern LambdaTypeType LIT_TYPE_ANY;
+extern LambdaTypeType LIT_TYPE_ERROR;
 
+LambdaType *type_null() {
+    return (LambdaType *)&LIT_TYPE_NULL;
+}
+LambdaType *type_bool() {
+    return (LambdaType *)&LIT_TYPE_BOOL;
+}
 LambdaType *type_int() {
     return (LambdaType *)&LIT_TYPE_INT;
 }
 LambdaType *type_float() {
     return (LambdaType *)&LIT_TYPE_FLOAT;
 }
+LambdaType *type_number() {
+    return (LambdaType *)&LIT_TYPE_NUMBER;
+}
 LambdaType *type_string() {
     return (LambdaType *)&LIT_TYPE_STRING;
+}
+LambdaType *type_binary() {
+    return (LambdaType *)&LIT_TYPE_BINARY;
+}
+LambdaType *type_symbol() {
+    return (LambdaType *)&LIT_TYPE_SYMBOL;
+}
+LambdaType *type_dtime() {
+    return (LambdaType *)&LIT_TYPE_DTIME;
+}
+LambdaType *type_list() {
+    return (LambdaType *)&LIT_TYPE_LIST;
+}
+LambdaType *type_array() {
+    return (LambdaType *)&LIT_TYPE_ARRAY;
+}
+LambdaType *type_map() {
+    return (LambdaType *)&LIT_TYPE_MAP;
+}
+LambdaType *type_elmt() {
+    return (LambdaType *)&LIT_TYPE_ELMT;
+}
+LambdaType *type_func() {
+    return (LambdaType *)&LIT_TYPE_FUNC;
+}
+LambdaType *type_type() {
+    return (LambdaType *)&LIT_TYPE_TYPE;
+}
+LambdaType *type_any() {
+    return (LambdaType *)&LIT_TYPE_ANY;
+}
+LambdaType *type_error() {
+    return (LambdaType *)&LIT_TYPE_ERROR;
 }
 
 bool is(Item a, Item b) {

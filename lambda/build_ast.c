@@ -8,8 +8,13 @@ LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 LambdaType TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
+LambdaType TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 LambdaType TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 LambdaType TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
+LambdaType TYPE_LIST = {.type_id = LMD_TYPE_LIST};
+LambdaType TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
+LambdaType TYPE_MAP = {.type_id = LMD_TYPE_MAP};
+LambdaType TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
 LambdaType TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
 LambdaType TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
 LambdaType TYPE_ANY = {.type_id = LMD_TYPE_ANY};
@@ -27,9 +32,23 @@ LambdaType LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 
 LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
 LambdaType LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
 
+LambdaTypeType LIT_TYPE_NULL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_NULL};
+LambdaTypeType LIT_TYPE_BOOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_BOOL};
 LambdaTypeType LIT_TYPE_INT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_INT};
 LambdaTypeType LIT_TYPE_FLOAT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FLOAT};
+LambdaTypeType LIT_TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_NUMBER};
 LambdaTypeType LIT_TYPE_STRING = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_STRING};
+LambdaTypeType LIT_TYPE_BINARY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_BINARY};
+LambdaTypeType LIT_TYPE_SYMBOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_SYMBOL};
+LambdaTypeType LIT_TYPE_DTIME = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_DTIME};
+LambdaTypeType LIT_TYPE_LIST = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_LIST};
+LambdaTypeType LIT_TYPE_ARRAY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ARRAY};
+LambdaTypeType LIT_TYPE_MAP = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_MAP};
+LambdaTypeType LIT_TYPE_ELMT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ELMT};
+LambdaTypeType LIT_TYPE_FUNC = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FUNC};
+LambdaTypeType LIT_TYPE_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_TYPE};
+LambdaTypeType LIT_TYPE_ANY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ANY};
+LambdaTypeType LIT_TYPE_ERROR = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ERROR};
 
 TypeInfo type_info[] = {
     [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer"},

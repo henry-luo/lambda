@@ -5,3 +5,6 @@
 
 let ls = (1, 2.5, true, "hi");
 ls[0]; ls[1]; (ls[3], ls[2]);
+
+let m = {a:10, b:12.5, c:false, d:"hii"};
+m.a; m.b; (m.c, m.d); {a:123} is map;

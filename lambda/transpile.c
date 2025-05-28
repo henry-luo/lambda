@@ -614,12 +614,38 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
 
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
     StrView type_name = ts_node_source(tp, type_node->node);
-    if (strview_equal(&type_name, "int")) {
+    if (strview_equal(&type_name, "null")) {
+        strbuf_append_str(tp->code_buf, "type_null()");
+    } else if (strview_equal(&type_name, "bool")) {
+        strbuf_append_str(tp->code_buf, "type_bool()");
+    } else if (strview_equal(&type_name, "int")) {
         strbuf_append_str(tp->code_buf, "type_int()");
     } else if (strview_equal(&type_name, "float")) {
         strbuf_append_str(tp->code_buf, "type_float()");
     } else if (strview_equal(&type_name, "string")) {
         strbuf_append_str(tp->code_buf, "type_string()");
+    } else if (strview_equal(&type_name, "symbol")) {
+        strbuf_append_str(tp->code_buf, "type_symbol()");
+    } else if (strview_equal(&type_name, "dtime")) {
+        strbuf_append_str(tp->code_buf, "type_dtime()");
+    } else if (strview_equal(&type_name, "binary")) {
+        strbuf_append_str(tp->code_buf, "type_binary()");
+    } else if (strview_equal(&type_name, "array")) {
+        strbuf_append_str(tp->code_buf, "type_array()");
+    } else if (strview_equal(&type_name, "map")) {
+        strbuf_append_str(tp->code_buf, "type_map()");
+    } else if (strview_equal(&type_name, "list")) {
+        strbuf_append_str(tp->code_buf, "type_list()");
+    } else if (strview_equal(&type_name, "element")) {
+        strbuf_append_str(tp->code_buf, "type_elmt()");
+    } else if (strview_equal(&type_name, "func")) {
+        strbuf_append_str(tp->code_buf, "type_func()");
+    } else if (strview_equal(&type_name, "type")) {
+        strbuf_append_str(tp->code_buf, "type_type()");
+    } else if (strview_equal(&type_name, "any")) {
+        strbuf_append_str(tp->code_buf, "type_any()");
+    } else if (strview_equal(&type_name, "error")) {
+        strbuf_append_str(tp->code_buf, "type_error()");
     } else {
         printf("base type not supported yet: %.*s\n", (int)type_name.length, type_name.str);
         assert(0);

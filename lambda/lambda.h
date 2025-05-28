@@ -167,9 +167,23 @@ typedef struct LambdaType {
     uint8_t is_const:1;  // is a constant expr
 } LambdaType;
 
+LambdaType *type_null();
+LambdaType *type_bool();
 LambdaType *type_int();
 LambdaType *type_float();
+LambdaType *type_number();
 LambdaType *type_string();
+LambdaType *type_binary();
+LambdaType *type_symbol();
+LambdaType *type_dtime();
+LambdaType *type_list();
+LambdaType *type_array();
+LambdaType *type_map();
+LambdaType *type_elmt();
+LambdaType *type_func();
+LambdaType *type_type();
+LambdaType *type_any();
+LambdaType *type_error();
 
 bool is(Item a, Item b);
 bool in(Item a, Item b);
