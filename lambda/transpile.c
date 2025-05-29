@@ -371,7 +371,8 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     printf("transpile list expr: dec - %p, itm - %p\n", list_node->declare, list_node->item);
     LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
-    strbuf_append_str(tp->code_buf, "({");
+    // create list before the declarations, to contain all the allocations
+    strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");
     // let declare first
     AstNode *declare = list_node->declare;
     while (declare) {
@@ -384,7 +385,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }    
-    strbuf_append_str(tp->code_buf, "\n List* ls = list(); list_fill(ls,");
+    strbuf_append_str(tp->code_buf, " list_fill(ls,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     transpile_items(tp, (AstArrayNode*)list_node);
@@ -394,7 +395,8 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     printf("transpile content expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
-    strbuf_append_str(tp->code_buf, "({");
+    // create list before the declarations, to contain all the allocations
+    strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
     // let declare first
     AstNode *item = list_node->item;
     printf("content item cnt:%d,%p\n", type->length, item);
@@ -414,7 +416,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }
-    strbuf_append_str(tp->code_buf, "\n List* ls = list(); list_fill(ls,");
+    strbuf_append_str(tp->code_buf, "\n list_fill(ls,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
     transpile_items(tp, (AstArrayNode*)list_node);
