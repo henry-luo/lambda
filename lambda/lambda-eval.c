@@ -139,9 +139,15 @@ Item list_get(List *list, int index) {
     LambdaItem itm = {.item = list->items[index]};
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
-        printf("adding dataowner hash entry: %llu\n", itm.pointer);
         String *str = (String*)itm.pointer;
-        hashmap_set(context->data_owners, &(DataOwner){.data = str, .owner = list});
+        printf("getting list scalar: %p\n", str);
+        if (str->in_heap) {
+            DataOwner *owner = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
+            if (!owner) {
+                printf("adding dataowner hash entry: %p\n", str);
+                hashmap_set(context->data_owners, &(DataOwner){.data = str, .owner = list});
+            }
+        }
         return s2it(str);
     }
     return list->items[index];
@@ -353,7 +359,8 @@ String *str_cat(String *left, String *right) {
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
-    return (String*)result;
+    printf("str_cat result: %s\n", result->chars);
+    return result;
 }
 
 Item add(Context *rt, Item a, Item b) {

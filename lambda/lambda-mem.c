@@ -248,7 +248,10 @@ void entry_end() {
         if (!data) { continue; }  // skip NULL entries
         LambdaItem itm = {.raw_pointer = data};
         if (itm.type_id == LMD_TYPE_STRING) {
-            pool_variable_free(context->heap->pool, (void*)itm.pointer);
+            String *str = (String*)itm.pointer;
+            assert(str->in_heap && !str->contained);
+            printf("freeing heap string: %s\n", str->chars);
+            pool_variable_free(context->heap->pool, (void*)str);
         }
         else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
             Container* cont = (Container*)itm.raw_pointer;
