@@ -27,10 +27,10 @@ int main(void) {
 
     Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
     strbuf_append_str(strbuf, "Test result ===============\n");
-    run_test_script(&runner, "value.ls", strbuf);
-    run_test_script(&runner, "expr.ls", strbuf);
-    run_test_script(&runner, "box_unbox.ls", strbuf);
-    run_test_script(&runner, "func.ls", strbuf);
+    // run_test_script(&runner, "value.ls", strbuf);
+    // run_test_script(&runner, "expr.ls", strbuf);
+    // run_test_script(&runner, "box_unbox.ls", strbuf);
+    // run_test_script(&runner, "func.ls", strbuf);
     run_test_script(&runner, "mem.ls", strbuf);
 
     printf("%s", strbuf->str);

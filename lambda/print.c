@@ -1,8 +1,6 @@
 
 #include "transpiler.h"
 
-extern TypeInfo type_info[];
-
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     for (uint32_t i = 0; i < indent; i++) {

@@ -149,6 +149,8 @@ typedef struct TypeInfo {
     // char* c_type;  // C type of the type
 } TypeInfo;
 
+extern TypeInfo type_info[];
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 
@@ -412,7 +414,7 @@ void heap_destroy();
 void entry_start();
 void entry_end();
 void retain_scalar(void *data, TypeId type_id);
-void free_item(Item item, bool free_mapping);
+void free_item(Item item, bool clear_entry);
 
 // uses the high byte to tag the pointer, defined for little-endian
 typedef union LambdaItem {

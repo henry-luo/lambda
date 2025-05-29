@@ -72,6 +72,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function"},
     [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any"},
     [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error"},
+    [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start"},
 };
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {

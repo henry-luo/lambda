@@ -85,17 +85,16 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
     }
-    // list is flattened
     if (itm.type_id == LMD_TYPE_RAW_POINTER) {
         TypeId type_id = *((uint8_t*)itm.raw_pointer);
+        // nest list is flattened
         if (type_id == LMD_TYPE_LIST) {
+            // copy over the items
             List *nest_list = (List*)itm.raw_pointer;
             for (int i = 0; i < nest_list->length; i++) {
                 Item nest_item = nest_list->items[i];
                 list_push(list, nest_item);
             }
-            free(nest_list->items);  nest_list->items = NULL;
-            nest_list->length = 0;  nest_list->capacity = 0;
             return;
         }
         else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
@@ -124,6 +123,7 @@ void list_push(List *list, Item item) {
             printf("getting dataowner hash entry: %llu\n", itm.pointer);
             DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
             if (owned) {
+                printf("got dataowner: %p\n", owned->owner);
                 Container* owner = owned->owner;
                 owner->ref_cnt++;
             }

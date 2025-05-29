@@ -6,7 +6,8 @@ void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void transpile_ast_script(Transpiler* tp, AstScript *script);
-void check_heap_entries();
+void check_memory_leak();
+void print_heap_entries();
 int dataowner_compare(const void *a, const void *b, void *udata);
 uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
 
@@ -134,15 +135,17 @@ void runner_setup_context(Runner* runner) {
     runner->context.result = ITEM_NULL;  // exec result
     context = &runner->context;
     heap_init();
+    entry_start();
 }
 
 void runner_cleanup(Runner* runner) {
     printf("runner cleanup\n");
     // free final result
-    printf("freeing final result: %llu\n", runner->context.result);
+    print_heap_entries();
+    printf("freeing final result -----------------\n");
     free_item(runner->context.result, true);
     // check memory leaks
-    check_heap_entries();
+    check_memory_leak();
     Transpiler *tp = runner->transpiler;
     if (tp) {
         if (tp->jit_context) jit_cleanup(tp->jit_context);
