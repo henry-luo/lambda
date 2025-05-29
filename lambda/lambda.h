@@ -95,6 +95,7 @@ typedef struct ArrayLong {
 Array* array();
 Array* array_fill(Array* arr, int count, ...);
 ArrayLong* array_long_new(int count, ...);
+Item array_get(Array *array, int index);
 
 typedef struct List {
     uint8_t type_id;

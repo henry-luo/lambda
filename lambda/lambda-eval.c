@@ -43,6 +43,19 @@ Array* array_fill(Array* arr, int count, ...) {
     return arr;
 }
 
+Item array_get(Array *array, int index) {
+    if (index < 0 || index >= array->length) { return ITEM_NULL; }
+    LambdaItem itm = {.item = array->items[index]};
+    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
+        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+        printf("adding dataowner hash entry: %llu\n", itm.pointer);
+        String *str = (String*)itm.pointer;
+        hashmap_set(context->data_owners, &(DataOwner){.data = str, .owner = array});
+        return s2it(str);
+    }
+    return array->items[index];
+}
+
 ArrayLong* array_long_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;

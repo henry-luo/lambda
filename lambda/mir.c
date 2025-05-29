@@ -28,6 +28,7 @@ func_obj_t func_list[] = {
     {"pow", (fn_ptr) pow},
     {"array", (fn_ptr) array},
     {"array_fill", (fn_ptr) array_fill},
+    {"array_get", (fn_ptr) array_get},
     {"array_long_new", (fn_ptr) array_long_new},
     {"list", (fn_ptr) list},
     {"list_fill", (fn_ptr) list_fill},

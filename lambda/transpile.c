@@ -555,12 +555,19 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
         }
         strbuf_append_char(tp->code_buf, ')');
     } 
-    else if (field_node->object->type->type_id == LMD_TYPE_ARRAY) {
+    else if (field_node->object->type->type_id == LMD_TYPE_ARRAY_INT) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");
         writeNodeSource(tp, field_node->field->node);
         strbuf_append_char(tp->code_buf, ']');
     }
+    else if (field_node->object->type->type_id == LMD_TYPE_ARRAY) {
+        strbuf_append_str(tp->code_buf, "array_get(");
+        transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        writeNodeSource(tp, field_node->field->node);
+        strbuf_append_char(tp->code_buf, ')');
+    }    
     else if (field_node->object->type->type_id == LMD_TYPE_LIST) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);
