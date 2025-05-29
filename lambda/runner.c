@@ -7,7 +7,6 @@ TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void transpile_ast_script(Transpiler* tp, AstScript *script);
 void check_heap_entries();
-void free_item(Item item);
 int dataowner_compare(const void *a, const void *b, void *udata);
 uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
 
@@ -141,7 +140,7 @@ void runner_cleanup(Runner* runner) {
     printf("runner cleanup\n");
     // free final result
     printf("freeing final result: %llu\n", runner->context.result);
-    free_item(runner->context.result);
+    free_item(runner->context.result, true);
     // check memory leaks
     check_heap_entries();
     Transpiler *tp = runner->transpiler;

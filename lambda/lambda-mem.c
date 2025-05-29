@@ -51,8 +51,6 @@ void heap_destroy() {
 
 Item HEAP_ENTRY_START = ((uint64_t)LMD_TYPE_CONTAINER_START << 56); 
 
-void free_item(Item item);
-
 void print_heap_entries() {
     ArrayList *entries = context->heap->entries;
     printf("after exec heap entries: %d\n", entries->length);
@@ -83,7 +81,7 @@ void free_container(Container* cont) {
             // free list items
             printf("freeing list items: %p, length: %ld\n", list, list->length);
             for (int j = 0; j < list->length; j++) {
-                free_item(list->items[j]);
+                free_item(list->items[j], true);
             }
             if (list->items) free(list->items);
             pool_variable_free(context->heap->pool, cont);
@@ -95,7 +93,7 @@ void free_container(Container* cont) {
             // free array items
             printf("freeing array items: %p, length: %ld\n", arr, arr->length);
             for (int j = 0; j < arr->length; j++) {
-                free_item(arr->items[j]);
+                free_item(arr->items[j], true);
             }
             if (arr->items) free(arr->items);
             pool_variable_free(context->heap->pool, cont);
@@ -112,7 +110,25 @@ void free_container(Container* cont) {
     else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
         Map *map = (Map*)cont;
         if (!map->ref_cnt) {
-            // todo: free map items
+            // free map items based on the shape
+            ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
+            printf("freeing map items: %p, length: %d\n", map, ((LambdaTypeMap*)map->type)->length);
+            while (field) {
+                printf("freeing map field: %s, type: %d\n", field->name.str, field->type->type_id);
+                void* field_ptr = ((uint8_t*)map->data) + field->byte_offset;
+                if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
+                    field->type->type_id == LMD_TYPE_DTIME || field->type->type_id == LMD_TYPE_BINARY) {
+                    String *str = *(String**)field_ptr;
+                    Item item = s2it(str);
+                    free_item(item, true);
+                }
+                else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
+                    field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
+                    Container *container = *(Container**)field_ptr;
+                    free_container(container);
+                }
+                field = field->next;
+            }
             printf("freeing map data: %p\n", map);
             if (map->data) free(map->data);
             pool_variable_free(context->heap->pool, cont);
@@ -120,7 +136,7 @@ void free_container(Container* cont) {
     }
 }
 
-void free_item(Item item) {
+void free_item(Item item, bool free_mapping) {
     LambdaItem itm = {.item = item};
     printf("free item: type: %d, pointer: %llu\n", itm.type_id, itm.pointer);
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
@@ -130,12 +146,11 @@ void free_item(Item item) {
         if (owned) {
             Container* owner = owned->owner;
             owner->ref_cnt--;
-            hashmap_delete(context->data_owners, &str);
-            if (!owner->ref_cnt) {
-                free_container(owner);
-            }            
+            // the data owner entry might be shared
+            if (free_mapping) hashmap_delete(context->data_owners, &str);
+            // let heap entry free the owner
         }
-        else if (str->heap_owned) {
+        else if (str->contained) {
             pool_variable_free(context->heap->pool, str);
         }
     }
@@ -144,7 +159,25 @@ void free_item(Item item) {
     }
 }
 
-// heap entry functions
+void retain_string(String *str) {
+    if (str->heap_owned) {  // remove string from heap entries
+        str->heap_owned = false;  str->contained = true;  // change ownership from heap to container
+        int entry = context->heap->entries->length-1;  // int start = context->heap->entry_start->start;
+        for (; entry >= 0; entry--) {
+            void *data = context->heap->entries->data[entry];
+            LambdaItem itm = {.raw_pointer = data};
+            if (itm.type_id == LMD_TYPE_STRING && itm.pointer == str) {
+                printf("removing string from heap entries: %p\n", str);
+                context->heap->entries->data[entry] = NULL;  break;
+            }
+            else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
+                printf("found container start, stop searching\n");
+                break;  // stop searching
+            }
+        }
+    }
+}
+
 void entry_start() {
     arraylist_append(context->heap->entries, (void*)HEAP_ENTRY_START);
 }
@@ -167,25 +200,6 @@ void entry_end() {
             printf("reached container start: %d\n", i);
             entries->length = i;
             return;
-        }
-    }
-}
-
-void retain_string(String *str) {
-    if (str->heap_owned) {  // remove string from heap entries
-        str->heap_owned = false;
-        int entry = context->heap->entries->length-1;  // int start = context->heap->entry_start->start;
-        for (; entry >= 0; entry--) {
-            void *data = context->heap->entries->data[entry];
-            LambdaItem itm = {.raw_pointer = data};
-            if (itm.type_id == LMD_TYPE_STRING && itm.pointer == str) {
-                printf("removing string from heap entries: %p\n", str);
-                context->heap->entries->data[entry] = NULL;  break;
-            }
-            else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
-                printf("found container start, stop searching\n");
-                break;  // stop searching
-            }
         }
     }
 }

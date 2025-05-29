@@ -412,6 +412,7 @@ void heap_destroy();
 void entry_start();
 void entry_end();
 void retain_string(String *str);
+void free_item(Item item, bool free_mapping);
 
 // uses the high byte to tag the pointer, defined for little-endian
 typedef union LambdaItem {

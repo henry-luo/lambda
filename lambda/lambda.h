@@ -50,7 +50,7 @@ typedef uint64_t Item;
 typedef struct String {
     int32_t len:30;  // int instead of uint, to align with default Lambda int literal type
     int32_t heap_owned:1;  // whether it is owned by the heap
-    int32_t contained:1;  // whether it is a reference to a string in containers
+    int32_t contained:1;  // whether it is owned by container
     char chars[];
 } String;
 
