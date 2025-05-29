@@ -411,7 +411,7 @@ void* heap_calloc(size_t size, TypeId type_id);
 void heap_destroy();
 void entry_start();
 void entry_end();
-void retain_string(String *str);
+void retain_scalar(void *data, TypeId type_id);
 void free_item(Item item, bool free_mapping);
 
 // uses the high byte to tag the pointer, defined for little-endian

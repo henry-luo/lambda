@@ -25,7 +25,7 @@ Array* array_fill(Array* arr, int count, ...) {
             if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
                 itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
                 String *str = (String*)itm.pointer;
-                retain_string(str);
+                retain_scalar(str, itm.type_id);
             }
             else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
                 TypeId type_id = *((uint8_t*)itm.raw_pointer);
@@ -118,7 +118,7 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;
-        if (str->heap_owned) retain_string(str);
+        if (str->heap_owned) retain_scalar(str, itm.type_id);
         else {
             // get the data owner
             printf("getting dataowner hash entry: %llu\n", itm.pointer);
@@ -188,7 +188,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 String *str = va_arg(args, String*);
                 printf("field string value: %s\n", str->chars);
                 *(String**)field_ptr = str;
-                retain_string(str);
+                retain_scalar(str, field->type->type_id);
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:

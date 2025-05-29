@@ -159,20 +159,21 @@ void free_item(Item item, bool free_mapping) {
     }
 }
 
-void retain_string(String *str) {
+void retain_scalar(void *data, TypeId type_id) {
+    String *str = (String*)data;
     if (str->heap_owned) {  // remove string from heap entries
         str->heap_owned = false;  str->contained = true;  // change ownership from heap to container
         int entry = context->heap->entries->length-1;  // int start = context->heap->entry_start->start;
         for (; entry >= 0; entry--) {
             void *data = context->heap->entries->data[entry];
             LambdaItem itm = {.raw_pointer = data};
-            if (itm.type_id == LMD_TYPE_STRING && itm.pointer == str) {
-                printf("removing string from heap entries: %p\n", str);
+            if (itm.type_id == type_id && itm.pointer == str) {
+                printf("removing data from heap entries: %p\n", str);
                 context->heap->entries->data[entry] = NULL;  break;
             }
+            // reached container start, stop searching
             else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
-                printf("found container start, stop searching\n");
-                break;  // stop searching
+                break;
             }
         }
     }
