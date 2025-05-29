@@ -117,8 +117,7 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;
-        if (str->heap_owned) retain_scalar(str, itm.type_id);
-        else {
+        if (str->contained) {
             // get the data owner
             printf("getting dataowner hash entry: %llu\n", itm.pointer);
             DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
@@ -128,6 +127,10 @@ void list_push(List *list, Item item) {
                 owner->ref_cnt++;
             }
         }
+        else if (str->in_heap) {
+            retain_scalar(str, itm.type_id);
+        }
+        // else from connstant pool
     }
 }
 
@@ -346,7 +349,7 @@ String *str_cat(String *left, String *right) {
     printf("left len %zu, right len %zu\n", left_len, right_len);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     printf("str result %p\n", result);
-    result->heap_owned = true;  result->len = left_len + right_len;
+    result->in_heap = true;  result->contained = false;  result->len = left_len + right_len;
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
@@ -615,7 +618,7 @@ String* string(Context *rt, Item item) {
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;  str->heap_owned = true;
+        str->len = len;  str->in_heap = true;  str->contained = false;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_INT) {
@@ -625,7 +628,7 @@ String* string(Context *rt, Item item) {
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;  str->heap_owned = true;
+        str->len = len;  str->in_heap = true;  str->contained = false;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
@@ -635,7 +638,7 @@ String* string(Context *rt, Item item) {
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;  str->heap_owned = true;
+        str->len = len;  str->in_heap = true;  str->contained = false;
         return (String*)str;
     }
     printf("unhandled type %d\n", itm.type_id);

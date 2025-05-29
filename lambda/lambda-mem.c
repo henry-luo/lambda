@@ -192,9 +192,10 @@ void free_item(Item item, bool clear_entry) {
             // the data owner entry might be shared
             hashmap_delete(context->data_owners, &str);
         }
-        else if (str->contained) {
+        else if (str->in_heap) {
             pool_variable_free(context->heap->pool, str);
         }
+        // else from constant pool
     }
     else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
         Container* container = (Container*)itm.raw_pointer;
@@ -216,8 +217,8 @@ void free_item(Item item, bool clear_entry) {
 
 void retain_scalar(void *data, TypeId type_id) {
     String *str = (String*)data;
-    if (str->heap_owned) {  // remove string from heap entries
-        str->heap_owned = false;  str->contained = true;  // change ownership from heap to container
+    if (str->in_heap) {  // remove string from heap entries
+        str->contained = true;  // change to container owned
         int entry = context->heap->entries->length-1;
         for (; entry >= 0; entry--) {
             void *data = context->heap->entries->data[entry];
