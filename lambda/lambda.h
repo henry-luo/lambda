@@ -5,9 +5,13 @@
 
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+typedef signed char int8_t;
+typedef short int16_t;
 typedef int int32_t;
 typedef long long int64_t;
-typedef unsigned long long uint64_t;
+
 #ifndef bool
 #define bool uint8_t
 #endif
@@ -48,9 +52,8 @@ typedef uint64_t Item;
 
 // a fat string with prefixed length and flags
 typedef struct String {
-    int32_t len:30;  // int instead of uint, to align with default Lambda int literal type
-    int32_t in_heap:1;  // whether it is stored in heap
-    int32_t contained:1;  // whether it is owned by a container
+    uint32_t len:22;  // string len , up to 4MB;
+    uint32_t ref_cnt:10;  // ref_cnt, up to 1024 refs
     char chars[];
 } String;
 
@@ -63,7 +66,7 @@ typedef struct Context {
     void* ast_pool;
     void** consts;
     void* type_list;
-    void* data_owners;  // hashmap that maps from data => its owner
+    // void* data_owners;  // hashmap that maps from data => its owner
     Item result; // final exec result
 } Context;
 

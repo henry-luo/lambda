@@ -25,7 +25,7 @@ Array* array_fill(Array* arr, int count, ...) {
             if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
                 itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
                 String *str = (String*)itm.pointer;
-                retain_scalar(str, itm.type_id);
+                str->ref_cnt++;
             }
             else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
                 TypeId type_id = *((uint8_t*)itm.raw_pointer);
@@ -45,14 +45,6 @@ Array* array_fill(Array* arr, int count, ...) {
 
 Item array_get(Array *array, int index) {
     if (index < 0 || index >= array->length) { return ITEM_NULL; }
-    LambdaItem itm = {.item = array->items[index]};
-    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
-        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
-        printf("adding dataowner hash entry: %llu\n", itm.pointer);
-        String *str = (String*)itm.pointer;
-        hashmap_set(context->data_owners, &(DataOwner){.data = str, .owner = array});
-        return s2it(str);
-    }
     return array->items[index];
 }
 
@@ -117,39 +109,12 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;
-        if (str->contained) {
-            // get the data owner
-            printf("getting dataowner hash entry: %llu\n", itm.pointer);
-            DataOwner *owned = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
-            if (owned) {
-                printf("got dataowner: %p\n", owned->owner);
-                Container* owner = owned->owner;
-                owner->ref_cnt++;
-            }
-        }
-        else if (str->in_heap) {
-            retain_scalar(str, itm.type_id);
-        }
-        // else from connstant pool
+        str->ref_cnt++;
     }
 }
 
 Item list_get(List *list, int index) {
     if (index < 0 || index >= list->length) { return ITEM_NULL; }
-    LambdaItem itm = {.item = list->items[index]};
-    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
-        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
-        String *str = (String*)itm.pointer;
-        printf("getting list scalar: %p\n", str);
-        if (str->in_heap) {
-            DataOwner *owner = (DataOwner*)hashmap_get(context->data_owners, &(DataOwner){.data = str});
-            if (!owner) {
-                printf("adding dataowner hash entry: %p\n", str);
-                hashmap_set(context->data_owners, &(DataOwner){.data = str, .owner = list});
-            }
-        }
-        return s2it(str);
-    }
     return list->items[index];
 }
 
@@ -197,7 +162,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 String *str = va_arg(args, String*);
                 printf("field string value: %s\n", str->chars);
                 *(String**)field_ptr = str;
-                retain_scalar(str, field->type->type_id);
+                str->ref_cnt++;
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
@@ -285,16 +250,16 @@ Item map_get(Map* map, char *key) {
                     double dval = *(double*)field_ptr;
                     return push_d(dval);
                 case LMD_TYPE_DTIME:
-                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
+                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return k2it(*(char**)field_ptr);
                 case LMD_TYPE_STRING:
-                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
+                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return s2it(*(char**)field_ptr);
                 case LMD_TYPE_SYMBOL:
-                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
+                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return y2it(*(char**)field_ptr);
                 case LMD_TYPE_BINARY:
-                    hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
+                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return x2it(*(char**)field_ptr);
                 case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
                 case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
@@ -355,7 +320,7 @@ String *str_cat(String *left, String *right) {
     printf("left len %zu, right len %zu\n", left_len, right_len);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     printf("str result %p\n", result);
-    result->in_heap = true;  result->contained = false;  result->len = left_len + right_len;
+    result->ref_cnt = 0;  result->len = left_len + right_len;
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
@@ -625,7 +590,7 @@ String* string(Context *rt, Item item) {
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;  str->in_heap = true;  str->contained = false;
+        str->len = len;  str->ref_cnt = 0;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_INT) {
@@ -635,7 +600,7 @@ String* string(Context *rt, Item item) {
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;  str->in_heap = true;  str->contained = false;
+        str->len = len;  str->ref_cnt = 0;
         return (String*)str;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
@@ -645,7 +610,7 @@ String* string(Context *rt, Item item) {
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
         strcpy(str->chars, buf);
-        str->len = len;  str->in_heap = true;  str->contained = false;
+        str->len = len;  str->ref_cnt = 0;
         return (String*)str;
     }
     printf("unhandled type %d\n", itm.type_id);

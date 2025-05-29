@@ -130,8 +130,8 @@ void runner_setup_context(Runner* runner) {
     runner->context.type_list = runner->transpiler->type_list;
     runner->context.consts = runner->transpiler->const_list->data;
     runner->context.stack = pack_init(256);
-    runner->context.data_owners = hashmap_new(sizeof(DataOwner), 16, 0, 0, 
-        dataowner_hash, dataowner_compare, NULL, NULL);
+    // runner->context.data_owners = hashmap_new(sizeof(DataOwner), 16, 0, 0, 
+    //     dataowner_hash, dataowner_compare, NULL, NULL);
     runner->context.result = ITEM_NULL;  // exec result
     context = &runner->context;
     heap_init();
@@ -157,7 +157,7 @@ void runner_cleanup(Runner* runner) {
     }
     heap_destroy();
     if (runner->context.stack) pack_free(runner->context.stack);
-    if (runner->context.data_owners) hashmap_free(runner->context.data_owners);
+    // if (runner->context.data_owners) hashmap_free(runner->context.data_owners);
 }
 
 Item run_script(Runner *runner, char* source, char* script_path) {
