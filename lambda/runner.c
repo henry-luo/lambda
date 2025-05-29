@@ -8,6 +8,13 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 void transpile_ast_script(Transpiler* tp, AstScript *script);
 void check_heap_entries();
 void free_item(Item item);
+int dataowner_compare(const void *a, const void *b, void *udata);
+uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
+
+typedef Item (*main_func_t)(Context*);
+
+// thread-specific runtime context
+__thread Context* context = NULL;
 
 void find_errors(TSNode node) {
     if (ts_node_is_error(node)) {
@@ -18,9 +25,7 @@ void find_errors(TSNode node) {
     for (uint32_t i = 0; i < child_count; ++i) {
         find_errors(ts_node_child(node, i));
     }
-} 
-
-typedef Item (*main_func_t)(Context*);
+}
 
 void print_time_elapsed(char* label, struct timespec start, struct timespec end) {
     // Calculate elapsed time in milliseconds
@@ -111,56 +116,6 @@ main_func_t transpile_script(Transpiler *tp, char* source, char* script_path) {
     print_time_elapsed(":", start, end);  
 
     return main_func;
-}
-
-// thread-specific runtime context
-__thread Context* context = NULL;
-
-int dataowner_compare(const void *a, const void *b, void *udata) {
-    const DataOwner *da = a;
-    const DataOwner *db = b;
-    return da->data == db->data;
-}
-
-uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const DataOwner *dataowner = item;
-    return hashmap_xxhash3(dataowner->data, sizeof(dataowner->data), seed0, seed1);
-}
-
-void heap_init() {
-    printf("heap init: %p\n", context);
-    context->heap = (Heap*)calloc(1, sizeof(Heap));
-    size_t grow_size = 4096;  // 4k
-    size_t tolerance_percent = 20;
-    pool_variable_init(&context->heap->pool, grow_size, tolerance_percent);
-    context->heap->entries = arraylist_new(1024);
-}
-
-void* heap_alloc(size_t size, TypeId type_id) {
-    Heap *heap = context->heap;
-    void *data;
-    pool_variable_alloc(heap->pool, size, (void**)&data);
-    if (!data) {
-        printf("Error: Failed to allocate memory for heap entry.\n");
-        return NULL;
-    }
-    // scalar pointers needs to be tagged
-    arraylist_append(heap->entries, type_id < LMD_TYPE_ARRAY ?
-        ((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data);
-    return data;
-}
-
-void* heap_calloc(size_t size, TypeId type_id) {
-    void* ptr = heap_alloc(size, type_id);
-    memset(ptr, 0, size);
-    return ptr;
-}
-
-void heap_destroy() {
-    if (context->heap) {
-        if (context->heap->pool) pool_variable_destroy(context->heap->pool);
-        free(context->heap);
-    }
 }
 
 void runner_init(Runner* runner) {

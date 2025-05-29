@@ -409,6 +409,9 @@ void heap_init();
 void* heap_alloc(size_t size, TypeId type_id);
 void* heap_calloc(size_t size, TypeId type_id);
 void heap_destroy();
+void entry_start();
+void entry_end();
+void retain_string(String *str);
 
 // uses the high byte to tag the pointer, defined for little-endian
 typedef union LambdaItem {
