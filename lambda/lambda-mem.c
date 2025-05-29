@@ -74,6 +74,7 @@ void check_heap_entries() {
 
 void free_container(Container* cont) {
     printf("freeing data owner: %p\n", cont);
+    if (cont->ref_cnt > 0) { return; }
     TypeId type_id = cont->type_id;
     if (type_id == LMD_TYPE_LIST) {
         List *list = (List *)cont;
@@ -125,7 +126,9 @@ void free_container(Container* cont) {
                 else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
                     field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
                     Container *container = *(Container**)field_ptr;
-                    free_container(container);
+                    // delink with the contaienr
+                    container->ref_cnt--;
+                    if (!container->ref_cnt) free_container(container);
                 }
                 field = field->next;
             }
@@ -155,7 +158,10 @@ void free_item(Item item, bool free_mapping) {
         }
     }
     else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
-        free_container((Container*)itm.raw_pointer);
+        Container* container = (Container*)itm.raw_pointer;
+        // delink with the container
+        container->ref_cnt--;
+        if (!container->ref_cnt) free_container((Container*)itm.raw_pointer);
     }
 }
 
