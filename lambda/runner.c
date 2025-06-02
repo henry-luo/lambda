@@ -129,13 +129,11 @@ void runner_setup_context(Runner* runner) {
     runner->context.ast_pool = runner->transpiler->ast_pool;
     runner->context.type_list = runner->transpiler->type_list;
     runner->context.consts = runner->transpiler->const_list->data;
-    runner->context.stack = pack_init(256);
-    // runner->context.data_owners = hashmap_new(sizeof(DataOwner), 16, 0, 0, 
-    //     dataowner_hash, dataowner_compare, NULL, NULL);
+    runner->context.stack = pack_init(16);
     runner->context.result = ITEM_NULL;  // exec result
     context = &runner->context;
     heap_init();
-    entry_start();
+    frame_start();
 }
 
 void runner_cleanup(Runner* runner) {

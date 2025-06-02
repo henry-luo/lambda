@@ -226,11 +226,12 @@ void free_item(Item item, bool clear_entry) {
     }
 }
 
-void entry_start() {
+void frame_start() {
+    arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_TYPE_CONTAINER_START << 56) | (uint64_t)context->stack->size));
     arraylist_append(context->heap->entries, (void*)HEAP_ENTRY_START);
 }
 
-void entry_end() {
+void frame_end() {
     ArrayList *entries = context->heap->entries;
     // free heap allocations
     for (int i = entries->length - 1; i >= 0; i--) {
@@ -255,7 +256,8 @@ void entry_end() {
         }
         else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
             printf("reached container start: %d\n", i);
-            entries->length = i;
+            context->stack->size = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
+            entries->length = i-1;
             return;
         }
     }

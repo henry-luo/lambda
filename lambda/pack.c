@@ -102,8 +102,9 @@ static int convert_to_virtual(Pack* pack) {
 
 // Update the pack_alloc function to use vm_grow for virtual memory
 void* pack_alloc(Pack* pack, size_t size) {
-    // Make sure we have enough space
     if (pack->size + size > pack->capacity) {
+        printf("expanding pack: current size: %zu, capacity: %zu, req size: %zu\n", 
+            pack->size, pack->capacity, size);
         if (pack->committed_size == 0 && (pack->capacity >= VIRTUAL_PACK_THRESHOLD || pack->size + size >= VIRTUAL_PACK_THRESHOLD)) {
             // Convert to virtual memory pack
             if (!convert_to_virtual(pack)) {
@@ -137,12 +138,11 @@ void* pack_alloc(Pack* pack, size_t size) {
         }
     }
     
-    // Return NULL if we couldn't ensure enough capacity
+    // return NULL if we couldn't ensure enough capacity
     if (pack->committed_size > 0 && pack->size + size > pack->committed_size) {
         return NULL;
     }
     
-    // Allocate from the pack
     void* ptr = (char*)pack->data + pack->size;
     pack->size += size;
     return ptr;

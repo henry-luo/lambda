@@ -10,7 +10,7 @@ extern __thread Context* context;
 Array* array() {
     Array *arr = calloc(1, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
-    entry_start();
+    frame_start();
     return arr;
 }
 
@@ -58,7 +58,7 @@ Array* array_fill(Array* arr, int count, ...) {
         }
         va_end(args);
     }
-    entry_end();
+    frame_end();
     return arr;
 }
 
@@ -86,7 +86,7 @@ ArrayLong* array_long_new(int count, ...) {
 List* list() {
     List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
-    entry_start();
+    frame_start();
     return list;
 }
 
@@ -171,7 +171,7 @@ List* list_fill(List *list, int count, ...) {
         list_push(list, itm.item);
     }
     va_end(args);
-    entry_end();
+    frame_end();
     return list;
 }
 
@@ -230,7 +230,7 @@ Map* map(int type_index) {
     AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
     LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
     map->type = map_type;    
-    entry_start();
+    frame_start();
     return map;
 }
 
@@ -244,7 +244,7 @@ Map* map_fill(Map* map, ...) {
     va_start(args, map_type->length);
     set_fields(map_type, map->data, args);
     va_end(args);
-    entry_end();
+    frame_end();
     return map;
 }
 
@@ -257,7 +257,7 @@ Element* elmt(int type_index) {
     LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
     elmt->type = elmt_type;
     if (elmt_type->length || elmt_type->content_length) {
-        entry_start();
+        frame_start();
     }
     return elmt;
 }

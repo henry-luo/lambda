@@ -413,8 +413,8 @@ void heap_init();
 void* heap_alloc(size_t size, TypeId type_id);
 void* heap_calloc(size_t size, TypeId type_id);
 void heap_destroy();
-void entry_start();
-void entry_end();
+void frame_start();
+void frame_end();
 void free_item(Item item, bool clear_entry);
 
 // uses the high byte to tag the pointer, defined for little-endian
