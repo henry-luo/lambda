@@ -22,6 +22,18 @@ const linebreak = /\r\n|\n/;
 const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
 const signed_integer_literal = seq(optional('-'), integer_literal);
+const signed_integer = seq(optional('-'), decimal_digits);
+const exponent_part = seq(choice('e', 'E'), signed_integer);
+const float_literal = choice(
+  seq(signed_integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
+  seq(optional('-'), '.', decimal_digits, optional(exponent_part)),
+  seq(signed_integer_literal, exponent_part),
+);
+const decimal_literal = choice(
+  seq(signed_integer_literal, '.', optional(decimal_digits)),
+  seq(optional('-'), '.', decimal_digits),
+);
+
 const base64_unit = /[A-Za-z0-9+/]{4}/;
 const base64_padding = choice(/[A-Za-z0-9+/]{2}==/, /[A-Za-z0-9+/]{3}=/);
 
@@ -298,30 +310,29 @@ module.exports = grammar({
       repeat1(choice(base64_unit, /\s+/)), optional(base64_padding)
     )),
 
-    _number: $ => choice($.integer, $.float),
-
-    float: _ => {
-      const signed_integer = seq(optional('-'), decimal_digits);
-      const exponent_part = seq(choice('e', 'E'), signed_integer);
-      const decimal_literal = choice(
-        seq(signed_integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
-        seq(signed_integer_literal, exponent_part),
-      );
-      return token(decimal_literal);
-    },
+    _number: $ => choice($.integer, $.float, $.decimal),
 
     integer: $ => {
       return token(signed_integer_literal);
     },
 
+    float: _ => {
+      return token(float_literal);
+    },
+
+    decimal: $ => {
+      // no e-notation for decimal
+      return token( seq(choice(decimal_literal, signed_integer_literal), choice('n','N')) );
+    },
+
     unsigned_float: _ => {
       const signed_integer = seq(optional('-'), decimal_digits);
       const exponent_part = seq(choice('e', 'E'), signed_integer);
-      const decimal_literal = choice(
+      const float_literal = choice(
         seq(integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
         seq(integer_literal, exponent_part),
       );
-      return token(decimal_literal);
+      return token(float_literal);
     },    
 
     _unsigned_number: $ => choice(alias(integer_literal, $.integer), alias($.unsigned_float, $.float)),

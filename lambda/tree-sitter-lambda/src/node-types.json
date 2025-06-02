@@ -1238,6 +1238,10 @@
           "named": true
         },
         {
+          "type": "decimal",
+          "named": true
+        },
+        {
           "type": "element",
           "named": true
         },
@@ -1346,6 +1350,10 @@
         },
         {
           "type": "datetime",
+          "named": true
+        },
+        {
+          "type": "decimal",
           "named": true
         },
         {
@@ -1953,6 +1961,10 @@
     "named": false
   },
   {
+    "type": "decimal",
+    "named": true
+  },
+  {
     "type": "element",
     "named": false
   },
@@ -1974,11 +1986,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "floor",
@@ -2130,11 +2142,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
