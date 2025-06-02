@@ -966,7 +966,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern) {
         // else comment or error
         child = ts_node_next_named_sibling(child);
     }
-    printf("end building content item: %p, %d\n", ast_node->item, type->length);
+    printf("end building content item: %p, %ld\n", ast_node->item, type->length);
     if (flattern && type->length == 1) { return ast_node->item;}
     return (AstNode*)ast_node;
 }

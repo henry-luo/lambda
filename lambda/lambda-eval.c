@@ -22,18 +22,21 @@ Array* array_fill(Array* arr, int count, ...) {
         for (int i = 0; i < count; i++) {
             Item item = arr->items[i] = va_arg(args, Item);
             LambdaItem itm = {.item = item};
-            if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
-                itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+            switch (itm.type_id) {
+            case LMD_TYPE_FLOAT:
+                break;
+            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
                 String *str = (String*)itm.pointer;
                 str->ref_cnt++;
-            }
-            else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
+                break;
+            case LMD_TYPE_RAW_POINTER: 
                 TypeId type_id = *((uint8_t*)itm.raw_pointer);
                 if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
                     type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
                     Container *container = (Container*)itm.raw_pointer;
                     container->ref_cnt++;
                 }
+                break;
             }
         }
         arr->length = count;
@@ -135,11 +138,11 @@ List* list_fill(List *list, int count, ...) {
 }
 
 void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
-    int count = map_type->length;
-    printf("map length: %d\n", count);
+    long count = map_type->length;
+    printf("map length: %ld\n", count);
     ShapeEntry *field = map_type->shape;
-    for (int i = 0; i < count; i++) {
-        printf("field type: %d, offset: %d\n", field->type->type_id, field->byte_offset);
+    for (long i = 0; i < count; i++) {
+        printf("field type: %d, offset: %ld\n", field->type->type_id, field->byte_offset);
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         switch (field->type->type_id) {
             case LMD_TYPE_NULL:
@@ -197,7 +200,7 @@ Map* map(int type_index) {
 Map* map_fill(Map* map, ...) {
     LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
     map->data = calloc(1, map_type->byte_size);
-    printf("map byte_size: %d\n", map_type->byte_size);
+    printf("map byte_size: %ld\n", map_type->byte_size);
     // set map fields
     va_list args;
     va_start(args, map_type->length);
@@ -224,10 +227,10 @@ Element* elmt(int type_index) {
 Element* elmt_fill(Element* elmt, ...) {
     LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)elmt->type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
-    printf("elmt byte_size: %d\n", elmt_type->byte_size);
+    printf("elmt byte_size: %ld\n", elmt_type->byte_size);
     // set attributes
-    int count = elmt_type->length;
-    printf("elmt length: %d\n", count);
+    long count = elmt_type->length;
+    printf("elmt length: %ld\n", count);
     va_list args;
     va_start(args, count);
     set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);

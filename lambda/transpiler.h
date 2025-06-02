@@ -156,6 +156,9 @@ extern TypeInfo type_info[];
 
 #include "lambda.h"
 
+// const_index, type_index - 32-bit, there should not be more than 4G types and consts in a single Lambda runtime
+// list item count, map size - 64-bit, to support large data files
+
 // mapping from data to its owner
 typedef struct DataOwner {
     void *data;
@@ -192,7 +195,7 @@ typedef LambdaTypeString LambdaTypeSymbol;
 typedef struct {
     LambdaType;  // extends LambdaType
     LambdaType* nested;  // nested item type for the array
-    int length;  // no. of items in the array/map
+    long length;  // no. of items in the array/map
 } LambdaTypeArray;
 
 typedef LambdaTypeArray LambdaTypeList;
@@ -200,22 +203,22 @@ typedef LambdaTypeArray LambdaTypeList;
 typedef struct ShapeEntry {
     StrView name;
     LambdaType* type;  // type of the field
-    int byte_offset;  // byte offset of the map field
+    long byte_offset;  // byte offset of the map field
     struct ShapeEntry* next;
 } ShapeEntry;
 
 typedef struct {
     LambdaType;  // extends LambdaType
-    int length;  // no. of items in the map
+    long length;  // no. of items in the map
+    long byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
-    int byte_size;  // byte size of the struct that the map is transpiled to
     ShapeEntry* shape;  // shape of the map
 } LambdaTypeMap;
 
 typedef struct {
     LambdaTypeMap; // extends LambdaTypeMap
     StrView name;  // name of the element
-    int content_length;  // no. of content items
+    long content_length;  // no. of content items
 } LambdaTypeElmt;
 
 typedef struct LambdaTypeParam {

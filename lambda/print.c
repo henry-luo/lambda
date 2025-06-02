@@ -248,7 +248,7 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_MAP) {
             Map *map = (Map*)item;
             LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
-            printf("print map: %p, length: %d\n", map, map_type->length);
+            printf("print map: %p, length: %ld\n", map, map_type->length);
             strbuf_append_char(strbuf, '{');
             print_named_items(strbuf, map_type, map->data);
             strbuf_append_char(strbuf, '}');
@@ -256,12 +256,12 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_ELEMENT) {
             Element *element = (Element*)item;
             LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)element->type;
-            printf("print element, attr len: %d, content len: %d, actual content len: %ld\n", 
+            printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
                 elmt_type->length, elmt_type->content_length, element->length);
             strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
             print_named_items(strbuf, (LambdaTypeMap*)elmt_type, element->data);
             // print content
-            for (int i = 0; i < element->length; i++) {
+            for (long i = 0; i < element->length; i++) {
                 strbuf_append_char(strbuf, ';');
                 print_item(strbuf, element->items[i]);
             }            
@@ -418,7 +418,7 @@ void print_ast_node(AstNode *node, int indent) {
         }        
         break;
     case AST_NODE_LIST:  case AST_NODE_CONTENT:
-        printf("[%s:%s[%d]]\n", node->node_type == AST_NODE_CONTENT ? "content" : "list", 
+        printf("[%s:%s[%ld]]\n", node->node_type == AST_NODE_CONTENT ? "content" : "list", 
             formatType(node->type), ((LambdaTypeList*)node->type)->length);
         AstNode *ld = ((AstListNode*)node)->declare;
         if (!ld) {

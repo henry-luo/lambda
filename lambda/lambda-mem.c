@@ -102,7 +102,7 @@ void check_memory_leak() {
             }
             else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
                 Map *map = (Map*)data;
-                printf("heap entry map: %p, length: %d, ref_cnt: %d\n", map, 
+                printf("heap entry map: %p, length: %ld, ref_cnt: %d\n", map, 
                     ((LambdaTypeMap*)map->type)->length, map->ref_cnt);
             }
         }
@@ -173,7 +173,7 @@ void free_container(Container* cont, bool clear_entry) {
         if (!map->ref_cnt) {
             // free map items based on the shape
             ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
-            printf("freeing map items: %p, length: %d\n", map, ((LambdaTypeMap*)map->type)->length);
+            printf("freeing map items: %p, length: %ld\n", map, ((LambdaTypeMap*)map->type)->length);
             if (field) { free_map_item(field, map->data, clear_entry); }
             if (map->data) free(map->data);
             pool_variable_free(context->heap->pool, cont);
@@ -184,12 +184,12 @@ void free_container(Container* cont, bool clear_entry) {
         if (!elmt->ref_cnt) {
             // free element attrs based on the shape
             ShapeEntry *field = ((LambdaTypeElmt*)elmt->type)->shape;
-            printf("freeing element items: %p, length: %d\n", elmt, ((LambdaTypeElmt*)elmt->type)->length);
+            printf("freeing element items: %p, length: %ld\n", elmt, ((LambdaTypeElmt*)elmt->type)->length);
             if (field) { free_map_item(field, elmt->data, clear_entry); }
             if (elmt->data) free(elmt->data);
             // free content
             printf("freeing element content: %p, length: %ld\n", elmt, elmt->length);
-            for (int j = 0; j < elmt->length; j++) {
+            for (long j = 0; j < elmt->length; j++) {
                 free_item(elmt->items[j], clear_entry);
             }
             if (elmt->items) free(elmt->items);

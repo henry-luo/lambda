@@ -398,7 +398,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
     // let declare first
     AstNode *item = list_node->item;
-    printf("content item cnt:%d,%p\n", type->length, item);
+    printf("content item cnt:%ld,%p\n", type->length, item);
     while (item) {
         printf("content item type:%d\n", item->node_type);
         if (item->node_type == AST_NODE_LET_STAM) {

@@ -84,6 +84,7 @@ typedef struct Array {
     // --------
     Item* items;
     long length;
+    long extra;  // bytes of extra data
     long capacity;
 } Array;
 
@@ -94,6 +95,7 @@ typedef struct ArrayLong {
     // --------
     long* items;
     long length;
+    long extra;  // bytes of extra data
     long capacity;
 } ArrayLong;
 
@@ -109,6 +111,7 @@ typedef struct List {
     // --------
     Item* items;
     long length;
+    long extra;  // bytes of extra data
     long capacity;
 } List;
 
