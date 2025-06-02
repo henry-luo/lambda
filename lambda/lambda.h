@@ -26,11 +26,11 @@ enum TypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
     LMD_TYPE_BOOL,
-    LMD_TYPE_IMP_INT,  // implicit int, 32-bit
-    LMD_TYPE_INT64,  // lambda: explicit int, 64-bit
-    LMD_TYPE_FLOAT,  // lambda: explicit float, 64-bit
+    LMD_TYPE_INT,  // implicit int, store up to 32-bit
+    LMD_TYPE_INT64,  // explicit int, 64-bit
+    LMD_TYPE_FLOAT,  // explicit float, 64-bit
     LMD_TYPE_DECIMAL,
-    LMD_TYPE_NUMBER,  // lambda: explicit number, which includes decimal
+    LMD_TYPE_NUMBER,  // explicit number, which includes decimal
     LMD_TYPE_DTIME,
     LMD_TYPE_STRING,
     LMD_TYPE_SYMBOL,
@@ -136,11 +136,11 @@ Item push_d(double dval);
 Item push_l(long lval);
 
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
-#define ITEM_IMP_INT        ((uint64_t)LMD_TYPE_IMP_INT << 56)
+#define ITEM_INT        ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
-#define i2it(int_val)        (ITEM_IMP_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
+#define i2it(int_val)        (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
 #define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
 #define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
 #define c2it(decimal_ptr)    ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr))

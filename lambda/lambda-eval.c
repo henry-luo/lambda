@@ -190,7 +190,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 *(bool*)field_ptr = va_arg(args, bool);
                 printf("field bool value: %s\n", *(bool*)field_ptr ? "true" : "false");
                 break;                
-            case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:
+            case LMD_TYPE_INT:  case LMD_TYPE_INT64:
                 *(long*)field_ptr = va_arg(args, long);
                 printf("field int value: %ld\n", *(long*)field_ptr);
                 break;
@@ -288,7 +288,7 @@ Item map_get(Map* map, char *key) {
                     return ITEM_NULL;
                 case LMD_TYPE_BOOL:
                     return b2it(*(bool*)field_ptr);
-                case LMD_TYPE_IMP_INT:
+                case LMD_TYPE_INT:
                     return i2it(*(int*)field_ptr);
                 case LMD_TYPE_FLOAT:
                     double dval = *(double*)field_ptr;
@@ -380,7 +380,7 @@ Item add(Context *rt, Item a, Item b) {
         String *result = str_cat(str_a, str_b);
         return s2it(result);
     }
-    else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_IMP_INT) {
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
         return i2it(item_a.long_val + item_b.long_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
@@ -390,10 +390,10 @@ Item add(Context *rt, Item a, Item b) {
         printf("add float: %g + %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return d2it(push_d(*(double*)item_a.pointer + *(double*)item_b.pointer));
     }
-    else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_FLOAT) {
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
         return d2it(push_d((double)item_a.long_val + *(double*)item_b.pointer));
     }
-    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_IMP_INT) {
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
         return d2it(push_d(*(double*)item_a.pointer + (double)item_b.long_val));
     }
     else {
@@ -404,7 +404,7 @@ Item add(Context *rt, Item a, Item b) {
 
 long it2l(Item item) {
     LambdaItem itm = {.item = item};
-    if (itm.type_id == LMD_TYPE_IMP_INT) {
+    if (itm.type_id == LMD_TYPE_INT) {
         return itm.long_val;
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
@@ -420,7 +420,7 @@ long it2l(Item item) {
 
 double it2d(Item item) {
     LambdaItem itm = {.item = item};
-    if (itm.type_id == LMD_TYPE_IMP_INT) {
+    if (itm.type_id == LMD_TYPE_INT) {
         return (double)itm.long_val;
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
@@ -524,8 +524,8 @@ bool is(Item a, Item b) {
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
         return a_item.type_id != LMD_TYPE_ERROR;
-    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
-        return LMD_TYPE_IMP_INT <= a_item.type_id && a_item.type_id <= type_b->type->type_id;
+    case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
+        return LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= type_b->type->type_id;
     default:
         return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
     }
@@ -537,8 +537,8 @@ bool equal(Item a, Item b) {
     LambdaItem b_item = {.item = b};
     if (a_item.type_id != b_item.type_id) {
         // number promotion
-        if (LMD_TYPE_IMP_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
-            LMD_TYPE_IMP_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
+        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+            LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item.item);
             double b_val = it2d(b_item.item);
             return a_val == b_val;
@@ -548,7 +548,7 @@ bool equal(Item a, Item b) {
     if (a_item.type_id == LMD_TYPE_NULL) {
         return true;
     }    
-    else if (a_item.type_id == LMD_TYPE_IMP_INT) {
+    else if (a_item.type_id == LMD_TYPE_INT) {
         return a_item.long_val == b_item.long_val;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
@@ -634,7 +634,7 @@ String* string(Context *rt, Item item) {
         itm.type_id == LMD_TYPE_BINARY || itm.type_id == LMD_TYPE_DTIME) {
         return (String*)itm.pointer;
     }
-    else if (itm.type_id == LMD_TYPE_IMP_INT) {
+    else if (itm.type_id == LMD_TYPE_INT) {
         char buf[32];
         int int_val = (int32_t)itm.long_val;
         snprintf(buf, sizeof(buf), "%d", int_val);

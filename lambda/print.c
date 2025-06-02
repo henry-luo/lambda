@@ -57,7 +57,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "bool");
         break;
-    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:
+    case LMD_TYPE_INT:  case LMD_TYPE_INT64:
         strbuf_append_str(tp->code_buf, "long");
         break;
     case LMD_TYPE_FLOAT:
@@ -74,7 +74,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
         break;
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_IMP_INT) {
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
@@ -108,7 +108,7 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
         case LMD_TYPE_BOOL:
             strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
             break;                    
-        case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:
+        case LMD_TYPE_INT:  case LMD_TYPE_INT64:
             strbuf_append_format(strbuf, "%ld", *(long*)data);
             break;
         case LMD_TYPE_FLOAT:
@@ -151,7 +151,7 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_BOOL) {
             strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
         }
-        else if (type_id == LMD_TYPE_IMP_INT) {
+        else if (type_id == LMD_TYPE_INT) {
             int int_val = (int32_t)ld_item.long_val;
             strbuf_append_format(strbuf, "%d", int_val);
         }
@@ -297,7 +297,7 @@ char* formatType(LambdaType *type) {
         return "ERROR";        
     case LMD_TYPE_BOOL:
         return "bool";
-    case LMD_TYPE_IMP_INT:
+    case LMD_TYPE_INT:
         return "int^";
     case LMD_TYPE_INT64:
         return "int";
@@ -310,7 +310,7 @@ char* formatType(LambdaType *type) {
 
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_IMP_INT) {
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             return "ArrayLong*";
         } else {
             return "Array*";
