@@ -440,7 +440,7 @@ void print_ast_node(AstNode *node, int indent) {
         printf("[map expr:%s]\n", formatType(node->type));
         AstNamedNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
-            print_label(indent + 1, "item:");
+            print_label(indent + 1, "map item:");
             print_ast_node((AstNode*)nm_item, indent + 1);
             nm_item = (AstNamedNode*)nm_item->next;
         }

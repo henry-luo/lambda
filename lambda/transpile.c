@@ -461,7 +461,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         strbuf_append_str(tp->code_buf, "\n list_fill(el,");
         strbuf_append_int(tp->code_buf, type->content_length);
         strbuf_append_char(tp->code_buf, ',');
-        transpile_items(tp, elmt_node->content);
+        transpile_items(tp, ((AstListNode*)elmt_node->content)->item);
         strbuf_append_str(tp->code_buf, ");");
     }
     else if (!item) {
