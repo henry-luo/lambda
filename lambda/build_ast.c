@@ -787,7 +787,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
             byte_offset += type_info[item->type->type_id].byte_size;            
         }
         else if (symbol == SYM_CONTENT) {  // element content
-            ast_node->content = build_content(tp, child);
+            ast_node->content = build_content(tp, child, false);
         }
         else {
             printf("unknown element type %d\n", symbol);
@@ -948,7 +948,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_content(Transpiler* tp, TSNode list_node) {
+AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern) {
     printf("build content\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
@@ -970,7 +970,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node) {
         child = ts_node_next_named_sibling(child);
     }
     printf("end building content item: %p, %d\n", ast_node->item, type->length);
-    if (type->length == 1) { return ast_node->item;}
+    if (flattern && type->length == 1) { return ast_node->item;}
     return (AstNode*)ast_node;
 }
 
@@ -1014,7 +1014,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_element(tp, expr_node);
     }
     else if (symbol == SYM_CONTENT) {
-        return build_content(tp, expr_node);
+        return build_content(tp, expr_node, true);
     }
     else if (symbol == SYM_LIST) {
         return build_list(tp, expr_node);

@@ -16,7 +16,7 @@ g:"hello", h:'world', i:t'2025-05-01', j:b'\xA0FE',
 k:(120, 1e-2), l:[121], m:[true, 124], n:{a:'hello', b:0.5}};
 
 // element
-<elmt>
-<elmt a:123>
+<elmt>; <elmt a:123>; <elmt "text">
 <elmt a:123; "text"; 111>
 <elmt a:123, b:'symbol', c:<d>; "text"; 222; <br>>
+<elmt {a:123}; [456]; ("text", 789)>

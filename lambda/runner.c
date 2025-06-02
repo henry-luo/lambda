@@ -141,11 +141,15 @@ void runner_setup_context(Runner* runner) {
 void runner_cleanup(Runner* runner) {
     printf("runner cleanup\n");
     // free final result
-    print_heap_entries();
-    printf("freeing final result -----------------\n");
-    free_item(runner->context.result, true);
-    // check memory leaks
-    check_memory_leak();
+    if (runner->context.heap) {
+        print_heap_entries();
+        printf("freeing final result -----------------\n");
+        if (runner->context.result) free_item(runner->context.result, true);
+        // check memory leaks
+        check_memory_leak();
+        heap_destroy();
+        if (runner->context.stack) pack_free(runner->context.stack);
+    }
     Transpiler *tp = runner->transpiler;
     if (tp) {
         if (tp->jit_context) jit_cleanup(tp->jit_context);
@@ -155,9 +159,6 @@ void runner_cleanup(Runner* runner) {
         if (tp->parser) ts_parser_delete(tp->parser);    
         free(tp);
     }
-    heap_destroy();
-    if (runner->context.stack) pack_free(runner->context.stack);
-    // if (runner->context.data_owners) hashmap_free(runner->context.data_owners);
 }
 
 Item run_script(Runner *runner, char* source, char* script_path) {
