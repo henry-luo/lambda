@@ -23,7 +23,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_INT64: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_l2it(");
-            LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_str(tp->code_buf, ")");
         }
@@ -36,13 +36,21 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_FLOAT: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_d2it(");
-            LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
-            strbuf_append_str(tp->code_buf, ")");
+            strbuf_append_char(tp->code_buf, ')');
         }
         else {
             strbuf_append_str(tp->code_buf, "push_d(");
             transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        break;
+    case LMD_TYPE_DECIMAL: 
+        if (item->type->is_literal) {
+            strbuf_append_str(tp->code_buf, "const_c2it(");
+            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
+            strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
@@ -52,7 +60,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
         if (item->type->is_literal) {
             strbuf_append_format(tp->code_buf, "const_%c2it(", t);
-            LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
+            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_str(tp->code_buf, ")");
         }

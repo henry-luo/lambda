@@ -65,6 +65,17 @@ int main(void) {
     mpz_clear(b);
     mpz_clear(sum);
     mpz_clear(product);
-        
+
+    mpf_t f;
+    mpf_init(f);
+    mpf_set_str(f, "5e-2", 10);  // This works!
+    gmp_printf("f = %.10Ff\n", f);  // Output: f = 0.0500000000
+
+    mpf_set_str(f, "3.14159", 10); 
+    gmp_printf("f = %.10Ff\n", f);
+
+    mpf_clear(f);
+    printf("size of mpf_t: %zu\n", sizeof(mpf_t));  
+
     return 0;
 }

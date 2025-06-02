@@ -151,6 +151,7 @@ Item push_l(long lval);
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
 #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
+#define const_c2it(index)    c2it((uint64_t)*(rt->consts + index))
 #define const_s2it(index)    s2it((uint64_t)*(rt->consts + index))
 #define const_y2it(index)    y2it((uint64_t)*(rt->consts + index))
 #define const_k2it(index)    k2it((uint64_t)*(rt->consts + index))

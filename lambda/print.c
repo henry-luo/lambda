@@ -188,6 +188,12 @@ void print_item(StrBuf *strbuf, Item item) {
                 strbuf_append_format(strbuf, "%g", num);
             }
         }
+        else if (type_id == LMD_TYPE_DECIMAL) {
+            mpf_t *num = (mpf_t*)ld_item.pointer;
+            char buf[128];
+            gmp_sprintf(buf, "%.Ff", *num);
+            strbuf_append_str(strbuf, buf);
+        }
         else if (type_id == LMD_TYPE_STRING) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the string
@@ -303,6 +309,8 @@ char* formatType(LambdaType *type) {
         return "int";
     case LMD_TYPE_FLOAT:
         return "float";
+    case LMD_TYPE_DECIMAL:
+        return "decimal";
     case LMD_TYPE_NUMBER:
         return "number";
     case LMD_TYPE_STRING:

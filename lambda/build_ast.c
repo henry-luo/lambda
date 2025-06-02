@@ -325,7 +325,7 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
 }
 
 LambdaType* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    LambdaTypeItem *item_type = (LambdaTypeItem *)alloc_type(tp, LMD_TYPE_FLOAT, sizeof(LambdaTypeItem));
+    LambdaTypeFloat *item_type = (LambdaTypeFloat *)alloc_type(tp, LMD_TYPE_FLOAT, sizeof(LambdaTypeFloat));
     if (symbol == SYM_INF) {
         item_type->double_val = INFINITY;
     }
@@ -339,7 +339,20 @@ LambdaType* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
     arraylist_append(tp->const_list, &item_type->double_val);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
-    // ast_node->type = (LambdaType *)item_type;
+    return (LambdaType *)item_type;
+}
+
+LambdaType* build_lit_decimal(Transpiler* tp, TSNode node) {
+    LambdaTypeDecimal *item_type = (LambdaTypeDecimal *)alloc_type(tp, LMD_TYPE_DECIMAL, sizeof(LambdaTypeDecimal));
+    StrView num_sv = ts_node_source(tp, node);
+    char* num_str = strview_to_cstr(&num_sv);
+    num_str[num_sv.length-1] = '\0';  // clear suffix 'n'/'N'
+    mpf_init(item_type->dec_val);
+    mpf_set_str(item_type->dec_val, num_str, 10);
+    arraylist_append(tp->const_list, &item_type->dec_val);
+    item_type->const_index = tp->const_list->length - 1;
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    free(num_str);
     return (LambdaType *)item_type;
 }
 
@@ -361,7 +374,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = &LIT_INT;  // todo: check int value range
     }
     else if (symbol == SYM_DECIMAL) {
-        ast_node->type = &LIT_DECIMAL;  // build_lit_decimal
+        ast_node->type = build_lit_decimal(tp, child);
     }
     else if (symbol == SYM_FLOAT || symbol == SYM_INF || symbol == SYM_NAN) {
         ast_node->type = build_lit_float(tp, child, symbol);

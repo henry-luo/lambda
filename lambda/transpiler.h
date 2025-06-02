@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <math.h>
 #include <tree_sitter/api.h>
+#include <gmp.h>
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/mem-pool/include/mem_pool.h"
@@ -182,12 +183,20 @@ struct Element {
 typedef struct {
     LambdaType;  // extends LambdaType
     int const_index;
-    double double_val;
-} LambdaTypeItem;
+} LambdaTypeConst;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
-    int const_index;
+    LambdaTypeConst;  // extends LambdaTypeConst
+    double double_val;
+} LambdaTypeFloat;
+
+typedef struct {
+    LambdaTypeConst;  // extends LambdaTypeConst
+    mpf_t dec_val;
+} LambdaTypeDecimal;
+
+typedef struct {
+    LambdaTypeConst;  // extends LambdaTypeConst
     String *string;
 } LambdaTypeString;
 
