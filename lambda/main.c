@@ -20,8 +20,8 @@ int main(void) {
     _Static_assert(sizeof(uint64_t) == 8, "uint64_t size == 8 bytes");
     _Static_assert(sizeof(int32_t) == 4, "int32_t size == 4 bytes");
     _Static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
-    _Static_assert(sizeof(Item) == 8, "Item size == 8 bytes");
-    _Static_assert(sizeof(LambdaItem) == 8, "LambdaItem size == 8 bytes");
+    _Static_assert(sizeof(Item) == sizeof(double), "Item size == double size");
+    _Static_assert(sizeof(LambdaItem) == sizeof(Item), "LambdaItem size == Item size");
     LambdaItem itm = {.item = ITEM_ERROR};
     assert(itm.type_id == LMD_TYPE_ERROR);
 

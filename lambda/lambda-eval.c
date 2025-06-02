@@ -4,7 +4,8 @@
 extern __thread Context* context;
 
 #define stack_alloc(size) pack_alloc(context->stack, size)
-#define Malloc malloc 
+#define Malloc malloc
+#define Realloc realloc
 
 Array* array() {
     Array *arr = calloc(1, sizeof(Array));
@@ -17,13 +18,29 @@ Array* array_fill(Array* arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->capacity = count;
+        arr->capacity = arr->length = count;
         arr->items = Malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
             Item item = arr->items[i] = va_arg(args, Item);
             LambdaItem itm = {.item = item};
             switch (itm.type_id) {
             case LMD_TYPE_FLOAT:
+                if (arr->extra + arr->length >= arr->capacity) {
+                    arr->capacity = arr->length + 2*arr->extra + 8;
+                    arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
+                }
+                double* dval = (double*)(arr->items + (arr->length + arr->extra));
+                *dval = *(double*)itm.pointer;  arr->items[i] = d2it(dval);
+                arr->extra++;
+                break;
+            case LMD_TYPE_INT:
+                if (arr->extra + arr->length >= arr->capacity) {
+                    arr->capacity = arr->length + 2*arr->extra + 8;
+                    arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
+                }
+                long* ival = (long*)(arr->items + (arr->length + arr->extra));
+                *ival = *(long*)itm.pointer;  arr->items[i] = l2it(ival);
+                arr->extra++;
                 break;
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
                 String *str = (String*)itm.pointer;
@@ -39,7 +56,6 @@ Array* array_fill(Array* arr, int count, ...) {
                 break;
             }
         }
-        arr->length = count;
         va_end(args);
     }
     entry_end();
@@ -74,6 +90,21 @@ List* list() {
     return list;
 }
 
+void expand_list(List *list) {
+    printf("expand list: %p, len: %ld, extra: %ld, capacity: %ld\n", list, 
+        list->length, list->extra, list->capacity);
+    list->capacity = list->capacity ? list->capacity * 2 : 8;
+    // list items are allocated from C heap, instead of Lambda heap
+    // to consider: could also alloc from directly from Lambda heap without the heap entry
+    // need to profile to see which is faster
+    list->items = Realloc(list->items, list->capacity * sizeof(Item));
+    // copy extra items to the end of the list
+    if (list->extra) {
+        memcpy(list->items + (list->capacity - list->extra), 
+            list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));    
+    }
+}
+
 void list_push(List *list, Item item) {
     if (!item) { return; }  // NULL value
     LambdaItem itm = {.item = item};
@@ -99,20 +130,27 @@ void list_push(List *list, Item item) {
         }
     }
     // store the value in the list
-    if (list->length >= list->capacity) {
-        list->capacity = list->capacity ? list->capacity * 2 : 1;
-        // list items are allocated from C heap, instead of Lambda heap
-        // to consider: could also alloc from directly from Lambda heap without the heap entry
-        // need to profile to see which is faster
-        list->items = realloc(list->items, list->capacity * sizeof(Item));
-    }
+    if (list->length + list->extra >= list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
     // data ownership handling
-    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
-        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
+    switch (itm.type_id) {
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         String *str = (String*)itm.pointer;
         str->ref_cnt++;
+        break;
+    case LMD_TYPE_FLOAT:
+        if (list->extra + list->length >= list->capacity) { expand_list(list); }
+        double* dval = (double*)(list->items + list->capacity - list->extra - 1);
+        *dval = *(double*)itm.pointer;  list->items[list->length-1] = d2it(dval);
+        list->extra++;
+        break;
+    case LMD_TYPE_INT:
+        if (list->extra + list->length >= list->capacity) { expand_list(list); }
+        long* ival = (long*)(list->items + list->capacity - list->extra - 1);
+        *ival = *(long*)itm.pointer;  list->items[list->length-1] = l2it(ival);
+        list->extra++;
+        break;
     }
 }
 

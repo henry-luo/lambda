@@ -11,3 +11,7 @@ arr[0]; arr[1]; [21,22] is array;
 
 let m = {a:10, b:12.5, c:false, d:"hey"}
 m.a; m.b; (m.c, m.d); {a:123} is map;
+
+let lval:int = 1001
+[3.5, 0.9, -1073.9, lval]
+(1, 2, 3, 4, 5, 6, 7, 8, 3.5, lval)
