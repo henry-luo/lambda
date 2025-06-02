@@ -480,7 +480,14 @@ bool is(Item a, Item b) {
     }
     LambdaTypeType *type_b = (LambdaTypeType *)b;
     printf("is type %d, %d\n", a_item.type_id, type_b->type->type_id);
-    return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
+    switch (type_b->type->type_id) {
+    case LMD_TYPE_ANY:
+        return a_item.type_id != LMD_TYPE_ERROR;
+    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
+        return LMD_TYPE_IMP_INT <= a_item.type_id && a_item.type_id <= type_b->type->type_id;
+    default:
+        return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
+    }
 }
 
 bool equal(Item a, Item b) {

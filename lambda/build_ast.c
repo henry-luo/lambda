@@ -185,9 +185,6 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             fn_node->fn = SYSFUNC_STRING;
             fn_node->type = &TYPE_STRING;
         }
-        // else if (strview_eq(&func_name, "char")) {
-        //     ast_node->sys_func = SYSFUNC_CHAR;
-        // }
         else if (strview_equal(&func_name, "symbol")) {
             fn_node->fn = SYSFUNC_SYMBOL;
             fn_node->type = &TYPE_SYMBOL;

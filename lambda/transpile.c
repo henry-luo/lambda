@@ -650,6 +650,8 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
         strbuf_append_str(tp->code_buf, "type_int()");
     } else if (strview_equal(&type_name, "float")) {
         strbuf_append_str(tp->code_buf, "type_float()");
+    } else if (strview_equal(&type_name, "number")) {
+        strbuf_append_str(tp->code_buf, "type_number()");
     } else if (strview_equal(&type_name, "string")) {
         strbuf_append_str(tp->code_buf, "type_string()");
     } else if (strview_equal(&type_name, "symbol")) {

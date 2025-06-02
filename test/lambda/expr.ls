@@ -24,3 +24,5 @@ let d:float = 123
 1+"str"; 1/0; -1/0; 0/0;
 
 (234)  // list with one item
+
+<elmt a:1+2;  4+5;  "hello" + " world";  1+2 is number;  1+2 is int;  3.5/0 is float;>
