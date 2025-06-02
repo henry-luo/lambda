@@ -438,7 +438,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
     else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
-    else if (strview_equal(&op, "**")) { ast_node->op = OPERATOR_POW; }
+    else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_POW; }
     else if (strview_equal(&op, "/")) { ast_node->op = OPERATOR_DIV; }
     else if (strview_equal(&op, "_/")) { ast_node->op = OPERATOR_IDIV; }
     else if (strview_equal(&op, "%")) { ast_node->op = OPERATOR_MOD; }
@@ -449,9 +449,9 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, ">")) { ast_node->op = OPERATOR_GT; }
     else if (strview_equal(&op, ">=")) { ast_node->op = OPERATOR_GE; }
     else if (strview_equal(&op, "to")) { ast_node->op = OPERATOR_TO; }
-    else if (strview_equal(&op, "union")) { ast_node->op = OPERATOR_UNION; }
-    else if (strview_equal(&op, "intersect")) { ast_node->op = OPERATOR_INTERSECT; }
-    else if (strview_equal(&op, "exclude")) { ast_node->op = OPERATOR_EXCLUDE; }
+    else if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_INTERSECT; }
+    else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
     else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
     else { printf("unknown operator: %.*s\n", (int)op.length, op.str); }

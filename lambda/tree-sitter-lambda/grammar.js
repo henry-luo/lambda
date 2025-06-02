@@ -35,21 +35,21 @@ function binary_expr($, in_attr) {
     ['/', 'binary_times'],
     ['_/', 'binary_times'],
     ['%', 'binary_times'],
-    ['**', 'binary_pow', 'right'],
+    ['^', 'binary_pow', 'right'],
     ['==', 'binary_eq'],
     ['!=', 'binary_eq'],
     ...(in_attr ?[]:
-    [['<', 'binary_relation'],
-    ['<=', 'binary_relation'],
-    ['>=', 'binary_relation'],
-    ['>', 'binary_relation']]),
+      [['<', 'binary_relation'],
+      ['<=', 'binary_relation'],
+      ['>=', 'binary_relation'],
+      ['>', 'binary_relation']]),
     ['and', 'logical_and'],
     ['or', 'logical_or'],
     ['to', 'range_to'],
     ['|', 'set_union'],
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.    
+    // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.    
     ['is', 'set_is_in'],
     ['in', 'set_is_in'],
   ].map(([operator, precedence, associativity]) =>

@@ -6,7 +6,7 @@ void run_test_script(Runner *runner, const char *script, StrBuf *strbuf) {
     char path[256] = "test/lambda/";
     strcat(path, script);
     Item ret = run_script_at(runner, path);
-    strbuf_append_format(strbuf, "Script '%s' result: ", script);
+    strbuf_append_format(strbuf, "\nScript '%s' result: ", script);
     print_item(strbuf, ret);
     strbuf_append_str(strbuf, "\n");
     runner_cleanup(runner);
