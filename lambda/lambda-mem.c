@@ -109,6 +109,29 @@ void check_memory_leak() {
     }  
 }
 
+void free_container(Container* cont, bool clear_entry);
+
+void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
+    while (field) {
+        // printf("freeing map field: %.*s, type: %d\n", (int)field->name.length, field->name.str, field->type->type_id);
+        void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
+        if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
+            field->type->type_id == LMD_TYPE_DTIME || field->type->type_id == LMD_TYPE_BINARY) {
+            String *str = *(String**)field_ptr;
+            Item item = s2it(str);
+            free_item(item, clear_entry);
+        }
+        else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
+            field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
+            Container *container = *(Container**)field_ptr;
+            // delink with the container
+            if (container->ref_cnt > 0) container->ref_cnt--;
+            if (!container->ref_cnt) free_container(container, clear_entry);
+        }
+        field = field->next;
+    }
+}
+
 void free_container(Container* cont, bool clear_entry) {
     printf("free container: %p\n", cont);
     assert(cont->ref_cnt == 0);
@@ -145,35 +168,34 @@ void free_container(Container* cont, bool clear_entry) {
             pool_variable_free(context->heap->pool, cont);
         }
     }
-    else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+    else if (type_id == LMD_TYPE_MAP) {
         Map *map = (Map*)cont;
         if (!map->ref_cnt) {
             // free map items based on the shape
             ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
             printf("freeing map items: %p, length: %d\n", map, ((LambdaTypeMap*)map->type)->length);
-            while (field) {
-                // printf("freeing map field: %.*s, type: %d\n", (int)field->name.length, field->name.str, field->type->type_id);
-                void* field_ptr = ((uint8_t*)map->data) + field->byte_offset;
-                if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
-                    field->type->type_id == LMD_TYPE_DTIME || field->type->type_id == LMD_TYPE_BINARY) {
-                    String *str = *(String**)field_ptr;
-                    Item item = s2it(str);
-                    free_item(item, clear_entry);
-                }
-                else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
-                    field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
-                    Container *container = *(Container**)field_ptr;
-                    // delink with the container
-                    if (container->ref_cnt > 0) container->ref_cnt--;
-                    if (!container->ref_cnt) free_container(container, clear_entry);
-                }
-                field = field->next;
-            }
-            printf("freeing map data: %p\n", map);
+            if (field) { free_map_item(field, map->data, clear_entry); }
             if (map->data) free(map->data);
             pool_variable_free(context->heap->pool, cont);
         }
     }
+    else if (type_id == LMD_TYPE_ELEMENT) {
+        Element *elmt = (Element*)cont;
+        if (!elmt->ref_cnt) {
+            // free element attrs based on the shape
+            ShapeEntry *field = ((LambdaTypeElmt*)elmt->type)->shape;
+            printf("freeing element items: %p, length: %d\n", elmt, ((LambdaTypeElmt*)elmt->type)->length);
+            if (field) { free_map_item(field, elmt->data, clear_entry); }
+            if (elmt->data) free(elmt->data);
+            // free content
+            printf("freeing element content: %p, length: %ld\n", elmt, elmt->length);
+            for (int j = 0; j < elmt->length; j++) {
+                free_item(elmt->items[j], clear_entry);
+            }
+            if (elmt->items) free(elmt->items);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }    
 }
 
 void free_item(Item item, bool clear_entry) {

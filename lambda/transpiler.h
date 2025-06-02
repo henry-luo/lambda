@@ -169,12 +169,10 @@ struct Map {
 };
 
 struct Element {
-    Container;  // extends Container
+    List;  // extends List for content
     // attributes
     void* type;  // attr type/shape
     void* data;  // packed data struct of the attrs
-    // content
-    Item* items;  // items should be packed instead of a list
 };
 
 typedef struct {
@@ -217,6 +215,7 @@ typedef struct {
 typedef struct {
     LambdaTypeMap; // extends LambdaTypeMap
     StrView name;  // name of the element
+    int content_length;  // no. of content items
 } LambdaTypeElmt;
 
 typedef struct LambdaTypeParam {
@@ -382,8 +381,8 @@ typedef struct {
 } AstMapNode;
 
 typedef struct {
-    AstNode;  // extends AstNode
-    AstNamedNode *item;  // first item in the map
+    AstMapNode;  // extends AstMapNode
+    AstNode *content;  // first content node
 } AstElementNode;
 
 // aligned with AstNamedNode
@@ -469,6 +468,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_element(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
+AstNode* build_content(Transpiler* tp, TSNode list_node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_node(AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);

@@ -81,6 +81,7 @@ typedef struct Array {
     uint8_t type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
+    // --------
     Item* items;
     long length;
     long capacity;
@@ -90,6 +91,7 @@ typedef struct ArrayLong {
     uint8_t type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
+    // --------
     long* items;
     long length;
     long capacity;
@@ -104,6 +106,7 @@ typedef struct List {
     uint8_t type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
+    // --------
     Item* items;
     long length;
     long capacity;
@@ -115,13 +118,13 @@ void list_push(List *list, Item item);
 Item list_get(List *list, int index);
 
 typedef struct Map Map;
-Map* map();
-Map* map_fill(Map* map, int type_index, ...);
+Map* map(int type_index);
+Map* map_fill(Map* map, ...);
 Item map_get(Map* map, char *key);
 
 typedef struct Element Element;
-Element* elmt();
-Element* elmt_fill(Element *elmt, int type_index, ...);
+Element* elmt(int type_index);
+Element* elmt_fill(Element *elmt, ...);
 
 bool item_true(Item item);
 Item v2it(List *list);

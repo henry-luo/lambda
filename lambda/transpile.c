@@ -327,8 +327,8 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
     strbuf_append_str(tp->code_buf, " ls;})");
 }
 
-void transpile_items(Transpiler* tp, AstArrayNode *array_node) {
-    AstNode *item = array_node->item;  bool is_first = true;
+void transpile_items(Transpiler* tp, AstNode *item) {
+    bool is_first = true;
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_FUNC) { 
@@ -362,7 +362,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
             item = item->next;
         }
     } else {
-        transpile_items(tp, array_node);
+        transpile_items(tp, array_node->item);
         strbuf_append_str(tp->code_buf, ");}");
     }
     strbuf_append_char(tp->code_buf, ')');
@@ -388,12 +388,11 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     strbuf_append_str(tp->code_buf, " list_fill(ls,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
-    transpile_items(tp, (AstArrayNode*)list_node);
+    transpile_items(tp, list_node->item);
     strbuf_append_str(tp->code_buf, ");})");
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
-    printf("transpile content expr\n");
     LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
@@ -419,36 +418,56 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     strbuf_append_str(tp->code_buf, "\n list_fill(ls,");
     strbuf_append_int(tp->code_buf, type->length);
     strbuf_append_char(tp->code_buf, ',');
-    transpile_items(tp, (AstArrayNode*)list_node);
+    transpile_items(tp, list_node->item);
     strbuf_append_str(tp->code_buf, ");})");
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
-    printf("transpile map expr\n");
-    strbuf_append_str(tp->code_buf, "({Map* m = map(); map_fill(m,");
+    strbuf_append_str(tp->code_buf, "({Map* m = map(");
     strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)map_node->type)->type_index);
-    strbuf_append_char(tp->code_buf, ',');
+    strbuf_append_str(tp->code_buf, ");");
     AstNamedNode *item = map_node->item;
-    while (item) {
-        transpile_expr(tp, item->as);
-        if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-        item = (AstNamedNode*)item->next;
+    if (item) {
+        strbuf_append_str(tp->code_buf, "\n map_fill(m,");
+        while (item) {
+            transpile_expr(tp, item->as);
+            if (item->next) { strbuf_append_char(tp->code_buf, ','); }
+            item = (AstNamedNode*)item->next;
+        }
+        strbuf_append_str(tp->code_buf, ");");
     }
-    strbuf_append_str(tp->code_buf, ");})");
+    else {
+        strbuf_append_str(tp->code_buf, "m;");
+    }
+    strbuf_append_str(tp->code_buf, "})");
 }
 
 void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
-    printf("transpile element expr\n");
-    strbuf_append_str(tp->code_buf, "({Element* el=elmt(); elmt_fill(el,");
-    strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)elmt_node->type)->type_index);
-    strbuf_append_char(tp->code_buf, ',');
+    strbuf_append_str(tp->code_buf, "({Element* el=elmt(");
+    LambdaTypeElmt* type = (LambdaTypeElmt*)elmt_node->type;
+    strbuf_append_int(tp->code_buf, type->type_index);
+    strbuf_append_str(tp->code_buf, ");");
     AstNamedNode *item = elmt_node->item;
-    while (item) {
-        transpile_expr(tp, item->as);
-        if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-        item = (AstNamedNode*)item->next;
+    if (item) {
+        strbuf_append_str(tp->code_buf, "\n elmt_fill(el,");
+        while (item) {
+            transpile_expr(tp, item->as);
+            if (item->next) { strbuf_append_char(tp->code_buf, ','); }
+            item = (AstNamedNode*)item->next;
+        }
+        strbuf_append_str(tp->code_buf, ");");
     }
-    strbuf_append_str(tp->code_buf, ");})");
+    if (type->content_length) {
+        strbuf_append_str(tp->code_buf, "\n list_fill(el,");
+        strbuf_append_int(tp->code_buf, type->content_length);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_items(tp, elmt_node->content);
+        strbuf_append_str(tp->code_buf, ");");
+    }
+    else if (!item) {
+        strbuf_append_str(tp->code_buf, "el;");
+    }
+    strbuf_append_str(tp->code_buf, "})");
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {

@@ -10,9 +10,12 @@ b'\64A0FE'; b'\64A0FE gh8='; b'\64A0FE gh=='
 [1, ['symbol', null], 0.5, ("great", "!")]
 
 // map
+{}
 {a:123}; {a:123, b:-456, c:0.5, d:true, e:false, f:null, 
 g:"hello", h:'world', i:t'2025-05-01', j:b'\xA0FE', 
 k:(120, 1e-2), l:[121], m:[true, 124], n:{a:'hello', b:0.5}};
 
 // element
+<elmt>
 <elmt a:123>
+<elmt a:123; "text"; 111>

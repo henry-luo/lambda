@@ -181,20 +181,21 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
     }
 }
 
-Map* map() {
+Map* map(int type_index) {
+    printf("map with type %d\n", type_index);
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
+    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    map->type = map_type;    
     entry_start();
     return map;
 }
 
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
-Map* map_fill(Map* map, int type_index, ...) {
-    printf("map_fill with shape %d\n", type_index);
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
-    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
-    map->type = map_type;
+Map* map_fill(Map* map, ...) {
+    LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
     map->data = calloc(1, map_type->byte_size);
     printf("map byte_size: %d\n", map_type->byte_size);
     // set map fields
@@ -206,19 +207,22 @@ Map* map_fill(Map* map, int type_index, ...) {
     return map;
 }
 
-Element* elmt() {
+Element* elmt(int type_index) {
+    printf("elmt with type %d\n", type_index);
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
-    entry_start();
-    return elmt;
-}
-
-Element* elmt_fill(Element* elmt, int type_index, ...) {
-    printf("elmt_fill with shape %d\n", type_index);
     ArrayList* type_list = (ArrayList*)context->type_list;
     AstElementNode* node = (AstElementNode*)((AstNode*)type_list->data[type_index]);
     LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
     elmt->type = elmt_type;
+    if (elmt_type->length || elmt_type->content_length) {
+        entry_start();
+    }
+    return elmt;
+}
+
+Element* elmt_fill(Element* elmt, ...) {
+    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)elmt->type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
     printf("elmt byte_size: %d\n", elmt_type->byte_size);
     // set attributes
@@ -228,7 +232,6 @@ Element* elmt_fill(Element* elmt, int type_index, ...) {
     va_start(args, count);
     set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);
     va_end(args);
-    entry_end();
     return elmt;
 }
 

@@ -256,9 +256,15 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_ELEMENT) {
             Element *element = (Element*)item;
             LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)element->type;
+            printf("print element, attr len: %d, content len: %d, actual content len: %ld\n", 
+                elmt_type->length, elmt_type->content_length, element->length);
             strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
             print_named_items(strbuf, (LambdaTypeMap*)elmt_type, element->data);
             // print content
+            for (int i = 0; i < element->length; i++) {
+                strbuf_append_char(strbuf, ';');
+                print_item(strbuf, element->items[i]);
+            }            
             strbuf_append_char(strbuf, '>');
         }
         else if (type_id == LMD_TYPE_FUNC) {
@@ -438,6 +444,17 @@ void print_ast_node(AstNode *node, int indent) {
             print_ast_node((AstNode*)nm_item, indent + 1);
             nm_item = (AstNamedNode*)nm_item->next;
         }
+        break;
+    case AST_NODE_ELEMENT:
+        printf("[elmt expr:%s]\n", formatType(node->type));
+        AstElementNode* elmt_node = (AstElementNode*)node;
+        AstNamedNode *elmt_item = elmt_node->item;
+        while (elmt_item) {
+            print_label(indent + 1, "attr:");
+            print_ast_node((AstNode*)elmt_item, indent + 1);
+            elmt_item = (AstNamedNode*)elmt_item->next;
+        }
+        if (elmt_node->content) print_ast_node(elmt_node->content, indent + 1);
         break;
     case AST_NODE_PARAM:
         AstNamedNode* param = (AstNamedNode*)node;

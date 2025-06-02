@@ -787,7 +787,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
             byte_offset += type_info[item->type->type_id].byte_size;            
         }
         else if (symbol == SYM_CONTENT) {  // element content
-            
+            ast_node->content = build_content(tp, child);
         }
         else {
             printf("unknown element type %d\n", symbol);
@@ -798,6 +798,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
     arraylist_append(tp->type_list, ast_node);
     type->type_index = tp->type_list->length - 1;
     type->byte_size = byte_offset;
+    type->content_length = ast_node->content ? ((LambdaTypeList*)ast_node->content->type)->length : 0;
     return (AstNode*)ast_node;
 }
 
