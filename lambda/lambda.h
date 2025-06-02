@@ -26,8 +26,8 @@ enum TypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
     LMD_TYPE_BOOL,
-    LMD_TYPE_IMP_INT,  // implicit int, 56-bit
-    LMD_TYPE_INT,  // lambda: explicit int, 64-bit
+    LMD_TYPE_IMP_INT,  // implicit int, 32-bit
+    LMD_TYPE_INT64,  // lambda: explicit int, 64-bit
     LMD_TYPE_FLOAT,  // lambda: explicit float, 64-bit
     LMD_TYPE_DECIMAL,
     LMD_TYPE_NUMBER,  // lambda: explicit number, which includes decimal
@@ -141,8 +141,9 @@ Item push_l(long lval);
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
 #define i2it(int_val)        (ITEM_IMP_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
-#define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT)<<56) | (uint64_t)(long_ptr))
+#define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
 #define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
+#define c2it(decimal_ptr)    ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr))
 #define s2it(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))

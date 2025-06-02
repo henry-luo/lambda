@@ -24,6 +24,7 @@
 #define SYM_NAN sym_nan
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
+#define SYM_DECIMAL sym_decimal
 #define SYM_STRING sym_string
 #define SYM_SYMBOL sym_symbol
 #define SYM_DATETIME sym_datetime

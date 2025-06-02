@@ -57,7 +57,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "bool");
         break;
-    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:
         strbuf_append_str(tp->code_buf, "long");
         break;
     case LMD_TYPE_FLOAT:
@@ -108,7 +108,7 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
         case LMD_TYPE_BOOL:
             strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
             break;                    
-        case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+        case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:
             strbuf_append_format(strbuf, "%ld", *(long*)data);
             break;
         case LMD_TYPE_FLOAT:
@@ -155,7 +155,7 @@ void print_item(StrBuf *strbuf, Item item) {
             int int_val = (int32_t)ld_item.long_val;
             strbuf_append_format(strbuf, "%d", int_val);
         }
-        else if (type_id == LMD_TYPE_INT) {
+        else if (type_id == LMD_TYPE_INT64) {
             long long_val = *(long*)ld_item.pointer;
             strbuf_append_format(strbuf, "%ld", long_val);
         }
@@ -299,7 +299,7 @@ char* formatType(LambdaType *type) {
         return "bool";
     case LMD_TYPE_IMP_INT:
         return "int^";
-    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
         return "int";
     case LMD_TYPE_FLOAT:
         return "float";

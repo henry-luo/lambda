@@ -20,7 +20,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);
         strbuf_append_char(tp->code_buf, ')');
         break;
-    case LMD_TYPE_INT: 
+    case LMD_TYPE_INT64: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_l2it(");
             LambdaTypeItem *item_type = (LambdaTypeItem*)item->type;
@@ -106,7 +106,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_int(tp->code_buf, str_type->const_index);
                 strbuf_append_char(tp->code_buf, ')');
             }
-            else if (pri_node->type->type_id == LMD_TYPE_IMP_INT || pri_node->type->type_id == LMD_TYPE_INT) {
+            else if (pri_node->type->type_id == LMD_TYPE_IMP_INT || pri_node->type->type_id == LMD_TYPE_INT64) {
                 writeNodeSource(tp, pri_node->node);
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
@@ -186,7 +186,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            else if (bi_node->left->type->type_id == LMD_TYPE_IMP_INT || bi_node->left->type->type_id == LMD_TYPE_INT ||
+            else if (bi_node->left->type->type_id == LMD_TYPE_IMP_INT || bi_node->left->type->type_id == LMD_TYPE_INT64 ||
                 bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
@@ -516,7 +516,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 transpile_expr(tp, arg);
             }
             else if (param_type->type_id == LMD_TYPE_FLOAT) {
-                if ((arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT || 
+                if ((arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT64 || 
                     arg->type->type_id == LMD_TYPE_FLOAT)) {
                     transpile_expr(tp, arg);
                 }
@@ -530,8 +530,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     strbuf_append_str(tp->code_buf, "null");
                 }
             }
-            else if (param_type->type_id == LMD_TYPE_INT) {
-                if (arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT) {
+            else if (param_type->type_id == LMD_TYPE_INT64) {
+                if (arg->type->type_id == LMD_TYPE_IMP_INT || arg->type->type_id == LMD_TYPE_INT64) {
                     transpile_expr(tp, arg);
                 }
                 else if (arg->type->type_id == LMD_TYPE_FLOAT) {

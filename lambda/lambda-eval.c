@@ -33,7 +33,7 @@ Array* array_fill(Array* arr, int count, ...) {
                 *dval = *(double*)itm.pointer;  arr->items[i] = d2it(dval);
                 arr->extra++;
                 break;
-            case LMD_TYPE_INT:
+            case LMD_TYPE_INT64:
                 if (arr->extra + arr->length >= arr->capacity) {
                     arr->capacity = arr->length + 2*arr->extra + 8;
                     arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
@@ -145,7 +145,7 @@ void list_push(List *list, Item item) {
         *dval = *(double*)itm.pointer;  list->items[list->length-1] = d2it(dval);
         list->extra++;
         break;
-    case LMD_TYPE_INT:
+    case LMD_TYPE_INT64:
         if (list->extra + list->length >= list->capacity) { expand_list(list); }
         long* ival = (long*)(list->items + list->capacity - list->extra - 1);
         *ival = *(long*)itm.pointer;  list->items[list->length-1] = l2it(ival);
@@ -190,7 +190,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 *(bool*)field_ptr = va_arg(args, bool);
                 printf("field bool value: %s\n", *(bool*)field_ptr ? "true" : "false");
                 break;                
-            case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:
+            case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:
                 *(long*)field_ptr = va_arg(args, long);
                 printf("field int value: %ld\n", *(long*)field_ptr);
                 break;
@@ -383,7 +383,7 @@ Item add(Context *rt, Item a, Item b) {
     else if (item_a.type_id == LMD_TYPE_IMP_INT && item_b.type_id == LMD_TYPE_IMP_INT) {
         return i2it(item_a.long_val + item_b.long_val);
     }
-    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         return l2it(push_l(*(long*)item_a.pointer + *(long*)item_b.pointer));
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
@@ -407,7 +407,7 @@ long it2l(Item item) {
     if (itm.type_id == LMD_TYPE_IMP_INT) {
         return itm.long_val;
     }
-    else if (itm.type_id == LMD_TYPE_INT) {
+    else if (itm.type_id == LMD_TYPE_INT64) {
         return *(long*)itm.pointer;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
@@ -423,7 +423,7 @@ double it2d(Item item) {
     if (itm.type_id == LMD_TYPE_IMP_INT) {
         return (double)itm.long_val;
     }
-    else if (itm.type_id == LMD_TYPE_INT) {
+    else if (itm.type_id == LMD_TYPE_INT64) {
         return (double)*(long*)itm.pointer;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
@@ -524,7 +524,7 @@ bool is(Item a, Item b) {
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
         return a_item.type_id != LMD_TYPE_ERROR;
-    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
+    case LMD_TYPE_IMP_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
         return LMD_TYPE_IMP_INT <= a_item.type_id && a_item.type_id <= type_b->type->type_id;
     default:
         return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
@@ -551,7 +551,7 @@ bool equal(Item a, Item b) {
     else if (a_item.type_id == LMD_TYPE_IMP_INT) {
         return a_item.long_val == b_item.long_val;
     }
-    else if (a_item.type_id == LMD_TYPE_INT) {
+    else if (a_item.type_id == LMD_TYPE_INT64) {
         return *(long*)a_item.pointer == *(long*)b_item.pointer;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
@@ -644,7 +644,7 @@ String* string(Context *rt, Item item) {
         str->len = len;  str->ref_cnt = 0;
         return (String*)str;
     }
-    else if (itm.type_id == LMD_TYPE_INT) {
+    else if (itm.type_id == LMD_TYPE_INT64) {
         char buf[32];
         long long_val = *(long*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);

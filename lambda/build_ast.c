@@ -4,7 +4,7 @@
 LambdaType TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 LambdaType TYPE_IMP_INT = {.type_id = LMD_TYPE_IMP_INT};
-LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
+LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT64};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
 LambdaType TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
@@ -29,6 +29,7 @@ LambdaType LIT_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1, .is_literal = 1}
 LambdaType LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1, .is_literal = 1};
 LambdaType LIT_IMP_INT = {.type_id = LMD_TYPE_IMP_INT, .is_const = 1, .is_literal = 1};
 LambdaType LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
+LambdaType LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_const = 1, .is_literal = 1};
 LambdaType LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
 LambdaType LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
 
@@ -55,7 +56,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null"},
     [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool"},
     [LMD_TYPE_IMP_INT] = {.byte_size = sizeof(long), .name = "number"},
-    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "int"},
+    [LMD_TYPE_INT64] = {.byte_size = sizeof(long), .name = "int"},
     [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float"},
     [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal"},
     [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number"},
@@ -359,6 +360,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_INT) {
         ast_node->type = &LIT_IMP_INT;
     }
+    else if (symbol == SYM_DECIMAL) {
+        ast_node->type = &LIT_DECIMAL;  // build_lit_decimal
+    }
     else if (symbol == SYM_FLOAT || symbol == SYM_INF || symbol == SYM_NAN) {
         ast_node->type = build_lit_float(tp, child, symbol);
     }
@@ -616,7 +620,7 @@ LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
         type.type_id = LMD_TYPE_ANY;
     }       
     else if (strview_equal(&type_name, "int")) {
-        type.type_id = LMD_TYPE_INT;
+        type.type_id = LMD_TYPE_INT64;
     }
     else if (strview_equal(&type_name, "float")) {
         type.type_id = LMD_TYPE_FLOAT;
