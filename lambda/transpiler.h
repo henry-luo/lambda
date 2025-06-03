@@ -62,6 +62,7 @@
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
 #define SYM_FUNC_EXPR sym_fn_expr
 #define SYM_SYS_FUNC sym_sys_func
+#define SYM_IMPORT_MODULE sym_import_module
 
 #define SYM_COMMENT sym_comment
 
@@ -81,6 +82,8 @@
 #define FIELD_ARGUMENT field_argument
 #define FIELD_OPERATOR field_operator
 #define FIELD_OPERAND field_operand
+#define FIELD_ALIAS field_alias
+#define FIELD_MODULE field_module
 
 typedef enum {
     // unary
@@ -305,6 +308,7 @@ typedef enum AstNodeType {
     AST_NODE_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
+    AST_NODE_IMPORT,
     AST_SCRIPT,
 } AstNodeType;
 
@@ -357,6 +361,13 @@ typedef struct {
     StrView name;
     AstNode *as;
 } AstNamedNode;
+
+typedef struct {
+    AstNode;  // extends AstNode
+    StrView alias;
+    StrView module;
+    bool is_relative;
+} AstImportNode;
 
 typedef struct {
     AstNode;  // extends AstNode

@@ -152,6 +152,7 @@ module.exports = grammar({
     $._unsigned_number,
     $._expression,
     $._attr_expr,
+    $._import_stam,
   ],
 
   precedences: $ => [[
@@ -188,7 +189,15 @@ module.exports = grammar({
   ],
 
   rules: {
-    document: $ => optional($.content),
+    document: $ => optional(choice(
+      seq(
+        prec.left(seq(
+          $._import_stam, repeat(seq(choice(linebreak, ';'), $._import_stam)),
+        )),        
+        optional(seq(choice(linebreak, ';'), $.content))
+      ),
+      $.content
+    )),
 
     _content_item: $ => choice(
       $.if_stam, 
@@ -567,8 +576,22 @@ module.exports = grammar({
     for_stam: $ => seq(
       'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
       '{', field('then', $.content), '}'
-    ),     
+    ),
 
+    relative_name: $ => repeat1(seq(
+      choice('.', '\\'), $.identifier
+    )),
+    absolute_name: $ => seq(
+      $.identifier, repeat(seq(choice('.', '\\'), $.identifier))
+    ),
+    import_module: $ => choice(
+        field('module', choice($.absolute_name, $.relative_name, $.symbol)), 
+        seq(field('alias', $.identifier), ':', 
+          field('module', choice($.absolute_name, $.relative_name, $.symbol)))
+    ),
+    _import_stam: $ => seq(
+      'import', $.import_module, repeat(seq(',', $.import_module)),
+    ),
   },
 });
 

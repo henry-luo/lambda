@@ -37,35 +37,6 @@ int main(void) {
     printf("%s", strbuf->str);
     strbuf_free(strbuf);
 
-    mpz_t a, b, sum, product;
-
-    // Initialize variables
-    mpz_init(a);
-    mpz_init(b);
-    mpz_init(sum);
-    mpz_init(product);
-    
-    mpz_set_str(a, "123456789123456789123456789", 10);  // base 10
-    mpz_set_str(b, "987654321987654321987654321", 10);
-
-    // Compute sum = a + b
-    mpz_add(sum, a, b);
-
-    // Compute product = a * b
-    mpz_mul(product, a, b);
-
-    // Print results
-    gmp_printf("a        = %Zd\n", a);
-    gmp_printf("b        = %Zd\n", b);
-    gmp_printf("Sum      = %Zd\n", sum);
-    gmp_printf("Product  = %Zd\n", product);
-
-    // Clear memory
-    mpz_clear(a);
-    mpz_clear(b);
-    mpz_clear(sum);
-    mpz_clear(product);
-
     mpf_t f;
     mpf_init(f);
     mpf_set_str(f, "5e-2", 10);  // This works!

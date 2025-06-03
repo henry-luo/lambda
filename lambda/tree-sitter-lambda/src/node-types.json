@@ -1,5 +1,20 @@
 [
   {
+    "type": "absolute_name",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "array",
     "named": true,
     "fields": {},
@@ -495,11 +510,15 @@
     "root": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": false,
       "types": [
         {
           "type": "content",
+          "named": true
+        },
+        {
+          "type": "import_module",
           "named": true
         }
       ]
@@ -918,6 +937,45 @@
         "types": [
           {
             "type": "content",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "import",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "import_module",
+    "named": true,
+    "fields": {
+      "alias": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "module": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "absolute_name",
+            "named": true
+          },
+          {
+            "type": "relative_name",
+            "named": true
+          },
+          {
+            "type": "symbol",
             "named": true
           }
         ]
@@ -1390,6 +1448,21 @@
         },
         {
           "type": "true",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "relative_name",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
           "named": true
         }
       ]
@@ -1881,6 +1954,10 @@
     "named": false
   },
   {
+    "type": "\\",
+    "named": false
+  },
+  {
     "type": "]",
     "named": false
   },
@@ -1950,19 +2027,19 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
-  },
-  {
-    "type": "decimal",
     "named": false
   },
   {
     "type": "decimal",
     "named": true
+  },
+  {
+    "type": "decimal",
+    "named": false
   },
   {
     "type": "element",
@@ -1986,11 +2063,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "floor",
@@ -2022,7 +2099,7 @@
   },
   {
     "type": "import",
-    "named": true
+    "named": false
   },
   {
     "type": "in",
@@ -2142,11 +2219,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

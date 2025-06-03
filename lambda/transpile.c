@@ -744,6 +744,9 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_TYPE:
         transpile_base_type(tp, (AstTypeNode*)expr_node);
         break;
+    case AST_NODE_IMPORT:
+        printf("import module\n");
+        break;
     default:
         printf("unknown expression type\n");
         break;
@@ -752,7 +755,6 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 
 void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
-    printf("declare ast node: %d\n", node->node_type);
     switch(node->node_type) {
     case AST_NODE_IDENT:  case AST_NODE_PARAM:
         break;
@@ -853,6 +855,9 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }        
         define_ast_node(tp, func->body);
         break;
+    case AST_NODE_IMPORT:
+        printf("import module\n");
+        break;
     default:
         printf("unknown expression type\n");
         break;
@@ -870,8 +875,11 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
 
     // global evaluation, wrapped inside main()
     strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n return ");
-    AstNode *node = script->child;
-    transpile_box_item(tp, node);
+    child = script->child;
+    while (child) {
+        transpile_box_item(tp, child);
+        child = child->next;
+    }
     strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 

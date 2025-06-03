@@ -104,7 +104,7 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
 
 // compile MIR code to native code
 void* jit_gen_func(MIR_context_t ctx, char *func_name) {
-    printf("loading modules\n");
+    printf("find and load the module for %s\n", func_name);
     MIR_item_t mir_func = NULL;
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {

@@ -109,7 +109,7 @@ main_func_t transpile_script(Transpiler *tp, char* source, char* script_path) {
     printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
     strbuf_free(tp->code_buf);
-    // generate the native code and return the function
+    // generate native code and return the function
     main_func_t main_func = jit_gen_func(tp->jit_context, "main");
     clock_gettime(CLOCK_MONOTONIC, &end);
     printf("JIT compiled %s", script_path);

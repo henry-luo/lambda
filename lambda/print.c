@@ -506,6 +506,11 @@ void print_ast_node(AstNode *node, int indent) {
     case AST_NODE_TYPE:
         printf("[type:%s]\n", formatType(node->type));
         break;
+    case AST_NODE_IMPORT:
+        printf("[import %.*s:%.*s]\n", 
+            (int)((AstImportNode*)node)->alias.length, ((AstImportNode*)node)->alias.str, 
+            (int)((AstImportNode*)node)->module.length, ((AstImportNode*)node)->module.str);
+        break;
     case AST_SCRIPT:
         printf("[script:%s]\n", formatType(node->type));
         AstNode* child = ((AstScript*)node)->child;

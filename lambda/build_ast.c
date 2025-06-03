@@ -988,96 +988,98 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
+    printf("build import module\n");
+    AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
+        tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
+    TSTreeCursor cursor = ts_tree_cursor_new(import_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        if (field_id == FIELD_ALIAS) {
+            StrView alias = ts_node_source(tp, child);
+            ast_node->alias = alias;
+        }
+        else if (field_id == FIELD_MODULE) {
+            StrView module = ts_node_source(tp, child);
+            ast_node->module = module;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
-    if (symbol == SYM_PRIMARY_EXPR) {
+    switch (symbol) {
+    case SYM_PRIMARY_EXPR:
         return build_primary_expr(tp, expr_node);
-    }
-    else if (symbol == SYM_UNARY_EXPR) {
+    case SYM_UNARY_EXPR:
         return build_unary_expr(tp, expr_node);
-    }    
-    else if (symbol == SYM_BINARY_EXPR) {
+    case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
-    }
-    else if (symbol == SYM_LET_STAM || symbol == SYM_TYPE_DEFINE) {
+    case SYM_LET_STAM:
+    case SYM_TYPE_DEFINE:
         return build_let_stam(tp, expr_node);
-    }
-    else if (symbol == SYM_FOR_EXPR) {
+    case SYM_FOR_EXPR:
         return build_for_expr(tp, expr_node);
-    }
-    else if (symbol == SYM_FOR_STAM) {
+    case SYM_FOR_STAM:
         return build_for_expr(tp, expr_node);
-    }    
-    else if (symbol == SYM_IF_EXPR) {
+    case SYM_IF_EXPR:
         return build_if_expr(tp, expr_node);
-    }    
-    else if (symbol == SYM_IF_STAM) {
+    case SYM_IF_STAM:
         return build_if_expr(tp, expr_node);
-    }    
-    else if (symbol == SYM_ASSIGN_EXPR) {
+    case SYM_ASSIGN_EXPR:
         return build_assign_expr(tp, expr_node);
-    }  
-    else if (symbol == SYM_ARRAY) {
+    case SYM_ARRAY:
         return build_array(tp, expr_node);
-    }
-    else if (symbol == SYM_MAP) {
+    case SYM_MAP:
         return build_map(tp, expr_node);
-    }
-    else if (symbol == SYM_ELEMENT) {
+    case SYM_ELEMENT:
         return build_element(tp, expr_node);
-    }
-    else if (symbol == SYM_CONTENT) {
+    case SYM_CONTENT:
         return build_content(tp, expr_node, true);
-    }
-    else if (symbol == SYM_LIST) {
+    case SYM_LIST:
         return build_list(tp, expr_node);
-    }    
-    else if (symbol == SYM_IDENT) {
+    case SYM_IDENT:
         return build_identifier(tp, expr_node);
-    }
-    else if (symbol == SYM_FUNC_STAM) {
+    case SYM_FUNC_STAM:
         return build_func(tp, expr_node, true);
-    }
-    else if (symbol == SYM_FUNC_EXPR_STAM) {
+    case SYM_FUNC_EXPR_STAM:
         return build_func(tp, expr_node, true);
-    }
-    else if (symbol == SYM_FUNC_EXPR) {
+    case SYM_FUNC_EXPR:
         return build_func(tp, expr_node, false);
-    }
-    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
-        symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {
-        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        ast_node->type = build_lit_string(tp, expr_node);
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_TRUE || symbol == SYM_FALSE) {
-        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        ast_node->type = &LIT_BOOL;
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_INT) {
-        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        ast_node->type = &LIT_INT;   // todo: check int value range
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_FLOAT) {
-        AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        ast_node->type = build_lit_float(tp, expr_node, symbol);
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_BASE_TYPE) {
-        AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, expr_node, sizeof(AstTypeNode));
-        ast_node->type = &LIT_TYPE;
-        return (AstNode*)ast_node;
-    }
-    else if (symbol == SYM_TYPE_ANNOTE) {
+    case SYM_STRING:  case SYM_SYMBOL:  case SYM_DATETIME:  case SYM_TIME:  case SYM_BINARY:
+        AstPrimaryNode* s_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        s_node->type = build_lit_string(tp, expr_node);
+        return (AstNode*)s_node;
+    case SYM_TRUE:  case SYM_FALSE:
+        AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        b_node->type = &LIT_BOOL;
+        return (AstNode*)b_node;
+    case SYM_INT:
+        AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        i_node->type = &LIT_INT;   // todo: check int value range
+        return (AstNode*)i_node;
+    case SYM_FLOAT:
+        AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
+        f_node->type = build_lit_float(tp, expr_node, symbol);
+        return (AstNode*)f_node;
+    case SYM_BASE_TYPE:
+        AstTypeNode* t_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, expr_node, sizeof(AstTypeNode));
+        t_node->type = &LIT_TYPE;
+        return (AstNode*)t_node;
+    case SYM_TYPE_ANNOTE:
         return build_type_annote(tp, expr_node);
-    }
-    else if (symbol == SYM_COMMENT) {
+    case SYM_IMPORT_MODULE:
+        return build_import_module(tp, expr_node);
+    case SYM_COMMENT:
         return NULL;
-    }
-    else {
+    default:
         printf("unknown syntax node: %s\n", ts_node_type(expr_node));
         return NULL;
     }
