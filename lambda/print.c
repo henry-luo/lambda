@@ -520,7 +520,7 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     default:
-        printf("unknown expression type\n");
+        printf("unknown expression type!\n");
         break;
     }
 }

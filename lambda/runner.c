@@ -132,7 +132,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
-    transpiler.parser = runtime->parser;
+    transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
     transpile_script(&transpiler, new_script->source, script_path);
     memcpy(new_script, &transpiler, sizeof(Script));
     new_script->main_func = transpiler.main_func;

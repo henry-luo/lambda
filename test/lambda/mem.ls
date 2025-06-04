@@ -1,4 +1,4 @@
-// import .func
+import .func
 
 (123, "hello" + " world", string(123), "a" + "b" is string, string(40.5) is string)
 [123, "hello" + " world", string(123), "a" + "b" is string]

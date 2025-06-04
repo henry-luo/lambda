@@ -461,7 +461,7 @@ module.exports = grammar({
     ),
 
     fn_stam: $ => seq(
-      optional('pub'), // note: pub fn is only allowed at global level
+      optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
@@ -470,7 +470,7 @@ module.exports = grammar({
     ),
 
     fn_expr_stam: $ => seq(
-      optional('pub'), // note: pub fn is only allowed at global level
+      optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type

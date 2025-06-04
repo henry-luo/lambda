@@ -4487,8 +4487,12 @@
           "type": "CHOICE",
           "members": [
             {
-              "type": "STRING",
-              "value": "pub"
+              "type": "FIELD",
+              "name": "pub",
+              "content": {
+                "type": "STRING",
+                "value": "pub"
+              }
             },
             {
               "type": "BLANK"
@@ -4593,8 +4597,12 @@
           "type": "CHOICE",
           "members": [
             {
-              "type": "STRING",
-              "value": "pub"
+              "type": "FIELD",
+              "name": "pub",
+              "content": {
+                "type": "STRING",
+                "value": "pub"
+              }
             },
             {
               "type": "BLANK"

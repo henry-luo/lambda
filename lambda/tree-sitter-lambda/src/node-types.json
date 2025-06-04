@@ -661,6 +661,16 @@
           }
         ]
       },
+      "pub": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "pub",
+            "named": false
+          }
+        ]
+      },
       "type": {
         "multiple": false,
         "required": false,
@@ -704,6 +714,16 @@
           {
             "type": "identifier",
             "named": true
+          }
+        ]
+      },
+      "pub": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "pub",
+            "named": false
           }
         ]
       },

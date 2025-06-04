@@ -759,7 +759,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         printf("import module\n");
         break;
     default:
-        printf("unknown expression type\n");
+        printf("unknown expression type!!!\n");
         break;
     }
 }
@@ -774,7 +774,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     if (!node) { printf("misssing root node\n");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
-    printf("finding content node");
+    printf("finding content node\n");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
@@ -785,6 +785,8 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
+            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name.length, func_node->name.str, 
+                ((LambdaTypeFunc*)func_node->type)->is_public);
             if (((LambdaTypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
                 push_name(tp, (AstNamedNode*)func_node, true);

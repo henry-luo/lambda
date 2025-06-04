@@ -186,8 +186,9 @@ enum ts_field_identifiers {
   field_object = 13,
   field_operand = 14,
   field_operator = 15,
-  field_right = 16,
-  field_then = 17,
-  field_type = 18,
+  field_pub = 16,
+  field_right = 17,
+  field_then = 18,
+  field_type = 19,
 };
 

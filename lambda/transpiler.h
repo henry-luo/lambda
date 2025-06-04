@@ -84,6 +84,7 @@
 #define FIELD_OPERAND field_operand
 #define FIELD_ALIAS field_alias
 #define FIELD_MODULE field_module
+#define FIELD_PUB field_pub
 
 typedef enum {
     // unary

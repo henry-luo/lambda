@@ -905,8 +905,12 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
         is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
-    fn_type->is_anonymous = !is_named;  fn_type->is_public = false;
+    fn_type->is_anonymous = !is_named;  
     
+    // 'pub' flag
+    TSNode pub = ts_node_child_by_field_id(func_node, FIELD_PUB);
+    fn_type->is_public = !ts_node_is_null(pub);
+
     // get the function name
     if (is_named) {
         TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
