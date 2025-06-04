@@ -3,7 +3,7 @@
 
 extern LambdaType TYPE_ANY;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
-void define_func(Transpiler* tp, AstFuncNode *fn_node);
+void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     switch (item->type->type_id) {
@@ -614,13 +614,13 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
 }
 
-void define_func(Transpiler* tp, AstFuncNode *fn_node) {
+void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // use function body type as the return type for the time being
     LambdaType *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
 
     // write the function name, with a prefix '_', so as to diff from built-in functions
-    strbuf_append_str(tp->code_buf, " _");
+    strbuf_append_str(tp->code_buf, as_pointer ? " (*_":" _");
     if (fn_node->name.str) {
         strbuf_append_str_n(tp->code_buf, fn_node->name.str, fn_node->name.length);
     }
@@ -630,6 +630,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node) {
     // add param cnt to support param-based overloading
     strbuf_append_char(tp->code_buf, '_');
     strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)fn_node->type)->param_count);
+    if (as_pointer) strbuf_append_char(tp->code_buf, ')');
 
     strbuf_append_char(tp->code_buf, '(');
     AstNamedNode *param = fn_node->param;
@@ -639,6 +640,9 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node) {
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, param->name.str, param->name.length);
         param = (AstNamedNode*)param->next;
+    }
+    if (as_pointer) {
+        strbuf_append_str(tp->code_buf, ");\n");  return;
     }
     strbuf_append_str(tp->code_buf, "){\n return ");
     transpile_expr(tp, fn_node->body);
@@ -756,24 +760,27 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 }
 
 void define_module_import(Transpiler* tp, AstImportNode *import_node) {
+    printf("define import module\n");
     // import module
-    if (!import_node->script) { return; }
+    if (!import_node->script) { printf("misssing script\n");  return; }
+    printf("script reference: %s\n", import_node->script->reference);
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
-    if (!node) { return; }
+    if (!node) { printf("misssing root node\n");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
+    printf("finding content node");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-    if (!node) { return; }
-    strbuf_append_format(tp->code_buf, "struct mod%d {", import_node->script->index);
+    if (!node) { printf("misssing content node\n");  return; }
+    strbuf_append_format(tp->code_buf, "struct mod%d {\n", import_node->script->index);
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-            // define_func(tp, func_node);
+            if (((LambdaTypeFunc*)func_node->type)->is_public) define_func(tp, func_node, true);
         }
         node = node->next;
     }
@@ -873,7 +880,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }
         break;
     case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
-        define_func(tp, (AstFuncNode*)node);
+        define_func(tp, (AstFuncNode*)node, false);
         AstFuncNode* func = (AstFuncNode*)node;
         AstNode* fn_param = (AstNode*)func->param;
         while (fn_param) {

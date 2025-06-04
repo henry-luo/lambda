@@ -3,15 +3,12 @@
 #include <gmp.h>
 
 void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
-    Runner runner;
-    runner_init(runtime, &runner);
-    char path[256] = "test/lambda/";
-    strcat(path, script);
-    Item ret = run_script_at(&runner, path);
+    char path[256];
+    snprintf(path, sizeof(path), "%s%s", runtime->current_dir, script);
+    Item ret = run_script_at(runtime, path);
     strbuf_append_format(strbuf, "\nScript '%s' result: ", script);
     print_item(strbuf, ret);
     strbuf_append_str(strbuf, "\n");
-    runner_cleanup(&runner);
 }
 
 int main(void) {
@@ -29,6 +26,7 @@ int main(void) {
 
     Runtime runtime;
     runtime_init(&runtime);
+    runtime.current_dir = "test/lambda/";
     StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
     strbuf_append_str(strbuf, "Test result ===============\n");
     run_test_script(&runtime, "value.ls", strbuf);

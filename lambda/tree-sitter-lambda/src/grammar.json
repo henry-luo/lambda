@@ -70,13 +70,8 @@
                           ]
                         },
                         {
-                          "type": "ALIAS",
-                          "content": {
-                            "type": "SYMBOL",
-                            "name": "script_content"
-                          },
-                          "named": true,
-                          "value": "content"
+                          "type": "SYMBOL",
+                          "name": "content"
                         }
                       ]
                     },
@@ -88,13 +83,8 @@
               ]
             },
             {
-              "type": "ALIAS",
-              "content": {
-                "type": "SYMBOL",
-                "name": "script_content"
-              },
-              "named": true,
-              "value": "content"
+              "type": "SYMBOL",
+              "name": "content"
             }
           ]
         },
@@ -252,118 +242,6 @@
             {
               "type": "SYMBOL",
               "name": "_content_item"
-            }
-          ]
-        }
-      ]
-    },
-    "script_content": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "REPEAT",
-          "content": {
-            "type": "CHOICE",
-            "members": [
-              {
-                "type": "SEQ",
-                "members": [
-                  {
-                    "type": "SYMBOL",
-                    "name": "_content_expr"
-                  },
-                  {
-                    "type": "CHOICE",
-                    "members": [
-                      {
-                        "type": "PATTERN",
-                        "value": "\\r\\n|\\n"
-                      },
-                      {
-                        "type": "STRING",
-                        "value": ";"
-                      }
-                    ]
-                  }
-                ]
-              },
-              {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "SYMBOL",
-                    "name": "if_stam"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "for_stam"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "fn_stam"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "pub_fn_stam"
-                  }
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "SEQ",
-              "members": [
-                {
-                  "type": "SYMBOL",
-                  "name": "_content_expr"
-                },
-                {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "CHOICE",
-                      "members": [
-                        {
-                          "type": "PATTERN",
-                          "value": "\\r\\n|\\n"
-                        },
-                        {
-                          "type": "STRING",
-                          "value": ";"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "BLANK"
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "SYMBOL",
-                  "name": "if_stam"
-                },
-                {
-                  "type": "SYMBOL",
-                  "name": "for_stam"
-                },
-                {
-                  "type": "SYMBOL",
-                  "name": "fn_stam"
-                },
-                {
-                  "type": "SYMBOL",
-                  "name": "pub_fn_stam"
-                }
-              ]
             }
           ]
         }
@@ -4606,6 +4484,18 @@
       "type": "SEQ",
       "members": [
         {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "pub"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
           "type": "STRING",
           "value": "fn"
         },
@@ -4696,22 +4586,21 @@
         }
       ]
     },
-    "pub_fn_stam": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "STRING",
-          "value": "pub"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "fn_stam"
-        }
-      ]
-    },
     "fn_expr_stam": {
       "type": "SEQ",
       "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "pub"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
         {
           "type": "STRING",
           "value": "fn"

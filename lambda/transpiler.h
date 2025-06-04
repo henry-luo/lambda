@@ -59,7 +59,6 @@
 #define SYM_TYPE_ANNOTE sym_type_annotation
 
 #define SYM_FUNC_STAM sym_fn_stam
-#define SYM_PUB_FUNC_STAM sym_pub_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
 #define SYM_FUNC_EXPR sym_fn_expr
 #define SYM_SYS_FUNC sym_sys_func
@@ -498,13 +497,14 @@ typedef struct Transpiler {
 } Transpiler;
 
 typedef struct Runner {
-    Transpiler* transpiler;
+    Script* script;
     Context context;  // execution context
 } Runner;
 
 struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
     TSParser* parser;
+    char* current_dir;
 };
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
@@ -516,7 +516,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_element(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
-AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern);
+AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_node(AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
@@ -525,17 +525,17 @@ void writeType(Transpiler* tp, LambdaType *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 
 MIR_context_t jit_init();
-void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, char *file_name);
+void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
 void jit_cleanup(MIR_context_t ctx);
 
 typedef uint64_t Item;
 
-Script* load_script(Runtime *runtime, char* script_path);
+Script* load_script(Runtime *runtime, const char* script_path, const char* source);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_cleanup(Runner* runner);
-Item run_script(Runner *runner, const char* source, char* script_path);
-Item run_script_at(Runner *runner, char* script_path);
+Item run_script(Runtime *runtime, const char* source, char* script_path);
+Item run_script_at(Runtime *runtime, char* script_path);
 void print_item(StrBuf *strbuf, Item item);
 
 void runtime_init(Runtime* runtime);

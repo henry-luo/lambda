@@ -92,7 +92,7 @@ MIR_context_t jit_init() {
 }
 
 // compile C code to MIR
-void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, char *file_name) {
+void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
     ops.message_file = stdout;  ops.verbose_p = 1;  ops.debug_p = 0;
     printf("compiling C code in '%s' to MIR\n", file_name);

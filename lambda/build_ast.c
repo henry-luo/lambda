@@ -801,7 +801,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
             byte_offset += type_info[item->type->type_id].byte_size;            
         }
         else if (symbol == SYM_CONTENT) {  // element content
-            ast_node->content = build_content(tp, child, false);
+            ast_node->content = build_content(tp, child, false, false);
         }
         else {
             printf("unknown element type %d\n", symbol);
@@ -898,13 +898,13 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     return ast_node;
 }
 
-AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_public) {
+AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global) {
     printf("build function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
         is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
-    fn_type->is_anonymous = !is_named;  fn_type->is_public = is_public;
+    fn_type->is_anonymous = !is_named;  fn_type->is_public = false;
     
     // get the function name
     if (is_named) {
@@ -962,7 +962,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_pub
     return (AstNode*)ast_node;
 }
 
-AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern) {
+AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     printf("build content\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
@@ -970,6 +970,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern) {
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
+        // TSSymbol symbol = ts_node_symbol(child);
+        // AstNode* item = symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM ? 
+        //     build_func(tp, child, false, is_global) : build_expr(tp, child);
         AstNode* item = build_expr(tp, child);
         if (item) {
             if (!prev_item) { 
@@ -1013,13 +1016,19 @@ AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
     if (ast_node->module.length) {
         if (ast_node->module.str[0] == '.') {
             // convert relative import to path
+            printf("runtime: %p\n", tp->runtime);
+            printf("runtime dir: %s\n", tp->runtime->current_dir);
             StrBuf *buf = strbuf_new();
-            strbuf_append_str_n(buf, ast_node->module.str+1, ast_node->module.length-1);
-            char* ch = buf->str;
-            while(*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_format(buf, "%s%.*s", tp->runtime->current_dir, 
+                (int)ast_node->module.length - 1, ast_node->module.str + 1);
+            char* ch = buf->str + buf->length - (ast_node->module.length - 1);
+            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
             strbuf_append_str(buf, ".ls");
-            ast_node->script = load_script(tp->runtime, buf->str);
+            ast_node->script = load_script(tp->runtime, buf->str, NULL);
             strbuf_free(buf);
+        }
+        else {
+            printf("module type not supported yet: %.*s\n", (int)ast_node->module.length, ast_node->module.str);
         }
     }
     return (AstNode*)ast_node;
@@ -1055,15 +1064,13 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_ELEMENT:
         return build_element(tp, expr_node);
     case SYM_CONTENT:
-        return build_content(tp, expr_node, true);
+        return build_content(tp, expr_node, true, false);
     case SYM_LIST:
         return build_list(tp, expr_node);
     case SYM_IDENT:
         return build_identifier(tp, expr_node);
     case SYM_FUNC_STAM:
         return build_func(tp, expr_node, true, false);
-    case SYM_PUB_FUNC_STAM:
-        return build_func(tp, expr_node, true, true);
     case SYM_FUNC_EXPR_STAM:
         return build_func(tp, expr_node, true, false);
     case SYM_FUNC_EXPR:  // anonymous function
@@ -1109,6 +1116,8 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     TSNode child = ts_node_named_child(script_node, 0);
     AstNode* prev = NULL;
     while (!ts_node_is_null(child)) {
+        // TSSymbol symbol = ts_node_symbol(child);
+        // AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
         AstNode* ast = build_expr(tp, child);
         if (ast) {
             if (!prev) ast_node->child = ast;

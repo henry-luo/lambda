@@ -37,7 +37,7 @@ void print_time_elapsed(char* label, struct timespec start, struct timespec end)
     printf("%s took %.3f ms\n", label, elapsed_ms);
 }
 
-void transpile_script(Transpiler *tp, const char* source, char* script_path) {
+void transpile_script(Transpiler *tp, const char* source, const char* script_path) {
     if (!source) {
         printf("Error: Source code is NULL\n");
         return; 
@@ -86,7 +86,7 @@ void transpile_script(Transpiler *tp, const char* source, char* script_path) {
     clock_gettime(CLOCK_MONOTONIC, &end);
     print_time_elapsed("building AST", start, end);
     // print the AST for debugging
-    printf("AST: ---------\n");
+    printf("AST: %s ---------\n", tp->reference);
     print_ast_node(tp->ast_root, 0);
 
     // transpile the AST to C code
@@ -112,7 +112,7 @@ void transpile_script(Transpiler *tp, const char* source, char* script_path) {
     print_time_elapsed(":", start, end);
 }
 
-Script* load_script(Runtime *runtime, char* script_path) {
+Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
     printf("loading script: %s\n", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
@@ -126,31 +126,29 @@ Script* load_script(Runtime *runtime, char* script_path) {
     printf("Script %s not found, loading...\n", script_path);
     Script *new_script = (Script*)calloc(1, sizeof(Script));
     new_script->reference = strdup(script_path);
-    new_script->source = read_text_file(script_path);
+    new_script->source = source ? source : read_text_file(script_path);
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
 
-    Transpiler *transpiler = (Transpiler*)calloc(1, sizeof(Transpiler));
-    memcpy(transpiler, new_script, sizeof(Script));
-    transpiler->parser = runtime->parser;
-    transpile_script(transpiler, new_script->source, script_path);
-    memcpy(new_script, transpiler, sizeof(Script));
+    Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
+    memcpy(&transpiler, new_script, sizeof(Script));
+    transpiler.parser = runtime->parser;
+    transpile_script(&transpiler, new_script->source, script_path);
+    memcpy(new_script, &transpiler, sizeof(Script));
+    new_script->main_func = transpiler.main_func;
+    printf("loaded main func: %p\n", new_script->main_func);
     return new_script;
 }
 
 void runner_init(Runtime *runtime, Runner* runner) {
     memset(runner, 0, sizeof(Runner));
-    runner->transpiler = (Transpiler*)malloc(sizeof(Transpiler));
-    memset(runner->transpiler, 0, sizeof(Transpiler));
-    runner->transpiler->parser = runtime->parser;
-    runner->transpiler->runtime = runtime;
 }
 
 void runner_setup_context(Runner* runner) {
     printf("runner setup exec context\n");
-    runner->context.ast_pool = runner->transpiler->ast_pool;
-    runner->context.type_list = runner->transpiler->type_list;
-    runner->context.consts = runner->transpiler->const_list->data;
+    runner->context.ast_pool = runner->script->ast_pool;
+    runner->context.type_list = runner->script->type_list;
+    runner->context.consts = runner->script->const_list->data;
     runner->context.stack = pack_init(16);
     runner->context.result = ITEM_NULL;  // exec result
     context = &runner->context;
@@ -170,34 +168,28 @@ void runner_cleanup(Runner* runner) {
         heap_destroy();
         if (runner->context.stack) pack_free(runner->context.stack);
     }
-    Transpiler *tp = runner->transpiler;
-    if (tp) {
-        if (tp->jit_context) jit_cleanup(tp->jit_context);
-        if (tp->ast_pool) pool_variable_destroy(tp->ast_pool);
-        if (tp->type_list) arraylist_free(tp->type_list);
-        if (tp->syntax_tree) ts_tree_delete(tp->syntax_tree);
-        free(tp);
-    }
 }
 
-Item run_script(Runner *runner, const char* source, char* script_path) {
-    transpile_script(runner->transpiler, source, script_path);
+Item run_script(Runtime *runtime, const char* source, char* script_path) {
+    Runner runner;
+    runner_init(runtime, &runner);
+    runner.script = load_script(runtime, script_path, source);
     // execute the function
     Item result;
-    if (!runner->transpiler->main_func) { 
+    if (!runner.script || !runner.script->main_func) { 
         printf("Error: Failed to compile the function.\n"); 
         result = ITEM_NULL;
     } else {
         printf("Executing JIT compiled code...\n");
-        runner_setup_context(runner);
-        result = context->result = runner->transpiler->main_func(context);
+        runner_setup_context(&runner);
+        result = context->result = runner.script->main_func(context);
+        // runner_cleanup() later
     }
     return result;
 }
 
-Item run_script_at(Runner *runner, char* script_path) {
-    const char* source = (const char*)read_text_file(script_path);
-    return run_script(runner, source, script_path);
+Item run_script_at(Runtime *runtime, char* script_path) {
+    return run_script(runtime, NULL, script_path);
 }
 
 void runtime_init(Runtime* runtime) {
@@ -212,6 +204,10 @@ void runtime_cleanup(Runtime* runtime) {
         for (int i = 0; i < runtime->scripts->length; i++) {
             Script *script = (Script*)runtime->scripts->data[i];
             if (script->source) free((void*)script->source);
+            if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
+            if (script->ast_pool) pool_variable_destroy(script->ast_pool);
+            if (script->type_list) arraylist_free(script->type_list);
+            if (script->jit_context) jit_cleanup(script->jit_context);
             free(script);
         }
         arraylist_free(runtime->scripts);

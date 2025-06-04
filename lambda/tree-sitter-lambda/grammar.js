@@ -125,16 +125,6 @@ function built_in_types(include_null) {
   return include_null ? choice('null', ...types) : choice(...types);
 }
 
-function content_item($, global) {
-  return choice(
-    $.if_stam, 
-    $.for_stam,
-    $.fn_stam,
-    ... (global ? [
-      $.pub_fn_stam,
-    ] : [])
-  );
-}
 module.exports = grammar({
   name: "lambda",
 
@@ -204,9 +194,9 @@ module.exports = grammar({
         prec.left(seq(
           $._import_stam, repeat(seq(choice(linebreak, ';'), $._import_stam)),
         )),        
-        optional(seq( choice(linebreak, ';'), alias($.script_content, $.content) )),
+        optional(seq( choice(linebreak, ';'), $.content )),
       ),
-      alias($.script_content, $.content)
+      $.content
     )),
 
     comment: _ => token(choice(
@@ -218,7 +208,11 @@ module.exports = grammar({
       ),
     )),
 
-    _content_item: $ => content_item($, false),
+    _content_item: $ => choice(
+      $.if_stam, 
+      $.for_stam,
+      $.fn_stam,
+    ),
 
     _content_expr: $ => choice(
       $._attr_expr, 
@@ -238,20 +232,6 @@ module.exports = grammar({
       choice(
         seq($._content_expr, optional(choice(linebreak, ';'))), 
         $._content_item
-      )
-    ),
-
-    script_content: $ => seq(
-      repeat(
-        choice( 
-          seq($._content_expr, choice(linebreak, ';')), 
-          content_item($, true) // global content item
-        )
-      ), 
-      // for last content expr, ';' is optional
-      choice(
-        seq($._content_expr, optional(choice(linebreak, ';'))), 
-        content_item($, true) // global content item
       )
     ),
 
@@ -481,6 +461,7 @@ module.exports = grammar({
     ),
 
     fn_stam: $ => seq(
+      optional('pub'), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
@@ -488,11 +469,8 @@ module.exports = grammar({
       '{', field('body', $.content), '}',
     ),
 
-    pub_fn_stam: $ => seq(
-      'pub', $.fn_stam
-    ),
-
     fn_expr_stam: $ => seq(
+      optional('pub'), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type

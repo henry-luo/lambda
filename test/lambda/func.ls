@@ -1,4 +1,4 @@
-fn factorial(n: float) :float {
+pub fn factorial(n: float) :float {
     if (n == 0.0) 1.0
     else if (n < 0.0) 0.0
     else n * factorial(n - 1.0)
