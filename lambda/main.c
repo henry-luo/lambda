@@ -2,15 +2,16 @@
 #include "transpiler.h"
 #include <gmp.h>
 
-void run_test_script(Runner *runner, const char *script, StrBuf *strbuf) {
-    runner_init(runner);
+void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
+    Runner runner;
+    runner_init(runtime, &runner);
     char path[256] = "test/lambda/";
     strcat(path, script);
-    Item ret = run_script_at(runner, path);
+    Item ret = run_script_at(&runner, path);
     strbuf_append_format(strbuf, "\nScript '%s' result: ", script);
     print_item(strbuf, ret);
     strbuf_append_str(strbuf, "\n");
-    runner_cleanup(runner);
+    runner_cleanup(&runner);
 }
 
 int main(void) {
@@ -26,16 +27,19 @@ int main(void) {
     LambdaItem itm = {.item = ITEM_ERROR};
     assert(itm.type_id == LMD_TYPE_ERROR);
 
-    Runner runner;  StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
+    Runtime runtime;
+    runtime_init(&runtime);
+    StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
     strbuf_append_str(strbuf, "Test result ===============\n");
-    run_test_script(&runner, "value.ls", strbuf);
-    run_test_script(&runner, "expr.ls", strbuf);
-    run_test_script(&runner, "box_unbox.ls", strbuf);
-    run_test_script(&runner, "func.ls", strbuf);
-    run_test_script(&runner, "mem.ls", strbuf);
+    run_test_script(&runtime, "value.ls", strbuf);
+    run_test_script(&runtime, "expr.ls", strbuf);
+    run_test_script(&runtime, "box_unbox.ls", strbuf);
+    run_test_script(&runtime, "func.ls", strbuf);
+    run_test_script(&runtime, "mem.ls", strbuf);
 
     printf("%s", strbuf->str);
     strbuf_free(strbuf);
+    runtime_cleanup(&runtime);
 
     mpf_t f;
     mpf_init(f);

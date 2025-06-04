@@ -898,13 +898,13 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     return ast_node;
 }
 
-AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named) {
+AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_public) {
     printf("build function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
         is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
-    fn_type->is_anonymous = !is_named;
+    fn_type->is_anonymous = !is_named;  fn_type->is_public = is_public;
     
     // get the function name
     if (is_named) {
@@ -1049,11 +1049,13 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_IDENT:
         return build_identifier(tp, expr_node);
     case SYM_FUNC_STAM:
-        return build_func(tp, expr_node, true);
+        return build_func(tp, expr_node, true, false);
+    case SYM_PUB_FUNC_STAM:
+        return build_func(tp, expr_node, true, true);
     case SYM_FUNC_EXPR_STAM:
-        return build_func(tp, expr_node, true);
-    case SYM_FUNC_EXPR:
-        return build_func(tp, expr_node, false);
+        return build_func(tp, expr_node, true, false);
+    case SYM_FUNC_EXPR:  // anonymous function
+        return build_func(tp, expr_node, false, false);
     case SYM_STRING:  case SYM_SYMBOL:  case SYM_DATETIME:  case SYM_TIME:  case SYM_BINARY:
         AstPrimaryNode* s_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         s_node->type = build_lit_string(tp, expr_node);

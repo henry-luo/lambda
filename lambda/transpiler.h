@@ -59,6 +59,7 @@
 #define SYM_TYPE_ANNOTE sym_type_annotation
 
 #define SYM_FUNC_STAM sym_fn_stam
+#define SYM_PUB_FUNC_STAM sym_pub_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
 #define SYM_FUNC_EXPR sym_fn_expr
 #define SYM_SYS_FUNC sym_sys_func
@@ -245,6 +246,7 @@ typedef struct {
     LambdaType *returned;
     int param_count;
     bool is_anonymous;
+    bool is_public;
 } LambdaTypeFunc;
 
 typedef struct {
@@ -464,24 +466,39 @@ typedef union LambdaItem {
 #include <mir-gen.h>
 #include <c2mir.h>
 
-typedef struct {
+typedef Item (*main_func_t)(Context*);
+
+typedef struct Script {
+    const char* reference;  // path (relative to the main script) and name of the script 
     const char* source;
-    TSParser* parser;
     TSTree* syntax_tree;
+    // AST
     VariableMemPool* ast_pool;
     AstNode *ast_root;
     // todo: have a hashmap to speed up name lookup
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
     ArrayList* const_list;  // list of constants
-    StrBuf* code_buf;
+    // each script is JIT compiled its own MIR context
     MIR_context_t jit_context;
+    main_func_t main_func;  // transpiled main function
+} Script;
+
+typedef struct Transpiler {
+    Script;  // extends Script
+    TSParser* parser;
+    StrBuf* code_buf;
 } Transpiler;
 
-typedef struct {
+typedef struct Runner {
     Transpiler* transpiler;
     Context context;  // execution context
 } Runner;
+
+typedef struct {
+    ArrayList* scripts;  // list of (loaded) scripts
+    TSParser* parser;
+} Runtime;
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
@@ -507,10 +524,13 @@ void jit_cleanup(MIR_context_t ctx);
 
 typedef uint64_t Item;
 
-void runner_init(Runner* runner);
+void runner_init(Runtime *runtime, Runner* runner);
 void runner_cleanup(Runner* runner);
-Item run_script(Runner *runner, char* source, char* script_path);
+Item run_script(Runner *runner, const char* source, char* script_path);
 Item run_script_at(Runner *runner, char* script_path);
 void print_item(StrBuf *strbuf, Item item);
+
+void runtime_init(Runtime* runtime);
+void runtime_cleanup(Runtime* runtime);
 
 #pragma clang diagnostic pop

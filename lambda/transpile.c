@@ -864,7 +864,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     }
 }
 
-void transpile_ast_script(Transpiler* tp, AstScript *script) {
+void transpile_ast_to_c(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
     // all (nested) function definitions need to be hoisted to global level
     AstNode* child = script->child;
