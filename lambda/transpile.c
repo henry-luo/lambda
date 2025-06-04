@@ -877,7 +877,9 @@ void transpile_ast_script(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n return ");
     child = script->child;
     while (child) {
-        transpile_box_item(tp, child);
+        if (child->node_type == AST_NODE_CONTENT) {
+            transpile_box_item(tp, child);
+        }
         child = child->next;
     }
     strbuf_append_str(tp->code_buf, ";\n}\n");

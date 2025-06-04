@@ -70,8 +70,13 @@
                           ]
                         },
                         {
-                          "type": "SYMBOL",
-                          "name": "content"
+                          "type": "ALIAS",
+                          "content": {
+                            "type": "SYMBOL",
+                            "name": "script_content"
+                          },
+                          "named": true,
+                          "value": "content"
                         }
                       ]
                     },
@@ -83,8 +88,13 @@
               ]
             },
             {
-              "type": "SYMBOL",
-              "name": "content"
+              "type": "ALIAS",
+              "content": {
+                "type": "SYMBOL",
+                "name": "script_content"
+              },
+              "named": true,
+              "value": "content"
             }
           ]
         },
@@ -92,6 +102,44 @@
           "type": "BLANK"
         }
       ]
+    },
+    "comment": {
+      "type": "TOKEN",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "//"
+              },
+              {
+                "type": "PATTERN",
+                "value": "[^\\r\\n\\u2028\\u2029]*"
+              }
+            ]
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "/*"
+              },
+              {
+                "type": "PATTERN",
+                "value": "[^*]*\\*+([^/*][^*]*\\*+)*"
+              },
+              {
+                "type": "STRING",
+                "value": "/"
+              }
+            ]
+          }
+        ]
+      }
     },
     "_content_item": {
       "type": "CHOICE",
@@ -204,6 +252,118 @@
             {
               "type": "SYMBOL",
               "name": "_content_item"
+            }
+          ]
+        }
+      ]
+    },
+    "script_content": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "_content_expr"
+                  },
+                  {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "PATTERN",
+                        "value": "\\r\\n|\\n"
+                      },
+                      {
+                        "type": "STRING",
+                        "value": ";"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "CHOICE",
+                "members": [
+                  {
+                    "type": "SYMBOL",
+                    "name": "if_stam"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "for_stam"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "fn_stam"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "pub_fn_stam"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "_content_expr"
+                },
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "CHOICE",
+                      "members": [
+                        {
+                          "type": "PATTERN",
+                          "value": "\\r\\n|\\n"
+                        },
+                        {
+                          "type": "STRING",
+                          "value": ";"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "if_stam"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "for_stam"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "fn_stam"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "pub_fn_stam"
+                }
+              ]
             }
           ]
         }
@@ -3308,44 +3468,6 @@
       "type": "STRING",
       "value": "nan"
     },
-    "comment": {
-      "type": "TOKEN",
-      "content": {
-        "type": "CHOICE",
-        "members": [
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "//"
-              },
-              {
-                "type": "PATTERN",
-                "value": "[^\\r\\n\\u2028\\u2029]*"
-              }
-            ]
-          },
-          {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "/*"
-              },
-              {
-                "type": "PATTERN",
-                "value": "[^*]*\\*+([^/*][^*]*\\*+)*"
-              },
-              {
-                "type": "STRING",
-                "value": "/"
-              }
-            ]
-          }
-        ]
-      }
-    },
     "_parenthesized_expr": {
       "type": "SEQ",
       "members": [
@@ -4571,6 +4693,19 @@
         {
           "type": "STRING",
           "value": "}"
+        }
+      ]
+    },
+    "pub_fn_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "pub"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "fn_stam"
         }
       ]
     },

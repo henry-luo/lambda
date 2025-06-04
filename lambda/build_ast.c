@@ -992,6 +992,7 @@ AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
     printf("build import module\n");
     AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
         tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
+        ast_node->type = &TYPE_NULL;
     TSTreeCursor cursor = ts_tree_cursor_new(import_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
     while (has_node) {

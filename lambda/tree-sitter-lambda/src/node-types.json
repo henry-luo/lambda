@@ -494,6 +494,10 @@
           "named": true
         },
         {
+          "type": "pub_fn_stam",
+          "named": true
+        },
+        {
           "type": "type_definition",
           "named": true
         },
@@ -1454,6 +1458,21 @@
     }
   },
   {
+    "type": "pub_fn_stam",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "fn_stam",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "relative_name",
     "named": true,
     "fields": {},
@@ -2182,6 +2201,10 @@
     "named": false
   },
   {
+    "type": "pub",
+    "named": false
+  },
+  {
     "type": "round",
     "named": false
   },
@@ -2219,11 +2242,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
