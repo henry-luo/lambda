@@ -970,10 +970,9 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
-        // TSSymbol symbol = ts_node_symbol(child);
-        // AstNode* item = symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM ? 
-        //     build_func(tp, child, false, is_global) : build_expr(tp, child);
-        AstNode* item = build_expr(tp, child);
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* item = symbol == SYM_FUNC_STAM || symbol == SYM_FUNC_EXPR_STAM ? 
+            build_func(tp, child, true, is_global) : build_expr(tp, child);
         if (item) {
             if (!prev_item) { 
                 ast_node->item = item;
@@ -1116,9 +1115,8 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     TSNode child = ts_node_named_child(script_node, 0);
     AstNode* prev = NULL;
     while (!ts_node_is_null(child)) {
-        // TSSymbol symbol = ts_node_symbol(child);
-        // AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
-        AstNode* ast = build_expr(tp, child);
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
         if (ast) {
             if (!prev) ast_node->child = ast;
             else { prev->next = ast; }
