@@ -372,7 +372,7 @@ String *str_cat(String *left, String *right) {
     return result;
 }
 
-Item add(Context *rt, Item a, Item b) {
+Item add(Item a, Item b) {
     LambdaItem item_a = {.item = a};  LambdaItem item_b = {.item = b};
     // todo: join binary, list, array, map
     if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_STRING) {
@@ -622,7 +622,7 @@ String STR_NULL = {.chars = "null", .len = 4};
 String STR_TRUE = {.chars = "true", .len = 4};
 String STR_FALSE = {.chars = "false", .len = 5};
 
-String* string(Context *rt, Item item) {
+String* string(Item item) {
     LambdaItem itm = {.item = item};
     if (itm.type_id == LMD_TYPE_NULL) {
         return &STR_NULL;
@@ -668,7 +668,7 @@ String* string(Context *rt, Item item) {
     return NULL;
 }
 
-LambdaType* type(Context *rt, Item item) {
+LambdaType* type(Item item) {
     LambdaItem itm = {.item = item};
     LambdaTypeType *type = calloc(1, sizeof(LambdaTypeType) + sizeof(LambdaType)); 
     LambdaType *item_type = (LambdaType *)((uint8_t *)type + sizeof(LambdaTypeType));

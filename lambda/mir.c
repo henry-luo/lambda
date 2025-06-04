@@ -74,12 +74,12 @@ func_obj_t func_list[] = {
 };
 
 void *import_resolver(const char *name) {
-    printf("resolving name: %s\n", name);
+    // printf("resolving name: %s\n", name);
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) 
         if (strcmp(func_list[i].name, name) == 0)
             return func_list[i].func;
-    printf("failed to resolve: %s\n", name);
+    printf("failed to resolve native fn: %s\n", name);
     return NULL;
 }
 

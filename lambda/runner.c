@@ -5,7 +5,7 @@ char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-void transpile_ast_to_c(Transpiler* tp, AstScript *script);
+void transpile_ast(Transpiler* tp, AstScript *script);
 void check_memory_leak();
 void print_heap_entries();
 int dataowner_compare(const void *a, const void *b, void *udata);
@@ -93,7 +93,7 @@ void transpile_script(Transpiler *tp, const char* source, char* script_path) {
     printf("transpiling...\n");
     clock_gettime(CLOCK_MONOTONIC, &start);
     tp->code_buf = strbuf_new_cap(1024);
-    transpile_ast_to_c(tp, (AstScript*)tp->ast_root);
+    transpile_ast(tp, (AstScript*)tp->ast_root);
     clock_gettime(CLOCK_MONOTONIC, &end);
     print_time_elapsed("transpiling", start, end);
 
@@ -113,6 +113,7 @@ void transpile_script(Transpiler *tp, const char* source, char* script_path) {
 }
 
 Script* load_script(Runtime *runtime, char* script_path) {
+    printf("loading script: %s\n", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
@@ -122,17 +123,18 @@ Script* load_script(Runtime *runtime, char* script_path) {
         }
     }
     // script not found, create a new one
+    printf("Script %s not found, loading...\n", script_path);
     Script *new_script = (Script*)calloc(1, sizeof(Script));
     new_script->reference = strdup(script_path);
     new_script->source = read_text_file(script_path);
     arraylist_append(runtime->scripts, new_script);
+    new_script->index = runtime->scripts->length - 1;
 
     Transpiler *transpiler = (Transpiler*)calloc(1, sizeof(Transpiler));
     memcpy(transpiler, new_script, sizeof(Script));
     transpiler->parser = runtime->parser;
     transpile_script(transpiler, new_script->source, script_path);
     memcpy(new_script, transpiler, sizeof(Script));
-
     return new_script;
 }
 
@@ -141,6 +143,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
     runner->transpiler = (Transpiler*)malloc(sizeof(Transpiler));
     memset(runner->transpiler, 0, sizeof(Transpiler));
     runner->transpiler->parser = runtime->parser;
+    runner->transpiler->runtime = runtime;
 }
 
 void runner_setup_context(Runner* runner) {
@@ -200,6 +203,7 @@ Item run_script_at(Runner *runner, char* script_path) {
 void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
     runtime->parser = lambda_parser();
+    runtime->scripts = arraylist_new(16);
 }
 
 void runtime_cleanup(Runtime* runtime) {

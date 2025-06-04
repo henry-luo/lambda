@@ -163,7 +163,7 @@ long it2l(Item item);
 double it2d(Item item);
 
 double pow(double x, double y);
-Item add(Context *rt, Item a, Item b);
+Item add(Item a, Item b);
 String *str_cat(String *left, String *right);
 
 typedef void* (*fn_ptr)();
@@ -201,5 +201,5 @@ LambdaType *type_error();
 
 bool is(Item a, Item b);
 bool in(Item a, Item b);
-String* string(Context *rt, Item item);
-LambdaType* type(Context *rt, Item item);
+String* string(Item item);
+LambdaType* type(Item item);

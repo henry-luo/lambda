@@ -99,6 +99,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             if (ident_node->as->node_type == AST_NODE_FUNC) {
                 strbuf_append_char(tp->code_buf, '_');
                 strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)ident_node->type)->param_count);
+                // todo: add byte offset
             }
         } else { 
             transpile_expr(tp, pri_node->expr);
@@ -215,7 +216,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             return;
         }
         // call runtime add()
-        strbuf_append_str(tp->code_buf, "add(rt,");
+        strbuf_append_str(tp->code_buf, "add(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
@@ -515,7 +516,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     }
 
     // write the params
-    strbuf_append_str(tp->code_buf, "(rt,");
+    strbuf_append_str(tp->code_buf, "(");
     AstNode* arg = call_node->argument;  LambdaTypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
         // boxing based on arg type and fn definition type
@@ -614,25 +615,26 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
 }
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node) {
-    printf("transpile func\n");
     // use function body type as the return type for the time being
     LambdaType *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
+
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, " _");
     if (fn_node->name.str) {
-        printf("fn name: %.*s\n", (int)fn_node->name.length, fn_node->name.str);
         strbuf_append_str_n(tp->code_buf, fn_node->name.str, fn_node->name.length);
     }
-    else { // use byte offset for fn name
+    else { // use byte offset to ensure the name is unique
         strbuf_append_int(tp->code_buf, ts_node_start_byte(fn_node->node));
     }
+    // add param cnt to support param-based overloading
     strbuf_append_char(tp->code_buf, '_');
     strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)fn_node->type)->param_count);
-    strbuf_append_str(tp->code_buf, "(Context *rt");
+
+    strbuf_append_char(tp->code_buf, '(');
     AstNamedNode *param = fn_node->param;
     while (param) {
-        strbuf_append_str(tp->code_buf, ", ");
+        if (param != fn_node->param) strbuf_append_str(tp->code_buf, ",");
         writeType(tp, param->type);
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, param->name.str, param->name.length);
@@ -753,6 +755,31 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
 }
 
+void define_module_import(Transpiler* tp, AstImportNode *import_node) {
+    // import module
+    if (!import_node->script) { return; }
+    // loop through the public functions in the module
+    AstNode *node = import_node->script->ast_root;
+    if (!node) { return; }
+    assert(node->node_type == AST_SCRIPT);
+    node = ((AstScript*)node)->child;
+    while (node) {
+        if (node->node_type == AST_NODE_CONTENT) break;
+        node = node->next;
+    }
+    if (!node) { return; }
+    strbuf_append_format(tp->code_buf, "struct mod%d {", import_node->script->index);
+    node = ((AstListNode*)node)->item;
+    while (node) {
+        if (node->node_type == AST_NODE_FUNC) {
+            AstFuncNode *func_node = (AstFuncNode*)node;
+            // define_func(tp, func_node);
+        }
+        node = node->next;
+    }
+    strbuf_append_str(tp->code_buf, "};\n");
+}
+
 void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
     switch(node->node_type) {
@@ -856,7 +883,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         define_ast_node(tp, func->body);
         break;
     case AST_NODE_IMPORT:
-        printf("import module\n");
+        define_module_import(tp, (AstImportNode*)node);
         break;
     default:
         printf("unknown expression type\n");
@@ -864,7 +891,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     }
 }
 
-void transpile_ast_to_c(Transpiler* tp, AstScript *script) {
+void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
     // all (nested) function definitions need to be hoisted to global level
     AstNode* child = script->child;

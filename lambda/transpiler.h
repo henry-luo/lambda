@@ -184,6 +184,8 @@ struct Element {
     void* data;  // packed data struct of the attrs
 };
 
+typedef struct Script Script;
+
 typedef struct {
     LambdaType;  // extends LambdaType
     int const_index;
@@ -368,6 +370,7 @@ typedef struct {
     AstNode;  // extends AstNode
     StrView alias;
     StrView module;
+    Script* script; // imported script
     bool is_relative;
 } AstImportNode;
 
@@ -420,6 +423,7 @@ typedef struct {
     NameScope *vars;  // vars including params and local variables
 } AstFuncNode;
 
+// root of the AST
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *child;  // first child
@@ -467,9 +471,11 @@ typedef union LambdaItem {
 #include <c2mir.h>
 
 typedef Item (*main_func_t)(Context*);
+typedef struct Runtime Runtime;
 
-typedef struct Script {
-    const char* reference;  // path (relative to the main script) and name of the script 
+struct Script {
+    const char* reference;  // path (relative to the main script) and name of the script
+    int index;  // index of the script in the runtime scripts list
     const char* source;
     TSTree* syntax_tree;
     // AST
@@ -482,12 +488,13 @@ typedef struct Script {
     // each script is JIT compiled its own MIR context
     MIR_context_t jit_context;
     main_func_t main_func;  // transpiled main function
-} Script;
+};
 
 typedef struct Transpiler {
     Script;  // extends Script
     TSParser* parser;
     StrBuf* code_buf;
+    Runtime* runtime;
 } Transpiler;
 
 typedef struct Runner {
@@ -495,10 +502,10 @@ typedef struct Runner {
     Context context;  // execution context
 } Runner;
 
-typedef struct {
+struct Runtime {
     ArrayList* scripts;  // list of (loaded) scripts
     TSParser* parser;
-} Runtime;
+};
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
@@ -524,6 +531,7 @@ void jit_cleanup(MIR_context_t ctx);
 
 typedef uint64_t Item;
 
+Script* load_script(Runtime *runtime, char* script_path);
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_cleanup(Runner* runner);
 Item run_script(Runner *runner, const char* source, char* script_path);

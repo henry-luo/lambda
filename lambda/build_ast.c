@@ -1010,6 +1010,18 @@ AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
+    if (ast_node->module.length) {
+        if (ast_node->module.str[0] == '.') {
+            // convert relative import to path
+            StrBuf *buf = strbuf_new();
+            strbuf_append_str_n(buf, ast_node->module.str+1, ast_node->module.length-1);
+            char* ch = buf->str;
+            while(*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_str(buf, ".ls");
+            ast_node->script = load_script(tp->runtime, buf->str);
+            strbuf_free(buf);
+        }
+    }
     return (AstNode*)ast_node;
 }
 
