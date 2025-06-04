@@ -610,10 +610,11 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     return (AstNode*)ast_node;
 }
 
-void push_name(Transpiler* tp, AstNamedNode* node) {
+void push_name(Transpiler* tp, AstNamedNode* node, bool is_imported) {
     printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
     NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
     entry->name = node->name;  entry->node = (AstNode*)node;
+    entry->is_imported = is_imported;
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
@@ -707,7 +708,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     }
 
     // push the name to the name stack
-    push_name(tp, ast_node);
+    push_name(tp, ast_node, false);
     return (AstNode*)ast_node;
 }
 
@@ -833,7 +834,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
         ((LambdaTypeArray*)ast_node->as->type)->nested : ast_node->as->type;
 
     // push the name to the name stack
-    push_name(tp, ast_node);
+    push_name(tp, ast_node, false);
     return (AstNode*)ast_node;
 }
 
@@ -894,7 +895,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
         *ast_node->type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
     }
 
-    push_name(tp, ast_node);
+    push_name(tp, ast_node, false);
     return ast_node;
 }
 
@@ -912,7 +913,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
         StrView name = ts_node_source(tp, fn_name_node);
         ast_node->name = name;
         // add fn name to current scope
-        push_name(tp, (AstNamedNode*)ast_node);
+        push_name(tp, (AstNamedNode*)ast_node, false);
     }
 
     // build the params

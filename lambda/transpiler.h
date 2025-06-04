@@ -278,6 +278,7 @@ typedef struct NameEntry {
     StrView name;
     AstNode* node;  // AST node that defines the name
     struct NameEntry* next;
+    bool is_imported;
 } NameEntry;
 
 // name_scope
@@ -522,6 +523,7 @@ void print_ast_node(AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void writeNodeSource(Transpiler* tp, TSNode node);
 void writeType(Transpiler* tp, LambdaType *type);
+void push_name(Transpiler* tp, AstNamedNode* node, bool is_imported);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 
 MIR_context_t jit_init();
