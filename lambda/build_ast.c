@@ -278,7 +278,7 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
 
 AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     printf("building identifier\n");
-    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstNamedNode));
+    AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstIdentNode));
 
     // get the identifier name
     StrView var_name = ts_node_source(tp, id_node);
@@ -291,7 +291,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         ast_node->type = &TYPE_ERROR;
     } else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
-        ast_node->as = entry->node;
+        ast_node->entry = entry;
         ast_node->type = entry->node->type;
     }
     return (AstNode*)ast_node;
@@ -610,11 +610,11 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
     return (AstNode*)ast_node;
 }
 
-void push_name(Transpiler* tp, AstNamedNode* node, bool is_imported) {
+void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
     NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
-    entry->name = node->name;  entry->node = (AstNode*)node;
-    entry->is_imported = is_imported;
+    entry->name = node->name;  
+    entry->node = (AstNode*)node;  entry->import = import;
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
     if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
     tp->current_scope->last = entry;
@@ -708,7 +708,7 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     }
 
     // push the name to the name stack
-    push_name(tp, ast_node, false);
+    push_name(tp, ast_node, NULL);
     return (AstNode*)ast_node;
 }
 
@@ -834,7 +834,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
         ((LambdaTypeArray*)ast_node->as->type)->nested : ast_node->as->type;
 
     // push the name to the name stack
-    push_name(tp, ast_node, false);
+    push_name(tp, ast_node, NULL);
     return (AstNode*)ast_node;
 }
 
@@ -895,7 +895,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
         *ast_node->type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
     }
 
-    push_name(tp, ast_node, false);
+    push_name(tp, ast_node, NULL);
     return ast_node;
 }
 
@@ -917,7 +917,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
         StrView name = ts_node_source(tp, fn_name_node);
         ast_node->name = name;
         // add fn name to current scope
-        push_name(tp, (AstNamedNode*)ast_node, false);
+        push_name(tp, (AstNamedNode*)ast_node, NULL);
     }
 
     // build the params
@@ -995,49 +995,6 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     return (AstNode*)ast_node;
 }
 
-AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
-    printf("build import module\n");
-    AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
-        tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
-        ast_node->type = &TYPE_NULL;
-    TSTreeCursor cursor = ts_tree_cursor_new(import_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    while (has_node) {
-        // Check if the current node's field ID matches the target field ID
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        TSNode child = ts_tree_cursor_current_node(&cursor);
-        if (field_id == FIELD_ALIAS) {
-            StrView alias = ts_node_source(tp, child);
-            ast_node->alias = alias;
-        }
-        else if (field_id == FIELD_MODULE) {
-            StrView module = ts_node_source(tp, child);
-            ast_node->module = module;
-        }
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-    if (ast_node->module.length) {
-        if (ast_node->module.str[0] == '.') {
-            // convert relative import to path
-            printf("runtime: %p\n", tp->runtime);
-            printf("runtime dir: %s\n", tp->runtime->current_dir);
-            StrBuf *buf = strbuf_new();
-            strbuf_append_format(buf, "%s%.*s", tp->runtime->current_dir, 
-                (int)ast_node->module.length - 1, ast_node->module.str + 1);
-            char* ch = buf->str + buf->length - (ast_node->module.length - 1);
-            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
-            strbuf_append_str(buf, ".ls");
-            ast_node->script = load_script(tp->runtime, buf->str, NULL);
-            strbuf_free(buf);
-        }
-        else {
-            printf("module type not supported yet: %.*s\n", (int)ast_node->module.length, ast_node->module.str);
-        }
-    }
-    return (AstNode*)ast_node;
-}
-
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
@@ -1102,13 +1059,89 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_TYPE_ANNOTE:
         return build_type_annote(tp, expr_node);
     case SYM_IMPORT_MODULE:
-        return build_import_module(tp, expr_node);
+        // already processed
+        return NULL;
     case SYM_COMMENT:
         return NULL;
     default:
         printf("unknown syntax node: %s\n", ts_node_type(expr_node));
         return NULL;
     }
+}
+
+void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
+    printf("declare import module\n");
+    // import module
+    if (!import_node->script) { printf("misssing script\n");  return; }
+    printf("script reference: %s\n", import_node->script->reference);
+    // loop through the public functions in the module
+    AstNode *node = import_node->script->ast_root;
+    if (!node) { printf("misssing root node\n");  return; }
+    assert(node->node_type == AST_SCRIPT);
+    node = ((AstScript*)node)->child;
+    printf("finding content node\n");
+    while (node) {
+        if (node->node_type == AST_NODE_CONTENT) break;
+        node = node->next;
+    }
+    if (!node) { printf("misssing content node\n");  return; }
+    node = ((AstListNode*)node)->item;
+    while (node) {
+        if (node->node_type == AST_NODE_FUNC) {
+            AstFuncNode *func_node = (AstFuncNode*)node;
+            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name.length, func_node->name.str, 
+                ((LambdaTypeFunc*)func_node->type)->is_public);
+            if (((LambdaTypeFunc*)func_node->type)->is_public) {
+                push_name(tp, (AstNamedNode*)func_node, import_node);
+            }
+        }
+        node = node->next;
+    }
+}
+
+AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
+    printf("build import module\n");
+    AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
+        tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
+        ast_node->type = &TYPE_NULL;
+    TSTreeCursor cursor = ts_tree_cursor_new(import_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        TSNode child = ts_tree_cursor_current_node(&cursor);
+        if (field_id == FIELD_ALIAS) {
+            StrView alias = ts_node_source(tp, child);
+            ast_node->alias = alias;
+        }
+        else if (field_id == FIELD_MODULE) {
+            StrView module = ts_node_source(tp, child);
+            ast_node->module = module;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    if (ast_node->module.length) {
+        if (ast_node->module.str[0] == '.') {
+            // convert relative import to path
+            printf("runtime: %p\n", tp->runtime);
+            printf("runtime dir: %s\n", tp->runtime->current_dir);
+            StrBuf *buf = strbuf_new();
+            strbuf_append_format(buf, "%s%.*s", tp->runtime->current_dir, 
+                (int)ast_node->module.length - 1, ast_node->module.str + 1);
+            char* ch = buf->str + buf->length - (ast_node->module.length - 1);
+            while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
+            strbuf_append_str(buf, ".ls");
+            ast_node->script = load_script(tp->runtime, buf->str, NULL);
+            strbuf_free(buf);
+            // import names/definitions from the modules
+            declare_module_import(tp, ast_node);
+        }
+        else {
+            printf("module type not supported yet: %.*s\n", (int)ast_node->module.length, ast_node->module.str);
+        }
+    }
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
@@ -1121,7 +1154,19 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
     AstNode* prev = NULL;
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
-        AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
+        AstNode* ast = NULL;
+        switch (symbol) {
+        case SYM_IMPORT_MODULE:
+            // import module
+            ast = build_import_module(tp, child);
+            break;
+        case SYM_CONTENT:
+            ast = build_content(tp, child, true, true);
+            break;
+        default:
+            printf("unknown script child: %s\n", ts_node_type(child));
+        }
+        // AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
         if (ast) {
             if (!prev) ast_node->child = ast;
             else { prev->next = ast; }

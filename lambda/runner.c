@@ -37,6 +37,9 @@ void print_time_elapsed(char* label, struct timespec start, struct timespec end)
     printf("%s took %.3f ms\n", label, elapsed_ms);
 }
 
+void find_script_func() {
+
+}
 void init_script_imports(Transpiler *tp, AstScript *script) {
     printf("init imports of script\n");
     AstNode* child = script->child;
@@ -54,6 +57,7 @@ void init_script_imports(Transpiler *tp, AstScript *script) {
                     (int)(import->module.length), import->module.str);
                 return;
             }
+            uint8_t* mod_def = imp->addr;
             // loop through the public functions in the module
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
@@ -77,6 +81,9 @@ void init_script_imports(Transpiler *tp, AstScript *script) {
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
                         printf("got fn: %s, func_ptr: %p\n", func_name->str, fn_ptr);
                         strbuf_free(func_name);
+                        if (!fn_ptr) { printf("misssing content node\n");  return; }
+                        *(main_func_t*) mod_def = (main_func_t)fn_ptr;
+                        mod_def += sizeof(main_func_t);
                     }
                 }
                 node = node->next;

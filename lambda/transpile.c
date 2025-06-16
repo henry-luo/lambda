@@ -92,9 +92,9 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     if (pri_node->expr) {
         printf("transpile_expr\n");
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
-            AstNamedNode* ident_node = (AstNamedNode*)pri_node->expr;
-            if (ident_node->as->node_type == AST_NODE_FUNC) {
-                write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->as);
+            AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
+            if (ident_node->entry->node->node_type == AST_NODE_FUNC) {
+                write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node);
             }
             else {
                 // user var name starts with '_'
@@ -507,9 +507,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             AstPrimaryNode *fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
                 (AstPrimaryNode*)call_node->function:null;
             if (fn_node && fn_node->expr->node_type == AST_NODE_IDENT) {
-                AstNamedNode* ident_node = (AstNamedNode*)fn_node->expr;
-                if (ident_node->as->node_type == AST_NODE_FUNC) {
-                    write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->as);
+                AstIdentNode* ident_node = (AstIdentNode*)fn_node->expr;
+                if (ident_node->entry->node->node_type == AST_NODE_FUNC) {
+                    write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node);
                 } else { // variable
                     strbuf_append_char(tp->code_buf, '_');
                     writeNodeSource(tp, fn_node->expr->node);
@@ -789,7 +789,6 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
                 ((LambdaTypeFunc*)func_node->type)->is_public);
             if (((LambdaTypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
-                push_name(tp, (AstNamedNode*)func_node, true);
             }
         }
         node = node->next;
@@ -801,7 +800,6 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
     switch(node->node_type) {
     case AST_NODE_IDENT:  case AST_NODE_PARAM:
-        break;
         break;
     case AST_NODE_PRIMARY:
         if (((AstPrimaryNode*)node)->expr) {

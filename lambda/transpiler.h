@@ -273,13 +273,14 @@ void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
 
 typedef struct AstNode AstNode;
+typedef struct AstImportNode AstImportNode;
 
 // entry in the name_stack
 typedef struct NameEntry {
     StrView name;
     AstNode* node;  // AST node that defines the name
     struct NameEntry* next;
-    bool is_imported;
+    AstImportNode* import;  // the module that the name is imported from, if any
 } NameEntry;
 
 // name_scope
@@ -361,6 +362,7 @@ typedef struct {
     Operator op;
 } AstBinaryNode;
 
+// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_LOOP, AST_NODE_PARAM
 typedef struct {
     AstNode;  // extends AstNode
     StrView name;
@@ -369,11 +371,17 @@ typedef struct {
 
 typedef struct {
     AstNode;  // extends AstNode
+    StrView name;
+    NameEntry *entry;
+} AstIdentNode;
+
+struct AstImportNode {
+    AstNode;  // extends AstNode
     StrView alias;
     StrView module;
     Script* script; // imported script
     bool is_relative;
-} AstImportNode;
+};
 
 typedef struct {
     AstNode;  // extends AstNode
@@ -526,7 +534,6 @@ void print_ast_node(AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void writeNodeSource(Transpiler* tp, TSNode node);
 void writeType(Transpiler* tp, LambdaType *type);
-void push_name(Transpiler* tp, AstNamedNode* node, bool is_imported);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node);
 
