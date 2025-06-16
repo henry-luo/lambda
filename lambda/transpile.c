@@ -94,7 +94,8 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
             if (ident_node->entry->node->node_type == AST_NODE_FUNC) {
-                write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node);
+                write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node, 
+                    (AstImportNode*)ident_node->entry->import);
             }
             else {
                 // user var name starts with '_'
@@ -479,7 +480,10 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     strbuf_append_str(tp->code_buf, "})");
 }
 
-void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node) {
+void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
+    if (import) {
+        strbuf_append_format(strbuf, "m%d.", import->script->index);
+    }
     strbuf_append_char(strbuf, '_');
     if (fn_node->name.str) {
         strbuf_append_str_n(strbuf, fn_node->name.str, fn_node->name.length);
@@ -509,7 +513,8 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             if (fn_node && fn_node->expr->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident_node = (AstIdentNode*)fn_node->expr;
                 if (ident_node->entry->node->node_type == AST_NODE_FUNC) {
-                    write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node);
+                    write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node, 
+                        (AstImportNode*)ident_node->entry->import);
                 } else { // variable
                     strbuf_append_char(tp->code_buf, '_');
                     writeNodeSource(tp, fn_node->expr->node);
@@ -633,7 +638,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
 
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, as_pointer ? " (*" :" ");
-    write_fn_name(tp->code_buf, fn_node);
+    write_fn_name(tp->code_buf, fn_node, NULL);
     if (as_pointer) strbuf_append_char(tp->code_buf, ')');
 
     // write the params

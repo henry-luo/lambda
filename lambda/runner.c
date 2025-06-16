@@ -77,7 +77,7 @@ void init_script_imports(Transpiler *tp, AstScript *script) {
                         printf("loading fn addr: %.*s from script: %s\n", 
                             (int)func_node->name.length, func_node->name.str, import->script->reference);
                         StrBuf *func_name = strbuf_new();
-                        write_fn_name(func_name, func_node);
+                        write_fn_name(func_name, func_node, NULL);
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
                         printf("got fn: %s, func_ptr: %p\n", func_name->str, fn_ptr);
                         strbuf_free(func_name);

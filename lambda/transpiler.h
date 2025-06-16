@@ -535,7 +535,7 @@ void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void writeNodeSource(Transpiler* tp, TSNode node);
 void writeType(Transpiler* tp, LambdaType *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
-void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node);
+void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 
 MIR_context_t jit_init();
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
