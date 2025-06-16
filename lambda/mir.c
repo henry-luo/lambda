@@ -102,18 +102,55 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
     }
 }
 
+void print_module_item(MIR_item_t mitem) {
+    switch (mitem->item_type) {
+    case MIR_func_item:
+        // Function mitem->addr is the address to call the function
+        printf("module item func: %d %s, addr %p, call addr %p\n", 
+            mitem->item_type, mitem->u.func->name, mitem->addr, mitem->u.func->call_addr);
+        break;
+    case MIR_proto_item:
+        printf("module item proto: %d %s\n", mitem->item_type, mitem->u.proto->name);
+        break;
+    case MIR_import_item:
+        printf("module item import: %d %s\n", mitem->item_type, mitem->u.import_id);
+        break;
+    case MIR_export_item:
+        printf("module item export: %d %s\n", mitem->item_type, mitem->u.export_id);
+        break;
+    case MIR_forward_item:
+        printf("module item forward: %d %s\n", mitem->item_type, mitem->u.forward_id);
+        break;
+    case MIR_data_item:
+        printf("module item data: %d %s\n", mitem->item_type, mitem->u.data->name);
+        break;
+    case MIR_ref_data_item:
+        printf("module item ref_data: %d %s\n", mitem->item_type, mitem->u.ref_data->name);
+        break;
+    case MIR_lref_data_item:
+        printf("module item lref_data: %d %s\n", mitem->item_type, mitem->u.lref_data->name);
+        break;
+    case MIR_expr_data_item:
+        printf("module item expr_data: %d %s\n", mitem->item_type, mitem->u.expr_data->name);
+        break;
+    case MIR_bss_item:
+        printf("module item bss: %d %s\n", mitem->item_type, mitem->u.bss->name);
+        break;
+    }
+}
+
 // compile MIR code to native code
 void* jit_gen_func(MIR_context_t ctx, char *func_name) {
-    printf("find and load the module for %s\n", func_name);
+    printf("finding and to load module: %s\n", func_name);
     MIR_item_t mir_func = NULL;
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
-        MIR_item_t func = DLIST_HEAD (MIR_item_t, module->items);
-        dzlog_debug("Loaded module: %p, items: %p\n", module, (void*)func);
-        for (; func != NULL; func = DLIST_NEXT (MIR_item_t, func)) {
-            if (func->item_type != MIR_func_item) continue;
-            dzlog_debug("got func: %s\n", func->u.func->name);
-            if (strcmp(func->u.func->name, func_name) == 0) mir_func = func;
+        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
+        dzlog_debug("Loaded module: %p, items: %p\n", module, (void*)mitem);
+        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
+            print_module_item(mitem);
+            if (mitem->item_type != MIR_func_item) { continue; }
+            if (strcmp(mitem->u.func->name, func_name) == 0) mir_func = mitem;
         }
         MIR_load_module(ctx, module);
     }
@@ -126,7 +163,41 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
     // link MIR code with external functions
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
     // generate native code
-    return MIR_gen(ctx, mir_func);
+    void* func_ptr =  MIR_gen(ctx, mir_func);
+    printf("generated fn ptr: %p\n", func_ptr);
+    return func_ptr;
+}
+
+MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {
+    printf("finding import module: %s, %p\n", mod_name, ctx);
+    for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
+        module = DLIST_NEXT (MIR_module_t, module)) {
+        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
+        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
+            if (mitem->item_type == MIR_bss_item && strcmp(mitem->u.bss->name, mod_name) == 0) {
+                return mitem;
+            }
+        }
+    }
+    return NULL;
+}
+
+void* find_func(MIR_context_t ctx, const char *fn_name) {
+    printf("finding function: %s, %p\n", fn_name, ctx);
+    for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
+        module = DLIST_NEXT (MIR_module_t, module)) {
+        printf("checking module: %s\n", module->name);
+        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
+        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
+            print_module_item(mitem);
+            if (mitem->item_type == MIR_func_item) {
+                printf("checking fn item: %s\n", mitem->u.func->name);
+                if (strcmp(mitem->u.func->name, fn_name) == 0)
+                    return mitem->addr;
+            }
+        }
+    }
+    return NULL;
 }
 
 void jit_cleanup(MIR_context_t ctx) {

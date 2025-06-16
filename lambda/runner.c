@@ -37,6 +37,55 @@ void print_time_elapsed(char* label, struct timespec start, struct timespec end)
     printf("%s took %.3f ms\n", label, elapsed_ms);
 }
 
+void init_script_imports(Transpiler *tp, AstScript *script) {
+    printf("init imports of script\n");
+    AstNode* child = script->child;
+    while (child) {
+        if (child->node_type == AST_NODE_IMPORT) {
+            AstImportNode* import = (AstImportNode*)child;
+            printf("init import: %.*s\n", (int)(import->module.length), import->module.str);
+            // find the module bss item
+            char buf[256];
+            snprintf(buf, sizeof(buf), "m%d", import->script->index);
+            MIR_item_t imp = find_import(tp->jit_context, buf);
+            printf("imported item: %p\n", imp);
+            if (!imp) {
+                printf("Error: Failed to find import item for module %.*s\n", 
+                    (int)(import->module.length), import->module.str);
+                return;
+            }
+            // loop through the public functions in the module
+            AstNode *node = import->script->ast_root;
+            assert(node->node_type == AST_SCRIPT);
+            node = ((AstScript*)node)->child;
+            printf("finding content node\n");
+            while (node) {
+                if (node->node_type == AST_NODE_CONTENT) break;
+                node = node->next;
+            }
+            if (!node) { printf("misssing content node\n");  return; }
+            node = ((AstListNode*)node)->item;
+            while (node) {
+                if (node->node_type == AST_NODE_FUNC) {
+                    AstFuncNode *func_node = (AstFuncNode*)node;
+                    if (((LambdaTypeFunc*)func_node->type)->is_public) {
+                        // get func addr
+                        printf("loading fn addr: %.*s from script: %s\n", 
+                            (int)func_node->name.length, func_node->name.str, import->script->reference);
+                        StrBuf *func_name = strbuf_new();
+                        write_fn_name(func_name, func_node);
+                        void* fn_ptr = find_func(import->script->jit_context, func_name->str);
+                        printf("got fn: %s, func_ptr: %p\n", func_name->str, fn_ptr);
+                        strbuf_free(func_name);
+                    }
+                }
+                node = node->next;
+            }
+        }
+        child = child->next;
+    }    
+}
+
 void transpile_script(Transpiler *tp, const char* source, const char* script_path) {
     if (!source) {
         printf("Error: Source code is NULL\n");
@@ -108,7 +157,11 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     // generate native code and return the function
     tp->main_func = jit_gen_func(tp->jit_context, "main");
     clock_gettime(CLOCK_MONOTONIC, &end);
+    // init lambda imports
+    init_script_imports(tp, (AstScript*)tp->ast_root);
+
     printf("JIT compiled %s", script_path);
+    printf("jit_context: %p, main_func: %p\n", tp->jit_context, tp->main_func);
     print_time_elapsed(":", start, end);
 }
 

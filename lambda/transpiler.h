@@ -479,6 +479,7 @@ struct Script {
     int index;  // index of the script in the runtime scripts list
     const char* source;
     TSTree* syntax_tree;
+
     // AST
     VariableMemPool* ast_pool;
     AstNode *ast_root;
@@ -486,6 +487,7 @@ struct Script {
     NameScope* current_scope;  // current name scope
     ArrayList* type_list;  // list of types
     ArrayList* const_list;  // list of constants
+
     // each script is JIT compiled its own MIR context
     MIR_context_t jit_context;
     main_func_t main_func;  // transpiled main function
@@ -526,10 +528,13 @@ void writeNodeSource(Transpiler* tp, TSNode node);
 void writeType(Transpiler* tp, LambdaType *type);
 void push_name(Transpiler* tp, AstNamedNode* node, bool is_imported);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
+void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node);
 
 MIR_context_t jit_init();
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
+MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
+void* find_func(MIR_context_t ctx, const char *fn_name);
 void jit_cleanup(MIR_context_t ctx);
 
 typedef uint64_t Item;
