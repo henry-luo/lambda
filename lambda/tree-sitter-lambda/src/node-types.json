@@ -494,6 +494,10 @@
           "named": true
         },
         {
+          "type": "pub_stam",
+          "named": true
+        },
+        {
           "type": "type_definition",
           "named": true
         },
@@ -1474,6 +1478,22 @@
     }
   },
   {
+    "type": "pub_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "relative_name",
     "named": true,
     "fields": {},
@@ -2047,11 +2067,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -2243,11 +2263,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

@@ -161,6 +161,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "pub_stam"
+        },
+        {
+          "type": "SYMBOL",
           "name": "fn_expr_stam"
         },
         {
@@ -5557,6 +5561,43 @@
         {
           "type": "STRING",
           "value": "let"
+        },
+        {
+          "type": "FIELD",
+          "name": "declare",
+          "content": {
+            "type": "SYMBOL",
+            "name": "assign_expr"
+          }
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": ","
+              },
+              {
+                "type": "FIELD",
+                "name": "declare",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "assign_expr"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "pub_stam": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "pub"
         },
         {
           "type": "FIELD",

@@ -51,6 +51,7 @@
 #define SYM_IF_EXPR sym_if_expr
 #define SYM_IF_STAM sym_if_stam
 #define SYM_LET_STAM sym_let_stam
+#define SYM_PUB_STAM sym_pub_stam
 #define SYM_FOR_EXPR sym_for_expr
 #define SYM_FOR_STAM sym_for_stam
 
@@ -306,6 +307,7 @@ typedef enum AstNodeType {
     AST_NODE_IF_EXPR,
     AST_NODE_FOR_EXPR,
     AST_NODE_LET_STAM,
+    AST_NODE_PUB_STAM,
     AST_NODE_FIELD_EXPR,
     AST_NODE_CALL_EXPR,
     AST_NODE_SYS_FUNC,

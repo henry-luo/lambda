@@ -4,9 +4,13 @@ pub fn factorial(n: float) :float {
     else n * factorial(n - 1.0)
 }
 
+pub fn add(a, b) {
+    a + b
+}
+
 fn strcat(a: string, b: string) { a + b }
 
-fn mul(a: float, b: float) :float => a * b
+pub fn mul(a: float, b: float) :float => a * b
 
 factorial(5.0)
 strcat("hello", " world")

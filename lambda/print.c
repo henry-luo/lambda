@@ -380,8 +380,8 @@ void print_ast_node(AstNode *node, int indent) {
             print_ast_node(if_node->otherwise, indent + 1);
         }
         break;
-    case AST_NODE_LET_STAM:
-        printf("[let stam:%s]\n", formatType(node->type));
+    case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
+        printf("[%s stam:%s]\n", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", formatType(node->type));
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             print_label(indent + 1, "declare:");

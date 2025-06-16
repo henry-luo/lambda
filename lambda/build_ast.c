@@ -581,8 +581,9 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_let_stam(Transpiler* tp, TSNode let_node) {
-    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
+AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, 
+        symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
 
     // let can have multiple cond declarations
     TSTreeCursor cursor = ts_tree_cursor_new(let_node);
@@ -1005,9 +1006,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
-    case SYM_LET_STAM:
-    case SYM_TYPE_DEFINE:
-        return build_let_stam(tp, expr_node);
+    case SYM_LET_STAM:  case SYM_PUB_STAM:  case SYM_TYPE_DEFINE:
+        // todo: full type def support 
+        return build_let_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
         return build_for_expr(tp, expr_node);
     case SYM_FOR_STAM:

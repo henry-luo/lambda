@@ -217,6 +217,7 @@ module.exports = grammar({
     _content_expr: $ => choice(
       $._attr_expr, 
       $.let_stam,
+      $.pub_stam,
       $.fn_expr_stam,
       $.type_definition,
     ),    
@@ -554,6 +555,10 @@ module.exports = grammar({
     
     let_stam: $ => seq(
       'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
+    ),
+
+    pub_stam: $ => seq(
+      'pub', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
 
     if_expr: $ => prec.right(seq(

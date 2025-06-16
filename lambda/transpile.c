@@ -341,8 +341,9 @@ void transpile_items(Transpiler* tp, AstNode *item) {
     bool is_first = true;
     while (item) {
         // skip let declaration
-        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_FUNC) { 
-            item = item->next; continue; 
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
+            item->node_type == AST_NODE_FUNC) {
+            item = item->next;  continue;
         }
 
         if (is_first) { is_first = false; } 
@@ -411,7 +412,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     printf("content item cnt:%ld,%p\n", type->length, item);
     while (item) {
         printf("content item type:%d\n", item->node_type);
-        if (item->node_type == AST_NODE_LET_STAM) {
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM) {
             type->length--;
             transpile_let_stam(tp, (AstLetNode*)item);
         }
@@ -751,7 +752,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
-    case AST_NODE_FUNC:  case AST_NODE_LET_STAM:
+    case AST_NODE_FUNC:  case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
         // already transpiled
         break;
     case AST_NODE_FUNC_EXPR:
@@ -826,7 +827,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             define_ast_node(tp, if_node->otherwise);
         }
         break;
-    case AST_NODE_LET_STAM:
+    case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             define_ast_node(tp, declare);
