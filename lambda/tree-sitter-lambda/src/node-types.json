@@ -1123,7 +1123,22 @@
     }
   },
   {
-    "type": "map_item_type",
+    "type": "map_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "map_type_item",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "map_type_item",
     "named": true,
     "fields": {
       "as": {
@@ -1150,21 +1165,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "map_type",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "map_item_type",
-          "named": true
-        }
-      ]
     }
   },
   {

@@ -5016,7 +5016,7 @@
         }
       ]
     },
-    "map_item_type": {
+    "map_type_item": {
       "type": "SEQ",
       "members": [
         {
@@ -5059,7 +5059,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "map_item_type"
+          "name": "map_type_item"
         },
         {
           "type": "REPEAT",
@@ -5081,7 +5081,7 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "map_item_type"
+                "name": "map_type_item"
               }
             ]
           }

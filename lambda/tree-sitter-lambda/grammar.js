@@ -509,12 +509,12 @@ module.exports = grammar({
 
     occurrence: $ => choice('?', '+', '*'),
 
-    map_item_type: $=> seq(
+    map_type_item: $=> seq(
       field('name', choice($.identifier, $.symbol)), ':', field('as', $.type_annotation)
     ),
 
     map_type: $ => seq('{', 
-      $.map_item_type, repeat(seq(choice(linebreak, ';'), $.map_item_type)), '}'
+      $.map_type_item, repeat(seq(choice(linebreak, ';'), $.map_type_item)), '}'
     ),
 
     base_type: $ => built_in_types(true),

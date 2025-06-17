@@ -135,7 +135,7 @@ enum ts_symbol_identifiers {
   sym_fn_expr = 131,
   sym_sys_func = 132,
   sym_occurrence = 133,
-  sym_map_item_type = 134,
+  sym_map_type_item = 134,
   sym_map_type = 135,
   sym_base_type = 136,
   sym__non_null_base_type = 137,
