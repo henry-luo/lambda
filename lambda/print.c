@@ -100,10 +100,8 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
         if (i) strbuf_append_char(strbuf, ',');
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
-            printf("nested map field: %p\n", data);
             Map *nest_map = *(Map**)data;
             LambdaTypeMap *nest_map_type = (LambdaTypeMap*)nest_map->type;
-            printf("print nested map: %p, length: %ld\n", nest_map, nest_map_type->length);
             print_named_items(strbuf, nest_map_type, nest_map->data);
         }
         else {

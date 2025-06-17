@@ -180,8 +180,8 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
     printf("map length: %ld\n", count);
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
-        printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
-            field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
+        // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
+        //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
             LambdaItem itm = {.item = va_arg(args, uint64_t)};
@@ -189,7 +189,6 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 Map* nested_map = (Map*)itm.raw_pointer;
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
-                printf("nested map field %p\n", nested_map);
             } else {
                 printf("expected a map, got type %d\n", itm.type_id );
             }
@@ -261,39 +260,22 @@ Map* map_fill(Map* map, ...) {
     return map;
 }
 
-Element* elmt(int type_index) {
-    printf("elmt with type %d\n", type_index);
-    Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
-    elmt->type_id = LMD_TYPE_ELEMENT;
-    ArrayList* type_list = (ArrayList*)context->type_list;
-    AstElementNode* node = (AstElementNode*)((AstNode*)type_list->data[type_index]);
-    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
-    elmt->type = elmt_type;
-    if (elmt_type->length || elmt_type->content_length) {
-        frame_start();
-    }
-    return elmt;
-}
-
-Element* elmt_fill(Element* elmt, ...) {
-    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)elmt->type;
-    elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
-    printf("elmt byte_size: %ld\n", elmt_type->byte_size);
-    // set attributes
-    long count = elmt_type->length;
-    printf("elmt length: %ld\n", count);
-    va_list args;
-    va_start(args, count);
-    set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);
-    va_end(args);
-    return elmt;
-}
-
-Item map_get(Map* map, char *key) {
-    if (!map || !key) { return ITEM_NULL; }
+Item _map_get(Map* map, char *key, bool *is_found) {
     ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
     while (field) {
+        if (!field->name) { // nested map, skip
+            Map* nested_map = *(Map**)((char*)map->data + field->byte_offset);
+            bool nested_is_found;
+            Item result = _map_get(nested_map, key, &nested_is_found);
+            if (nested_is_found) {
+                *is_found = true;
+                return result;
+            }
+            field = field->next;
+            continue;
+        }
         if (strncmp(field->name->str, key, field->name->length) == 0) {
+            *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
@@ -329,7 +311,42 @@ Item map_get(Map* map, char *key) {
         field = field->next;
     }
     printf("key %s not found\n", key);
+    *is_found = false;
     return ITEM_NULL;
+}
+
+Item map_get(Map* map, char *key) {
+    if (!map || !key) { return ITEM_NULL;}
+    bool is_found;
+    return _map_get(map, key, &is_found);
+}
+
+Element* elmt(int type_index) {
+    printf("elmt with type %d\n", type_index);
+    Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    elmt->type_id = LMD_TYPE_ELEMENT;
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    AstElementNode* node = (AstElementNode*)((AstNode*)type_list->data[type_index]);
+    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
+    elmt->type = elmt_type;
+    if (elmt_type->length || elmt_type->content_length) {
+        frame_start();
+    }
+    return elmt;
+}
+
+Element* elmt_fill(Element* elmt, ...) {
+    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)elmt->type;
+    elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
+    printf("elmt byte_size: %ld\n", elmt_type->byte_size);
+    // set attributes
+    long count = elmt_type->length;
+    printf("elmt length: %ld\n", count);
+    va_list args;
+    va_start(args, count);
+    set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);
+    va_end(args);
+    return elmt;
 }
 
 bool item_true(Item itm) {

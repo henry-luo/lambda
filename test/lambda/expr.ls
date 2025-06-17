@@ -27,4 +27,5 @@ let d:float = 123
 
 <elmt a:1+2;  4+5;  "hello" + " world";  1+2 is number;  1+2 is int;  3.5/0 is float;>
 
-{a:678, {b:123, c:456}, d:789}
+let nested ={a:678, {b:123, c:456}, d:789}
+nested.a; nested.b; nested.c; nested.d;

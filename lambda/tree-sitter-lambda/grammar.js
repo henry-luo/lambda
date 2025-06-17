@@ -256,7 +256,7 @@ module.exports = grammar({
       ':',
       field('as', $._expression),
     ),
-    
+
     map: $ => seq(
       '{', comma_sep(choice($.pair, $._expression)), '}',
     ),
@@ -273,6 +273,7 @@ module.exports = grammar({
       ...binary_expr($, true),
     ),
 
+    // expr excluding comparison exprs
     _attr_expr: $ => prec.left(choice(
       $.primary_expr,
       $.unary_expr,
