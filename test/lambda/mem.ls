@@ -1,6 +1,6 @@
 import .func
 
-pub PI = 3.14159
+pub PI = 3.1415926
 
 (123, "hello" + " world", string(123), "a" + "b" is string, string(40.5) is string)
 [123, "hello" + " world", string(123), "a" + "b" is string]
@@ -30,3 +30,4 @@ add(10, 2.5)
 mul(0.5, 7)
 PI
 pi
+(PI >= pi)
