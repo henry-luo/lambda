@@ -763,11 +763,8 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
             printf("invalid map item type %d, should be map or any\n", item->type->type_id);
         }
         shape_entry->byte_offset = byte_offset;
-        if (!prev_entry) {
-            type->shape = shape_entry;
-        } else {
-            prev_entry->next = shape_entry;
-        }
+        if (!prev_entry) { type->shape = shape_entry; } 
+        else { prev_entry->next = shape_entry; }
         prev_entry = shape_entry;
 
         type->length++;
@@ -789,38 +786,35 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
     ast_node->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(elmt_node, 0);
-    AstNamedNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
         if (symbol == SYM_IDENT) {  // element name
             StrView name = ts_node_source(tp, child);
             type->name = name;
         }
-        else if (symbol == SYM_ATTR) {  // attrs
-            AstNamedNode* item = build_key_expr(tp, child);
-            if (!prev_item) { ast_node->item = (AstNode*)item; } 
-            else { prev_item->next = (AstNode*)item; }
+        else if (symbol == SYM_CONTENT) {  // element content
+            ast_node->content = build_content(tp, child, false, false);
+        }        
+        else {  // attrs
+            AstNode* item = (symbol == SYM_ATTR) ? build_key_expr(tp, child) : build_expr(tp, child);
+            if (!prev_item) { ast_node->item = item; } 
+            else { prev_item->next = item; }
             prev_item = item;
 
             ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
-            shape_entry->name = &item->name;
+            shape_entry->name = (symbol == SYM_ATTR) ? &((AstNamedNode*)item)->name : NULL;
             shape_entry->type = item->type;
+            if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
+                printf("invalid map item type %d, should be map or any\n", item->type->type_id);
+            }            
             shape_entry->byte_offset = byte_offset;
-            if (!prev_entry) {
-                type->shape = shape_entry;
-            } else {
-                prev_entry->next = shape_entry;
-            }
+            if (!prev_entry) { type->shape = shape_entry; } 
+            else { prev_entry->next = shape_entry; }
             prev_entry = shape_entry;
 
             type->length++;
-            byte_offset += type_info[item->type->type_id].byte_size;            
-        }
-        else if (symbol == SYM_CONTENT) {  // element content
-            ast_node->content = build_content(tp, child, false, false);
-        }
-        else {
-            printf("unknown element type %d\n", symbol);
+            byte_offset += (symbol == SYM_ATTR) ? type_info[item->type->type_id].byte_size : sizeof(void*);
         }
         child = ts_node_next_named_sibling(child);
     }

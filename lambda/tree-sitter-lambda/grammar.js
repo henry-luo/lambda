@@ -284,17 +284,19 @@ module.exports = grammar({
     )),
 
     attr: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)),
-      ':',
-      field('as', $._attr_expr),
+      field('name', choice($.string, $.symbol, $.identifier)), 
+      ':', field('as', $._attr_expr)
     ),
 
     element: $ => seq('<', $.identifier,
       choice(
-        seq($.attr, repeat(seq(',', $.attr)), optional(seq(choice(linebreak, ';'), $.content))),
+        seq(choice($.attr, seq('&', $._attr_expr)), 
+          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
+          optional(seq(choice(linebreak, ';'), $.content))
+        ),
         optional($.content)
-      ),
-    '>'),
+      ),'>'
+    ),
 
     // no empty strings under Mark/Lambda
     string: $ => seq('"', $._string_content, '"'),

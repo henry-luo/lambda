@@ -485,7 +485,11 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     if (item) {
         strbuf_append_str(tp->code_buf, "\n elmt_fill(el,");
         while (item) {
-            transpile_expr(tp, ((AstNamedNode*)item)->as);
+            if (item->node_type == AST_NODE_KEY_EXPR) {
+                transpile_expr(tp, ((AstNamedNode*)item)->as);
+            } else {
+                transpile_box_item(tp, item);
+            }
             if (item->next) { strbuf_append_char(tp->code_buf, ','); }
             item = item->next;
         }
