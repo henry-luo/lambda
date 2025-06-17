@@ -98,44 +98,52 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
     ShapeEntry *field = map_type->shape;
     for (int i = 0; i < map_type->length; i++) {
         if (i) strbuf_append_char(strbuf, ',');
-        strbuf_append_format(strbuf, "%.*s:", (int)field->name.length, field->name.str);
-        printf("field %.*s:%d\n", (int)field->name.length, field->name.str, field->type->type_id);
         void* data = ((char*)map_data) + field->byte_offset;
-        switch (field->type->type_id) {
-        case LMD_TYPE_NULL:
-            strbuf_append_str(strbuf, "null");
-            break;
-        case LMD_TYPE_BOOL:
-            strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
-            break;                    
-        case LMD_TYPE_INT:  case LMD_TYPE_INT64:
-            strbuf_append_format(strbuf, "%ld", *(long*)data);
-            break;
-        case LMD_TYPE_FLOAT:
-            strbuf_append_format(strbuf, "%g", *(double*)data);
-            break;
-        case LMD_TYPE_STRING:
-            String *string = *(String**)data;
-            strbuf_append_format(strbuf, "\"%s\"", string->chars);
-            break;
-        case LMD_TYPE_SYMBOL:
-            String *symbol = *(String**)data;
-            strbuf_append_format(strbuf, "'%s'", symbol->chars);
-            break;
-        case LMD_TYPE_DTIME:
-            String *dt = *(String**)data;
-            strbuf_append_format(strbuf, "t'%s'", dt->chars);
-            break;
-        case LMD_TYPE_BINARY:
-            String *bin = *(String**)data;
-            strbuf_append_format(strbuf, "b'%s'", bin->chars);
-            break;
-        case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
-        case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
-            print_item(strbuf, *(Item*)data);
-            break;
-        default:
-            strbuf_append_format(strbuf, "unknown");
+        if (!field->name) { // nested map
+            printf("nested map field: %p\n", data);
+            Map *nest_map = *(Map**)data;
+            LambdaTypeMap *nest_map_type = (LambdaTypeMap*)nest_map->type;
+            printf("print nested map: %p, length: %ld\n", nest_map, nest_map_type->length);
+            print_named_items(strbuf, nest_map_type, nest_map->data);
+        }
+        else {
+            strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
+            switch (field->type->type_id) {
+            case LMD_TYPE_NULL:
+                strbuf_append_str(strbuf, "null");
+                break;
+            case LMD_TYPE_BOOL:
+                strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
+                break;                    
+            case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+                strbuf_append_format(strbuf, "%ld", *(long*)data);
+                break;
+            case LMD_TYPE_FLOAT:
+                strbuf_append_format(strbuf, "%g", *(double*)data);
+                break;
+            case LMD_TYPE_STRING:
+                String *string = *(String**)data;
+                strbuf_append_format(strbuf, "\"%s\"", string->chars);
+                break;
+            case LMD_TYPE_SYMBOL:
+                String *symbol = *(String**)data;
+                strbuf_append_format(strbuf, "'%s'", symbol->chars);
+                break;
+            case LMD_TYPE_DTIME:
+                String *dt = *(String**)data;
+                strbuf_append_format(strbuf, "t'%s'", dt->chars);
+                break;
+            case LMD_TYPE_BINARY:
+                String *bin = *(String**)data;
+                strbuf_append_format(strbuf, "b'%s'", bin->chars);
+                break;
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
+            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
+                print_item(strbuf, *(Item*)data);
+                break;
+            default:
+                strbuf_append_format(strbuf, "unknown");
+            }
         }
         field = field->next;
     }
@@ -446,21 +454,21 @@ void print_ast_node(AstNode *node, int indent) {
         break; 
     case AST_NODE_MAP:
         printf("[map expr:%s]\n", formatType(node->type));
-        AstNamedNode *nm_item = ((AstMapNode*)node)->item;
+        AstNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
             print_label(indent + 1, "map item:");
-            print_ast_node((AstNode*)nm_item, indent + 1);
-            nm_item = (AstNamedNode*)nm_item->next;
+            print_ast_node(nm_item, indent + 1);
+            nm_item = nm_item->next;
         }
         break;
     case AST_NODE_ELEMENT:
         printf("[elmt expr:%s]\n", formatType(node->type));
         AstElementNode* elmt_node = (AstElementNode*)node;
-        AstNamedNode *elmt_item = elmt_node->item;
+        AstNode *elmt_item = elmt_node->item;
         while (elmt_item) {
             print_label(indent + 1, "attr:");
-            print_ast_node((AstNode*)elmt_item, indent + 1);
-            elmt_item = (AstNamedNode*)elmt_item->next;
+            print_ast_node(elmt_item, indent + 1);
+            elmt_item = elmt_item->next;
         }
         if (elmt_node->content) print_ast_node(elmt_node->content, indent + 1);
         break;

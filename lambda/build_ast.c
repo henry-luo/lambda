@@ -748,16 +748,20 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
     LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
 
     TSNode child = ts_node_named_child(map_node, 0);
-    AstNamedNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
-        AstNamedNode* item = build_key_expr(tp, child);
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* item = (symbol == SYM_PAIR) ? build_key_expr(tp, child) : build_expr(tp, child);
         if (!prev_item) { ast_node->item = item; } 
-        else { prev_item->next = (AstNode*)item; }
+        else { prev_item->next = item; }
         prev_item = item;
 
         ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
-        shape_entry->name = item->name;
+        shape_entry->name = (symbol == SYM_PAIR) ? &((AstNamedNode*)item)->name : NULL;
         shape_entry->type = item->type;
+        if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
+            printf("invalid map item type %d, should be map or any\n", item->type->type_id);
+        }
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) {
             type->shape = shape_entry;
@@ -767,7 +771,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         prev_entry = shape_entry;
 
         type->length++;
-        byte_offset += type_info[item->type->type_id].byte_size;
+        byte_offset += (symbol == SYM_PAIR) ? type_info[item->type->type_id].byte_size : sizeof(void*);
         child = ts_node_next_named_sibling(child);
     }
 
@@ -794,12 +798,12 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
         }
         else if (symbol == SYM_ATTR) {  // attrs
             AstNamedNode* item = build_key_expr(tp, child);
-            if (!prev_item) { ast_node->item = item; } 
+            if (!prev_item) { ast_node->item = (AstNode*)item; } 
             else { prev_item->next = (AstNode*)item; }
             prev_item = item;
 
             ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
-            shape_entry->name = item->name;
+            shape_entry->name = &item->name;
             shape_entry->type = item->type;
             shape_entry->byte_offset = byte_offset;
             if (!prev_entry) {

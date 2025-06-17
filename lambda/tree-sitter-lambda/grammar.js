@@ -7,12 +7,11 @@
 // @ts-check
 /// <reference types="../tree-sitter-dsl.d.ts" />
 
-// Creates a rule to match one or more of the rules separated by a comma
+// rule for one or more of the rules separated by a comma
 function comma_sep1(rule) {
   return seq(rule, repeat(seq(',', rule)));
 }
 
-// Creates a rule to optionally match one or more of the rules separated by a comma
 function comma_sep(rule) {
   return optional(comma_sep1(rule));
 }
@@ -257,8 +256,9 @@ module.exports = grammar({
       ':',
       field('as', $._expression),
     ),
+    
     map: $ => seq(
-      '{', comma_sep($.pair), '}',
+      '{', comma_sep(choice($.pair, $._expression)), '}',
     ),
 
     array: $ => seq(

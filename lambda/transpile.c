@@ -456,13 +456,17 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     strbuf_append_str(tp->code_buf, "({Map* m = map(");
     strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)map_node->type)->type_index);
     strbuf_append_str(tp->code_buf, ");");
-    AstNamedNode *item = map_node->item;
+    AstNode *item = map_node->item;
     if (item) {
         strbuf_append_str(tp->code_buf, "\n map_fill(m,");
         while (item) {
-            transpile_expr(tp, item->as);
+            if (item->node_type == AST_NODE_KEY_EXPR) {
+                transpile_expr(tp, ((AstNamedNode*)item)->as);
+            } else {
+                transpile_box_item(tp, item);
+            }
             if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-            item = (AstNamedNode*)item->next;
+            item = item->next;
         }
         strbuf_append_str(tp->code_buf, ");");
     }
@@ -477,13 +481,13 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     LambdaTypeElmt* type = (LambdaTypeElmt*)elmt_node->type;
     strbuf_append_int(tp->code_buf, type->type_index);
     strbuf_append_str(tp->code_buf, ");");
-    AstNamedNode *item = elmt_node->item;
+    AstNode *item = elmt_node->item;
     if (item) {
         strbuf_append_str(tp->code_buf, "\n elmt_fill(el,");
         while (item) {
-            transpile_expr(tp, item->as);
+            transpile_expr(tp, ((AstNamedNode*)item)->as);
             if (item->next) { strbuf_append_char(tp->code_buf, ','); }
-            item = (AstNamedNode*)item->next;
+            item = item->next;
         }
         strbuf_append_str(tp->code_buf, ");");
     }
@@ -899,10 +903,10 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }        
         break; 
     case AST_NODE_MAP:  case AST_NODE_ELEMENT:
-        AstNamedNode *nm_item = ((AstMapNode*)node)->item;
+        AstNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
-            define_ast_node(tp, (AstNode*)nm_item);
-            nm_item = (AstNamedNode*)nm_item->next;
+            define_ast_node(tp, nm_item);
+            nm_item = nm_item->next;
         }
         break;
     case AST_NODE_FIELD_EXPR:

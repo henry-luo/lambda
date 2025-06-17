@@ -26,3 +26,5 @@ let d:float = 123
 (234)  // list with one item
 
 <elmt a:1+2;  4+5;  "hello" + " world";  1+2 is number;  1+2 is int;  3.5/0 is float;>
+
+{a:678, {b:123, c:456}, d:789}

@@ -35,6 +35,7 @@
 #define SYM_CONTENT sym_content
 #define SYM_LIST sym_list
 #define SYM_ARRAY sym_array
+#define SYM_PAIR sym_pair
 #define SYM_MAP sym_map
 #define SYM_ELEMENT sym_element
 #define SYM_ATTR sym_attr
@@ -218,7 +219,7 @@ typedef struct {
 typedef LambdaTypeArray LambdaTypeList;
 
 typedef struct ShapeEntry {
-    StrView name;
+    StrView* name;
     LambdaType* type;  // type of the field
     long byte_offset;  // byte offset of the map field
     struct ShapeEntry* next;
@@ -417,7 +418,7 @@ typedef struct {
 
 typedef struct {
     AstNode;  // extends AstNode
-    AstNamedNode *item;  // first item in the map
+    AstNode *item;  // first item in the map
 } AstMapNode;
 
 typedef struct {

@@ -180,9 +180,21 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
     printf("map length: %ld\n", count);
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
-        printf("field type: %d, offset: %ld\n", field->type->type_id, field->byte_offset);
+        printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
+            field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
-        switch (field->type->type_id) {
+        if (!field->name) { // nested map
+            LambdaItem itm = {.item = va_arg(args, uint64_t)};
+            if (itm.type_id == LMD_TYPE_RAW_POINTER && *((TypeId*)itm.raw_pointer) == LMD_TYPE_MAP) {
+                Map* nested_map = (Map*)itm.raw_pointer;
+                nested_map->ref_cnt++;
+                *(Map**)field_ptr = nested_map;
+                printf("nested map field %p\n", nested_map);
+            } else {
+                printf("expected a map, got type %d\n", itm.type_id );
+            }
+        } else {
+            switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 *(bool*)field_ptr = va_arg(args, bool);
                 break;
@@ -217,6 +229,7 @@ void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
                 break;
             default:
                 printf("unknown type %d\n", field->type->type_id);
+            }
         }
         field = field->next;
     }
@@ -280,7 +293,7 @@ Item map_get(Map* map, char *key) {
     if (!map || !key) { return ITEM_NULL; }
     ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
     while (field) {
-        if (strncmp(field->name.str, key, field->name.length) == 0) {
+        if (strncmp(field->name->str, key, field->name->length) == 0) {
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map->data + field->byte_offset;
             switch (type_id) {
