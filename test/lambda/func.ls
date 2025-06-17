@@ -8,9 +8,11 @@ pub fn add(a, b) {
     a + b
 }
 
-fn strcat(a: string, b: string) { a + b }
-
 pub fn mul(a: float, b: float) :float => a * b
+
+pub pi = 3.1415926
+
+fn strcat(a: string, b: string) { a + b }
 
 factorial(5.0)
 strcat("hello", " world")

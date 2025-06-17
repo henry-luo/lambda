@@ -40,7 +40,7 @@ void print_time_elapsed(char* label, struct timespec start, struct timespec end)
 void find_script_func() {
 
 }
-void init_script_imports(Transpiler *tp, AstScript *script) {
+void init_module_import(Transpiler *tp, AstScript *script) {
     printf("init imports of script\n");
     AstNode* child = script->child;
     while (child) {
@@ -74,16 +74,33 @@ void init_script_imports(Transpiler *tp, AstScript *script) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
                     if (((LambdaTypeFunc*)func_node->type)->is_public) {
                         // get func addr
-                        printf("loading fn addr: %.*s from script: %s\n", 
-                            (int)func_node->name.length, func_node->name.str, import->script->reference);
                         StrBuf *func_name = strbuf_new();
                         write_fn_name(func_name, func_node, NULL);
+                        printf("loading fn addr: %s from script: %s\n", func_name->str, import->script->reference);
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
                         printf("got fn: %s, func_ptr: %p\n", func_name->str, fn_ptr);
                         strbuf_free(func_name);
                         if (!fn_ptr) { printf("misssing content node\n");  return; }
                         *(main_func_t*) mod_def = (main_func_t)fn_ptr;
                         mod_def += sizeof(main_func_t);
+                    }
+                }
+                else if (node->node_type == AST_NODE_PUB_STAM) {
+                    AstLetNode *pub_node = (AstLetNode*)node;
+                    // loop through the declarations
+                    AstNode *declare = pub_node->declare;
+                    while (declare) {
+                        AstNamedNode *dec_node = (AstNamedNode*)declare;
+                        // write the variable name
+                        StrBuf *var_name = strbuf_new();
+                        write_var_name(var_name, dec_node);
+                        printf("loading pub var: %s from script: %s\n", var_name->str, import->script->reference);
+                        void* data_ptr = find_data(import->script->jit_context, var_name->str);
+                        // assign the variable address
+                        *(void**)mod_def = data_ptr;
+                        mod_def += type_info[dec_node->type->type_id].byte_size;
+                        strbuf_free(var_name);
+                        declare = declare->next;
                     }
                 }
                 node = node->next;
@@ -165,7 +182,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     tp->main_func = jit_gen_func(tp->jit_context, "main");
     clock_gettime(CLOCK_MONOTONIC, &end);
     // init lambda imports
-    init_script_imports(tp, (AstScript*)tp->ast_root);
+    init_module_import(tp, (AstScript*)tp->ast_root);
 
     printf("JIT compiled %s", script_path);
     printf("jit_context: %p, main_func: %p\n", tp->jit_context, tp->main_func);

@@ -106,6 +106,75 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     return t;
 }
 
+void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
+    printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
+    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
+    entry->name = node->name;  
+    entry->node = (AstNode*)node;  entry->import = import;
+    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
+    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
+    tp->current_scope->last = entry;
+}
+
+LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
+    printf("build type annotation\n");
+    LambdaType type;  memset(&type, 0, sizeof(LambdaType));
+    StrView type_name = ts_node_source(tp, type_node);
+    if (strview_equal(&type_name, "null")) {
+        type.type_id = LMD_TYPE_NULL;
+    }
+    else if (strview_equal(&type_name, "error")) {
+        type.type_id = LMD_TYPE_ERROR;
+    }
+    else if (strview_equal(&type_name, "any")) {
+        type.type_id = LMD_TYPE_ANY;
+    }       
+    else if (strview_equal(&type_name, "int")) {
+        type.type_id = LMD_TYPE_INT64;
+    }
+    else if (strview_equal(&type_name, "float")) {
+        type.type_id = LMD_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "number")) {
+        type.type_id = LMD_TYPE_NUMBER;
+    }    
+    else if (strview_equal(&type_name, "string")) {
+        type.type_id = LMD_TYPE_STRING;
+    }
+    else if (strview_equal(&type_name, "symbol")) {
+        type.type_id = LMD_TYPE_SYMBOL;
+    }    
+    else if (strview_equal(&type_name, "boolean")) {
+        type.type_id = LMD_TYPE_BOOL;
+    }
+    else if (strview_equal(&type_name, "list")) {
+        type.type_id = LMD_TYPE_LIST;
+    }    
+    else if (strview_equal(&type_name, "array")) {
+        type.type_id = LMD_TYPE_ARRAY;
+    }
+    else if (strview_equal(&type_name, "map")) {
+        type.type_id = LMD_TYPE_MAP;
+    }
+    else if (strview_equal(&type_name, "function")) {
+        type.type_id = LMD_TYPE_FUNC;
+    }
+    else if (strview_equal(&type_name, "datetime")) {
+        type.type_id = LMD_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        type.type_id = LMD_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        type.type_id = LMD_TYPE_DTIME;
+    }
+    else {
+        printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
+        type.type_id = LMD_TYPE_ERROR;
+    }
+    return type;
+}
+
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
     printf("build array expr\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
@@ -581,111 +650,6 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
-    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, 
-        symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
-
-    // let can have multiple cond declarations
-    TSTreeCursor cursor = ts_tree_cursor_new(let_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
-    AstNode *prev_declare = NULL;
-    while (has_node) {
-        // Check if the current node's field ID matches the target field ID
-        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
-        if (field_id == FIELD_DECLARE) {
-            TSNode child = ts_tree_cursor_current_node(&cursor);
-            AstNode *declare = build_expr(tp, child);
-            if (prev_declare == NULL) {
-                ast_node->declare = declare;
-            } else {
-                prev_declare->next = declare;
-            }
-            prev_declare = declare;
-        }
-        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
-    }
-    ts_tree_cursor_delete(&cursor);
-
-    // let statement does not have 'then' clause
-    ast_node->type = &LIT_NULL;
-    return (AstNode*)ast_node;
-}
-
-void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
-    printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
-    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
-    entry->name = node->name;  
-    entry->node = (AstNode*)node;  entry->import = import;
-    if (!tp->current_scope->first) { tp->current_scope->first = entry; }
-    if (tp->current_scope->last) { tp->current_scope->last->next = entry; }
-    tp->current_scope->last = entry;
-}
-
-LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
-    printf("build type annotation\n");
-    LambdaType type;  memset(&type, 0, sizeof(LambdaType));
-    StrView type_name = ts_node_source(tp, type_node);
-    if (strview_equal(&type_name, "null")) {
-        type.type_id = LMD_TYPE_NULL;
-    }
-    else if (strview_equal(&type_name, "error")) {
-        type.type_id = LMD_TYPE_ERROR;
-    }
-    else if (strview_equal(&type_name, "any")) {
-        type.type_id = LMD_TYPE_ANY;
-    }       
-    else if (strview_equal(&type_name, "int")) {
-        type.type_id = LMD_TYPE_INT64;
-    }
-    else if (strview_equal(&type_name, "float")) {
-        type.type_id = LMD_TYPE_FLOAT;
-    }
-    else if (strview_equal(&type_name, "number")) {
-        type.type_id = LMD_TYPE_NUMBER;
-    }    
-    else if (strview_equal(&type_name, "string")) {
-        type.type_id = LMD_TYPE_STRING;
-    }
-    else if (strview_equal(&type_name, "symbol")) {
-        type.type_id = LMD_TYPE_SYMBOL;
-    }    
-    else if (strview_equal(&type_name, "boolean")) {
-        type.type_id = LMD_TYPE_BOOL;
-    }
-    else if (strview_equal(&type_name, "list")) {
-        type.type_id = LMD_TYPE_LIST;
-    }    
-    else if (strview_equal(&type_name, "array")) {
-        type.type_id = LMD_TYPE_ARRAY;
-    }
-    else if (strview_equal(&type_name, "map")) {
-        type.type_id = LMD_TYPE_MAP;
-    }
-    else if (strview_equal(&type_name, "function")) {
-        type.type_id = LMD_TYPE_FUNC;
-    }
-    else if (strview_equal(&type_name, "datetime")) {
-        type.type_id = LMD_TYPE_DTIME;
-    }
-    else if (strview_equal(&type_name, "time")) {
-        type.type_id = LMD_TYPE_DTIME;
-    }
-    else if (strview_equal(&type_name, "date")) {
-        type.type_id = LMD_TYPE_DTIME;
-    }
-    else {
-        printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
-        type.type_id = LMD_TYPE_ERROR;
-    }
-    return type;
-}
-
-AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
-    ast_node->type = &LIT_TYPE;
-    return (AstNode*)ast_node;
-}
-
 AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     printf("build assign expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
@@ -710,6 +674,43 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
 
     // push the name to the name stack
     push_name(tp, ast_node, NULL);
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
+    AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, 
+        symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
+
+    // 'let' can have multiple name-value declarations
+    TSTreeCursor cursor = ts_tree_cursor_new(let_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNode *prev_declare = NULL;
+    while (has_node) {
+        // Check if the current node's field ID matches the target field ID
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            assert(ts_node_symbol(child) == SYM_ASSIGN_EXPR);
+            AstNode *declare = build_assign_expr(tp, child);
+            if (prev_declare == NULL) {
+                ast_node->declare = declare;
+            } else {
+                prev_declare->next = declare;
+            }
+            prev_declare = declare;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+
+    // let statement does not have 'then' clause
+    ast_node->type = &LIT_NULL;
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
+    ast_node->type = &LIT_TYPE;
     return (AstNode*)ast_node;
 }
 
@@ -1096,11 +1097,21 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
                 push_name(tp, (AstNamedNode*)func_node, import_node);
             }
         }
+        else if (node->node_type == AST_NODE_PUB_STAM) {
+            AstLetNode *pub_node = (AstLetNode*)node;
+            AstNode *declare = pub_node->declare;
+            while (declare) {
+                AstNamedNode *dec_node = (AstNamedNode*)declare;
+                push_name(tp, (AstNamedNode*)dec_node, import_node);
+                printf("got pub var: %.*s\n", (int)dec_node->name.length, dec_node->name.str);
+                declare = declare->next;
+            }
+        }
         node = node->next;
     }
 }
 
-AstNode* build_import_module(Transpiler* tp, TSNode import_node) {
+AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     printf("build import module\n");
     AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
         tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
@@ -1159,7 +1170,7 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         switch (symbol) {
         case SYM_IMPORT_MODULE:
             // import module
-            ast = build_import_module(tp, child);
+            ast = build_module_import(tp, child);
             break;
         case SYM_CONTENT:
             ast = build_content(tp, child, true, true);

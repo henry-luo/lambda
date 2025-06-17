@@ -200,6 +200,24 @@ void* find_func(MIR_context_t ctx, const char *fn_name) {
     return NULL;
 }
 
+void* find_data(MIR_context_t ctx, const char *data_name) {
+    printf("finding data: %s, %p\n", data_name, ctx);
+    for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
+        module = DLIST_NEXT (MIR_module_t, module)) {
+        printf("checking module: %s\n", module->name);
+        MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
+        for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
+            print_module_item(mitem);
+            if (mitem->item_type == MIR_data_item) {
+                printf("checking data item: %s\n", mitem->u.data->name);
+                if (strcmp(mitem->u.data->name, data_name) == 0)
+                    return mitem->addr;
+            }
+        }
+    }
+    return NULL;
+}
+
 void jit_cleanup(MIR_context_t ctx) {
     // Cleanup
     MIR_gen_finish(ctx);

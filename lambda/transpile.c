@@ -278,10 +278,8 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     // declare the type
     LambdaType *type = asn_node->type;
     writeType(tp, type);
-    // user var name starts with '_'
-    strbuf_append_str(tp->code_buf, " _");
-    // declare the variable
-    strbuf_append_str_n(tp->code_buf, asn_node->name.str, asn_node->name.length);
+    strbuf_append_char(tp->code_buf, ' ');
+    write_var_name(tp->code_buf, asn_node);
     strbuf_append_char(tp->code_buf, '=');
 
     transpile_expr(tp, asn_node->as);
@@ -289,7 +287,6 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
 }
 
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
-    printf("transpile let stam\n");
     AstNode *declare = let_node->declare;
     while (declare) {
         assert(declare->node_type == AST_NODE_ASSIGN);
@@ -299,7 +296,6 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 }
 
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
-    printf("transpile loop expr\n");
     // todo: prefix var name with '_'
     LambdaType *item_type = loop_node->as->type->type_id == LMD_TYPE_ARRAY ? 
         ((LambdaTypeArray*)loop_node->as->type)->nested : &TYPE_ANY;
@@ -324,13 +320,11 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
 }
 
 void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
-    printf("transpile for expr\n");
     LambdaType *then_type = for_node->then->type;
     // init a list
     strbuf_append_str(tp->code_buf, "({\n List* ls=list(); \n");
     AstNode *loop = for_node->loop;
     if (loop) {
-        printf("transpile for loop\n");
         transpile_loop_expr(tp, (AstNamedNode*)loop, for_node->then);
     }
     // return the list
@@ -770,6 +764,12 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
 }
 
+void write_var_name(StrBuf *buf, AstNamedNode *asn_node) {
+    // user var name starts with '_'
+    strbuf_append_char(buf, '_');
+    strbuf_append_str_n(buf, asn_node->name.str, asn_node->name.length);
+}
+
 void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     printf("define import module\n");
     // import module
@@ -795,6 +795,20 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
                 ((LambdaTypeFunc*)func_node->type)->is_public);
             if (((LambdaTypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
+            }
+        } 
+        else if (node->node_type == AST_NODE_PUB_STAM) {
+            // let declaration
+            AstNode *declare = ((AstLetNode*)node)->declare;
+            while (declare) {
+                AstNamedNode *asn_node = (AstNamedNode*)declare;
+                // declare the type
+                LambdaType *type = asn_node->type;
+                writeType(tp, type);
+                strbuf_append_char(tp->code_buf, ' ');
+                write_var_name(tp->code_buf, asn_node);
+                strbuf_append_str(tp->code_buf, ";\n");
+                declare = declare->next;
             }
         }
         node = node->next;
@@ -827,13 +841,21 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             define_ast_node(tp, if_node->otherwise);
         }
         break;
-    case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
+    case AST_NODE_LET_STAM:  
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             define_ast_node(tp, declare);
             declare = declare->next;
         }
         break;
+    case AST_NODE_PUB_STAM:
+        // pub vars need to be brought to global scope in C, to allow them to be exported
+        AstNode *decl = ((AstLetNode*)node)->declare;
+        while (decl) {
+            transpile_assign_expr(tp, (AstNamedNode*)decl);
+            decl = decl->next;
+        }
+        break;    
     case AST_NODE_FOR_EXPR:
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
