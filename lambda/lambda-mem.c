@@ -115,7 +115,13 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
     while (field) {
         // printf("freeing map field: %.*s, type: %d\n", (int)field->name.length, field->name.str, field->type->type_id);
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
-        if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
+        if (!field->name) { // nested map
+            Map *nested_map = *(Map**)field_ptr;
+            // delink the nested map
+            if (nested_map->ref_cnt > 0) nested_map->ref_cnt--;
+            if (!nested_map->ref_cnt) free_container((Container*)nested_map, clear_entry);
+        }
+        else if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
             field->type->type_id == LMD_TYPE_DTIME || field->type->type_id == LMD_TYPE_BINARY) {
             String *str = *(String**)field_ptr;
             Item item = s2it(str);
