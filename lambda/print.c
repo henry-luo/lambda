@@ -348,11 +348,11 @@ void print_ast_node(AstNode *node, int indent) {
     // get the function name
     switch(node->node_type) {
     case AST_NODE_IDENT:
-        printf("[ident:%.*s:%s]\n", (int)((AstIdentNode*)node)->name.length, 
-            ((AstIdentNode*)node)->name.str, formatType(node->type));
+        printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name.length, 
+            ((AstIdentNode*)node)->name.str, formatType(node->type), node->type->is_const);
         break;
     case AST_NODE_PRIMARY:
-        printf("[primary expr:%s]\n", formatType(node->type));
+        printf("[primary expr:%s,const:%d]\n", formatType(node->type), node->type->is_const);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
         }

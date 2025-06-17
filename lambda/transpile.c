@@ -5,6 +5,32 @@ extern LambdaType TYPE_ANY;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 
+void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
+    if (import) {
+        strbuf_append_format(strbuf, "m%d.", import->script->index);
+    }
+    strbuf_append_char(strbuf, '_');
+    if (fn_node->name.str) {
+        strbuf_append_str_n(strbuf, fn_node->name.str, fn_node->name.length);
+    } else {
+        strbuf_append_char(strbuf, 'f');
+    }
+    // char offset ensures the fn name is unique across the script
+    strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
+    // no need to add param cnt
+    // strbuf_append_char(tp->code_buf, '_');
+    // strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)fn_node->type)->param_count);    
+}
+
+void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import) {
+    if (import) {
+        strbuf_append_format(strbuf, "m%d.", import->script->index);
+    }
+    // user var name starts with '_'
+    strbuf_append_char(strbuf, '_');
+    strbuf_append_str_n(strbuf, asn_node->name.str, asn_node->name.length);
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
@@ -98,9 +124,8 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     (AstImportNode*)ident_node->entry->import);
             }
             else {
-                // user var name starts with '_'
-                strbuf_append_char(tp->code_buf, '_');
-                writeNodeSource(tp, ident_node->node);
+                write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                    (AstImportNode*)ident_node->entry->import);
             }
         } else { 
             transpile_expr(tp, pri_node->expr);
@@ -279,7 +304,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     LambdaType *type = asn_node->type;
     writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
-    write_var_name(tp->code_buf, asn_node);
+    write_var_name(tp->code_buf, asn_node, NULL);
     strbuf_append_char(tp->code_buf, '=');
 
     transpile_expr(tp, asn_node->as);
@@ -473,23 +498,6 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         strbuf_append_str(tp->code_buf, "el;");
     }
     strbuf_append_str(tp->code_buf, "})");
-}
-
-void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
-    if (import) {
-        strbuf_append_format(strbuf, "m%d.", import->script->index);
-    }
-    strbuf_append_char(strbuf, '_');
-    if (fn_node->name.str) {
-        strbuf_append_str_n(strbuf, fn_node->name.str, fn_node->name.length);
-    } else {
-        strbuf_append_char(strbuf, 'f');
-    }
-    // char offset ensures the fn name is unique across the script
-    strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
-    // no need to add param cnt
-    // strbuf_append_char(tp->code_buf, '_');
-    // strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)fn_node->type)->param_count);    
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
@@ -764,12 +772,6 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     }
 }
 
-void write_var_name(StrBuf *buf, AstNamedNode *asn_node) {
-    // user var name starts with '_'
-    strbuf_append_char(buf, '_');
-    strbuf_append_str_n(buf, asn_node->name.str, asn_node->name.length);
-}
-
 void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     printf("define import module\n");
     // import module
@@ -806,7 +808,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
                 LambdaType *type = asn_node->type;
                 writeType(tp, type);
                 strbuf_append_char(tp->code_buf, ' ');
-                write_var_name(tp->code_buf, asn_node);
+                write_var_name(tp->code_buf, asn_node, NULL);
                 strbuf_append_str(tp->code_buf, ";\n");
                 declare = declare->next;
             }

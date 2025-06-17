@@ -29,3 +29,4 @@ dval
 add(10, 2.5)
 mul(0.5, 7)
 PI
+pi

@@ -93,12 +93,15 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         AstNamedNode *dec_node = (AstNamedNode*)declare;
                         // write the variable name
                         StrBuf *var_name = strbuf_new();
-                        write_var_name(var_name, dec_node);
+                        write_var_name(var_name, dec_node, NULL);
                         printf("loading pub var: %s from script: %s\n", var_name->str, import->script->reference);
                         void* data_ptr = find_data(import->script->jit_context, var_name->str);
+                        printf("got pub var: %s, data_ptr: %p\n", var_name->str, data_ptr);
                         // assign the variable address
-                        *(void**)mod_def = data_ptr;
-                        mod_def += type_info[dec_node->type->type_id].byte_size;
+                        // *(void**)mod_def = data_ptr;
+                        int bytes = type_info[dec_node->type->type_id].byte_size;
+                        memcpy(mod_def, &data_ptr, bytes);
+                        mod_def += bytes;
                         strbuf_free(var_name);
                         declare = declare->next;
                     }

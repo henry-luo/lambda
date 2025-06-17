@@ -102,7 +102,7 @@ LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
     LambdaType* t;
     pool_variable_alloc(tp->ast_pool, size, (void**)&t);
     memset(t, 0, size);
-    t->type_id = type;  // t->is_const = 0;
+    t->type_id = type;  assert(t->is_const == 0);
     return t;
 }
 
@@ -361,7 +361,16 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     } else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
         ast_node->entry = entry;
-        ast_node->type = entry->node->type;
+        if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
+            // clone and remove is_const flag
+            // todo: full type clone
+            printf("got imported identifier %.*s from module %.*s\n", 
+                (int)entry->name.length, entry->name.str, 
+                (int)entry->import->module.length, entry->import->module.str);
+            ast_node->type = alloc_type(tp, entry->node->type->type_id, sizeof(LambdaType));
+            assert(ast_node->type->is_const == 0);
+        }
+        else { ast_node->type = entry->node->type; }
     }
     return (AstNode*)ast_node;
 }
