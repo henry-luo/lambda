@@ -454,10 +454,6 @@
       "required": true,
       "types": [
         {
-          "type": "array",
-          "named": true
-        },
-        {
           "type": "binary_expr",
           "named": true
         },
@@ -507,6 +503,10 @@
         },
         {
           "type": "pub_stam",
+          "named": true
+        },
+        {
+          "type": "string",
           "named": true
         },
         {

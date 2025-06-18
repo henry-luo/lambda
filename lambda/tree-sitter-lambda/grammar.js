@@ -211,7 +211,7 @@ module.exports = grammar({
       $.if_stam, 
       $.for_stam,
       $.fn_stam,
-      $.array,
+      $.string,
       $.map,
       $.element,
     ),

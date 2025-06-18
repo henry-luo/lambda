@@ -19,4 +19,4 @@ k:(120, 1e-2), l:[121], m:[true, 124], n:{a:'hello', b:0.5}};
 <elmt> <elmt a:123> <elmt "text">
 <elmt a:123; "text"; 111>
 <elmt a:123, b:'symbol', c:<d>; "text"; 222; <br>>
-<elmt {a:123}; [456]; ("text", 789); <br> <br> <br>>
+<elmt [456]; ("text", 789); {a:123} <br> <br> <br> "test" " and " "more text">
