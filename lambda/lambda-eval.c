@@ -132,7 +132,7 @@ void list_push(List *list, Item item) {
     // store the value in the list
     if (list->length + list->extra >= list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
-    printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
+    // printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
     // data ownership handling
     switch (itm.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:

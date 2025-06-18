@@ -454,7 +454,15 @@
       "required": true,
       "types": [
         {
+          "type": "array",
+          "named": true
+        },
+        {
           "type": "binary_expr",
+          "named": true
+        },
+        {
+          "type": "element",
           "named": true
         },
         {
@@ -487,6 +495,10 @@
         },
         {
           "type": "let_stam",
+          "named": true
+        },
+        {
+          "type": "map",
           "named": true
         },
         {

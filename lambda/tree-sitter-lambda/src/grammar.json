@@ -145,6 +145,18 @@
         {
           "type": "SYMBOL",
           "name": "fn_stam"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "array"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "map"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "element"
         }
       ]
     },
@@ -3455,98 +3467,102 @@
       }
     },
     "primary_expr": {
-      "type": "CHOICE",
-      "members": [
-        {
-          "type": "SYMBOL",
-          "name": "null"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "true"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "false"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "inf"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "nan"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_number"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_datetime"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "string"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "symbol"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "binary"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "list"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "array"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "map"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "element"
-        },
-        {
-          "type": "ALIAS",
-          "content": {
+      "type": "PREC",
+      "value": 50,
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
             "type": "SYMBOL",
-            "name": "_non_null_base_type"
+            "name": "null"
           },
-          "named": true,
-          "value": "base_type"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "identifier"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "subscript_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "member_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "call_expr"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "sys_func"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "_parenthesized_expr"
-        }
-      ]
+          {
+            "type": "SYMBOL",
+            "name": "true"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "false"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "inf"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "nan"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_number"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_datetime"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "string"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "symbol"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "binary"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "list"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "array"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "map"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "element"
+          },
+          {
+            "type": "ALIAS",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_non_null_base_type"
+            },
+            "named": true,
+            "value": "base_type"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "identifier"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "subscript_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "member_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "call_expr"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "sys_func"
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_parenthesized_expr"
+          }
+        ]
+      }
     },
     "import": {
       "type": "TOKEN",
@@ -6106,12 +6122,7 @@
       "name": "comment"
     }
   ],
-  "conflicts": [
-    [
-      "primary_expr",
-      "parameter"
-    ]
-  ],
+  "conflicts": [],
   "precedences": [
     [
       {

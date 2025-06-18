@@ -114,9 +114,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
-    printf("transpile primary expr\n");
     if (pri_node->expr) {
-        printf("transpile_expr\n");
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
             if (ident_node->entry->node->node_type == AST_NODE_FUNC) {
@@ -132,7 +130,6 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
         }
     } else { // const
         if (pri_node->type->is_literal) {  // literal
-            printf("transpile_literal: %d\n", pri_node->type->type_id);
             if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL ||
                 pri_node->type->type_id == LMD_TYPE_DTIME || pri_node->type->type_id == LMD_TYPE_BINARY) {
                 // loads the const string without boxing
@@ -368,7 +365,6 @@ void transpile_items(Transpiler* tp, AstNode *item) {
         if (is_first) { is_first = false; } 
         else { strbuf_append_str(tp->code_buf, ", "); }
 
-        printf("list item type:%d\n", item->type->type_id);
         transpile_box_item(tp, item);
         item = item->next;
     }
@@ -428,9 +424,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
     // let declare first
     AstNode *item = list_node->item;
-    printf("content item cnt:%ld,%p\n", type->length, item);
     while (item) {
-        printf("content item type:%d\n", item->node_type);
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM) {
             type->length--;
             transpile_let_stam(tp, (AstLetNode*)item);

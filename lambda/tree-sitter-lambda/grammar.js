@@ -179,12 +179,12 @@ module.exports = grammar({
     $.assign_expr,
     $.if_expr,
     $.for_expr,
-    $.fn_expr,
+    $.fn_expr
   ]],
 
   conflicts: $ => [
     // [$.content, $.binary_expr],
-    [$.primary_expr, $.parameter],
+    // [$.primary_expr, $.parameter],
   ],
 
   rules: {
@@ -211,6 +211,9 @@ module.exports = grammar({
       $.if_stam, 
       $.for_stam,
       $.fn_stam,
+      $.array,
+      $.map,
+      $.element,
     ),
 
     _content_expr: $ => choice(
@@ -394,7 +397,7 @@ module.exports = grammar({
       $.fn_expr,
     )),
 
-    primary_expr: $ => choice(
+    primary_expr: $ => prec(50,choice(
       $.null,
       $.true,
       $.false,
@@ -416,7 +419,7 @@ module.exports = grammar({
       $.call_expr,
       $.sys_func,
       $._parenthesized_expr,
-    ),
+    )),
 
     import: _ => token('import'),
 
