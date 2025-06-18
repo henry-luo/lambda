@@ -723,6 +723,12 @@ AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
+    ast_node->type = &LIT_TYPE;
+    return (AstNode*)ast_node;
+}
+
 AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     printf("build key expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
@@ -1014,7 +1020,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
-    case SYM_LET_STAM:  case SYM_PUB_STAM:  case SYM_TYPE_DEFINE:
+    case SYM_LET_STAM:  case SYM_PUB_STAM:
         // todo: full type def support 
         return build_let_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
@@ -1067,6 +1073,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return (AstNode*)t_node;
     case SYM_TYPE_ANNOTE:
         return build_type_annote(tp, expr_node);
+    case SYM_TYPE_DEFINE:
+        // todo: full type def support 
+        return build_let_stam(tp, expr_node, symbol);
+        // return build_type_definition(tp, expr_node);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;

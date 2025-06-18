@@ -30,10 +30,11 @@ int main(void) {
     StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
     strbuf_append_str(strbuf, "Test result ===============\n");
     run_test_script(&runtime, "value.ls", strbuf);
+    run_test_script(&runtime, "expr.ls", strbuf);
     run_test_script(&runtime, "box_unbox.ls", strbuf);
     run_test_script(&runtime, "func.ls", strbuf);
     run_test_script(&runtime, "mem.ls", strbuf);
-    run_test_script(&runtime, "expr.ls", strbuf);
+    run_test_script(&runtime, "type.ls", strbuf);
 
     printf("%s", strbuf->str);
     strbuf_free(strbuf);

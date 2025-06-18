@@ -397,6 +397,7 @@ module.exports = grammar({
       $.fn_expr,
     )),
 
+    // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50,choice(
       $.null,
       $.true,
@@ -520,7 +521,7 @@ module.exports = grammar({
     ),
 
     map_type: $ => seq('{', 
-      $.map_type_item, repeat(seq(choice(linebreak, ';'), $.map_type_item)), '}'
+      $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
     ),
 
     base_type: $ => built_in_types(true),

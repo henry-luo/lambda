@@ -1,0 +1,1 @@
+type a = {b:123, c:int}
