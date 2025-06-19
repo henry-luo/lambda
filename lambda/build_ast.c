@@ -727,47 +727,54 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;   
 }
 
+AstNode* build_map_type(Transpiler* tp, TSNode type_node) {
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
+    // ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
+    ast_node->type = &LIT_TYPE;
+    // *ast_node->type = build_type_annotation(tp, type_node);
+    return (AstNode*)ast_node;   
+}
+
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
+    printf("build primary type\n");
     TSNode child = ts_node_named_child(type_node, 0);
-    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
         switch (symbol) {
         case SYM_BASE_TYPE:
+            printf("build base type\n");
             return build_base_type(tp, child);
+        case SYM_MAP_TYPE:
+            printf("build map type\n");
+            return build_map_type(tp, child);
         default: // literal values
-            // Handle attributes
+            printf("unknown primary type: %d\n", symbol);
             break;
         }
         child = ts_node_next_named_sibling(child);
     }
+    return NULL;
 }
 
 AstNode* build_binary_type(Transpiler* tp, TSNode type_node) {
     TSNode child = ts_node_named_child(type_node, 0);
-    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
         AstNode *node = build_expr(tp, child);
         if (node) return node;
         child = ts_node_next_named_sibling(child);
     }
+    return NULL;
 }
 
-// AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
-//     TSNode child = ts_node_named_child(type_node, 0);
-//     AstNode* prev_item = NULL;
-//     while (!ts_node_is_null(child)) {
-//         AstNode *node = build_expr(tp, child);
-//         if (node) return node;
-//         child = ts_node_next_named_sibling(child);
-//     }
-//     return NULL;
-// }
-
 AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
-    ast_node->type = &LIT_TYPE;
-    return (AstNode*)ast_node;
+    printf("build type annote\n");
+    TSNode child = ts_node_named_child(type_node, 0);
+    while (!ts_node_is_null(child)) {
+        AstNode *node = build_expr(tp, child);
+        if (node) return node;
+        child = ts_node_next_named_sibling(child);
+    }
+    return NULL;
 }
 
 // AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
