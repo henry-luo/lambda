@@ -35,7 +35,7 @@
 #define SYM_CONTENT sym_content
 #define SYM_LIST sym_list
 #define SYM_ARRAY sym_array
-#define SYM_PAIR sym_pair
+#define SYM_MAP_ITEM sym_map_item
 #define SYM_MAP sym_map
 #define SYM_ELEMENT sym_element
 #define SYM_ATTR sym_attr

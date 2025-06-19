@@ -347,7 +347,7 @@
         }
       ]
     },
-    "pair": {
+    "map_item": {
       "type": "SEQ",
       "members": [
         {
@@ -403,7 +403,7 @@
                   "members": [
                     {
                       "type": "SYMBOL",
-                      "name": "pair"
+                      "name": "map_item"
                     },
                     {
                       "type": "SYMBOL",
@@ -425,7 +425,7 @@
                         "members": [
                           {
                             "type": "SYMBOL",
-                            "name": "pair"
+                            "name": "map_item"
                           },
                           {
                             "type": "SYMBOL",

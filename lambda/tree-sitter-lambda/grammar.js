@@ -254,14 +254,14 @@ module.exports = grammar({
       $.false,
     ),
 
-    pair: $ => seq(
+    map_item: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)),
       ':',
       field('as', $._expression),
     ),
 
     map: $ => seq(
-      '{', comma_sep(choice($.pair, $._expression)), '}',
+      '{', comma_sep(choice($.map_item, $._expression)), '}',
     ),
 
     array: $ => seq(

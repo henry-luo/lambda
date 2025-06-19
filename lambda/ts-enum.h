@@ -109,7 +109,7 @@ enum ts_symbol_identifiers {
   sym_document = 105,
   sym_content = 106,
   sym_list = 107,
-  sym_pair = 108,
+  sym_map_item = 108,
   sym_map = 109,
   sym_array = 110,
   sym_attr_binary_expr = 111,
