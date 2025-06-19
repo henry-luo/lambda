@@ -531,7 +531,7 @@ module.exports = grammar({
     primary_type: $ => choice(
       $.base_type,
       $.identifier,
-      $._non_null_literal,
+      $._non_null_literal, // null is now a base type
       // array type
       $.map_type,
       // entity type

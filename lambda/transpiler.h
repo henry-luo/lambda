@@ -57,6 +57,8 @@
 #define SYM_FOR_STAM sym_for_stam
 
 #define SYM_BASE_TYPE sym_base_type
+#define SYM_PRIMARY_TYPE sym_primary_type
+#define SYM_BINARY_TYPE sym_binary_type
 #define SYM_TYPE_ANNOTE sym_type_annotation
 #define SYM_TYPE_DEFINE sym_type_definition
 
@@ -151,18 +153,19 @@ typedef enum {
     SYSFUNC_ERROR,
 } SysFunc;
 
-typedef struct TypeInfo {
-    int byte_size;  // byte size of the type
-    char* name;  // name of the type
-    // char* c_type;  // C type of the type
-} TypeInfo;
-
-extern TypeInfo type_info[];
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 
 #include "lambda.h"
+
+typedef struct TypeInfo {
+    int byte_size;  // byte size of the type
+    char* name;  // name of the type
+    LambdaType *lit_type;  // literal type
+    // char* c_type;  // C type of the type
+} TypeInfo;
+
+extern TypeInfo type_info[];
 
 // const_index, type_index - 32-bit, there should not be more than 4G types and consts in a single Lambda runtime
 // list item count, map size - 64-bit, to support large data files
@@ -260,7 +263,7 @@ typedef struct {
 
 typedef struct {
     LambdaType;  // extends LambdaType
-    LambdaType *type;
+    LambdaType *type;  // full type defintion
 } LambdaTypeType;
 
 struct Pack {

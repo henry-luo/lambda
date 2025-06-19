@@ -227,6 +227,7 @@ void runner_setup_context(Runner* runner) {
     printf("runner setup exec context\n");
     runner->context.ast_pool = runner->script->ast_pool;
     runner->context.type_list = runner->script->type_list;
+    runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
     runner->context.stack = pack_init(16);
     runner->context.result = ITEM_NULL;  // exec result

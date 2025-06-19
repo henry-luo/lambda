@@ -6,6 +6,7 @@ LambdaType TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
 LambdaType TYPE_INT = {.type_id = LMD_TYPE_INT};
 LambdaType TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
 LambdaType TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
+LambdaType TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
 LambdaType TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
 LambdaType TYPE_STRING = {.type_id = LMD_TYPE_STRING};
 LambdaType TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
@@ -37,6 +38,7 @@ LambdaTypeType LIT_TYPE_NULL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_lit
 LambdaTypeType LIT_TYPE_BOOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_BOOL};
 LambdaTypeType LIT_TYPE_INT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_INT64};
 LambdaTypeType LIT_TYPE_FLOAT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FLOAT};
+LambdaTypeType LIT_TYPE_DECIMAL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_DECIMAL};
 LambdaTypeType LIT_TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_NUMBER};
 LambdaTypeType LIT_TYPE_STRING = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_STRING};
 LambdaTypeType LIT_TYPE_BINARY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_BINARY};
@@ -52,28 +54,28 @@ LambdaTypeType LIT_TYPE_ANY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_lite
 LambdaTypeType LIT_TYPE_ERROR = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ERROR};
 
 TypeInfo type_info[] = {
-    [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer"},
-    [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null"},
-    [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool"},
-    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "number"},
-    [LMD_TYPE_INT64] = {.byte_size = sizeof(long), .name = "int"},
-    [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float"},
-    [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal"},
-    [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number"},
-    [LMD_TYPE_DTIME] = {.byte_size = sizeof(char*), .name = "datetime"},
-    [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string"},
-    [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol"},
-    [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary"},
-    [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array"},
-    [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array"},
-    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list"},
-    [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map"},
-    [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element"},
-    [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type"},
-    [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function"},
-    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any"},
-    [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error"},
-    [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start"},
+    [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
+    [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
+    [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool", .lit_type = (LambdaType*)&LIT_TYPE_BOOL},
+    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "int", .lit_type = (LambdaType*)&LIT_TYPE_INT},
+    [LMD_TYPE_INT64] = {.byte_size = sizeof(long), .name = "int", .lit_type = (LambdaType*)&LIT_TYPE_INT},
+    [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float", .lit_type = (LambdaType*)&LIT_TYPE_FLOAT},
+    [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal", .lit_type = (LambdaType*)&LIT_TYPE_DECIMAL},
+    [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number", .lit_type = (LambdaType*)&LIT_TYPE_NUMBER},
+    [LMD_TYPE_DTIME] = {.byte_size = sizeof(char*), .name = "datetime", .lit_type = (LambdaType*)&LIT_TYPE_DTIME},
+    [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .lit_type = (LambdaType*)&LIT_TYPE_STRING},
+    [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .lit_type = (LambdaType*)&LIT_TYPE_SYMBOL},
+    [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .lit_type = (LambdaType*)&LIT_TYPE_BINARY},
+    [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list", .lit_type = (LambdaType*)&LIT_TYPE_LIST},
+    [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .lit_type = (LambdaType*)&LIT_TYPE_MAP},
+    [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .lit_type = (LambdaType*)&LIT_TYPE_ELMT},
+    [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .lit_type = (LambdaType*)&LIT_TYPE_TYPE},
+    [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function", .lit_type = (LambdaType*)&LIT_TYPE_FUNC},
+    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any", .lit_type = (LambdaType*)&LIT_TYPE_ANY},
+    [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error", .lit_type = (LambdaType*)&LIT_TYPE_ERROR},
+    [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
 };
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
@@ -717,17 +719,59 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
+    // ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
+    ast_node->type = &LIT_TYPE;
+    // *ast_node->type = build_type_annotation(tp, type_node);
+    return (AstNode*)ast_node;   
+}
+
+AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
+    TSNode child = ts_node_named_child(type_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        switch (symbol) {
+        case SYM_BASE_TYPE:
+            return build_base_type(tp, child);
+        default: // literal values
+            // Handle attributes
+            break;
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+}
+
+AstNode* build_binary_type(Transpiler* tp, TSNode type_node) {
+    TSNode child = ts_node_named_child(type_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        AstNode *node = build_expr(tp, child);
+        if (node) return node;
+        child = ts_node_next_named_sibling(child);
+    }
+}
+
+// AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
+//     TSNode child = ts_node_named_child(type_node, 0);
+//     AstNode* prev_item = NULL;
+//     while (!ts_node_is_null(child)) {
+//         AstNode *node = build_expr(tp, child);
+//         if (node) return node;
+//         child = ts_node_next_named_sibling(child);
+//     }
+//     return NULL;
+// }
+
 AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
     AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     ast_node->type = &LIT_TYPE;
     return (AstNode*)ast_node;
 }
 
-AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
-    ast_node->type = &LIT_TYPE;
-    return (AstNode*)ast_node;
-}
+// AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
+// }
 
 AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     printf("build key expr\n");
@@ -1068,9 +1112,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         f_node->type = build_lit_float(tp, expr_node, symbol);
         return (AstNode*)f_node;
     case SYM_BASE_TYPE:
-        AstTypeNode* t_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, expr_node, sizeof(AstTypeNode));
-        t_node->type = &LIT_TYPE;
-        return (AstNode*)t_node;
+        return build_base_type(tp, expr_node);
+    case SYM_PRIMARY_TYPE:
+        return build_primary_type(tp, expr_node);
+    case SYM_BINARY_TYPE:
+        return build_binary_type(tp, expr_node);
     case SYM_TYPE_ANNOTE:
         return build_type_annote(tp, expr_node);
     case SYM_TYPE_DEFINE:
