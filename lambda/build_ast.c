@@ -810,16 +810,16 @@ AstNode* build_binary_type(Transpiler* tp, TSNode type_node) {
     return NULL;
 }
 
-AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
-    printf("build type annote\n");
-    TSNode child = ts_node_named_child(type_node, 0);
-    while (!ts_node_is_null(child)) {
-        AstNode *node = build_expr(tp, child);
-        if (node) return node;
-        child = ts_node_next_named_sibling(child);
-    }
-    return NULL;
-}
+// AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
+//     printf("build type annote\n");
+//     TSNode child = ts_node_named_child(type_node, 0);
+//     while (!ts_node_is_null(child)) {
+//         AstNode *node = build_expr(tp, child);
+//         if (node) return node;
+//         child = ts_node_next_named_sibling(child);
+//     }
+//     return NULL;
+// }
 
 // AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
 // }
@@ -1150,8 +1150,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_type(tp, expr_node);
     case SYM_BINARY_TYPE:
         return build_binary_type(tp, expr_node);
-    case SYM_TYPE_ANNOTE:
-        return build_type_annote(tp, expr_node);
     case SYM_TYPE_DEFINE:
         // todo: full type def support 
         return build_let_stam(tp, expr_node, symbol);

@@ -61,7 +61,6 @@
 #define SYM_MAP_TYPE sym_map_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
-#define SYM_TYPE_ANNOTE sym_type_annotation
 #define SYM_TYPE_DEFINE sym_type_definition
 
 #define SYM_FUNC_STAM sym_fn_stam

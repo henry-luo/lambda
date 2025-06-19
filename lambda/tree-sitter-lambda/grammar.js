@@ -152,6 +152,7 @@ module.exports = grammar({
     $._expression,
     $._attr_expr,
     $._import_stam,
+    $._type_expr
   ],
 
   precedences: $ => [[
@@ -465,7 +466,7 @@ module.exports = grammar({
 
     // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
     parameter: $ => seq(
-      field('name', $.identifier), optional(seq(':', field('type', $.type_annotation))),
+      field('name', $.identifier), optional(seq(':', field('type', $._type_expr))),
     ),
 
     fn_stam: $ => seq(
@@ -473,7 +474,7 @@ module.exports = grammar({
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
-      optional(seq(':', field('type', $.type_annotation))),      
+      optional(seq(':', field('type', $._type_expr))),      
       '{', field('body', $.content), '}',
     ),
 
@@ -482,7 +483,7 @@ module.exports = grammar({
       'fn', field('name', $.identifier), 
       '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
-      optional(seq(':', field('type', $.type_annotation))),      
+      optional(seq(':', field('type', $._type_expr))),      
       '=>', field('body', $._expression)
     ),
 
@@ -491,13 +492,13 @@ module.exports = grammar({
       seq('fn', 
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
         // return type
-        optional(seq(':', field('type', $.type_annotation))),      
+        optional(seq(':', field('type', $._type_expr))),      
         '{', field('body', $.content), '}'
       ),
       seq(
         '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
         // return type
-        optional(seq(':', field('type', $.type_annotation))),      
+        optional(seq(':', field('type', $._type_expr))),      
         '=>', field('body', $._expression)
       ),      
     ),
@@ -516,25 +517,38 @@ module.exports = grammar({
 
     occurrence: $ => choice('?', '+', '*'),
 
+    base_type: $ => built_in_types(true),
+
+    _non_null_base_type: $ => built_in_types(false),
+
+    array_type: $ => seq(
+      '[', comma_sep($._type_expr), ']',
+    ),
+
+    list_type: $ => seq(
+      '(', comma_sep($._type_expr), ')',
+    ),
+
     map_type_item: $=> seq(
-      field('name', choice($.identifier, $.symbol)), ':', field('as', $.type_annotation)
+      field('name', choice($.identifier, $.symbol)), ':', field('as', $._type_expr)
     ),
 
     map_type: $ => seq('{', 
       $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
     ),
 
-    base_type: $ => built_in_types(true),
-
-    _non_null_base_type: $ => built_in_types(false),
+    element_type: $ => seq('<', 
+      $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '>'
+    ),
 
     primary_type: $ => choice(
       $.base_type,
-      $.identifier,
+      $.identifier,  // type variable, to keep syntax simple, we don't allow full expr here
       $._non_null_literal, // null is now a base type
-      // array type
+      $.list_type,
+      $.array_type,
       $.map_type,
-      // entity type
+      $.element_type,
       // fn type
     ),
 
@@ -544,12 +558,12 @@ module.exports = grammar({
       ...type_pattern($.type_occurrence),
     ),
 
-    type_annotation: $ => choice(
+    _type_expr: $ => choice(
       $.primary_type,
       $.binary_type,
     ),
 
-    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $.type_annotation)),
+    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
 
     type_definition: $ => seq(
       'type', field('declare', alias($.type_assign, $.assign_expr)),
@@ -557,7 +571,7 @@ module.exports = grammar({
 
     assign_expr: $ => seq(
       field('name', $.identifier), 
-      optional(seq(':', field('type', $.type_annotation))), '=', field('as', $._expression),
+      optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
     ),
     
     let_stam: $ => seq(
