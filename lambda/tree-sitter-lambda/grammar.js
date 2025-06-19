@@ -567,6 +567,7 @@ module.exports = grammar({
 
     type_definition: $ => seq(
       'type', field('declare', alias($.type_assign, $.assign_expr)),
+      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
     assign_expr: $ => seq(

@@ -297,7 +297,7 @@ void print_item(StrBuf *strbuf, Item item) {
 }
 
 // print the type of the AST node
-char* formatType(LambdaType *type) {
+char* format_type(LambdaType *type) {
     if (!type) { return "null*"; }
     TypeId type_id = type->type_id;
     switch (type_id) {
@@ -321,6 +321,12 @@ char* formatType(LambdaType *type) {
         return "number";
     case LMD_TYPE_STRING:
         return "char*";
+    case LMD_TYPE_SYMBOL:
+        return "char*";
+    case LMD_TYPE_DTIME:
+        return "char*";
+    case LMD_TYPE_BINARY:
+        return "uint8_t*";
 
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
@@ -355,28 +361,28 @@ void print_ast_node(AstNode *node, int indent) {
     switch(node->node_type) {
     case AST_NODE_IDENT:
         printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name.length, 
-            ((AstIdentNode*)node)->name.str, formatType(node->type), node->type->is_const);
+            ((AstIdentNode*)node)->name.str, format_type(node->type), node->type->is_const);
         break;
     case AST_NODE_PRIMARY:
-        printf("[primary expr:%s,const:%d]\n", formatType(node->type), node->type->is_const);
+        printf("[primary expr:%s,const:%d]\n", format_type(node->type), node->type->is_const);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
         }
         break;
     case AST_NODE_UNARY:
         printf("[unary expr %.*s:%s]\n", (int)((AstUnaryNode*)node)->operator.length, 
-            ((AstUnaryNode*)node)->operator.str, formatType(node->type));
+            ((AstUnaryNode*)node)->operator.str, format_type(node->type));
         print_ast_node(((AstUnaryNode*)node)->operand, indent + 1);
         break;
     case AST_NODE_BINARY:
         AstBinaryNode* bnode = (AstBinaryNode*)node;
         printf("[binary expr %.*s.%d:%s]\n", (int)bnode->operator.length, bnode->operator.str, 
-            bnode->op, formatType(node->type));
+            bnode->op, format_type(node->type));
         print_ast_node(bnode->left, indent + 1);
         print_ast_node(bnode->right, indent + 1);
         break;
     case AST_NODE_IF_EXPR:
-        printf("[if expr:%s]\n", formatType(node->type));
+        printf("[if expr:%s]\n", format_type(node->type));
         AstIfExprNode* if_node = (AstIfExprNode*)node;
         print_ast_node(if_node->cond, indent + 1);
         print_label(indent + 1, "then:");
@@ -387,7 +393,7 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
-        printf("[%s stam:%s]\n", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", formatType(node->type));
+        printf("[%s stam:%s]\n", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", format_type(node->type));
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             print_label(indent + 1, "declare:");
@@ -396,7 +402,7 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_FOR_EXPR:
-        printf("[for %s:%s]\n", node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", formatType(node->type));
+        printf("[for %s:%s]\n", node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", format_type(node->type));
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             print_label(indent + 1, "loop:");
@@ -410,20 +416,20 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_ASSIGN:
         AstNamedNode* assign = (AstNamedNode*)node;
-        printf("[assign expr:%.*s:%s]\n", (int)assign->name.length, assign->name.str, formatType(node->type));
+        printf("[assign expr:%.*s:%s]\n", (int)assign->name.length, assign->name.str, format_type(node->type));
         print_ast_node(assign->as, indent + 1);
         break;
     case AST_NODE_KEY_EXPR:
         AstNamedNode* key = (AstNamedNode*)node;
-        printf("[key expr:%.*s:%s]\n", (int)key->name.length, key->name.str, formatType(node->type));
+        printf("[key expr:%.*s:%s]\n", (int)key->name.length, key->name.str, format_type(node->type));
         print_ast_node(key->as, indent + 1);
         break;
     case AST_NODE_LOOP:
-        printf("[loop expr:%s]\n", formatType(node->type));
+        printf("[loop expr:%s]\n", format_type(node->type));
         print_ast_node(((AstNamedNode*)node)->as, indent + 1);
         break;
     case AST_NODE_ARRAY:
-        printf("[array expr:%s]\n", formatType(node->type));
+        printf("[array expr:%s]\n", format_type(node->type));
         AstNode *item = ((AstArrayNode*)node)->item;
         while (item) {
             print_label(indent + 1, "item:");
@@ -433,7 +439,7 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_LIST:  case AST_NODE_CONTENT:
         printf("[%s:%s[%ld]]\n", node->node_type == AST_NODE_CONTENT ? "content" : "list", 
-            formatType(node->type), ((LambdaTypeList*)node->type)->length);
+            format_type(node->type), ((LambdaTypeList*)node->type)->length);
         AstNode *ld = ((AstListNode*)node)->declare;
         if (!ld) {
             print_label(indent + 1, "no declare");
@@ -451,7 +457,7 @@ void print_ast_node(AstNode *node, int indent) {
         }        
         break; 
     case AST_NODE_MAP:
-        printf("[map expr:%s]\n", formatType(node->type));
+        printf("[map expr:%s]\n", format_type(node->type));
         AstNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
             print_label(indent + 1, "map item:");
@@ -460,7 +466,7 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_ELEMENT:
-        printf("[elmt expr:%s]\n", formatType(node->type));
+        printf("[elmt expr:%s]\n", format_type(node->type));
         AstElementNode* elmt_node = (AstElementNode*)node;
         AstNode *elmt_item = elmt_node->item;
         while (elmt_item) {
@@ -472,17 +478,17 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_PARAM:
         AstNamedNode* param = (AstNamedNode*)node;
-        printf("[param: %.*s:%s]\n", (int)param->name.length, param->name.str, formatType(node->type));
+        printf("[param: %.*s:%s]\n", (int)param->name.length, param->name.str, format_type(node->type));
         break;
     case AST_NODE_FIELD_EXPR:
-        printf("[field expr:%s]\n", formatType(node->type));
+        printf("[field expr:%s]\n", format_type(node->type));
         print_label(indent + 1, "object:");
         print_ast_node(((AstFieldNode*)node)->object, indent + 1);
         print_label(indent + 1, "field:");     
         print_ast_node(((AstFieldNode*)node)->field, indent + 1);
         break;
     case AST_NODE_CALL_EXPR:
-        printf("[call expr:%s]\n", formatType(node->type));
+        printf("[call expr:%s]\n", format_type(node->type));
         print_ast_node(((AstCallNode*)node)->function, indent + 1);
         print_label(indent + 1, "args:"); 
         AstNode* arg = ((AstCallNode*)node)->argument;
@@ -492,14 +498,14 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_SYS_FUNC:
-        printf("[sys func:%d:%s]\n", ((AstSysFuncNode*)node)->fn, formatType(node->type));
+        printf("[sys func:%d:%s]\n", ((AstSysFuncNode*)node)->fn, format_type(node->type));
         break;
     case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
         AstFuncNode* func = (AstFuncNode*)node;
         if (node->node_type == AST_NODE_FUNC_EXPR) {
-            printf("[function expr:%s]\n", formatType(node->type));
+            printf("[function expr:%s]\n", format_type(node->type));
         } else {
-            printf("[function: %.*s:%s]\n", (int)func->name.length, func->name.str, formatType(node->type));
+            printf("[function: %.*s:%s]\n", (int)func->name.length, func->name.str, format_type(node->type));
         }
         print_label(indent + 1, "params:"); 
         AstNode* fn_param = (AstNode*)func->param;
@@ -512,10 +518,10 @@ void print_ast_node(AstNode *node, int indent) {
     case AST_NODE_TYPE:
         assert(node->type->type_id == LMD_TYPE_TYPE && 
             ((LambdaTypeType*)node->type)->type);
-        printf("[type:%s, %s]\n", formatType(node->type), formatType(((LambdaTypeType*)node->type)->type));
+        printf("[type:%s, %s]\n", format_type(node->type), format_type(((LambdaTypeType*)node->type)->type));
         break;
     case AST_NODE_LIST_TYPE:
-        printf("[list type:%s]\n", formatType(node->type));
+        printf("[list type:%s]\n", format_type(node->type));
         AstNode *ls_item = ((AstListNode*)node)->item;
         while (ls_item) {
             print_label(indent + 1, "item:");
@@ -524,7 +530,7 @@ void print_ast_node(AstNode *node, int indent) {
         }        
         break;           
     case AST_NODE_ARRAY_TYPE:
-        printf("[array type:%s]\n", formatType(node->type));
+        printf("[array type:%s]\n", format_type(node->type));
         AstNode *arr_item = ((AstArrayNode*)node)->item;
         while (arr_item) {
             print_label(indent + 1, "item:");
@@ -533,7 +539,7 @@ void print_ast_node(AstNode *node, int indent) {
         }        
         break;    
     case AST_NODE_MAP_TYPE:
-        printf("[map type:%s]\n", formatType(node->type));
+        printf("[map type:%s]\n", format_type(node->type));
         AstNode *mt_item = ((AstMapNode*)node)->item;
         while (mt_item) {
             print_label(indent + 1, "map item:");
@@ -547,7 +553,7 @@ void print_ast_node(AstNode *node, int indent) {
             (int)((AstImportNode*)node)->module.length, ((AstImportNode*)node)->module.str);
         break;
     case AST_SCRIPT:
-        printf("[script:%s]\n", formatType(node->type));
+        printf("[script:%s]\n", format_type(node->type));
         AstNode* child = ((AstScript*)node)->child;
         while (child) {
             print_ast_node(child, indent + 1);

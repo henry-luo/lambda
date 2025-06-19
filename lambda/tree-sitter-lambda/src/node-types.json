@@ -1939,7 +1939,7 @@
     "named": true,
     "fields": {
       "declare": {
-        "multiple": false,
+        "multiple": true,
         "required": true,
         "types": [
           {
