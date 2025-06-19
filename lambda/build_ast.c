@@ -820,7 +820,49 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_element_type(Transpiler* tp, TSNode map_node) {
+AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
+    printf("build element type\n");
+    AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
+        AST_NODE_ELEMENT_TYPE, elmt_node, sizeof(AstElementNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+    ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
+
+    TSNode child = ts_node_named_child(elmt_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        if (symbol == SYM_IDENT) {  // element name
+            StrView name = ts_node_source(tp, child);
+            type->name = name;
+        }
+        else if (symbol == SYM_CONTENT) {  // element content
+            ast_node->content = build_content(tp, child, false, false);
+        }        
+        else {  // attrs
+            AstNode* item = (AstNode*)build_key_expr(tp, child);
+            if (!prev_item) { ast_node->item = item; } 
+            else { prev_item->next = item; }
+            prev_item = item;
+
+            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+            shape_entry->name = &((AstNamedNode*)item)->name;
+            shape_entry->type = item->type;           
+            shape_entry->byte_offset = byte_offset;
+            if (!prev_entry) { type->shape = shape_entry; } 
+            else { prev_entry->next = shape_entry; }
+            prev_entry = shape_entry;
+
+            type->length++;  byte_offset += sizeof(void*);
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
+    type->byte_size = byte_offset;
+    type->content_length = ast_node->content ? ((LambdaTypeList*)ast_node->content->type)->length : 0;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {

@@ -537,9 +537,14 @@ module.exports = grammar({
       $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
     ),
 
-    element_type: $ => seq('<', 
-      $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '>'
-    ),
+    element_type: $ => seq('<', $.identifier,
+      choice(
+        seq($.attr, repeat(seq(',', $.attr)), 
+          optional(seq(choice(linebreak, ';'), $.content))
+        ),
+        optional($.content)
+      ),'>'
+    ),    
 
     primary_type: $ => choice(
       $.base_type,

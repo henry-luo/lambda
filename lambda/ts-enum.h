@@ -168,11 +168,12 @@ enum ts_symbol_identifiers {
   aux_sym_fn_stam_repeat1 = 164,
   aux_sym_list_type_repeat1 = 165,
   aux_sym_map_type_repeat1 = 166,
-  aux_sym_type_definition_repeat1 = 167,
-  aux_sym_let_stam_repeat1 = 168,
-  aux_sym_for_expr_repeat1 = 169,
-  aux_sym_relative_name_repeat1 = 170,
-  aux_sym__import_stam_repeat1 = 171,
+  aux_sym_element_type_repeat1 = 167,
+  aux_sym_type_definition_repeat1 = 168,
+  aux_sym_let_stam_repeat1 = 169,
+  aux_sym_for_expr_repeat1 = 170,
+  aux_sym_relative_name_repeat1 = 171,
+  aux_sym__import_stam_repeat1 = 172,
 };
 
 enum ts_field_identifiers {

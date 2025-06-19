@@ -547,6 +547,15 @@ void print_ast_node(AstNode *node, int indent) {
             mt_item = mt_item->next;
         }
         break;
+    case AST_NODE_ELEMENT_TYPE:
+        printf("[elmt type:%s]\n", format_type(node->type));
+        AstNode *et_item = ((AstElementNode*)node)->item;
+        while (et_item) {
+            print_label(indent + 1, "attr:");
+            print_ast_node(et_item, indent + 1);
+            et_item = et_item->next;
+        }
+        break;
     case AST_NODE_IMPORT:
         printf("[import %.*s:%.*s]\n", 
             (int)((AstImportNode*)node)->alias.length, ((AstImportNode*)node)->alias.str, 

@@ -623,7 +623,15 @@
       "required": true,
       "types": [
         {
-          "type": "map_type_item",
+          "type": "attr",
+          "named": true
+        },
+        {
+          "type": "content",
+          "named": true
+        },
+        {
+          "type": "identifier",
           "named": true
         }
       ]
