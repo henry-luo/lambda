@@ -669,10 +669,8 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
     strbuf_append_format(tp->code_buf, "to_fn(_f%d)", ts_node_start_byte(fn_node->node));
 }
 
-extern LambdaType build_type_annotation(Transpiler* tp, TSNode type_node);
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
-    LambdaType type = build_type_annotation(tp, type_node->node);
-    strbuf_append_format(tp->code_buf, "base_type(%d)", type.type_id);
+    strbuf_append_format(tp->code_buf, "base_type(%d)", type_node->type->type_id);
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {

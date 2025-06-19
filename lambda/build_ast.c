@@ -118,65 +118,6 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     tp->current_scope->last = entry;
 }
 
-LambdaType build_type_annotation(Transpiler* tp, TSNode type_node) {
-    printf("build type annotation\n");
-    LambdaType type;  memset(&type, 0, sizeof(LambdaType));
-    StrView type_name = ts_node_source(tp, type_node);
-    if (strview_equal(&type_name, "null")) {
-        type.type_id = LMD_TYPE_NULL;
-    }
-    else if (strview_equal(&type_name, "error")) {
-        type.type_id = LMD_TYPE_ERROR;
-    }
-    else if (strview_equal(&type_name, "any")) {
-        type.type_id = LMD_TYPE_ANY;
-    }       
-    else if (strview_equal(&type_name, "int")) {
-        type.type_id = LMD_TYPE_INT64;
-    }
-    else if (strview_equal(&type_name, "float")) {
-        type.type_id = LMD_TYPE_FLOAT;
-    }
-    else if (strview_equal(&type_name, "number")) {
-        type.type_id = LMD_TYPE_NUMBER;
-    }    
-    else if (strview_equal(&type_name, "string")) {
-        type.type_id = LMD_TYPE_STRING;
-    }
-    else if (strview_equal(&type_name, "symbol")) {
-        type.type_id = LMD_TYPE_SYMBOL;
-    }    
-    else if (strview_equal(&type_name, "boolean")) {
-        type.type_id = LMD_TYPE_BOOL;
-    }
-    else if (strview_equal(&type_name, "list")) {
-        type.type_id = LMD_TYPE_LIST;
-    }    
-    else if (strview_equal(&type_name, "array")) {
-        type.type_id = LMD_TYPE_ARRAY;
-    }
-    else if (strview_equal(&type_name, "map")) {
-        type.type_id = LMD_TYPE_MAP;
-    }
-    else if (strview_equal(&type_name, "function")) {
-        type.type_id = LMD_TYPE_FUNC;
-    }
-    else if (strview_equal(&type_name, "datetime")) {
-        type.type_id = LMD_TYPE_DTIME;
-    }
-    else if (strview_equal(&type_name, "time")) {
-        type.type_id = LMD_TYPE_DTIME;
-    }
-    else if (strview_equal(&type_name, "date")) {
-        type.type_id = LMD_TYPE_DTIME;
-    }
-    else {
-        printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
-        type.type_id = LMD_TYPE_ERROR;
-    }
-    return type;
-}
-
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
     printf("build array expr\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
@@ -679,8 +620,8 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     if (ts_node_is_null(type_node)) {
         ast_node->type = ast_node->as->type;
     } else {
-        ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
-        *ast_node->type = build_type_annotation(tp, type_node);
+        AstNode *type_expr = build_expr(tp, type_node);
+        ast_node->type = ((LambdaTypeType*)type_expr->type)->type;
     }
 
     // push the name to the name stack
@@ -739,9 +680,57 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
 
 AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
-    // ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
-    ast_node->type = &LIT_TYPE;
-    // *ast_node->type = build_type_annotation(tp, type_node);
+    printf("build type annotation\n");
+    StrView type_name = ts_node_source(tp, type_node);
+    if (strview_equal(&type_name, "null")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_NULL;
+    }
+    else if (strview_equal(&type_name, "any")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_ANY;
+    }
+    else if (strview_equal(&type_name, "int")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_INT;
+    }
+    else if (strview_equal(&type_name, "float")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_FLOAT;
+    }
+    else if (strview_equal(&type_name, "number")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_NUMBER;
+    }
+    else if (strview_equal(&type_name, "string")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_STRING;
+    }
+    else if (strview_equal(&type_name, "symbol")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_SYMBOL;
+    }
+    else if (strview_equal(&type_name, "list")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_LIST;
+    }
+    else if (strview_equal(&type_name, "array")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_ARRAY;
+    }
+    else if (strview_equal(&type_name, "map")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_MAP;
+    }
+    else if (strview_equal(&type_name, "function")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_FUNC;
+    }
+    else if (strview_equal(&type_name, "datetime")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "error")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_ERROR;
+    }
+    else {
+        printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
+        ast_node->type = (LambdaType*)&LIT_TYPE_ERROR;
+    }
     return (AstNode*)ast_node;   
 }
 
@@ -809,17 +798,6 @@ AstNode* build_binary_type(Transpiler* tp, TSNode type_node) {
     }
     return NULL;
 }
-
-// AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
-//     printf("build type annote\n");
-//     TSNode child = ts_node_named_child(type_node, 0);
-//     while (!ts_node_is_null(child)) {
-//         AstNode *node = build_expr(tp, child);
-//         if (node) return node;
-//         child = ts_node_next_named_sibling(child);
-//     }
-//     return NULL;
-// }
 
 // AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
 // }
@@ -982,7 +960,8 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
     // determine the type of the field
     ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaTypeParam));
     if (!ts_node_is_null(type_node)) {
-        *ast_node->type = build_type_annotation(tp, type_node);
+        AstNode *type_expr = build_expr(tp, type_node);
+        *ast_node->type = *((LambdaTypeType*)type_expr->type)->type;
     } else {
         *ast_node->type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
     }
@@ -1035,10 +1014,9 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
             prev_param = param;  param_count++;
         }
         else if (field_id == FIELD_TYPE) {  // return type
-            TSNode child = ts_tree_cursor_current_node(&cursor);
-            LambdaType *type = (LambdaType*)alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
-            *type = build_type_annotation(tp, child);
-            fn_type->returned = type;
+            TSNode child = ts_tree_cursor_current_node(&cursor);            
+            AstNode *type_expr = build_expr(tp, child);
+            fn_type->returned = ((LambdaTypeType*)type_expr->type)->type;
         }
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
