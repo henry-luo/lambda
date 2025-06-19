@@ -57,6 +57,7 @@
 #define SYM_FOR_STAM sym_for_stam
 
 #define SYM_BASE_TYPE sym_base_type
+#define SYM_MAP_TYPE_ITEM sym_map_type_item
 #define SYM_MAP_TYPE sym_map_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
@@ -318,6 +319,7 @@ typedef enum AstNodeType {
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
+    AST_NODE_MAP_TYPE,
     AST_NODE_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,

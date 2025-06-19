@@ -719,6 +719,24 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     return (AstNode*)ast_node;
 }
 
+AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
+    printf("build key expr\n");
+    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
+
+    TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
+    int start_byte = ts_node_start_byte(name);
+    ast_node->name.str = tp->source + start_byte;
+    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+
+    TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
+    printf("build key as\n");
+    ast_node->as = build_expr(tp, val_node);
+
+    // determine the type of the field
+    ast_node->type = ast_node->as->type;
+    return ast_node;
+}
+
 AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     // ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
@@ -727,7 +745,7 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;   
 }
 
-AstNode* build_map_type(Transpiler* tp, TSNode type_node) {
+AstNode* _build_map_type(Transpiler* tp, TSNode type_node) {
     AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
     // ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
     ast_node->type = &LIT_TYPE;
@@ -735,41 +753,40 @@ AstNode* build_map_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;   
 }
 
-// AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
-//     printf("build map expr\n");
-//     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
-//     ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
-//     LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
+AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
+    printf("build map expr\n");
+    AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeMap *type = (LambdaTypeMap*)alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
 
-//     TSNode child = ts_node_named_child(map_node, 0);
-//     AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
-//     while (!ts_node_is_null(child)) {
-//         TSSymbol symbol = ts_node_symbol(child);
-//         AstNode* item = (symbol == SYM_MAP_ITEM) ? build_key_expr(tp, child) : build_expr(tp, child);
-//         if (!prev_item) { ast_node->item = item; } 
-//         else { prev_item->next = item; }
-//         prev_item = item;
+    TSNode child = ts_node_named_child(map_node, 0);
+    AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
+    // map type does not support dynamic expr in the body
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* item = (AstNode*)build_key_expr(tp, child);
+        if (!prev_item) { ast_node->item = item; } 
+        else { prev_item->next = item; }
+        prev_item = item;
 
-//         ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
-//         shape_entry->name = (symbol == SYM_MAP_ITEM) ? &((AstNamedNode*)item)->name : NULL;
-//         shape_entry->type = item->type;
-//         if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
-//             printf("invalid map item type %d, should be map or any\n", item->type->type_id);
-//         }
-//         shape_entry->byte_offset = byte_offset;
-//         if (!prev_entry) { type->shape = shape_entry; } 
-//         else { prev_entry->next = shape_entry; }
-//         prev_entry = shape_entry;
+        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+        shape_entry->name = &((AstNamedNode*)item)->name;
+        shape_entry->type = item->type;
+        shape_entry->byte_offset = byte_offset;
+        if (!prev_entry) { type->shape = shape_entry; } 
+        else { prev_entry->next = shape_entry; }
+        prev_entry = shape_entry;
 
-//         type->length++;  byte_offset += sizeof(void*);
-//         child = ts_node_next_named_sibling(child);
-//     }
+        type->length++;  byte_offset += sizeof(void*);
+        child = ts_node_next_named_sibling(child);
+    }
 
-//     arraylist_append(tp->type_list, ast_node);
-//     type->type_index = tp->type_list->length - 1;
-//     type->byte_size = byte_offset;
-//     return (AstNode*)ast_node;
-// }
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
+    type->byte_size = byte_offset;
+    return (AstNode*)ast_node;
+}
 
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     printf("build primary type\n");
@@ -784,8 +801,7 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
             printf("build map type\n");
             return build_map_type(tp, child);
         default: // literal values
-            printf("unknown primary type: %d\n", symbol);
-            break;
+            return build_expr(tp, child);
         }
         child = ts_node_next_named_sibling(child);
     }
@@ -815,24 +831,6 @@ AstNode* build_type_annote(Transpiler* tp, TSNode type_node) {
 
 // AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
 // }
-
-AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
-    printf("build key expr\n");
-    AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
-
-    TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
-    int start_byte = ts_node_start_byte(name);
-    ast_node->name.str = tp->source + start_byte;
-    ast_node->name.length = ts_node_end_byte(name) - start_byte;
-
-    TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
-    printf("build key as\n");
-    ast_node->as = build_expr(tp, val_node);
-
-    // determine the type of the field
-    ast_node->type = ast_node->as->type;
-    return ast_node;
-}
 
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
     printf("build map expr\n");

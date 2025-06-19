@@ -91,7 +91,7 @@ enum ts_symbol_identifiers {
   anon_sym_print = 87,
   anon_sym_error = 88,
   anon_sym_QMARK = 89,
-  anon_sym_boolean = 90,
+  anon_sym_bool = 90,
   anon_sym_decimal = 91,
   anon_sym_binary = 92,
   anon_sym_list = 93,

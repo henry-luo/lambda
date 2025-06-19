@@ -2106,7 +2106,7 @@
     "named": false
   },
   {
-    "type": "boolean",
+    "type": "bool",
     "named": false
   },
   {

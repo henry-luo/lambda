@@ -5179,7 +5179,7 @@
         },
         {
           "type": "STRING",
-          "value": "boolean"
+          "value": "bool"
         },
         {
           "type": "STRING",
@@ -5264,7 +5264,7 @@
         },
         {
           "type": "STRING",
-          "value": "boolean"
+          "value": "bool"
         },
         {
           "type": "STRING",

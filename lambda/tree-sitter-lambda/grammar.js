@@ -100,7 +100,7 @@ function built_in_types(include_null) {
   let types = [
     'any',
     'error',
-    'boolean',
+    'bool',
     // 'int8', 'int16', 'int32', 'int64',
     'int',  // int64
     // 'float32', 'float64',
