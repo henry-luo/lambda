@@ -914,12 +914,15 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     // global evaluation, wrapped inside main()
     strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n return ");
     child = script->child;
+    bool has_content = false;
     while (child) {
         if (child->node_type == AST_NODE_CONTENT) {
             transpile_box_item(tp, child);
+            has_content = true;
         }
         child = child->next;
     }
+    if (!has_content) { strbuf_append_str(tp->code_buf, "ITEM_NULL"); }
     strbuf_append_str(tp->code_buf, ";\n}\n");
 }
 

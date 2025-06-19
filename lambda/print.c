@@ -512,6 +512,15 @@ void print_ast_node(AstNode *node, int indent) {
     case AST_NODE_TYPE:
         printf("[type:%s]\n", formatType(node->type));
         break;
+    case AST_NODE_MAP_TYPE:
+        printf("[map type:%s]\n", formatType(node->type));
+        AstNode *mt_item = ((AstMapNode*)node)->item;
+        while (mt_item) {
+            print_label(indent + 1, "map item:");
+            print_ast_node(mt_item, indent + 1);
+            mt_item = mt_item->next;
+        }
+        break;
     case AST_NODE_IMPORT:
         printf("[import %.*s:%.*s]\n", 
             (int)((AstImportNode*)node)->alias.length, ((AstImportNode*)node)->alias.str, 

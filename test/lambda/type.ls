@@ -1,1 +1,1 @@
-type a = {b:bool_value, c:int}
+type a = {b:bool, c:int}

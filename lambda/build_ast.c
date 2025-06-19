@@ -745,14 +745,6 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     return (AstNode*)ast_node;   
 }
 
-AstNode* _build_map_type(Transpiler* tp, TSNode type_node) {
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
-    // ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
-    ast_node->type = &LIT_TYPE;
-    // *ast_node->type = build_type_annotation(tp, type_node);
-    return (AstNode*)ast_node;   
-}
-
 AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     printf("build map expr\n");
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
