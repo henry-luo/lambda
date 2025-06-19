@@ -670,7 +670,7 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
-    strbuf_append_format(tp->code_buf, "base_type(%d)", type_node->type->type_id);
+    strbuf_append_format(tp->code_buf, "base_type(%d)", ((LambdaTypeType*)type_node->type)->type->type_id);
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
