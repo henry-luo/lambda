@@ -31,3 +31,4 @@ mul(0.5, 7)
 PI
 pi
 (PI >= pi)
+pi is float

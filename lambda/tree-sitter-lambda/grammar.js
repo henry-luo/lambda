@@ -521,12 +521,12 @@ module.exports = grammar({
 
     _non_null_base_type: $ => built_in_types(false),
 
-    array_type: $ => seq(
-      '[', comma_sep($._type_expr), ']',
-    ),
-
     list_type: $ => seq(
       '(', comma_sep($._type_expr), ')',
+    ),
+
+    array_type: $ => seq(
+      '[', comma_sep($._type_expr), ']',
     ),
 
     map_type_item: $=> seq(

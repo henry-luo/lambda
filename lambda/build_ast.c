@@ -13,7 +13,7 @@ LambdaType TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 LambdaType TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 LambdaType TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 LambdaType TYPE_LIST = {.type_id = LMD_TYPE_LIST};
-LambdaType TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
+LambdaTypeArray TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
 LambdaType TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 LambdaType TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
 LambdaType TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
@@ -45,7 +45,7 @@ LambdaTypeType LIT_TYPE_BINARY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_l
 LambdaTypeType LIT_TYPE_SYMBOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_SYMBOL};
 LambdaTypeType LIT_TYPE_DTIME = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_DTIME};
 LambdaTypeType LIT_TYPE_LIST = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_LIST};
-LambdaTypeType LIT_TYPE_ARRAY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ARRAY};
+LambdaTypeType LIT_TYPE_ARRAY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = (LambdaType*)&TYPE_ARRAY};
 LambdaTypeType LIT_TYPE_MAP = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_MAP};
 LambdaTypeType LIT_TYPE_ELMT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ELMT};
 LambdaTypeType LIT_TYPE_FUNC = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FUNC};
@@ -728,10 +728,61 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         ast_node->type = (LambdaType*)&LIT_TYPE_ERROR;
     }
     else {
-        printf("unknown type %.*s\n", (int)type_name.length, type_name.str);
+        printf("unknown base type %.*s\n", (int)type_name.length, type_name.str);
         ast_node->type = (LambdaType*)&LIT_TYPE_ERROR;
     }
+    printf("built base type %.*s, type_id %d\n", (int)type_name.length, type_name.str, 
+        ((LambdaTypeType*)ast_node->type)->type->type_id);
     return (AstNode*)ast_node;   
+}
+
+AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
+    printf("build list type\n");
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode *prev_declare = NULL, *prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            if (!prev_item) { 
+                ast_node->item = item;
+            } else {  
+                prev_item->next = item;
+            }
+            prev_item = item;
+            type->length++;   
+        }
+        child = ts_node_next_named_sibling(child);
+    }
+    if (!ast_node->declare && type->length == 1) { return ast_node->item;}
+    return (AstNode*)ast_node;
+}
+
+AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
+    printf("build array type\n");
+    AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY_TYPE, array_node, sizeof(AstArrayNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
+    LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
+    TSNode child = ts_node_named_child(array_node, 0);
+    AstNode* prev_item = NULL;  LambdaType *nested_type = NULL;
+    while (!ts_node_is_null(child)) {
+        AstNode* item = build_expr(tp, child);
+        if (!prev_item) { 
+            ast_node->item = item;  nested_type = item->type;
+        } else {  
+            prev_item->next = item;
+            if (nested_type && item->type->type_id != nested_type->type_id) {
+                nested_type = NULL;  // type mismatch, reset the nested type to NULL
+            }
+        }
+        prev_item = item;
+        type->length++;
+        child = ts_node_next_named_sibling(child);
+    }
+    type->nested = nested_type;
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
@@ -769,6 +820,9 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_element_type(Transpiler* tp, TSNode map_node) {
+}
+
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     printf("build primary type\n");
     TSNode child = ts_node_named_child(type_node, 0);
@@ -776,11 +830,16 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
         TSSymbol symbol = ts_node_symbol(child);
         switch (symbol) {
         case SYM_BASE_TYPE:
-            printf("build base type\n");
             return build_base_type(tp, child);
+        case SYM_ARRAY_TYPE:
+            return build_array_type(tp, child);
+        case SYM_LIST_TYPE:
+            return build_list_type(tp, child);
         case SYM_MAP_TYPE:
-            printf("build map type\n");
             return build_map_type(tp, child);
+        case SYM_ELEMENT_TYPE:
+            printf("build element type\n");
+            return build_element_type(tp, child);
         default: // literal values
             return build_expr(tp, child);
         }

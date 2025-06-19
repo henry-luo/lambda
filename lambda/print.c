@@ -510,8 +510,28 @@ void print_ast_node(AstNode *node, int indent) {
         print_ast_node(func->body, indent + 1);
         break;
     case AST_NODE_TYPE:
-        printf("[type:%s]\n", formatType(node->type));
+        assert(node->type->type_id == LMD_TYPE_TYPE && 
+            ((LambdaTypeType*)node->type)->type);
+        printf("[type:%s, %s]\n", formatType(node->type), formatType(((LambdaTypeType*)node->type)->type));
         break;
+    case AST_NODE_LIST_TYPE:
+        printf("[list type:%s]\n", formatType(node->type));
+        AstNode *ls_item = ((AstListNode*)node)->item;
+        while (ls_item) {
+            print_label(indent + 1, "item:");
+            print_ast_node(ls_item, indent + 1);
+            ls_item = ls_item->next;
+        }        
+        break;           
+    case AST_NODE_ARRAY_TYPE:
+        printf("[array type:%s]\n", formatType(node->type));
+        AstNode *arr_item = ((AstArrayNode*)node)->item;
+        while (arr_item) {
+            print_label(indent + 1, "item:");
+            print_ast_node(arr_item, indent + 1);
+            arr_item = arr_item->next;
+        }        
+        break;    
     case AST_NODE_MAP_TYPE:
         printf("[map type:%s]\n", formatType(node->type));
         AstNode *mt_item = ((AstMapNode*)node)->item;
