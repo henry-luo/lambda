@@ -72,17 +72,17 @@ function binary_expr($, in_attr) {
   );
 }
 
-function type_pattern(primary_type) { 
+function type_pattern(type_expr) { 
   return [
     ['|', 'set_union'],
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.
+    // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
-      field('left', primary_type), // operator === 'in' ? choice($._expression, $.private_property_identifier) : $._expression),
+      field('left', type_expr),
       field('operator', operator),
-      field('right', primary_type),
+      field('right', type_expr),
     )),
   );
 }
@@ -161,6 +161,7 @@ module.exports = grammar({
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
+    $.type_occurrence,
     // binary operators
     'binary_pow',
     'binary_times',
@@ -180,7 +181,12 @@ module.exports = grammar({
     $.assign_expr,
     $.if_expr,
     $.for_expr,
-    $.fn_expr
+    $.fn_expr,
+    $.fn_type,
+  ],[
+    $.primary_type,
+    $.type_occurrence,
+    $.binary_type,
   ]],
 
   conflicts: $ => [
@@ -472,7 +478,7 @@ module.exports = grammar({
     fn_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier), 
-      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+      '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
       optional(seq(':', field('type', $._type_expr))),      
       '{', field('body', $.content), '}',
@@ -515,66 +521,6 @@ module.exports = grammar({
       )), $._arguments,
     )),
 
-    occurrence: $ => choice('?', '+', '*'),
-
-    base_type: $ => built_in_types(true),
-
-    _non_null_base_type: $ => built_in_types(false),
-
-    list_type: $ => seq(
-      '(', comma_sep($._type_expr), ')',
-    ),
-
-    array_type: $ => seq(
-      '[', comma_sep($._type_expr), ']',
-    ),
-
-    map_type_item: $=> seq(
-      field('name', choice($.identifier, $.symbol)), ':', field('as', $._type_expr)
-    ),
-
-    map_type: $ => seq('{', 
-      $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
-    ),
-
-    element_type: $ => seq('<', $.identifier,
-      choice(
-        seq($.attr, repeat(seq(',', $.attr)), 
-          optional(seq(choice(linebreak, ';'), $.content))
-        ),
-        optional($.content)
-      ),'>'
-    ),    
-
-    primary_type: $ => choice(
-      $.base_type,
-      $.identifier,  // type variable, to keep syntax simple, we don't allow full expr here
-      $._non_null_literal, // null is now a base type
-      $.list_type,
-      $.array_type,
-      $.map_type,
-      $.element_type,
-      // fn type
-    ),
-
-    type_occurrence: $ => seq($.primary_type, optional($.occurrence)),
-
-    binary_type: $ => choice(
-      ...type_pattern($.type_occurrence),
-    ),
-
-    _type_expr: $ => choice(
-      $.primary_type,
-      $.binary_type,
-    ),
-
-    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
-
-    type_definition: $ => seq(
-      'type', field('declare', alias($.type_assign, $.assign_expr)),
-      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
-    ),
-
     assign_expr: $ => seq(
       field('name', $.identifier), 
       optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
@@ -612,8 +558,81 @@ module.exports = grammar({
     for_stam: $ => seq(
       'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
       '{', field('then', $.content), '}'
+    ),    
+
+    // Type definitions
+    occurrence: $ => choice('?', '+', '*'),
+
+    base_type: $ => built_in_types(true),
+
+    _non_null_base_type: $ => built_in_types(false),
+
+    list_type: $ => seq(
+      // list cannot be empty
+      '(', seq($._type_expr, repeat(seq(',', $._type_expr))), ')',
     ),
 
+    array_type: $ => seq(
+      '[', comma_sep($._type_expr), ']',
+    ),
+
+    map_type_item: $=> seq(
+      field('name', choice($.identifier, $.symbol)), ':', field('as', $._type_expr)
+    ),
+
+    map_type: $ => seq('{', 
+      $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
+    ),
+
+    element_type: $ => seq('<', $.identifier,
+      choice(
+        seq($.attr, repeat(seq(',', $.attr)), 
+          optional(seq(choice(linebreak, ';'), $.content))
+        ),
+        optional($.content)
+      ),'>'
+    ),
+
+    fn_param: $ => seq(
+      field('name', $.identifier), seq(':', field('type', $._type_expr)),
+    ),
+
+    fn_type: $ => seq(
+      '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')', 
+      '=>', field('type', $._type_expr),      
+    ),
+
+    primary_type: $ => choice(
+      $.base_type,
+      $.identifier,  // type variable, to keep syntax simple, we don't allow full expr here
+      $._non_null_literal, // null is now a base type
+      $.list_type,
+      $.array_type,
+      $.map_type,
+      $.element_type,
+      $.fn_type
+    ),
+
+    type_occurrence: $ => prec.right(seq($._type_expr, $.occurrence)),
+
+    binary_type: $ => choice(
+      ...type_pattern($._type_expr),
+    ),
+
+    _type_expr: $ => choice(
+      $.primary_type,
+      $.type_occurrence,
+      $.binary_type,
+    ),
+
+    type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
+
+    type_definition: $ => seq(
+      'type', field('declare', alias($.type_assign, $.assign_expr)),
+      repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
+    ),
+
+    // Module import
     relative_name: $ => repeat1(seq(
       choice('.', '\\'), $.identifier
     )),
