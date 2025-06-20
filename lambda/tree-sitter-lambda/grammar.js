@@ -152,7 +152,7 @@ module.exports = grammar({
     $._expression,
     $._attr_expr,
     $._import_stam,
-    $._type_expr
+    $._type_expr,
   ],
 
   precedences: $ => [[
@@ -161,7 +161,6 @@ module.exports = grammar({
     $.primary_expr,
     $.primary_type,
     $.unary_expr,
-    $.type_occurrence,
     // binary operators
     'binary_pow',
     'binary_times',
@@ -182,17 +181,15 @@ module.exports = grammar({
     $.if_expr,
     $.for_expr,
     $.fn_expr,
-    $.fn_type,
-  ],[
+  ],
+  [
     $.primary_type,
     $.type_occurrence,
     $.binary_type,
+    $.fn_type
   ]],
 
-  conflicts: $ => [
-    // [$.content, $.binary_expr],
-    // [$.primary_expr, $.parameter],
-  ],
+  conflicts: $ => [],
 
   rules: {
     document: $ => optional(choice(

@@ -6426,10 +6426,6 @@
         "name": "unary_expr"
       },
       {
-        "type": "SYMBOL",
-        "name": "type_occurrence"
-      },
-      {
         "type": "STRING",
         "value": "binary_pow"
       },
@@ -6500,10 +6496,6 @@
       {
         "type": "SYMBOL",
         "name": "fn_expr"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "fn_type"
       }
     ],
     [
@@ -6518,6 +6510,10 @@
       {
         "type": "SYMBOL",
         "name": "binary_type"
+      },
+      {
+        "type": "SYMBOL",
+        "name": "fn_type"
       }
     ]
   ],
