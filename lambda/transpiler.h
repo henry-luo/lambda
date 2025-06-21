@@ -64,7 +64,7 @@
 #define SYM_ELEMENT_TYPE sym_element_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
-#define SYM_TYPE_DEFINE sym_type_definition
+#define SYM_TYPE_DEFINE sym_type_stam
 
 #define SYM_FUNC_STAM sym_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
@@ -221,6 +221,7 @@ typedef struct {
     LambdaType;  // extends LambdaType
     LambdaType* nested;  // nested item type for the array
     long length;  // no. of items in the array/map
+    int type_index;  // index of the type in the type list
 } LambdaTypeArray;
 
 typedef LambdaTypeArray LambdaTypeList;

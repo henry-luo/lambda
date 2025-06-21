@@ -186,5 +186,9 @@ Function* to_fn(fn_ptr ptr);
 bool is(Item a, Item b);
 bool in(Item a, Item b);
 String* string(Item item);
+
 LambdaType* base_type(TypeId type_id);
+LambdaType* const_type(int type_index);
+
+// returns the type of the item
 LambdaType* type(Item item);

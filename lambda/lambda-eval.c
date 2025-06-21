@@ -635,6 +635,11 @@ LambdaType* base_type(TypeId type_id) {
         &LIT_TYPE_ERROR : ((TypeInfo*)context->type_info)[type_id].lit_type;
 }
 
+LambdaType* const_type(int type_index) {
+    AstNode* node = ((AstNode**)context->type_list)[type_index];
+    return node->type;
+}
+
 LambdaType* type(Item item) {
     LambdaItem itm = {.item = item};
     LambdaTypeType *type = calloc(1, sizeof(LambdaTypeType) + sizeof(LambdaType)); 

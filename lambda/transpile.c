@@ -727,6 +727,21 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_TYPE:
         transpile_base_type(tp, (AstTypeNode*)expr_node);
         break;
+    case AST_NODE_LIST_TYPE:
+        LambdaTypeType* list_type = (LambdaTypeType*)((AstListNode*)expr_node)->type;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+            ((LambdaTypeList*)list_type->type)->type_index);
+        break;
+    case AST_NODE_ARRAY_TYPE:
+        LambdaTypeType* array_type = (LambdaTypeType*)((AstArrayNode*)expr_node)->type;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+            ((LambdaTypeArray*)array_type->type)->type_index);
+        break;
+    case AST_NODE_MAP_TYPE:
+        LambdaTypeType* map_type = (LambdaTypeType*)((AstMapNode*)expr_node)->type;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+            ((LambdaTypeMap*)map_type->type)->type_index);
+        break;
     case AST_NODE_IMPORT:
         printf("import module\n");
         break;

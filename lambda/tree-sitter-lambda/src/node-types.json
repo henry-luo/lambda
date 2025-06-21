@@ -161,6 +161,10 @@
             "named": true
           },
           {
+            "type": "binary_type",
+            "named": true
+          },
+          {
             "type": "fn_expr",
             "named": true
           },
@@ -174,6 +178,14 @@
           },
           {
             "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_occurrence",
             "named": true
           },
           {
@@ -513,6 +525,10 @@
           "named": true
         },
         {
+          "type": "entity_type",
+          "named": true
+        },
+        {
           "type": "fn_expr",
           "named": true
         },
@@ -549,6 +565,10 @@
           "named": true
         },
         {
+          "type": "object_type",
+          "named": true
+        },
+        {
           "type": "primary_expr",
           "named": true
         },
@@ -561,11 +581,34 @@
           "named": true
         },
         {
-          "type": "type_definition",
+          "type": "type_stam",
           "named": true
         },
         {
           "type": "unary_expr",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "content_type",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "binary_type",
+          "named": true
+        },
+        {
+          "type": "primary_type",
+          "named": true
+        },
+        {
+          "type": "type_occurrence",
           "named": true
         }
       ]
@@ -651,11 +694,41 @@
           "named": true
         },
         {
-          "type": "content",
+          "type": "content_type",
           "named": true
         },
         {
           "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "entity_type",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "attr",
+          "named": true
+        },
+        {
+          "type": "content_type",
           "named": true
         }
       ]
@@ -1514,6 +1587,36 @@
     "fields": {}
   },
   {
+    "type": "object_type",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "attr",
+          "named": true
+        },
+        {
+          "type": "content_type",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "occurrence",
     "named": true,
     "fields": {}
@@ -2063,22 +2166,6 @@
     }
   },
   {
-    "type": "type_definition",
-    "named": true,
-    "fields": {
-      "declare": {
-        "multiple": true,
-        "required": true,
-        "types": [
-          {
-            "type": "assign_expr",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
     "type": "type_occurrence",
     "named": true,
     "fields": {},
@@ -2103,6 +2190,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "type_stam",
+    "named": true,
+    "fields": {
+      "declare": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "assign_expr",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -2345,11 +2448,11 @@
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "element",
@@ -2357,6 +2460,10 @@
   },
   {
     "type": "else",
+    "named": false
+  },
+  {
+    "type": "entity",
     "named": false
   },
   {

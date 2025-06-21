@@ -52,6 +52,7 @@ func_obj_t func_list[] = {
     {"in", (fn_ptr) in},
     {"string", (fn_ptr) string},
     {"base_type", (fn_ptr) base_type},
+    {"const_type", (fn_ptr) const_type},
     {"type", (fn_ptr) type},
 };
 

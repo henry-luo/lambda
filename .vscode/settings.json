@@ -44,7 +44,8 @@
         "stdbool.h": "c",
         "stdint.h": "c",
         "stdarg.h": "c",
-        "new": "c"
+        "new": "c",
+        "optional": "c"
     },
     "cmake.sourceDirectory": "/Users/henryluo/Projects/Jubily/lambda-parser/tree-sitter-javascript"
 }

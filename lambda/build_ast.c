@@ -340,8 +340,6 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
     // add to const list
     arraylist_append(tp->const_list, str_type->string);
     str_type->const_index = tp->const_list->length - 1;
-    printf("const string: %p, len %d, index %d\n", str_type->string, len, str_type->const_index);
-    // ast_node->type = (LambdaType *)str_type;
     return (LambdaType *)str_type;
 }
 
@@ -739,8 +737,10 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
 AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     printf("build list type\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
-    LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
+    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeList *type = (LambdaTypeList*)alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
+
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode *prev_declare = NULL, *prev_item = NULL;
     while (!ts_node_is_null(child)) {
@@ -756,15 +756,20 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
         }
         child = ts_node_next_named_sibling(child);
     }
-    if (!ast_node->declare && type->length == 1) { return ast_node->item;}
+
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
+    // todo: if (!ast_node->declare && type->length == 1) { return ast_node->item; }
     return (AstNode*)ast_node;
 }
 
 AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     printf("build array type\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY_TYPE, array_node, sizeof(AstArrayNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
-    LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
+    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeArray *type = (LambdaTypeArray*)alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
+    ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
+
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  LambdaType *nested_type = NULL;
     while (!ts_node_is_null(child)) {
@@ -782,6 +787,9 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
         child = ts_node_next_named_sibling(child);
     }
     type->nested = nested_type;
+
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
     return (AstNode*)ast_node;
 }
 
@@ -813,10 +821,10 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
         type->length++;  byte_offset += sizeof(void*);
         child = ts_node_next_named_sibling(child);
     }
+    type->byte_size = byte_offset;
 
     arraylist_append(tp->type_list, ast_node);
     type->type_index = tp->type_list->length - 1;
-    type->byte_size = byte_offset;
     return (AstNode*)ast_node;
 }
 
@@ -900,9 +908,6 @@ AstNode* build_binary_type(Transpiler* tp, TSNode type_node) {
     return NULL;
 }
 
-// AstNode* build_type_definition(Transpiler* tp, TSNode type_node) {
-// }
-
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
     printf("build map expr\n");
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
@@ -933,10 +938,10 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         byte_offset += (symbol == SYM_MAP_ITEM) ? type_info[item->type->type_id].byte_size : sizeof(void*);
         child = ts_node_next_named_sibling(child);
     }
+    type->byte_size = byte_offset;
 
     arraylist_append(tp->type_list, ast_node);
     type->type_index = tp->type_list->length - 1;
-    type->byte_size = byte_offset;
     return (AstNode*)ast_node;
 }
 

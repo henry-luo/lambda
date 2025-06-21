@@ -61,8 +61,8 @@ function binary_expr($, in_attr) {
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
     // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.    
-    ['is', 'set_is_in'],
-    ['in', 'set_is_in'],
+    ['is', 'is_in'],
+    ['in', 'is_in'],
   ].map(([operator, precedence, associativity]) =>
     (associativity === 'right' ? prec.right : prec.left)(precedence, seq(
       field('left', operand),
@@ -117,11 +117,21 @@ function built_in_types(include_null) {
     'array',
     'map',
     'element',
+    'entity',
     'object',
     'type',
     'function',
   ];
   return include_null ? choice('null', ...types) : choice(...types);
+}
+
+function _attr_content($) {
+  return choice(
+    seq(alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
+      optional(seq(choice(linebreak, ';'), $.content_type))
+    ),
+    optional($.content_type)
+  );
 }
 
 module.exports = grammar({
@@ -173,10 +183,10 @@ module.exports = grammar({
     'logical_or',
     // set operators
     'range_to',
-    'set_intersect',
-    'set_exclude',
-    'set_union',
-    'set_is_in',
+    'set_intersect',  // like *
+    'set_exclude',    // like -
+    'set_union',      // like or
+    'is_in',
     $.assign_expr,
     $.if_expr,
     $.for_expr,
@@ -211,99 +221,7 @@ module.exports = grammar({
       ),
     )),
 
-    _content_item: $ => choice(
-      $.if_stam, 
-      $.for_stam,
-      $.fn_stam,
-      $.string,
-      $.map,
-      $.element,
-    ),
-
-    _content_expr: $ => choice(
-      $._attr_expr, 
-      $.let_stam,
-      $.pub_stam,
-      $.fn_expr_stam,
-      $.type_definition,
-    ),    
-
-    content: $ => seq(
-      repeat(
-        choice( 
-          seq($._content_expr, choice(linebreak, ';')), 
-          $._content_item
-        )
-      ), 
-      // for last content expr, ';' is optional
-      choice(
-        seq($._content_expr, optional(choice(linebreak, ';'))), 
-        $._content_item
-      )
-    ),
-
-    list: $ => seq('(', 
-      choice($._expression, $.assign_expr), 
-      repeat1(seq(',', choice($._expression, $.assign_expr))), ')'
-    ),
-
-    // Literals and Containers
-    _non_null_literal: $ => choice(
-      $._number,
-      $.string,
-      $.symbol,
-      $._datetime,
-      $.binary,
-      $.true,
-      $.false,
-    ),
-
-    map_item: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)),
-      ':',
-      field('as', $._expression),
-    ),
-
-    map: $ => seq(
-      '{', comma_sep(choice($.map_item, $._expression)), '}',
-    ),
-
-    array: $ => seq(
-      '[', comma_sep($._expression), ']',
-    ),    
-
-    range: $ => seq(
-      $._expression, 'to', $._expression,
-    ),
-    
-    attr_binary_expr: $ => choice(
-      ...binary_expr($, true),
-    ),
-
-    // expr excluding comparison exprs
-    _attr_expr: $ => prec.left(choice(
-      $.primary_expr,
-      $.unary_expr,
-      alias($.attr_binary_expr, $.binary_expr),
-      $.if_expr,
-      $.for_expr,
-      $.fn_expr,
-    )),
-
-    attr: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)), 
-      ':', field('as', $._attr_expr)
-    ),
-
-    element: $ => seq('<', $.identifier,
-      choice(
-        seq(choice($.attr, seq('&', $._attr_expr)), 
-          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
-          optional(seq(choice(linebreak, ';'), $.content))
-        ),
-        optional($.content)
-      ),'>'
-    ),
+    // Literal Values
 
     // no empty strings under Mark/Lambda
     string: $ => seq('"', $._string_content, '"'),
@@ -387,7 +305,106 @@ module.exports = grammar({
     inf: _ => 'inf',
     nan: _ => 'nan',
 
+    // Containers: list, array, map, element
+
+    _content_item: $ => choice(
+      $.if_stam, 
+      $.for_stam,
+      $.fn_stam,
+      $.string,
+      $.map,
+      $.element,
+      $.object_type,
+      $.entity_type,
+    ),
+
+    _content_expr: $ => choice(
+      $._attr_expr, 
+      $.let_stam,
+      $.pub_stam,
+      $.fn_expr_stam,
+      $.type_stam,
+    ),    
+
+    content: $ => seq(
+      repeat(
+        choice( 
+          seq($._content_expr, choice(linebreak, ';')), 
+          $._content_item
+        )
+      ), 
+      // for last content expr, ';' is optional
+      choice(
+        seq($._content_expr, optional(choice(linebreak, ';'))), 
+        $._content_item
+      )
+    ),
+
+    list: $ => seq('(', 
+      choice($._expression, $.assign_expr), 
+      repeat1(seq(',', choice($._expression, $.assign_expr))), ')'
+    ),
+
+    // Literals and Containers
+    _non_null_literal: $ => choice(
+      $._number,
+      $.string,
+      $.symbol,
+      $._datetime,
+      $.binary,
+      $.true,
+      $.false,
+    ),
+
+    map_item: $ => seq(
+      field('name', choice($.string, $.symbol, $.identifier)),
+      ':',
+      field('as', $._expression),
+    ),
+
+    map: $ => seq(
+      '{', comma_sep(choice($.map_item, $._expression)), '}',
+    ),
+
+    array: $ => seq(
+      '[', comma_sep($._expression), ']',
+    ),    
+
+    range: $ => seq(
+      $._expression, 'to', $._expression,
+    ),
+    
+    attr_binary_expr: $ => choice(
+      ...binary_expr($, true),
+    ),
+
+    // expr excluding comparison exprs
+    _attr_expr: $ => prec.left(choice(
+      $.primary_expr,
+      $.unary_expr,
+      alias($.attr_binary_expr, $.binary_expr),
+      $.if_expr,
+      $.for_expr,
+      $.fn_expr,
+    )),
+
+    attr: $ => seq(
+      field('name', choice($.string, $.symbol, $.identifier)), 
+      ':', field('as', $._attr_expr)
+    ),
+
+    element: $ => seq('<', $.identifier,
+      choice(
+        seq(choice($.attr, seq('&', $._attr_expr)), 
+          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
+          optional(seq(choice(linebreak, ';'), $.content))
+        ),
+        optional($.content)
+      ),'>'
+    ),
+
     // Expressions
+
     _parenthesized_expr: $ => seq(
       '(', $._expression, ')',
     ),
@@ -426,14 +443,14 @@ module.exports = grammar({
       $._parenthesized_expr,
     )),
 
-    import: _ => token('import'),
-
     spread_argument: $ => seq('...', $._expression),
 
     _arguments: $ => seq(
       '(', comma_sep(optional(
       field('argument', choice($._expression, $.spread_argument)))), ')',
     ),
+
+    import: _ => token('import'),
 
     call_expr: $ => seq(
       field('function', choice($.primary_expr, $.import)),
@@ -557,7 +574,8 @@ module.exports = grammar({
       '{', field('then', $.content), '}'
     ),    
 
-    // Type definitions
+    // Type Definitions
+
     occurrence: $ => choice('?', '+', '*'),
 
     base_type: $ => built_in_types(true),
@@ -581,14 +599,17 @@ module.exports = grammar({
       $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
     ),
 
-    element_type: $ => seq('<', $.identifier,
-      choice(
-        seq($.attr, repeat(seq(',', $.attr)), 
-          optional(seq(choice(linebreak, ';'), $.content))
-        ),
-        optional($.content)
-      ),'>'
+    attr_type: $ => seq(
+      field('name', choice($.string, $.symbol, $.identifier)), 
+      ':', field('as', $._type_expr)
     ),
+
+    content_type: $ => seq(
+      $._type_expr,
+      repeat(seq(',', $._type_expr)), 
+    ),
+
+    element_type: $ => seq('<', $.identifier, _attr_content($), '>'),
 
     fn_param: $ => seq(
       field('name', $.identifier), seq(':', field('type', $._type_expr)),
@@ -600,9 +621,9 @@ module.exports = grammar({
     ),
 
     primary_type: $ => choice(
+      $._non_null_literal, // non-null literal values; null is now a base type
       $.base_type,
-      $.identifier,  // type variable, to keep syntax simple, we don't allow full expr here
-      $._non_null_literal, // null is now a base type
+      $.identifier,  // type reference
       $.list_type,
       $.array_type,
       $.map_type,
@@ -624,26 +645,41 @@ module.exports = grammar({
 
     type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
 
-    type_definition: $ => seq(
+    entity_type: $ => seq(
+      'type', field('name', $.identifier), '<', _attr_content($), '>'
+    ),
+
+    object_type: $ => seq(
+      'type', field('name', $.identifier), '{', _attr_content($), '}'
+    ),
+
+    type_stam: $ => seq(
       'type', field('declare', alias($.type_assign, $.assign_expr)),
       repeat(seq(',', field('declare', alias($.type_assign, $.assign_expr))))
     ),
 
-    // Module import
+    // top-level type defintions: type_stam | entity_type | object_type
+
+    // Module Imports
+
     relative_name: $ => repeat1(seq(
       choice('.', '\\'), $.identifier
     )),
+
     absolute_name: $ => seq(
       $.identifier, repeat(seq(choice('.', '\\'), $.identifier))
     ),
+
     import_module: $ => choice(
         field('module', choice($.absolute_name, $.relative_name, $.symbol)), 
         seq(field('alias', $.identifier), ':', 
           field('module', choice($.absolute_name, $.relative_name, $.symbol)))
     ),
+    
     _import_stam: $ => seq(
       'import', $.import_module, repeat(seq(',', $.import_module)),
     ),
+
   },
 });
 
