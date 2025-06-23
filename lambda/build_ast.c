@@ -686,12 +686,18 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "any")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_ANY;
     }
+    else if (strview_equal(&type_name, "bool")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_BOOL;
+    } 
     else if (strview_equal(&type_name, "int")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_INT;
     }
     else if (strview_equal(&type_name, "float")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_FLOAT;
     }
+    else if (strview_equal(&type_name, "decimal")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DECIMAL;
+    }    
     else if (strview_equal(&type_name, "number")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_NUMBER;
     }
@@ -701,6 +707,18 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "symbol")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_SYMBOL;
     }
+    else if (strview_equal(&type_name, "datetime")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "time")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "date")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    }
+    else if (strview_equal(&type_name, "binary")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_BINARY;
+    }   
     else if (strview_equal(&type_name, "list")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_LIST;
     }
@@ -710,17 +728,17 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     else if (strview_equal(&type_name, "map")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_MAP;
     }
+    else if (strview_equal(&type_name, "element")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_ELMT;
+    }    
+    // else if (strview_equal(&type_name, "object")) {
+    //     ast_node->type = (LambdaType*)&LIT_TYPE_OBJECT;
+    // }    
     else if (strview_equal(&type_name, "function")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_FUNC;
     }
-    else if (strview_equal(&type_name, "datetime")) {
-        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
-    }
-    else if (strview_equal(&type_name, "time")) {
-        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
-    }
-    else if (strview_equal(&type_name, "date")) {
-        ast_node->type = (LambdaType*)&LIT_TYPE_DTIME;
+    else if (strview_equal(&type_name, "type")) {
+        ast_node->type = (LambdaType*)&LIT_TYPE_TYPE;
     }
     else if (strview_equal(&type_name, "error")) {
         ast_node->type = (LambdaType*)&LIT_TYPE_ERROR;

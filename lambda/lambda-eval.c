@@ -636,7 +636,9 @@ LambdaType* base_type(TypeId type_id) {
 }
 
 LambdaType* const_type(int type_index) {
-    AstNode* node = ((AstNode**)context->type_list)[type_index];
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    AstNode* node = ((AstNode*)type_list->data[type_index]);
+    printf("const_type %d, %p\n", type_index, node);
     return node->type;
 }
 
