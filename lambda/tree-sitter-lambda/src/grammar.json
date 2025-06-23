@@ -6722,10 +6722,6 @@
       },
       {
         "type": "SYMBOL",
-        "name": "primary_type"
-      },
-      {
-        "type": "SYMBOL",
         "name": "unary_expr"
       },
       {
@@ -6804,6 +6800,10 @@
     [
       {
         "type": "SYMBOL",
+        "name": "fn_type"
+      },
+      {
+        "type": "SYMBOL",
         "name": "primary_type"
       },
       {
@@ -6813,10 +6813,6 @@
       {
         "type": "SYMBOL",
         "name": "binary_type"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "fn_type"
       }
     ]
   ],

@@ -78,6 +78,8 @@ TypeInfo type_info[] = {
     [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
 };
 
+AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
+
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
     AstNode* ast_node;
     pool_variable_alloc(tp->ast_pool, size, (void**)&ast_node);
@@ -314,6 +316,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             assert(ast_node->type->is_const == 0);
         }
         else { ast_node->type = entry->node->type; }
+        printf("ident %.*s type: %d\n", (int)entry->name.length, entry->name.str, ast_node->type->type_id);
     }
     return (AstNode*)ast_node;
 }
@@ -601,7 +604,6 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
 }
 
 AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
-    printf("build assign expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_ASSIGN, asn_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
@@ -654,7 +656,7 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     ts_tree_cursor_delete(&cursor);
 
     // let statement does not have 'then' clause
-    ast_node->type = &LIT_NULL;
+    ast_node->type = &LIT_NULL;  // let stam returns null
     return (AstNode*)ast_node;
 }
 
@@ -871,7 +873,7 @@ AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
 AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
     printf("build element type\n");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
-        AST_NODE_ELEMENT_TYPE, elmt_node, sizeof(AstElementNode));
+        AST_NODE_ELMT_TYPE, elmt_node, sizeof(AstElementNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
     LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
@@ -913,6 +915,51 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
+    printf("build fn type\n");
+    AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, func_node, sizeof(AstFuncNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeFunc *fn_type = (LambdaTypeFunc*) alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
+    ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)fn_type;
+
+    // build the params
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars->parent = tp->current_scope;
+    tp->current_scope = ast_node->vars;
+    TSTreeCursor cursor = ts_tree_cursor_new(func_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    AstNamedNode *prev_param = NULL;  int param_count = 0;
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_DECLARE) {  // param declaration
+            TSNode child = ts_tree_cursor_current_node(&cursor);
+            AstNamedNode *param = build_param_expr(tp, child, true);
+            printf("got param type %d\n", param->node_type);
+            if (prev_param == NULL) {
+                ast_node->param = param;
+                fn_type->param = (LambdaTypeParam*)param->type;
+            } else {
+                prev_param->next = (AstNode*)param;
+                ((LambdaTypeParam*)prev_param->type)->next = (LambdaTypeParam*)param->type;
+            }
+            prev_param = param;  param_count++;
+        }
+        else if (field_id == FIELD_TYPE) {  // return type
+            TSNode child = ts_tree_cursor_current_node(&cursor);            
+            AstNode *type_expr = build_expr(tp, child);
+            fn_type->returned = ((LambdaTypeType*)type_expr->type)->type;
+        }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    fn_type->param_count = param_count;
+
+    arraylist_append(tp->type_list, ast_node);
+    fn_type->type_index = tp->type_list->length - 1;
+    printf("func type index: %d\n", fn_type->type_index);
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     printf("build primary type\n");
     TSNode child = ts_node_named_child(type_node, 0);
@@ -929,6 +976,8 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
             return build_map_type(tp, child);
         case SYM_ELEMENT_TYPE:
             return build_element_type(tp, child);
+        case SYM_FN_TYPE:
+            return build_func_type(tp, child);
         default: // literal values
             return build_expr(tp, child);
         }
@@ -1113,7 +1162,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     return (AstNode*)ast_node;
 }
 
-AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
+AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) {
     printf("build param expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_PARAM, param_node, sizeof(AstNamedNode));
 
@@ -1131,7 +1180,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node) {
         *ast_node->type = ast_node->as ? *ast_node->as->type : TYPE_ANY;
     }
 
-    push_name(tp, ast_node, NULL);
+    if (!is_type) { push_name(tp, ast_node, NULL); }
     return ast_node;
 }
 
@@ -1167,7 +1216,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_DECLARE) {  // param declaration
             TSNode child = ts_tree_cursor_current_node(&cursor);
-            AstNamedNode *param = build_param_expr(tp, child);
+            AstNamedNode *param = build_param_expr(tp, child, false);
             printf("got param type %d\n", param->node_type);
             if (prev_param == NULL) {
                 ast_node->param = param;
@@ -1296,7 +1345,6 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_TYPE_DEFINE:
         // todo: full type def support 
         return build_let_stam(tp, expr_node, symbol);
-        // return build_type_definition(tp, expr_node);
     case SYM_IMPORT_MODULE:
         // already processed
         return NULL;

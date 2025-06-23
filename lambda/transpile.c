@@ -1,4 +1,3 @@
-
 #include "transpiler.h"
 
 extern LambdaType TYPE_ANY;
@@ -748,10 +747,15 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((LambdaTypeMap*)map_type->type)->type_index);
         break;
-    case AST_NODE_ELEMENT_TYPE:
+    case AST_NODE_ELMT_TYPE:
         LambdaTypeType* elmt_type = (LambdaTypeType*)((AstElementNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((LambdaTypeElmt*)elmt_type->type)->type_index);
+        break;
+    case AST_NODE_FUNC_TYPE:
+        LambdaTypeType* fn_type = (LambdaTypeType*)((AstFuncNode*)expr_node)->type;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+            ((LambdaTypeFunc*)fn_type->type)->type_index);
         break;
     case AST_NODE_BINARY_TYPE:
         transpile_binary_type(tp, (AstBinaryNode*)expr_node);

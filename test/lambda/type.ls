@@ -1,8 +1,9 @@
-type a = array
-type b = (string, int)
-type c = [bool, int, null]
-type d = {b:bool, c:int}
-type e = map, f = datetime
-type g = <elmt a:b; c, d>
-type h = a | b & c;
-a
+type a = array, b = int, c = map
+type d = (string, int)
+type e = [bool, int, null]
+type f = {b:bool, c:int}
+type g = map, h = datetime
+type i = <elmt a:b; c, d>
+type j = a | b & c;
+type k = (a:int)=>int;
+a; b; c; d; e; f; g; h; i; j; k;

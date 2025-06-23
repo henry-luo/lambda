@@ -552,7 +552,7 @@ void print_ast_node(AstNode *node, int indent) {
             mt_item = mt_item->next;
         }
         break;
-    case AST_NODE_ELEMENT_TYPE:
+    case AST_NODE_ELMT_TYPE:
         printf("[elmt type:%s]\n", format_type(node->type));
         AstElementNode* et_node = (AstElementNode*)node;
         AstNode *et_item = et_node->item;
@@ -562,6 +562,16 @@ void print_ast_node(AstNode *node, int indent) {
             et_item = et_item->next;
         }
         if (et_node->content) print_ast_node(et_node->content, indent + 1);
+        break;
+    case AST_NODE_FUNC_TYPE:
+        printf("[func type:%s]\n", format_type(node->type));
+        AstFuncNode* ft = (AstFuncNode*)node;
+        print_label(indent + 1, "params:"); 
+        AstNode* ft_param = (AstNode*)ft->param;
+        while (ft_param) {
+            print_ast_node(ft_param, indent + 1);
+            ft_param = ft_param->next;
+        }    
         break;
     case AST_NODE_BINARY_TYPE:
         AstBinaryNode* bt_node = (AstBinaryNode*)node;

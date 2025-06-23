@@ -169,7 +169,6 @@ module.exports = grammar({
     $.fn_expr_stam,
     $.sys_func,
     $.primary_expr,
-    $.primary_type,
     $.unary_expr,
     // binary operators
     'binary_pow',
@@ -193,10 +192,10 @@ module.exports = grammar({
     $.fn_expr,
   ],
   [
+    $.fn_type,
     $.primary_type,
     $.type_occurrence,
     $.binary_type,
-    $.fn_type
   ]],
 
   conflicts: $ => [],
@@ -612,6 +611,7 @@ module.exports = grammar({
     element_type: $ => seq('<', $.identifier, _attr_content_type($), '>'),
 
     fn_param: $ => seq(
+      // param type is required
       field('name', $.identifier), seq(':', field('type', $._type_expr)),
     ),
 
@@ -628,7 +628,7 @@ module.exports = grammar({
       $.array_type,
       $.map_type,
       $.element_type,
-      $.fn_type
+      $.fn_type,
     ),
 
     type_occurrence: $ => prec.right(seq($._type_expr, $.occurrence)),

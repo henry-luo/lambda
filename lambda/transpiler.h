@@ -63,6 +63,7 @@
 #define SYM_MAP_TYPE sym_map_type
 #define SYM_CONTENT_TYPE sym_content_type
 #define SYM_ELEMENT_TYPE sym_element_type
+#define SYM_FN_TYPE sym_fn_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_TYPE_DEFINE sym_type_stam
@@ -266,6 +267,7 @@ typedef struct {
     LambdaTypeParam *param;
     LambdaType *returned;
     int param_count;
+    int type_index;
     bool is_anonymous;
     bool is_public;
 } LambdaTypeFunc;
@@ -336,7 +338,8 @@ typedef enum AstNodeType {
     AST_NODE_LIST_TYPE,
     AST_NODE_ARRAY_TYPE,
     AST_NODE_MAP_TYPE,
-    AST_NODE_ELEMENT_TYPE,
+    AST_NODE_ELMT_TYPE,
+    AST_NODE_FUNC_TYPE,
     AST_NODE_BINARY_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
@@ -449,12 +452,12 @@ typedef struct {
     AstNode *content;  // first content node
 } AstElementNode;
 
-// aligned with AstNamedNode
+// aligned with AstNamedNode on name
 typedef struct {
     AstNode;  // extends AstNode
     StrView name;
-    AstNode *body;
     AstNamedNode *param; // first parameter of the function
+    AstNode *body;
     NameScope *vars;  // vars including params and local variables
 } AstFuncNode;
 
