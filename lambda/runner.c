@@ -186,7 +186,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
 
-    printf("JIT compiled %s", script_path);
+    printf("JIT compiled %s\n", script_path);
     printf("jit_context: %p, main_func: %p\n", tp->jit_context, tp->main_func);
     print_time_elapsed(":", start, end);
 }
@@ -262,7 +262,9 @@ Item run_script(Runtime *runtime, const char* source, char* script_path) {
     } else {
         printf("Executing JIT compiled code...\n");
         runner_setup_context(&runner);
+        printf("exec main func\n");
         result = context->result = runner.script->main_func(context);
+        printf("after main func\n");
         // runner_cleanup() later
     }
     return result;

@@ -125,7 +125,7 @@ function built_in_types(include_null) {
   return include_null ? choice('null', ...types) : choice(...types);
 }
 
-function _attr_content($) {
+function _attr_content_type($) {
   return choice(
     seq(alias($.attr_type, $.attr), repeat(seq(',', alias($.attr_type, $.attr))),
       optional(seq(choice(linebreak, ';'), $.content_type))
@@ -609,7 +609,7 @@ module.exports = grammar({
       repeat(seq(',', $._type_expr)), 
     ),
 
-    element_type: $ => seq('<', $.identifier, _attr_content($), '>'),
+    element_type: $ => seq('<', $.identifier, _attr_content_type($), '>'),
 
     fn_param: $ => seq(
       field('name', $.identifier), seq(':', field('type', $._type_expr)),
@@ -646,11 +646,11 @@ module.exports = grammar({
     type_assign: $ => seq(field('name', $.identifier), '=', field('as', $._type_expr)),
 
     entity_type: $ => seq(
-      'type', field('name', $.identifier), '<', _attr_content($), '>'
+      'type', field('name', $.identifier), '<', _attr_content_type($), '>'
     ),
 
     object_type: $ => seq(
-      'type', field('name', $.identifier), '{', _attr_content($), '}'
+      'type', field('name', $.identifier), '{', _attr_content_type($), '}'
     ),
 
     type_stam: $ => seq(

@@ -794,7 +794,6 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
 }
 
 AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
-    printf("build map expr\n");
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
     LambdaTypeMap *type = (LambdaTypeMap*)alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
@@ -828,6 +827,29 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
+    printf("build content type\n");
+    AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
+    TSNode child = ts_node_named_child(list_node, 0);
+    AstNode* prev_item = NULL;
+    while (!ts_node_is_null(child)) {
+        TSSymbol symbol = ts_node_symbol(child);
+        AstNode* item = build_expr(tp, child);
+        if (item) {
+            if (!prev_item) ast_node->item = item;
+            else prev_item->next = item;
+            prev_item = item;
+            type->length++;
+        }
+        // else comment or error
+        child = ts_node_next_named_sibling(child);
+    }
+    printf("end building content type: %ld\n", type->length);
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
     printf("build element type\n");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
@@ -844,8 +866,8 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
             StrView name = ts_node_source(tp, child);
             type->name = name;
         }
-        else if (symbol == SYM_CONTENT) {  // element content
-            ast_node->content = build_content(tp, child, false, false);
+        else if (symbol == SYM_CONTENT_TYPE) {  // element content
+            ast_node->content = build_content_type(tp, child);
         }        
         else {  // attrs
             AstNode* item = (AstNode*)build_key_expr(tp, child);
@@ -888,7 +910,6 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
         case SYM_MAP_TYPE:
             return build_map_type(tp, child);
         case SYM_ELEMENT_TYPE:
-            printf("build element type\n");
             return build_element_type(tp, child);
         default: // literal values
             return build_expr(tp, child);
@@ -898,18 +919,38 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
     return NULL;
 }
 
-AstNode* build_binary_type(Transpiler* tp, TSNode type_node) {
-    TSNode child = ts_node_named_child(type_node, 0);
-    while (!ts_node_is_null(child)) {
-        AstNode *node = build_expr(tp, child);
-        if (node) return node;
-        child = ts_node_next_named_sibling(child);
-    }
-    return NULL;
+AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
+    printf("build binary type\n");
+    AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, 
+        AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
+    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeBinary *type  = (LambdaTypeBinary*)alloc_type(tp, LMD_TYPE_BINARY, sizeof(LambdaTypeBinary));
+    ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
+
+    TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
+    ast_node->left = build_expr(tp, left_node);
+
+    TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);  
+    ast_node->operator = op;
+    if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
+    else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_OR; }
+    else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
+    else { printf("unknown operator: %.*s\n", (int)op.length, op.str); }
+
+    TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
+    ast_node->right = build_expr(tp, right_node);
+
+    type->left = ast_node->left->type;
+    type->right = ast_node->right->type;
+    type->op = ast_node->op;
+    arraylist_append(tp->type_list, ast_node);
+    type->type_index = tp->type_list->length - 1;
+    printf("binary type index: %d\n", type->type_index);
+    return (AstNode*)ast_node;
 }
 
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
-    printf("build map expr\n");
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
     LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;

@@ -673,6 +673,12 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
     strbuf_append_format(tp->code_buf, "base_type(%d)", ((LambdaTypeType*)type_node->type)->type->type_id);
 }
 
+void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
+    printf("transpile binary type\n");
+    LambdaTypeBinary* binary_type = (LambdaTypeBinary*)((LambdaTypeType*)bin_node->type)->type;
+    strbuf_append_format(tp->code_buf, "const_type(%d)", binary_type->type_index);
+}
+
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     if (!expr_node) {
         printf("missing expression node\n");  return;
@@ -741,6 +747,14 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         LambdaTypeType* map_type = (LambdaTypeType*)((AstMapNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((LambdaTypeMap*)map_type->type)->type_index);
+        break;
+    case AST_NODE_ELEMENT_TYPE:
+        LambdaTypeType* elmt_type = (LambdaTypeType*)((AstElementNode*)expr_node)->type;
+        strbuf_append_format(tp->code_buf, "const_type(%d)", 
+            ((LambdaTypeElmt*)elmt_type->type)->type_index);
+        break;
+    case AST_NODE_BINARY_TYPE:
+        transpile_binary_type(tp, (AstBinaryNode*)expr_node);
         break;
     case AST_NODE_IMPORT:
         printf("import module\n");

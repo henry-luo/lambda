@@ -148,6 +148,10 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
 }
 
 void print_item(StrBuf *strbuf, Item item) {
+    if (!item) {
+        strbuf_append_str(strbuf, "null");
+        return;
+    }
     LambdaItem ld_item = {.item = item};
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
@@ -555,6 +559,13 @@ void print_ast_node(AstNode *node, int indent) {
             print_ast_node(et_item, indent + 1);
             et_item = et_item->next;
         }
+        break;
+    case AST_NODE_BINARY_TYPE:
+        AstBinaryNode* bt_node = (AstBinaryNode*)node;
+        printf("[binary type %.*s.%d:%s]\n", (int)bt_node->operator.length, bt_node->operator.str, 
+            bt_node->op, format_type(node->type));
+        print_ast_node(bt_node->left, indent + 1);
+        print_ast_node(bt_node->right, indent + 1);        
         break;
     case AST_NODE_IMPORT:
         printf("[import %.*s:%.*s]\n", 

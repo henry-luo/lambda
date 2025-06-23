@@ -61,6 +61,7 @@
 #define SYM_LIST_TYPE sym_list_type
 #define SYM_MAP_TYPE_ITEM sym_map_type_item
 #define SYM_MAP_TYPE sym_map_type
+#define SYM_CONTENT_TYPE sym_content_type
 #define SYM_ELEMENT_TYPE sym_element_type
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
@@ -247,6 +248,14 @@ typedef struct {
     long content_length;  // no. of content items
 } LambdaTypeElmt;
 
+typedef struct {
+    LambdaType;  // extends LambdaType
+    LambdaType* left;
+    LambdaType* right;
+    Operator op;  // operator
+    int type_index;  // index of the type in the type list
+} LambdaTypeBinary;
+
 typedef struct LambdaTypeParam {
     LambdaType;  // extends LambdaType
     struct LambdaTypeParam *next;
@@ -322,11 +331,13 @@ typedef enum AstNodeType {
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,
     AST_NODE_PARAM,
+    AST_NODE_TYPE,
+    AST_NODE_CONTENT_TYPE,
     AST_NODE_LIST_TYPE,
     AST_NODE_ARRAY_TYPE,
     AST_NODE_MAP_TYPE,
     AST_NODE_ELEMENT_TYPE,
-    AST_NODE_TYPE,
+    AST_NODE_BINARY_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
     AST_NODE_IMPORT,
