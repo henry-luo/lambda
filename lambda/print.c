@@ -441,8 +441,9 @@ void print_ast_node(AstNode *node, int indent) {
             item = item->next;
         }        
         break;
-    case AST_NODE_LIST:  case AST_NODE_CONTENT:
-        printf("[%s:%s[%ld]]\n", node->node_type == AST_NODE_CONTENT ? "content" : "list", 
+    case AST_NODE_LIST:  case AST_NODE_CONTENT:  case AST_NODE_CONTENT_TYPE:
+        printf("[%s:%s[%ld]]\n", node->node_type == 
+            AST_NODE_CONTENT_TYPE ? "content_type" : AST_NODE_CONTENT ? "content" : "list", 
             format_type(node->type), ((LambdaTypeList*)node->type)->length);
         AstNode *ld = ((AstListNode*)node)->declare;
         if (!ld) {
@@ -553,12 +554,14 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_ELEMENT_TYPE:
         printf("[elmt type:%s]\n", format_type(node->type));
-        AstNode *et_item = ((AstElementNode*)node)->item;
+        AstElementNode* et_node = (AstElementNode*)node;
+        AstNode *et_item = et_node->item;
         while (et_item) {
             print_label(indent + 1, "attr:");
             print_ast_node(et_item, indent + 1);
             et_item = et_item->next;
         }
+        if (et_node->content) print_ast_node(et_node->content, indent + 1);
         break;
     case AST_NODE_BINARY_TYPE:
         AstBinaryNode* bt_node = (AstBinaryNode*)node;
