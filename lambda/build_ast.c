@@ -777,7 +777,7 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
         child = ts_node_next_named_sibling(child);
     }
 
-    arraylist_append(tp->type_list, type);
+    arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
     // todo: if (!ast_node->declare && type->length == 1) { return ast_node->item; }
     return (AstNode*)ast_node;
@@ -808,7 +808,7 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     }
     type->nested = nested_type;
 
-    arraylist_append(tp->type_list, type);
+    arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
     return (AstNode*)ast_node;
 }
@@ -842,7 +842,7 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     }
     type->byte_size = byte_offset;
 
-    arraylist_append(tp->type_list, type);
+    arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
     return (AstNode*)ast_node;
 }
@@ -908,7 +908,7 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
         child = ts_node_next_named_sibling(child);
     }
 
-    arraylist_append(tp->type_list, type);
+    arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
     type->byte_size = byte_offset;
     type->content_length = ast_node->content ? ((LambdaTypeList*)ast_node->content->type)->length : 0;
@@ -954,7 +954,7 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
     ts_tree_cursor_delete(&cursor);
     fn_type->param_count = param_count;
 
-    arraylist_append(tp->type_list, fn_type);
+    arraylist_append(tp->type_list, ast_node->type);
     fn_type->type_index = tp->type_list->length - 1;
     printf("func type index: %d\n", fn_type->type_index);
     return (AstNode*)ast_node;
@@ -1011,7 +1011,7 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     type->left = ast_node->left->type;
     type->right = ast_node->right->type;
     type->op = ast_node->op;
-    arraylist_append(tp->type_list, type);
+    arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
     printf("binary type index: %d\n", type->type_index);
     return (AstNode*)ast_node;

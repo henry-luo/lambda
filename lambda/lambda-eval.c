@@ -125,7 +125,7 @@ void expand_list(List *list) {
         list->length, list->extra, list->capacity);
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
-    // to consider: could also alloc from directly from Lambda heap without the heap entry
+    // to consider: could also alloc directly from Lambda heap without the heap entry
     // need to profile to see which is faster
     list->items = Realloc(list->items, list->capacity * sizeof(Item));
     // copy extra items to the end of the list
@@ -141,6 +141,7 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
     }
+    printf("list_push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
     if (itm.type_id == LMD_TYPE_RAW_POINTER) {
         TypeId type_id = *((uint8_t*)itm.raw_pointer);
         // nest list is flattened
@@ -163,7 +164,6 @@ void list_push(List *list, Item item) {
     if (list->length + list->extra >= list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     // printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
-    // data ownership handling
     switch (itm.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         String *str = (String*)itm.pointer;
@@ -201,6 +201,7 @@ List* list_fill(List *list, int count, ...) {
         list_push(list, itm.item);
     }
     va_end(args);
+    printf("list filled: %ld\n", list->length);
     frame_end();
     return list;
 }
@@ -668,9 +669,9 @@ LambdaType* const_type(int type_index) {
     if (type_index < 0 || type_index >= type_list->length) {
         return &LIT_TYPE_ERROR;
     }    
-    LambdaTypeType* type = (LambdaTypeType*)(type_list->data[type_index]);
-    printf("const_type %d, %p\n", type_index, type);
-    return (LambdaType*)type;
+    LambdaType* type = (LambdaType*)(type_list->data[type_index]);
+    printf("const_type %d, %d, %p\n", type_index, type->type_id, type);
+    return type;
 }
 
 LambdaType* type(Item item) {
