@@ -88,13 +88,6 @@ AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size
     return ast_node;
 }
 
-void* alloc_ast_bytes(VariableMemPool* pool, size_t size) {
-    void* bytes;
-    pool_variable_alloc(pool, size, &bytes);
-    memset(bytes, 0, size);
-    return bytes;
-}
-
 void* alloc_const(Transpiler* tp, size_t size) {
     void* bytes;
     pool_variable_alloc(tp->ast_pool, size, &bytes);
@@ -112,7 +105,7 @@ LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
-    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(NameEntry));
+    NameEntry *entry = (NameEntry*)pool_calloc(tp->ast_pool, sizeof(NameEntry));
     entry->name = node->name;  
     entry->node = (AstNode*)node;  entry->import = import;
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
@@ -567,7 +560,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
     LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
 
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
+    ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
 
@@ -829,7 +822,7 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
         else { prev_item->next = item; }
         prev_item = item;
 
-        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
+        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
         shape_entry->name = &((AstNamedNode*)item)->name;
         shape_entry->type = item->type;
         shape_entry->byte_offset = byte_offset;
@@ -895,7 +888,7 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
             else { prev_item->next = item; }
             prev_item = item;
 
-            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
+            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
             shape_entry->name = &((AstNamedNode*)item)->name;
             shape_entry->type = item->type;           
             shape_entry->byte_offset = byte_offset;
@@ -923,7 +916,7 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)fn_type;
 
     // build the params
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
+    ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
@@ -1032,7 +1025,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         else { prev_item->next = item; }
         prev_item = item;
 
-        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
+        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
         shape_entry->name = (symbol == SYM_MAP_ITEM) ? &((AstNamedNode*)item)->name : NULL;
         shape_entry->type = item->type;
         if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
@@ -1078,7 +1071,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
             else { prev_item->next = item; }
             prev_item = item;
 
-            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
+            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
             shape_entry->name = (symbol == SYM_ATTR) ? &((AstNamedNode*)item)->name : NULL;
             shape_entry->type = item->type;
             if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
@@ -1128,7 +1121,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ANY, sizeof(LambdaType));
 
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
+    ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
     // for can have multiple loop declarations
@@ -1207,7 +1200,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     }
 
     // build the params
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
+    ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
@@ -1239,7 +1232,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     fn_type->param_count = param_count;
 
     // build the function body
-    // ast_node->locals = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
+    // ast_node->locals = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     // ast_node->locals->parent = tp->current_scope;
     // tp->current_scope = ast_node->locals;
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
@@ -1445,7 +1438,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
     printf("build script\n");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
-    tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
+    tp->current_scope = ast_node->global_vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
 
     // build the script body
     TSNode child = ts_node_named_child(script_node, 0);

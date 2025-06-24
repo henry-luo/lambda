@@ -76,6 +76,7 @@ MemPoolError pool_variable_init(VariableMemPool **pool, size_t grow_size, uint16
 
 MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr);
 
+void* pool_calloc(VariableMemPool* pool, size_t size);
 void* pool_variable_realloc(VariableMemPool *pool, void *ptr,  size_t data_size, size_t new_size);
 
 /**

@@ -101,6 +101,15 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
     return MEM_POOL_ERR_OK;
 }
 
+void* pool_calloc(VariableMemPool* pool, size_t size) {
+    void* bytes;
+    if (pool_variable_alloc(pool, size, &bytes) == MEM_POOL_ERR_OK) {
+        memset(bytes, 0, size);
+        return bytes;
+    }
+    return NULL;
+}
+
 void* pool_variable_realloc(VariableMemPool *pool, void *ptr,  size_t data_size, size_t new_size) {
     void *new_ptr;
     MemPoolError err = pool_variable_alloc(pool, new_size, &new_ptr);

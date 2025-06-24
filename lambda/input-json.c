@@ -110,47 +110,91 @@ static Array* parse_array(Input *input, const char **json) {
 
 static Map* parse_object(Input *input, const char **json) {
     if (**json != '{') return NULL;
-    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
-    Map* mp = map(0);
-    mp->type = map_type;
-
+    Map* mp = map_pooled(input->pool);
+    if (!mp) return NULL;
+    
     (*json)++; // skip '{'
     skip_whitespace(json);
-    if (**json == '}') { (*json)++;  return mp; }
+    if (**json == '}') { // empty map
+        (*json)++;  return mp;
+    }
 
-    int byte_offset = 0;  ShapeEntry* prev_entry = NULL;
+    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    if (!map_type) { return mp; }
+    mp->type = map_type;
+    int byte_offset = 0, byte_cap = 64;  ShapeEntry* prev_entry = NULL;
+    mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
+    if (!mp->data) return mp;
     while (**json) {
         String* key = parse_string(input, json);
-        if (!key) return NULL;
+        if (!key) return mp;
 
         skip_whitespace(json);
-        if (**json != ':') return NULL;
+        if (**json != ':') return mp;
         (*json)++;
 
         LambdaItem value = (LambdaItem)parse_value(input, json);
-        // map_set(map, key->chars, value);
 
-        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(input->pool, sizeof(ShapeEntry) + sizeof(StrView));
+        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
+            sizeof(ShapeEntry) + sizeof(StrView));
         StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
         nv->str = key->chars;  nv->length = key->len;
         shape_entry->name = nv;
-        shape_entry->type = type_info[value.type_id].type;
+        TypeId type_id = value.type_id == LMD_TYPE_RAW_POINTER ? 
+            ((Container*)value.raw_pointer)->type_id : value.type_id;
+        shape_entry->type = type_info[type_id].type;
+        printf("shape_entry: key: %.*s, type: %d\n", 
+            (int)nv->length, nv->str, shape_entry->type->type_id);
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { map_type->shape = shape_entry; } 
         else { prev_entry->next = shape_entry; }
         prev_entry = shape_entry;
-
         map_type->length++;
-        byte_offset += type_info[value.type_id].byte_size;
 
+        int bsize = type_info[type_id].byte_size;
+        byte_offset += bsize;
+        if (byte_offset > byte_cap) {
+            byte_cap *= 2;
+            void* new_data = pool_calloc(input->pool, byte_cap);
+            if (!new_data) return mp;
+            memcpy(new_data, mp->data, byte_offset - bsize);
+            pool_variable_free(input->pool, mp->data);
+            mp->data = new_data;  mp->data_cap = byte_cap;
+        }
+        void* field_ptr = (char*)mp->data + byte_offset - bsize;
+        switch (type_id) {
+        case LMD_TYPE_NULL:
+            *(void**)field_ptr = NULL;
+            break;
+        case LMD_TYPE_BOOL:
+            *(bool*)field_ptr = value.bool_val;             
+            break;
+        case LMD_TYPE_INT:
+            *(long*)field_ptr = *(long*)value.pointer;
+            break;
+        case LMD_TYPE_FLOAT:
+            *(double*)field_ptr = *(double*)value.pointer;
+            break;
+        case LMD_TYPE_STRING:
+            *(String**)field_ptr = (String*)value.pointer;
+            break;
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:
+            *(Map**)field_ptr = (Map*)value.raw_pointer;
+            break;
+        default:
+            printf("unknown type %d\n", value.type_id);
+        }
+        
         skip_whitespace(json);
         if (**json == '}') { (*json)++;  break; }
-        if (**json != ',') return NULL;
+        if (**json != ',') return mp;
         (*json)++;
     }
     map_type->byte_size = byte_offset;
     arraylist_append(input->type_list, map_type);
     map_type->type_index = input->type_list->length - 1;
+    printf("parsed map length: %ld, byte_size: %ld, shape: %p\n", 
+        map_type->length, map_type->byte_size, map_type->shape);
     return mp;
 }
 

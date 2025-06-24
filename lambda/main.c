@@ -53,7 +53,7 @@ int main(void) {
     // mpf_clear(f);
     // printf("size of mpf_t: %zu\n", sizeof(mpf_t));  
 
-    Input* json = json_parse("[\"name\", \"John\", \"age\", 30, \"city\",\"New York\"]");
+    Input* json = json_parse("{\"a\":[\"name\", \"John\", \"age\", 30, \"city\", true]}");
     printf("JSON parse result: %llu, type: %d\n", json->root, ((LambdaItem)json->root).type_id);
     print_item(json->sb, json->root);
     String *result = (String*)json->sb->str;

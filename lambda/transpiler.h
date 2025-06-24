@@ -187,6 +187,7 @@ struct Map {
     Container;  // extends Container
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
+    int data_cap;  // capacity of the data struct
 };
 
 struct Element {
@@ -194,6 +195,7 @@ struct Element {
     // attributes
     void* type;  // attr type/shape
     void* data;  // packed data struct of the attrs
+    int data_cap;  // capacity of the data struct
 };
 
 typedef struct Script Script;
@@ -562,8 +564,8 @@ struct Runtime {
 
 Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
+Map* map_pooled(VariableMemPool *pool);
 
-void* alloc_ast_bytes(VariableMemPool* pool, size_t size);
 void* alloc_const(Transpiler* tp, size_t size);
 LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);

@@ -276,6 +276,23 @@ Map* map(int type_index) {
     return map;
 }
 
+LambdaTypeMap EmptyMap = {
+    .type_id = LMD_TYPE_MAP,
+    .is_literal = 0,
+    .is_const = 0,
+    .length = 0,
+    .byte_size = 0,
+    .type_index = -1,
+    .shape = NULL
+};
+
+Map* map_pooled(VariableMemPool *pool) {
+    Map *map = (Map *)pool_calloc(pool, sizeof(Map));
+    map->type_id = LMD_TYPE_MAP;
+    map->type = &EmptyMap;
+    return map;
+}
+
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
     LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
