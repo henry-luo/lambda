@@ -1,4 +1,3 @@
-
 #pragma once
 // #include <math.h>  // MIR has problem parsing math.h
 // #include <stdint.h>
@@ -127,6 +126,9 @@ List* list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
 Item list_get(List *list, int index);
 
+// void array_push(Array *array, Item item);
+// void map_set(Map* map, char *key, Item value);
+
 typedef struct Map Map;
 Map* map(int type_index);
 Map* map_fill(Map* map, ...);
@@ -156,6 +158,8 @@ Item push_l(long lval);
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
 #define k2it(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
+// #define a2it(arr_ptr) ((((uint64_t)LMD_TYPE_ARRAY)<<56) | (uint64_t)(arr_ptr))
+// #define m2it(map_ptr) ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(map_ptr))
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
 #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
@@ -186,6 +190,8 @@ Function* to_fn(fn_ptr ptr);
 bool is(Item a, Item b);
 bool in(Item a, Item b);
 String* string(Item item);
+
+Item json_parse(const char* json_string);
 
 LambdaType* base_type(TypeId type_id);
 LambdaType* const_type(int type_index);

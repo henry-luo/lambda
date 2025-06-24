@@ -14,6 +14,52 @@ Array* array() {
     return arr;
 }
 
+Array* array_pooled(VariableMemPool *pool) {
+    Array *arr;
+    MemPoolError err = pool_variable_alloc(pool, sizeof(Array), (void**)&arr);
+    if (err != MEM_POOL_ERR_OK) return NULL;
+    memset(arr, 0, sizeof(Array));
+    arr->type_id = LMD_TYPE_ARRAY;
+    frame_start();
+    return arr;
+}
+
+void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
+    arr->items[index] = itm.item;
+    switch (itm.type_id) {
+    case LMD_TYPE_FLOAT:
+        if (arr->extra + arr->length >= arr->capacity) {
+            arr->capacity = arr->length + 2*arr->extra + 8;
+            arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
+        }
+        double* dval = (double*)(arr->items + (arr->length + arr->extra));
+        *dval = *(double*)itm.pointer;  arr->items[index] = d2it(dval);
+        arr->extra++;
+        break;
+    case LMD_TYPE_INT64:
+        if (arr->extra + arr->length >= arr->capacity) {
+            arr->capacity = arr->length + 2*arr->extra + 8;
+            arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
+        }
+        long* ival = (long*)(arr->items + (arr->length + arr->extra));
+        *ival = *(long*)itm.pointer;  arr->items[index] = l2it(ival);
+        arr->extra++;
+        break;
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
+        String *str = (String*)itm.pointer;
+        str->ref_cnt++;
+        break;
+    case LMD_TYPE_RAW_POINTER: 
+        TypeId type_id = *((uint8_t*)itm.raw_pointer);
+        if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
+            type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+            Container *container = (Container*)itm.raw_pointer;
+            container->ref_cnt++;
+        }
+        break;
+    }
+}
+
 Array* array_fill(Array* arr, int count, ...) {
     if (count > 0) {
         va_list args;
@@ -21,40 +67,8 @@ Array* array_fill(Array* arr, int count, ...) {
         arr->capacity = arr->length = count;
         arr->items = Malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
-            Item item = arr->items[i] = va_arg(args, Item);
-            LambdaItem itm = {.item = item};
-            switch (itm.type_id) {
-            case LMD_TYPE_FLOAT:
-                if (arr->extra + arr->length >= arr->capacity) {
-                    arr->capacity = arr->length + 2*arr->extra + 8;
-                    arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
-                }
-                double* dval = (double*)(arr->items + (arr->length + arr->extra));
-                *dval = *(double*)itm.pointer;  arr->items[i] = d2it(dval);
-                arr->extra++;
-                break;
-            case LMD_TYPE_INT64:
-                if (arr->extra + arr->length >= arr->capacity) {
-                    arr->capacity = arr->length + 2*arr->extra + 8;
-                    arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
-                }
-                long* ival = (long*)(arr->items + (arr->length + arr->extra));
-                *ival = *(long*)itm.pointer;  arr->items[i] = l2it(ival);
-                arr->extra++;
-                break;
-            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
-                String *str = (String*)itm.pointer;
-                str->ref_cnt++;
-                break;
-            case LMD_TYPE_RAW_POINTER: 
-                TypeId type_id = *((uint8_t*)itm.raw_pointer);
-                if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
-                    type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
-                    Container *container = (Container*)itm.raw_pointer;
-                    container->ref_cnt++;
-                }
-                break;
-            }
+            LambdaItem itm = {.item = va_arg(args, Item)};
+            array_set(arr, i, itm, NULL);
         }
         va_end(args);
     }

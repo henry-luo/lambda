@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include "strview.h"
+#include "mem-pool/include/mem_pool.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
@@ -29,6 +30,7 @@ typedef struct {
 
 StrBuf* strbuf_new();
 StrBuf* strbuf_new_cap(size_t size);
+StrBuf* strbuf_new_pooled(VariableMemPool *pool);
 StrBuf* strbuf_create(const char *str);
 StrBuf* strbuf_dup(const StrBuf *sb);
 void strbuf_free(StrBuf *sb);

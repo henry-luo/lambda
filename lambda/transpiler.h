@@ -511,6 +511,13 @@ typedef union LambdaItem {
 typedef Item (*main_func_t)(Context*);
 typedef struct Runtime Runtime;
 
+typedef struct Input {
+    const char* path;
+    void* pool; // memory pool
+    Item root;
+    StrBuf* sb;
+} Input;
+
 struct Script {
     const char* reference;  // path (relative to the main script) and name of the script
     int index;  // index of the script in the runtime scripts list
@@ -550,6 +557,8 @@ struct Runtime {
 
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
+
+Array* array_pooled(VariableMemPool *pool);
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
 void* alloc_const(Transpiler* tp, size_t size);
