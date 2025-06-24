@@ -16,6 +16,7 @@ typedef struct {
     char* str;        // pointer to string data (may or may-not be null-terminated)
     size_t length;    // length excluding null terminator    
     size_t capacity;
+    VariableMemPool *pool;  // memory pool for the string buffer
 } StrBuf;
 #pragma clang diagnostic pop
 
@@ -36,7 +37,6 @@ StrBuf* strbuf_dup(const StrBuf *sb);
 void strbuf_free(StrBuf *sb);
 void strbuf_reset(StrBuf *sb);
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity);
-bool strbuf_resize(StrBuf *sb, size_t new_size);
 void strbuf_append_str(StrBuf *sb, const char *str);
 // append string of given length n
 void strbuf_append_str_n(StrBuf *sb, const char *str, size_t n);
@@ -50,7 +50,6 @@ void strbuf_append_all(StrBuf *sb, int num_args, ...);
 void strbuf_vappend(StrBuf *sb, int num_args, va_list args);
 void strbuf_append_format(StrBuf *sb, const char *format, ...);
 void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args);
-void strbuf_trim_to_length(StrBuf *sb);
 void strbuf_copy(StrBuf *dst, const StrBuf *src);
 bool strbuf_append_file(StrBuf *sb, FILE *file);
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n);

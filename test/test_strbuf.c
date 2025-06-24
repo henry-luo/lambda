@@ -114,27 +114,6 @@ Test(strbuf_tests, test_append_format) {
     strbuf_free(sb);
 }
 
-Test(strbuf_tests, test_resize) {
-    StrBuf* sb = strbuf_create("Test");
-    bool result = strbuf_resize(sb, 10);
-    cr_assert_eq(result, true);
-    cr_assert_str_eq(sb->str, "Test");
-    cr_assert_geq(sb->capacity, 11);
-    cr_assert_eq(sb->length, 4);
-    strbuf_free(sb);
-}
-
-Test(strbuf_tests, test_trim_to_length) {
-    StrBuf* sb = strbuf_create("Test");
-    size_t old_cap = sb->capacity;
-    strbuf_trim_to_length(sb);
-    cr_assert_str_eq(sb->str, "Test");
-    cr_assert_eq(sb->length, 4);
-    cr_assert_eq(sb->capacity, 5);
-    cr_assert_leq(sb->capacity, old_cap);
-    strbuf_free(sb);
-}
-
 Test(strbuf_tests, test_copy_and_dup) {
     StrBuf* src = strbuf_create("Original");
     StrBuf* dst = strbuf_new();

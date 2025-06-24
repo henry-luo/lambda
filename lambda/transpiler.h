@@ -513,7 +513,7 @@ typedef struct Runtime Runtime;
 
 typedef struct Input {
     const char* path;
-    void* pool; // memory pool
+    VariableMemPool* pool; // memory pool
     Item root;
     StrBuf* sb;
 } Input;
@@ -559,6 +559,7 @@ struct Runtime {
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
 
 Array* array_pooled(VariableMemPool *pool);
+void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
 void* alloc_const(Transpiler* tp, size_t size);

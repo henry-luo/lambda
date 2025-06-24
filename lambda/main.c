@@ -11,6 +11,8 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
     strbuf_append_str(strbuf, "\n");
 }
 
+Input* json_parse(const char* json_string);
+
 int main(void) {
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
     _Static_assert(sizeof(uint8_t) == 1, "uint8_t size == 1 byte");
@@ -51,5 +53,10 @@ int main(void) {
     // mpf_clear(f);
     // printf("size of mpf_t: %zu\n", sizeof(mpf_t));  
 
+    Input* json = json_parse("[\"name\", \"John\", \"age\", 30, \"city\",\"New York\"]");
+    printf("JSON parse result: %llu, type: %d\n", json->root, ((LambdaItem)json->root).type_id);
+    print_item(json->sb, json->root);
+    String *result = (String*)json->sb->str;
+    printf("JSON parsed: %s\n", result->chars);
     return 0;
 }

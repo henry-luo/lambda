@@ -191,8 +191,6 @@ bool is(Item a, Item b);
 bool in(Item a, Item b);
 String* string(Item item);
 
-Item json_parse(const char* json_string);
-
 LambdaType* base_type(TypeId type_id);
 LambdaType* const_type(int type_index);
 

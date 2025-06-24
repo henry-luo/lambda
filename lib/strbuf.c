@@ -13,20 +13,20 @@ StrBuf* _strbuf_new_cap(size_t size, VariableMemPool *pool) {
     if (pool) {
         MemPoolError err = pool_variable_alloc(pool, sizeof(StrBuf), (void**)&sb);
         if (err != MEM_POOL_ERR_OK) { return NULL; }
+        sb->pool = pool;
         // allocate a fat string
         err = pool_variable_alloc(pool, sizeof(uint32_t) + size, (void**)&sb->str);
         if (err != MEM_POOL_ERR_OK) { pool_variable_free(pool, sb); return NULL; }
         sb->length = sizeof(uint32_t);  // reserved for length
         sb->str[sizeof(uint32_t)] = '\0';
-        sb->capacity = size + sizeof(uint32_t);        
+        sb->capacity = size + sizeof(uint32_t);
     } else {
         sb = (StrBuf*) malloc(sizeof(StrBuf));
         if (!sb) return NULL;
         sb->str = malloc(size);
         if (!sb->str) { free(sb);  return NULL; }
-        sb->str[0] = '\0';
-        sb->length = 0;
-        sb->capacity = size;        
+        sb->str[0] = '\0';  sb->length = 0;
+        sb->capacity = size;  sb->pool = NULL;
     }
     return sb;
 }
@@ -65,18 +65,25 @@ void strbuf_reset(StrBuf *sb) {
 }
 
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
-    if (!sb->str) return false;
     if (min_capacity <= sb->capacity) return true;
-    
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
-    while (new_capacity < min_capacity) {
-        new_capacity *= 2;
-    }
+    while (new_capacity < min_capacity) { new_capacity *= 2; }
 
-    char *new_s = (char*)realloc(sb->str, new_capacity);
+    printf("strbuf_ensure_cap: %zu -> %zu\n", sb->capacity, new_capacity);
+    char *new_s;
+    if (!sb->pool) new_s = (char*)realloc(sb->str, new_capacity);
+    else {
+        if (!sb->length) {
+            MemPoolError err = pool_variable_alloc(sb->pool, new_capacity, (void**)&new_s);
+            if (err != MEM_POOL_ERR_OK) return false;
+            sb->length = sizeof(uint32_t);  // reserved for length
+        }
+        else {
+            new_s = (char*)pool_variable_realloc(sb->pool, sb->str, (sb->length+1), new_capacity);
+        }
+    }
     if (!new_s) return false;
-    sb->str = new_s;
-    sb->capacity = new_capacity;
+    sb->str = new_s;  sb->capacity = new_capacity;
     return true;
 }
 
@@ -150,33 +157,6 @@ void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
     size = vsnprintf(sb->str + sb->length, sb->capacity - sb->length, format, args);
     if (size < 0) return;
     sb->length += size;
-}
-
-// Resize the buffer to have capacity to hold a string of length new_len
-// (+ a null terminating character).  Can also be used to downsize the buffer's
-// memory usage.  Returns true on success, false on failure.
-bool strbuf_resize(StrBuf *sbuf, size_t new_len) {
-    size_t capacity = ROUNDUP2POW(new_len + 1);
-    char *new_buff = realloc(sbuf->str, capacity * sizeof(char));
-    if (!new_buff) return false;
-
-    sbuf->str = new_buff;
-    sbuf->capacity = capacity;
-    if (sbuf->length > new_len) {
-        // Buffer was shrunk - re-add null byte
-        sbuf->length = new_len;
-        sbuf->str[sbuf->length] = '\0';
-    }
-    return true;
-}
-
-void strbuf_trim_to_length(StrBuf *sb) {
-    if (!sb->str) return;
-    char *new_s = (char*)realloc(sb->str, sb->length + 1);
-    if (new_s) {
-        sb->str = new_s;
-        sb->capacity = sb->length + 1;
-    }
 }
 
 void strbuf_copy(StrBuf *dst, const StrBuf *src) {

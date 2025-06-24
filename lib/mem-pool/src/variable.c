@@ -1,6 +1,6 @@
 #include "internals.h"
 #include "../include/mem_pool.h"
-
+#include <string.h>
 
 struct SizedBlock {
     Header header;
@@ -99,6 +99,16 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
     // unlock(pool);
 
     return MEM_POOL_ERR_OK;
+}
+
+void* pool_variable_realloc(VariableMemPool *pool, void *ptr,  size_t data_size, size_t new_size) {
+    void *new_ptr;
+    MemPoolError err = pool_variable_alloc(pool, new_size, &new_ptr);
+    if (err != MEM_POOL_ERR_OK) { return NULL; }
+    // copy the old data to the new block
+    if (data_size) memcpy(new_ptr, ptr, data_size);
+    pool_variable_free(pool, ptr);
+    return new_ptr;
 }
 
 static int delete_block_from_free_list(VariableMemPool *pool, SizedBlock *block)

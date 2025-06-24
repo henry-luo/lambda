@@ -16,16 +16,20 @@ Array* array() {
 
 Array* array_pooled(VariableMemPool *pool) {
     Array *arr;
+    printf("array_pooled: pool %p\n", pool);
     MemPoolError err = pool_variable_alloc(pool, sizeof(Array), (void**)&arr);
     if (err != MEM_POOL_ERR_OK) return NULL;
     memset(arr, 0, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
-    frame_start();
+    // frame_start();
     return arr;
 }
 
 void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
+    printf("array_set index: %d, type: %d\n", index, itm.type_id);
     arr->items[index] = itm.item;
+    // mem handling
+    if (pool) return;
     switch (itm.type_id) {
     case LMD_TYPE_FLOAT:
         if (arr->extra + arr->length >= arr->capacity) {
@@ -58,6 +62,18 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
         }
         break;
     }
+}
+
+void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool) {
+    if (arr->length + 1 > arr->capacity) {
+        printf("expand array len: %ld, extra: %ld, capacity: %ld\n",
+            arr->length, arr->extra, arr->capacity);
+        arr->capacity = arr->capacity ? arr->capacity * 2 : 8;
+        arr->items = !pool ? Realloc(arr->items, arr->capacity * sizeof(Item)) :
+            pool_variable_realloc(pool, arr->items, arr->length * sizeof(Item), arr->capacity * sizeof(Item));
+    }
+    array_set(arr, arr->length, itm, pool);
+    arr->length++;
 }
 
 Array* array_fill(Array* arr, int count, ...) {

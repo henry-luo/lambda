@@ -12,6 +12,7 @@ static void skip_whitespace(const char **json) {
 }
 
 static String* parse_string(Input *input, const char **json) {
+    printf("parse_string: %s\n", *json);
     if (**json != '"') return NULL;
     StrBuf* sb;
     if (!input->sb) {
@@ -19,7 +20,7 @@ static String* parse_string(Input *input, const char **json) {
         if (!input->sb) return NULL;
     }
     sb = input->sb;
-
+    
     (*json)++; // Skip opening quote
     while (**json && **json != '"') {
         if (**json == '\\') {
@@ -49,8 +50,8 @@ static String* parse_string(Input *input, const char **json) {
     String *string = (String*)sb->str;
     string->len = sb->length - sizeof(uint32_t);
     string->ref_cnt = 0;
-    strbuf_reset(sb);
-    return s2it(string);
+    sb->str = NULL;  sb->length = 0;  sb->capacity = 0;
+    return string;
 }
 
 static Item parse_number(Input *input, const char **json) {
@@ -60,81 +61,80 @@ static Item parse_number(Input *input, const char **json) {
     char* end;
     *dval = strtod(*json, &end);
     *json = end;
-    return d2item(dval);
+    return d2it(dval);
 }
 
-static Item parse_array(Input *input, const char **json) {
-    if (**json != '[') return ITEM_ERROR;
-    (*json)++; // Skip [ 
-
+static Array* parse_array(Input *input, const char **json) {
+    printf("parse_array: %s\n", *json);
+    if (**json != '[') return NULL;
     Array* arr = array_pooled(input->pool);
-    if (!arr) return ITEM_ERROR;
+    printf("array_pooled: arr %p\n", arr);
+    if (!arr) return NULL;
 
+    (*json)++; // skip [ 
     skip_whitespace(json);
-    if (**json == ']') {
-        (*json)++;
-        return a2it(arr);
-    }
+    if (**json == ']') { (*json)++;  return arr; }
 
     while (**json) {
-        Item value = parse_value(input, json);
-        array_push(arr, value);
+        LambdaItem item = {.item = parse_value(input, json)};
+        array_append(arr, item, input->pool);
 
         skip_whitespace(json);
-        if (**json == ']') {
-            (*json)++;
-            break;
+        if (**json == ']') { (*json)++;  break; }
+        if (**json != ',') {
+            printf("Expected ',' or ']', got '%c'\n", **json);
+            return NULL; // invalid format
         }
-
-        if (**json != ',') return ITEM_ERROR; // Invalid format
         (*json)++;
     }
-    return a2it(arr);
+    printf("parsed array length: %ld\n", arr->length);
+    return arr;
 }
 
 static Item parse_object(Input *input, const char **json) {
     if (**json != '{') return ITEM_ERROR;
     (*json)++; // Skip {
+    return ITEM_ERROR;
 
-    Map* map_obj = map(0); // Assuming 0 is a generic map type
+    // Map* map_obj = map(0); // Assuming 0 is a generic map type
 
-    skip_whitespace(json);
-    if (**json == '}') {
-        (*json)++;
-        return m2it(map_obj);
-    }
+    // skip_whitespace(json);
+    // if (**json == '}') {
+    //     (*json)++;
+    //     return m2it(map_obj);
+    // }
 
-    while (**json) {
-        String* key = parse_string(input, json);
-        if (!key) return ITEM_ERROR;
+    // while (**json) {
+    //     String* key = parse_string(input, json);
+    //     if (!key) return ITEM_ERROR;
 
-        skip_whitespace(json);
-        if (**json != ':') return ITEM_ERROR;
-        (*json)++;
+    //     skip_whitespace(json);
+    //     if (**json != ':') return ITEM_ERROR;
+    //     (*json)++;
 
-        Item value = parse_value(input, json);
-        map_set(map_obj, key->chars, value);
+    //     Item value = parse_value(input, json);
+    //     map_set(map_obj, key->chars, value);
 
-        skip_whitespace(json);
-        if (**json == '}') {
-            (*json)++;
-            break;
-        }
+    //     skip_whitespace(json);
+    //     if (**json == '}') {
+    //         (*json)++;
+    //         break;
+    //     }
 
-        if (**json != ',') return ITEM_ERROR;
-        (*json)++;
-    }
-
-    return m2it(map_obj);
+    //     if (**json != ',') return ITEM_ERROR;
+    //     (*json)++;
+    // }
+    // return m2it(map_obj);
 }
 
 static Item parse_value(Input *input, const char **json) {
+    printf("parse_value: %s\n", *json);
     skip_whitespace(json);
     switch (**json) {
         case '{':
             return parse_object(input, json);
         case '[':
-            return parse_array(input, json);
+            return (Item)parse_array(input, json);
         case '"':
             return s2it(parse_string(input, json));
         case 't':
@@ -163,6 +163,16 @@ static Item parse_value(Input *input, const char **json) {
     }
 }
 
-Item json_parse(const char* json_string) {
-    return parse_value(&json_string);
+Input* json_parse(const char* json_string) {
+    printf("json_parse: %s\n", json_string);
+    Input* input = malloc(sizeof(Input));
+    input->path = NULL; // path for JSON input
+    size_t grow_size = 1024;  // 1k
+    size_t tolerance_percent = 20;
+    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
+    if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
+    input->root = ITEM_NULL;
+    input->sb = strbuf_new_pooled(input->pool);
+    input->root = parse_value(input, &json_string);
+    return input;
 }
