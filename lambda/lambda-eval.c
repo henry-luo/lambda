@@ -269,8 +269,7 @@ Map* map(int type_index) {
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
-    AstMapNode* node = (AstMapNode*)((AstNode*)type_list->data[type_index]);
-    LambdaTypeMap *map_type = (LambdaTypeMap*)node->type;
+    LambdaTypeMap *map_type = (LambdaTypeMap*)(type_list->data[type_index]);
     map->type = map_type;    
     frame_start();
     return map;
@@ -356,8 +355,7 @@ Element* elmt(int type_index) {
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
-    AstElementNode* node = (AstElementNode*)((AstNode*)type_list->data[type_index]);
-    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)node->type;
+    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)(type_list->data[type_index]);
     elmt->type = elmt_type;
     if (elmt_type->length || elmt_type->content_length) {
         frame_start();
@@ -670,9 +668,9 @@ LambdaType* const_type(int type_index) {
     if (type_index < 0 || type_index >= type_list->length) {
         return &LIT_TYPE_ERROR;
     }    
-    AstNode* node = ((AstNode*)type_list->data[type_index]);
-    printf("const_type %d, %p\n", type_index, node);
-    return node->type;
+    LambdaTypeType* type = (LambdaTypeType*)(type_list->data[type_index]);
+    printf("const_type %d, %p\n", type_index, type);
+    return (LambdaType*)type;
 }
 
 LambdaType* type(Item item) {

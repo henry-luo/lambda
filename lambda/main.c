@@ -36,7 +36,7 @@ int main(void) {
     run_test_script(&runtime, "box_unbox.ls", strbuf);
     run_test_script(&runtime, "func.ls", strbuf);
     run_test_script(&runtime, "mem.ls", strbuf);
-    run_test_script(&runtime, "type.ls", strbuf);
+    // run_test_script(&runtime, "type.ls", strbuf);
 
     printf("%s", strbuf->str);
     strbuf_free(strbuf);

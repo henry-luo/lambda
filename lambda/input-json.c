@@ -112,6 +112,7 @@ static Map* parse_object(Input *input, const char **json) {
     if (**json != '{') return NULL;
     LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
     Map* mp = map(0);
+    mp->type = map_type;
 
     (*json)++; // skip '{'
     skip_whitespace(json);
@@ -129,9 +130,10 @@ static Map* parse_object(Input *input, const char **json) {
         LambdaItem value = (LambdaItem)parse_value(input, json);
         // map_set(map, key->chars, value);
 
-        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(input->pool, sizeof(ShapeEntry));
-        StrView nv = {.str= key->chars, .length = key->len};
-        shape_entry->name = &nv;
+        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(input->pool, sizeof(ShapeEntry) + sizeof(StrView));
+        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+        nv->str = key->chars;  nv->length = key->len;
+        shape_entry->name = nv;
         shape_entry->type = type_info[value.type_id].type;
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { map_type->shape = shape_entry; } 
@@ -147,7 +149,7 @@ static Map* parse_object(Input *input, const char **json) {
         (*json)++;
     }
     map_type->byte_size = byte_offset;
-    // arraylist_append(input->type_list, ast_node);
+    arraylist_append(input->type_list, map_type);
     map_type->type_index = input->type_list->length - 1;
     return mp;
 }
