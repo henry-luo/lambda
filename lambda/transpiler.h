@@ -167,7 +167,8 @@ typedef enum {
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type
     char* name;  // name of the type
-    LambdaType *lit_type;  // literal type
+    LambdaType *type;  // literal type
+    LambdaType *lit_type;  // literal type_type
     // char* c_type;  // C type of the type
 } TypeInfo;
 
@@ -514,6 +515,7 @@ typedef struct Runtime Runtime;
 typedef struct Input {
     const char* path;
     VariableMemPool* pool; // memory pool
+    ArrayList* type_list;  // list of types
     Item root;
     StrBuf* sb;
 } Input;
@@ -561,7 +563,7 @@ struct Runtime {
 Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
 
-void* alloc_ast_bytes(Transpiler* tp, size_t size);
+void* alloc_ast_bytes(VariableMemPool* pool, size_t size);
 void* alloc_const(Transpiler* tp, size_t size);
 LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);

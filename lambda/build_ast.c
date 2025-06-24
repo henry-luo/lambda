@@ -54,28 +54,28 @@ LambdaTypeType LIT_TYPE_ANY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_lite
 LambdaTypeType LIT_TYPE_ERROR = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ERROR};
 
 TypeInfo type_info[] = {
-    [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
-    [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
-    [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool", .lit_type = (LambdaType*)&LIT_TYPE_BOOL},
-    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "int", .lit_type = (LambdaType*)&LIT_TYPE_INT},
-    [LMD_TYPE_INT64] = {.byte_size = sizeof(long), .name = "int", .lit_type = (LambdaType*)&LIT_TYPE_INT},
-    [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float", .lit_type = (LambdaType*)&LIT_TYPE_FLOAT},
-    [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal", .lit_type = (LambdaType*)&LIT_TYPE_DECIMAL},
-    [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number", .lit_type = (LambdaType*)&LIT_TYPE_NUMBER},
-    [LMD_TYPE_DTIME] = {.byte_size = sizeof(char*), .name = "datetime", .lit_type = (LambdaType*)&LIT_TYPE_DTIME},
-    [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .lit_type = (LambdaType*)&LIT_TYPE_STRING},
-    [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .lit_type = (LambdaType*)&LIT_TYPE_SYMBOL},
-    [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .lit_type = (LambdaType*)&LIT_TYPE_BINARY},
-    [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
-    [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
-    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list", .lit_type = (LambdaType*)&LIT_TYPE_LIST},
-    [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .lit_type = (LambdaType*)&LIT_TYPE_MAP},
-    [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .lit_type = (LambdaType*)&LIT_TYPE_ELMT},
-    [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .lit_type = (LambdaType*)&LIT_TYPE_TYPE},
-    [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function", .lit_type = (LambdaType*)&LIT_TYPE_FUNC},
-    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any", .lit_type = (LambdaType*)&LIT_TYPE_ANY},
-    [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error", .lit_type = (LambdaType*)&LIT_TYPE_ERROR},
-    [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start", .lit_type = (LambdaType*)&LIT_TYPE_NULL},
+    [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer", .type = &TYPE_NULL, .lit_type = (LambdaType*)&LIT_TYPE_NULL},
+    [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null", .type=&TYPE_NULL, .lit_type = (LambdaType*)&LIT_TYPE_NULL},
+    [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool", .type=&TYPE_BOOL, .lit_type = (LambdaType*)&LIT_TYPE_BOOL},
+    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "int", .type=&TYPE_INT, .lit_type = (LambdaType*)&LIT_TYPE_INT},
+    [LMD_TYPE_INT64] = {.byte_size = sizeof(long), .name = "int", .type=&TYPE_INT, .lit_type = (LambdaType*)&LIT_TYPE_INT},
+    [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float", .type=&TYPE_FLOAT, .lit_type = (LambdaType*)&LIT_TYPE_FLOAT},
+    [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal", .type=&TYPE_DECIMAL, .lit_type = (LambdaType*)&LIT_TYPE_DECIMAL},
+    [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number", .type=&TYPE_NUMBER, .lit_type = (LambdaType*)&LIT_TYPE_NUMBER},
+    [LMD_TYPE_DTIME] = {.byte_size = sizeof(char*), .name = "datetime", .type=&TYPE_DTIME, .lit_type = (LambdaType*)&LIT_TYPE_DTIME},
+    [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .type=&TYPE_STRING, .lit_type = (LambdaType*)&LIT_TYPE_STRING},
+    [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .type=&TYPE_SYMBOL, .lit_type = (LambdaType*)&LIT_TYPE_SYMBOL},
+    [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .type=&TYPE_BINARY, .lit_type = (LambdaType*)&LIT_TYPE_BINARY},
+    [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .type=(LambdaType*)&TYPE_ARRAY, .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .type=(LambdaType*)&TYPE_ARRAY, .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list", .type=&TYPE_LIST, .lit_type = (LambdaType*)&LIT_TYPE_LIST},
+    [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .type=&TYPE_MAP, .lit_type = (LambdaType*)&LIT_TYPE_MAP},
+    [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .type=&TYPE_ELMT, .lit_type = (LambdaType*)&LIT_TYPE_ELMT},
+    [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .type=&TYPE_TYPE, .lit_type = (LambdaType*)&LIT_TYPE_TYPE},
+    [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function", .type=&TYPE_FUNC, .lit_type = (LambdaType*)&LIT_TYPE_FUNC},
+    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any", .type=&TYPE_ANY, .lit_type = (LambdaType*)&LIT_TYPE_ANY},
+    [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error", .type=&TYPE_ERROR, .lit_type = (LambdaType*)&LIT_TYPE_ERROR},
+    [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start", .type=&TYPE_NULL, .lit_type = (LambdaType*)&LIT_TYPE_NULL},
 };
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
@@ -88,9 +88,9 @@ AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size
     return ast_node;
 }
 
-void* alloc_ast_bytes(Transpiler* tp, size_t size) {
+void* alloc_ast_bytes(VariableMemPool* pool, size_t size) {
     void* bytes;
-    pool_variable_alloc(tp->ast_pool, size, &bytes);
+    pool_variable_alloc(pool, size, &bytes);
     memset(bytes, 0, size);
     return bytes;
 }
@@ -112,7 +112,7 @@ LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
     printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
-    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp, sizeof(NameEntry));
+    NameEntry *entry = (NameEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(NameEntry));
     entry->name = node->name;  
     entry->node = (AstNode*)node;  entry->import = import;
     if (!tp->current_scope->first) { tp->current_scope->first = entry; }
@@ -567,7 +567,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
     LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
 
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
 
@@ -829,7 +829,7 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
         else { prev_item->next = item; }
         prev_item = item;
 
-        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
         shape_entry->name = &((AstNamedNode*)item)->name;
         shape_entry->type = item->type;
         shape_entry->byte_offset = byte_offset;
@@ -895,7 +895,7 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
             else { prev_item->next = item; }
             prev_item = item;
 
-            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
             shape_entry->name = &((AstNamedNode*)item)->name;
             shape_entry->type = item->type;           
             shape_entry->byte_offset = byte_offset;
@@ -923,7 +923,7 @@ AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)fn_type;
 
     // build the params
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
@@ -1026,12 +1026,13 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
     AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
+        // named map item, or dynamic expr
         AstNode* item = (symbol == SYM_MAP_ITEM) ? build_key_expr(tp, child) : build_expr(tp, child);
         if (!prev_item) { ast_node->item = item; } 
         else { prev_item->next = item; }
         prev_item = item;
 
-        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
         shape_entry->name = (symbol == SYM_MAP_ITEM) ? &((AstNamedNode*)item)->name : NULL;
         shape_entry->type = item->type;
         if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
@@ -1077,7 +1078,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
             else { prev_item->next = item; }
             prev_item = item;
 
-            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp, sizeof(ShapeEntry));
+            ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(tp->ast_pool, sizeof(ShapeEntry));
             shape_entry->name = (symbol == SYM_ATTR) ? &((AstNamedNode*)item)->name : NULL;
             shape_entry->type = item->type;
             if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
@@ -1127,7 +1128,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ANY, sizeof(LambdaType));
 
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
     // for can have multiple loop declarations
@@ -1206,7 +1207,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     }
 
     // build the params
-    ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    ast_node->vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
@@ -1238,7 +1239,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     fn_type->param_count = param_count;
 
     // build the function body
-    // ast_node->locals = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    // ast_node->locals = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
     // ast_node->locals->parent = tp->current_scope;
     // tp->current_scope = ast_node->locals;
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
@@ -1444,7 +1445,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
     printf("build script\n");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
-    tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
+    tp->current_scope = ast_node->global_vars = (NameScope*)alloc_ast_bytes(tp->ast_pool, sizeof(NameScope));
 
     // build the script body
     TSNode child = ts_node_named_child(script_node, 0);

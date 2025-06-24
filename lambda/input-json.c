@@ -110,14 +110,14 @@ static Array* parse_array(Input *input, const char **json) {
 
 static Map* parse_object(Input *input, const char **json) {
     if (**json != '{') return NULL;
-    LambdaTypeMap *map_type = (LambdaTypeMap*)pool_variable_alloc(input->pool, sizeof(LambdaTypeMap), (void**)&map);
-
-    Map* m = map(0);
+    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    Map* mp = map(0);
 
     (*json)++; // skip '{'
     skip_whitespace(json);
-    if (**json == '}') { (*json)++;  return m; }
+    if (**json == '}') { (*json)++;  return mp; }
 
+    int byte_offset = 0;  ShapeEntry* prev_entry = NULL;
     while (**json) {
         String* key = parse_string(input, json);
         if (!key) return NULL;
@@ -126,15 +126,30 @@ static Map* parse_object(Input *input, const char **json) {
         if (**json != ':') return NULL;
         (*json)++;
 
-        Item value = parse_value(input, json);
+        LambdaItem value = (LambdaItem)parse_value(input, json);
         // map_set(map, key->chars, value);
+
+        ShapeEntry* shape_entry = (ShapeEntry*)alloc_ast_bytes(input->pool, sizeof(ShapeEntry));
+        StrView nv = {.str= key->chars, .length = key->len};
+        shape_entry->name = &nv;
+        shape_entry->type = type_info[value.type_id].type;
+        shape_entry->byte_offset = byte_offset;
+        if (!prev_entry) { map_type->shape = shape_entry; } 
+        else { prev_entry->next = shape_entry; }
+        prev_entry = shape_entry;
+
+        map_type->length++;
+        byte_offset += type_info[value.type_id].byte_size;
 
         skip_whitespace(json);
         if (**json == '}') { (*json)++;  break; }
         if (**json != ',') return NULL;
         (*json)++;
     }
-    return m;
+    map_type->byte_size = byte_offset;
+    // arraylist_append(input->type_list, ast_node);
+    map_type->type_index = input->type_list->length - 1;
+    return mp;
 }
 
 static Item parse_value(Input *input, const char **json) {
@@ -181,6 +196,7 @@ Input* json_parse(const char* json_string) {
     size_t tolerance_percent = 20;
     MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
     if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
+    input->type_list = arraylist_new(16);
     input->root = ITEM_NULL;
     input->sb = strbuf_new_pooled(input->pool);
     input->root = parse_value(input, &json_string);
