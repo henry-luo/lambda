@@ -563,7 +563,7 @@ void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
 
 void* alloc_ast_bytes(Transpiler* tp, size_t size);
 void* alloc_const(Transpiler* tp, size_t size);
-LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size);
+LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_element(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);

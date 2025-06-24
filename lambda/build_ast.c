@@ -102,9 +102,9 @@ void* alloc_const(Transpiler* tp, size_t size) {
     return bytes;
 }
 
-LambdaType* alloc_type(Transpiler* tp, TypeId type, size_t size) {
+LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     LambdaType* t;
-    pool_variable_alloc(tp->ast_pool, size, (void**)&t);
+    pool_variable_alloc(pool, size, (void**)&t);
     memset(t, 0, size);
     t->type_id = type;  assert(t->is_const == 0);
     return t;
@@ -123,7 +123,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
     printf("build array expr\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
     LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  LambdaType *nested_type = NULL;
@@ -312,7 +312,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             printf("got imported identifier %.*s from module %.*s\n", 
                 (int)entry->name.length, entry->name.str, 
                 (int)entry->import->module.length, entry->import->module.str);
-            ast_node->type = alloc_type(tp, entry->node->type->type_id, sizeof(LambdaType));
+            ast_node->type = alloc_type(tp->ast_pool, entry->node->type->type_id, sizeof(LambdaType));
             assert(ast_node->type->is_const == 0);
         }
         else { ast_node->type = entry->node->type; }
@@ -326,7 +326,7 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
     // todo: exclude zero-length string
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
     int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : symbol == SYM_BINARY ? 3:2);  // -2 to exclude the quotes
-    LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp, 
+    LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp->ast_pool, 
         (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
         symbol == SYM_STRING ? LMD_TYPE_STRING : 
         symbol == SYM_BINARY ? LMD_TYPE_BINARY : 
@@ -347,7 +347,7 @@ LambdaType* build_lit_string(Transpiler* tp, TSNode node) {
 }
 
 LambdaType* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    LambdaTypeFloat *item_type = (LambdaTypeFloat *)alloc_type(tp, LMD_TYPE_FLOAT, sizeof(LambdaTypeFloat));
+    LambdaTypeFloat *item_type = (LambdaTypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(LambdaTypeFloat));
     if (symbol == SYM_INF) {
         item_type->double_val = INFINITY;
     }
@@ -365,7 +365,7 @@ LambdaType* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
 }
 
 LambdaType* build_lit_decimal(Transpiler* tp, TSNode node) {
-    LambdaTypeDecimal *item_type = (LambdaTypeDecimal *)alloc_type(tp, LMD_TYPE_DECIMAL, sizeof(LambdaTypeDecimal));
+    LambdaTypeDecimal *item_type = (LambdaTypeDecimal *)alloc_type(tp->ast_pool, LMD_TYPE_DECIMAL, sizeof(LambdaTypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
     num_str[num_sv.length-1] = '\0';  // clear suffix 'n'/'N'
@@ -453,7 +453,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
 
     TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
     ast_node->operand = build_expr(tp, operand_node);
-    // ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
+    // ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(LambdaType));
     ast_node->type = ast_node->op == OPERATOR_NOT ? &TYPE_BOOL : &TYPE_FLOAT;
 
     printf("end build unary expr\n");
@@ -535,7 +535,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else {
         type_id = LMD_TYPE_ANY;
     }
-    ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
+    ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(LambdaType));
     printf("end build binary expr\n");
     return (AstNode*)ast_node;
 }
@@ -556,7 +556,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     // determine the type of the if expression, should be union of then and else
     TypeId type_id = max(ast_node->then->type->type_id, 
         ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL);
-    ast_node->type = alloc_type(tp, type_id, sizeof(LambdaType));
+    ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(LambdaType));
     printf("end build if expr\n");
     return (AstNode*)ast_node;
 }
@@ -564,7 +564,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
     printf("build list\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
     LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
 
     ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
@@ -757,8 +757,8 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
 AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     printf("build list type\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
-    LambdaTypeList *type = (LambdaTypeList*)alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeList *type = (LambdaTypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(list_node, 0);
@@ -786,8 +786,8 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
 AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     printf("build array type\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY_TYPE, array_node, sizeof(AstArrayNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
-    LambdaTypeArray *type = (LambdaTypeArray*)alloc_type(tp, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeArray *type = (LambdaTypeArray*)alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(array_node, 0);
@@ -815,8 +815,8 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
 
 AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
-    LambdaTypeMap *type = (LambdaTypeMap*)alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeMap *type = (LambdaTypeMap*)alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(map_node, 0);
@@ -850,7 +850,7 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
 AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
     printf("build content type\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
     LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
@@ -874,8 +874,8 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
     printf("build element type\n");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
         AST_NODE_ELMT_TYPE, elmt_node, sizeof(AstElementNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
-    LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp->ast_pool, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(elmt_node, 0);
@@ -918,8 +918,8 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
 AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
     printf("build fn type\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, func_node, sizeof(AstFuncNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
-    LambdaTypeFunc *fn_type = (LambdaTypeFunc*) alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeFunc *fn_type = (LambdaTypeFunc*) alloc_type(tp->ast_pool, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)fn_type;
 
     // build the params
@@ -990,8 +990,8 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     printf("build binary type\n");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, 
         AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
-    LambdaTypeBinary *type  = (LambdaTypeBinary*)alloc_type(tp, LMD_TYPE_BINARY, sizeof(LambdaTypeBinary));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(LambdaTypeType));
+    LambdaTypeBinary *type  = (LambdaTypeBinary*)alloc_type(tp->ast_pool, LMD_TYPE_BINARY, sizeof(LambdaTypeBinary));
     ((LambdaTypeType*)ast_node->type)->type = (LambdaType*)type;
 
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
@@ -1019,7 +1019,7 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
 
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
     LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
 
     TSNode child = ts_node_named_child(map_node, 0);
@@ -1057,7 +1057,7 @@ AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
     printf("build element expr\n");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
         AST_NODE_ELEMENT, elmt_node, sizeof(AstElementNode));
-    LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+    LambdaTypeElmt *type  = (LambdaTypeElmt*)alloc_type(tp->ast_pool, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
     ast_node->type = (LambdaType*)type;
 
     TSNode child = ts_node_named_child(elmt_node, 0);
@@ -1125,7 +1125,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     printf("build for expr\n");
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_EXPR, for_node, sizeof(AstForNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaType));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ANY, sizeof(LambdaType));
 
     ast_node->vars = (NameScope*)alloc_ast_bytes(tp, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
@@ -1172,7 +1172,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
 
     TSNode type_node = ts_node_child_by_field_id(param_node, FIELD_TYPE);
     // determine the type of the field
-    ast_node->type = alloc_type(tp, LMD_TYPE_ANY, sizeof(LambdaTypeParam));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ANY, sizeof(LambdaTypeParam));
     if (!ts_node_is_null(type_node)) {
         AstNode *type_expr = build_expr(tp, type_node);
         *ast_node->type = *((LambdaTypeType*)type_expr->type)->type;
@@ -1188,7 +1188,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     printf("build function\n");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
         is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_FUNC, sizeof(LambdaTypeFunc));
     LambdaTypeFunc *fn_type = (LambdaTypeFunc*) ast_node->type;
     fn_type->is_anonymous = !is_named;  
     
@@ -1254,7 +1254,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     printf("build content\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
     LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;

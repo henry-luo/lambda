@@ -34,8 +34,25 @@ static String* parse_string(Input *input, const char **json) {
                 case 'n': strbuf_append_char(sb, '\n'); break;
                 case 'r': strbuf_append_char(sb, '\r'); break;
                 case 't': strbuf_append_char(sb, '\t'); break;
-                // TODO: Handle \uXXXX escapes
-                default: break; // Invalid escape
+                // handle \uXXXX escapes
+                case 'u': {
+                    (*json)++; // skip 'u'
+                    char hex[5] = {0};
+                    strncpy(hex, *json, 4);
+                    (*json) += 4; // skip 4 hex digits
+                    int codepoint = (int)strtol(hex, NULL, 16);
+                    if (codepoint < 0x80) {
+                        strbuf_append_char(sb, (char)codepoint);
+                    } else if (codepoint < 0x800) {
+                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                    } else {
+                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                    }
+                } break;
+                default: break; // invalid escape
             }
         } else {
             strbuf_append_char(sb, **json);
@@ -44,7 +61,7 @@ static String* parse_string(Input *input, const char **json) {
     }
 
     if (**json == '"') {
-        (*json)++; // Skip closing quote
+        (*json)++; // skip closing quote
     }
 
     String *string = (String*)sb->str;
@@ -91,40 +108,33 @@ static Array* parse_array(Input *input, const char **json) {
     return arr;
 }
 
-static Item parse_object(Input *input, const char **json) {
-    if (**json != '{') return ITEM_ERROR;
-    (*json)++; // Skip {
-    return ITEM_ERROR;
+static Map* parse_object(Input *input, const char **json) {
+    if (**json != '{') return NULL;
+    LambdaTypeMap *map_type = (LambdaTypeMap*)pool_variable_alloc(input->pool, sizeof(LambdaTypeMap), (void**)&map);
 
-    // Map* map_obj = map(0); // Assuming 0 is a generic map type
+    Map* m = map(0);
 
-    // skip_whitespace(json);
-    // if (**json == '}') {
-    //     (*json)++;
-    //     return m2it(map_obj);
-    // }
+    (*json)++; // skip '{'
+    skip_whitespace(json);
+    if (**json == '}') { (*json)++;  return m; }
 
-    // while (**json) {
-    //     String* key = parse_string(input, json);
-    //     if (!key) return ITEM_ERROR;
+    while (**json) {
+        String* key = parse_string(input, json);
+        if (!key) return NULL;
 
-    //     skip_whitespace(json);
-    //     if (**json != ':') return ITEM_ERROR;
-    //     (*json)++;
+        skip_whitespace(json);
+        if (**json != ':') return NULL;
+        (*json)++;
 
-    //     Item value = parse_value(input, json);
-    //     map_set(map_obj, key->chars, value);
+        Item value = parse_value(input, json);
+        // map_set(map, key->chars, value);
 
-    //     skip_whitespace(json);
-    //     if (**json == '}') {
-    //         (*json)++;
-    //         break;
-    //     }
-
-    //     if (**json != ',') return ITEM_ERROR;
-    //     (*json)++;
-    // }
-    // return m2it(map_obj);
+        skip_whitespace(json);
+        if (**json == '}') { (*json)++;  break; }
+        if (**json != ',') return NULL;
+        (*json)++;
+    }
+    return m;
 }
 
 static Item parse_value(Input *input, const char **json) {
@@ -132,7 +142,7 @@ static Item parse_value(Input *input, const char **json) {
     skip_whitespace(json);
     switch (**json) {
         case '{':
-            return parse_object(input, json);
+            return (Item)parse_object(input, json);
         case '[':
             return (Item)parse_array(input, json);
         case '"':

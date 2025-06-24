@@ -158,8 +158,6 @@ Item push_l(long lval);
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
 #define k2it(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
-// #define a2it(arr_ptr) ((((uint64_t)LMD_TYPE_ARRAY)<<56) | (uint64_t)(arr_ptr))
-// #define m2it(map_ptr) ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(map_ptr))
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
 #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
