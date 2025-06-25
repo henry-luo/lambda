@@ -12,8 +12,8 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 
 Input* json_parse(const char* json_string);
 Input* csv_parse(const char* csv_string);
-Input* ini_parse(const char* ini_string);
 Input* ini_file_parse(const char* ini_string);
+Input* xml_parse(const char* xml_string);
 
 int main(void) {
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -74,6 +74,13 @@ int main(void) {
     print_item(ini_file_input->sb, ini_file_input->root);
     String *ini_file_result = (String*)ini_file_input->sb->str;
     printf("INI file parsed: %s\n", ini_file_result->chars);
+
+    // test xml parsing
+    Input* xml_input = xml_parse("<?xml version=\"1.0\"?>\n<bookstore>\n  <book id=\"1\" category=\"fiction\">\n    <title>Great Gatsby</title>\n    <author>F. Scott Fitzgerald</author>\n    <price>12.99</price>\n  </book>\n  <book id=\"2\" category=\"science\">\n    <title>Brief History of Time</title>\n    <author>Stephen Hawking</author>\n    <price>15.99</price>\n  </book>\n</bookstore>");
+    printf("XML parse result: %llu, type: %d\n", xml_input->root, ((LambdaItem)xml_input->root).type_id);
+    print_item(xml_input->sb, xml_input->root);
+    String *xml_result = (String*)xml_input->sb->str;
+    printf("XML parsed: %s\n", xml_result->chars);
 
     return 0;
 }

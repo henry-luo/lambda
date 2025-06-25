@@ -14,12 +14,7 @@ static void skip_whitespace(const char **json) {
 static String* parse_string(Input *input, const char **json) {
     printf("parse_string: %s\n", *json);
     if (**json != '"') return NULL;
-    StrBuf* sb;
-    if (!input->sb) {
-        input->sb = strbuf_new_pooled(input->pool);
-        if (!input->sb) return NULL;
-    }
-    sb = input->sb;
+    StrBuf* sb = input->sb;
     
     (*json)++; // Skip opening quote
     while (**json && **json != '"') {
