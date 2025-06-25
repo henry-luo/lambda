@@ -198,73 +198,44 @@ static Item parse_element(Input *input, const char **xml) {
     if (**xml != '>') return ITEM_ERROR;
     (*xml)++; // skip >
 
-    // create element map
-    Map* element_map = map_pooled(input->pool);
-    if (!element_map) return ITEM_ERROR;
+    // Create element
+    Element* element = elmt_pooled(input->pool);
+    if (!element) return ITEM_ERROR;
     
-    LambdaTypeMap *element_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
-    if (!element_type) return (Item)element_map;
-    element_map->type = element_type;
+    LambdaTypeElmt *element_type = (LambdaTypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+    if (!element_type) return (Item)element;
+    element->type = element_type;
     
-    int byte_offset = 0, byte_cap = 128;
-    ShapeEntry* prev_entry = NULL;
-    element_map->data = pool_calloc(input->pool, byte_cap);
-    element_map->data_cap = byte_cap;
-    if (!element_map->data) return (Item)element_map;
+    // Set element name
+    element_type->name.str = tag_name->chars;
+    element_type->name.length = tag_name->len;
     
-    // Add tag name field
-    ShapeEntry* tag_shape = (ShapeEntry*)pool_calloc(input->pool, 
-        sizeof(ShapeEntry) + sizeof(StrView));
-    StrView* tag_nv = (StrView*)((char*)tag_shape + sizeof(ShapeEntry));
-    tag_nv->str = "tag";
-    tag_nv->length = 3;
-    tag_shape->name = tag_nv;
-    tag_shape->type = type_info[LMD_TYPE_STRING].type;
-    tag_shape->byte_offset = byte_offset;
-    element_type->shape = tag_shape;
-    prev_entry = tag_shape;
-    element_type->length++;
-    
-    int bsize = type_info[LMD_TYPE_STRING].byte_size;
-    byte_offset += bsize;
-    *(String**)((char*)element_map->data + tag_shape->byte_offset) = tag_name;
-    
-    // add attributes field if attributes exist
+    // Set up attributes in the Element's Map data
     if (attributes->type && ((LambdaTypeMap*)attributes->type)->length > 0) {
-        if (byte_offset + type_info[LMD_TYPE_MAP].byte_size > byte_cap) {
-            byte_cap *= 2;
-            void* new_data = pool_calloc(input->pool, byte_cap);
-            if (!new_data) return (Item)element_map;
-            memcpy(new_data, element_map->data, byte_offset);
-            pool_variable_free(input->pool, element_map->data);
-            element_map->data = new_data;
-            element_map->data_cap = byte_cap;
+        LambdaTypeMap* attr_map_type = (LambdaTypeMap*)attributes->type;
+        element_type->shape = attr_map_type->shape;
+        element_type->length = attr_map_type->length;
+        element_type->byte_size = attr_map_type->byte_size;
+        
+        // Allocate and copy attributes data to element
+        element->data = pool_calloc(input->pool, element_type->byte_size);
+        element->data_cap = element_type->byte_size;
+        if (element->data) {
+            memcpy(element->data, attributes->data, element_type->byte_size);
         }
-        
-        ShapeEntry* attr_shape = (ShapeEntry*)pool_calloc(input->pool, 
-            sizeof(ShapeEntry) + sizeof(StrView));
-        StrView* attr_nv = (StrView*)((char*)attr_shape + sizeof(ShapeEntry));
-        attr_nv->str = "attributes";
-        attr_nv->length = 10;
-        attr_shape->name = attr_nv;
-        attr_shape->type = type_info[LMD_TYPE_MAP].type;
-        attr_shape->byte_offset = byte_offset;
-        prev_entry->next = attr_shape;
-        prev_entry = attr_shape;
-        element_type->length++;
-        
-        byte_offset += type_info[LMD_TYPE_MAP].byte_size;
-        *(Map**)((char*)element_map->data + attr_shape->byte_offset) = attributes;
+    } else {
+        // No attributes
+        element->data = NULL;
+        element->data_cap = 0;
+        element_type->shape = NULL;
+        element_type->length = 0;
+        element_type->byte_size = 0;
     }
-    
+    arraylist_append(input->type_list, element_type);
+    element_type->type_index = input->type_list->length - 1;
+        
     if (!self_closing) {
-        // Parse content and children
-        Array* children = array_pooled(input->pool);
-        if (!children) return (Item)element_map;
-        
-        String* text_content = NULL;
-        bool has_text = false;
-        
+        // Parse content and add to Element's List part
         skip_whitespace(xml);
         
         while (**xml && !(**xml == '<' && *(*xml + 1) == '/')) {
@@ -272,16 +243,15 @@ static Item parse_element(Input *input, const char **xml) {
                 // Child element
                 Item child = parse_element(input, xml);
                 if (child != ITEM_ERROR) {
-                    LambdaItem child_item = {.item = child};
-                    array_append(children, child_item, input->pool);
+                    list_push((List*)element, child);
+                    element_type->content_length++;
                 }
             } else {
                 // Text content
-                if (!has_text) {
-                    text_content = parse_string_content(input, xml, '<');
-                    has_text = true;
-                } else {
-                    (*xml)++; // Skip character if we already have text
+                String* text_content = parse_string_content(input, xml, '<');
+                if (text_content && text_content->len > 0) {
+                    list_push((List*)element, s2it(text_content));
+                    element_type->content_length++;
                 }
             }
             skip_whitespace(xml);
@@ -295,69 +265,8 @@ static Item parse_element(Input *input, const char **xml) {
             }
             if (**xml == '>') (*xml)++; // Skip >
         }
-        
-        // Add text content if exists
-        if (has_text && text_content && text_content->len > 0) {
-            if (byte_offset + type_info[LMD_TYPE_STRING].byte_size > byte_cap) {
-                byte_cap *= 2;
-                void* new_data = pool_calloc(input->pool, byte_cap);
-                if (!new_data) return (Item)element_map;
-                memcpy(new_data, element_map->data, byte_offset);
-                pool_variable_free(input->pool, element_map->data);
-                element_map->data = new_data;
-                element_map->data_cap = byte_cap;
-            }
-            
-            ShapeEntry* text_shape = (ShapeEntry*)pool_calloc(input->pool, 
-                sizeof(ShapeEntry) + sizeof(StrView));
-            StrView* text_nv = (StrView*)((char*)text_shape + sizeof(ShapeEntry));
-            text_nv->str = "text";
-            text_nv->length = 4;
-            text_shape->name = text_nv;
-            text_shape->type = type_info[LMD_TYPE_STRING].type;
-            text_shape->byte_offset = byte_offset;
-            prev_entry->next = text_shape;
-            prev_entry = text_shape;
-            element_type->length++;
-            
-            byte_offset += type_info[LMD_TYPE_STRING].byte_size;
-            *(String**)((char*)element_map->data + text_shape->byte_offset) = text_content;
-        }
-        
-        // Add children if exist
-        if (children->length > 0) {
-            if (byte_offset + type_info[LMD_TYPE_ARRAY].byte_size > byte_cap) {
-                byte_cap *= 2;
-                void* new_data = pool_calloc(input->pool, byte_cap);
-                if (!new_data) return (Item)element_map;
-                memcpy(new_data, element_map->data, byte_offset);
-                pool_variable_free(input->pool, element_map->data);
-                element_map->data = new_data;
-                element_map->data_cap = byte_cap;
-            }
-            
-            ShapeEntry* children_shape = (ShapeEntry*)pool_calloc(input->pool, 
-                sizeof(ShapeEntry) + sizeof(StrView));
-            StrView* children_nv = (StrView*)((char*)children_shape + sizeof(ShapeEntry));
-            children_nv->str = "children";
-            children_nv->length = 8;
-            children_shape->name = children_nv;
-            children_shape->type = type_info[LMD_TYPE_ARRAY].type;
-            children_shape->byte_offset = byte_offset;
-            prev_entry->next = children_shape;
-            prev_entry = children_shape;
-            element_type->length++;
-            
-            byte_offset += type_info[LMD_TYPE_ARRAY].byte_size;
-            *(Array**)((char*)element_map->data + children_shape->byte_offset) = children;
-        }
-    }
-    
-    element_type->byte_size = byte_offset;
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    
-    return (Item)element_map;
+    }    
+    return (Item)element;
 }
 
 Input* xml_parse(const char* xml_string) {
