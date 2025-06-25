@@ -1,4 +1,3 @@
-
 #include "transpiler.h"
 #include <gmp.h>
 
@@ -13,6 +12,8 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 
 Input* json_parse(const char* json_string);
 Input* csv_parse(const char* csv_string);
+Input* ini_parse(const char* ini_string);
+Input* ini_file_parse(const char* ini_string);
 
 int main(void) {
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -61,10 +62,18 @@ int main(void) {
     printf("JSON parsed: %s\n", result->chars);
 
     // test csv parsing
-    Input* csv_input = csv_parse("name, age, city\nJohn, 30, New York\nJane, 25, Los Angeles");
+    Input* csv_input = csv_parse("name,\"age\",city\nJohn, 30,\"New York, City\"\nJane, 25,\"Los Angeles\"");
     printf("CSV parse result: %llu, type: %d\n", csv_input->root, ((LambdaItem)csv_input->root).type_id);
     print_item(csv_input->sb, csv_input->root);
     String *csv_result = (String*)csv_input->sb->str;
     printf("CSV parsed: %s\n", csv_result->chars);
+
+    // test ini file parsing with type detection
+    Input* ini_file_input = ini_file_parse("[server]\nhost=localhost\nport=8080\ndebug=true\ntimeout=30.5\n\n[database]\nname=mydb\nconnections=100\nssl=false\nversion=1.2.3");
+    printf("INI file parse result: %llu, type: %d\n", ini_file_input->root, ((LambdaItem)ini_file_input->root).type_id);
+    print_item(ini_file_input->sb, ini_file_input->root);
+    String *ini_file_result = (String*)ini_file_input->sb->str;
+    printf("INI file parsed: %s\n", ini_file_result->chars);
+
     return 0;
 }

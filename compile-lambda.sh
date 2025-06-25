@@ -8,7 +8,7 @@ output=$(clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitte
   -I/opt/homebrew/include -L/opt/homebrew/lib -lgmp \
   lambda/main.c lambda/runner.c \
   lambda/transpile.c lambda/build_ast.c lambda/mir.c lambda/pack.c lambda/print.c \
-  lambda/lambda-eval.c lambda/lambda-mem.c lambda/input-json.c lambda/input-csv.c \
+  lambda/lambda-eval.c lambda/lambda-mem.c lambda/input-json.c lambda/input-csv.c lambda/input-ini.c \
   -o transpile.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types -Werror=multichar \
   -pedantic -fcolor-diagnostics 2>&1)
 

@@ -1,0 +1,461 @@
+#include "transpiler.h"
+#include "../lib/strbuf.h"
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+
+static void skip_whitespace(const char **ini) {
+    while (**ini && (**ini == ' ' || **ini == '\t')) {
+        (*ini)++;
+    }
+}
+
+static void skip_to_newline(const char **ini) {
+    while (**ini && **ini != '\n' && **ini != '\r') {
+        (*ini)++;
+    }
+    if (**ini == '\r' && *(*ini + 1) == '\n') {
+        (*ini) += 2; // skip \r\n
+    } else if (**ini == '\n' || **ini == '\r') {
+        (*ini)++; // skip \n or \r
+    }
+}
+
+static bool is_section_start(const char *ini) {
+    return *ini == '[';
+}
+
+static bool is_comment(const char *ini) {
+    return *ini == ';' || *ini == '#';
+}
+
+static String* parse_section_name(Input *input, const char **ini) {
+    if (**ini != '[') return NULL;
+    StrBuf* sb = input->sb;
+    
+    (*ini)++; // skip '['
+    while (**ini && **ini != ']' && **ini != '\n' && **ini != '\r') {
+        strbuf_append_char(sb, **ini);
+        (*ini)++;
+    }
+    if (**ini == ']') {
+        (*ini)++; // skip ']'
+    }
+    
+    String *string = (String*)sb->str;
+    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+    strbuf_full_reset(sb);
+    return string;
+}
+
+static String* parse_key(Input *input, const char **ini) {
+    StrBuf* sb = input->sb;
+    
+    // Read until '=' or whitespace
+    while (**ini && **ini != '=' && **ini != '\n' && **ini != '\r' && !isspace(**ini)) {
+        strbuf_append_char(sb, **ini);
+        (*ini)++;
+    }
+    
+    String *string = (String*)sb->str;
+    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+    strbuf_full_reset(sb);
+    return string;
+}
+
+static String* parse_raw_value(Input *input, const char **ini) {
+    StrBuf* sb = input->sb;
+    
+    skip_whitespace(ini);
+    // handle quoted values
+    bool quoted = false;
+    if (**ini == '"' || **ini == '\'') {
+        char quote_char = **ini;
+        quoted = true;
+        (*ini)++; // skip opening quote
+
+        while (**ini && **ini != quote_char) {
+            if (**ini == '\\' && *(*ini + 1) == quote_char) {
+                // handle escaped quotes
+                (*ini)++; // skip backslash
+                strbuf_append_char(sb, **ini);
+            } else {
+                strbuf_append_char(sb, **ini);
+            }
+            (*ini)++;
+        }
+        
+        if (**ini == quote_char) {
+            (*ini)++; // skip closing quote
+        }
+    } else {
+        // read until end of line or comment
+        while (**ini && **ini != '\n' && **ini != '\r' && **ini != ';' && **ini != '#') {
+            strbuf_append_char(sb, **ini);
+            (*ini)++;
+        }
+        // trim trailing whitespace
+        while (sb->length > sizeof(uint32_t) && isspace(sb->str[sb->length - 1])) {
+            sb->length--;
+        }
+    }
+    
+    String *string = (String*)sb->str;
+    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+    strbuf_full_reset(sb);
+    return string;
+}
+
+static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        char c1 = tolower((unsigned char)s1[i]);
+        char c2 = tolower((unsigned char)s2[i]);
+        if (c1 != c2) return c1 - c2;
+    }
+    return 0;
+}
+
+static Item parse_typed_value(Input *input, String* value_str) {
+    if (!value_str || value_str->len == 0) {
+        return s2it(value_str);
+    }
+    char* str = value_str->chars;  size_t len = value_str->len;
+    // check for boolean values (case insensitive)
+    if ((len == 4 && case_insensitive_compare(str, "true", 4) == 0) ||
+        (len == 3 && case_insensitive_compare(str, "yes", 3) == 0) ||
+        (len == 2 && case_insensitive_compare(str, "on", 2) == 0) ||
+        (len == 1 && str[0] == '1')) {
+        return b2it(true);
+    }
+    if ((len == 5 && case_insensitive_compare(str, "false", 5) == 0) ||
+        (len == 2 && case_insensitive_compare(str, "no", 2) == 0) ||
+        (len == 3 && case_insensitive_compare(str, "off", 3) == 0) ||
+        (len == 1 && str[0] == '0')) {
+        return b2it(false);
+    }
+    // check for null/empty values
+    if ((len == 4 && case_insensitive_compare(str, "null", 4) == 0) ||
+        (len == 3 && case_insensitive_compare(str, "nil", 3) == 0) ||
+        (len == 5 && case_insensitive_compare(str, "empty", 5) == 0)) {
+        return ITEM_NULL;
+    }
+    
+    // try to parse as number
+    char* end;  bool is_number = true, has_dot = false;
+    for (size_t i = 0; i < len; i++) {
+        char c = str[i];
+        if (i == 0 && (c == '-' || c == '+')) {
+            continue; // allow leading sign
+        }
+        if (c == '.' && !has_dot) {
+            has_dot = true;
+            continue;
+        }
+        if (c == 'e' || c == 'E') {
+            // allow scientific notation
+            if (i + 1 < len && (str[i + 1] == '+' || str[i + 1] == '-')) {
+                i++; // skip the sign after e/E
+            }
+            continue;
+        }
+        if (!isdigit(c)) {
+            is_number = false;
+            break;
+        }
+    }
+    
+    if (is_number && len > 0) {
+        // Create null-terminated string for parsing
+        char* temp_str = pool_calloc(input->pool, len + 1);
+        if (temp_str) {
+            memcpy(temp_str, str, len);
+            temp_str[len] = '\0';
+            
+            if (has_dot || strchr(temp_str, 'e') || strchr(temp_str, 'E')) {
+                // Parse as floating point
+                double dval = strtod(temp_str, &end);
+                if (end == temp_str + len) {
+                    double* dval_ptr;
+                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval_ptr);
+                    if (err == MEM_POOL_ERR_OK) {
+                        *dval_ptr = dval;
+                        pool_variable_free(input->pool, temp_str);
+                        return d2it(dval_ptr);
+                    }
+                }
+            } else {
+                // Parse as integer
+                long lval = strtol(temp_str, &end, 10);
+                if (end == temp_str + len) {
+                    long* lval_ptr;
+                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval_ptr);
+                    if (err == MEM_POOL_ERR_OK) {
+                        *lval_ptr = lval;
+                        pool_variable_free(input->pool, temp_str);
+                        return l2it(lval_ptr);
+                    }
+                }
+            }
+            
+            pool_variable_free(input->pool, temp_str);
+        }
+    }
+    return s2it(value_str);
+}
+
+static Map* parse_section(Input *input, const char **ini, String* section_name) {
+    printf("parse_section: %.*s\n", (int)section_name->len, section_name->chars);
+    
+    Map* section_map = map_pooled(input->pool);
+    if (!section_map) return NULL;
+    
+    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    if (!map_type) return section_map;
+    section_map->type = map_type;
+    
+    int byte_offset = 0, byte_cap = 64;
+    ShapeEntry* prev_entry = NULL;
+    section_map->data = pool_calloc(input->pool, byte_cap);
+    section_map->data_cap = byte_cap;
+    if (!section_map->data) return section_map;
+    
+    while (**ini) {
+        skip_whitespace(ini);
+        
+        // check for end of file
+        if (!**ini) break;
+        
+        // skip empty lines
+        if (**ini == '\n' || **ini == '\r') { skip_to_newline(ini);  continue; }
+
+        // check for comments
+        if (is_comment(*ini)) { skip_to_newline(ini);  continue; }
+
+        // check for next section
+        if (is_section_start(*ini)) { break; }
+
+        // parse key-value pair
+        String* key = parse_key(input, ini);
+        if (!key || key->len == 0) { skip_to_newline(ini);  continue; }
+
+        skip_whitespace(ini);
+        if (**ini != '=') { skip_to_newline(ini);  continue; }
+        (*ini)++; // skip '='
+        
+        String* value_str = parse_raw_value(input, ini);
+        Item value = parse_typed_value(input, value_str);
+        
+        // Add to map structure
+        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
+            sizeof(ShapeEntry) + sizeof(StrView));
+        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+        nv->str = key->chars;
+        nv->length = key->len;
+        shape_entry->name = nv;
+        
+        TypeId type_id = (value >> 56) & 0xFF; // Extract type_id from tagged pointer
+        shape_entry->type = type_info[type_id].type;
+        shape_entry->byte_offset = byte_offset;
+        
+        if (!prev_entry) {
+            map_type->shape = shape_entry;
+        } else {
+            prev_entry->next = shape_entry;
+        }
+        prev_entry = shape_entry;
+        map_type->length++;
+        
+        int bsize = type_info[type_id].byte_size;
+        byte_offset += bsize;
+        if (byte_offset > byte_cap) {
+            byte_cap *= 2;
+            void* new_data = pool_calloc(input->pool, byte_cap);
+            if (!new_data) return section_map;
+            memcpy(new_data, section_map->data, byte_offset - bsize);
+            pool_variable_free(input->pool, section_map->data);
+            section_map->data = new_data;
+            section_map->data_cap = byte_cap;
+        }
+        
+        void* field_ptr = (char*)section_map->data + byte_offset - bsize;
+        LambdaItem item = {.item = value};
+        switch (type_id) {
+        case LMD_TYPE_NULL:
+            *(void**)field_ptr = NULL;
+            break;
+        case LMD_TYPE_BOOL:
+            *(bool*)field_ptr = item.bool_val;
+            break;
+        case LMD_TYPE_INT64:
+            *(long*)field_ptr = *(long*)item.pointer;
+            break;
+        case LMD_TYPE_FLOAT:
+            *(double*)field_ptr = *(double*)item.pointer;
+            break;
+        case LMD_TYPE_STRING:
+            *(String**)field_ptr = (String*)item.pointer;
+            break;
+        default:
+            printf("unknown type %d\n", type_id);
+        }
+        
+        skip_to_newline(ini);
+        printf("added key-value: %.*s = (type %d)\n", (int)key->len, key->chars, type_id);
+    }
+    
+    map_type->byte_size = byte_offset;
+    arraylist_append(input->type_list, map_type);
+    map_type->type_index = input->type_list->length - 1;
+    
+    printf("parsed section '%.*s' with %ld entries, byte_size: %ld\n", 
+        (int)section_name->len, section_name->chars, map_type->length, map_type->byte_size);
+    return section_map;
+}
+
+Input* ini_file_parse(const char* ini_string) {
+    printf("ini_file_parse: %s\n", ini_string);
+    Input* input = calloc(1, sizeof(Input));
+    if (!input) return NULL;
+    size_t grow_size = 1024;  size_t tolerance_percent = 20;
+    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
+    if (err != MEM_POOL_ERR_OK) { return input; }
+
+    input->type_list = arraylist_new(16);
+    input->root = ITEM_NULL;
+    input->sb = strbuf_new_pooled(input->pool);
+    
+    // Create root map to hold all sections
+    Map* root_map = map_pooled(input->pool);
+    if (!root_map) { return input; }
+    input->root = (Item)root_map;
+
+    LambdaTypeMap *root_map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    if (!root_map_type) { return input; }
+    root_map->type = root_map_type;
+    
+    int byte_offset = 0, byte_cap = 64;
+    ShapeEntry* prev_entry = NULL;
+    root_map->data = pool_calloc(input->pool, byte_cap);
+    root_map->data_cap = root_map->data ? byte_cap : 0;
+    
+    const char *current = ini_string;
+    String* current_section_name = NULL;
+    
+    // handle key-value pairs before any section (global section)
+    Map* global_section = NULL;
+    while (*current) {
+        skip_whitespace(&current);
+        
+        // check for end of file
+        if (!*current) break;
+        
+        // skip empty lines
+        if (*current == '\n' || *current == '\r') { skip_to_newline(&current);  continue; }
+
+        // check for comments
+        if (is_comment(current)) { skip_to_newline(&current);  continue; }
+
+        // check for section header
+        if (is_section_start(current)) {
+            current_section_name = parse_section_name(input, &current);
+            if (!current_section_name) { skip_to_newline(&current);  continue; }
+
+            skip_to_newline(&current);
+            // parse the section content
+            Map* section_map = parse_section(input, &current, current_section_name);
+            if (section_map && section_map->type && ((LambdaTypeMap*)section_map->type)->length > 0) {
+                // Add section to root map
+                ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
+                    sizeof(ShapeEntry) + sizeof(StrView));
+                StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+                nv->str = current_section_name->chars;
+                nv->length = current_section_name->len;
+                shape_entry->name = nv;
+                shape_entry->type = type_info[LMD_TYPE_MAP].type;
+                shape_entry->byte_offset = byte_offset;
+                
+                if (!prev_entry) {
+                    root_map_type->shape = shape_entry;
+                } else {
+                    prev_entry->next = shape_entry;
+                }
+                prev_entry = shape_entry;
+                root_map_type->length++;
+                
+                int bsize = type_info[LMD_TYPE_MAP].byte_size;
+                byte_offset += bsize;
+                if (byte_offset > byte_cap) {
+                    byte_cap *= 2;
+                    void* new_data = pool_calloc(input->pool, byte_cap);
+                    if (new_data) {
+                        memcpy(new_data, root_map->data, byte_offset - bsize);
+                        pool_variable_free(input->pool, root_map->data);
+                        root_map->data = new_data;
+                        root_map->data_cap = byte_cap;
+                    }
+                }
+                
+                void* field_ptr = (char*)root_map->data + byte_offset - bsize;
+                *(Map**)field_ptr = section_map;
+            }
+        } else {
+            // key-value pair outside of any section (global)
+            if (!global_section) {
+                // Create a global section name
+                String* global_name;
+                MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 7, (void**)&global_name);
+                if (err == MEM_POOL_ERR_OK) {
+                    global_name->len = 6;
+                    global_name->ref_cnt = 0;
+                    memcpy(global_name->chars, "global", 6);
+                    global_name->chars[6] = '\0';
+                    
+                    global_section = parse_section(input, &current, global_name);
+                    if (global_section && global_section->type && ((LambdaTypeMap*)global_section->type)->length > 0) {
+                        // Add global section to root map
+                        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
+                            sizeof(ShapeEntry) + sizeof(StrView));
+                        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+                        nv->str = global_name->chars;
+                        nv->length = global_name->len;
+                        shape_entry->name = nv;
+                        shape_entry->type = type_info[LMD_TYPE_MAP].type;
+                        shape_entry->byte_offset = byte_offset;
+                        
+                        if (!prev_entry) {
+                            root_map_type->shape = shape_entry;
+                        } else {
+                            prev_entry->next = shape_entry;
+                        }
+                        prev_entry = shape_entry;
+                        root_map_type->length++;
+                        
+                        int bsize = type_info[LMD_TYPE_MAP].byte_size;
+                        byte_offset += bsize;
+                        if (byte_offset > byte_cap) {
+                            byte_cap *= 2;
+                            void* new_data = pool_calloc(input->pool, byte_cap);
+                            if (new_data) {
+                                memcpy(new_data, root_map->data, byte_offset - bsize);
+                                pool_variable_free(input->pool, root_map->data);
+                                root_map->data = new_data;
+                                root_map->data_cap = byte_cap;
+                            }
+                        }
+                        
+                        void* field_ptr = (char*)root_map->data + byte_offset - bsize;
+                        *(Map**)field_ptr = global_section;
+                    }
+                }
+            } else {
+                skip_to_newline(&current);
+            }
+        }
+    }
+    
+    root_map_type->byte_size = byte_offset;
+    arraylist_append(input->type_list, root_map_type);
+    root_map_type->type_index = input->type_list->length - 1;
+    printf("ini_file_parse completed, root map has %ld sections\n", root_map_type->length);
+    return input;
+}
