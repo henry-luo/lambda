@@ -75,7 +75,7 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
     while (new_capacity < min_capacity) { new_capacity *= 2; }
 
-    printf("strbuf_ensure_cap: %zu -> %zu\n", sb->capacity, new_capacity);
+    // printf("strbuf_ensure_cap: %zu -> %zu\n", sb->capacity, new_capacity);
     char *new_s;
     if (!sb->pool) new_s = (char*)realloc(sb->str, new_capacity);
     else {

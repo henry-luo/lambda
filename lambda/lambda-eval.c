@@ -276,12 +276,7 @@ Map* map(int type_index) {
 
 LambdaTypeMap EmptyMap = {
     .type_id = LMD_TYPE_MAP,
-    .is_literal = 0,
-    .is_const = 0,
-    .length = 0,
-    .byte_size = 0,
     .type_index = -1,
-    .shape = NULL
 };
 
 Map* map_pooled(VariableMemPool *pool) {
@@ -376,6 +371,19 @@ Element* elmt(int type_index) {
     if (elmt_type->length || elmt_type->content_length) {
         frame_start();
     }
+    return elmt;
+}
+
+LambdaTypeElmt EmptyElmt = {
+    .type_id = LMD_TYPE_ELEMENT,
+    .type_index = -1,
+    .name = {0},
+};
+
+Element* elmt_pooled(VariableMemPool *pool) {
+    Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
+    elmt->type_id = LMD_TYPE_ELEMENT;
+    elmt->type = &EmptyElmt;
     return elmt;
 }
 

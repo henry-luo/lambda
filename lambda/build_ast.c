@@ -411,7 +411,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_ELEMENT) {
-        ast_node->expr = build_element(tp, child);
+        ast_node->expr = build_elmt(tp, child);
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_MEMBER_EXPR) {
@@ -1047,7 +1047,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_element(Transpiler* tp, TSNode elmt_node) {
+AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     printf("build element expr\n");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
         AST_NODE_ELEMENT, elmt_node, sizeof(AstElementNode));
@@ -1301,7 +1301,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_MAP:
         return build_map(tp, expr_node);
     case SYM_ELEMENT:
-        return build_element(tp, expr_node);
+        return build_elmt(tp, expr_node);
     case SYM_CONTENT:
         return build_content(tp, expr_node, true, false);
     case SYM_LIST:

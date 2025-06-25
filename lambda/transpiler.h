@@ -565,11 +565,12 @@ struct Runtime {
 Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
 Map* map_pooled(VariableMemPool *pool);
+Element* elmt_pooled(VariableMemPool *pool);
 
 void* alloc_const(Transpiler* tp, size_t size);
 LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
-AstNode* build_element(Transpiler* tp, TSNode element_node);
+AstNode* build_elmt(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
