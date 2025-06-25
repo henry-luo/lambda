@@ -14,6 +14,7 @@ Input* json_parse(const char* json_string);
 Input* csv_parse(const char* csv_string);
 Input* ini_file_parse(const char* ini_string);
 Input* xml_parse(const char* xml_string);
+Input* yaml_parse(const char* yaml_string);
 
 int main(void) {
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -81,6 +82,13 @@ int main(void) {
     print_item(xml_input->sb, xml_input->root);
     String *xml_result = (String*)xml_input->sb->str;
     printf("XML parsed: %s\n", xml_result->chars);
+
+    // test yaml parsing
+    Input* yaml_input = yaml_parse("---\nname: John Doe\nage: 30\nactive: true\ncity: New York\naddress:\n  street: 123 Main St\n  zip: 10001\nhobbies:\n  - reading\n  - swimming\n  - coding\nscores:\n  - 85.5\n  - 92.0\n  - 78.3\nmetadata:\n  created: 2023-01-15\n  updated: null\n  tags: [important, personal]");
+    printf("YAML parse result: %llu, type: %d\n", yaml_input->root, ((LambdaItem)yaml_input->root).type_id);
+    print_item(yaml_input->sb, yaml_input->root);
+    String *yaml_result = (String*)yaml_input->sb->str;
+    printf("YAML parsed: %s\n", yaml_result->chars);
 
     return 0;
 }

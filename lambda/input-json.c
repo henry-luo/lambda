@@ -60,8 +60,7 @@ static String* parse_string(Input *input, const char **json) {
     }
 
     String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);
-    string->ref_cnt = 0;
+    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
     strbuf_full_reset(sb);
     return string;
 }
