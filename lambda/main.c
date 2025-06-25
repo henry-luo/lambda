@@ -15,6 +15,7 @@ Input* csv_parse(const char* csv_string);
 Input* ini_file_parse(const char* ini_string);
 Input* xml_parse(const char* xml_string);
 Input* yaml_parse(const char* yaml_string);
+Input* markdown_parse(const char* markdown_string);
 
 int main(void) {
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -89,6 +90,13 @@ int main(void) {
     print_item(yaml_input->sb, yaml_input->root);
     String *yaml_result = (String*)yaml_input->sb->str;
     printf("YAML parsed: %s\n", yaml_result->chars);
+
+    // test markdown parsing
+    Input* markdown_input = markdown_parse("# Welcome to Markdown\n\nThis is a **bold** paragraph with *italic* text and `inline code`.\n\n## Features\n\n- First item\n- Second item with [a link](https://example.com)\n- Third item\n\n### Code Example\n\n```python\ndef hello_world():\n    print(\"Hello, World!\")\n    return True\n```\n\n---\n\nAnother paragraph after horizontal rule.");
+    printf("Markdown parse result: %llu, type: %d\n", markdown_input->root, ((LambdaItem)markdown_input->root).type_id);
+    print_item(markdown_input->sb, markdown_input->root);
+    String *markdown_result = (String*)markdown_input->sb->str;
+    printf("Markdown parsed: %s\n", markdown_result->chars);
 
     return 0;
 }
