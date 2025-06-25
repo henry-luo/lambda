@@ -64,6 +64,12 @@ void strbuf_reset(StrBuf *sb) {
     }
 }
 
+void strbuf_full_reset(StrBuf *sb) {
+    sb->str = NULL;
+    sb->length = 0;
+    sb->capacity = 0;
+}
+
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     if (min_capacity <= sb->capacity) return true;
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;

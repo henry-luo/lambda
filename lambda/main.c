@@ -12,6 +12,7 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 }
 
 Input* json_parse(const char* json_string);
+Input* csv_parse(const char* csv_string);
 
 int main(void) {
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -58,5 +59,12 @@ int main(void) {
     print_item(json->sb, json->root);
     String *result = (String*)json->sb->str;
     printf("JSON parsed: %s\n", result->chars);
+
+    // test csv parsing
+    Input* csv_input = csv_parse("name, age, city\nJohn, 30, New York\nJane, 25, Los Angeles");
+    printf("CSV parse result: %llu, type: %d\n", csv_input->root, ((LambdaItem)csv_input->root).type_id);
+    print_item(csv_input->sb, csv_input->root);
+    String *csv_result = (String*)csv_input->sb->str;
+    printf("CSV parsed: %s\n", csv_result->chars);
     return 0;
 }

@@ -148,6 +148,7 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
 }
 
 void print_item(StrBuf *strbuf, Item item) {
+    printf("print_item: %d\n", ((LambdaItem)item).type_id);
     if (!item) {
         strbuf_append_str(strbuf, "null");
         return;
@@ -207,20 +208,24 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_STRING) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the string
-            strbuf_append_format(strbuf, "\"%s\"", string->chars);
+            if (string) strbuf_append_format(strbuf, "\"%s\"", string->chars);
+            else strbuf_append_str(strbuf, "ERROR(null)");
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the symbol chars
-            strbuf_append_format(strbuf, "'%s'", string->chars);
+            if (string) strbuf_append_format(strbuf, "'%s'", string->chars);
+            else strbuf_append_str(strbuf, "ERROR(null)");
         } 
         else if (type_id == LMD_TYPE_DTIME) {
             String *string = (String*)ld_item.pointer;
-            strbuf_append_format(strbuf, "t'%s'", string->chars);
+            if (string) strbuf_append_format(strbuf, "t'%s'", string->chars);
+            else strbuf_append_str(strbuf, "ERROR(null)");
         }
         else if (type_id == LMD_TYPE_BINARY) {
             String *string = (String*)ld_item.pointer;
-            strbuf_append_format(strbuf, "b'%s'", string->chars);
+            if (string) strbuf_append_format(strbuf, "b'%s'", string->chars);
+            else strbuf_append_str(strbuf, "ERROR(null)");
         }
         else if (type_id == LMD_TYPE_ERROR) {
             strbuf_append_str(strbuf, "ERROR");

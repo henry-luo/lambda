@@ -36,6 +36,7 @@ StrBuf* strbuf_create(const char *str);
 StrBuf* strbuf_dup(const StrBuf *sb);
 void strbuf_free(StrBuf *sb);
 void strbuf_reset(StrBuf *sb);
+void strbuf_full_reset(StrBuf *sb);
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity);
 void strbuf_append_str(StrBuf *sb, const char *str);
 // append string of given length n
