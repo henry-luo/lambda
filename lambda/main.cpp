@@ -27,22 +27,6 @@ void test_input() {
     String *csv_result = (String*)csv_input->sb->str;
     printf("CSV parsed: %s\n", csv_result->chars);
 
-    // test xml parsing
-    Input* xml_input = xml_parse("<?xml version=\"1.0\"?>\n<bookstore>\n  <book id=\"1\" category=\"fiction\">\n    <title>Great Gatsby</title>\n    <author>F. Scott Fitzgerald</author>\n    <price>12.99</price>\n  </book>\n  <book id=\"2\" category=\"science\">\n    <title>Brief History of Time</title>\n    <author>Stephen Hawking</author>\n    <price>15.99</price>\n  </book>\n</bookstore>");
-    LambdaItem xml_item; xml_item.item = xml_input->root;
-    printf("XML parse result: %llu, type: %d\n", xml_input->root, xml_item.type_id);
-    print_item(xml_input->sb, xml_input->root);
-    String *xml_result = (String*)xml_input->sb->str;
-    printf("XML parsed: %s\n", xml_result->chars);
-
-    // test markdown parsing
-    Input* markdown_input = markdown_parse("# Welcome to Markdown\n\nThis is a **bold** paragraph with *italic* text and `inline code`.\n\n## Features\n\n- First item\n- Second item with [a link](https://example.com)\n- Third item\n\n### Code Example\n\n```python\ndef hello_world():\n    print(\"Hello, World!\")\n    return True\n```\n\n---\n\nAnother paragraph after horizontal rule.");
-    LambdaItem markdown_item; markdown_item.item = markdown_input->root;
-    printf("Markdown parse result: %llu, type: %d\n", markdown_input->root, markdown_item.type_id);
-    print_item(markdown_input->sb, markdown_input->root);
-    String *markdown_result = (String*)markdown_input->sb->str;
-    printf("Markdown parsed: %s\n", markdown_result->chars);
-
     Input* json = json_parse("{\"a\":[\"name\", \"John\", \"age\", 30, \"city\", true],\"b\":[],\"c\":null,\"d\":{},\"e\":{\"f\":3.14,\"g\":\"hello\"}}");
     LambdaItem json_item; json_item.item = json->root;
     printf("JSON parse result: %llu, type: %d\n", json->root, json_item.type_id);
@@ -64,7 +48,23 @@ void test_input() {
     printf("YAML parse result: %llu, type: %d\n", yaml_input->root, yaml_item.type_id);
     print_item(yaml_input->sb, yaml_input->root);
     String *yaml_result = (String*)yaml_input->sb->str;
-    printf("YAML parsed: %s\n", yaml_result->chars);    
+    printf("YAML parsed: %s\n", yaml_result->chars);
+    
+    // test xml parsing
+    Input* xml_input = xml_parse("<?xml version=\"1.0\"?>\n<bookstore>\n  <book id=\"1\" category=\"fiction\">\n    <title>Great Gatsby</title>\n    <author>F. Scott Fitzgerald</author>\n    <price>12.99</price>\n  </book>\n  <book id=\"2\" category=\"science\">\n    <title>Brief History of Time</title>\n    <author>Stephen Hawking</author>\n    <price>15.99</price>\n  </book>\n</bookstore>");
+    LambdaItem xml_item; xml_item.item = xml_input->root;
+    printf("XML parse result: %llu, type: %d\n", xml_input->root, xml_item.type_id);
+    print_item(xml_input->sb, xml_input->root);
+    String *xml_result = (String*)xml_input->sb->str;
+    printf("XML parsed: %s\n", xml_result->chars);
+    
+    // test markdown parsing
+    Input* markdown_input = markdown_parse("# Welcome to Markdown\n\nThis is a **bold** paragraph with *italic* text and `inline code`.\n\n## Features\n\n- First item\n- Second item with [a link](https://example.com)\n- Third item\n\n### Code Example\n\n```python\ndef hello_world():\n    print(\"Hello, World!\")\n    return True\n```\n\n---\n\nAnother paragraph after horizontal rule.");
+    LambdaItem markdown_item; markdown_item.item = markdown_input->root;
+    printf("Markdown parse result: %llu, type: %d\n", markdown_input->root, markdown_item.type_id);
+    print_item(markdown_input->sb, markdown_input->root);
+    String *markdown_result = (String*)markdown_input->sb->str;
+    printf("Markdown parsed: %s\n", markdown_result->chars);    
 }
 
 int main(void) {

@@ -71,15 +71,11 @@ static Map* parse_attributes(Input *input, const char **xml) {
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
     
-    TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    // Initialize map using shared function
+    TypeMap* map_type = map_init_cap(mp, input->pool);
     if (!map_type) return mp;
-    mp->type = map_type;
     
-    int byte_offset = 0, byte_cap = 64;
-    ShapeEntry* prev_entry = NULL;
-    mp->data = pool_calloc(input->pool, byte_cap);
-    mp->data_cap = byte_cap;
-    if (!mp->data) return mp;
+    ShapeEntry* shape_entry = NULL;
     
     skip_whitespace(xml);
     
@@ -103,43 +99,14 @@ static Map* parse_attributes(Input *input, const char **xml) {
 
         if (**xml == quote_char) { (*xml)++; } // skip closing quote
         
-        // Create shape entry for attribute
-        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
-            sizeof(ShapeEntry) + sizeof(StrView));
-        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-        nv->str = attr_name->chars;
-        nv->length = attr_name->len;
-        shape_entry->name = nv;
-        shape_entry->type = type_info[LMD_TYPE_STRING].type;
-        shape_entry->byte_offset = byte_offset;
-        
-        if (!prev_entry) {
-            map_type->shape = shape_entry;
-        } else {
-            prev_entry->next = shape_entry;
-        }
-        prev_entry = shape_entry;
-        map_type->length++;
-        
-        int bsize = type_info[LMD_TYPE_STRING].byte_size;
-        byte_offset += bsize;
-        if (byte_offset > byte_cap) {
-            byte_cap *= 2;
-            void* new_data = pool_calloc(input->pool, byte_cap);
-            if (!new_data) return mp;
-            memcpy(new_data, mp->data, byte_offset - bsize);
-            pool_variable_free(input->pool, mp->data);
-            mp->data = new_data;
-            mp->data_cap = byte_cap;
-        }
-        
-        void* field_ptr = (char*)mp->data + byte_offset - bsize;
-        *(String**)field_ptr = attr_value;
+        // Add to map using shared function
+        LambdaItem value = (LambdaItem)s2it(attr_value);
+        map_put(mp, map_type, attr_name, value, input->pool, &shape_entry);
         
         skip_whitespace(xml);
     }
     
-    map_type->byte_size = byte_offset;
+    // Add map type to type list
     arraylist_append(input->type_list, map_type);
     map_type->type_index = input->type_list->length - 1;
     

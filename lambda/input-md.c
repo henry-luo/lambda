@@ -250,56 +250,54 @@ static Element* create_markdown_element(Input *input, const char* tag_name) {
 static void add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
     TypeElmt *element_type = (TypeElmt*)element->type;
     
-    // Create shape entry for attribute
-    ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
-        sizeof(ShapeEntry) + sizeof(StrView));
-    StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+    // Create key and value strings
+    String* key = create_string(input, attr_name);
+    String* value = create_string(input, attr_value);
+    if (!key || !value) return;
     
-    String* name_str = create_string(input, attr_name);
-    if (name_str) {
-        nv->str = name_str->chars;
-        nv->length = name_str->len;
-    }
-    
-    shape_entry->name = nv;
-    shape_entry->type = type_info[LMD_TYPE_STRING].type;
-    shape_entry->byte_offset = element_type->byte_size;
-    
-    // Add to shape list
-    if (!element_type->shape) {
-        element_type->shape = shape_entry;
-    } else {
-        ShapeEntry* current = element_type->shape;
-        while (current->next) {
-            current = current->next;
-        }
-        current->next = shape_entry;
-    }
-    element_type->length++;
-    
-    int bsize = type_info[LMD_TYPE_STRING].byte_size;
-    element_type->byte_size += bsize;
-    
-    // Allocate or resize data
+    // If this is the first attribute, initialize the map structure
     if (!element->data) {
-        element->data = pool_calloc(input->pool, element_type->byte_size);
-        element->data_cap = element_type->byte_size;
-    } else if (element_type->byte_size > element->data_cap) {
-        int new_cap = element_type->byte_size * 2;
-        void* new_data = pool_calloc(input->pool, new_cap);
-        if (new_data) {
-            memcpy(new_data, element->data, element->data_cap);
-            pool_variable_free(input->pool, element->data);
-            element->data = new_data;
-            element->data_cap = new_cap;
+        // Create a temporary map to use the shared functions
+        Map temp_map = {0};
+        temp_map.type = NULL;
+        temp_map.data = NULL;
+        temp_map.data_cap = 0;
+        
+        TypeMap* map_type = map_init_cap(&temp_map, input->pool);
+        if (!map_type) return;
+        
+        ShapeEntry* shape_entry = NULL;
+        LambdaItem lambda_value = (LambdaItem)s2it(value);
+        map_put(&temp_map, map_type, key, lambda_value, input->pool, &shape_entry);
+        
+        // Transfer the map data to the element
+        element_type->shape = map_type->shape;
+        element_type->length = map_type->length;
+        element_type->byte_size = map_type->byte_size;
+        
+        element->data = temp_map.data;
+        element->data_cap = temp_map.data_cap;
+    } else {
+        // Use existing map structure with shared functions
+        Map temp_map;
+        temp_map.type = element->type; // Reuse the existing TypeElmt as TypeMap
+        temp_map.data = element->data;
+        temp_map.data_cap = element->data_cap;
+        
+        TypeMap* map_type = (TypeMap*)element->type; // TypeElmt extends TypeMap
+        ShapeEntry* shape_entry = element_type->shape;
+        
+        // Find the last shape entry
+        while (shape_entry && shape_entry->next) {
+            shape_entry = shape_entry->next;
         }
-    }
-    
-    // Store attribute value
-    if (element->data) {
-        void* field_ptr = (char*)element->data + shape_entry->byte_offset;
-        String* value_str = create_string(input, attr_value);
-        *(String**)field_ptr = value_str;
+        
+        LambdaItem lambda_value = (LambdaItem)s2it(value);
+        map_put(&temp_map, map_type, key, lambda_value, input->pool, &shape_entry);
+        
+        // Update element data pointers
+        element->data = temp_map.data;
+        element->data_cap = temp_map.data_cap;
     }
 }
 
