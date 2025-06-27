@@ -523,7 +523,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         type_id = LMD_TYPE_INT;
     }
     else if (ast_node->op == OPERATOR_TO) {
-        type_id = LMD_TYPE_ARRAY;
+        type_id = LMD_TYPE_RANGE;
     }
     else {
         type_id = LMD_TYPE_ANY;

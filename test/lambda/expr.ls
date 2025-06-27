@@ -32,4 +32,4 @@ nested.a;  nested.b;  nested.c;  nested.d;
 
 <elmt a:12, &{b:34}, c:56>
 
-(1 to 3)
+(1 to 3); [1, (2 to 5), 6]

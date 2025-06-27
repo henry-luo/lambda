@@ -55,8 +55,7 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
         break;
     case LMD_TYPE_RAW_POINTER: 
         TypeId type_id = *((uint8_t*)itm.raw_pointer);
-        if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
-            type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+        if (type_id >= LMD_TYPE_LIST && type_id <= LMD_TYPE_ELEMENT) {
             Container *container = (Container*)itm.raw_pointer;
             container->ref_cnt++;
         }

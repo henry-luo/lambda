@@ -342,6 +342,10 @@ char* format_type(LambdaType *type) {
     case LMD_TYPE_BINARY:
         return "uint8_t*";
 
+    case LMD_TYPE_LIST:
+        return "List*";
+    case LMD_TYPE_RANGE:
+        return "Range*";
     case LMD_TYPE_ARRAY:
         LambdaTypeArray *array_type = (LambdaTypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
@@ -349,8 +353,7 @@ char* format_type(LambdaType *type) {
         } else {
             return "Array*";
         }
-    case LMD_TYPE_LIST:
-        return "List*";
+
     case LMD_TYPE_MAP:
         return "Map*";
     case LMD_TYPE_ELEMENT:

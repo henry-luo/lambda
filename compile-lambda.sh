@@ -10,7 +10,7 @@ output=$(clang -Ilambda/tree-sitter/lib/include lambda/tree-sitter/libtree-sitte
   lambda/transpile.c lambda/build_ast.c lambda/mir.c lambda/pack.c lambda/print.c \
   lambda/lambda-eval.c lambda/lambda-mem.c \
   lambda/input-json.c lambda/input-csv.c lambda/input-ini.c lambda/input-xml.c lambda/input-yaml.c lambda/input-md.c \
-  -o transpile.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types -Werror=multichar \
+  -g -o transpile.exe -fms-extensions -Werror=format -Werror=incompatible-pointer-types -Werror=multichar \
   -pedantic -fcolor-diagnostics 2>&1)
 
 # Output the captured, colorized messages

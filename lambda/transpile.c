@@ -95,7 +95,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
-    case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_LIST:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:
         transpile_expr(tp, item);  // raw pointer
         break;
