@@ -1,0 +1,70 @@
+{
+    "output": "lambda.exe",
+    "source_files": [
+        "lambda/tree-sitter-lambda/src/parser.c",
+        "lambda/parse.c",
+        "lib/strbuf.c",
+        "lib/strview.c",
+        "lib/arraylist.c",
+        "lib/file.c",
+        "lib/hashmap.c",
+        "lib/mem-pool/src/variable.c",
+        "lib/mem-pool/src/buffer.c",
+        "lib/mem-pool/src/utils.c",
+        "lambda/runner.c",
+        "lambda/transpile.c",
+        "lambda/build_ast.c",
+        "lambda/mir.c",
+        "lambda/pack.c",
+        "lambda/print.c",
+        "lambda/lambda-eval.c",
+        "lambda/lambda-mem.c",
+        "lambda/input-json.c",
+        "lambda/input-csv.c",
+        "lambda/input-ini.c",
+        "lambda/input-xml.c",
+        "lambda/input-yaml.c",
+        "lambda/input-md.c"
+    ],
+    "cpp_files": [
+        "lambda/main.cpp"
+    ],
+    "libraries": [
+        {
+            "name": "tree-sitter",
+            "include": "lambda/tree-sitter/lib/include",
+            "lib": "lambda/tree-sitter/libtree-sitter.a",
+            "link": "static"
+        },
+        {
+            "name": "mir",
+            "include": "/usr/local/include",
+            "lib": "/usr/local/lib/libmir.a",
+            "link": "static"
+        },
+        {
+            "name": "zlog",
+            "include": "/usr/local/include",
+            "lib": "/usr/local/lib/libzlog.a",
+            "link": "static"
+        },
+        {
+            "name": "gmp",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib",
+            "link": "dynamic"
+        }
+    ],
+    "warnings": [
+        "format",
+        "incompatible-pointer-types",
+        "multichar"
+    ],
+    "flags": [
+        "fms-extensions",
+        "pedantic",
+        "fcolor-diagnostics"
+    ],
+    "debug": true,
+    "build_dir": "build"
+}

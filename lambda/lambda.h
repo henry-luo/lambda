@@ -21,7 +21,7 @@ typedef long long int64_t;
 #define infinity (1.0 / 0.0)
 #define not_a_number (0.0 / 0.0)
 
-enum TypeId {
+enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
 

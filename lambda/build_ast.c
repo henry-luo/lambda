@@ -442,7 +442,7 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
     StrView op = ts_node_source(tp, op_node);
-    ast_node->operator = op;
+    ast_node->op_str = op;
     if (strview_equal(&op, "not")) { ast_node->op = OPERATOR_NOT; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_NEG; }
     else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_POS; }
@@ -463,8 +463,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     ast_node->left = build_expr(tp, left_node);
 
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
-    StrView op = ts_node_source(tp, op_node);  
-    ast_node->operator = op;
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->op_str = op;
     if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
     else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
     else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
@@ -994,8 +994,8 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     ast_node->left = build_expr(tp, left_node);
 
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
-    StrView op = ts_node_source(tp, op_node);  
-    ast_node->operator = op;
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->op_str = op;
     if (strview_equal(&op, "|")) { ast_node->op = OPERATOR_UNION; }
     else if (strview_equal(&op, "&")) { ast_node->op = OPERATOR_OR; }
     else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }

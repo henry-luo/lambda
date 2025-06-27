@@ -1,4 +1,11 @@
 #pragma once
+
+#include <gmp.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,7 +13,6 @@
 #include <ctype.h>
 #include <math.h>
 #include <tree_sitter/api.h>
-#include <gmp.h>
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/mem-pool/include/mem_pool.h"
@@ -383,14 +389,14 @@ typedef AstNode AstTypeNode;
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *operand;
-    StrView operator;
+    StrView op_str;
     Operator op;
 } AstUnaryNode;
 
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *left, *right;
-    StrView operator;
+    StrView op_str;
     Operator op;
 } AstBinaryNode;
 
@@ -603,3 +609,7 @@ void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
 
 #pragma clang diagnostic pop
+
+#ifdef __cplusplus
+}
+#endif

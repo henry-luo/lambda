@@ -387,13 +387,13 @@ void print_ast_node(AstNode *node, int indent) {
         }
         break;
     case AST_NODE_UNARY:
-        printf("[unary expr %.*s:%s]\n", (int)((AstUnaryNode*)node)->operator.length, 
-            ((AstUnaryNode*)node)->operator.str, format_type(node->type));
+        printf("[unary expr %.*s:%s]\n", (int)((AstUnaryNode*)node)->op_str.length, 
+            ((AstUnaryNode*)node)->op_str.str, format_type(node->type));
         print_ast_node(((AstUnaryNode*)node)->operand, indent + 1);
         break;
     case AST_NODE_BINARY:
         AstBinaryNode* bnode = (AstBinaryNode*)node;
-        printf("[binary expr %.*s.%d:%s]\n", (int)bnode->operator.length, bnode->operator.str, 
+        printf("[binary expr %.*s.%d:%s]\n", (int)bnode->op_str.length, bnode->op_str.str, 
             bnode->op, format_type(node->type));
         print_ast_node(bnode->left, indent + 1);
         print_ast_node(bnode->right, indent + 1);
@@ -588,7 +588,7 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_BINARY_TYPE:
         AstBinaryNode* bt_node = (AstBinaryNode*)node;
-        printf("[binary type %.*s.%d:%s]\n", (int)bt_node->operator.length, bt_node->operator.str, 
+        printf("[binary type %.*s.%d:%s]\n", (int)bt_node->op_str.length, bt_node->op_str.str, 
             bt_node->op, format_type(node->type));
         print_ast_node(bt_node->left, indent + 1);
         print_ast_node(bt_node->right, indent + 1);        
