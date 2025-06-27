@@ -94,14 +94,14 @@ void writeType(Transpiler* tp, Type *type) {
     }
 }
 
-void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) {
+void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
     ShapeEntry *field = map_type->shape;
     for (int i = 0; i < map_type->length; i++) {
         if (i) strbuf_append_char(strbuf, ',');
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
             Map *nest_map = *(Map**)data;
-            LambdaTypeMap *nest_map_type = (LambdaTypeMap*)nest_map->type;
+            TypeMap *nest_map_type = (TypeMap*)nest_map->type;
             print_named_items(strbuf, nest_map_type, nest_map->data);
         }
         else {
@@ -273,7 +273,7 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_MAP) {
             Map *map = (Map*)item;
-            LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
+            TypeMap *map_type = (TypeMap*)map->type;
             printf("print map: %p, length: %ld\n", map, map_type->length);
             strbuf_append_char(strbuf, '{');
             print_named_items(strbuf, map_type, map->data);
@@ -285,7 +285,7 @@ void print_item(StrBuf *strbuf, Item item) {
             printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
                 elmt_type->length, elmt_type->content_length, element->length);
             strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
-            print_named_items(strbuf, (LambdaTypeMap*)elmt_type, element->data);
+            print_named_items(strbuf, (TypeMap*)elmt_type, element->data);
             // print content
             for (long i = 0; i < element->length; i++) {
                 strbuf_append_char(strbuf, ';');

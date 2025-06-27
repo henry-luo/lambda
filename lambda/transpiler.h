@@ -250,10 +250,10 @@ typedef struct {
     long byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
     ShapeEntry* shape;  // shape of the map
-} LambdaTypeMap;
+} TypeMap;
 
 typedef struct {
-    LambdaTypeMap; // extends LambdaTypeMap
+    TypeMap; // extends TypeMap
     StrView name;  // name of the element
     long content_length;  // no. of content items
 } TypeElmt;

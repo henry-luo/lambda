@@ -209,7 +209,7 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
     
-    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!map_type) return section_map;
     section_map->type = map_type;
     
@@ -329,7 +329,7 @@ Input* ini_file_parse(const char* ini_string) {
     if (!root_map) { return input; }
     input->root = (Item)root_map;
 
-    LambdaTypeMap *root_map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    TypeMap *root_map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!root_map_type) { return input; }
     root_map->type = root_map_type;
     
@@ -363,7 +363,7 @@ Input* ini_file_parse(const char* ini_string) {
             skip_to_newline(&current);
             // parse the section content
             Map* section_map = parse_section(input, &current, current_section_name);
-            if (section_map && section_map->type && ((LambdaTypeMap*)section_map->type)->length > 0) {
+            if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // Add section to root map
                 ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
                     sizeof(ShapeEntry) + sizeof(StrView));
@@ -411,7 +411,7 @@ Input* ini_file_parse(const char* ini_string) {
                     global_name->chars[6] = '\0';
                     
                     global_section = parse_section(input, &current, global_name);
-                    if (global_section && global_section->type && ((LambdaTypeMap*)global_section->type)->length > 0) {
+                    if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
                         ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
                             sizeof(ShapeEntry) + sizeof(StrView));

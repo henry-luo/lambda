@@ -213,7 +213,7 @@ List* list_fill(List *list, int count, ...) {
     return list;
 }
 
-void set_fields(LambdaTypeMap *map_type, void* map_data, va_list args) {
+void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
     printf("map length: %ld\n", count);
     ShapeEntry *field = map_type->shape;
@@ -277,13 +277,13 @@ Map* map(int type_index) {
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
-    LambdaTypeMap *map_type = (LambdaTypeMap*)(type_list->data[type_index]);
+    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
     map->type = map_type;    
     frame_start();
     return map;
 }
 
-LambdaTypeMap EmptyMap = {
+TypeMap EmptyMap = {
     .type_id = LMD_TYPE_MAP,
     .type_index = -1,
 };
@@ -297,7 +297,7 @@ Map* map_pooled(VariableMemPool *pool) {
 
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
-    LambdaTypeMap *map_type = (LambdaTypeMap*)map->type;
+    TypeMap *map_type = (TypeMap*)map->type;
     map->data = calloc(1, map_type->byte_size);
     printf("map byte_size: %ld\n", map_type->byte_size);
     // set map fields
@@ -310,7 +310,7 @@ Map* map_fill(Map* map, ...) {
 }
 
 Item _map_get(Map* map, char *key, bool *is_found) {
-    ShapeEntry *field = ((LambdaTypeMap*)map->type)->shape;
+    ShapeEntry *field = ((TypeMap*)map->type)->shape;
     while (field) {
         if (!field->name) { // nested map, skip
             Map* nested_map = *(Map**)((char*)map->data + field->byte_offset);
@@ -405,7 +405,7 @@ Element* elmt_fill(Element* elmt, ...) {
     printf("elmt length: %ld\n", count);
     va_list args;
     va_start(args, count);
-    set_fields((LambdaTypeMap*)elmt_type, elmt->data, args);
+    set_fields((TypeMap*)elmt_type, elmt->data, args);
     va_end(args);
     return elmt;
 }

@@ -113,7 +113,7 @@ static Map* parse_object(Input *input, const char **json) {
         (*json)++;  return mp;
     }
 
-    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!map_type) { return mp; }
     mp->type = map_type;
     int byte_offset = 0, byte_cap = 64;  ShapeEntry* prev_entry = NULL;

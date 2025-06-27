@@ -71,7 +71,7 @@ static Map* parse_attributes(Input *input, const char **xml) {
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
     
-    LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
     if (!map_type) return mp;
     mp->type = map_type;
     
@@ -211,8 +211,8 @@ static Item parse_element(Input *input, const char **xml) {
     element_type->name.length = tag_name->len;
     
     // Set up attributes in the Element's Map data
-    if (attributes->type && ((LambdaTypeMap*)attributes->type)->length > 0) {
-        LambdaTypeMap* attr_map_type = (LambdaTypeMap*)attributes->type;
+    if (attributes->type && ((TypeMap*)attributes->type)->length > 0) {
+        TypeMap* attr_map_type = (TypeMap*)attributes->type;
         element_type->shape = attr_map_type->shape;
         element_type->length = attr_map_type->length;
         element_type->byte_size = attr_map_type->byte_size;

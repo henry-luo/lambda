@@ -460,7 +460,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     strbuf_append_str(tp->code_buf, "({Map* m = map(");
-    strbuf_append_int(tp->code_buf, ((LambdaTypeMap*)map_node->type)->type_index);
+    strbuf_append_int(tp->code_buf, ((TypeMap*)map_node->type)->type_index);
     strbuf_append_str(tp->code_buf, ");");
     AstNode *item = map_node->item;
     if (item) {
@@ -758,7 +758,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_MAP_TYPE:
         TypeType* map_type = (TypeType*)((AstMapNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
-            ((LambdaTypeMap*)map_type->type)->type_index);
+            ((TypeMap*)map_type->type)->type_index);
         break;
     case AST_NODE_ELMT_TYPE:
         TypeType* elmt_type = (TypeType*)((AstElementNode*)expr_node)->type;

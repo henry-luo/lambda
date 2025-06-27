@@ -222,7 +222,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
         if (!map) return ITEM_ERROR;
         
         // Initialize map type
-        LambdaTypeMap *map_type = (LambdaTypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+        TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
         if (!map_type) return ITEM_ERROR;
         map->type = map_type;
         map_type->length = 0;

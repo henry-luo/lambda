@@ -812,7 +812,7 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
 AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP_TYPE, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    LambdaTypeMap *type = (LambdaTypeMap*)alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
+    TypeMap *type = (TypeMap*)alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(TypeMap));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     TSNode child = ts_node_named_child(map_node, 0);
@@ -1015,8 +1015,8 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
 
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(LambdaTypeMap));
-    LambdaTypeMap *type = (LambdaTypeMap*)ast_node->type;
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    TypeMap *type = (TypeMap*)ast_node->type;
 
     TSNode child = ts_node_named_child(map_node, 0);
     AstNode* prev_item = NULL;  ShapeEntry* prev_entry = NULL;  int byte_offset = 0;
