@@ -75,7 +75,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function", .type=&TYPE_FUNC, .lit_type = (LambdaType*)&LIT_TYPE_FUNC},
     [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any", .type=&TYPE_ANY, .lit_type = (LambdaType*)&LIT_TYPE_ANY},
     [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error", .type=&TYPE_ERROR, .lit_type = (LambdaType*)&LIT_TYPE_ERROR},
-    [LMD_TYPE_CONTAINER_START] = {.byte_size = 0, .name = "container_start", .type=&TYPE_NULL, .lit_type = (LambdaType*)&LIT_TYPE_NULL},
+    [LMD_CONTAINER_HEAP_START] = {.byte_size = 0, .name = "container_start", .type=&TYPE_NULL, .lit_type = (LambdaType*)&LIT_TYPE_NULL},
 };
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);

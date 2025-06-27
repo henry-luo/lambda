@@ -24,28 +24,36 @@ typedef long long int64_t;
 enum TypeId {
     LMD_TYPE_RAW_POINTER = 0,
     LMD_TYPE_NULL,
+
+    // scalar types
     LMD_TYPE_BOOL,
-    LMD_TYPE_INT,  // implicit int, store up to 32-bit
+    LMD_TYPE_INT,  // implicit int literal, store value up to 32-bit
     LMD_TYPE_INT64,  // explicit int, 64-bit
     LMD_TYPE_FLOAT,  // explicit float, 64-bit
     LMD_TYPE_DECIMAL,
     LMD_TYPE_NUMBER,  // explicit number, which includes decimal
     LMD_TYPE_DTIME,
-    LMD_TYPE_STRING,
     LMD_TYPE_SYMBOL,
+    LMD_TYPE_STRING,
     LMD_TYPE_BINARY,
-    LMD_TYPE_ARRAY,
-    LMD_TYPE_ARRAY_INT,
+
+    // container types, LMD_TYPE_CONTAINER 
     LMD_TYPE_LIST,
+    LMD_TYPE_RANGE,
+    LMD_TYPE_ARRAY_INT,
+    LMD_TYPE_ARRAY,
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
     LMD_TYPE_TYPE,
     LMD_TYPE_FUNC,
+
     LMD_TYPE_ANY,
     LMD_TYPE_ERROR,
-    LMD_TYPE_CONTAINER_START, // special value for container heap entry start
+    LMD_CONTAINER_HEAP_START, // special value for container heap entry start
 };
 typedef uint8_t TypeId;
+
+# define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
 
 typedef struct LambdaType {
     TypeId type_id;
@@ -82,6 +90,18 @@ typedef struct Container {
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
 } Container;
+
+typedef struct Range {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+    // --------
+    long start;  // inclusive start
+    long end;    // inclusive end
+} Range;
+
+Range* range();
+long range_get(Range *range, int index);
 
 typedef struct Array {
     uint8_t type_id;
@@ -158,6 +178,7 @@ Item push_l(long lval);
 #define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
 #define k2it(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
+#define r2it(range_ptr)      ((((uint64_t)LMD_TYPE_RANGE)<<56) | (uint64_t)(range_ptr))
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
 #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
@@ -185,8 +206,9 @@ typedef struct Function {
 
 Function* to_fn(fn_ptr ptr);
 
-bool is(Item a, Item b);
-bool in(Item a, Item b);
+bool fn_is(Item a, Item b);
+bool fn_in(Item a, Item b);
+Range* fn_to(Item a, Item b);
 String* string(Item item);
 
 LambdaType* base_type(TypeId type_id);

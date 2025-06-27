@@ -254,19 +254,26 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_IS) {
-        strbuf_append_str(tp->code_buf, "is(");
+        strbuf_append_str(tp->code_buf, "fn_is(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');   
     }
     else if (bi_node->op == OPERATOR_IN) {
-        strbuf_append_str(tp->code_buf, "in(");
+        strbuf_append_str(tp->code_buf, "fn_in(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');   
     }
+    else if (bi_node->op == OPERATOR_TO) {
+        strbuf_append_str(tp->code_buf, "fn_to(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');   
+    }    
     else {
         strbuf_append_char(tp->code_buf, '(');
         transpile_expr(tp, bi_node->left);

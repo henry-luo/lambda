@@ -152,6 +152,16 @@ void list_push(List *list, Item item) {
             }
             return;
         }
+        else if (type_id == LMD_TYPE_RANGE) {
+            // copy over the items
+            Range *range = (Range*)itm.raw_pointer;
+            for (int i = range->start; i <= range->end; i++) {
+                // todo: handle value > 32-bit
+                Item ival = i2it(i);
+                list_push(list, ival);
+            }
+            return;
+        }
         else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
             type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
             Container *container = (Container*)itm.raw_pointer;
@@ -484,6 +494,26 @@ Item add(Item a, Item b) {
     return ITEM_ERROR;
 }
 
+Range* fn_to(Item a, Item b) {
+    LambdaItem item_a = (LambdaItem)a;  LambdaItem item_b = (LambdaItem)b;
+    // todo: join binary, list, array, map
+    if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64) && 
+        (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64)) {
+        if (item_a.long_val > item_b.long_val) {
+            // todo: should raise error
+            return NULL;
+        }
+        Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
+        range->type_id = LMD_TYPE_RANGE;
+        range->start = item_a.long_val;  range->end = item_b.long_val;
+        return range;
+    }
+    else {
+        printf("unknown range type: %d, %d\n", item_a.type_id, item_b.type_id);
+        return NULL;
+    }
+}
+
 long it2l(Item item) {
     LambdaItem itm = {.item = item};
     if (itm.type_id == LMD_TYPE_INT) {
@@ -524,7 +554,7 @@ Function* to_fn(fn_ptr ptr) {
     return fn;
 }
 
-bool is(Item a, Item b) {
+bool fn_is(Item a, Item b) {
     printf("is expr\n");
     LambdaItem a_item = {.item = a};
     LambdaItem b_item = {.item = b};
@@ -578,7 +608,7 @@ bool equal(Item a, Item b) {
     return false;
 }
 
-bool in(Item a, Item b) {
+bool fn_in(Item a, Item b) {
     printf("in expr\n");
     LambdaItem a_item = {.item = a};
     LambdaItem b_item = {.item = b};

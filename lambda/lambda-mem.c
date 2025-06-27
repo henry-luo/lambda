@@ -31,7 +31,7 @@ void* heap_alloc(size_t size, TypeId type_id) {
         return NULL;
     }
     // scalar pointers needs to be tagged
-    arraylist_append(heap->entries, type_id < LMD_TYPE_ARRAY ?
+    arraylist_append(heap->entries, type_id < LMD_TYPE_CONTAINER ?
         ((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data);
     return data;
 }
@@ -49,7 +49,7 @@ void heap_destroy() {
     }
 }
 
-Item HEAP_ENTRY_START = ((uint64_t)LMD_TYPE_CONTAINER_START << 56); 
+Item HEAP_ENTRY_START = ((uint64_t)LMD_CONTAINER_HEAP_START << 56); 
 
 void print_heap_entries() {
     ArrayList *entries = context->heap->entries;
@@ -233,7 +233,7 @@ void free_item(Item item, bool clear_entry) {
 }
 
 void frame_start() {
-    arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_TYPE_CONTAINER_START << 56) | (uint64_t)context->stack->size));
+    arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | (uint64_t)context->stack->size));
     arraylist_append(context->heap->entries, (void*)HEAP_ENTRY_START);
 }
 
@@ -260,7 +260,7 @@ void frame_end() {
             }
             else free_container(cont, false);
         }
-        else if (itm.type_id == LMD_TYPE_CONTAINER_START) {
+        else if (itm.type_id == LMD_CONTAINER_HEAP_START) {
             printf("reached container start: %d\n", i);
             context->stack->size = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
             entries->length = i-1;

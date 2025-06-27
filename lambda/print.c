@@ -246,6 +246,11 @@ void print_item(StrBuf *strbuf, Item item) {
             }
             strbuf_append_char(strbuf, ')');
         }
+        else if (type_id == LMD_TYPE_RANGE) {
+            Range *range = (Range*)item;
+            printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
+            strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
+        }
         else if (type_id == LMD_TYPE_ARRAY) {
             Array *array = (Array*)item;
             printf("print array: %p, length: %ld\n", array, array->length);
