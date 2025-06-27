@@ -1108,8 +1108,11 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     ast_node->as = build_expr(tp, expr_node);
 
     // determine the type of the variable
-    ast_node->type = ast_node->as->type->type_id == LMD_TYPE_ARRAY || ast_node->as->type->type_id == LMD_TYPE_LIST ?
-        ((LambdaTypeArray*)ast_node->as->type)->nested : ast_node->as->type;
+    LambdaType *expr_type = ast_node->as->type;
+    ast_node->type = 
+        expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST ? 
+            ((LambdaTypeArray*)expr_type)->nested : 
+        expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : expr_type;
 
     // push the name to the name stack
     push_name(tp, ast_node, NULL);

@@ -98,6 +98,7 @@ typedef struct Range {
     // --------
     long start;  // inclusive start
     long end;    // inclusive end
+    long length;
 } Range;
 
 Range* range();

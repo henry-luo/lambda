@@ -505,6 +505,7 @@ Range* fn_to(Item a, Item b) {
         Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
         range->type_id = LMD_TYPE_RANGE;
         range->start = item_a.long_val;  range->end = item_b.long_val;
+        range->length = item_b.long_val - item_a.long_val + 1;
         return range;
     }
     else {

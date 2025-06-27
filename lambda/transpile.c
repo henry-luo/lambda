@@ -1,6 +1,6 @@
 #include "transpiler.h"
 
-extern LambdaType TYPE_ANY;
+extern LambdaType TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 
@@ -324,16 +324,22 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 }
 
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
-    // todo: prefix var name with '_'
-    LambdaType *item_type = loop_node->as->type->type_id == LMD_TYPE_ARRAY ? 
-        ((LambdaTypeArray*)loop_node->as->type)->nested : &TYPE_ANY;
-    strbuf_append_str(tp->code_buf, (item_type->type_id == LMD_TYPE_INT) ? " ArrayLong *arr=" : " Array *arr=");
+    LambdaType * expr_type = loop_node->as->type;
+    LambdaType *item_type = 
+        expr_type->type_id == LMD_TYPE_ARRAY ? ((LambdaTypeArray*)expr_type)->nested : 
+        expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : &TYPE_ANY;
+    strbuf_append_str(tp->code_buf, 
+        expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
+        (item_type->type_id == LMD_TYPE_INT) ? " ArrayLong *arr=" : " Array *arr=");
     transpile_expr(tp, loop_node->as);
-    strbuf_append_str(tp->code_buf, ";\n for (int i=0; i<arr->length; i++) {\n ");
+    strbuf_append_str(tp->code_buf, expr_type->type_id == LMD_TYPE_RANGE ? 
+        ";\n for (long i=rng->start; i<=rng->end; i++) {\n " : 
+        ";\n for (int i=0; i<arr->length; i++) {\n ");
     writeType(tp, item_type);
     strbuf_append_str(tp->code_buf, " _");
     strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
-    strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
+    strbuf_append_str(tp->code_buf, expr_type->type_id == LMD_TYPE_RANGE ? 
+        "=i;\n" : "=arr->items[i];\n");
     AstNode *next_loop = loop_node->next;
     if (next_loop) {
         printf("transpile nested loop\n");
