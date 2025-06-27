@@ -7,6 +7,7 @@ Input* ini_file_parse(const char* ini_string);
 Input* xml_parse(const char* xml_string);
 Input* yaml_parse(const char* yaml_string);
 Input* markdown_parse(const char* markdown_string);
+Input* toml_parse(const char* toml_string);
 }
 
 void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
@@ -64,7 +65,15 @@ void test_input() {
     printf("Markdown parse result: %llu, type: %d\n", markdown_input->root, markdown_item.type_id);
     print_item(markdown_input->sb, markdown_input->root);
     String *markdown_result = (String*)markdown_input->sb->str;
-    printf("Markdown parsed: %s\n", markdown_result->chars);    
+    printf("Markdown parsed: %s\n", markdown_result->chars);
+    
+    // test toml parsing
+    Input* toml_input = toml_parse("# Configuration file\n[server]\nhost = \"localhost\"\nport = 8080\ndebug = true\ntimeout = 30.5\n\n[database]\nname = \"mydb\"\nconnections = 100\nssl = false\nversion = \"1.2.3\"\nfeatures = [\"backup\", \"ssl\", \"monitoring\"]\n\n[logging]\nlevel = \"info\"\nfile = \"/var/log/app.log\"\nrotate = true\nmax_size = 10.5");
+    LambdaItem toml_item; toml_item.item = toml_input->root;
+    printf("TOML parse result: %llu, type: %d\n", toml_input->root, toml_item.type_id);
+    print_item(toml_input->sb, toml_input->root);
+    String *toml_result = (String*)toml_input->sb->str;
+    printf("TOML parsed: %s\n", toml_result->chars);
 }
 
 int main(void) {
@@ -95,6 +104,9 @@ int main(void) {
     printf("%s", strbuf->str);
     strbuf_free(strbuf);
     runtime_cleanup(&runtime);
+
+    // Test input parsers
+    test_input();
 
     // mpf_t f;
     // mpf_init(f);
