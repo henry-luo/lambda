@@ -159,7 +159,7 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value,
         *(bool*)field_ptr = value.bool_val;             
         break;
     case LMD_TYPE_INT:
-        *(long*)field_ptr = *(long*)value.pointer;
+        *(long*)field_ptr = value.long_val;
         break;
     case LMD_TYPE_INT64:
         *(long*)field_ptr = *(long*)value.pointer;

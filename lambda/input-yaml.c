@@ -6,6 +6,19 @@
 
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent);
 
+// Helper function to create String* from char*
+static String* create_string_from_cstr(Input *input, const char* str) {
+    if (!str) return NULL;
+    int len = strlen(str);
+    String* string;
+    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + len + 1, (void**)&string);
+    if (err != MEM_POOL_ERR_OK) return NULL;
+    string->len = len;
+    string->ref_cnt = 0;
+    strcpy(string->chars, str);
+    return string;
+}
+
 // Utility functions
 static void trim_string_inplace(char* str) {
     // Trim leading whitespace
@@ -221,18 +234,11 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
         Map* map = map_pooled(input->pool);
         if (!map) return ITEM_ERROR;
         
-        // Initialize map type
-        TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        // Initialize map using shared function
+        TypeMap* map_type = map_init_cap(map, input->pool);
         if (!map_type) return ITEM_ERROR;
-        map->type = map_type;
-        map_type->length = 0;
-        map_type->shape = NULL;
         
-        int byte_offset = 0, byte_cap = 64;
-        ShapeEntry* prev_entry = NULL;
-        map->data = pool_calloc(input->pool, byte_cap);
-        map->data_cap = byte_cap;
-        if (!map->data) return ITEM_ERROR;
+        ShapeEntry* shape_entry = NULL;
         
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -253,10 +259,15 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             
             // Extract key
             int key_len = colon_pos - content;
-            char* key = malloc(key_len + 1);
-            strncpy(key, content, key_len);
-            key[key_len] = '\0';
-            trim_string_inplace(key);
+            char* key_str = malloc(key_len + 1);
+            strncpy(key_str, content, key_len);
+            key_str[key_len] = '\0';
+            trim_string_inplace(key_str);
+            
+            // Create String object for key
+            String* key = create_string_from_cstr(input, key_str);
+            free(key_str);
+            if (!key) continue;
             
             // Extract value
             char* value_content = colon_pos + 1;
@@ -278,75 +289,14 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
                 value = parse_yaml_content(input, lines, current_line, total_lines, target_indent + 2);
             }
             
-            // Add to map shape and data
-            LambdaItem lambda_value = {.item = value};
-            
-            // Add to shape
-            ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, sizeof(ShapeEntry) + sizeof(StrView));
-            StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-            nv->str = strdup(key);  // Note: This creates a potential memory leak, but matches the original code
-            nv->length = strlen(key);
-            shape_entry->name = nv;
-            
-            TypeId type_id = lambda_value.type_id == LMD_TYPE_RAW_POINTER ? 
-                ((Container*)lambda_value.raw_pointer)->type_id : lambda_value.type_id;
-            shape_entry->type = type_info[type_id].type;
-            shape_entry->byte_offset = byte_offset;
-            
-            if (!prev_entry) {
-                map_type->shape = shape_entry;
-            } else {
-                prev_entry->next = shape_entry;
-            }
-            prev_entry = shape_entry;
-            map_type->length++;
-            
-            // Store value in map data
-            int bsize = type_info[type_id].byte_size;
-            byte_offset += bsize;
-            if (byte_offset > byte_cap) {
-                byte_cap *= 2;
-                void* new_data = pool_calloc(input->pool, byte_cap);
-                if (!new_data) {
-                    free(key);
-                    return ITEM_ERROR;
-                }
-                memcpy(new_data, map->data, byte_offset - bsize);
-                pool_variable_free(input->pool, map->data);
-                map->data = new_data;
-                map->data_cap = byte_cap;
-            }
-            
-            void* field_ptr = (char*)map->data + byte_offset - bsize;
-            switch (type_id) {
-                case LMD_TYPE_NULL:
-                    *(void**)field_ptr = NULL;
-                    break;
-                case LMD_TYPE_BOOL:
-                    *(bool*)field_ptr = lambda_value.bool_val;
-                    break;
-                case LMD_TYPE_INT:
-                    *(long*)field_ptr = lambda_value.long_val;
-                    break;
-                case LMD_TYPE_INT64:
-                    *(long*)field_ptr = *(long*)lambda_value.pointer;
-                    break;
-                case LMD_TYPE_FLOAT:
-                    *(double*)field_ptr = *(double*)lambda_value.pointer;
-                    break;
-                case LMD_TYPE_STRING:
-                    *(String**)field_ptr = (String*)lambda_value.pointer;
-                    break;
-                case LMD_TYPE_ARRAY:
-                case LMD_TYPE_MAP:
-                    *(void**)field_ptr = lambda_value.raw_pointer;
-                    break;
-                default:
-                    break;
-            }
-            
-            free(key);
+            // Add to map using shared function
+            LambdaItem lambda_value = (LambdaItem)value;
+            map_put(map, map_type, key, lambda_value, input->pool, &shape_entry);
         }
+        
+        // Add map type to type list
+        arraylist_append(input->type_list, map_type);
+        map_type->type_index = input->type_list->length - 1;
         
         return (Item)map;
     }

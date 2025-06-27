@@ -35,14 +35,6 @@ void test_input() {
     String *xml_result = (String*)xml_input->sb->str;
     printf("XML parsed: %s\n", xml_result->chars);
 
-    // test yaml parsing
-    Input* yaml_input = yaml_parse("---\nname: John Doe\nage: 30\nactive: true\ncity: New York\naddress:\n  street: 123 Main St\n  zip: 10001\nhobbies:\n  - reading\n  - swimming\n  - coding\nscores:\n  - 85.5\n  - 92.0\n  - 78.3\nmetadata:\n  created: 2023-01-15\n  updated: null\n  tags: [important, personal]");
-    LambdaItem yaml_item; yaml_item.item = yaml_input->root;
-    printf("YAML parse result: %llu, type: %d\n", yaml_input->root, yaml_item.type_id);
-    print_item(yaml_input->sb, yaml_input->root);
-    String *yaml_result = (String*)yaml_input->sb->str;
-    printf("YAML parsed: %s\n", yaml_result->chars);
-
     // test markdown parsing
     Input* markdown_input = markdown_parse("# Welcome to Markdown\n\nThis is a **bold** paragraph with *italic* text and `inline code`.\n\n## Features\n\n- First item\n- Second item with [a link](https://example.com)\n- Third item\n\n### Code Example\n\n```python\ndef hello_world():\n    print(\"Hello, World!\")\n    return True\n```\n\n---\n\nAnother paragraph after horizontal rule.");
     LambdaItem markdown_item; markdown_item.item = markdown_input->root;
@@ -65,6 +57,14 @@ void test_input() {
     print_item(ini_file_input->sb, ini_file_input->root);
     String *ini_file_result = (String*)ini_file_input->sb->str;
     printf("INI file parsed: %s\n", ini_file_result->chars);    
+
+    // test yaml parsing
+    Input* yaml_input = yaml_parse("---\nname: John Doe\nage: 30\nactive: true\ncity: New York\naddress:\n  street: 123 Main St\n  zip: 10001\nhobbies:\n  - reading\n  - swimming\n  - coding\nscores:\n  - 85.5\n  - 92.0\n  - 78.3\nmetadata:\n  created: 2023-01-15\n  updated: null\n  tags: [important, personal]");
+    LambdaItem yaml_item; yaml_item.item = yaml_input->root;
+    printf("YAML parse result: %llu, type: %d\n", yaml_input->root, yaml_item.type_id);
+    print_item(yaml_input->sb, yaml_input->root);
+    String *yaml_result = (String*)yaml_input->sb->str;
+    printf("YAML parsed: %s\n", yaml_result->chars);    
 }
 
 int main(void) {
