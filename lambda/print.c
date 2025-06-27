@@ -274,7 +274,6 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_MAP) {
             Map *map = (Map*)item;
             TypeMap *map_type = (TypeMap*)map->type;
-            printf("print map: %p, length: %ld\n", map, map_type->length);
             strbuf_append_char(strbuf, '{');
             print_named_items(strbuf, map_type, map->data);
             strbuf_append_char(strbuf, '}');
@@ -282,8 +281,6 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_ELEMENT) {
             Element *element = (Element*)item;
             TypeElmt *elmt_type = (TypeElmt*)element->type;
-            printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
-                elmt_type->length, elmt_type->content_length, element->length);
             strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
             print_named_items(strbuf, (TypeMap*)elmt_type, element->data);
             // print content

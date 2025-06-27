@@ -129,7 +129,8 @@ TypeMap* map_init_cap(Map* mp, VariableMemPool* pool) {
     return map_type;
 }
 
-void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool, ShapeEntry** shape_entry) {
+void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, 
+    VariableMemPool* pool, ShapeEntry** shape_entry) {
     TypeId type_id = value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
     *shape_entry = alloc_shape_entry(pool, key, type_id, *shape_entry);
     if (!map_type->shape) { map_type->shape = *shape_entry; }
@@ -160,6 +161,9 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, Variable
     case LMD_TYPE_INT:
         *(long*)field_ptr = *(long*)value.pointer;
         break;
+    case LMD_TYPE_INT64:
+        *(long*)field_ptr = *(long*)value.pointer;
+        break;        
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
@@ -171,7 +175,7 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, Variable
         break;
     default:
         printf("unknown type %d\n", value.type_id);
-    }    
+    }
 }
 
 static Map* parse_object(Input *input, const char **json) {

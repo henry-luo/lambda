@@ -27,14 +27,6 @@ void test_input() {
     String *csv_result = (String*)csv_input->sb->str;
     printf("CSV parsed: %s\n", csv_result->chars);
 
-    // test ini file parsing with type detection
-    Input* ini_file_input = ini_file_parse("[server]\nhost=localhost\nport=8080\ndebug=true\ntimeout=30.5\n\n[database]\nname=mydb\nconnections=100\nssl=false\nversion=1.2.3");
-    LambdaItem ini_item; ini_item.item = ini_file_input->root;
-    printf("INI file parse result: %llu, type: %d\n", ini_file_input->root, ini_item.type_id);
-    print_item(ini_file_input->sb, ini_file_input->root);
-    String *ini_file_result = (String*)ini_file_input->sb->str;
-    printf("INI file parsed: %s\n", ini_file_result->chars);
-
     // test xml parsing
     Input* xml_input = xml_parse("<?xml version=\"1.0\"?>\n<bookstore>\n  <book id=\"1\" category=\"fiction\">\n    <title>Great Gatsby</title>\n    <author>F. Scott Fitzgerald</author>\n    <price>12.99</price>\n  </book>\n  <book id=\"2\" category=\"science\">\n    <title>Brief History of Time</title>\n    <author>Stephen Hawking</author>\n    <price>15.99</price>\n  </book>\n</bookstore>");
     LambdaItem xml_item; xml_item.item = xml_input->root;
@@ -64,7 +56,15 @@ void test_input() {
     printf("JSON parse result: %llu, type: %d\n", json->root, json_item.type_id);
     print_item(json->sb, json->root);
     String *result = (String*)json->sb->str;
-    printf("JSON parsed: %s\n", result->chars);    
+    printf("JSON parsed: %s\n", result->chars);
+
+    // test ini file parsing with type detection
+    Input* ini_file_input = ini_file_parse("[server]\nhost=localhost\nport=8080\ndebug=true\ntimeout=30.5\n\n[database]\nname=mydb\nconnections=100\nssl=false\nversion=1.2.3");
+    LambdaItem ini_item; ini_item.item = ini_file_input->root;
+    printf("INI file parse result: %llu, type: %d\n", ini_file_input->root, ini_item.type_id);
+    print_item(ini_file_input->sb, ini_file_input->root);
+    String *ini_file_result = (String*)ini_file_input->sb->str;
+    printf("INI file parsed: %s\n", ini_file_result->chars);    
 }
 
 int main(void) {

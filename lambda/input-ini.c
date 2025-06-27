@@ -209,16 +209,11 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
     
-    TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!map_type) return section_map;
-    section_map->type = map_type;
     
-    int byte_offset = 0, byte_cap = 64;
-    ShapeEntry* prev_entry = NULL;
-    section_map->data = pool_calloc(input->pool, byte_cap);
-    section_map->data_cap = byte_cap;
+    TypeMap* map_type = map_init_cap(section_map, input->pool);
     if (!section_map->data) return section_map;
-    
+
+    ShapeEntry* shape_entry = NULL;
     while (**ini) {
         skip_whitespace(ini);
         
@@ -243,67 +238,11 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
         (*ini)++; // skip '='
         
         String* value_str = parse_raw_value(input, ini);
-        Item value = parse_typed_value(input, value_str);
-        
-        // Add to map structure
-        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
-            sizeof(ShapeEntry) + sizeof(StrView));
-        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-        nv->str = key->chars;
-        nv->length = key->len;
-        shape_entry->name = nv;
-        
-        TypeId type_id = (value >> 56) & 0xFF; // Extract type_id from tagged pointer
-        shape_entry->type = type_info[type_id].type;
-        shape_entry->byte_offset = byte_offset;
-        
-        if (!prev_entry) {
-            map_type->shape = shape_entry;
-        } else {
-            prev_entry->next = shape_entry;
-        }
-        prev_entry = shape_entry;
-        map_type->length++;
-        
-        int bsize = type_info[type_id].byte_size;
-        byte_offset += bsize;
-        if (byte_offset > byte_cap) {
-            byte_cap *= 2;
-            void* new_data = pool_calloc(input->pool, byte_cap);
-            if (!new_data) return section_map;
-            memcpy(new_data, section_map->data, byte_offset - bsize);
-            pool_variable_free(input->pool, section_map->data);
-            section_map->data = new_data;
-            section_map->data_cap = byte_cap;
-        }
-        
-        void* field_ptr = (char*)section_map->data + byte_offset - bsize;
-        LambdaItem item = {.item = value};
-        switch (type_id) {
-        case LMD_TYPE_NULL:
-            *(void**)field_ptr = NULL;
-            break;
-        case LMD_TYPE_BOOL:
-            *(bool*)field_ptr = item.bool_val;
-            break;
-        case LMD_TYPE_INT64:
-            *(long*)field_ptr = *(long*)item.pointer;
-            break;
-        case LMD_TYPE_FLOAT:
-            *(double*)field_ptr = *(double*)item.pointer;
-            break;
-        case LMD_TYPE_STRING:
-            *(String**)field_ptr = (String*)item.pointer;
-            break;
-        default:
-            printf("unknown type %d\n", type_id);
-        }
-        
+        LambdaItem value = (LambdaItem) parse_typed_value(input, value_str);
+        map_put(section_map, map_type, key, value, input->pool, &shape_entry);
+       
         skip_to_newline(ini);
-        printf("added key-value: %.*s = (type %d)\n", (int)key->len, key->chars, type_id);
     }
-    
-    map_type->byte_size = byte_offset;
     arraylist_append(input->type_list, map_type);
     map_type->type_index = input->type_list->length - 1;
     
@@ -333,8 +272,7 @@ Input* ini_file_parse(const char* ini_string) {
     if (!root_map_type) { return input; }
     root_map->type = root_map_type;
     
-    int byte_offset = 0, byte_cap = 64;
-    ShapeEntry* prev_entry = NULL;
+    int byte_cap = 64;
     root_map->data = pool_calloc(input->pool, byte_cap);
     root_map->data_cap = root_map->data ? byte_cap : 0;
     
@@ -342,7 +280,7 @@ Input* ini_file_parse(const char* ini_string) {
     String* current_section_name = NULL;
     
     // handle key-value pairs before any section (global section)
-    Map* global_section = NULL;
+    Map* global_section = NULL;  ShapeEntry* shape_entry = NULL;
     while (*current) {
         skip_whitespace(&current);
         
@@ -364,39 +302,9 @@ Input* ini_file_parse(const char* ini_string) {
             // parse the section content
             Map* section_map = parse_section(input, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
-                // Add section to root map
-                ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
-                    sizeof(ShapeEntry) + sizeof(StrView));
-                StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-                nv->str = current_section_name->chars;
-                nv->length = current_section_name->len;
-                shape_entry->name = nv;
-                shape_entry->type = type_info[LMD_TYPE_MAP].type;
-                shape_entry->byte_offset = byte_offset;
-                
-                if (!prev_entry) {
-                    root_map_type->shape = shape_entry;
-                } else {
-                    prev_entry->next = shape_entry;
-                }
-                prev_entry = shape_entry;
-                root_map_type->length++;
-                
-                int bsize = type_info[LMD_TYPE_MAP].byte_size;
-                byte_offset += bsize;
-                if (byte_offset > byte_cap) {
-                    byte_cap *= 2;
-                    void* new_data = pool_calloc(input->pool, byte_cap);
-                    if (new_data) {
-                        memcpy(new_data, root_map->data, byte_offset - bsize);
-                        pool_variable_free(input->pool, root_map->data);
-                        root_map->data = new_data;
-                        root_map->data_cap = byte_cap;
-                    }
-                }
-                
-                void* field_ptr = (char*)root_map->data + byte_offset - bsize;
-                *(Map**)field_ptr = section_map;
+                // add section to root map
+                map_put(root_map, root_map_type, current_section_name, 
+                    (LambdaItem)(Item)section_map, input->pool, &shape_entry);
             }
         } else {
             // key-value pair outside of any section (global)
@@ -413,38 +321,8 @@ Input* ini_file_parse(const char* ini_string) {
                     global_section = parse_section(input, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
-                        ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
-                            sizeof(ShapeEntry) + sizeof(StrView));
-                        StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
-                        nv->str = global_name->chars;
-                        nv->length = global_name->len;
-                        shape_entry->name = nv;
-                        shape_entry->type = type_info[LMD_TYPE_MAP].type;
-                        shape_entry->byte_offset = byte_offset;
-                        
-                        if (!prev_entry) {
-                            root_map_type->shape = shape_entry;
-                        } else {
-                            prev_entry->next = shape_entry;
-                        }
-                        prev_entry = shape_entry;
-                        root_map_type->length++;
-                        
-                        int bsize = type_info[LMD_TYPE_MAP].byte_size;
-                        byte_offset += bsize;
-                        if (byte_offset > byte_cap) {
-                            byte_cap *= 2;
-                            void* new_data = pool_calloc(input->pool, byte_cap);
-                            if (new_data) {
-                                memcpy(new_data, root_map->data, byte_offset - bsize);
-                                pool_variable_free(input->pool, root_map->data);
-                                root_map->data = new_data;
-                                root_map->data_cap = byte_cap;
-                            }
-                        }
-                        
-                        void* field_ptr = (char*)root_map->data + byte_offset - bsize;
-                        *(Map**)field_ptr = global_section;
+                        map_put(root_map, root_map_type, global_name, 
+                            (LambdaItem)(Item)global_section, input->pool, &shape_entry);
                     }
                 }
             } else {
@@ -452,8 +330,6 @@ Input* ini_file_parse(const char* ini_string) {
             }
         }
     }
-    
-    root_map_type->byte_size = byte_offset;
     arraylist_append(input->type_list, root_map_type);
     root_map_type->type_index = input->type_list->length - 1;
     printf("ini_file_parse completed, root map has %ld sections\n", root_map_type->length);
