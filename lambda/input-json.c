@@ -118,6 +118,17 @@ ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id
     return shape_entry;
 }
 
+TypeMap* map_init_cap(Map* mp, VariableMemPool* pool) {
+    // alloc map type and data chunk
+    TypeMap *map_type = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!map_type) { return NULL; }
+    mp->type = map_type;
+    int byte_cap = 64;
+    mp->data = pool_calloc(pool, byte_cap);  mp->data_cap = byte_cap;
+    if (!mp->data) return NULL;
+    return map_type;
+}
+
 void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool, ShapeEntry** shape_entry) {
     TypeId type_id = value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
     *shape_entry = alloc_shape_entry(pool, key, type_id, *shape_entry);
@@ -174,12 +185,7 @@ static Map* parse_object(Input *input, const char **json) {
         (*json)++;  return mp;
     }
 
-    // alloc map type and data chunk
-    TypeMap *map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!map_type) { return mp; }
-    mp->type = map_type;
-    int byte_cap = 64;
-    mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
+    TypeMap* map_type = map_init_cap(mp, input->pool);
     if (!mp->data) return mp;
 
     ShapeEntry* shape_entry = NULL;
@@ -193,7 +199,7 @@ static Map* parse_object(Input *input, const char **json) {
 
         LambdaItem value = (LambdaItem)parse_value(input, json);
         map_put(mp, map_type, key, value, input->pool, &shape_entry);
-        
+
         skip_whitespace(json);
         if (**json == '}') { (*json)++;  break; }
         if (**json != ',') return mp;
