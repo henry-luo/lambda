@@ -55,11 +55,11 @@ typedef uint8_t TypeId;
 
 # define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
 
-typedef struct LambdaType {
+typedef struct Type {
     TypeId type_id;
     uint8_t is_literal:1;  // is a literal value
     uint8_t is_const:1;  // is a constant expr
-} LambdaType;
+} Type;
 
 typedef uint64_t Item;
 
@@ -212,8 +212,8 @@ bool fn_in(Item a, Item b);
 Range* fn_to(Item a, Item b);
 String* string(Item item);
 
-LambdaType* base_type(TypeId type_id);
-LambdaType* const_type(int type_index);
+Type* base_type(TypeId type_id);
+Type* const_type(int type_index);
 
 // returns the type of the item
-LambdaType* type(Item item);
+Type* type(Item item);

@@ -1,6 +1,6 @@
 #include "transpiler.h"
 
-extern LambdaType TYPE_ANY, TYPE_INT;
+extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 
@@ -304,7 +304,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     printf("transpile assign expr\n");
     strbuf_append_str(tp->code_buf, "\n ");
     // declare the type
-    LambdaType *type = asn_node->type;
+    Type *type = asn_node->type;
     writeType(tp, type);
     strbuf_append_char(tp->code_buf, ' ');
     write_var_name(tp->code_buf, asn_node, NULL);
@@ -324,8 +324,8 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 }
 
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
-    LambdaType * expr_type = loop_node->as->type;
-    LambdaType *item_type = 
+    Type * expr_type = loop_node->as->type;
+    Type *item_type = 
         expr_type->type_id == LMD_TYPE_ARRAY ? ((LambdaTypeArray*)expr_type)->nested : 
         expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : &TYPE_ANY;
     strbuf_append_str(tp->code_buf, 
@@ -345,7 +345,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         printf("transpile nested loop\n");
         transpile_loop_expr(tp, (AstNamedNode*)next_loop, then);
     } else {
-        LambdaType *then_type = then->type;
+        Type *then_type = then->type;
         strbuf_append_str(tp->code_buf, " list_push(ls,");
         transpile_box_item(tp, then);
         strbuf_append_str(tp->code_buf, ");");
@@ -354,7 +354,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
 }
 
 void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
-    LambdaType *then_type = for_node->then->type;
+    Type *then_type = for_node->then->type;
     // init a list
     strbuf_append_str(tp->code_buf, "({\n List* ls=list(); \n");
     AstNode *loop = for_node->loop;
@@ -650,7 +650,7 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     // use function body type as the return type for the time being
-    LambdaType *ret_type = fn_node->body->type;
+    Type *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
 
     // write the function name, with a prefix '_', so as to diff from built-in functions
@@ -815,7 +815,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
             while (declare) {
                 AstNamedNode *asn_node = (AstNamedNode*)declare;
                 // declare the type
-                LambdaType *type = asn_node->type;
+                Type *type = asn_node->type;
                 writeType(tp, type);
                 strbuf_append_char(tp->code_buf, ' ');
                 write_var_name(tp->code_buf, asn_node, NULL);

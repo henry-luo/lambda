@@ -718,27 +718,27 @@ String* string(Item item) {
     return NULL;
 }
 
-extern LambdaType LIT_TYPE_ERROR;
+extern Type LIT_TYPE_ERROR;
 
-LambdaType* base_type(TypeId type_id) {
+Type* base_type(TypeId type_id) {
     return (type_id <= 0 || type_id > LMD_TYPE_ERROR) ? 
         &LIT_TYPE_ERROR : ((TypeInfo*)context->type_info)[type_id].lit_type;
 }
 
-LambdaType* const_type(int type_index) {
+Type* const_type(int type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     if (type_index < 0 || type_index >= type_list->length) {
         return &LIT_TYPE_ERROR;
     }    
-    LambdaType* type = (LambdaType*)(type_list->data[type_index]);
+    Type* type = (Type*)(type_list->data[type_index]);
     printf("const_type %d, %d, %p\n", type_index, type->type_id, type);
     return type;
 }
 
-LambdaType* type(Item item) {
+Type* type(Item item) {
     LambdaItem itm = {.item = item};
-    LambdaTypeType *type = calloc(1, sizeof(LambdaTypeType) + sizeof(LambdaType)); 
-    LambdaType *item_type = (LambdaType *)((uint8_t *)type + sizeof(LambdaTypeType));
+    LambdaTypeType *type = calloc(1, sizeof(LambdaTypeType) + sizeof(Type)); 
+    Type *item_type = (Type *)((uint8_t *)type + sizeof(LambdaTypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     if (itm.type_id) {
         item_type->type_id = itm.type_id;
@@ -746,5 +746,5 @@ LambdaType* type(Item item) {
     else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
         item_type->type_id = *((uint8_t*)item);
     }
-    return (LambdaType*)type;
+    return (Type*)type;
 }

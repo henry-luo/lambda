@@ -173,8 +173,8 @@ typedef enum {
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type
     char* name;  // name of the type
-    LambdaType *type;  // literal type
-    LambdaType *lit_type;  // literal type_type
+    Type *type;  // literal type
+    Type *lit_type;  // literal type_type
     // char* c_type;  // C type of the type
 } TypeInfo;
 
@@ -207,7 +207,7 @@ struct Element {
 typedef struct Script Script;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
+    Type;  // extends Type
     int const_index;
 } LambdaTypeConst;
 
@@ -229,8 +229,8 @@ typedef struct {
 typedef LambdaTypeString LambdaTypeSymbol;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
-    LambdaType* nested;  // nested item type for the array
+    Type;  // extends Type
+    Type* nested;  // nested item type for the array
     long length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
 } LambdaTypeArray;
@@ -239,13 +239,13 @@ typedef LambdaTypeArray LambdaTypeList;
 
 typedef struct ShapeEntry {
     StrView* name;
-    LambdaType* type;  // type of the field
+    Type* type;  // type of the field
     long byte_offset;  // byte offset of the map field
     struct ShapeEntry* next;
 } ShapeEntry;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
+    Type;  // extends Type
     long length;  // no. of items in the map
     long byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
@@ -259,22 +259,22 @@ typedef struct {
 } LambdaTypeElmt;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
-    LambdaType* left;
-    LambdaType* right;
+    Type;  // extends Type
+    Type* left;
+    Type* right;
     Operator op;  // operator
     int type_index;  // index of the type in the type list
 } LambdaTypeBinary;
 
 typedef struct LambdaTypeParam {
-    LambdaType;  // extends LambdaType
+    Type;  // extends Type
     struct LambdaTypeParam *next;
 } LambdaTypeParam;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
+    Type;  // extends Type
     LambdaTypeParam *param;
-    LambdaType *returned;
+    Type *returned;
     int param_count;
     int type_index;
     bool is_anonymous;
@@ -282,13 +282,13 @@ typedef struct {
 } LambdaTypeFunc;
 
 typedef struct {
-    LambdaType;
+    Type;
     SysFunc *fn;
 } LambdaTypeSysFunc;
 
 typedef struct {
-    LambdaType;  // extends LambdaType
-    LambdaType *type;  // full type defintion
+    Type;  // extends Type
+    Type *type;  // full type defintion
 } LambdaTypeType;
 
 struct Pack {
@@ -358,7 +358,7 @@ typedef enum AstNodeType {
 
 struct AstNode {
     AstNodeType node_type;
-    LambdaType *type;
+    Type *type;
     struct AstNode* next;
     TSNode node;
 };
@@ -574,7 +574,7 @@ Map* map_pooled(VariableMemPool *pool);
 Element* elmt_pooled(VariableMemPool *pool);
 
 void* alloc_const(Transpiler* tp, size_t size);
-LambdaType* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
+Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_elmt(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
@@ -583,7 +583,7 @@ AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_node(AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void writeNodeSource(Transpiler* tp, TSNode node);
-void writeType(Transpiler* tp, LambdaType *type);
+void writeType(Transpiler* tp, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);

@@ -42,7 +42,7 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
 }
 
 // write the native C type for the lambda type
-void writeType(Transpiler* tp, LambdaType *type) {
+void writeType(Transpiler* tp, Type *type) {
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -87,7 +87,7 @@ void writeType(Transpiler* tp, LambdaType *type) {
         strbuf_append_str(tp->code_buf, "Function*");
         break;
     case LMD_TYPE_TYPE:
-        strbuf_append_str(tp->code_buf, "LambdaType*");
+        strbuf_append_str(tp->code_buf, "Type*");
         break;
     default:
         printf("unknown type %d\n", type_id);
@@ -311,7 +311,7 @@ void print_item(StrBuf *strbuf, Item item) {
 }
 
 // print the type of the AST node
-char* format_type(LambdaType *type) {
+char* format_type(Type *type) {
     if (!type) { return "null*"; }
     TypeId type_id = type->type_id;
     switch (type_id) {
