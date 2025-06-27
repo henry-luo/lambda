@@ -19,13 +19,6 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 }
 
 void test_input() {
-    Input* json = json_parse("{\"a\":[\"name\", \"John\", \"age\", 30, \"city\", true]}");
-    LambdaItem json_item; json_item.item = json->root;
-    printf("JSON parse result: %llu, type: %d\n", json->root, json_item.type_id);
-    print_item(json->sb, json->root);
-    String *result = (String*)json->sb->str;
-    printf("JSON parsed: %s\n", result->chars);
-
     // test csv parsing
     Input* csv_input = csv_parse("name,\"age\",city\nJohn, 30,\"New York, City\"\nJane, 25,\"Los Angeles\"");
     LambdaItem csv_item; csv_item.item = csv_input->root;
@@ -65,6 +58,13 @@ void test_input() {
     print_item(markdown_input->sb, markdown_input->root);
     String *markdown_result = (String*)markdown_input->sb->str;
     printf("Markdown parsed: %s\n", markdown_result->chars);
+
+    Input* json = json_parse("{\"a\":[\"name\", \"John\", \"age\", 30, \"city\", true],\"b\":[],\"c\":null,\"d\":{},\"e\":{\"f\":3.14,\"g\":\"hello\"}}");
+    LambdaItem json_item; json_item.item = json->root;
+    printf("JSON parse result: %llu, type: %d\n", json->root, json_item.type_id);
+    print_item(json->sb, json->root);
+    String *result = (String*)json->sb->str;
+    printf("JSON parsed: %s\n", result->chars);    
 }
 
 int main(void) {
@@ -107,6 +107,6 @@ int main(void) {
     // mpf_clear(f);
     // printf("size of mpf_t: %zu\n", sizeof(mpf_t));  
 
-    // test_input();
+    test_input();
     return 0;
 }
