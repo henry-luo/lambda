@@ -209,33 +209,33 @@ typedef struct Script Script;
 typedef struct {
     Type;  // extends Type
     int const_index;
-} LambdaTypeConst;
+} TypeConst;
 
 typedef struct {
-    LambdaTypeConst;  // extends LambdaTypeConst
+    TypeConst;  // extends TypeConst
     double double_val;
-} LambdaTypeFloat;
+} TypeFloat;
 
 typedef struct {
-    LambdaTypeConst;  // extends LambdaTypeConst
+    TypeConst;  // extends TypeConst
     mpf_t dec_val;
-} LambdaTypeDecimal;
+} TypeDecimal;
 
 typedef struct {
-    LambdaTypeConst;  // extends LambdaTypeConst
+    TypeConst;  // extends TypeConst
     String *string;
-} LambdaTypeString;
+} TypeString;
 
-typedef LambdaTypeString LambdaTypeSymbol;
+typedef TypeString TypeSymbol;
 
 typedef struct {
     Type;  // extends Type
     Type* nested;  // nested item type for the array
     long length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
-} LambdaTypeArray;
+} TypeArray;
 
-typedef LambdaTypeArray LambdaTypeList;
+typedef TypeArray TypeList;
 
 typedef struct ShapeEntry {
     StrView* name;

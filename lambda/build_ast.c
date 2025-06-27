@@ -14,7 +14,7 @@ Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_LIST = {.type_id = LMD_TYPE_LIST};
 Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
-LambdaTypeArray TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
+TypeArray TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
 Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 Type TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
 Type TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
@@ -119,8 +119,8 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
     printf("build array expr\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
-    LambdaTypeArray *type = (LambdaTypeArray*)ast_node->type;
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
+    TypeArray *type = (TypeArray*)ast_node->type;
     TSNode child = ts_node_named_child(array_node, 0);
     AstNode* prev_item = NULL;  Type *nested_type = NULL;
     while (!ts_node_is_null(child)) {
@@ -151,7 +151,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     ast_node->field = build_expr(tp, field_node);
 
     if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
-        ast_node->type = ((LambdaTypeArray*)ast_node->object->type)->nested;
+        ast_node->type = ((TypeArray*)ast_node->object->type)->nested;
     }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
         ast_node->type = &TYPE_ANY;
@@ -322,11 +322,11 @@ Type* build_lit_string(Transpiler* tp, TSNode node) {
     // todo: exclude zero-length string
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
     int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : symbol == SYM_BINARY ? 3:2);  // -2 to exclude the quotes
-    LambdaTypeString *str_type = (LambdaTypeString*)alloc_type(tp->ast_pool, 
+    TypeString *str_type = (TypeString*)alloc_type(tp->ast_pool, 
         (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
         symbol == SYM_STRING ? LMD_TYPE_STRING : 
         symbol == SYM_BINARY ? LMD_TYPE_BINARY : 
-        LMD_TYPE_SYMBOL, sizeof(LambdaTypeString));
+        LMD_TYPE_SYMBOL, sizeof(TypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
     // copy the string, todo: handle escape sequence
     String *str;
@@ -343,7 +343,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node) {
 }
 
 Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    LambdaTypeFloat *item_type = (LambdaTypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(LambdaTypeFloat));
+    TypeFloat *item_type = (TypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     if (symbol == SYM_INF) {
         item_type->double_val = INFINITY;
     }
@@ -361,7 +361,7 @@ Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
 }
 
 Type* build_lit_decimal(Transpiler* tp, TSNode node) {
-    LambdaTypeDecimal *item_type = (LambdaTypeDecimal *)alloc_type(tp->ast_pool, LMD_TYPE_DECIMAL, sizeof(LambdaTypeDecimal));
+    TypeDecimal *item_type = (TypeDecimal *)alloc_type(tp->ast_pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
     num_str[num_sv.length-1] = '\0';  // clear suffix 'n'/'N'
@@ -560,8 +560,8 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
     printf("build list\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
-    LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList *type = (TypeList*)ast_node->type;
 
     ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
@@ -754,7 +754,7 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     printf("build list type\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    LambdaTypeList *type = (LambdaTypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
+    TypeList *type = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     TSNode child = ts_node_named_child(list_node, 0);
@@ -783,7 +783,7 @@ AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
     printf("build array type\n");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY_TYPE, array_node, sizeof(AstArrayNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    LambdaTypeArray *type = (LambdaTypeArray*)alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(LambdaTypeArray));
+    TypeArray *type = (TypeArray*)alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     TSNode child = ts_node_named_child(array_node, 0);
@@ -846,8 +846,8 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
 AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
     printf("build content type\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
-    LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList *type = (TypeList*)ast_node->type;
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
@@ -907,7 +907,7 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
     arraylist_append(tp->type_list, ast_node->type);
     type->type_index = tp->type_list->length - 1;
     type->byte_size = byte_offset;
-    type->content_length = ast_node->content ? ((LambdaTypeList*)ast_node->content->type)->length : 0;
+    type->content_length = ast_node->content ? ((TypeList*)ast_node->content->type)->length : 0;
     return (AstNode*)ast_node;
 }
 
@@ -1094,7 +1094,7 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     arraylist_append(tp->type_list, type);
     type->type_index = tp->type_list->length - 1;
     type->byte_size = byte_offset;
-    type->content_length = ast_node->content ? ((LambdaTypeList*)ast_node->content->type)->length : 0;
+    type->content_length = ast_node->content ? ((TypeList*)ast_node->content->type)->length : 0;
     return (AstNode*)ast_node;
 }
 
@@ -1114,7 +1114,7 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
     Type *expr_type = ast_node->as->type;
     ast_node->type = 
         expr_type->type_id == LMD_TYPE_ARRAY || expr_type->type_id == LMD_TYPE_LIST ? 
-            ((LambdaTypeArray*)expr_type)->nested : 
+            ((TypeArray*)expr_type)->nested : 
         expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : expr_type;
 
     // push the name to the name stack
@@ -1254,8 +1254,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     printf("build content\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(LambdaTypeList));
-    LambdaTypeList *type = (LambdaTypeList*)ast_node->type;
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    TypeList *type = (TypeList*)ast_node->type;
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {

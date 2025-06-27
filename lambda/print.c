@@ -73,7 +73,7 @@ void writeType(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "List*");
         break;
     case LMD_TYPE_ARRAY:
-        LambdaTypeArray *array_type = (LambdaTypeArray*)type;
+        TypeArray *array_type = (TypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
@@ -347,7 +347,7 @@ char* format_type(Type *type) {
     case LMD_TYPE_RANGE:
         return "Range*";
     case LMD_TYPE_ARRAY:
-        LambdaTypeArray *array_type = (LambdaTypeArray*)type;
+        TypeArray *array_type = (TypeArray*)type;
         if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             return "ArrayLong*";
         } else {
@@ -457,7 +457,7 @@ void print_ast_node(AstNode *node, int indent) {
     case AST_NODE_LIST:  case AST_NODE_CONTENT:  case AST_NODE_CONTENT_TYPE:
         printf("[%s:%s[%ld]]\n", node->node_type == 
             AST_NODE_CONTENT_TYPE ? "content_type" : AST_NODE_CONTENT ? "content" : "list", 
-            format_type(node->type), ((LambdaTypeList*)node->type)->length);
+            format_type(node->type), ((TypeList*)node->type)->length);
         AstNode *ld = ((AstListNode*)node)->declare;
         if (!ld) {
             print_label(indent + 1, "no declare");

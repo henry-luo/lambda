@@ -48,7 +48,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_INT64: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_l2it(");
-            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
+            TypeConst *item_type = (TypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_str(tp->code_buf, ")");
         }
@@ -61,7 +61,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_FLOAT: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_d2it(");
-            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
+            TypeConst *item_type = (TypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_char(tp->code_buf, ')');
         }
@@ -74,7 +74,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     case LMD_TYPE_DECIMAL: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_c2it(");
-            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
+            TypeConst *item_type = (TypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_char(tp->code_buf, ')');
         }
@@ -85,7 +85,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
         if (item->type->is_literal) {
             strbuf_append_format(tp->code_buf, "const_%c2it(", t);
-            LambdaTypeConst *item_type = (LambdaTypeConst*)item->type;
+            TypeConst *item_type = (TypeConst*)item->type;
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_str(tp->code_buf, ")");
         }
@@ -133,7 +133,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 pri_node->type->type_id == LMD_TYPE_DTIME || pri_node->type->type_id == LMD_TYPE_BINARY) {
                 // loads the const string without boxing
                 strbuf_append_str(tp->code_buf, "const_s(");
-                LambdaTypeString *str_type = (LambdaTypeString*)pri_node->type;
+                TypeString *str_type = (TypeString*)pri_node->type;
                 strbuf_append_int(tp->code_buf, str_type->const_index);
                 strbuf_append_char(tp->code_buf, ')');
             }
@@ -326,7 +326,7 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
     Type * expr_type = loop_node->as->type;
     Type *item_type = 
-        expr_type->type_id == LMD_TYPE_ARRAY ? ((LambdaTypeArray*)expr_type)->nested : 
+        expr_type->type_id == LMD_TYPE_ARRAY ? ((TypeArray*)expr_type)->nested : 
         expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : &TYPE_ANY;
     strbuf_append_str(tp->code_buf, 
         expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
@@ -384,7 +384,7 @@ void transpile_items(Transpiler* tp, AstNode *item) {
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     printf("transpile array expr\n");
-    LambdaTypeArray *type = (LambdaTypeArray*)array_node->type;
+    TypeArray *type = (TypeArray*)array_node->type;
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : 
         "({Array* arr = array(); array_fill(arr,");
@@ -408,7 +408,7 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 
 void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     printf("transpile list expr: dec - %p, itm - %p\n", list_node->declare, list_node->item);
-    LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
+    TypeArray *type = (TypeArray*)list_node->type;
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");
     // let declare first
@@ -431,7 +431,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
-    LambdaTypeArray *type = (LambdaTypeArray*)list_node->type;
+    TypeArray *type = (TypeArray*)list_node->type;
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
     // let declare first
@@ -748,12 +748,12 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_LIST_TYPE:
         TypeType* list_type = (TypeType*)((AstListNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
-            ((LambdaTypeList*)list_type->type)->type_index);
+            ((TypeList*)list_type->type)->type_index);
         break;
     case AST_NODE_ARRAY_TYPE:
         TypeType* array_type = (TypeType*)((AstArrayNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
-            ((LambdaTypeArray*)array_type->type)->type_index);
+            ((TypeArray*)array_type->type)->type_index);
         break;
     case AST_NODE_MAP_TYPE:
         TypeType* map_type = (TypeType*)((AstMapNode*)expr_node)->type;
