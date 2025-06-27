@@ -37,3 +37,5 @@ nested.a;  nested.b;  nested.c;  nested.d;
 12 to 12;  1 to 3;  (1, 2 to 3, 4);  
 [1, (2 to 5), 6]
 for r in 1 to 5 { r+1 }
+for (r in 10 to 15) r+1
+type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3);

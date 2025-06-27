@@ -13,6 +13,7 @@ LambdaType TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
 LambdaType TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 LambdaType TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 LambdaType TYPE_LIST = {.type_id = LMD_TYPE_LIST};
+LambdaType TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
 LambdaTypeArray TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
 LambdaType TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 LambdaType TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
@@ -45,6 +46,7 @@ LambdaTypeType LIT_TYPE_BINARY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_l
 LambdaTypeType LIT_TYPE_SYMBOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_SYMBOL};
 LambdaTypeType LIT_TYPE_DTIME = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_DTIME};
 LambdaTypeType LIT_TYPE_LIST = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_LIST};
+LambdaTypeType LIT_TYPE_RANGE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_RANGE};
 LambdaTypeType LIT_TYPE_ARRAY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = (LambdaType*)&TYPE_ARRAY};
 LambdaTypeType LIT_TYPE_MAP = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_MAP};
 LambdaTypeType LIT_TYPE_ELMT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ELMT};
@@ -66,9 +68,10 @@ TypeInfo type_info[] = {
     [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .type=&TYPE_STRING, .lit_type = (LambdaType*)&LIT_TYPE_STRING},
     [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .type=&TYPE_SYMBOL, .lit_type = (LambdaType*)&LIT_TYPE_SYMBOL},
     [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .type=&TYPE_BINARY, .lit_type = (LambdaType*)&LIT_TYPE_BINARY},
+    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list", .type=&TYPE_LIST, .lit_type = (LambdaType*)&LIT_TYPE_LIST},
+    [LMD_TYPE_RANGE] = {.byte_size = sizeof(void*), .name = "array", .type=&TYPE_RANGE, .lit_type = (LambdaType*)&LIT_TYPE_RANGE},
     [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .type=(LambdaType*)&TYPE_ARRAY, .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
     [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .type=(LambdaType*)&TYPE_ARRAY, .lit_type = (LambdaType*)&LIT_TYPE_ARRAY},
-    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list", .type=&TYPE_LIST, .lit_type = (LambdaType*)&LIT_TYPE_LIST},
     [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .type=&TYPE_MAP, .lit_type = (LambdaType*)&LIT_TYPE_MAP},
     [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .type=&TYPE_ELMT, .lit_type = (LambdaType*)&LIT_TYPE_ELMT},
     [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .type=&TYPE_TYPE, .lit_type = (LambdaType*)&LIT_TYPE_TYPE},

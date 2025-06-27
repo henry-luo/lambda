@@ -556,20 +556,23 @@ Function* to_fn(fn_ptr ptr) {
 
 bool fn_is(Item a, Item b) {
     printf("is expr\n");
-    LambdaItem a_item = {.item = a};
-    LambdaItem b_item = {.item = b};
+    LambdaItem a_item = (LambdaItem)a, b_item = (LambdaItem)b;
     if (b_item.type_id || *((uint8_t*)b) != LMD_TYPE_TYPE) {
         return false;
     }
     LambdaTypeType *type_b = (LambdaTypeType *)b;
-    printf("is type %d, %d\n", a_item.type_id, type_b->type->type_id);
+    TypeId a_type_id = a_item.type_id ? a_item.type_id : *((uint8_t*)a);
+    printf("is type %d, %d\n", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
-        return a_item.type_id != LMD_TYPE_ERROR;
+        return a_type_id != LMD_TYPE_ERROR;
     case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
-        return LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= type_b->type->type_id;
+        return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+        printf("is array type: %d, %d\n", a_type_id, type_b->type->type_id);
+        return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT;
     default:
-        return a_item.type_id ? a_item.type_id == type_b->type->type_id : *((uint8_t*)a) == type_b->type->type_id;
+        return a_type_id == type_b->type->type_id;
     }
 }
 
@@ -628,6 +631,11 @@ bool fn_in(Item a, Item b) {
                 }
             }
             return false;
+        }
+        else if (b_type == LMD_TYPE_RANGE) {
+            Range *range = (Range*)b;
+            long a_val = it2l(a);
+            return range->start <= a_val && a_val <= range->end;
         }
         else if (b_type == LMD_TYPE_ARRAY) {
             Array *arr = (Array*)b;
