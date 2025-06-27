@@ -18,7 +18,7 @@ void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) 
     strbuf_append_int(strbuf, ts_node_start_byte(fn_node->node));
     // no need to add param cnt
     // strbuf_append_char(tp->code_buf, '_');
-    // strbuf_append_int(tp->code_buf, ((LambdaTypeFunc*)fn_node->type)->param_count);    
+    // strbuf_append_int(tp->code_buf, ((TypeFunc*)fn_node->type)->param_count);    
 }
 
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import) {
@@ -484,7 +484,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 
 void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     strbuf_append_str(tp->code_buf, "({Element* el=elmt(");
-    LambdaTypeElmt* type = (LambdaTypeElmt*)elmt_node->type;
+    TypeElmt* type = (TypeElmt*)elmt_node->type;
     strbuf_append_int(tp->code_buf, type->type_index);
     strbuf_append_str(tp->code_buf, ");");
     AstNode *item = elmt_node->item;
@@ -517,14 +517,14 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     printf("transpile call expr\n");
     // write the function name/ptr
-    LambdaTypeFunc *fn_type = NULL;
+    TypeFunc *fn_type = NULL;
     if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
         StrView fn = ts_node_source(tp, call_node->function->node);
         strbuf_append_str_n(tp->code_buf, fn.str, fn.length);
     }
     else {
         if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
-            fn_type = (LambdaTypeFunc*)call_node->function->type;
+            fn_type = (TypeFunc*)call_node->function->type;
             AstPrimaryNode *fn_node = call_node->function->node_type == AST_NODE_PRIMARY ? 
                 (AstPrimaryNode*)call_node->function:null;
             if (fn_node && fn_node->expr->node_type == AST_NODE_IDENT) {
@@ -551,7 +551,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
     // write the params
     strbuf_append_str(tp->code_buf, "(");
-    AstNode* arg = call_node->argument;  LambdaTypeParam *param_type = fn_type ? fn_type->param : NULL;
+    AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
         // boxing based on arg type and fn definition type
         if (param_type) {
@@ -682,12 +682,12 @@ void transpile_fn_expr(Transpiler* tp, AstFuncNode *fn_node) {
 }
 
 void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
-    strbuf_append_format(tp->code_buf, "base_type(%d)", ((LambdaTypeType*)type_node->type)->type->type_id);
+    strbuf_append_format(tp->code_buf, "base_type(%d)", ((TypeType*)type_node->type)->type->type_id);
 }
 
 void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
     printf("transpile binary type\n");
-    LambdaTypeBinary* binary_type = (LambdaTypeBinary*)((LambdaTypeType*)bin_node->type)->type;
+    TypeBinary* binary_type = (TypeBinary*)((TypeType*)bin_node->type)->type;
     strbuf_append_format(tp->code_buf, "const_type(%d)", binary_type->type_index);
 }
 
@@ -746,29 +746,29 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_base_type(tp, (AstTypeNode*)expr_node);
         break;
     case AST_NODE_LIST_TYPE:
-        LambdaTypeType* list_type = (LambdaTypeType*)((AstListNode*)expr_node)->type;
+        TypeType* list_type = (TypeType*)((AstListNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((LambdaTypeList*)list_type->type)->type_index);
         break;
     case AST_NODE_ARRAY_TYPE:
-        LambdaTypeType* array_type = (LambdaTypeType*)((AstArrayNode*)expr_node)->type;
+        TypeType* array_type = (TypeType*)((AstArrayNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((LambdaTypeArray*)array_type->type)->type_index);
         break;
     case AST_NODE_MAP_TYPE:
-        LambdaTypeType* map_type = (LambdaTypeType*)((AstMapNode*)expr_node)->type;
+        TypeType* map_type = (TypeType*)((AstMapNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((LambdaTypeMap*)map_type->type)->type_index);
         break;
     case AST_NODE_ELMT_TYPE:
-        LambdaTypeType* elmt_type = (LambdaTypeType*)((AstElementNode*)expr_node)->type;
+        TypeType* elmt_type = (TypeType*)((AstElementNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
-            ((LambdaTypeElmt*)elmt_type->type)->type_index);
+            ((TypeElmt*)elmt_type->type)->type_index);
         break;
     case AST_NODE_FUNC_TYPE:
-        LambdaTypeType* fn_type = (LambdaTypeType*)((AstFuncNode*)expr_node)->type;
+        TypeType* fn_type = (TypeType*)((AstFuncNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
-            ((LambdaTypeFunc*)fn_type->type)->type_index);
+            ((TypeFunc*)fn_type->type)->type_index);
         break;
     case AST_NODE_BINARY_TYPE:
         transpile_binary_type(tp, (AstBinaryNode*)expr_node);
@@ -804,8 +804,8 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             printf("got fn: %.*s, is_public: %d\n", (int)func_node->name.length, func_node->name.str, 
-                ((LambdaTypeFunc*)func_node->type)->is_public);
-            if (((LambdaTypeFunc*)func_node->type)->is_public) {
+                ((TypeFunc*)func_node->type)->is_public);
+            if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
             }
         } 

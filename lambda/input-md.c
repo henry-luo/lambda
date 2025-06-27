@@ -221,7 +221,7 @@ static Element* create_markdown_element(Input *input, const char* tag_name) {
     Element* element = elmt_pooled(input->pool);
     if (!element) return NULL;
     
-    LambdaTypeElmt *element_type = (LambdaTypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!element_type) return element;
     
     element->type = element_type;
@@ -248,7 +248,7 @@ static Element* create_markdown_element(Input *input, const char* tag_name) {
 }
 
 static void add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
-    LambdaTypeElmt *element_type = (LambdaTypeElmt*)element->type;
+    TypeElmt *element_type = (TypeElmt*)element->type;
     
     // Create shape entry for attribute
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(input->pool, 
@@ -332,7 +332,7 @@ static Item parse_header(Input *input, const char* line) {
             Item text_content = parse_inline_content(input, content);
             if (text_content != ITEM_NULL) {
                 list_push((List*)header, text_content);
-                ((LambdaTypeElmt*)header->type)->content_length++;
+                ((TypeElmt*)header->type)->content_length++;
             }
         }
         free(content);
@@ -419,7 +419,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     // Add content as text
     if (content_str->len > 0) {
         list_push((List*)code_block, s2it(content_str));
-        ((LambdaTypeElmt*)code_block->type)->content_length++;
+        ((TypeElmt*)code_block->type)->content_length++;
     }
     
     return (Item)code_block;
@@ -482,13 +482,13 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
             Item text_content = parse_inline_content(input, content);
             if (text_content != ITEM_NULL) {
                 list_push((List*)list_item, text_content);
-                ((LambdaTypeElmt*)list_item->type)->content_length++;
+                ((TypeElmt*)list_item->type)->content_length++;
             }
         }
         free(content);
         
         list_push((List*)list, (Item)list_item);
-        ((LambdaTypeElmt*)list->type)->content_length++;
+        ((TypeElmt*)list->type)->content_length++;
         
         (*current_line)++;
     }
@@ -512,7 +512,7 @@ static Item parse_paragraph(Input *input, const char* line) {
     Item text_content = parse_inline_content(input, content);
     if (text_content != ITEM_NULL) {
         list_push((List*)paragraph, text_content);
-        ((LambdaTypeElmt*)paragraph->type)->content_length++;
+        ((TypeElmt*)paragraph->type)->content_length++;
     }
     
     free(content);
@@ -579,7 +579,7 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count) {
         
         if (element != ITEM_NULL) {
             list_push((List*)document, element);
-            ((LambdaTypeElmt*)document->type)->content_length++;
+            ((TypeElmt*)document->type)->content_length++;
         } else {
             // If no element was parsed, advance to avoid infinite loop
             current_line++;

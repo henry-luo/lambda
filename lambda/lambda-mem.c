@@ -189,8 +189,8 @@ void free_container(Container* cont, bool clear_entry) {
         Element *elmt = (Element*)cont;
         if (!elmt->ref_cnt) {
             // free element attrs based on the shape
-            ShapeEntry *field = ((LambdaTypeElmt*)elmt->type)->shape;
-            printf("freeing element items: %p, length: %ld\n", elmt, ((LambdaTypeElmt*)elmt->type)->length);
+            ShapeEntry *field = ((TypeElmt*)elmt->type)->shape;
+            printf("freeing element items: %p, length: %ld\n", elmt, ((TypeElmt*)elmt->type)->length);
             if (field) { free_map_item(field, elmt->data, clear_entry); }
             if (elmt->data) free(elmt->data);
             // free content

@@ -72,7 +72,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             while (node) {
                 if (node->node_type == AST_NODE_FUNC) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
-                    if (((LambdaTypeFunc*)func_node->type)->is_public) {
+                    if (((TypeFunc*)func_node->type)->is_public) {
                         // get func addr
                         StrBuf *func_name = strbuf_new();
                         write_fn_name(func_name, func_node, NULL);

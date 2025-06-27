@@ -201,7 +201,7 @@ String *str_cat(String *left, String *right);
 typedef void* (*fn_ptr)();
 typedef struct Function {
     uint8_t type_id;
-    void* fn;  // fn definition, LambdaTypeFunc
+    void* fn;  // fn definition, TypeFunc
     fn_ptr ptr;
 } Function;
 

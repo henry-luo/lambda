@@ -375,7 +375,7 @@ Element* elmt(int type_index) {
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
-    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)(type_list->data[type_index]);
+    TypeElmt *elmt_type = (TypeElmt*)(type_list->data[type_index]);
     elmt->type = elmt_type;
     if (elmt_type->length || elmt_type->content_length) {
         frame_start();
@@ -383,7 +383,7 @@ Element* elmt(int type_index) {
     return elmt;
 }
 
-LambdaTypeElmt EmptyElmt = {
+TypeElmt EmptyElmt = {
     .type_id = LMD_TYPE_ELEMENT,
     .type_index = -1,
     .name = {0},
@@ -397,7 +397,7 @@ Element* elmt_pooled(VariableMemPool *pool) {
 }
 
 Element* elmt_fill(Element* elmt, ...) {
-    LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)elmt->type;
+    TypeElmt *elmt_type = (TypeElmt*)elmt->type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
     printf("elmt byte_size: %ld\n", elmt_type->byte_size);
     // set attributes
@@ -560,7 +560,7 @@ bool fn_is(Item a, Item b) {
     if (b_item.type_id || *((uint8_t*)b) != LMD_TYPE_TYPE) {
         return false;
     }
-    LambdaTypeType *type_b = (LambdaTypeType *)b;
+    TypeType *type_b = (TypeType *)b;
     TypeId a_type_id = a_item.type_id ? a_item.type_id : *((uint8_t*)a);
     printf("is type %d, %d\n", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
@@ -737,8 +737,8 @@ Type* const_type(int type_index) {
 
 Type* type(Item item) {
     LambdaItem itm = {.item = item};
-    LambdaTypeType *type = calloc(1, sizeof(LambdaTypeType) + sizeof(Type)); 
-    Type *item_type = (Type *)((uint8_t *)type + sizeof(LambdaTypeType));
+    TypeType *type = calloc(1, sizeof(TypeType) + sizeof(Type)); 
+    Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     if (itm.type_id) {
         item_type->type_id = itm.type_id;

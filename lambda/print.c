@@ -148,7 +148,7 @@ void print_named_items(StrBuf *strbuf, LambdaTypeMap *map_type, void* map_data) 
 }
 
 void print_item(StrBuf *strbuf, Item item) {
-    printf("print_item: %d\n", ((LambdaItem)item).type_id);
+    // printf("print_item: %d\n", ((LambdaItem)item).type_id);
     if (!item) {
         strbuf_append_str(strbuf, "null");
         return;
@@ -281,7 +281,7 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_ELEMENT) {
             Element *element = (Element*)item;
-            LambdaTypeElmt *elmt_type = (LambdaTypeElmt*)element->type;
+            TypeElmt *elmt_type = (TypeElmt*)element->type;
             printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
                 elmt_type->length, elmt_type->content_length, element->length);
             strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
@@ -301,7 +301,7 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_format(strbuf, "fn %p", func);
         }
         else if (type_id == LMD_TYPE_TYPE) {
-            LambdaTypeType *type = (LambdaTypeType*)item;
+            TypeType *type = (TypeType*)item;
             strbuf_append_format(strbuf, "type %s", type_info[type->type->type_id].name);
         }
         else {
@@ -535,8 +535,8 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     case AST_NODE_TYPE:
         assert(node->type->type_id == LMD_TYPE_TYPE && 
-            ((LambdaTypeType*)node->type)->type);
-        printf("[type:%s, %s]\n", format_type(node->type), format_type(((LambdaTypeType*)node->type)->type));
+            ((TypeType*)node->type)->type);
+        printf("[type:%s, %s]\n", format_type(node->type), format_type(((TypeType*)node->type)->type));
         break;
     case AST_NODE_LIST_TYPE:
         printf("[list type:%s]\n", format_type(node->type));

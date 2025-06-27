@@ -201,8 +201,8 @@ static Item parse_element(Input *input, const char **xml) {
     // Create element
     Element* element = elmt_pooled(input->pool);
     if (!element) return ITEM_ERROR;
-    
-    LambdaTypeElmt *element_type = (LambdaTypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(LambdaTypeElmt));
+
+    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!element_type) return (Item)element;
     element->type = element_type;
     

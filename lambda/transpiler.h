@@ -256,7 +256,7 @@ typedef struct {
     LambdaTypeMap; // extends LambdaTypeMap
     StrView name;  // name of the element
     long content_length;  // no. of content items
-} LambdaTypeElmt;
+} TypeElmt;
 
 typedef struct {
     Type;  // extends Type
@@ -264,32 +264,32 @@ typedef struct {
     Type* right;
     Operator op;  // operator
     int type_index;  // index of the type in the type list
-} LambdaTypeBinary;
+} TypeBinary;
 
-typedef struct LambdaTypeParam {
+typedef struct TypeParam {
     Type;  // extends Type
-    struct LambdaTypeParam *next;
-} LambdaTypeParam;
+    struct TypeParam *next;
+} TypeParam;
 
 typedef struct {
     Type;  // extends Type
-    LambdaTypeParam *param;
+    TypeParam *param;
     Type *returned;
     int param_count;
     int type_index;
     bool is_anonymous;
     bool is_public;
-} LambdaTypeFunc;
+} TypeFunc;
 
 typedef struct {
     Type;
     SysFunc *fn;
-} LambdaTypeSysFunc;
+} TypeSysFunc;
 
 typedef struct {
     Type;  // extends Type
     Type *type;  // full type defintion
-} LambdaTypeType;
+} TypeType;
 
 struct Pack {
     size_t size;           // Current used size of the pack
