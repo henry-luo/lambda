@@ -412,8 +412,8 @@ static Item parse_element(Input *input, const char **html) {
     printf("DEBUG: parse_element depth %d, char: '%c', html: %.50s\n", 
            parse_depth, **html, *html);
     
-    if (parse_depth > 50) {
-        printf("ERROR: Parse depth exceeded 50, possible infinite recursion\n");
+    if (parse_depth > 20) {  // Reduced limit for faster debugging
+        printf("ERROR: Parse depth exceeded 20, possible infinite recursion\n");
         parse_depth--;
         return ITEM_ERROR;
     }
@@ -480,10 +480,13 @@ static Item parse_element(Input *input, const char **html) {
     // Check for closing tag
     if (**html == '/') {
         // This is a closing tag, skip it and return null
+        printf("DEBUG: Found closing tag at depth %d, skipping: ", parse_depth);
+        const char* start = *html;
         while (**html && **html != '>') {
             (*html)++;
         }
         if (**html) (*html)++; // Skip >
+        printf("%.*s\n", (int)(*html - start), start);
         parse_depth--;
         return ITEM_NULL;
     }
@@ -565,8 +568,11 @@ static Item parse_element(Input *input, const char **html) {
             snprintf(closing_tag, sizeof(closing_tag), "</%s>", tag_name->chars);
             
             // Add safety counter to prevent infinite loops
-            int max_iterations = 1000;  // Reduced from 10000 for faster debugging
+            int max_iterations = 100;  // Further reduced for faster debugging
             int iteration_count = 0;
+            
+            printf("DEBUG: Starting content parsing for tag '%s', closing_tag: '%s'\n", 
+                   tag_name->chars, closing_tag);
             
             while (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) != 0 && 
                    iteration_count < max_iterations) {
@@ -574,14 +580,13 @@ static Item parse_element(Input *input, const char **html) {
                 const char* html_before = *html; // Track position to prevent infinite loops
                 
                 // Debug output to track parsing progress
-                if (iteration_count % 100 == 0) {
-                    printf("Debug: iteration %d, char: '%c', remaining: %.20s\n", 
-                           iteration_count, **html, *html);
-                }
+                printf("DEBUG: iter %d, depth %d, char: '%c', html: %.30s\n", 
+                       iteration_count, parse_depth, **html, *html);
                 
                 if (**html == '<') {
                     // Check if it's the closing tag
                     if (strncasecmp(*html, closing_tag, strlen(closing_tag)) == 0) {
+                        printf("DEBUG: Found closing tag: %s\n", closing_tag);
                         break;
                     }
                     
@@ -589,6 +594,7 @@ static Item parse_element(Input *input, const char **html) {
                     if (strcasecmp(tag_name->chars, "script") == 0 || 
                         strcasecmp(tag_name->chars, "style") == 0 ||
                         strcasecmp(tag_name->chars, "template") == 0) {
+                        printf("DEBUG: Parsing special content for %s tag\n", tag_name->chars);
                         StrBuf* content_sb = input->sb;
                         while (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) != 0) {
                             strbuf_append_char(content_sb, **html);
@@ -607,7 +613,11 @@ static Item parse_element(Input *input, const char **html) {
                         break;
                     }
                     
+                    printf("DEBUG: Calling parse_element recursively from depth %d\n", parse_depth);
                     Item child = parse_element(input, html);
+                    printf("DEBUG: parse_element returned, child=%llu, new char: '%c'\n", 
+                           child, **html ? **html : '\0');
+                    
                     if (child == ITEM_ERROR) {
                         // If we hit an error, try to recover by skipping this character
                         printf("Warning: parse_element returned error, skipping character '%c'\n", **html);
@@ -709,6 +719,8 @@ static Item parse_element(Input *input, const char **html) {
     arraylist_append(input->type_list, elem_type);
     elem_type->type_index = input->type_list->length - 1;
     parse_depth--;
+    printf("DEBUG: parse_element depth %d EXITING, returning element for tag '%s'\n", 
+           parse_depth, tag_name->chars);
     return (Item)element;
 }
 

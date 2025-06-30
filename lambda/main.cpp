@@ -75,14 +75,25 @@ void test_input() {
     print_item(toml_input->sb, toml_input->root);
     String *toml_result = (String*)toml_input->sb->str;
     printf("TOML parsed: %s\n", toml_result->chars);
+
+    // test html parsing with minimal example first
+    printf("Testing minimal HTML...\n");
+    Input* html_simple = html_parse("<div><p>Hello</p></div>");
+    if (html_simple && html_simple->root != ITEM_NULL) {
+        printf("Simple HTML parsed successfully\n");
+    } else {
+        printf("Simple HTML parsing failed\n");
+    }
     
-    // test html parsing
+    // test html parsing with comprehensive HTML5 features
+    printf("Testing comprehensive HTML5...\n");
     Input* html_input = html_parse("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n    <meta charset=\"UTF-8\">\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n    <title>Sample Page</title>\n    <link rel=\"stylesheet\" href=\"style.css\">\n</head>\n<body>\n    <header class=\"main-header\">\n        <h1>Welcome to HTML Parser</h1>\n        <nav>\n            <ul>\n                <li><a href=\"#home\">Home</a></li>\n                <li><a href=\"#about\">About</a></li>\n                <li><a href=\"#contact\">Contact</a></li>\n            </ul>\n        </nav>\n    </header>\n    <main>\n        <section id=\"content\">\n            <h2>Main Content</h2>\n            <p>This is a <strong>sample</strong> HTML document with <em>various</em> elements.</p>\n            <img src=\"image.jpg\" alt=\"Sample Image\" width=\"300\" height=\"200\">\n            <br>\n            <button type=\"submit\" disabled>Submit</button>\n        </section>\n    </main>\n    <footer>\n        <p>&copy; 2024 HTML Parser Test</p>\n    </footer>\n</body>\n</html>");
     LambdaItem html_item; html_item.item = html_input->root;
     printf("HTML parse result: %llu, type: %d\n", html_input->root, html_item.type_id);
     print_item(html_input->sb, html_input->root);
     String *html_result = (String*)html_input->sb->str;
     printf("HTML parsed: %s\n", html_result->chars);
+
 }
 
 int main(void) {
