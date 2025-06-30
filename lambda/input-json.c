@@ -215,7 +215,6 @@ static Map* parse_object(Input *input, const char **json) {
 }
 
 static Item parse_value(Input *input, const char **json) {
-    printf("parse_value: %s\n", *json);
     skip_whitespace(json);
     switch (**json) {
         case '{':

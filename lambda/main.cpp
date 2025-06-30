@@ -127,50 +127,6 @@ void test_input() {
         printf("CSS/JS HTML parsing failed\n");
     }
     
-    // Comment out comprehensive HTML5 test for debugging
-    /*
-    // test html parsing with comprehensive HTML5 features including CSS and JavaScript
-    printf("Testing comprehensive HTML5 with CSS and JavaScript...\n");
-    const char* comprehensive_html = 
-    */
-    
-    // Simple debugging HTML test for empty attribute values
-    printf("Testing simple HTML with empty attribute value...\n");
-    const char* debug_html = "<select><option value=\"\">Select a country</option></select>";
-    printf("Testing very simple HTML first...\n");
-    
-    // Test with extremely simple HTML first
-    Input* simple_test = html_parse("<div>Hello</div>");
-    if (simple_test && simple_test->root != ITEM_NULL) {
-        printf("Simple HTML parsed successfully\n");
-        if (simple_test->sb && simple_test->sb->str) {
-            print_item(simple_test->sb, simple_test->root);
-            String *simple_result = (String*)simple_test->sb->str;
-            if (simple_result && simple_result->chars) {
-                printf("Simple HTML result: %s\n", simple_result->chars);
-            }
-        }
-    }
-    
-    // Test with debug HTML (empty attribute)
-    Input* debug_input = html_parse(debug_html);
-    if (debug_input && debug_input->root != ITEM_NULL) {
-        printf("Debug HTML with empty attribute parsed successfully\n");
-        if (debug_input->sb && debug_input->sb->str) {
-            // Add a timeout mechanism - use alarm() to prevent hanging
-            printf("About to print HTML result...\n");
-            fflush(stdout);
-            
-            print_item(debug_input->sb, debug_input->root);
-            
-            printf("Print completed successfully\n");
-            String *debug_result = (String*)debug_input->sb->str;
-            if (debug_result && debug_result->chars) {
-                printf("Debug HTML result: %s\n", debug_result->chars);
-            }
-        }
-    }
-    
     // Test comprehensive HTML
     printf("Testing comprehensive HTML with CSS and JavaScript...\n");
     const char* comprehensive_html = "<!DOCTYPE html>\n"
