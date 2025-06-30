@@ -1,6 +1,9 @@
 
 #include "transpiler.h"
 
+// Global counter to detect infinite loops
+static int print_call_count = 0;
+
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     for (uint32_t i = 0; i < indent; i++) {
@@ -94,9 +97,26 @@ void writeType(Transpiler* tp, Type *type) {
     }
 }
 
+void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth);
+void print_item_with_depth(StrBuf *strbuf, Item item, int depth);
+
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
+    print_named_items_with_depth(strbuf, map_type, map_data, 0);
+}
+
+void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth) {
+    // Prevent infinite recursion
+    if (depth > 100) {
+        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");
+        return;
+    }
+    
     ShapeEntry *field = map_type->shape;
-    for (int i = 0; i < map_type->length; i++) {
+    int item_count = 0;
+    const int max_items = 50; // Reasonable limit for HTML attributes/children
+    
+    for (int i = 0; i < map_type->length && item_count < max_items; i++) {
+        item_count++;
         if (i) strbuf_append_char(strbuf, ',');
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
@@ -121,23 +141,39 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
                 break;
             case LMD_TYPE_STRING:
                 String *string = *(String**)data;
-                strbuf_append_format(strbuf, "\"%s\"", string->chars);
+                if (string && string->chars) {
+                    strbuf_append_format(strbuf, "\"%s\"", string->chars);
+                } else {
+                    strbuf_append_str(strbuf, "\"\"");
+                }
                 break;
             case LMD_TYPE_SYMBOL:
                 String *symbol = *(String**)data;
-                strbuf_append_format(strbuf, "'%s'", symbol->chars);
+                if (symbol && symbol->chars) {
+                    strbuf_append_format(strbuf, "'%s'", symbol->chars);
+                } else {
+                    strbuf_append_str(strbuf, "''");
+                }
                 break;
             case LMD_TYPE_DTIME:
                 String *dt = *(String**)data;
-                strbuf_append_format(strbuf, "t'%s'", dt->chars);
+                if (dt && dt->chars) {
+                    strbuf_append_format(strbuf, "t'%s'", dt->chars);
+                } else {
+                    strbuf_append_str(strbuf, "t''");
+                }
                 break;
             case LMD_TYPE_BINARY:
                 String *bin = *(String**)data;
-                strbuf_append_format(strbuf, "b'%s'", bin->chars);
+                if (bin && bin->chars) {
+                    strbuf_append_format(strbuf, "b'%s'", bin->chars);
+                } else {
+                    strbuf_append_str(strbuf, "b''");
+                }
                 break;
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
-                print_item(strbuf, *(Item*)data);
+                print_item_with_depth(strbuf, *(Item*)data, depth + 1);
                 break;
             default:
                 strbuf_append_format(strbuf, "unknown");
@@ -145,15 +181,39 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
         }
         field = field->next;
     }
+    
+    if (item_count >= max_items) {
+        strbuf_append_str(strbuf, "[TOO_MANY_ITEMS]");
+    }
 }
 
+void print_item_with_depth(StrBuf *strbuf, Item item, int depth);
+
 void print_item(StrBuf *strbuf, Item item) {
-    // printf("print_item: %d\n", ((LambdaItem)item).type_id);
+    print_call_count = 0; // Reset counter for each top-level call
+    print_item_with_depth(strbuf, item, 0);
+}
+
+void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
+    // Safety counter to prevent infinite loops
+    print_call_count++;
+    if (print_call_count > 1000) {
+        strbuf_append_str(strbuf, "[INFINITE_LOOP_DETECTED]");
+        return;
+    }
+    
+    // Prevent infinite recursion - reasonable depth limit
+    if (depth > 100) {
+        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");
+        return;
+    }
+    
     if (!item) {
         strbuf_append_str(strbuf, "null");
         return;
     }
     LambdaItem ld_item = {.item = item};
+    
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
         if (type_id == LMD_TYPE_NULL) {
@@ -208,24 +268,24 @@ void print_item(StrBuf *strbuf, Item item) {
         else if (type_id == LMD_TYPE_STRING) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the string
-            if (string) strbuf_append_format(strbuf, "\"%s\"", string->chars);
-            else strbuf_append_str(strbuf, "ERROR(null)");
+            if (string && string->chars) strbuf_append_format(strbuf, "\"%s\"", string->chars);
+            else strbuf_append_str(strbuf, "\"\"");
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
             String *string = (String*)ld_item.pointer;
             // todo: escape the symbol chars
-            if (string) strbuf_append_format(strbuf, "'%s'", string->chars);
-            else strbuf_append_str(strbuf, "ERROR(null)");
+            if (string && string->chars) strbuf_append_format(strbuf, "'%s'", string->chars);
+            else strbuf_append_str(strbuf, "''");
         } 
         else if (type_id == LMD_TYPE_DTIME) {
             String *string = (String*)ld_item.pointer;
-            if (string) strbuf_append_format(strbuf, "t'%s'", string->chars);
-            else strbuf_append_str(strbuf, "ERROR(null)");
+            if (string && string->chars) strbuf_append_format(strbuf, "t'%s'", string->chars);
+            else strbuf_append_str(strbuf, "t''");
         }
         else if (type_id == LMD_TYPE_BINARY) {
             String *string = (String*)ld_item.pointer;
-            if (string) strbuf_append_format(strbuf, "b'%s'", string->chars);
-            else strbuf_append_str(strbuf, "ERROR(null)");
+            if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
+            else strbuf_append_str(strbuf, "b''");
         }
         else if (type_id == LMD_TYPE_ERROR) {
             strbuf_append_str(strbuf, "ERROR");
@@ -242,7 +302,7 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_char(strbuf, '(');
             for (int i = 0; i < list->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
-                print_item(strbuf, list->items[i]);
+                print_item_with_depth(strbuf, list->items[i], depth + 1);
             }
             strbuf_append_char(strbuf, ')');
         }
@@ -257,7 +317,7 @@ void print_item(StrBuf *strbuf, Item item) {
             strbuf_append_char(strbuf, '[');
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
-                print_item(strbuf, array->items[i]);
+                print_item_with_depth(strbuf, array->items[i], depth + 1);
             }
             strbuf_append_char(strbuf, ']');
         }        
@@ -275,20 +335,13 @@ void print_item(StrBuf *strbuf, Item item) {
             Map *map = (Map*)item;
             TypeMap *map_type = (TypeMap*)map->type;
             strbuf_append_char(strbuf, '{');
-            print_named_items(strbuf, map_type, map->data);
+            print_named_items_with_depth(strbuf, map_type, map->data, depth + 1);
             strbuf_append_char(strbuf, '}');
         }
         else if (type_id == LMD_TYPE_ELEMENT) {
-            Element *element = (Element*)item;
-            TypeElmt *elmt_type = (TypeElmt*)element->type;
-            strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
-            print_named_items(strbuf, (TypeMap*)elmt_type, element->data);
-            // print content
-            for (long i = 0; i < element->length; i++) {
-                strbuf_append_char(strbuf, ';');
-                print_item(strbuf, element->items[i]);
-            }            
-            strbuf_append_char(strbuf, '>');
+            // Note: HTML elements from input-html.c are handled as Maps, not Elements
+            // This case is for other types of elements in the system
+            strbuf_append_str(strbuf, "[ELEMENT_TYPE_NOT_IMPLEMENTED]");
         }
         else if (type_id == LMD_TYPE_FUNC) {
             strbuf_append_str(strbuf, "function");

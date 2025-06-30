@@ -108,8 +108,6 @@ ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id
     nv->str = key->chars;  nv->length = key->len;
     shape_entry->name = nv;
     shape_entry->type = type_info[type_id].type;
-    printf("shape_entry: key: %.*s, type: %d\n", 
-        (int)nv->length, nv->str, shape_entry->type->type_id);
     if (prev_entry) {
         prev_entry->next = shape_entry;
         shape_entry->byte_offset = prev_entry->byte_offset + type_info[prev_entry->type->type_id].byte_size;

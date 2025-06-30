@@ -16,7 +16,6 @@ Array* array() {
 
 Array* array_pooled(VariableMemPool *pool) {
     Array *arr;
-    printf("array_pooled: pool %p\n", pool);
     MemPoolError err = pool_variable_alloc(pool, sizeof(Array), (void**)&arr);
     if (err != MEM_POOL_ERR_OK) return NULL;
     memset(arr, 0, sizeof(Array));
@@ -26,7 +25,6 @@ Array* array_pooled(VariableMemPool *pool) {
 }
 
 void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
-    printf("array_set index: %d, type: %d\n", index, itm.type_id);
     arr->items[index] = itm.item;
     // mem handling
     if (pool) return;
