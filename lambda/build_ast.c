@@ -212,6 +212,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             fn_node->fn = SYSFUNC_TIME;
             fn_node->type = &TYPE_DTIME;
         }
+        else if (strview_equal(&func_name, "input")) {
+            fn_node->fn = SYSFUNC_INPUT;
+            fn_node->type = &TYPE_ANY;
+        }        
         else if (strview_equal(&func_name, "print")) {
             fn_node->fn = SYSFUNC_PRINT;
             fn_node->type = &TYPE_NULL;

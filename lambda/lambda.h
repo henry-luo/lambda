@@ -80,6 +80,7 @@ typedef struct Context {
     void** consts;
     void* type_list;
     void* type_info;  // meta info for the base types
+    void* cwd;  // current working directory
     // void* data_owners;  // hashmap that maps from data => its owner
     Item result; // final exec result
 } Context;
@@ -217,3 +218,5 @@ Type* const_type(int type_index);
 
 // returns the type of the item
 Type* type(Item item);
+
+Item input(Item url, Item type);

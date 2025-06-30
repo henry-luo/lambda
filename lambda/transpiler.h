@@ -161,6 +161,7 @@ typedef enum {
     SYSFUNC_ROUND,
     SYSFUNC_FLOOR,
     SYSFUNC_CEIL,
+    SYSFUNC_INPUT,
     SYSFUNC_PRINT,
     SYSFUNC_ERROR,
 } SysFunc;
@@ -521,7 +522,7 @@ typedef Item (*main_func_t)(Context*);
 typedef struct Runtime Runtime;
 
 typedef struct Input {
-    const char* path;
+    void* path;
     VariableMemPool* pool; // memory pool
     ArrayList* type_list;  // list of types
     Item root;

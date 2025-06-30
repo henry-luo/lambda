@@ -263,3 +263,4 @@ Input* json_parse(const char* json_string) {
     input->root = parse_value(input, &json_string);
     return input;
 }
+

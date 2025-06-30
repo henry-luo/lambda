@@ -746,3 +746,28 @@ Type* type(Item item) {
     }
     return (Type*)type;
 }
+
+Input* input_data(Context* ctx, String* url, String* type);
+
+Item input(Item url, Item type) {
+    String* url_str;
+    LambdaItem url_item = {.item = url};
+    if (url_item.type_id != LMD_TYPE_STRING && url_item.type_id != LMD_TYPE_SYMBOL) {
+        printf("input url must be a string or symbol, got type %d\n", url_item.type_id);
+        return ITEM_NULL;  // todo: push error
+    }
+    else {
+        url_str = (String*)url_item.pointer;
+    }
+    LambdaItem type_item = {.item = type};
+    String* type_str;
+    if (type_item.type_id != LMD_TYPE_NULL && type_item.type_id != LMD_TYPE_STRING && type_item.type_id != LMD_TYPE_SYMBOL) {
+        printf("input type must be a string or symbol, got type %d\n", type_item.type_id);
+        return ITEM_NULL;  // todo: push error
+    }
+    else {
+        type_str = (type_item.type_id == LMD_TYPE_NULL) ? ITEM_NULL : (String*)type_item.pointer;
+    }
+    Input *input = input_data(context, url_str, type_str);
+    return (Item)input;
+}

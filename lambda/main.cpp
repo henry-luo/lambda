@@ -591,7 +591,6 @@ void test_input() {
     } else {
         printf("Comprehensive HTML parsing failed\n");
     }
-
 }
 
 int main(void) {
