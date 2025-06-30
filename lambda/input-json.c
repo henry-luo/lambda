@@ -255,18 +255,9 @@ static Item parse_value(Input *input, const char **json) {
     }
 }
 
-Input* json_parse(const char* json_string) {
-    printf("json_parse: %s\n", json_string);
-    Input* input = malloc(sizeof(Input));
-    input->path = NULL; // path for JSON input
-    size_t grow_size = 1024;  // 1k
-    size_t tolerance_percent = 20;
-    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
-    if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
-    input->type_list = arraylist_new(16);
-    input->root = ITEM_NULL;
+void parse_json(Input* input, const char* json_string) {
+    printf("json_parse\n");
     input->sb = strbuf_new_pooled(input->pool);
     input->root = parse_value(input, &json_string);
-    return input;
 }
 

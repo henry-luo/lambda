@@ -154,7 +154,7 @@ for source in "${SOURCE_FILES_ARRAY[@]}"; do
         obj_file="$BUILD_DIR/${obj_name}.o"
         OBJECT_FILES="$OBJECT_FILES $obj_file"
         
-        echo "Compiling: $source -> $obj_file"
+        # echo "Compiling: $source -> $obj_file"
         
         # Compile individual source file (only use includes and warnings/flags, not linker flags)
         compile_output=$(clang $INCLUDES \

@@ -766,7 +766,7 @@ Item input(Item url, Item type) {
         return ITEM_NULL;  // todo: push error
     }
     else {
-        type_str = (type_item.type_id == LMD_TYPE_NULL) ? ITEM_NULL : (String*)type_item.pointer;
+        type_str = (type_item.type_id == LMD_TYPE_NULL) ? NULL : (String*)type_item.pointer;
     }
     Input *input = input_data(context, url_str, type_str);
     // todo: input should be cached in context

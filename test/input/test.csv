@@ -1,0 +1,29 @@
+name,age,city,salary,active,notes,email
+John Doe,30,New York,50000.50,true,Simple record,john@example.com
+Jane Smith,25,"San Francisco",75000,false,Record with quoted city,jane@test.org
+"Bob Johnson",35,Boston,60000.75,true,"Quoted name and notes",bob@company.net
+Alice Brown,28,"Los Angeles, CA",45000,true,"City with comma, needs quotes",alice@domain.com
+"Charlie ""The Great"" Wilson",40,Chicago,80000,false,"Name with quotes and nickname","charlie@email.com"
+David Lee,32,,55000,true,Missing city field,david@work.org
+Maria Garcia,29,Miami,65000,,Missing boolean field,maria@example.net
+"Robert ""Bob"" Smith",45,"Dallas, TX",90000,true,"Multiple edge cases combined","robert@test.com"
+Lisa Wang,31,Seattle,70000,false,"Line break in notes
+Continues here",lisa@company.org
+"Tom O'Connor",38,Dublin,55000,true,Name with apostrophe,tom@ireland.ie
+Sarah Johnson,26,Portland,48000,true,"Comma, semicolon; and ""quotes"" test",sarah@test.com
+Mike Brown,33,Denver,62000,false,"Tab	character in notes",mike@example.org
+"Emily Davis",24,"Phoenix, AZ",41000,true,"",emily@domain.net
+Kevin Wilson,42,Austin,78000,true,NULL,kevin@work.com
+"Amy ""Ace"" Thompson",29,Nashville,52000,false,"Special chars: @#$%^&*()",amy@email.org
+"Chris ""C.J."" Miller",36,"Las Vegas, NV",67000,true,"Multiple quotes ""test"" case",chris@test.net
+"Zhang, Wei",31,"San Jose, CA",85000,true,"Asian name with comma",wei.zhang@tech.com
+José María,34,Barcelona,45000,false,Unicode characters,jose@spain.es
+"Müller, Hans",40,Berlin,55000,true,German umlaut characters,hans@germany.de
+Владимир Петров,45,Moscow,35000,true,Cyrillic characters,vladimir@russia.ru
+山田太郎,38,Tokyo,60000,false,Japanese characters,yamada@japan.jp
+"",25,Unknown,30000,true,Empty name field,anonymous@example.com
+Test User,0,TestCity,0,false,Zero values,test@zero.com
+"Very Long Name That Exceeds Normal Length Expectations",99,VeryLongCityNameThatAlsoExceedsNormalLimits,999999,true,Testing long values,verylongemail@verylongdomain.com
+"Special,Chars""In,Name",50,"City""With""Quotes",75000,true,"Notes with
+multiple
+lines",special@example.com

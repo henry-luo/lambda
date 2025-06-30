@@ -522,6 +522,7 @@ typedef Item (*main_func_t)(Context*);
 typedef struct Runtime Runtime;
 
 typedef struct Input {
+    void* url;
     void* path;
     VariableMemPool* pool; // memory pool
     ArrayList* type_list;  // list of types

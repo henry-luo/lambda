@@ -21,21 +21,6 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 }
 
 void test_input() {
-    // test csv parsing
-    Input* csv_input = csv_parse("name,\"age\",city\nJohn, 30,\"New York, City\"\nJane, 25,\"Los Angeles\"");
-    LambdaItem csv_item; csv_item.item = csv_input->root;
-    printf("CSV parse result: %llu, type: %d\n", csv_input->root, csv_item.type_id);
-    print_item(csv_input->sb, csv_input->root);
-    String *csv_result = (String*)csv_input->sb->str;
-    printf("CSV parsed: %s\n", csv_result->chars);
-
-    Input* json = json_parse("{\"a\":[\"name\", \"John\", \"age\", 30, \"city\", true],\"b\":[],\"c\":null,\"d\":{},\"e\":{\"f\":3.14,\"g\":\"hello\"}}");
-    LambdaItem json_item; json_item.item = json->root;
-    printf("JSON parse result: %llu, type: %d\n", json->root, json_item.type_id);
-    print_item(json->sb, json->root);
-    String *result = (String*)json->sb->str;
-    printf("JSON parsed: %s\n", result->chars);
-
     // test ini file parsing with type detection
     Input* ini_file_input = ini_file_parse("[server]\nhost=localhost\nport=8080\ndebug=true\ntimeout=30.5\n\n[database]\nname=mydb\nconnections=100\nssl=false\nversion=1.2.3");
     LambdaItem ini_item; ini_item.item = ini_file_input->root;

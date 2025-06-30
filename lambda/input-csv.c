@@ -25,26 +25,21 @@ String* parse_csv_field(Input *input, const char **csv) {
             (*csv)++;
         }
     }
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    if (sb->str) {
+        String *string = (String*)sb->str;
+        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+        strbuf_full_reset(sb);
+        return string;
+    }
+    return NULL;
 }
 
 // CSV parser
-Input* csv_parse(const char* csv_string) {
-    Input* input = calloc(1, sizeof(Input));
-    input->root = ITEM_NULL;
-    size_t grow_size = 1024;
-    size_t tolerance_percent = 20;
-    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
-    if (err != MEM_POOL_ERR_OK) { return input; }
+void parse_csv(Input* input, const char* csv_string) {
     input->sb = strbuf_new_pooled(input->pool);
-    if (!input->sb) { return input; }
-
     const char *csv = csv_string;
     Array *rows = array_pooled(input->pool);
-    if (!rows) { return input; }
+    if (!rows) { return; }
     input->root = (Item)rows;
     while (*csv) {
         // parse a row
@@ -65,5 +60,4 @@ Input* csv_parse(const char* csv_string) {
         // Handle \r\n
         if (*csv == '\r' && *(csv+1) == '\n') csv += 2;
     }
-    return input;
 }
