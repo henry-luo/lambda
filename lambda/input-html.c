@@ -6,6 +6,67 @@
 
 static Item parse_element(Input *input, const char **html);
 
+// HTML5 entity definitions for better compatibility
+typedef struct {
+    const char* name;
+    const char* utf8;
+} HTMLEntity;
+
+static const HTMLEntity html_entities[] = {
+    // Basic HTML entities
+    {"lt", "<"}, {"gt", ">"}, {"amp", "&"}, {"quot", "\""}, {"apos", "'"},
+    {"nbsp", " "}, {"copy", "©"}, {"reg", "®"}, {"trade", "™"},
+    
+    // Currency symbols
+    {"euro", "€"}, {"pound", "£"}, {"yen", "¥"}, {"cent", "¢"}, {"dollar", "$"},
+    
+    // Mathematical symbols
+    {"times", "×"}, {"divide", "÷"}, {"plusmn", "±"}, {"minus", "−"},
+    {"sup2", "²"}, {"sup3", "³"}, {"frac14", "¼"}, {"frac12", "½"}, {"frac34", "¾"},
+    
+    // Arrows
+    {"larr", "←"}, {"uarr", "↑"}, {"rarr", "→"}, {"darr", "↓"},
+    {"harr", "↔"}, {"crarr", "↵"},
+    
+    // Greek letters (common ones)
+    {"alpha", "α"}, {"beta", "β"}, {"gamma", "γ"}, {"delta", "δ"},
+    {"epsilon", "ε"}, {"zeta", "ζ"}, {"eta", "η"}, {"theta", "θ"},
+    {"pi", "π"}, {"sigma", "σ"}, {"tau", "τ"}, {"phi", "φ"},
+    {"chi", "χ"}, {"psi", "ψ"}, {"omega", "ω"},
+    
+    // Accented characters (common ones)
+    {"agrave", "à"}, {"aacute", "á"}, {"acirc", "â"}, {"atilde", "ã"},
+    {"auml", "ä"}, {"aring", "å"}, {"ccedil", "ç"}, {"egrave", "è"},
+    {"eacute", "é"}, {"ecirc", "ê"}, {"euml", "ë"}, {"igrave", "ì"},
+    {"iacute", "í"}, {"icirc", "î"}, {"iuml", "ï"}, {"ntilde", "ñ"},
+    {"ograve", "ò"}, {"oacute", "ó"}, {"ocirc", "ô"}, {"otilde", "õ"},
+    {"ouml", "ö"}, {"ugrave", "ù"}, {"uacute", "ú"}, {"ucirc", "û"},
+    {"uuml", "ü"}, {"yuml", "ÿ"},
+    
+    // Quotation marks
+    {"lsquo", "'"}, {"rsquo", "'"}, {"ldquo", "\""}, {"rdquo", "\""},
+    {"sbquo", "‚"}, {"bdquo", "„"},
+    
+    // Miscellaneous
+    {"sect", "§"}, {"para", "¶"}, {"middot", "·"}, {"cedil", "¸"},
+    {"ordm", "º"}, {"ordf", "ª"}, {"laquo", "«"}, {"raquo", "»"},
+    {"iquest", "¿"}, {"iexcl", "¡"}, {"brvbar", "¦"}, {"shy", "­"},
+    {"macr", "¯"}, {"deg", "°"}, {"acute", "´"}, {"micro", "µ"},
+    {"not", "¬"}, {"curren", "¤"},
+    
+    {NULL, NULL} // Sentinel
+};
+
+static const char* find_html_entity(const char* name, size_t len) {
+    for (int i = 0; html_entities[i].name; i++) {
+        if (strlen(html_entities[i].name) == len && 
+            strncmp(html_entities[i].name, name, len) == 0) {
+            return html_entities[i].utf8;
+        }
+    }
+    return NULL;
+}
+
 static void skip_whitespace(const char **html) {
     while (**html && (**html == ' ' || **html == '\n' || **html == '\r' || **html == '\t')) {
         (*html)++;
@@ -16,7 +77,7 @@ static void skip_whitespace(const char **html) {
 static const char* void_elements[] = {
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr", "command",
-    "keygen", "menuitem", NULL
+    "keygen", "menuitem", "slot", NULL
 };
 
 // HTML5 semantic elements that should be parsed as containers
@@ -24,7 +85,8 @@ static const char* semantic_elements[] = {
     "article", "aside", "details", "figcaption", "figure", "footer",
     "header", "main", "mark", "nav", "section", "summary", "time",
     "audio", "video", "canvas", "svg", "math", "datalist", "dialog",
-    "meter", "output", "progress", "template", NULL
+    "meter", "output", "progress", "template", "search", "hgroup",
+    NULL
 };
 
 static bool is_semantic_element(const char* tag_name) {
@@ -57,47 +119,8 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
     while (**html && **html != end_char) {
         if (**html == '&') {
             (*html)++; // Skip &
-            // Common HTML5 entities
-            if (strncmp(*html, "lt;", 3) == 0) {
-                strbuf_append_char(sb, '<');
-                *html += 3;
-            } else if (strncmp(*html, "gt;", 3) == 0) {
-                strbuf_append_char(sb, '>');  
-                *html += 3;
-            } else if (strncmp(*html, "amp;", 4) == 0) {
-                strbuf_append_char(sb, '&');
-                *html += 4;
-            } else if (strncmp(*html, "quot;", 5) == 0) {
-                strbuf_append_char(sb, '"');
-                *html += 5;
-            } else if (strncmp(*html, "apos;", 5) == 0) {
-                strbuf_append_char(sb, '\'');
-                *html += 5;
-            } else if (strncmp(*html, "nbsp;", 5) == 0) {
-                strbuf_append_char(sb, ' ');
-                *html += 5;
-            } else if (strncmp(*html, "copy;", 5) == 0) {
-                strbuf_append_str(sb, "©");
-                *html += 5;
-            } else if (strncmp(*html, "reg;", 4) == 0) {
-                strbuf_append_str(sb, "®");
-                *html += 4;
-            } else if (strncmp(*html, "trade;", 6) == 0) {
-                strbuf_append_str(sb, "™");
-                *html += 6;
-            } else if (strncmp(*html, "euro;", 5) == 0) {
-                strbuf_append_str(sb, "€");
-                *html += 5;
-            } else if (strncmp(*html, "pound;", 6) == 0) {
-                strbuf_append_str(sb, "£");
-                *html += 6;
-            } else if (strncmp(*html, "yen;", 4) == 0) {
-                strbuf_append_str(sb, "¥");
-                *html += 4;
-            } else if (strncmp(*html, "cent;", 5) == 0) {
-                strbuf_append_str(sb, "¢");
-                *html += 5;
-            } else if (*html[0] == '#') {
+            
+            if (*html[0] == '#') {
                 // Numeric character reference
                 (*html)++; // Skip #
                 int code = 0;
@@ -141,25 +164,47 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
                         strbuf_append_char(sb, (char)(0xE0 | (code >> 12)));
                         strbuf_append_char(sb, (char)(0x80 | ((code >> 6) & 0x3F)));
                         strbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
+                    } else if (code < 0x110000) {
+                        // 4-byte UTF-8 encoding for code points up to U+10FFFF
+                        strbuf_append_char(sb, (char)(0xF0 | (code >> 18)));
+                        strbuf_append_char(sb, (char)(0x80 | ((code >> 12) & 0x3F)));
+                        strbuf_append_char(sb, (char)(0x80 | ((code >> 6) & 0x3F)));
+                        strbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
                     } else {
-                        strbuf_append_char(sb, '?'); // Unsupported
+                        strbuf_append_char(sb, '?'); // Invalid code point
                     }
                 } else {
                     strbuf_append_char(sb, '&');
                     strbuf_append_char(sb, '#');
                 }
             } else {
-                // Try to find the end of the entity
-                const char *end = *html;
-                while (*end && *end != ';' && *end != ' ' && *end != '<') {
-                    end++;
+                // Named entity reference
+                const char *entity_start = *html;
+                const char *entity_end = *html;
+                
+                // Find the end of the entity name
+                while (*entity_end && *entity_end != ';' && *entity_end != ' ' && 
+                       *entity_end != '<' && *entity_end != '&') {
+                    entity_end++;
                 }
-                if (*end == ';') {
-                    // Skip unknown entity
-                    *html = end + 1;
-                    strbuf_append_char(sb, '?'); // placeholder
+                
+                if (*entity_end == ';') {
+                    size_t entity_len = entity_end - entity_start;
+                    const char* entity_value = find_html_entity(entity_start, entity_len);
+                    
+                    if (entity_value) {
+                        strbuf_append_str(sb, entity_value);
+                        *html = entity_end + 1; // Skip past the semicolon
+                    } else {
+                        // Unknown entity, output as-is with replacement character
+                        strbuf_append_char(sb, '&');
+                        for (const char* p = entity_start; p <= entity_end; p++) {
+                            strbuf_append_char(sb, *p);
+                        }
+                        *html = entity_end + 1;
+                    }
                 } else {
-                    // Invalid entity, just append the &
+                    // Invalid entity format, just append the &
                     strbuf_append_char(sb, '&');
                 }
             }
@@ -329,16 +374,65 @@ static void skip_cdata(const char **html) {
     }
 }
 
+// HTML5 custom element validation (simplified)
+static bool is_valid_custom_element_name(const char* name) {
+    if (!name || strlen(name) == 0) return false;
+    
+    // Custom elements must contain a hyphen and start with a lowercase letter
+    bool has_hyphen = false;
+    if (name[0] < 'a' || name[0] > 'z') return false;
+    
+    for (int i = 1; name[i]; i++) {
+        if (name[i] == '-') {
+            has_hyphen = true;
+        } else if (!((name[i] >= 'a' && name[i] <= 'z') ||
+                     (name[i] >= '0' && name[i] <= '9') ||
+                     name[i] == '-' || name[i] == '.' || name[i] == '_')) {
+            return false;
+        }
+    }
+    
+    return has_hyphen;
+}
+
+// Check if attribute is a data attribute (HTML5 feature)
+static bool is_data_attribute(const char* attr_name) {
+    return strncmp(attr_name, "data-", 5) == 0;
+}
+
+// Check if attribute is an ARIA attribute (accessibility)
+static bool is_aria_attribute(const char* attr_name) {
+    return strncmp(attr_name, "aria-", 5) == 0;
+}
+
 static Item parse_element(Input *input, const char **html) {
-    if (**html != '<') return ITEM_ERROR;
+    static int parse_depth = 0;
+    parse_depth++;
+    
+    printf("DEBUG: parse_element depth %d, char: '%c', html: %.50s\n", 
+           parse_depth, **html, *html);
+    
+    if (parse_depth > 50) {
+        printf("ERROR: Parse depth exceeded 50, possible infinite recursion\n");
+        parse_depth--;
+        return ITEM_ERROR;
+    }
+    
+    if (**html != '<') {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
     
     // Skip comments
     if (strncmp(*html, "<!--", 4) == 0) {
         skip_comment(html);
         skip_whitespace(html);
         if (**html) {
-            return parse_element(input, html); // Try next element
+            Item result = parse_element(input, html); // Try next element
+            parse_depth--;
+            return result;
         }
+        parse_depth--;
         return ITEM_NULL;
     }
     
@@ -347,8 +441,11 @@ static Item parse_element(Input *input, const char **html) {
         skip_doctype(html);
         skip_whitespace(html);
         if (**html) {
-            return parse_element(input, html); // Try next element
+            Item result = parse_element(input, html); // Try next element
+            parse_depth--;
+            return result;
         }
+        parse_depth--;
         return ITEM_NULL;
     }
     
@@ -357,8 +454,11 @@ static Item parse_element(Input *input, const char **html) {
         skip_processing_instruction(html);
         skip_whitespace(html);
         if (**html) {
-            return parse_element(input, html); // Try next element
+            Item result = parse_element(input, html); // Try next element
+            parse_depth--;
+            return result;
         }
+        parse_depth--;
         return ITEM_NULL;
     }
     
@@ -367,8 +467,11 @@ static Item parse_element(Input *input, const char **html) {
         skip_cdata(html);
         skip_whitespace(html);
         if (**html) {
-            return parse_element(input, html); // Try next element
+            Item result = parse_element(input, html); // Try next element
+            parse_depth--;
+            return result;
         }
+        parse_depth--;
         return ITEM_NULL;
     }
     
@@ -381,14 +484,21 @@ static Item parse_element(Input *input, const char **html) {
             (*html)++;
         }
         if (**html) (*html)++; // Skip >
+        parse_depth--;
         return ITEM_NULL;
     }
     
     String* tag_name = parse_tag_name(input, html);
-    if (!tag_name || tag_name->len == 0) return ITEM_ERROR;
+    if (!tag_name || tag_name->len == 0) {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
     
     Map* attributes = parse_attributes(input, html);
-    if (!attributes) return ITEM_ERROR;
+    if (!attributes) {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
     
     // Check for self-closing tag
     bool is_self_closing = false;
@@ -397,15 +507,24 @@ static Item parse_element(Input *input, const char **html) {
         (*html)++; // Skip /
     }
     
-    if (**html != '>') return ITEM_ERROR;
+    if (**html != '>') {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
     (*html)++; // Skip >
     
     // Create element map
     Map* element = map_pooled(input->pool);
-    if (!element) return ITEM_ERROR;
+    if (!element) {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
     
     TypeMap* elem_type = map_init_cap(element, input->pool);
-    if (!element->data) return ITEM_ERROR;
+    if (!element->data) {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
     
     ShapeEntry* elem_shape_entry = NULL;
     
@@ -446,7 +565,7 @@ static Item parse_element(Input *input, const char **html) {
             snprintf(closing_tag, sizeof(closing_tag), "</%s>", tag_name->chars);
             
             // Add safety counter to prevent infinite loops
-            int max_iterations = 10000;
+            int max_iterations = 1000;  // Reduced from 10000 for faster debugging
             int iteration_count = 0;
             
             while (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) != 0 && 
@@ -454,15 +573,22 @@ static Item parse_element(Input *input, const char **html) {
                 iteration_count++;
                 const char* html_before = *html; // Track position to prevent infinite loops
                 
+                // Debug output to track parsing progress
+                if (iteration_count % 100 == 0) {
+                    printf("Debug: iteration %d, char: '%c', remaining: %.20s\n", 
+                           iteration_count, **html, *html);
+                }
+                
                 if (**html == '<') {
                     // Check if it's the closing tag
                     if (strncasecmp(*html, closing_tag, strlen(closing_tag)) == 0) {
                         break;
                     }
                     
-                    // Handle script and style tags specially (preserve content as-is)
+                    // Handle script, style, and template tags specially (preserve content as-is)
                     if (strcasecmp(tag_name->chars, "script") == 0 || 
-                        strcasecmp(tag_name->chars, "style") == 0) {
+                        strcasecmp(tag_name->chars, "style") == 0 ||
+                        strcasecmp(tag_name->chars, "template") == 0) {
                         StrBuf* content_sb = input->sb;
                         while (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) != 0) {
                             strbuf_append_char(content_sb, **html);
@@ -483,7 +609,9 @@ static Item parse_element(Input *input, const char **html) {
                     
                     Item child = parse_element(input, html);
                     if (child == ITEM_ERROR) {
-                        // If we hit an error, break out to prevent infinite loop
+                        // If we hit an error, try to recover by skipping this character
+                        printf("Warning: parse_element returned error, skipping character '%c'\n", **html);
+                        if (**html) (*html)++;
                         break;
                     } else if (child != ITEM_NULL) {
                         LambdaItem child_item = {.item = child};
@@ -494,16 +622,18 @@ static Item parse_element(Input *input, const char **html) {
                     
                     // Safety check: if HTML pointer didn't advance, force it to avoid infinite loop
                     if (*html == html_before) {
+                        printf("Warning: parse_element didn't advance HTML pointer from char '%c', forcing advance\n", **html);
                         (*html)++; // Skip problematic character
                     }
                 } else {
                     // Parse text content
                     String* text = parse_text_content(input, html);
                     if (text && text->len > 0) {
-                        // For pre, code, and textarea tags, preserve whitespace
+                        // For pre, code, textarea, template tags, preserve whitespace
                         bool preserve_whitespace = (strcasecmp(tag_name->chars, "pre") == 0 ||
                                                    strcasecmp(tag_name->chars, "code") == 0 ||
-                                                   strcasecmp(tag_name->chars, "textarea") == 0);
+                                                   strcasecmp(tag_name->chars, "textarea") == 0 ||
+                                                   strcasecmp(tag_name->chars, "template") == 0);
                         
                         if (preserve_whitespace) {
                             LambdaItem text_item = (LambdaItem)s2it(text);
@@ -532,10 +662,18 @@ static Item parse_element(Input *input, const char **html) {
                                 array_append(children, text_item, input->pool);
                             }
                         }
+                    } else {
+                        // No text content found, and we're not at a < character
+                        // This means we're likely at some other character that needs to be handled
+                        // Skip this character to avoid infinite loop
+                        if (**html && **html != '<') {
+                            (*html)++;
+                        }
                     }
                     
                     // Safety check: if HTML pointer didn't advance, force it to avoid infinite loop
                     if (*html == html_before) {
+                        printf("Warning: HTML pointer stuck at char '%c', forcing advance\n", **html);
                         (*html)++; // Skip problematic character
                     }
                 }
@@ -570,6 +708,7 @@ static Item parse_element(Input *input, const char **html) {
     
     arraylist_append(input->type_list, elem_type);
     elem_type->type_index = input->type_list->length - 1;
+    parse_depth--;
     return (Item)element;
 }
 
