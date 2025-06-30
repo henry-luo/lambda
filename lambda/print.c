@@ -238,7 +238,7 @@ void print_item(StrBuf *strbuf, Item item) {
         TypeId type_id = *((uint8_t*)item);
         if (type_id == LMD_TYPE_LIST) {
             List *list = (List*)item;
-            printf("print list: %p, length: %ld\n", list, list->length);
+            // printf("print list: %p, length: %ld\n", list, list->length);
             strbuf_append_char(strbuf, '(');
             for (int i = 0; i < list->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
@@ -248,12 +248,12 @@ void print_item(StrBuf *strbuf, Item item) {
         }
         else if (type_id == LMD_TYPE_RANGE) {
             Range *range = (Range*)item;
-            printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
+            // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
             strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
         }
         else if (type_id == LMD_TYPE_ARRAY) {
             Array *array = (Array*)item;
-            printf("print array: %p, length: %ld\n", array, array->length);
+            // printf("print array: %p, length: %ld\n", array, array->length);
             strbuf_append_char(strbuf, '[');
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');

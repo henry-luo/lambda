@@ -25,7 +25,8 @@
         "lambda/input-xml.c",
         "lambda/input-yaml.c",
         "lambda/input-md.c",
-        "lambda/input-toml.c"
+        "lambda/input-toml.c",
+        "lambda/input-html.c"
     ],
     "cpp_files": [
         "lambda/main.cpp"
