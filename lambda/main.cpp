@@ -1,9 +1,6 @@
 
 #include "transpiler.h"
 extern "C" {
-Input* json_parse(const char* json_string);
-Input* csv_parse(const char* csv_string);
-Input* ini_file_parse(const char* ini_string);
 Input* xml_parse(const char* xml_string);
 Input* yaml_parse(const char* yaml_string);
 Input* markdown_parse(const char* markdown_string);
@@ -21,14 +18,6 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 }
 
 void test_input() {
-    // test ini file parsing with type detection
-    Input* ini_file_input = ini_file_parse("[server]\nhost=localhost\nport=8080\ndebug=true\ntimeout=30.5\n\n[database]\nname=mydb\nconnections=100\nssl=false\nversion=1.2.3");
-    LambdaItem ini_item; ini_item.item = ini_file_input->root;
-    printf("INI file parse result: %llu, type: %d\n", ini_file_input->root, ini_item.type_id);
-    print_item(ini_file_input->sb, ini_file_input->root);
-    String *ini_file_result = (String*)ini_file_input->sb->str;
-    printf("INI file parsed: %s\n", ini_file_result->chars);    
-
     // test yaml parsing
     Input* yaml_input = yaml_parse("---\nname: John Doe\nage: 30\nactive: true\ncity: New York\naddress:\n  street: 123 Main St\n  zip: 10001\nhobbies:\n  - reading\n  - swimming\n  - coding\nscores:\n  - 85.5\n  - 92.0\n  - 78.3\nmetadata:\n  created: 2023-01-15\n  updated: null\n  tags: [important, personal]");
     LambdaItem yaml_item; yaml_item.item = yaml_input->root;

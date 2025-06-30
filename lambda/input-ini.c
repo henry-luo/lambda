@@ -100,10 +100,13 @@ static String* parse_raw_value(Input *input, const char **ini) {
         }
     }
     
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    if (sb->str) {
+        String *string = (String*)sb->str;
+        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+        strbuf_full_reset(sb);
+        return string;
+    }
+    return NULL;
 }
 
 static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
@@ -251,25 +254,16 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
     return section_map;
 }
 
-Input* ini_file_parse(const char* ini_string) {
-    printf("ini_file_parse: %s\n", ini_string);
-    Input* input = calloc(1, sizeof(Input));
-    if (!input) return NULL;
-    size_t grow_size = 1024;  size_t tolerance_percent = 20;
-    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
-    if (err != MEM_POOL_ERR_OK) { return input; }
-
-    input->type_list = arraylist_new(16);
-    input->root = ITEM_NULL;
+void parse_ini(Input* input, const char* ini_string) {
     input->sb = strbuf_new_pooled(input->pool);
     
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);
-    if (!root_map) { return input; }
+    if (!root_map) { return; }
     input->root = (Item)root_map;
 
     TypeMap *root_map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!root_map_type) { return input; }
+    if (!root_map_type) { return; }
     root_map->type = root_map_type;
     
     int byte_cap = 64;
@@ -333,5 +327,4 @@ Input* ini_file_parse(const char* ini_string) {
     arraylist_append(input->type_list, root_map_type);
     root_map_type->type_index = input->type_list->length - 1;
     printf("ini_file_parse completed, root map has %ld sections\n", root_map_type->length);
-    return input;
 }

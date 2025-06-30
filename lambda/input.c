@@ -5,6 +5,7 @@ lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
 char* read_text_doc(lxb_url_t *url);
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
+void parse_ini(Input* input, const char* ini_string);
 
 Input* input_new(lxb_url_t* abs_url) {
     Input* input = malloc(sizeof(Input));
@@ -44,6 +45,10 @@ Input* input_data(Context* ctx, String* url, String* type) {
     else if (strcmp(type->chars, "csv") == 0) {
         input = input_new(abs_url);
         parse_csv(input, source);
+    }
+    else if (strcmp(type->chars, "ini") == 0) {
+        input = input_new(abs_url);
+        parse_ini(input, source);
     }
     free(source);
     return input;
