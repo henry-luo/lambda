@@ -59,10 +59,13 @@ static String* parse_string(Input *input, const char **json) {
         (*json)++; // skip closing quote
     }
 
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    if (sb->str) {
+        String *string = (String*)sb->str;
+        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+        strbuf_full_reset(sb);
+        return string;
+    }
+    return NULL; // empty string
 }
 
 static Item parse_number(Input *input, const char **json) {
@@ -97,6 +100,7 @@ static Array* parse_array(Input *input, const char **json) {
             return NULL; // invalid format
         }
         (*json)++;
+        skip_whitespace(json);
     }
     printf("parsed array length: %ld\n", arr->length);
     return arr;
@@ -198,6 +202,7 @@ static Map* parse_object(Input *input, const char **json) {
         skip_whitespace(json);
         if (**json != ':') return mp;
         (*json)++;
+        skip_whitespace(json);
 
         LambdaItem value = (LambdaItem)parse_value(input, json);
         map_put(mp, map_type, key, value, input->pool, &shape_entry);
@@ -206,6 +211,7 @@ static Map* parse_object(Input *input, const char **json) {
         if (**json == '}') { (*json)++;  break; }
         if (**json != ',') return mp;
         (*json)++;
+        skip_whitespace(json);
     }
     arraylist_append(input->type_list, map_type);
     map_type->type_index = input->type_list->length - 1;

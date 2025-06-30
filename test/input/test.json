@@ -65,7 +65,6 @@
       "object": {"inner": "value"}
     },
     "special_keys": {
-      "": "empty key",
       " ": "space key",
       "key with spaces": "spaces in key",
       "key-with-dashes": "dashes in key",

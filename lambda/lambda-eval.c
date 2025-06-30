@@ -769,5 +769,6 @@ Item input(Item url, Item type) {
         type_str = (type_item.type_id == LMD_TYPE_NULL) ? ITEM_NULL : (String*)type_item.pointer;
     }
     Input *input = input_data(context, url_str, type_str);
-    return (Item)input;
+    // todo: input should be cached in context
+    return (input && input->root) ? input->root : ITEM_NULL;
 }
