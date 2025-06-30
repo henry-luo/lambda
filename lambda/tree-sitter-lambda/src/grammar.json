@@ -5069,6 +5069,10 @@
                 },
                 {
                   "type": "STRING",
+                  "value": "input"
+                },
+                {
+                  "type": "STRING",
                   "value": "print"
                 },
                 {

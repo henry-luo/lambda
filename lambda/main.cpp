@@ -617,13 +617,14 @@ int main(void) {
     run_test_script(&runtime, "func.ls", strbuf);
     run_test_script(&runtime, "mem.ls", strbuf);
     run_test_script(&runtime, "type.ls", strbuf);
+    run_test_script(&runtime, "input.ls", strbuf);
 
     printf("%s", strbuf->str);
     strbuf_free(strbuf);
     runtime_cleanup(&runtime);
 
     // Test input parsers
-    test_input();
+    // test_input();
 
     // mpf_t f;
     // mpf_init(f);

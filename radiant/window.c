@@ -200,40 +200,6 @@ void render(GLFWwindow* window) {
     glFinish(); // important, this waits until rendering result is actually visible, thus making resizing less ugly
 }
 
-#ifdef _WIN32
-    #include <direct.h>
-    #define GETCWD _getcwd
-#else
-    #include <unistd.h>
-    #define GETCWD getcwd
-#endif
-
-lxb_url_t* get_current_dir() {
-    char cwd[PATH_MAX + 8];  // "file://" + max_path + '/'
-    strcat(cwd, "file://");
-    if (!GETCWD(cwd + 7, sizeof(cwd) - 7)) {
-        perror("getcwd() error");  return NULL;
-    }
-    strcat(cwd, "/");
-    printf("Current working directory: %s\n", cwd);
-
-    lxb_url_parser_t parser;
-    lxb_status_t status = lxb_url_parser_init(&parser, NULL);
-    if (status != LXB_STATUS_OK) {
-        printf("Failed to init URL parser.\n");
-        return NULL;
-    }
-
-    lxb_url_t* url = lxb_url_parse(&parser, NULL, (const lxb_char_t *)cwd, strlen(cwd));
-    if (url == NULL) {
-        printf("Failed to parse URL.\n");
-        return NULL;
-    }
-
-    lxb_url_parser_destroy(&parser, false);    
-    return url; 
-}
-
 void log_init() {
     // empty existing log file
     FILE *file = fopen("log.txt", "w");

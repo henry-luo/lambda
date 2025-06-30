@@ -223,6 +223,9 @@ void runner_init(Runtime *runtime, Runner* runner) {
     memset(runner, 0, sizeof(Runner));
 }
 
+#include <lexbor/url/url.h>
+lxb_url_t* get_current_dir();
+
 void runner_setup_context(Runner* runner) {
     printf("runner setup exec context\n");
     runner->context.ast_pool = runner->script->ast_pool;
@@ -231,6 +234,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.consts = runner->script->const_list->data;
     runner->context.stack = pack_init(16);
     runner->context.result = ITEM_NULL;  // exec result
+    runner->context.cwd = get_current_dir();
     context = &runner->context;
     heap_init();
     frame_start();

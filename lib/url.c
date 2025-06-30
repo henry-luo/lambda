@@ -1,5 +1,41 @@
+#include <unistd.h>
 #include <lexbor/url/url.h>
 #include "../lib/strbuf.h"
+
+#ifdef _WIN32
+    #include <direct.h>
+    #define GETCWD _getcwd
+#else
+    #include <unistd.h>
+    #define GETCWD getcwd
+#endif
+
+lxb_url_t* get_current_dir() {
+    char cwd[PATH_MAX + 8];  // "file://" + max_path + '/'
+    cwd[0] = '\0';  // init to null for strcat to work
+    strcat(cwd, "file://");
+    if (!GETCWD(cwd + 7, sizeof(cwd) - 7)) {
+        perror("getcwd() error");  return NULL;
+    }
+    strcat(cwd, "/");
+    printf("Current working directory: %s\n", cwd);
+
+    lxb_url_parser_t parser;
+    lxb_status_t status = lxb_url_parser_init(&parser, NULL);
+    if (status != LXB_STATUS_OK) {
+        printf("Failed to init URL parser.\n");
+        return NULL;
+    }
+
+    lxb_url_t* url = lxb_url_parse(&parser, NULL, (const lxb_char_t *)cwd, strlen(cwd));
+    if (url == NULL) {
+        printf("Failed to parse URL.\n");
+        return NULL;
+    }
+
+    lxb_url_parser_destroy(&parser, false);    
+    return url; 
+}
 
 lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url) {
     lxb_url_parser_t parser;

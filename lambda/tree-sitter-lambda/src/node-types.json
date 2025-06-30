@@ -2098,6 +2098,10 @@
             "named": false
           },
           {
+            "type": "input",
+            "named": false
+          },
+          {
             "type": "int",
             "named": false
           },
@@ -2529,6 +2533,10 @@
   {
     "type": "inf",
     "named": true
+  },
+  {
+    "type": "input",
+    "named": false
   },
   {
     "type": "int",
