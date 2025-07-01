@@ -7,6 +7,7 @@ void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
 void parse_ini(Input* input, const char* ini_string);
 void parse_toml(Input* input, const char* toml_string);
+void parse_yaml(Input *input, const char* yaml_str);
 
 String* strbuf_to_string(StrBuf *sb) {
     String *string = (String*)sb->str;
@@ -49,21 +50,23 @@ Input* input_data(Context* ctx, String* url, String* type) {
         strcpy(str->chars, source);
         input->root = s2it(str);
     }
-    else if (strcmp(type->chars, "json") == 0) {
+    else {
         input = input_new(abs_url);
-        parse_json(input, source);
-    }
-    else if (strcmp(type->chars, "csv") == 0) {
-        input = input_new(abs_url);
-        parse_csv(input, source);
-    }
-    else if (strcmp(type->chars, "ini") == 0) {
-        input = input_new(abs_url);
-        parse_ini(input, source);
-    }
-    else if (strcmp(type->chars, "toml") == 0) {
-        input = input_new(abs_url);
-        parse_toml(input, source);
+        if (strcmp(type->chars, "json") == 0) {
+            parse_json(input, source);
+        }
+        else if (strcmp(type->chars, "csv") == 0) {
+            parse_csv(input, source);
+        }
+        else if (strcmp(type->chars, "ini") == 0) {
+            parse_ini(input, source);
+        }
+        else if (strcmp(type->chars, "toml") == 0) {
+            parse_toml(input, source);
+        }
+        else if (strcmp(type->chars, "yaml") == 0) {
+            parse_yaml(input, source);
+        }
     }
     free(source);
     return input;

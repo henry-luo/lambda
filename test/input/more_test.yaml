@@ -1,0 +1,489 @@
+# Comprehensive YAML Test File
+# This file tests all major YAML features and input cases
+
+---
+# Document 1: Basic Data Types
+basic_types:
+  # Strings
+  simple_string: "Hello World"
+  single_quoted_string: 'Single quotes'
+  unquoted_string: This is unquoted
+  multiline_string: |
+    This is a multiline string
+    that preserves line breaks
+    and whitespace.
+  folded_string: >
+    This is a folded string
+    that converts line breaks
+    to spaces.
+  
+  # Numbers
+  integer: 42
+  negative_integer: -17
+  float: 3.14159
+  scientific_notation: 1.23e-4
+  infinity: .inf
+  negative_infinity: -.inf
+  not_a_number: .nan
+  
+  # Booleans
+  boolean_true: true
+  boolean_false: false
+  boolean_yes: yes
+  boolean_no: no
+  boolean_on: on
+  boolean_off: off
+  
+  # Null values
+  null_value: null
+  null_tilde: ~
+  null_empty:
+  
+  # Binary data
+  binary_data: !!binary |
+    R0lGODlhDAAMAIQAAP//9/X17unp5WZmZgAAAOfn515eXvPz7Y6OjuDg4J+fn5
+    OTk6enp56enmlpaWNjY6Ojo4SEhP/++f/++f/++f/++f/++f/++f/++f/++f/+
+    +f/++f/++f/++f/++f/++SH+Dk1hZGUgd2l0aCBHSU1QACwAAAAADAAMAAAFLC
+    AgjoEwnuNAFOhpEMTRiggcz4BNJHrv/zCFcLiwMWYNG84BwwEeECcgggoBADs=
+
+# Document 2: Collections
+collections:
+  # Lists/Arrays
+  simple_list:
+    - item1
+    - item2
+    - item3
+  
+  nested_list:
+    - 
+      - nested1
+      - nested2
+    -
+      - nested3
+      - nested4
+  
+  inline_list: [one, two, three, four]
+  
+  mixed_type_list:
+    - string_item
+    - 42
+    - true
+    - null
+    - { key: value }
+  
+  # Maps/Dictionaries
+  simple_map:
+    key1: value1
+    key2: value2
+    key3: value3
+  
+  nested_map:
+    level1:
+      level2:
+        level3: deep_value
+        another_key: another_value
+      back_to_level2: value
+  
+  inline_map: { name: John, age: 30, active: true }
+  
+  # Complex nested structures
+  complex_structure:
+    users:
+      - name: Alice
+        age: 25
+        roles: [admin, user]
+        preferences:
+          theme: dark
+          notifications: true
+      - name: Bob
+        age: 30
+        roles: [user]
+        preferences:
+          theme: light
+          notifications: false
+    
+    settings:
+      database:
+        host: localhost
+        port: 5432
+        credentials:
+          username: admin
+          password: secret
+      
+      api:
+        endpoints:
+          - path: /users
+            methods: [GET, POST]
+          - path: /users/{id}
+            methods: [GET, PUT, DELETE]
+
+---
+# Document 3: Advanced YAML Features
+advanced_features:
+  # Anchors and Aliases
+  defaults: &defaults
+    timeout: 30
+    retries: 3
+    log_level: info
+  
+  service1:
+    <<: *defaults
+    name: web_service
+    port: 8080
+  
+  service2:
+    <<: *defaults
+    name: api_service
+    port: 3000
+    timeout: 60  # Override default
+  
+  # References
+  common_config: &common
+    version: "1.0"
+    author: "Test Author"
+  
+  app1:
+    <<: *common
+    name: "Application 1"
+  
+  app2:
+    <<: *common
+    name: "Application 2"
+  
+  # Explicit types
+  explicit_types:
+    string_type: !!str 123
+    int_type: !!int "456"
+    float_type: !!float "78.9"
+    bool_type: !!bool "yes"
+    null_type: !!null "null"
+  
+  # Timestamps
+  timestamps:
+    iso8601: 2023-12-25T10:30:00Z
+    date_only: 2023-12-25
+    canonical: 2023-12-25T10:30:00.000000Z
+    spaced: 2023-12-25 10:30:00
+
+---
+# Document 4: Edge Cases and Special Characters
+edge_cases:
+  # Special characters in keys and values
+  "key with spaces": "value with spaces"
+  "key:with:colons": "value:with:colons"
+  "key-with-dashes": "value-with-dashes"
+  "key_with_underscores": "value_with_underscores"
+  "key.with.dots": "value.with.dots"
+  "key/with/slashes": "value/with/slashes"
+  "key@with@symbols": "value@with@symbols"
+  
+  # Unicode
+  unicode_key: "Hello 世界 🌍"
+  emoji: "😀😃😄😁😆😅😂🤣😊😇"
+  
+  # Quotes and escapes
+  escaped_quotes: "He said \"Hello\" to me"
+  single_in_double: "Don't worry"
+  double_in_single: 'She said "Hi"'
+  escaped_backslash: "Path: C:\\Users\\Name"
+  escaped_newline: "Line 1\nLine 2"
+  escaped_tab: "Column1\tColumn2"
+  
+  # Long strings
+  very_long_string: >
+    This is a very long string that spans multiple lines and should be
+    folded into a single line with spaces replacing the line breaks.
+    It continues here and demonstrates how YAML handles long text content
+    that needs to be readable in the source but compact in memory.
+  
+  # Empty values
+  empty_string: ""
+  empty_list: []
+  empty_map: {}
+  
+  # Numeric edge cases
+  leading_zero: 007
+  octal_number: 0o755
+  hexadecimal: 0xFF
+  binary_number: 0b1010
+  large_number: 1234567890123456789
+  
+  # Boolean variations
+  boolean_variations:
+    - true
+    - True
+    - TRUE
+    - false
+    - False
+    - FALSE
+    - yes
+    - Yes
+    - YES
+    - no
+    - No
+    - NO
+    - on
+    - On
+    - ON
+    - off
+    - Off
+    - OFF
+
+---
+# Document 5: Real-world Configuration Examples
+real_world_examples:
+  # Database configuration
+  database:
+    development:
+      adapter: postgresql
+      host: localhost
+      port: 5432
+      database: myapp_dev
+      username: developer
+      password: dev_password
+      pool: 5
+      timeout: 5000
+      
+    production:
+      adapter: postgresql
+      host: db.example.com
+      port: 5432
+      database: myapp_prod
+      username: prod_user
+      password: prod_password
+      pool: 20
+      timeout: 10000
+      ssl: true
+  
+  # Application configuration
+  application:
+    name: "My Application"
+    version: "2.1.0"
+    environment: production
+    
+    features:
+      authentication: true
+      authorization: true
+      logging: true
+      caching: false
+      rate_limiting: true
+    
+    logging:
+      level: info
+      format: json
+      output: 
+        - console
+        - file
+      file_path: /var/log/myapp.log
+      rotation:
+        max_size: 100MB
+        max_files: 10
+        compress: true
+    
+    cache:
+      provider: redis
+      ttl: 3600
+      servers:
+        - host: cache1.example.com
+          port: 6379
+        - host: cache2.example.com
+          port: 6379
+    
+    api:
+      base_url: https://api.example.com
+      version: v1
+      timeout: 30
+      rate_limit:
+        requests_per_minute: 1000
+        burst: 100
+      
+      endpoints:
+        users:
+          list: GET /users
+          create: POST /users
+          get: GET /users/{id}
+          update: PUT /users/{id}
+          delete: DELETE /users/{id}
+
+  # CI/CD Pipeline configuration
+  pipeline:
+    stages:
+      - name: build
+        image: node:16
+        script:
+          - npm install
+          - npm run build
+        artifacts:
+          paths:
+            - dist/
+          expire_in: 1 week
+      
+      - name: test
+        image: node:16
+        script:
+          - npm run test:unit
+          - npm run test:integration
+        coverage: '/Coverage: \d+\.\d+%/'
+        
+      - name: deploy
+        image: alpine:latest
+        script:
+          - apk add --no-cache curl
+          - curl -X POST $DEPLOY_WEBHOOK
+        environment:
+          name: production
+          url: https://myapp.example.com
+        only:
+          - main
+          - production
+
+---
+# Document 6: Complex Data Structures
+complex_data:
+  # Matrix/Table data
+  matrix:
+    - [1, 2, 3]
+    - [4, 5, 6] 
+    - [7, 8, 9]
+  
+  # Tree structure
+  file_system:
+    name: root
+    type: directory
+    children:
+      - name: home
+        type: directory
+        children:
+          - name: user
+            type: directory
+            children:
+              - name: documents
+                type: directory
+                children:
+                  - name: file1.txt
+                    type: file
+                    size: 1024
+                  - name: file2.pdf
+                    type: file
+                    size: 2048
+              - name: downloads
+                type: directory
+                children: []
+      - name: etc
+        type: directory
+        children:
+          - name: config.yaml
+            type: file
+            size: 512
+  
+  # Graph data
+  social_network:
+    users:
+      alice:
+        id: 1
+        name: Alice Smith
+        friends: [bob, charlie]
+        posts:
+          - id: 101
+            content: "Hello world!"
+            timestamp: 2023-12-01T10:00:00Z
+            likes: 5
+      
+      bob:
+        id: 2
+        name: Bob Johnson
+        friends: [alice, diana]
+        posts:
+          - id: 102
+            content: "YAML is awesome"
+            timestamp: 2023-12-01T11:00:00Z
+            likes: 3
+      
+      charlie:
+        id: 3
+        name: Charlie Brown
+        friends: [alice]
+        posts: []
+      
+      diana:
+        id: 4
+        name: Diana Prince
+        friends: [bob]
+        posts:
+          - id: 103
+            content: "Working on a new project"
+            timestamp: 2023-12-01T12:00:00Z
+            likes: 8
+
+---
+# Document 7: Performance test data
+performance_test:
+  large_list: &large_list
+    - item_0001
+    - item_0002
+    - item_0003
+    - item_0004
+    - item_0005
+    - item_0006
+    - item_0007
+    - item_0008
+    - item_0009
+    - item_0010
+    - item_0011
+    - item_0012
+    - item_0013
+    - item_0014
+    - item_0015
+    - item_0016
+    - item_0017
+    - item_0018
+    - item_0019
+    - item_0020
+  
+  repeated_data:
+    set1: *large_list
+    set2: *large_list
+    set3: *large_list
+  
+  deep_nesting:
+    level1:
+      level2:
+        level3:
+          level4:
+            level5:
+              level6:
+                level7:
+                  level8:
+                    level9:
+                      level10:
+                        deep_value: "Found me!"
+
+---
+# Document 8: Multi-document test
+document_metadata:
+  document_number: 8
+  purpose: "Testing multi-document YAML parsing"
+  features_tested:
+    - "Document separators (---)"
+    - "Multiple independent documents"
+    - "Cross-document references"
+
+# Final metadata
+metadata:
+  created: 2024-01-01T00:00:00Z
+  author: "YAML Test Generator"
+  version: "1.0.0"
+  description: "Comprehensive YAML test file covering all major features"
+  tags:
+    - testing
+    - yaml
+    - parsing
+    - validation
+  test_cases: 50+
+  documents: 8
+  coverage:
+    basic_types: 100%
+    collections: 100%
+    advanced_features: 100%
+    edge_cases: 100%
+    real_world_examples: 100%

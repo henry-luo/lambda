@@ -10,6 +10,87 @@ static Item parse_value(Input *input, const char **toml, int *line_num);
 // External function from input-json.c
 extern ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry);
 
+// Common function to handle escape sequences in strings
+// is_multiline: true for multiline basic strings, false for regular strings
+static bool handle_escape_sequence(StrBuf* sb, const char **toml, bool is_multiline, int *line_num) {
+    if (**toml != '\\') return false;
+    
+    (*toml)++; // skip backslash
+    switch (**toml) {
+        case '"': strbuf_append_char(sb, '"'); break;
+        case '\\': strbuf_append_char(sb, '\\'); break;
+        case 'b': strbuf_append_char(sb, '\b'); break;
+        case 'f': strbuf_append_char(sb, '\f'); break;
+        case 'n': strbuf_append_char(sb, '\n'); break;
+        case 'r': strbuf_append_char(sb, '\r'); break;
+        case 't': strbuf_append_char(sb, '\t'); break;
+        case 'u': {
+            (*toml)++; // skip 'u'
+            char hex[5] = {0};
+            strncpy(hex, *toml, 4);
+            (*toml) += 4; // skip 4 hex digits
+            int codepoint = (int)strtol(hex, NULL, 16);
+            if (codepoint < 0x80) {
+                strbuf_append_char(sb, (char)codepoint);
+            } else if (codepoint < 0x800) {
+                strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+            } else {
+                strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+            }
+            (*toml)--; // Back up one since we'll increment at end
+        } break;
+        case 'U': {
+            (*toml)++; // skip 'U'
+            char hex[9] = {0};
+            strncpy(hex, *toml, 8);
+            (*toml) += 8; // skip 8 hex digits
+            long codepoint = strtol(hex, NULL, 16);
+            if (codepoint < 0x80) {
+                strbuf_append_char(sb, (char)codepoint);
+            } else if (codepoint < 0x800) {
+                strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+            } else if (codepoint < 0x10000) {
+                strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+            } else {
+                strbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
+                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
+                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+            }
+            (*toml)--; // Back up one since we'll increment at end
+        } break;
+        case ' ':
+        case '\t':
+        case '\n':
+        case '\r':
+            if (is_multiline) {
+                // Line ending backslash - trim whitespace (only in multiline strings)
+                while (**toml && (**toml == ' ' || **toml == '\t' || **toml == '\n' || **toml == '\r')) {
+                    if (**toml == '\n' && line_num) (*line_num)++;
+                    (*toml)++;
+                }
+                (*toml)--; // Back up one since we'll increment at end
+            } else {
+                // In regular strings, treat as literal backslash + character
+                strbuf_append_char(sb, '\\');
+                strbuf_append_char(sb, **toml);
+            }
+            break;
+        default: 
+            strbuf_append_char(sb, '\\');
+            strbuf_append_char(sb, **toml);
+            break;
+    }
+    (*toml)++; // move to next character
+    return true;
+}
+
 static void skip_whitespace(const char **toml) {
     while (**toml && (**toml == ' ' || **toml == '\t')) {
         (*toml)++;
@@ -68,41 +149,11 @@ static String* parse_quoted_key(Input *input, const char **toml) {
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
-            (*toml)++;
-            switch (**toml) {
-                case '"': strbuf_append_char(sb, '"'); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case 'b': strbuf_append_char(sb, '\b'); break;
-                case 'f': strbuf_append_char(sb, '\f'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
-                case 'u': {
-                    (*toml)++; // skip 'u'
-                    char hex[5] = {0};
-                    strncpy(hex, *toml, 4);
-                    (*toml) += 4; // skip 4 hex digits
-                    int codepoint = (int)strtol(hex, NULL, 16);
-                    if (codepoint < 0x80) {
-                        strbuf_append_char(sb, (char)codepoint);
-                    } else if (codepoint < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    }
-                } break;
-                default: 
-                    strbuf_append_char(sb, '\\');
-                    strbuf_append_char(sb, **toml);
-                    break;
-            }
+            handle_escape_sequence(sb, toml, false, NULL);
         } else {
             strbuf_append_char(sb, **toml);
+            (*toml)++;
         }
-        (*toml)++;
     }
 
     if (**toml == '"') {
@@ -134,63 +185,11 @@ static String* parse_basic_string(Input *input, const char **toml) {
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
-            (*toml)++;
-            switch (**toml) {
-                case '"': strbuf_append_char(sb, '"'); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case 'b': strbuf_append_char(sb, '\b'); break;
-                case 'f': strbuf_append_char(sb, '\f'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
-                case 'u': {
-                    (*toml)++; // skip 'u'
-                    char hex[5] = {0};
-                    strncpy(hex, *toml, 4);
-                    (*toml) += 4; // skip 4 hex digits
-                    int codepoint = (int)strtol(hex, NULL, 16);
-                    if (codepoint < 0x80) {
-                        strbuf_append_char(sb, (char)codepoint);
-                    } else if (codepoint < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    }
-                } break;
-                case 'U': {
-                    (*toml)++; // skip 'U'
-                    char hex[9] = {0};
-                    strncpy(hex, *toml, 8);
-                    (*toml) += 8; // skip 8 hex digits
-                    long codepoint = strtol(hex, NULL, 16);
-                    if (codepoint < 0x80) {
-                        strbuf_append_char(sb, (char)codepoint);
-                    } else if (codepoint < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else if (codepoint < 0x10000) {
-                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    }
-                } break;
-                default: 
-                    strbuf_append_char(sb, '\\');
-                    strbuf_append_char(sb, **toml);
-                    break;
-            }
+            handle_escape_sequence(sb, toml, false, NULL);
         } else {
             strbuf_append_char(sb, **toml);
+            (*toml)++;
         }
-        (*toml)++;
     }
 
     if (**toml == '"') {
@@ -237,55 +236,14 @@ static String* parse_multiline_basic_string(Input *input, const char **toml, int
         }
         
         if (**toml == '\\') {
-            (*toml)++;
-            switch (**toml) {
-                case '"': strbuf_append_char(sb, '"'); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case 'b': strbuf_append_char(sb, '\b'); break;
-                case 'f': strbuf_append_char(sb, '\f'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
-                case 'u': {
-                    (*toml)++; // skip 'u'
-                    char hex[5] = {0};
-                    strncpy(hex, *toml, 4);
-                    (*toml) += 4; // skip 4 hex digits
-                    int codepoint = (int)strtol(hex, NULL, 16);
-                    if (codepoint < 0x80) {
-                        strbuf_append_char(sb, (char)codepoint);
-                    } else if (codepoint < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
-                    }
-                } break;
-                case ' ':
-                case '\t':
-                case '\n':
-                case '\r':
-                    // Line ending backslash - trim whitespace
-                    while (**toml && (**toml == ' ' || **toml == '\t' || **toml == '\n' || **toml == '\r')) {
-                        if (**toml == '\n') (*line_num)++;
-                        (*toml)++;
-                    }
-                    (*toml)--; // Back up one since we'll increment at end of loop
-                    break;
-                default: 
-                    strbuf_append_char(sb, '\\');
-                    strbuf_append_char(sb, **toml);
-                    break;
-            }
+            handle_escape_sequence(sb, toml, true, line_num);
         } else {
             if (**toml == '\n') {
                 (*line_num)++;
             }
             strbuf_append_char(sb, **toml);
+            (*toml)++;
         }
-        (*toml)++;
     }
     return strbuf_to_string(sb);
 }

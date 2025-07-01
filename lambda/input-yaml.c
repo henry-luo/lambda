@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent);
 
@@ -170,10 +171,8 @@ static Array* parse_flow_array(Input *input, const char* str) {
 
 // Parse YAML content
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent) {
-    if (*current_line >= total_lines) {
-        return ITEM_NULL;
-    }
-    
+    if (*current_line >= total_lines) { return ITEM_NULL; }
+
     char* line = lines[*current_line];
     
     // Get indentation level
@@ -304,59 +303,137 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
     return parse_scalar_value(input, content);
 }
 
-// Main parsing function
-static Item parse_yaml(Input *input, const char* yaml_str) {
-    if (!yaml_str) return ITEM_NULL;
-    
+void parse_yaml(Input *input, const char* yaml_str) {
+    input->sb = strbuf_new_pooled(input->pool);
+
     // Split into lines
     char* yaml_copy = strdup(yaml_str);
-    char** lines = malloc(1000 * sizeof(char*));
-    int line_count = 0;
+    char** all_lines = malloc(1000 * sizeof(char*));
+    int total_line_count = 0;
     
     char* saveptr;
     char* line = strtok_r(yaml_copy, "\n", &saveptr);
-    while (line && line_count < 1000) {
-        // Skip document markers and empty lines
-        if (strlen(line) > 0 && strncmp(line, "---", 3) != 0) {
-            lines[line_count++] = strdup(line);
-        }
+    while (line && total_line_count < 1000) {
+        all_lines[total_line_count++] = strdup(line);
         line = strtok_r(NULL, "\n", &saveptr);
     }
     
     free(yaml_copy);
-    
-    if (line_count == 0) {
-        free(lines);
-        return ITEM_NULL;
-    }
-    
-    int current_line = 0;
-    Item result = parse_yaml_content(input, lines, &current_line, line_count, 0);
-    
-    // Cleanup
-    for (int i = 0; i < line_count; i++) {
-        free(lines[i]);
-    }
-    free(lines);
-    
-    return result;
-}
 
-Input* yaml_parse(const char* yaml_string) {
-    printf("yaml_parse: %s\n", yaml_string);
-    Input* input = malloc(sizeof(Input));
-    input->path = NULL; // path for YAML input
-    size_t grow_size = 1024;  // 1k
-    size_t tolerance_percent = 20;
-    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
-    if (err != MEM_POOL_ERR_OK) {
-        free(input);
-        return NULL;
+    if (total_line_count == 0) { 
+        free(all_lines);  
+        return; 
     }
-    input->type_list = arraylist_new(16);
-    input->root = ITEM_NULL;
-    input->sb = strbuf_new_pooled(input->pool);
     
-    input->root = parse_yaml(input, yaml_string);
-    return input;
+    // Find document boundaries
+    int* doc_starts = malloc(100 * sizeof(int));
+    int doc_count = 0;
+    bool has_doc_markers = false;
+    
+    // Check if there are any document markers
+    for (int i = 0; i < total_line_count; i++) {
+        if (strncmp(all_lines[i], "---", 3) == 0) {
+            has_doc_markers = true;
+            break;
+        }
+    }
+    
+    if (!has_doc_markers) {
+        // No document markers - treat as single document
+        doc_starts[doc_count++] = 0;
+    } else {
+        // Find all document starts
+        bool in_document = false;
+        for (int i = 0; i < total_line_count; i++) {
+            if (strncmp(all_lines[i], "---", 3) == 0) {
+                // Document marker found
+                if (i + 1 < total_line_count && doc_count < 100) {
+                    doc_starts[doc_count++] = i + 1; // Start after the marker
+                    in_document = true;
+                }
+            } else if (!in_document && doc_count == 0) {
+                // Content before first marker - treat as first document
+                doc_starts[doc_count++] = 0;
+                in_document = true;
+            }
+        }
+    }
+    
+    // Parse each document
+    Array* documents = NULL;
+    Item final_result = ITEM_NULL;
+    int parsed_doc_count = 0;
+    
+    for (int doc_idx = 0; doc_idx < doc_count; doc_idx++) {
+        int start_line = doc_starts[doc_idx];
+        int end_line = (doc_idx + 1 < doc_count) ? doc_starts[doc_idx + 1] - 1 : total_line_count;
+        
+        // Skip if start line is at or beyond end
+        if (start_line >= end_line) continue;
+        
+        // Create lines array for this document, excluding document markers and empty lines
+        char** doc_lines = malloc(1000 * sizeof(char*));
+        int doc_line_count = 0;
+        
+        for (int i = start_line; i < end_line; i++) {
+            // Skip document markers and empty lines
+            if (strlen(all_lines[i]) > 0 && strncmp(all_lines[i], "---", 3) != 0) {
+                doc_lines[doc_line_count++] = strdup(all_lines[i]);
+            }
+        }
+        
+        // Parse this document if it has content
+        if (doc_line_count > 0) {
+            int current_line = 0;
+            Item doc_result = parse_yaml_content(input, doc_lines, &current_line, doc_line_count, 0);
+            
+            if (parsed_doc_count == 0) {
+                // Store first document
+                final_result = doc_result;
+                parsed_doc_count++;
+            } else if (parsed_doc_count == 1) {
+                // Second document found - create array and add both documents
+                documents = array_pooled(input->pool);
+                if (!documents) {
+                    // cleanup and return
+                    for (int j = 0; j < doc_line_count; j++) { free(doc_lines[j]); }
+                    free(doc_lines);
+                    for (int j = 0; j < total_line_count; j++) { free(all_lines[j]); }
+                    free(all_lines);
+                    free(doc_starts);
+                    return;
+                }
+                
+                // Add first document to array
+                LambdaItem first_item = {.item = final_result};
+                array_append(documents, first_item, input->pool);
+                
+                // Add current document to array
+                LambdaItem current_item = {.item = doc_result};
+                array_append(documents, current_item, input->pool);
+                parsed_doc_count++;
+            } else {
+                // Third+ document - add to existing array
+                LambdaItem lambda_item = {.item = doc_result};
+                array_append(documents, lambda_item, input->pool);
+                parsed_doc_count++;
+            }
+        }
+        
+        // cleanup document lines
+        for (int i = 0; i < doc_line_count; i++) { free(doc_lines[i]); }
+        free(doc_lines);
+    }
+    
+    // Set the final result
+    if (documents) {
+        input->root = (Item)documents;
+    } else {
+        input->root = final_result;
+    }
+
+    // cleanup
+    for (int i = 0; i < total_line_count; i++) { free(all_lines[i]); }
+    free(all_lines);
+    free(doc_starts);
 }

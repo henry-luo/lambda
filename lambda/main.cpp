@@ -2,7 +2,6 @@
 #include "transpiler.h"
 extern "C" {
 Input* xml_parse(const char* xml_string);
-Input* yaml_parse(const char* yaml_string);
 Input* markdown_parse(const char* markdown_string);
 Input* html_parse(const char* html_string);
 }
@@ -17,15 +16,7 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
     printf("after print_item\n");
 }
 
-void test_input() {
-    // test yaml parsing
-    Input* yaml_input = yaml_parse("---\nname: John Doe\nage: 30\nactive: true\ncity: New York\naddress:\n  street: 123 Main St\n  zip: 10001\nhobbies:\n  - reading\n  - swimming\n  - coding\nscores:\n  - 85.5\n  - 92.0\n  - 78.3\nmetadata:\n  created: 2023-01-15\n  updated: null\n  tags: [important, personal]");
-    LambdaItem yaml_item; yaml_item.item = yaml_input->root;
-    printf("YAML parse result: %llu, type: %d\n", yaml_input->root, yaml_item.type_id);
-    print_item(yaml_input->sb, yaml_input->root);
-    String *yaml_result = (String*)yaml_input->sb->str;
-    printf("YAML parsed: %s\n", yaml_result->chars);
-    
+void test_input() {    
     // test xml parsing
     Input* xml_input = xml_parse("<?xml version=\"1.0\"?>\n<bookstore>\n  <book id=\"1\" category=\"fiction\">\n    <title>Great Gatsby</title>\n    <author>F. Scott Fitzgerald</author>\n    <price>12.99</price>\n  </book>\n  <book id=\"2\" category=\"science\">\n    <title>Brief History of Time</title>\n    <author>Stephen Hawking</author>\n    <price>15.99</price>\n  </book>\n</bookstore>");
     LambdaItem xml_item; xml_item.item = xml_input->root;

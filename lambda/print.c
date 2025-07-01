@@ -122,8 +122,8 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             print_named_items(strbuf, nest_map_type, nest_map->data);
         }
         else {
-            printf("print_named_item: name %.*s, type %d\n", 
-                (int)field->name->length, field->name->str, field->type ? field->type->type_id : 0);
+            // printf("print_named_item: name %.*s, type %d\n", 
+            //     (int)field->name->length, field->name->str, field->type ? field->type->type_id : 0);
             strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
@@ -139,15 +139,12 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 strbuf_append_format(strbuf, "%g", *(double*)data);
                 break;
             case LMD_TYPE_STRING:
-                printf("print string\n");
                 String *string = *(String**)data;
                 if (string && string->chars) {
-                    printf("print string: %p\n", string->chars);
                     strbuf_append_format(strbuf, "\"%s\"", string->chars);
                 } else {
                     strbuf_append_str(strbuf, "\"\"");
                 }
-                printf("printed string\n");
                 break;
             case LMD_TYPE_SYMBOL:
                 String *symbol = *(String**)data;
