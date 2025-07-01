@@ -1,0 +1,209 @@
+% Test LaTeX document for parser testing
+\documentclass[12pt,a4paper]{article}
+
+% Package imports
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+% Document metadata
+\title{LaTeX Parser Test Document}
+\author{Test Author}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This is a comprehensive test document for the LaTeX parser implementation. It includes various LaTeX constructs such as document structure, text formatting, mathematical expressions, lists, tables, and special characters.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+This document serves as a test case for the LaTeX parser. It demonstrates various LaTeX features and constructs that the parser should be able to handle correctly.
+
+\subsection{Basic Text Formatting}
+
+Here we test basic text formatting commands:
+\begin{itemize}
+    \item \textbf{Bold text} using textbf command
+    \item \textit{Italic text} using textit command
+    \item \texttt{Monospace text} using texttt command
+    \item \underline{Underlined text} using underline command
+    \item \emph{Emphasized text} using emph command
+\end{itemize}
+
+\subsection{Font Sizes}
+
+Different font sizes can be used:
+{\tiny This is tiny text.}
+{\scriptsize This is script size.}
+{\footnotesize This is footnote size.}
+{\small This is small text.}
+Normal size text.
+{\large This is large text.}
+{\Large This is Large text.}
+{\LARGE This is LARGE text.}
+{\huge This is huge text.}
+{\Huge This is Huge text.}
+
+\section{Mathematical Expressions}
+
+\subsection{Inline Mathematics}
+
+Here are some inline mathematical expressions: $x + y = z$, $\alpha + \beta = \gamma$, and $\int_0^1 f(x) dx$.
+
+The quadratic formula is: $x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$
+
+\subsection{Display Mathematics}
+
+Display mathematics can be written using double dollar signs:
+
+$$E = mc^2$$
+
+$$\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$$
+
+\subsection{Equation Environment}
+
+\begin{equation}
+\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
+\end{equation}
+
+\begin{align}
+x &= a + b \\
+y &= c + d \\
+z &= e + f
+\end{align}
+
+\section{Lists}
+
+\subsection{Unordered Lists}
+
+\begin{itemize}
+    \item First item
+    \item Second item
+    \begin{itemize}
+        \item Nested item 1
+        \item Nested item 2
+    \end{itemize}
+    \item Third item
+\end{itemize}
+
+\subsection{Ordered Lists}
+
+\begin{enumerate}
+    \item First numbered item
+    \item Second numbered item
+    \begin{enumerate}
+        \item Nested numbered item 1
+        \item Nested numbered item 2
+    \end{enumerate}
+    \item Third numbered item
+\end{enumerate}
+
+\subsection{Description Lists}
+
+\begin{description}
+    \item[Term 1] Definition of the first term
+    \item[Term 2] Definition of the second term
+    \item[Long Term Name] Definition of a term with a longer name
+\end{description}
+
+\section{Special Characters and Symbols}
+
+LaTeX has many special characters that need proper handling:
+
+\begin{itemize}
+    \item Escaped characters: \{ \} \$ \& \# \^ \_ \% \~
+    \item Mathematical symbols: $\alpha$, $\beta$, $\gamma$, $\delta$, $\pi$, $\sigma$, $\infty$
+    \item Operators: $\cdot$, $\times$, $\div$, $\pm$, $\mp$
+    \item Relations: $\leq$, $\geq$, $\neq$, $\approx$, $\equiv$
+    \item Arrows: $\leftarrow$, $\rightarrow$, $\leftrightarrow$, $\Leftarrow$, $\Rightarrow$
+\end{itemize}
+
+\section{Environments}
+
+\subsection{Quote Environment}
+
+\begin{quote}
+This is a quoted text block that demonstrates the quote environment. It is typically used for longer quotations that should be set apart from the main text.
+\end{quote}
+
+\subsection{Verbatim Environment}
+
+\begin{verbatim}
+This is verbatim text where all
+    special characters like \textbf{bold}
+    and $math$ are treated literally.
+\end{verbatim}
+
+\subsection{Center Environment}
+
+\begin{center}
+This text is centered using the center environment.
+\end{center}
+
+\section{Cross-References}
+
+We can reference sections like Section~\ref{sec:introduction} or equations like Equation~\ref{eq:quadratic}.
+
+\begin{equation}
+\label{eq:quadratic}
+ax^2 + bx + c = 0
+\end{equation}
+
+\section{Comments and Spacing}
+
+% This is a comment that should be ignored by the parser
+This line comes after a comment.
+
+LaTeX handles spacing automatically, but we can force spacing with commands like \quad and \qquad.
+
+Here is some text\quad with a quad space\qquad and a qquad space.
+
+\section{Complex Nested Structures}
+
+\begin{itemize}
+    \item Outer item with \textbf{bold text}
+    \item Item with math: $\sum_{i=1}^{n} x_i$
+    \item Item with nested environment:
+    \begin{quote}
+        This is a quote within a list item, demonstrating nested structures.
+    \end{quote}
+    \item Final outer item
+\end{itemize}
+
+\section{Document Commands}
+
+Some common document-level commands:
+\begin{itemize}
+    \item \LaTeX{} - The LaTeX logo
+    \item \TeX{} - The TeX logo  
+    \item \ldots{} - Ellipsis dots
+    \item Footnote\footnote{This is a footnote example}
+\end{itemize}
+
+\section{Conclusion}
+
+This document provides a comprehensive test case for LaTeX parsing, covering:
+\begin{enumerate}
+    \item Document structure (sections, subsections)
+    \item Text formatting (bold, italic, fonts)
+    \item Mathematical expressions (inline and display)
+    \item Lists (itemize, enumerate, description)
+    \item Special characters and symbols
+    \item Various environments
+    \item Comments and spacing
+    \item Cross-references
+    \item Nested structures
+\end{enumerate}
+
+The parser should be able to handle all these constructs and represent them appropriately in the parsed structure.
+
+\end{document}
