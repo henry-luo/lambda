@@ -55,6 +55,8 @@ TypeType LIT_TYPE_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal =
 TypeType LIT_TYPE_ANY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ANY};
 TypeType LIT_TYPE_ERROR = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ERROR};
 
+String EMPTY_STRING = {.chars = "lambda.nil", .len = sizeof("lambda.nil") - 1, .ref_cnt = 0};
+
 TypeInfo type_info[] = {
     [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer", .type = &TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},
     [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null", .type=&TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},

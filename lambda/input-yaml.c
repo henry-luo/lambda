@@ -238,8 +238,6 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
         TypeMap* map_type = map_init_cap(map, input->pool);
         if (!map_type) return ITEM_ERROR;
         
-        ShapeEntry* shape_entry = NULL;
-        
         while (*current_line < total_lines) {
             line = lines[*current_line];
             indent = 0;
@@ -291,7 +289,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             
             // Add to map using shared function
             LambdaItem lambda_value = (LambdaItem)value;
-            map_put(map, map_type, key, lambda_value, input->pool, &shape_entry);
+            map_put(map, map_type, key, lambda_value, input->pool);
         }
         
         // Add map type to type list

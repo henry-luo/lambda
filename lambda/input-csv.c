@@ -31,7 +31,7 @@ String* parse_csv_field(Input *input, const char **csv) {
         strbuf_full_reset(sb);
         return string;
     }
-    return NULL;
+    return &EMPTY_STRING;
 }
 
 // CSV parser
@@ -49,8 +49,8 @@ void parse_csv(Input* input, const char* csv_string) {
             // parse a field
             String *field = parse_csv_field(input, &csv);
             // append the string
-            LambdaItem item = {.type_id = field ? LMD_TYPE_STRING : LMD_TYPE_NULL, .pointer = (uint64_t)field};
-            array_append(fields, item, input->pool);
+            Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : (Item)NULL;
+            array_append(fields, (LambdaItem)item, input->pool);
             if (*csv == ',') csv++;
         }
         array_append(rows, (LambdaItem)(Item)fields, input->pool);

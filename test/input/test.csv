@@ -26,4 +26,4 @@ Test User,0,TestCity,0,false,Zero values,test@zero.com
 "Very Long Name That Exceeds Normal Length Expectations",99,VeryLongCityNameThatAlsoExceedsNormalLimits,999999,true,Testing long values,verylongemail@verylongdomain.com
 "Special,Chars""In,Name",50,"City""With""Quotes",75000,true,"Notes with
 multiple
-lines",special@example.com
+lines",special@csv.com

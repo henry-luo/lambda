@@ -1,8 +1,7 @@
 
 #include "transpiler.h"
 
-// Global counter to detect infinite loops
-static int print_call_count = 0;
+#define MAX_DEPTH 500
 
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
@@ -106,18 +105,16 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
 
 void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth) {
     // Prevent infinite recursion
-    if (depth > 100) {
-        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");
-        return;
-    }
-    
+    if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
+
     ShapeEntry *field = map_type->shape;
-    int item_count = 0;
-    const int max_items = 50; // Reasonable limit for HTML attributes/children
-    
-    for (int i = 0; i < map_type->length && item_count < max_items; i++) {
-        item_count++;
+    for (int i = 0; i < map_type->length; i++) {
         if (i) strbuf_append_char(strbuf, ',');
+        if (!field) {
+            printf("ERROR: missing map field for index %d\n", i);
+            strbuf_append_str(strbuf, "[null field shape]");
+            continue;
+        }
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
             Map *nest_map = *(Map**)data;
@@ -125,6 +122,8 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             print_named_items(strbuf, nest_map_type, nest_map->data);
         }
         else {
+            printf("print_named_item: name %.*s, type %d\n", 
+                (int)field->name->length, field->name->str, field->type ? field->type->type_id : 0);
             strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
@@ -140,12 +139,15 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 strbuf_append_format(strbuf, "%g", *(double*)data);
                 break;
             case LMD_TYPE_STRING:
+                printf("print string\n");
                 String *string = *(String**)data;
                 if (string && string->chars) {
+                    printf("print string: %p\n", string->chars);
                     strbuf_append_format(strbuf, "\"%s\"", string->chars);
                 } else {
                     strbuf_append_str(strbuf, "\"\"");
                 }
+                printf("printed string\n");
                 break;
             case LMD_TYPE_SYMBOL:
                 String *symbol = *(String**)data;
@@ -181,39 +183,21 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
         }
         field = field->next;
     }
-    
-    if (item_count >= max_items) {
-        strbuf_append_str(strbuf, "[TOO_MANY_ITEMS]");
-    }
 }
 
 void print_item_with_depth(StrBuf *strbuf, Item item, int depth);
 
 void print_item(StrBuf *strbuf, Item item) {
-    print_call_count = 0; // Reset counter for each top-level call
     print_item_with_depth(strbuf, item, 0);
 }
 
 void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
-    // Safety counter to prevent infinite loops
-    print_call_count++;
-    if (print_call_count > 1000) {
-        strbuf_append_str(strbuf, "[INFINITE_LOOP_DETECTED]");
-        return;
-    }
-    
-    // Prevent infinite recursion - reasonable depth limit
-    if (depth > 100) {
-        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");
-        return;
-    }
-    
-    if (!item) {
-        strbuf_append_str(strbuf, "null");
-        return;
-    }
+    // limit depth to prevent infinite recursion
+    if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
+    if (!item) { strbuf_append_str(strbuf, "null"); return; }
+
     LambdaItem ld_item = {.item = item};
-    
+    printf("print_item: type %d\n", !ld_item.type_id ? *((uint8_t*)item) : ld_item.type_id);  
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
         if (type_id == LMD_TYPE_NULL) {

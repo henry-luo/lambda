@@ -74,11 +74,8 @@ static Map* parse_attributes(Input *input, const char **xml) {
     // Initialize map using shared function
     TypeMap* map_type = map_init_cap(mp, input->pool);
     if (!map_type) return mp;
-    
-    ShapeEntry* shape_entry = NULL;
-    
+
     skip_whitespace(xml);
-    
     while (**xml && **xml != '>' && **xml != '/' && **xml != '?') {
         // parse attribute name
         String* attr_name = parse_tag_name(input, xml);
@@ -101,7 +98,7 @@ static Map* parse_attributes(Input *input, const char **xml) {
         
         // Add to map using shared function
         LambdaItem value = (LambdaItem)s2it(attr_value);
-        map_put(mp, map_type, attr_name, value, input->pool, &shape_entry);
+        map_put(mp, map_type, attr_name, value, input->pool);
         
         skip_whitespace(xml);
     }

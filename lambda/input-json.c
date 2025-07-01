@@ -58,14 +58,7 @@ static String* parse_string(Input *input, const char **json) {
     if (**json == '"') {
         (*json)++; // skip closing quote
     }
-
-    if (sb->str) {
-        String *string = (String*)sb->str;
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;
-    }
-    return NULL; // empty string
+    return strbuf_to_string(sb);
 }
 
 static Item parse_number(Input *input, const char **json) {
@@ -131,16 +124,16 @@ TypeMap* map_init_cap(Map* mp, VariableMemPool* pool) {
     return map_type;
 }
 
-void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, 
-    VariableMemPool* pool, ShapeEntry** shape_entry) {
+void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool) {
     TypeId type_id = value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
-    *shape_entry = alloc_shape_entry(pool, key, type_id, *shape_entry);
-    if (!map_type->shape) { map_type->shape = *shape_entry; }
+    ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, map_type->last);
+    if (!map_type->shape) { map_type->shape = shape_entry; }
+    map_type->last = shape_entry;
     map_type->length++;
 
     // ensure data capacity
     int bsize = type_info[type_id].byte_size;
-    int byte_offset = (*shape_entry)->byte_offset + bsize;
+    int byte_offset = shape_entry->byte_offset + bsize;
     if (byte_offset > mp->data_cap) { // resize map data
         int byte_cap = mp->data_cap * 2;
         void* new_data = pool_calloc(pool, byte_cap);
@@ -171,6 +164,8 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value,
         break;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = (String*)value.pointer;
+        printf("put map string: key %s, %p\n", key->chars, (void*)value.pointer);
+        ((String*)value.pointer)->ref_cnt++;
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:
         *(Map**)field_ptr = (Map*)value.raw_pointer;
@@ -194,7 +189,6 @@ static Map* parse_object(Input *input, const char **json) {
     TypeMap* map_type = map_init_cap(mp, input->pool);
     if (!mp->data) return mp;
 
-    ShapeEntry* shape_entry = NULL;
     while (**json) {
         String* key = parse_string(input, json);
         if (!key) return mp;
@@ -205,7 +199,7 @@ static Map* parse_object(Input *input, const char **json) {
         skip_whitespace(json);
 
         LambdaItem value = (LambdaItem)parse_value(input, json);
-        map_put(mp, map_type, key, value, input->pool, &shape_entry);
+        map_put(mp, map_type, key, value, input->pool);
 
         skip_whitespace(json);
         if (**json == '}') { (*json)++;  break; }
@@ -228,7 +222,8 @@ static Item parse_value(Input *input, const char **json) {
         case '[':
             return (Item)parse_array(input, json);
         case '"':
-            return s2it(parse_string(input, json));
+            String* str = parse_string(input, json);
+            return str ? (str == &EMPTY_STRING ? ITEM_NULL : s2it(str)): (Item)NULL;
         case 't':
             if (strncmp(*json, "true", 4) == 0) {
                 *json += 4;

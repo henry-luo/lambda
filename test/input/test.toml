@@ -1,0 +1,266 @@
+# This is a comprehensive test TOML file that covers all parser cases
+# Comments can appear anywhere
+
+# Root level key-value pairs (global section)
+title = "Test TOML Configuration"
+version = 1
+enabled = true
+disabled = false
+
+# String tests
+string_empty = ""
+string_basic = "Hello, World!"
+string_with_quotes = "He said \"Hello\" to me"
+string_with_backslash = "Path\\to\\file"
+string_with_escapes = "Line 1\nLine 2\tTabbed\rCarriage Return"
+string_with_unicode = "Unicode: \u03B1\u03B2\u03B3"  # Greek letters αβγ
+string_with_all_escapes = "Quote: \" Backslash: \\ Bell: \b Form feed: \f Newline: \n Carriage: \r Tab: \t"
+
+# More string variations
+string_with_newlines = "Line 1\nLine 2\nLine 3"
+string_with_tabs = "Column1\tColumn2\tColumn3"
+string_literal = 'C:\Users\nodejs\templates'
+string_literal_with_quotes = 'Tom "Dubs" Preston-Werner'
+
+# Multi-line basic string (if supported)
+multiline_basic = """
+This is a multi-line
+basic string that spans
+multiple lines.
+"""
+
+# Multi-line literal string (if supported)  
+multiline_literal = '''
+This is a multi-line
+literal string that
+preserves everything.
+'''
+
+# Number tests
+integer_positive = 123
+integer_negative = -456
+integer_zero = 0
+integer_with_sign = +789
+
+float_basic = 3.14159
+float_negative = -2.718
+float_zero = 0.0
+float_scientific = 1.23e4
+float_scientific_negative = -4.56E-7
+float_scientific_positive = +1.0e+10
+
+# Boolean tests
+bool_true = true
+bool_false = false
+
+# Array tests
+array_empty = []
+array_integers = [1, 2, 3, 4, 5]
+array_floats = [1.1, 2.2, 3.3]
+array_strings = ["apple", "banana", "cherry"]
+array_booleans = [true, false, true]
+array_mixed = [1, "two", 3.0, true]
+array_nested = [[1, 2], [3, 4], [5, 6]]
+
+# Multi-line array with comments
+array_multiline = [
+    "first",   # First item
+    "second",  # Second item
+    "third"    # Third item
+]
+
+# Inline table tests
+inline_table_empty = {}
+inline_table_simple = { x = 1, y = 2 }
+inline_table_mixed = { name = "John", age = 30, active = true }
+inline_table_nested = { point = { x = 1, y = 2 }, color = "red" }
+
+# Key variations
+bare_key = "bare key value"
+quoted_key = "quoted key value"
+key_with_dash = "dash key value"
+key_with_underscore = "underscore key value"
+key123 = "numeric key value"
+"quoted key with spaces" = "quoted key value"
+
+[database]
+# Database configuration section
+server = "192.168.1.1"
+ports = [8001, 8001, 8002]
+connection_max = 5000
+enabled = true
+ssl_enabled = false
+
+# Nested configuration
+[database.credentials]
+username = "admin"
+password = "secret123"
+timeout = 30.5
+
+[servers]
+# Server configurations
+
+# You can indent as you please. Tabs or spaces. TOML doesn't care.
+[servers.alpha]
+ip = "10.0.0.1"
+dc = "eqdc10"
+ports = [80, 443]
+ssl = true
+
+[servers.beta]
+ip = "10.0.0.2" 
+dc = "eqdc10"
+ports = [8080, 8443]
+ssl = false
+
+# Arrays of tables are not fully implemented in this parser
+# but we can test individual tables
+
+[networking]
+# Network configuration
+interface = "eth0"
+mtu = 1500
+dhcp = true
+dns_servers = ["8.8.8.8", "8.8.4.4", "1.1.1.1"]
+
+# More complex nested structures
+config = { 
+    debug = true, 
+    log_level = "info",
+    max_connections = 100,
+    timeouts = { connect = 5, read = 30, write = 30 }
+}
+
+[testing]
+# Testing various edge cases
+null_like_string = "null"
+number_like_string = "123"
+boolean_like_string = "true"
+
+# Scientific notation variations
+scientific_1 = 1e10
+scientific_2 = 1E10
+scientific_3 = 1e+10
+scientific_4 = 1E+10
+scientific_5 = 1e-10
+scientific_6 = 1E-10
+
+# Float variations
+float_with_leading_zero = 0.123
+float_ending_zero = 1.0
+
+# Integer variations with underscores (if supported)
+large_integer = 1_000_000
+hex_integer = 0x1A2B
+octal_integer = 0o755
+binary_integer = 0b1010
+
+# Special values and edge cases
+infinity_positive = inf
+infinity_negative = -inf
+not_a_number = nan
+not_a_number_negative = -nan
+
+# Very large numbers
+very_large_int = 9_223_372_036_854_775_807
+very_small_int = -9_223_372_036_854_775_808
+
+# Hexadecimal, octal, binary integers (if supported)
+hex_with_prefix = 0xDEADBEEF
+octal_with_prefix = 0o01234567
+binary_with_prefix = 0b11010110
+
+[unicode_tests]
+# Unicode string tests
+greek = "Ελληνικά"
+chinese = "中文"
+emoji = "🚀🌟💫"
+mixed_unicode = "Hello \u4E16\u754C World \u0021"  # Hello 世界 World !
+
+[special_characters]
+# Keys and values with special characters
+"key with spaces" = "value with spaces"
+"key-with-dashes" = "value-with-dashes"
+"key_with_underscores" = "value_with_underscores"
+"key.with.dots" = "value.with.dots"
+
+# Final section for comprehensive testing
+[comprehensive]
+all_types = {
+    string = "text",
+    integer = 42,
+    float = 3.14,
+    boolean = true,
+    array = [1, 2, 3],
+    nested = { inner = "value" }
+}
+
+# Date and time tests (if supported by parser)
+# Note: These may not be supported by the current parser
+date_only = 1979-05-27
+time_only = 07:32:00
+datetime_local = 1979-05-27T07:32:00
+datetime_offset = 1979-05-27T00:32:00-07:00
+datetime_utc = 1979-05-27T07:32:00Z
+
+# Comments at the end
+# End of test TOML file
+
+# Array of tables (if supported)
+# Note: This advanced feature may not be fully supported
+[[products]]
+name = "Hammer"
+sku = 738594937
+
+[[products]]
+name = "Nail"
+sku = 284758393
+color = "gray"
+
+# Dotted keys (if supported)
+name = "Orange"
+physical.color = "orange"
+physical.shape = "round"
+site."google.com" = true
+
+# Complex nested structures to stress test the parser
+[deeply_nested]
+level1 = { level2 = { level3 = { level4 = "deep value" } } }
+
+[arrays_of_different_types]
+# Arrays with homogeneous types
+integers_only = [1, 2, 3, 4, 5]
+strings_only = ["a", "b", "c", "d", "e"]
+floats_only = [1.1, 2.2, 3.3, 4.4, 5.5]
+booleans_only = [true, false, true, false]
+
+# Nested arrays
+matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+mixed_nested = [["a", "b"], [1, 2], [true, false]]
+
+# Arrays with inline tables
+config_array = [
+    { name = "config1", enabled = true, port = 8080 },
+    { name = "config2", enabled = false, port = 8081 }
+]
+
+# Key name edge cases and variations
+"" = "empty key"
+"character encoding" = "value with spaces in key"
+"ʎǝʞ" = "upside down key"
+'quoted-key' = 'single quoted key'
+bare-key = "hyphenated bare key"
+bare_key = "underscored bare key"
+1234 = "numeric key (if supported)"
+
+# More escape sequence tests
+control_chars = "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007"
+more_unicode = "\u00A9\u00AE\u2122"  # ©®™
+emoji_unicode = "\U0001F600\U0001F601\U0001F602"  # 😀😁😂
+
+# Edge case strings
+string_looks_like_number = "123.45"
+string_looks_like_bool = "true"
+string_looks_like_date = "1979-05-27"
+string_looks_like_array = "[1, 2, 3]"
+string_looks_like_table = "{ key = value }"

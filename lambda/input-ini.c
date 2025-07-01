@@ -57,10 +57,13 @@ static String* parse_key(Input *input, const char **ini) {
         (*ini)++;
     }
     
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    if (sb->str) {
+        String *string = (String*)sb->str;
+        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+        strbuf_full_reset(sb);
+        return string;
+    }
+    return NULL;
 }
 
 static String* parse_raw_value(Input *input, const char **ini) {
@@ -106,7 +109,7 @@ static String* parse_raw_value(Input *input, const char **ini) {
         strbuf_full_reset(sb);
         return string;
     }
-    return NULL;
+    return &EMPTY_STRING;
 }
 
 static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
@@ -216,7 +219,6 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
     TypeMap* map_type = map_init_cap(section_map, input->pool);
     if (!section_map->data) return section_map;
 
-    ShapeEntry* shape_entry = NULL;
     while (**ini) {
         skip_whitespace(ini);
         
@@ -234,16 +236,19 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
 
         // parse key-value pair
         String* key = parse_key(input, ini);
-        if (!key || key->len == 0) { skip_to_newline(ini);  continue; }
+        if (!key || key->len == 0) {
+            // todo: raise error for empty key
+            skip_to_newline(ini);  continue; 
+        }
 
         skip_whitespace(ini);
         if (**ini != '=') { skip_to_newline(ini);  continue; }
         (*ini)++; // skip '='
         
         String* value_str = parse_raw_value(input, ini);
-        LambdaItem value = (LambdaItem) parse_typed_value(input, value_str);
-        map_put(section_map, map_type, key, value, input->pool, &shape_entry);
-       
+        Item value = value_str ? ( value_str == &EMPTY_STRING ? ITEM_NULL : parse_typed_value(input, value_str)) : (Item)NULL;
+        map_put(section_map, map_type, key, (LambdaItem)value, input->pool);
+
         skip_to_newline(ini);
     }
     arraylist_append(input->type_list, map_type);
@@ -274,7 +279,7 @@ void parse_ini(Input* input, const char* ini_string) {
     String* current_section_name = NULL;
     
     // handle key-value pairs before any section (global section)
-    Map* global_section = NULL;  ShapeEntry* shape_entry = NULL;
+    Map* global_section = NULL;
     while (*current) {
         skip_whitespace(&current);
         
@@ -298,7 +303,7 @@ void parse_ini(Input* input, const char* ini_string) {
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
                 map_put(root_map, root_map_type, current_section_name, 
-                    (LambdaItem)(Item)section_map, input->pool, &shape_entry);
+                    (LambdaItem)(Item)section_map, input->pool);
             }
         } else {
             // key-value pair outside of any section (global)
@@ -316,7 +321,7 @@ void parse_ini(Input* input, const char* ini_string) {
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
                         map_put(root_map, root_map_type, global_name, 
-                            (LambdaItem)(Item)global_section, input->pool, &shape_entry);
+                            (LambdaItem)(Item)global_section, input->pool);
                     }
                 }
             } else {

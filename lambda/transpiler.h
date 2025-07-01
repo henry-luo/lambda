@@ -250,7 +250,8 @@ typedef struct {
     long length;  // no. of items in the map
     long byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
-    ShapeEntry* shape;  // shape of the map
+    ShapeEntry* shape;  // first shape entry of the map
+    ShapeEntry* last;  // last shape entry of the map
 } TypeMap;
 
 typedef struct {
@@ -514,6 +515,9 @@ typedef union LambdaItem {
     void* raw_pointer;
 } LambdaItem;
 
+extern String EMPTY_STRING;
+String* strbuf_to_string(StrBuf *sb);
+
 #include <mir.h>
 #include <mir-gen.h>
 #include <c2mir.h>
@@ -574,8 +578,7 @@ Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
 Map* map_pooled(VariableMemPool *pool);
 TypeMap* map_init_cap(Map* mp, VariableMemPool* pool);
-void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, 
-    VariableMemPool* pool, ShapeEntry** shape_entry);
+void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool);
 Element* elmt_pooled(VariableMemPool *pool);
 
 void* alloc_const(Transpiler* tp, size_t size);

@@ -1,0 +1,8 @@
+# Simple test TOML
+title = "Test"
+version = 1
+enabled = true
+
+[database]
+server = "localhost"
+port = 5432

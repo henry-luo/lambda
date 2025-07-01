@@ -65,6 +65,7 @@
       "object": {"inner": "value"}
     },
     "special_keys": {
+      "": "empty key",
       " ": "space key",
       "key with spaces": "spaces in key",
       "key-with-dashes": "dashes in key",
@@ -160,7 +161,7 @@
         "list1": [{"nested": true}, {"nested": false}],
         "list2": [1, [2, [3, [4]]]]
       },
-      "objects_in_arrays": [
+      "objects in arrays": [
         {"type": "A", "data": [1, 2, 3]},
         {"type": "B", "data": {"x": 10, "y": 20}}
       ]

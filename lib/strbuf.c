@@ -2,24 +2,13 @@
 
 #define INITIAL_CAPACITY 32
 
-// fat string for Lambda
-typedef struct String {
-    uint32_t len;  // string len:22 bits, up to 4MB;
-    char chars[];
-} String;
-
 StrBuf* _strbuf_new_cap(size_t size, VariableMemPool *pool) {
     StrBuf *sb;
     if (pool) {
         MemPoolError err = pool_variable_alloc(pool, sizeof(StrBuf), (void**)&sb);
         if (err != MEM_POOL_ERR_OK) { return NULL; }
         sb->pool = pool;
-        // allocate a fat string
-        err = pool_variable_alloc(pool, sizeof(uint32_t) + size, (void**)&sb->str);
-        if (err != MEM_POOL_ERR_OK) { pool_variable_free(pool, sb); return NULL; }
-        sb->length = sizeof(uint32_t);  // reserved for length
-        sb->str[sizeof(uint32_t)] = '\0';
-        sb->capacity = size + sizeof(uint32_t);
+        sb->length = sb->capacity = 0;  sb->str = NULL; 
     } else {
         sb = (StrBuf*) malloc(sizeof(StrBuf));
         if (!sb) return NULL;

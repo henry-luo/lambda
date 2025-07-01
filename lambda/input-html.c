@@ -380,8 +380,6 @@ static Map* parse_attributes(Input *input, const char **html) {
         return attributes;
     }
     
-    ShapeEntry* shape_entry = NULL;
-    
     skip_whitespace(html);
     
     int attr_count = 0;
@@ -434,7 +432,7 @@ static Map* parse_attributes(Input *input, const char **html) {
         }
         
         LambdaItem value = (LambdaItem)s2it(attr_value);
-        map_put(attributes, attr_type, attr_name, value, input->pool, &shape_entry);
+        map_put(attributes, attr_type, attr_name, value, input->pool);
         
         skip_whitespace(html);
     }
@@ -651,8 +649,6 @@ static Item parse_element(Input *input, const char **html) {
         return ITEM_ERROR;
     }
     
-    ShapeEntry* elem_shape_entry = NULL;
-    
     // Add tag name
     StrBuf* tag_key_sb = input->sb;
     strbuf_full_reset(tag_key_sb); // Ensure buffer is clean before use
@@ -663,7 +659,7 @@ static Item parse_element(Input *input, const char **html) {
     strbuf_full_reset(tag_key_sb);
     
     LambdaItem tag_value = (LambdaItem)s2it(tag_name);
-    map_put(element, elem_type, tag_key, tag_value, input->pool, &elem_shape_entry);
+    map_put(element, elem_type, tag_key, tag_value, input->pool);
     
     // Add element type information for HTML5 compliance
     StrBuf* type_key_sb = input->sb;
@@ -697,7 +693,7 @@ static Item parse_element(Input *input, const char **html) {
     strbuf_full_reset(type_value_sb);
     
     LambdaItem type_item = (LambdaItem)s2it(type_value);
-    map_put(element, elem_type, type_key, type_item, input->pool, &elem_shape_entry);
+    map_put(element, elem_type, type_key, type_item, input->pool);
     
     // Add attributes only if there are any
     if (attributes->type && ((TypeMap*)attributes->type)->length > 0) {
@@ -710,7 +706,7 @@ static Item parse_element(Input *input, const char **html) {
         strbuf_full_reset(attr_key_sb);
         
         LambdaItem attr_value = {.raw_pointer = attributes};
-        map_put(element, elem_type, attr_key, attr_value, input->pool, &elem_shape_entry);
+        map_put(element, elem_type, attr_key, attr_value, input->pool);
     }
     
     // Handle content for non-void elements
@@ -913,7 +909,7 @@ static Item parse_element(Input *input, const char **html) {
                 strbuf_full_reset(children_key_sb);
                 
                 LambdaItem children_value = {.raw_pointer = children};
-                map_put(element, elem_type, children_key, children_value, input->pool, &elem_shape_entry);
+                map_put(element, elem_type, children_key, children_value, input->pool);
             }
         }
     }

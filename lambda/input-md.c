@@ -266,9 +266,8 @@ static void add_attribute_to_element(Input *input, Element* element, const char*
         TypeMap* map_type = map_init_cap(&temp_map, input->pool);
         if (!map_type) return;
         
-        ShapeEntry* shape_entry = NULL;
         LambdaItem lambda_value = (LambdaItem)s2it(value);
-        map_put(&temp_map, map_type, key, lambda_value, input->pool, &shape_entry);
+        map_put(&temp_map, map_type, key, lambda_value, input->pool);
         
         // Transfer the map data to the element
         element_type->shape = map_type->shape;
@@ -293,7 +292,7 @@ static void add_attribute_to_element(Input *input, Element* element, const char*
         }
         
         LambdaItem lambda_value = (LambdaItem)s2it(value);
-        map_put(&temp_map, map_type, key, lambda_value, input->pool, &shape_entry);
+        map_put(&temp_map, map_type, key, lambda_value, input->pool);
         
         // Update element data pointers
         element->data = temp_map.data;

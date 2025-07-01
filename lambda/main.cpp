@@ -4,7 +4,6 @@ extern "C" {
 Input* xml_parse(const char* xml_string);
 Input* yaml_parse(const char* yaml_string);
 Input* markdown_parse(const char* markdown_string);
-Input* toml_parse(const char* toml_string);
 Input* html_parse(const char* html_string);
 }
 
@@ -15,6 +14,7 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
     strbuf_append_format(strbuf, "\nScript '%s' result: ", script);
     print_item(strbuf, ret);
     strbuf_append_str(strbuf, "\n");
+    printf("after print_item\n");
 }
 
 void test_input() {
@@ -41,14 +41,6 @@ void test_input() {
     print_item(markdown_input->sb, markdown_input->root);
     String *markdown_result = (String*)markdown_input->sb->str;
     printf("Markdown parsed: %s\n", markdown_result->chars);
-    
-    // test toml parsing
-    Input* toml_input = toml_parse("# Configuration file\n[server]\nhost = \"localhost\"\nport = 8080\ndebug = true\ntimeout = 30.5\n\n[database]\nname = \"mydb\"\nconnections = 100\nssl = false\nversion = \"1.2.3\"\nfeatures = [\"backup\", \"ssl\", \"monitoring\"]\n\n[logging]\nlevel = \"info\"\nfile = \"/var/log/app.log\"\nrotate = true\nmax_size = 10.5");
-    LambdaItem toml_item; toml_item.item = toml_input->root;
-    printf("TOML parse result: %llu, type: %d\n", toml_input->root, toml_item.type_id);
-    print_item(toml_input->sb, toml_input->root);
-    String *toml_result = (String*)toml_input->sb->str;
-    printf("TOML parsed: %s\n", toml_result->chars);
 
     // test html parsing with minimal example first
     printf("Testing minimal HTML...\n");
