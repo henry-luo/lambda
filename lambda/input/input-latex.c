@@ -63,6 +63,12 @@ static const char* math_environments[] = {
     "cases", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", NULL
 };
 
+// Raw text environments (content should be preserved as-is)
+static const char* raw_text_environments[] = {
+    "verbatim", "lstlisting", "minted", "alltt", "Verbatim", "BVerbatim", 
+    "LVerbatim", "SaveVerbatim", "VerbatimOut", "fancyvrb", NULL
+};
+
 static bool is_latex_command(const char* cmd_name) {
     for (int i = 0; latex_commands[i]; i++) {
         if (strcmp(cmd_name, latex_commands[i]) == 0) {
@@ -84,6 +90,15 @@ static bool is_latex_environment(const char* env_name) {
 static bool is_math_environment(const char* env_name) {
     for (int i = 0; math_environments[i]; i++) {
         if (strcmp(env_name, math_environments[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_raw_text_environment(const char* env_name) {
+    for (int i = 0; raw_text_environments[i]; i++) {
+        if (strcmp(env_name, raw_text_environments[i]) == 0) {
             return true;
         }
     }
@@ -283,105 +298,151 @@ static Item parse_latex_command(Input *input, const char **latex) {
             // Don't add arguments to the element for environments
             // The environment name becomes the tag, not a child
             
+            // Check if this is a math or raw text environment that should preserve content as-is
+            bool is_math_env = is_math_environment(env_name->chars);
+            bool is_raw_text_env = is_raw_text_environment(env_name->chars);
+            
             // Parse content until \end{environment_name}
             skip_whitespace(latex);
             
-            while (**latex) {
-                // Check for \end{environment_name}
-                if (strncmp(*latex, "\\end{", 5) == 0) {
-                    const char* end_check = *latex + 5;
-                    if (strncmp(end_check, env_name->chars, env_name->len) == 0 &&
-                        end_check[env_name->len] == '}') {
-                        // Found matching \end, skip it
-                        *latex = end_check + env_name->len + 1;
-                        break;
+            if (is_math_env || is_raw_text_env) {
+                // For math and raw text environments, treat content as raw text
+                StrBuf* content_sb = input->sb;
+                strbuf_full_reset(content_sb);
+                
+                int content_chars = 0;
+                const int max_content_chars = 10000;
+                
+                while (**latex && content_chars < max_content_chars) {
+                    // Check if we found the closing tag
+                    if (strncmp(*latex, "\\end{", 5) == 0) {
+                        const char* end_check = *latex + 5;
+                        if (strncmp(end_check, env_name->chars, env_name->len) == 0 &&
+                            end_check[env_name->len] == '}') {
+                            // Found matching \end, don't include it in content
+                            *latex = end_check + env_name->len + 1;
+                            break;
+                        }
                     }
+                    
+                    strbuf_append_char(content_sb, **latex);
+                    (*latex)++;
+                    content_chars++;
                 }
                 
-                // Parse content within the environment
-                if (**latex == '\\') {
-                    Item child = parse_latex_command(input, latex);
-                    if (child != ITEM_ERROR && child != ITEM_NULL) {
-                        list_push((List*)element, child);
+                // Create the content string
+                if (content_sb->length > sizeof(uint32_t)) {
+                    String *content_string = (String*)content_sb->str;
+                    content_string->len = content_sb->length - sizeof(uint32_t);
+                    content_string->ref_cnt = 0;
+                    strbuf_full_reset(content_sb);
+                    
+                    if (content_string->len > 0) {
+                        LambdaItem content_item = (LambdaItem)s2it(content_string);
+                        list_push((List*)element, content_item.item);
                     }
-                } else if (**latex == '%') {
-                    skip_comment(latex);
                 } else {
-                    // Parse text content with proper escape handling
-                    StrBuf* text_sb = input->sb;
-                    strbuf_full_reset(text_sb);
-                    
-                    int text_chars = 0;
-                    const int max_text_chars = 5000;
-                    
-                    while (**latex && text_chars < max_text_chars) {
-                        // Check for end of environment pattern
-                        if (strncmp(*latex, "\\end{", 5) == 0) {
-                            break;
-                        }
-                        
-                        // Check for other LaTeX commands
-                        if (**latex == '\\') {
-                            // Peek ahead to see if this is a command or just an escape
-                            const char* next_char = *latex + 1;
-                            if (*next_char && strchr("{}$&#^_%~", *next_char)) {
-                                // This is an escaped character, handle it
-                                (*latex)++; // Skip backslash
-                                switch (**latex) {
-                                    case '{': strbuf_append_char(text_sb, '{'); break;
-                                    case '}': strbuf_append_char(text_sb, '}'); break;
-                                    case '$': strbuf_append_char(text_sb, '$'); break;
-                                    case '&': strbuf_append_char(text_sb, '&'); break;
-                                    case '#': strbuf_append_char(text_sb, '#'); break;
-                                    case '^': strbuf_append_char(text_sb, '^'); break;
-                                    case '_': strbuf_append_char(text_sb, '_'); break;
-                                    case '%': strbuf_append_char(text_sb, '%'); break;
-                                    case '~': strbuf_append_char(text_sb, '~'); break;
-                                    default: 
-                                        strbuf_append_char(text_sb, '\\');
-                                        strbuf_append_char(text_sb, **latex);
-                                        break;
-                                }
-                                (*latex)++;
-                            } else {
-                                // This is a LaTeX command, break to let the main parser handle it
-                                break;
-                            }
-                        } else if (**latex == '%') {
-                            // This is a comment, break to let the comment handler deal with it
-                            break;
-                        } else {
-                            strbuf_append_char(text_sb, **latex);
-                            (*latex)++;
-                        }
-                        text_chars++;
-                    }
-                    
-                    if (text_sb->length > sizeof(uint32_t)) {
-                        String *text_string = (String*)text_sb->str;
-                        text_string->len = text_sb->length - sizeof(uint32_t);
-                        text_string->ref_cnt = 0;
-                        strbuf_full_reset(text_sb);
-                        
-                        // Only add non-whitespace text
-                        bool has_non_whitespace = false;
-                        for (int i = 0; i < text_string->len; i++) {
-                            if (!isspace(text_string->chars[i])) {
-                                has_non_whitespace = true;
-                                break;
-                            }
-                        }
-                        
-                        if (has_non_whitespace) {
-                            LambdaItem text_item = (LambdaItem)s2it(text_string);
-                            list_push((List*)element, text_item.item);
-                        }
-                    } else {
-                        strbuf_full_reset(text_sb);
-                    }
+                    strbuf_full_reset(content_sb);
                 }
-                
-                skip_whitespace(latex);
+            } else {
+                // For non-math/non-raw-text environments, parse content normally
+                while (**latex) {
+                    // Check for \end{environment_name}
+                    if (strncmp(*latex, "\\end{", 5) == 0) {
+                        const char* end_check = *latex + 5;
+                        if (strncmp(end_check, env_name->chars, env_name->len) == 0 &&
+                            end_check[env_name->len] == '}') {
+                            // Found matching \end, skip it
+                            *latex = end_check + env_name->len + 1;
+                            break;
+                        }
+                    }
+                    
+                    // Parse content within the environment
+                    if (**latex == '\\') {
+                        Item child = parse_latex_command(input, latex);
+                        if (child != ITEM_ERROR && child != ITEM_NULL) {
+                            list_push((List*)element, child);
+                        }
+                    } else if (**latex == '%') {
+                        skip_comment(latex);
+                    } else {
+                        // Parse text content with proper escape handling
+                        StrBuf* text_sb = input->sb;
+                        strbuf_full_reset(text_sb);
+                        
+                        int text_chars = 0;
+                        const int max_text_chars = 5000;
+                        
+                        while (**latex && text_chars < max_text_chars) {
+                            // Check for end of environment pattern
+                            if (strncmp(*latex, "\\end{", 5) == 0) {
+                                break;
+                            }
+                            
+                            // Check for other LaTeX commands
+                            if (**latex == '\\') {
+                                // Peek ahead to see if this is a command or just an escape
+                                const char* next_char = *latex + 1;
+                                if (*next_char && strchr("{}$&#^_%~", *next_char)) {
+                                    // This is an escaped character, handle it
+                                    (*latex)++; // Skip backslash
+                                    switch (**latex) {
+                                        case '{': strbuf_append_char(text_sb, '{'); break;
+                                        case '}': strbuf_append_char(text_sb, '}'); break;
+                                        case '$': strbuf_append_char(text_sb, '$'); break;
+                                        case '&': strbuf_append_char(text_sb, '&'); break;
+                                        case '#': strbuf_append_char(text_sb, '#'); break;
+                                        case '^': strbuf_append_char(text_sb, '^'); break;
+                                        case '_': strbuf_append_char(text_sb, '_'); break;
+                                        case '%': strbuf_append_char(text_sb, '%'); break;
+                                        case '~': strbuf_append_char(text_sb, '~'); break;
+                                        default: 
+                                            strbuf_append_char(text_sb, '\\');
+                                            strbuf_append_char(text_sb, **latex);
+                                            break;
+                                    }
+                                    (*latex)++;
+                                } else {
+                                    // This is a LaTeX command, break to let the main parser handle it
+                                    break;
+                                }
+                            } else if (**latex == '%') {
+                                // This is a comment, break to let the comment handler deal with it
+                                break;
+                            } else {
+                                strbuf_append_char(text_sb, **latex);
+                                (*latex)++;
+                            }
+                            text_chars++;
+                        }
+                        
+                        if (text_sb->length > sizeof(uint32_t)) {
+                            String *text_string = (String*)text_sb->str;
+                            text_string->len = text_sb->length - sizeof(uint32_t);
+                            text_string->ref_cnt = 0;
+                            strbuf_full_reset(text_sb);
+                            
+                            // Only add non-whitespace text
+                            bool has_non_whitespace = false;
+                            for (int i = 0; i < text_string->len; i++) {
+                                if (!isspace(text_string->chars[i])) {
+                                    has_non_whitespace = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (has_non_whitespace) {
+                                LambdaItem text_item = (LambdaItem)s2it(text_string);
+                                list_push((List*)element, text_item.item);
+                            }
+                        } else {
+                            strbuf_full_reset(text_sb);
+                        }
+                    }
+                    
+                    skip_whitespace(latex);
+                }
             }
         }
     } else {
