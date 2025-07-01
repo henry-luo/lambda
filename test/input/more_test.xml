@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE library [
+  <!ENTITY copyright "Copyright 2025 Library Corp.">
+  <!ENTITY nbsp "&#160;">
+]>
+<!-- Comprehensive XML test file covering various XML features and edge cases -->
+<library xmlns="http://library.example.com" 
+         xmlns:meta="http://metadata.example.com"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://library.example.com library.xsd">
+  
+  <!-- Books section with various attribute types and content -->
+  <books>
+    <!-- Fiction books with different text content types -->
+    <book id="001" category="fiction" available="true" rating="4.5">
+      <title lang="en">The Great Gatsby</title>
+      <author>
+        <first-name>F. Scott</first-name>
+        <last-name>Fitzgerald</last-name>
+        <birth-year>1896</birth-year>
+      </author>
+      <price currency="USD">12.99</price>
+      <description><![CDATA[A classic American novel set in the Jazz Age. Contains <em>HTML-like</em> content & special characters: @#$%^&*()]]></description>
+      <tags>
+        <tag>classic</tag>
+        <tag>american-literature</tag>
+        <tag>jazz-age</tag>
+      </tags>
+      <meta:metadata>
+        <meta:isbn>978-0-7432-7356-5</meta:isbn>
+        <meta:pages>180</meta:pages>
+      </meta:metadata>
+    </book>
+
+    <!-- Science book with mixed content -->
+    <book id="002" category="science" available="false">
+      <title>A Brief History of Time</title>
+      <author>Stephen Hawking</author>
+      <price currency="EUR">18.50</price>
+      <description>
+        Explores cosmology and theoretical physics.
+        Contains equations like E=mc² and discusses black holes.
+      </description>
+      <publication-date>1988-04-01</publication-date>
+      <chapters count="11">
+        <chapter number="1">Our Picture of the Universe</chapter>
+        <chapter number="2">Space and Time</chapter>
+        <chapter number="3">The Expanding Universe</chapter>
+      </chapters>
+    </book>
+
+    <!-- Book with empty elements and self-closing tags -->
+    <book id="003" category="mystery" out-of-print="true">
+      <title></title>
+      <author/>
+      <?metadata-missing reason="incomplete-record"?>
+      <price currency="USD">0.00</price>
+      <description>Unknown mystery book - details missing</description>
+      <reviews/>
+      <availability status="discontinued"/>
+      <?discontinuation-date value="unknown"?>
+    </book>
+
+    <!-- Book with special characters and Unicode -->
+    <book id="004" category="foreign-language">
+      <title>Café de Flore: Résumé</title>
+      <author>François Müller</author>
+      <price currency="JPY">¥2,500</price>
+      <description>
+        A French novel with accented characters: àáâãäåæçèéêë
+        Greek letters: αβγδε
+        Mathematical symbols: ∑∏∫√∞
+        Quotes: "Hello" 'World' „German quotes"
+      </description>
+      <unicode-text>中文 العربية русский עברית</unicode-text>
+    </book>
+  </books>
+
+  <!-- Magazines section -->
+  <magazines>
+    <magazine id="mag001" frequency="monthly">
+      <name>Science Today</name>
+      <publisher>Tech Publications</publisher>
+      <subscription-price>
+        <yearly>120.00</yearly>
+        <monthly>12.00</monthly>
+      </subscription-price>
+      <issues>
+        <issue number="1" month="January">
+          <articles>
+            <article>
+              <title>AI in 2025</title>
+              <author>Dr. Jane Smith</author>
+              <pages start="1" end="15"/>
+            </article>
+          </articles>
+        </issue>
+      </issues>
+    </magazine>
+  </magazines>
+
+  <!-- Digital resources section -->
+  <digital-resources>
+    <ebook format="PDF" size="15.2MB">
+      <title>Programming Fundamentals</title>
+      <download-url>https://example.com/download?id=123&amp;format=pdf</download-url>
+      <access-restrictions>
+        <country denied="true">CN</country>
+        <age-limit>13</age-limit>
+      </access-restrictions>
+    </ebook>
+    
+    <audiobook format="MP3" duration="PT8H30M">
+      <title>The Hitchhiker's Guide to the Galaxy</title>
+      <narrator>Douglas Adams</narrator>
+      <file-info>
+        <bitrate>128kbps</bitrate>
+        <size unit="GB">1.2</size>
+      </file-info>
+    </audiobook>
+  </digital-resources>
+
+  <!-- Complex nested structure -->
+  <library-systems>
+    <catalog-system>
+      <database type="PostgreSQL" version="13.2">
+        <connection-string>postgresql://localhost:5432/library</connection-string>
+        <tables>
+          <table name="books" records="10000"/>
+          <table name="users" records="5000"/>
+          <table name="loans" records="25000"/>
+        </tables>
+      </database>
+    </catalog-system>
+  </library-systems>
+
+  <!-- Processing instructions -->
+  <?xml-stylesheet type="text/xsl" href="library.xsl"?>
+  <?library-processor version="2.1" mode="production"?>
+  <?php echo "Hello World"; ?>
+  <?custom-directive action="validate" strict="true"?>
+  <?sort-order field="title" direction="ascending"?>
+  <?cache-control max-age="3600" no-store="false"?>
+  <?xml-model href="library-model.xml"?>
+  <?target-application name="Library Management System" version="1.0"?>
+
+  <!-- Mixed content with text and elements -->
+  <news-feed>
+    <item>
+      Breaking: New library branch opening in downtown. 
+      <emphasis>Grand opening</emphasis> scheduled for 
+      <date>July 15, 2025</date>. 
+      More details at <link>www.library.com/news</link>.
+    </item>
+  </news-feed>
+
+  <!-- Comments in various locations -->
+  <staff>
+    <!-- Head librarian -->
+    <librarian id="lib001" role="head">
+      <name>Alice Johnson</name>
+      <!-- Contact information -->
+      <contact>
+        <email>alice@library.com</email>
+        <phone type="work">555-0123</phone>
+        <!-- Emergency contact -->
+        <phone type="mobile">555-0124</phone>
+      </contact>
+    </librarian>
+  </staff>
+
+  <!-- Edge cases and special scenarios -->
+  <edge-cases>
+    <!-- Empty element with attributes -->
+    <empty-with-attrs id="empty001" type="placeholder"/>
+    
+    <!-- Element with only whitespace -->
+    <whitespace-only>   
+    </whitespace-only>
+    
+    <!-- Deeply nested structure -->
+    <level1>
+      <level2>
+        <level3>
+          <level4>
+            <level5>
+              <deep-content>Maximum nesting test</deep-content>
+            </level5>
+          </level4>
+        </level3>
+      </level2>
+    </level1>
+    
+    <!-- Multiple attributes with various quote styles -->
+    <multi-attrs 
+      attr1="double-quotes" 
+      attr2='single-quotes'
+      attr3="mixed &quot;quotes&quot; inside"
+      numeric-attr="123"
+      boolean-attr="true"
+      url-attr="https://example.com?param1=value1&amp;param2=value2"/>
+      
+    <!-- Large text content -->
+    <large-text>
+      Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+      
+      Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.
+    </large-text>
+  </edge-cases>
+
+  <!-- Entities and character references -->
+  <copyright-info>&copyright;</copyright-info>
+  <special-chars>
+    Less than: &lt;
+    Greater than: &gt;
+    Ampersand: &amp;
+    Quote: &quot;
+    Apostrophe: &apos;
+    Non-breaking space: &nbsp;
+    Copyright: &#169;
+    Trademark: &#8482;
+    Em dash: &#8212;
+  </special-chars>
+
+  <!-- Final statistics -->
+  <?data-source connection="database" table="statistics"?>
+  <statistics generated="2025-07-01T12:00:00Z">
+    <total-books>4</total-books>
+    <total-magazines>1</total-magazines>
+    <total-digital-resources>2</total-digital-resources>
+    <file-size unit="bytes"><!-- Will be calculated by processor --></file-size>
+    <?calculation-engine type="real-time" precision="high"?>
+  </statistics>
+  
+  <?end-document timestamp="2025-07-01T12:00:00Z"?>
+
+</library>

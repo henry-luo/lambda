@@ -320,9 +320,19 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             strbuf_append_char(strbuf, '}');
         }
         else if (type_id == LMD_TYPE_ELEMENT) {
-            // Note: HTML elements from input-html.c are handled as Maps, not Elements
-            // This case is for other types of elements in the system
-            strbuf_append_str(strbuf, "[ELEMENT_TYPE_NOT_IMPLEMENTED]");
+            Element *element = (Element*)item;
+            TypeElmt *elmt_type = (TypeElmt*)element->type;
+            printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
+                elmt_type->length, elmt_type->content_length, element->length);
+            strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
+            print_named_items(strbuf, (TypeMap*)elmt_type, element->data);
+            // print content
+            if (elmt_type->length) { strbuf_append_char(strbuf, ';'); }
+            for (long i = 0; i < element->length; i++) {
+                if (i) strbuf_append_char(strbuf, ';');
+                print_item(strbuf, element->items[i]);
+            }            
+            strbuf_append_char(strbuf, '>');
         }
         else if (type_id == LMD_TYPE_FUNC) {
             strbuf_append_str(strbuf, "function");

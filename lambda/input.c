@@ -8,6 +8,7 @@ void parse_csv(Input* input, const char* csv_string);
 void parse_ini(Input* input, const char* ini_string);
 void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
+void parse_xml(Input* input, const char* xml_string);
 
 String* strbuf_to_string(StrBuf *sb) {
     String *string = (String*)sb->str;
@@ -17,6 +18,82 @@ String* strbuf_to_string(StrBuf *sb) {
         return string;        
     }
     return &EMPTY_STRING;
+}
+
+ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
+    ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+    StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
+    nv->str = key->chars;  nv->length = key->len;
+    shape_entry->name = nv;
+    shape_entry->type = type_info[type_id].type;
+    if (prev_entry) {
+        prev_entry->next = shape_entry;
+        shape_entry->byte_offset = prev_entry->byte_offset + type_info[prev_entry->type->type_id].byte_size;
+    }
+    else { shape_entry->byte_offset = 0; }
+    return shape_entry;
+}
+
+TypeMap* map_init_cap(Map* mp, VariableMemPool* pool) {
+    // alloc map type and data chunk
+    TypeMap *map_type = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    if (!map_type) { return NULL; }
+    mp->type = map_type;
+    int byte_cap = 64;
+    mp->data = pool_calloc(pool, byte_cap);  mp->data_cap = byte_cap;
+    if (!mp->data) return NULL;
+    return map_type;
+}
+
+void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool) {
+    TypeId type_id = value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
+    ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, map_type->last);
+    if (!map_type->shape) { map_type->shape = shape_entry; }
+    map_type->last = shape_entry;
+    map_type->length++;
+
+    // ensure data capacity
+    int bsize = type_info[type_id].byte_size;
+    int byte_offset = shape_entry->byte_offset + bsize;
+    if (byte_offset > mp->data_cap) { // resize map data
+        int byte_cap = mp->data_cap * 2;
+        void* new_data = pool_calloc(pool, byte_cap);
+        if (!new_data) return;
+        memcpy(new_data, mp->data, byte_offset - bsize);
+        pool_variable_free(pool, mp->data);
+        mp->data = new_data;  mp->data_cap = byte_cap;
+    }
+    map_type->byte_size = byte_offset;
+
+    // store the value
+    void* field_ptr = (char*)mp->data + byte_offset - bsize;
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;             
+        break;
+    case LMD_TYPE_INT:
+        *(long*)field_ptr = value.long_val;
+        break;
+    case LMD_TYPE_INT64:
+        *(long*)field_ptr = *(long*)value.pointer;
+        break;        
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = *(double*)value.pointer;
+        break;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = (String*)value.pointer;
+        printf("put map string: key %s, %p\n", key->chars, (void*)value.pointer);
+        ((String*)value.pointer)->ref_cnt++;
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:
+        *(Map**)field_ptr = (Map*)value.raw_pointer;
+        break;
+    default:
+        printf("unknown type %d\n", value.type_id);
+    }
 }
 
 Input* input_new(lxb_url_t* abs_url) {
@@ -66,6 +143,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(type->chars, "yaml") == 0) {
             parse_yaml(input, source);
+        }
+        else if (strcmp(type->chars, "xml") == 0) {
+            parse_xml(input, source);
         }
     }
     free(source);
