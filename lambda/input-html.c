@@ -193,19 +193,7 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
     
     // Handle empty string case - if we immediately encounter the end_char, just return empty string
     if (**html == end_char) {
-        // Check if the buffer is in a valid state
-        if (!sb || !sb->str) {
-            return NULL;
-        }
-        
-        // Create empty string same way as boolean attributes do
-        String *string = (String*)sb->str;
-        string->len = 0;
-        string->ref_cnt = 0;
-        
-        // Instead of calling strbuf_full_reset, let's try just resetting the length
-        sb->length = sizeof(uint32_t); // Reset to just the header size
-        return string;
+        return strbuf_to_string(sb);
     }
     
     while (**html && **html != end_char && char_count < max_string_chars) {
@@ -307,11 +295,7 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
         char_count++;
     }
 
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);
-    string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    return strbuf_to_string(sb);
 }
 
 static String* parse_text_content(Input *input, const char **html) {
@@ -361,11 +345,7 @@ static String* parse_attribute_value(Input *input, const char **html) {
             printf("WARNING: Hit unquoted attribute value limit (%d)\n", max_unquoted_chars);
         }
         
-        String *string = (String*)sb->str;
-        string->len = sb->length - sizeof(uint32_t);
-        string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;
+        return strbuf_to_string(sb);
     }
 }
 
@@ -416,6 +396,21 @@ static Map* parse_attributes(Input *input, const char **html) {
         if (**html == '=') {
             (*html)++; // Skip =
             attr_value = parse_attribute_value(input, html);
+            
+            // Check if parse_attribute_value returned NULL
+            if (!attr_value) {
+                // Create empty string as fallback
+                StrBuf* fallback_sb = input->sb;
+                if (!fallback_sb || !fallback_sb->str) {
+                    return attributes;
+                }
+                
+                String *empty_string = (String*)fallback_sb->str;
+                empty_string->len = 0;
+                empty_string->ref_cnt = 0;
+                strbuf_full_reset(fallback_sb);
+                attr_value = empty_string;
+            }
         } else {
             // Boolean attribute (no value)
             StrBuf* empty_sb = input->sb;
@@ -431,8 +426,11 @@ static Map* parse_attributes(Input *input, const char **html) {
             attr_value = empty_string;
         }
         
-        LambdaItem value = (LambdaItem)s2it(attr_value);
-        map_put(attributes, attr_type, attr_name, value, input->pool);
+        // Double-check that attr_value is not NULL before using it
+        if (attr_value) {
+            LambdaItem value = (LambdaItem)s2it(attr_value);
+            map_put(attributes, attr_type, attr_name, value, input->pool);
+        }
         
         skip_whitespace(html);
     }
@@ -455,11 +453,7 @@ static String* parse_tag_name(Input *input, const char **html) {
         (*html)++;
     }
     
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);
-    string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    return strbuf_to_string(sb);
 }
 
 static void skip_comment(const char **html) {

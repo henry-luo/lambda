@@ -18,3 +18,5 @@ let markdown = input('./test/input/test.md', 'markdown')
 markdown
 let html = input('./test/input/test.html', 'html')
 html
+let more_html = input('./test/input/more_test.html', 'html')
+more_html
