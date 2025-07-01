@@ -1,7 +1,143 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE library [
+  <!-- Entity declarations -->
   <!ENTITY copyright "Copyright 2025 Library Corp.">
   <!ENTITY nbsp "&#160;">
+  <!ENTITY % common-attrs "id CDATA #IMPLIED
+                          lang CDATA #IMPLIED
+                          class CDATA #IMPLIED">
+  <!ENTITY publication-year "2025">
+  <!ENTITY website "https://library.example.com">
+  
+  <!-- External entity references -->
+  <!ENTITY external-logo SYSTEM "logo.png" NDATA PNG>
+  <!ENTITY external-stylesheet SYSTEM "styles.css">
+  <!ENTITY public-dtd PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" 
+                              "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+  
+  <!-- Element declarations -->
+  <!ELEMENT library (books, magazines, digital-resources, library-systems, 
+                     news-feed, staff, edge-cases, copyright-info, special-chars, statistics)>
+  <!ELEMENT books (book+)>
+  <!ELEMENT book (title, author, price, description?, tags?, meta:metadata?, 
+                  publication-date?, chapters?, reviews?, availability?)>
+  <!ELEMENT title (#PCDATA)>
+  <!ELEMENT author (first-name?, last-name?) | (#PCDATA)>
+  <!ELEMENT first-name (#PCDATA)>
+  <!ELEMENT last-name (#PCDATA)>
+  <!ELEMENT birth-year (#PCDATA)>
+  <!ELEMENT price (#PCDATA)>
+  <!ELEMENT description (#PCDATA | em | strong)*>
+  <!ELEMENT em (#PCDATA)>
+  <!ELEMENT strong (#PCDATA)>
+  <!ELEMENT tags (tag*)>
+  <!ELEMENT tag (#PCDATA)>
+  <!ELEMENT publication-date (#PCDATA)>
+  <!ELEMENT chapters (chapter+)>
+  <!ELEMENT chapter (#PCDATA)>
+  <!ELEMENT reviews EMPTY>
+  <!ELEMENT availability EMPTY>
+  
+  <!-- Mixed content and ANY content -->
+  <!ELEMENT news-feed (item+)>
+  <!ELEMENT item (#PCDATA | emphasis | date | link)*>
+  <!ELEMENT emphasis (#PCDATA)>
+  <!ELEMENT date (#PCDATA)>
+  <!ELEMENT link (#PCDATA)>
+  <!ELEMENT dynamic-content ANY>
+  
+  <!-- Attribute list declarations -->
+  <!ATTLIST library
+    xmlns CDATA #FIXED "http://library.example.com"
+    xmlns:meta CDATA #FIXED "http://metadata.example.com"
+    xmlns:xsi CDATA #FIXED "http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation CDATA #IMPLIED>
+    
+  <!ATTLIST book
+    %common-attrs;
+    category (fiction|science|mystery|foreign-language|biography|technical) #REQUIRED
+    available (true|false) "true"
+    rating CDATA #IMPLIED
+    out-of-print (true|false) "false"
+    isbn CDATA #IMPLIED>
+    
+  <!ATTLIST title
+    lang CDATA #IMPLIED
+    type (main|subtitle|original) "main">
+    
+  <!ATTLIST price
+    currency (USD|EUR|JPY|GBP|CAD) #REQUIRED
+    tax-included (yes|no) "no">
+    
+  <!ATTLIST author
+    birth-year CDATA #IMPLIED
+    nationality CDATA #IMPLIED
+    deceased (yes|no) "no">
+    
+  <!ATTLIST chapter
+    number CDATA #REQUIRED
+    title CDATA #IMPLIED
+    pages CDATA #IMPLIED>
+    
+  <!ATTLIST availability
+    status (available|discontinued|out-of-stock|pre-order) #REQUIRED
+    restock-date CDATA #IMPLIED>
+    
+  <!ATTLIST pages
+    start CDATA #REQUIRED
+    end CDATA #REQUIRED
+    total CDATA #IMPLIED>
+    
+  <!-- Notation declarations -->
+  <!NOTATION PNG SYSTEM "image/png">
+  <!NOTATION JPG SYSTEM "image/jpeg">
+  <!NOTATION GIF SYSTEM "image/gif">
+  <!NOTATION PDF SYSTEM "application/pdf">
+  <!NOTATION MP3 SYSTEM "audio/mpeg">
+  <!NOTATION CSS SYSTEM "text/css">
+  <!NOTATION XSL SYSTEM "text/xsl">
+  <!NOTATION JS SYSTEM "application/javascript">
+  <!NOTATION XML PUBLIC "-//W3C//NOTATION XML 1.0//EN" 
+                         "http://www.w3.org/TR/REC-xml">
+  <!NOTATION HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+                          "http://www.w3.org/TR/html4/strict.dtd">
+  
+  <!-- Parameter entity declarations -->
+  <!ENTITY % text-elements "em | strong | code | var | kbd | samp">
+  <!ENTITY % block-elements "p | div | section | article">
+  <!ENTITY % inline-elements "%text-elements; | span | a | img">
+  <!ENTITY % flow-content "%block-elements; | %inline-elements;">
+  
+  <!-- Conditional sections (advanced DTD feature) -->
+  <!ENTITY % use-unicode "INCLUDE">
+  <![%use-unicode;[
+    <!ELEMENT unicode-text (#PCDATA)>
+    <!ATTLIST unicode-text
+      encoding (UTF-8|UTF-16|ISO-8859-1) "UTF-8"
+      direction (ltr|rtl|auto) "auto">
+  ]]>
+  
+  <!-- Complex content models -->
+  <!ELEMENT magazine (name, publisher, subscription-price, issues?)>
+  <!ELEMENT subscription-price (yearly | monthly | weekly)+>
+  <!ELEMENT yearly (#PCDATA)>
+  <!ELEMENT monthly (#PCDATA)>
+  <!ELEMENT weekly (#PCDATA)>
+  <!ELEMENT issues (issue*)>
+  <!ELEMENT issue (articles?)>
+  <!ELEMENT articles (article+)>
+  <!ELEMENT article (title, author, pages?)>
+  
+  <!ATTLIST magazine
+    %common-attrs;
+    frequency (daily|weekly|monthly|quarterly|yearly) #REQUIRED
+    subscription-required (yes|no) "no">
+    
+  <!ATTLIST issue
+    number CDATA #REQUIRED
+    month CDATA #IMPLIED
+    year CDATA #IMPLIED
+    publication-date CDATA #IMPLIED>
 ]>
 <!-- Comprehensive XML test file covering various XML features and edge cases -->
 <library xmlns="http://library.example.com" 
