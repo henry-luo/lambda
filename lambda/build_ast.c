@@ -222,6 +222,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             fn_node->fn = SYSFUNC_PRINT;
             fn_node->type = &TYPE_NULL;
         }
+        else if (strview_equal(&func_name, "format")) {
+            fn_node->fn = SYSFUNC_FORMAT;
+            fn_node->type = &TYPE_STRING;
+        }
         else if (strview_equal(&func_name, "error")) {
             fn_node->fn = SYSFUNC_ERROR;
             fn_node->type = &TYPE_ERROR;

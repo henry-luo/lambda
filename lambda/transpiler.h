@@ -163,6 +163,7 @@ typedef enum {
     SYSFUNC_CEIL,
     SYSFUNC_INPUT,
     SYSFUNC_PRINT,
+    SYSFUNC_FORMAT,
     SYSFUNC_ERROR,
 } SysFunc;
 

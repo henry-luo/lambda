@@ -294,10 +294,6 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
     return strbuf_to_string(sb);
 }
 
-static String* parse_text_content(Input *input, const char **html) {
-    return parse_string_content(input, html, '<');
-}
-
 static String* parse_attribute_value(Input *input, const char **html) {
     skip_whitespace(html);
     
@@ -381,11 +377,7 @@ static Map* parse_attributes(Input *input, const char **html) {
             break;
         }
         
-        String *attr_name = (String*)sb->str;
-        attr_name->len = sb->length - sizeof(uint32_t);
-        attr_name->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        
+        String *attr_name = strbuf_to_string(sb);        
         skip_whitespace(html);
         
         String* attr_value;
@@ -442,13 +434,11 @@ static Map* parse_attributes(Input *input, const char **html) {
 
 static String* parse_tag_name(Input *input, const char **html) {
     StrBuf* sb = input->sb;
-    
     while (**html && **html != ' ' && **html != '\t' && **html != '\n' && 
            **html != '\r' && **html != '>' && **html != '/') {
         strbuf_append_char(sb, tolower(**html));
         (*html)++;
     }
-    
     return strbuf_to_string(sb);
 }
 
@@ -639,17 +629,9 @@ static Item parse_element(Input *input, const char **html) {
         return ITEM_ERROR;
     }
     element->type = elem_type;
-    
     // Set element name from tag name
     elem_type->name.str = tag_name->chars;
     elem_type->name.length = tag_name->len;
-    
-    // Initialize element structure
-    elem_type->length = 0;
-    elem_type->byte_size = 0;
-    elem_type->content_length = 0;
-    elem_type->shape = NULL;
-    elem_type->last = NULL;
     
     // Handle attributes by copying from the parsed attributes map to element shape
     if (attributes->type && ((TypeMap*)attributes->type)->length > 0) {
@@ -718,15 +700,9 @@ static Item parse_element(Input *input, const char **html) {
                 strbuf_full_reset(content_sb);
             }
         } else {
-            // Regular content parsing for non-raw-text elements
-            int max_iterations = 20; // Very conservative limit for debugging
-            int iteration_count = 0;
-            int chars_processed = 0;
-            const int max_chars = 5000; // Very conservative character limit
+            // regular content parsing for non-raw-text elements
             size_t closing_tag_len = strlen(closing_tag);
-            
-            while (**html && iteration_count < max_iterations && chars_processed < max_chars) {
-                iteration_count++;
+            while (**html) {
                 const char* html_before = *html; // Track position to prevent infinite loops
                 
                 // Check for closing tag at the beginning of each iteration
@@ -745,12 +721,9 @@ static Item parse_element(Input *input, const char **html) {
                         // Skip to next '>' to avoid getting stuck
                         while (**html && **html != '>') {
                             (*html)++;
-                            chars_processed++;
-                            if (chars_processed >= max_chars) break;
                         }
                         if (**html == '>') {
                             (*html)++;
-                            chars_processed++;
                         }
                     } else {
                         // Parse child element
@@ -768,7 +741,6 @@ static Item parse_element(Input *input, const char **html) {
                         // Additional safety check for child parsing
                         if (*html == before_child_parse) {
                             (*html)++;
-                            chars_processed++;
                         }
                     }
                 } else {
@@ -787,9 +759,6 @@ static Item parse_element(Input *input, const char **html) {
                             strbuf_append_char(text_sb, **html);
                             (*html)++;
                             text_chars++;
-                            chars_processed++;
-                            
-                            if (chars_processed >= max_chars) break;
                         }
                         
                         // Create text string if we have content
@@ -818,7 +787,6 @@ static Item parse_element(Input *input, const char **html) {
                     } else {
                         // Skip whitespace
                         (*html)++;
-                        chars_processed++;
                     }
                 }
                 
@@ -826,29 +794,13 @@ static Item parse_element(Input *input, const char **html) {
                 if (*html == html_before) {
                     if (**html) {
                         (*html)++; // Skip problematic character
-                        chars_processed++;
                     } else {
                         break; // End of string
                     }
                 }
                 
-                // Check for early exit conditions
-                if (chars_processed >= max_chars) {
-                    break;
-                }
-                
                 // Simplified whitespace skipping
                 skip_whitespace(html);
-            }
-            
-            // Check if we exited due to iteration or character limit
-            if (iteration_count >= max_iterations) {
-                printf("WARNING: HTML parser hit iteration limit (%d) for tag '%s', forcing exit\n", 
-                       max_iterations, tag_name->chars);
-            }
-            if (chars_processed >= max_chars) {
-                printf("WARNING: HTML parser hit character limit (%d) for tag '%s', forcing exit\n", 
-                       max_chars, tag_name->chars);
             }
         }
         
