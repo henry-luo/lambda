@@ -636,282 +636,239 @@ static Item parse_element(Input *input, const char **html) {
     }
     (*html)++; // Skip >
     
-    // Create element map
-    Map* element = map_pooled(input->pool);
+    // Create element
+    Element* element = elmt_pooled(input->pool);
     if (!element) {
         parse_depth--;
         return ITEM_ERROR;
     }
     
-    TypeMap* elem_type = map_init_cap(element, input->pool);
-    if (!element->data) {
+    TypeElmt* elem_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!elem_type) {
         parse_depth--;
         return ITEM_ERROR;
     }
+    element->type = elem_type;
     
-    // Add tag name
-    StrBuf* tag_key_sb = input->sb;
-    strbuf_full_reset(tag_key_sb); // Ensure buffer is clean before use
-    strbuf_append_str(tag_key_sb, "tag");
-    String *tag_key = (String*)tag_key_sb->str;
-    tag_key->len = tag_key_sb->length - sizeof(uint32_t);
-    tag_key->ref_cnt = 0;
-    strbuf_full_reset(tag_key_sb);
+    // Set element name from tag name
+    elem_type->name.str = tag_name->chars;
+    elem_type->name.length = tag_name->len;
     
-    LambdaItem tag_value = (LambdaItem)s2it(tag_name);
-    map_put(element, elem_type, tag_key, tag_value, input->pool);
+    // Initialize element structure
+    elem_type->length = 0;
+    elem_type->byte_size = 0;
+    elem_type->content_length = 0;
+    elem_type->shape = NULL;
+    elem_type->last = NULL;
     
-    // Add element type information for HTML5 compliance
-    StrBuf* type_key_sb = input->sb;
-    strbuf_full_reset(type_key_sb);
-    strbuf_append_str(type_key_sb, "type");
-    String *type_key = (String*)type_key_sb->str;
-    type_key->len = type_key_sb->length - sizeof(uint32_t);
-    type_key->ref_cnt = 0;
-    strbuf_full_reset(type_key_sb);
-    
-    // Determine element type
-    const char* element_type = "unknown";
-    if (is_void_element(tag_name->chars)) {
-        element_type = "void";
-    } else if (is_block_element(tag_name->chars)) {
-        element_type = "block";
-    } else if (is_inline_element(tag_name->chars)) {
-        element_type = "inline";
-    } else if (is_semantic_element(tag_name->chars)) {
-        element_type = "semantic";
-    } else if (is_raw_text_element(tag_name->chars)) {
-        element_type = "raw-text";
-    }
-    
-    StrBuf* type_value_sb = input->sb;
-    strbuf_full_reset(type_value_sb);
-    strbuf_append_str(type_value_sb, element_type);
-    String *type_value = (String*)type_value_sb->str;
-    type_value->len = type_value_sb->length - sizeof(uint32_t);
-    type_value->ref_cnt = 0;
-    strbuf_full_reset(type_value_sb);
-    
-    LambdaItem type_item = (LambdaItem)s2it(type_value);
-    map_put(element, elem_type, type_key, type_item, input->pool);
-    
-    // Add attributes only if there are any
+    // Handle attributes by copying from the parsed attributes map to element shape
     if (attributes->type && ((TypeMap*)attributes->type)->length > 0) {
-        StrBuf* attr_key_sb = input->sb;
-        strbuf_full_reset(attr_key_sb); // Ensure buffer is clean before use
-        strbuf_append_str(attr_key_sb, "attributes");
-        String *attr_key = (String*)attr_key_sb->str;
-        attr_key->len = attr_key_sb->length - sizeof(uint32_t);
-        attr_key->ref_cnt = 0;
-        strbuf_full_reset(attr_key_sb);
+        TypeMap* attr_type = (TypeMap*)attributes->type;
         
-        LambdaItem attr_value = {.raw_pointer = attributes};
-        map_put(element, elem_type, attr_key, attr_value, input->pool);
+        // Copy shape from attributes to element
+        elem_type->shape = attr_type->shape;
+        elem_type->last = attr_type->last;
+        elem_type->length = attr_type->length;
+        elem_type->byte_size = attr_type->byte_size;
+        
+        // Copy attribute data to element
+        if (attr_type->byte_size > 0) {
+            element->data = pool_calloc(input->pool, attr_type->byte_size);
+            element->data_cap = attr_type->byte_size;
+            if (attributes->data) {
+                memcpy(element->data, attributes->data, attr_type->byte_size);
+            }
+        }
     }
     
     // Handle content for non-void elements
     if (!is_self_closing && !is_void_element(tag_name->chars)) {
-        Array* children = array_pooled(input->pool);
-        if (children) {
-            skip_whitespace(html);
+        skip_whitespace(html);
+        
+        // Parse content until closing tag
+        char closing_tag[256];
+        snprintf(closing_tag, sizeof(closing_tag), "</%s>", tag_name->chars);
+        
+        // Handle raw text elements (script, style, textarea, etc.) specially
+        if (is_raw_text_element(tag_name->chars)) {
+            StrBuf* content_sb = input->sb;
+            strbuf_full_reset(content_sb); // Ensure clean state
             
-            // Parse content until closing tag
-            char closing_tag[256];
-            snprintf(closing_tag, sizeof(closing_tag), "</%s>", tag_name->chars);
+            // For raw text elements, we need to find the exact closing tag
+            // and preserve all content as-is, including HTML tags within
+            int content_chars = 0;
+            const int max_content_chars = 10000; // Reduced safety limit
+            size_t closing_tag_len = strlen(closing_tag);
             
-            // Handle raw text elements (script, style, textarea, etc.) specially
-            if (is_raw_text_element(tag_name->chars)) {
-                StrBuf* content_sb = input->sb;
-                strbuf_full_reset(content_sb); // Ensure clean state
-                
-                // For raw text elements, we need to find the exact closing tag
-                // and preserve all content as-is, including HTML tags within
-                int content_chars = 0;
-                const int max_content_chars = 10000; // Reduced safety limit
-                size_t closing_tag_len = strlen(closing_tag);
-                
-                while (**html && content_chars < max_content_chars) {
-                    // Check if we found the closing tag (case-insensitive for robustness)
-                    if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
-                        break;
-                    }
-                    
-                    strbuf_append_char(content_sb, **html);
-                    (*html)++;
-                    content_chars++;
+            while (**html && content_chars < max_content_chars) {
+                // Check if we found the closing tag (case-insensitive for robustness)
+                if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
+                    break;
                 }
                 
-                // Check if we hit the safety limit
-                if (content_chars >= max_content_chars) {
-                    strbuf_full_reset(content_sb);
-                } else if (content_sb->length > sizeof(uint32_t)) {
-                    String *content_string = (String*)content_sb->str;
-                    content_string->len = content_sb->length - sizeof(uint32_t);
-                    content_string->ref_cnt = 0;
-                    strbuf_full_reset(content_sb);
-                    
-                    if (content_string->len > 0) {
-                        LambdaItem content_item = (LambdaItem)s2it(content_string);
-                        array_append(children, content_item, input->pool);
-                    }
-                } else {
-                    strbuf_full_reset(content_sb);
+                strbuf_append_char(content_sb, **html);
+                (*html)++;
+                content_chars++;
+            }
+            
+            // Check if we hit the safety limit
+            if (content_chars >= max_content_chars) {
+                strbuf_full_reset(content_sb);
+            } else if (content_sb->length > sizeof(uint32_t)) {
+                String *content_string = (String*)content_sb->str;
+                content_string->len = content_sb->length - sizeof(uint32_t);
+                content_string->ref_cnt = 0;
+                strbuf_full_reset(content_sb);
+                
+                if (content_string->len > 0) {
+                    LambdaItem content_item = (LambdaItem)s2it(content_string);
+                    list_push((List*)element, content_item.item);
                 }
             } else {
-                // Regular content parsing for non-raw-text elements
-                int max_iterations = 20; // Very conservative limit for debugging
-                int iteration_count = 0;
-                int chars_processed = 0;
-                const int max_chars = 5000; // Very conservative character limit
-                size_t closing_tag_len = strlen(closing_tag);
+                strbuf_full_reset(content_sb);
+            }
+        } else {
+            // Regular content parsing for non-raw-text elements
+            int max_iterations = 20; // Very conservative limit for debugging
+            int iteration_count = 0;
+            int chars_processed = 0;
+            const int max_chars = 5000; // Very conservative character limit
+            size_t closing_tag_len = strlen(closing_tag);
+            
+            while (**html && iteration_count < max_iterations && chars_processed < max_chars) {
+                iteration_count++;
+                const char* html_before = *html; // Track position to prevent infinite loops
                 
-                while (**html && iteration_count < max_iterations && chars_processed < max_chars) {
-                    iteration_count++;
-                    const char* html_before = *html; // Track position to prevent infinite loops
-                    
-                    // Check for closing tag at the beginning of each iteration
+                // Check for closing tag at the beginning of each iteration
+                if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
+                    break;
+                }
+                
+                if (**html == '<') {
+                    // Check if it's the closing tag again (redundant check for safety)
                     if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
                         break;
                     }
                     
-                    if (**html == '<') {
-                        // Check if it's the closing tag again (redundant check for safety)
-                        if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
-                            break;
+                    // Add safety check for recursion depth
+                    if (parse_depth >= 15) {
+                        // Skip to next '>' to avoid getting stuck
+                        while (**html && **html != '>') {
+                            (*html)++;
+                            chars_processed++;
+                            if (chars_processed >= max_chars) break;
                         }
-                        
-                        // Add safety check for recursion depth
-                        if (parse_depth >= 15) {
-                            // Skip to next '>' to avoid getting stuck
-                            while (**html && **html != '>') {
-                                (*html)++;
-                                chars_processed++;
-                                if (chars_processed >= max_chars) break;
-                            }
-                            if (**html == '>') {
-                                (*html)++;
-                                chars_processed++;
-                            }
-                        } else {
-                            // Parse child element
-                            const char* before_child_parse = *html;
-                            Item child = parse_element(input, html);
-                            
-                            if (child == ITEM_ERROR) {
-                                // If we hit an error, try to recover by skipping this character
-                                if (**html) (*html)++;
-                                break;
-                            } else if (child != ITEM_NULL) {
-                                LambdaItem child_item = {.item = child};
-                                array_append(children, child_item, input->pool);
-                            }
-                            
-                            // Additional safety check for child parsing
-                            if (*html == before_child_parse) {
-                                (*html)++;
-                                chars_processed++;
-                            }
+                        if (**html == '>') {
+                            (*html)++;
+                            chars_processed++;
                         }
                     } else {
-                        // Parse text content character by character for better control
-                        if (**html && !isspace(**html)) {
-                            // Start building text content
-                            StrBuf* text_sb = input->sb;
-                            strbuf_full_reset(text_sb);
-                            
-                            // Collect text until we hit '<' or closing tag
-                            int text_chars = 0;
-                            const int max_text_chars = 1000; // Limit text content size
-                            
-                            while (**html && **html != '<' && text_chars < max_text_chars &&
-                                   strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
-                                strbuf_append_char(text_sb, **html);
-                                (*html)++;
-                                text_chars++;
-                                chars_processed++;
-                                
-                                if (chars_processed >= max_chars) break;
-                            }
-                            
-                            // Create text string if we have content
-                            if (text_chars > 0) {
-                                String *text_string = (String*)text_sb->str;
-                                text_string->len = text_sb->length - sizeof(uint32_t);
-                                text_string->ref_cnt = 0;
-                                strbuf_full_reset(text_sb);
-                                
-                                // Only add non-whitespace text
-                                bool has_non_whitespace = false;
-                                for (int i = 0; i < text_string->len; i++) {
-                                    if (!isspace(text_string->chars[i])) {
-                                        has_non_whitespace = true;
-                                        break;
-                                    }
-                                }
-                                
-                                if (has_non_whitespace) {
-                                    LambdaItem text_item = (LambdaItem)s2it(text_string);
-                                    array_append(children, text_item, input->pool);
-                                }
-                            } else {
-                                strbuf_full_reset(text_sb);
-                            }
-                        } else {
-                            // Skip whitespace
+                        // Parse child element
+                        const char* before_child_parse = *html;
+                        Item child = parse_element(input, html);
+                        
+                        if (child == ITEM_ERROR) {
+                            // If we hit an error, try to recover by skipping this character
+                            if (**html) (*html)++;
+                            break;
+                        } else if (child != ITEM_NULL) {
+                            list_push((List*)element, child);
+                        }
+                        
+                        // Additional safety check for child parsing
+                        if (*html == before_child_parse) {
                             (*html)++;
                             chars_processed++;
                         }
                     }
-                    
-                    // Safety check: if HTML pointer didn't advance, force it to avoid infinite loop
-                    if (*html == html_before) {
-                        if (**html) {
-                            (*html)++; // Skip problematic character
+                } else {
+                    // Parse text content character by character for better control
+                    if (**html && !isspace(**html)) {
+                        // Start building text content
+                        StrBuf* text_sb = input->sb;
+                        strbuf_full_reset(text_sb);
+                        
+                        // Collect text until we hit '<' or closing tag
+                        int text_chars = 0;
+                        const int max_text_chars = 1000; // Limit text content size
+                        
+                        while (**html && **html != '<' && text_chars < max_text_chars &&
+                               strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
+                            strbuf_append_char(text_sb, **html);
+                            (*html)++;
+                            text_chars++;
                             chars_processed++;
-                        } else {
-                            break; // End of string
+                            
+                            if (chars_processed >= max_chars) break;
                         }
+                        
+                        // Create text string if we have content
+                        if (text_chars > 0) {
+                            String *text_string = (String*)text_sb->str;
+                            text_string->len = text_sb->length - sizeof(uint32_t);
+                            text_string->ref_cnt = 0;
+                            strbuf_full_reset(text_sb);
+                            
+                            // Only add non-whitespace text
+                            bool has_non_whitespace = false;
+                            for (int i = 0; i < text_string->len; i++) {
+                                if (!isspace(text_string->chars[i])) {
+                                    has_non_whitespace = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (has_non_whitespace) {
+                                LambdaItem text_item = (LambdaItem)s2it(text_string);
+                                list_push((List*)element, text_item.item);
+                            }
+                        } else {
+                            strbuf_full_reset(text_sb);
+                        }
+                    } else {
+                        // Skip whitespace
+                        (*html)++;
+                        chars_processed++;
                     }
-                    
-                    // Check for early exit conditions
-                    if (chars_processed >= max_chars) {
-                        break;
-                    }
-                    
-                    // Simplified whitespace skipping
-                    skip_whitespace(html);
                 }
                 
-                // Check if we exited due to iteration or character limit
-                if (iteration_count >= max_iterations) {
-                    printf("WARNING: HTML parser hit iteration limit (%d) for tag '%s', forcing exit\n", 
-                           max_iterations, tag_name->chars);
+                // Safety check: if HTML pointer didn't advance, force it to avoid infinite loop
+                if (*html == html_before) {
+                    if (**html) {
+                        (*html)++; // Skip problematic character
+                        chars_processed++;
+                    } else {
+                        break; // End of string
+                    }
                 }
+                
+                // Check for early exit conditions
                 if (chars_processed >= max_chars) {
-                    printf("WARNING: HTML parser hit character limit (%d) for tag '%s', forcing exit\n", 
-                           max_chars, tag_name->chars);
+                    break;
                 }
-            }
-            
-            // Skip closing tag
-            if (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) == 0) {
-                *html += strlen(closing_tag);
-            }
-            
-            // Add children to element only if there are any
-            if (children->length > 0) {
-                StrBuf* children_key_sb = input->sb;
-                strbuf_full_reset(children_key_sb); // Ensure buffer is clean before use
-                strbuf_append_str(children_key_sb, "children");
-                String *children_key = (String*)children_key_sb->str;
-                children_key->len = children_key_sb->length - sizeof(uint32_t);
-                children_key->ref_cnt = 0;
-                strbuf_full_reset(children_key_sb);
                 
-                LambdaItem children_value = {.raw_pointer = children};
-                map_put(element, elem_type, children_key, children_value, input->pool);
+                // Simplified whitespace skipping
+                skip_whitespace(html);
+            }
+            
+            // Check if we exited due to iteration or character limit
+            if (iteration_count >= max_iterations) {
+                printf("WARNING: HTML parser hit iteration limit (%d) for tag '%s', forcing exit\n", 
+                       max_iterations, tag_name->chars);
+            }
+            if (chars_processed >= max_chars) {
+                printf("WARNING: HTML parser hit character limit (%d) for tag '%s', forcing exit\n", 
+                       max_chars, tag_name->chars);
             }
         }
+        
+        // Skip closing tag
+        if (**html && strncasecmp(*html, closing_tag, strlen(closing_tag)) == 0) {
+            *html += strlen(closing_tag);
+        }
+        
+        // Set content length based on element's list length
+        elem_type->content_length = ((List*)element)->length;
     }
     
     arraylist_append(input->type_list, elem_type);
@@ -921,36 +878,13 @@ static Item parse_element(Input *input, const char **html) {
     return (Item)element;
 }
 
-Input* html_parse(const char* html_string) {
-    Input* input = malloc(sizeof(Input));
-    input->path = NULL;
-    size_t grow_size = 1024;
-    size_t tolerance_percent = 20;
-    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
-    if (err != MEM_POOL_ERR_OK) { 
-        free(input);  
-        return NULL; 
-    }
-    input->type_list = arraylist_new(16);
-    input->root = ITEM_NULL;
+void parse_html(Input* input, const char* html_string) {
     input->sb = strbuf_new_pooled(input->pool);
-
     const char *html = html_string;
-    
-    // Skip any leading whitespace
+    // skip any leading whitespace
     skip_whitespace(&html);
-    
-    // Parse the root element
+    // parse the root element
     if (*html) {
         input->root = parse_element(input, &html);
     }
-    
-    // After parsing, ensure the string buffer is ready for print_item
-    // The string buffer may have been reset during parsing, so we need to 
-    // reinitialize it for output generation
-    if (!input->sb->str) {
-        input->sb = strbuf_new_pooled(input->pool);
-    }
-    
-    return input;
 }

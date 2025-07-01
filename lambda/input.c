@@ -10,6 +10,7 @@ void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_markdown(Input* input, const char* markdown_string);
+void parse_html(Input* input, const char* html_string);
 
 String* strbuf_to_string(StrBuf *sb) {
     String *string = (String*)sb->str;
@@ -120,7 +121,7 @@ Input* input_data(Context* ctx, String* url, String* type) {
         return NULL;
     }
     Input* input = NULL;
-    if (!type) { // treat as plain text
+    if (!type || strcmp(type->chars, "text") == 0) { // treat as plain text
         Input* input = (Input*)calloc(1, sizeof(Input));
         input->url = abs_url;
         String *str = (String*)malloc(sizeof(String) + strlen(source) + 1);
@@ -150,6 +151,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(type->chars, "markdown") == 0) {
             parse_markdown(input, source);
+        }
+        else if (strcmp(type->chars, "html") == 0) {
+            parse_html(input, source);
         }
         else {
             printf("Unknown input type: %s\n", type->chars);

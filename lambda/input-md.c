@@ -494,49 +494,24 @@ static void add_attribute_to_element(Input *input, Element* element, const char*
     String* value = create_string(input, attr_value);
     if (!key || !value) return;
     
-    // If this is the first attribute, initialize the map structure
-    if (!element->data) {
-        // Create a temporary map to use the shared functions
-        Map temp_map = {0};
-        temp_map.type = NULL;
-        temp_map.data = NULL;
-        temp_map.data_cap = 0;
-        
-        TypeMap* map_type = map_init_cap(&temp_map, input->pool);
-        if (!map_type) return;
-        
-        LambdaItem lambda_value = (LambdaItem)s2it(value);
-        map_put(&temp_map, map_type, key, lambda_value, input->pool);
-        
-        // Transfer the map data to the element
-        element_type->shape = map_type->shape;
-        element_type->length = map_type->length;
-        element_type->byte_size = map_type->byte_size;
-        
-        element->data = temp_map.data;
-        element->data_cap = temp_map.data_cap;
-    } else {
-        // Use existing map structure with shared functions
-        Map temp_map;
-        temp_map.type = element->type; // Reuse the existing TypeElmt as TypeMap
-        temp_map.data = element->data;
-        temp_map.data_cap = element->data_cap;
-        
-        TypeMap* map_type = (TypeMap*)element->type; // TypeElmt extends TypeMap
-        ShapeEntry* shape_entry = element_type->shape;
-        
-        // Find the last shape entry
-        while (shape_entry && shape_entry->next) {
-            shape_entry = shape_entry->next;
-        }
-        
-        LambdaItem lambda_value = (LambdaItem)s2it(value);
-        map_put(&temp_map, map_type, key, lambda_value, input->pool);
-        
-        // Update element data pointers
-        element->data = temp_map.data;
-        element->data_cap = temp_map.data_cap;
-    }
+    // Always create a fresh map structure
+    Map* attr_map = map_pooled(input->pool);
+    if (!attr_map) return;
+    
+    // Initialize the map type
+    TypeMap* map_type = map_init_cap(attr_map, input->pool);
+    if (!map_type) return;
+    
+    // Just add the new attribute (don't try to copy existing ones for now)
+    LambdaItem lambda_value = (LambdaItem)s2it(value);
+    map_put(attr_map, map_type, key, lambda_value, input->pool);
+    
+    // Update element with the new map data
+    element->data = attr_map->data;
+    element->data_cap = attr_map->data_cap;
+    element_type->shape = map_type->shape;
+    element_type->length = map_type->length;
+    element_type->byte_size = map_type->byte_size;
 }
 
 static Item parse_header(Input *input, const char* line) {
@@ -555,11 +530,6 @@ static Item parse_header(Input *input, const char* line) {
     snprintf(tag_name, sizeof(tag_name), "h%d", hash_count);
     Element* header = create_markdown_element(input, tag_name);
     if (!header) return ITEM_NULL;
-    
-    // Add level attribute
-    char level_str[10];
-    snprintf(level_str, sizeof(level_str), "%d", hash_count);
-    add_attribute_to_element(input, header, "level", level_str);
     
     // Add content if present
     if (*content_start != '\0') {
@@ -671,9 +641,6 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
     
     Element* list = create_markdown_element(input, is_ordered ? "ol" : "ul");
     if (!list) return ITEM_NULL;
-    
-    // Add type attribute
-    add_attribute_to_element(input, list, "type", is_ordered ? "ordered" : "unordered");
     
     if (is_ordered) {
         char start_str[20];

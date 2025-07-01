@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="HTML5 Parser Test with CSS and JS">
+    <title>HTML5 Parser Test</title>
+    <style>
+        /* CSS embedded in HTML */
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .nav-menu {
+            display: flex;
+            justify-content: center;
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .nav-menu li {
+            margin: 0 15px;
+        }
+        .nav-menu a {
+            color: #ecf0f1;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .nav-menu a:hover {
+            color: #3498db;
+        }
+        .content {
+            padding: 30px;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .feature-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #3498db;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .btn:hover {
+            background: #2980b9;
+        }
+        .code-block {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+        .highlight {
+            background: #fff3cd;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        @media (max-width: 768px) {
+            .nav-menu {
+                flex-direction: column;
+            }
+            .content {
+                padding: 20px;
+            }
+        }
+    </style>
+    <link rel="stylesheet" href="external-styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>HTML5 Parser Test Suite</h1>
+            <nav>
+                <ul class="nav-menu">
+                    <li><a href="#home" data-section="home">Home</a></li>
+                    <li><a href="#features" data-section="features">Features</a></li>
+                    <li><a href="#examples" data-section="examples">Examples</a></li>
+                    <li><a href="#contact" data-section="contact">Contact</a></li>
+                </ul>
+            </nav>
+        </header>
+        
+        <main class="content">
+            <section id="home">
+                <h2>Welcome to the HTML5 Parser</h2>
+                <p>This is a comprehensive test of HTML5 parsing capabilities including:</p>
+                <ul>
+                    <li><strong>Semantic HTML5 elements</strong> (header, nav, main, section, article, aside, footer)</li>
+                    <li><em>Embedded CSS</em> with modern features like grid, flexbox, and media queries</li>
+                    <li><mark>Inline JavaScript</mark> with event handling and DOM manipulation</li>
+                    <li>HTML5 form elements with validation</li>
+                    <li>Multimedia elements (audio, video, canvas)</li>
+                    <li>Accessibility features (ARIA attributes)</li>
+                </ul>
+            </section>
+            
+            <section id="features">
+                <h2>Parser Features</h2>
+                <div class="feature-grid">
+                    <article class="feature-card">
+                        <h3>HTML5 Semantic Elements</h3>
+                        <p>Supports all HTML5 semantic elements including <code>&lt;header&gt;</code>, <code>&lt;nav&gt;</code>, <code>&lt;main&gt;</code>, <code>&lt;section&gt;</code>, <code>&lt;article&gt;</code>, <code>&lt;aside&gt;</code>, and <code>&lt;footer&gt;</code>.</p>
+                    </article>
+                    
+                    <article class="feature-card">
+                        <h3>CSS Integration</h3>
+                        <p>Properly handles embedded CSS in <code>&lt;style&gt;</code> tags and external stylesheets via <code>&lt;link&gt;</code> tags.</p>
+                    </article>
+                    
+                    <article class="feature-card">
+                        <h3>JavaScript Support</h3>
+                        <p>Parses inline JavaScript code blocks and external script references while preserving code structure.</p>
+                    </article>
+                </div>
+            </section>
+            
+            <section id="examples">
+                <h2>Code Examples</h2>
+                
+                <h3>HTML5 Form with Validation</h3>
+                <form id="test-form" novalidate>
+                    <fieldset>
+                        <legend>Contact Information</legend>
+                        
+                        <label for="name">Name (required):</label>
+                        <input type="text" id="name" name="name" required aria-describedby="name-help">
+                        <small id="name-help">Please enter your full name</small>
+                        
+                        <label for="email">Email:</label>
+                        <input type="email" id="email" name="email" placeholder="user@example.com">
+                        
+                        <label for="phone">Phone:</label>
+                        <input type="tel" id="phone" name="phone" pattern="[0-9]{3}-[0-9]{3}-[0-9]{4}" placeholder="123-456-7890">
+                        
+                        <label for="age">Age:</label>
+                        <input type="number" id="age" name="age" min="18" max="120" step="1">
+                        
+                        <label for="website">Website:</label>
+                        <input type="url" id="website" name="website" placeholder="https://example.com">
+                        
+                        <label for="birthdate">Birth Date:</label>
+                        <input type="date" id="birthdate" name="birthdate">
+                        
+                        <label for="comments">Comments:</label>
+                        <textarea id="comments" name="comments" rows="4" cols="50" placeholder="Enter your comments here..."></textarea>
+                        
+                        <label for="country">Country:</label>
+                        <select id="country" name="country">
+                            <option value="">Select a country</option>
+                            <option value="us">United States</option>
+                            <option value="ca">Canada</option>
+                            <option value="uk">United Kingdom</option>
+                            <option value="de">Germany</option>
+                            <option value="fr">France</option>
+                        </select>
+                        
+                        <fieldset>
+                            <legend>Preferences</legend>
+                            <input type="checkbox" id="newsletter" name="newsletter" value="yes">
+                            <label for="newsletter">Subscribe to newsletter</label>
+                            
+                            <input type="radio" id="contact-email" name="contact-method" value="email">
+                            <label for="contact-email">Email</label>
+                            
+                            <input type="radio" id="contact-phone" name="contact-method" value="phone">
+                            <label for="contact-phone">Phone</label>
+                        </fieldset>
+                        
+                        <button type="submit" class="btn">Submit Form</button>
+                        <button type="reset" class="btn">Reset</button>
+                    </fieldset>
+                </form>
+                
+                <h3>HTML5 Multimedia</h3>
+                <figure>
+                    <video controls width="300" height="200" poster="video-poster.jpg">
+                        <source src="video.mp4" type="video/mp4">
+                        <source src="video.webm" type="video/webm">
+                        <p>Your browser doesn't support HTML5 video. <a href="video.mp4">Download the video</a> instead.</p>
+                    </video>
+                    <figcaption>Sample video with multiple source formats</figcaption>
+                </figure>
+                
+                <figure>
+                    <audio controls>
+                        <source src="audio.mp3" type="audio/mpeg">
+                        <source src="audio.ogg" type="audio/ogg">
+                        <p>Your browser doesn't support HTML5 audio. <a href="audio.mp3">Download the audio</a> instead.</p>
+                    </audio>
+                    <figcaption>Sample audio with fallback options</figcaption>
+                </figure>
+                
+                <h3>Interactive Canvas</h3>
+                <canvas id="demo-canvas" width="400" height="200" style="border: 1px solid #ccc;">
+                    Your browser does not support the HTML5 canvas element.
+                </canvas>
+                
+                <h3>Code Demonstration</h3>
+                <pre class="code-block"><code>// JavaScript Example
+function initializeApp() {
+    const canvas = document.getElementById('demo-canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Draw a gradient background
+    const gradient = ctx.createLinearGradient(0, 0, 400, 200);
+    gradient.addColorStop(0, '#667eea');
+    gradient.addColorStop(1, '#764ba2');
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 400, 200);
+    
+    // Add some text
+    ctx.fillStyle = 'white';
+    ctx.font = '24px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('HTML5 Canvas Demo', 200, 100);
+}
+</code></pre>
+            </section>
+            
+            <aside>
+                <h3>Additional Features</h3>
+                <ul>
+                    <li>Data attributes: <span class="highlight" data-info="example">data-info="example"</span></li>
+                    <li>ARIA attributes: <span role="button" aria-label="Example button">role="button"</span></li>
+                    <li>Custom elements: <code>&lt;custom-element&gt;</code></li>
+                    <li>Web Components support</li>
+                </ul>
+                
+                <details>
+                    <summary>Advanced HTML5 Features</summary>
+                    <p>This parser also supports advanced HTML5 features like:</p>
+                    <ul>
+                        <li>Shadow DOM elements</li>
+                        <li>Template elements</li>
+                        <li>Progressive enhancement patterns</li>
+                        <li>Microdata attributes</li>
+                    </ul>
+                </details>
+                
+                <template id="card-template">
+                    <div class="card">
+                        <h4 class="card-title"></h4>
+                        <p class="card-content"></p>
+                    </div>
+                </template>
+            </aside>
+        </main>
+        
+        <footer>
+            <p>&copy; 2024 HTML5 Parser Test Suite. Built with modern web standards.</p>
+            <address>
+                Contact: <a href="mailto:test@example.com">test@example.com</a>
+            </address>
+        </footer>
+    </div>
+    
+    <script>
+        // Embedded JavaScript code
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('HTML5 Parser Test Suite loaded successfully!');
+            
+            // Initialize canvas demo
+            initializeApp();
+            
+            // Add click handlers to navigation
+            const navLinks = document.querySelectorAll('.nav-menu a');
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const section = this.getAttribute('data-section');
+                    console.log('Navigating to section:', section);
+                    
+                    // Smooth scroll to section
+                    const targetElement = document.getElementById(section);
+                    if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth' });
+                    }
+                });
+            });
+            
+            // Form validation
+            const form = document.getElementById('test-form');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(form);
+                    const data = Object.fromEntries(formData.entries());
+                    
+                    console.log('Form data:', data);
+                    alert('Form submitted successfully! Check console for data.');
+                });
+            }
+            
+            // Feature card hover effects
+            const cards = document.querySelectorAll('.feature-card');
+            cards.forEach(card => {
+                card.addEventListener('mouseenter', function() {
+                    this.style.transform = 'translateY(-10px)';
+                });
+                
+                card.addEventListener('mouseleave', function() {
+                    this.style.transform = 'translateY(0)';
+                });
+            });
+        });
+        
+        // Canvas initialization function
+        function initializeApp() {
+            const canvas = document.getElementById('demo-canvas');
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            
+            // Draw a gradient background
+            const gradient = ctx.createLinearGradient(0, 0, 400, 200);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 400, 200);
+            
+            // Add some text
+            ctx.fillStyle = 'white';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('HTML5 Canvas Demo', 200, 100);
+            
+            // Add interactive elements
+            canvas.addEventListener('click', function(e) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                
+                // Draw a circle at click position
+                ctx.beginPath();
+                ctx.arc(x, y, 10, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.fill();
+            });
+        }
+        
+        // Utility functions
+        const Utils = {
+            // Debounce function for performance
+            debounce: function(func, wait) {
+                let timeout;
+                return function executedFunction(...args) {
+                    const later = () => {
+                        clearTimeout(timeout);
+                        func(...args);
+                    };
+                    clearTimeout(timeout);
+                    timeout = setTimeout(later, wait);
+                };
+            },
+            
+            // Theme toggle functionality
+            toggleTheme: function() {
+                const html = document.documentElement;
+                const currentTheme = html.getAttribute('data-theme');
+                const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+                html.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+            },
+            
+            // Form validation helper
+            validateForm: function(form) {
+                const inputs = form.querySelectorAll('input[required]');
+                let isValid = true;
+                
+                inputs.forEach(input => {
+                    if (!input.value.trim()) {
+                        input.classList.add('error');
+                        isValid = false;
+                    } else {
+                        input.classList.remove('error');
+                    }
+                });
+                
+                return isValid;
+            }
+        };
+        
+        // Global error handler
+        window.addEventListener('error', function(e) {
+            console.error('Global error:', e.error);
+        });
+        
+        // Performance monitoring
+        if ('performance' in window) {
+            window.addEventListener('load', function() {
+                setTimeout(function() {
+                    const perfData = performance.timing;
+                    const loadTime = perfData.loadEventEnd - perfData.navigationStart;
+                    console.log('Page load time:', loadTime + 'ms');
+                }, 0);
+            });
+        }
+    </script>
+    
+    <script src="external-script.js" defer></script>
+</body>
+</html>

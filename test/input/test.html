@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS and JS Test</title>
+    <style>
+        body { background: #f0f0f0; font-family: Arial; }
+        .highlight { background: yellow; padding: 5px; }
+        #main { max-width: 800px; margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <div id="main">
+        <h1 class="highlight">JavaScript Test</h1>
+        <p>This page contains embedded JavaScript.</p>
+        <button onclick="alert('Hello!')">Click Me</button>
+    </div>
+    <script>
+        console.log('Page loaded');
+        function greet(name) {
+            return 'Hello, ' + name + '!';
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM ready');
+        });
+    </script>
+</body>
+</html>

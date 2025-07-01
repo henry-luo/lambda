@@ -16,3 +16,5 @@ let more_xml = input('./test/input/more_test.xml', 'xml')
 more_xml
 let markdown = input('./test/input/test.md', 'markdown')
 markdown
+let html = input('./test/input/test.html', 'html')
+html
