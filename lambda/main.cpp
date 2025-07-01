@@ -1,7 +1,6 @@
 
 #include "transpiler.h"
 extern "C" {
-Input* markdown_parse(const char* markdown_string);
 Input* html_parse(const char* html_string);
 }
 
@@ -15,15 +14,7 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
     printf("after print_item\n");
 }
 
-void test_input() {    
-    // test markdown parsing
-    Input* markdown_input = markdown_parse("# Welcome to Markdown\n\nThis is a **bold** paragraph with *italic* text and `inline code`.\n\n## Features\n\n- First item\n- Second item with [a link](https://example.com)\n- Third item\n\n### Code Example\n\n```python\ndef hello_world():\n    print(\"Hello, World!\")\n    return True\n```\n\n---\n\nAnother paragraph after horizontal rule.");
-    LambdaItem markdown_item; markdown_item.item = markdown_input->root;
-    printf("Markdown parse result: %llu, type: %d\n", markdown_input->root, markdown_item.type_id);
-    print_item(markdown_input->sb, markdown_input->root);
-    String *markdown_result = (String*)markdown_input->sb->str;
-    printf("Markdown parsed: %s\n", markdown_result->chars);
-
+void test_input() {
     // test html parsing with minimal example first
     printf("Testing minimal HTML...\n");
     Input* html_simple = html_parse("<div><p>Hello World</p></div>");
