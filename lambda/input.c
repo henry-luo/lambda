@@ -122,12 +122,13 @@ Input* input_data(Context* ctx, String* url, String* type) {
     }
     Input* input = NULL;
     if (!type || strcmp(type->chars, "text") == 0) { // treat as plain text
-        Input* input = (Input*)calloc(1, sizeof(Input));
+        input = (Input*)calloc(1, sizeof(Input));
         input->url = abs_url;
         String *str = (String*)malloc(sizeof(String) + strlen(source) + 1);
         str->len = strlen(source);  str->ref_cnt = 0;
         strcpy(str->chars, source);
         input->root = s2it(str);
+        printf("input text: %s\n", str->chars);
     }
     else {
         input = input_new(abs_url);
