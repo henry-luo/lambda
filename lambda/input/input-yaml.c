@@ -1,9 +1,4 @@
-#include "transpiler.h"
-#include "../lib/strbuf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
+#include "../transpiler.h"
 
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent);
 

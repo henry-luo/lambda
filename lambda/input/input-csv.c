@@ -1,8 +1,4 @@
-#include "transpiler.h"
-#include "../lib/strbuf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
+#include "../transpiler.h"
 
 // Helper: parse a single CSV field (handles quoted fields)
 String* parse_csv_field(Input *input, const char **csv) {

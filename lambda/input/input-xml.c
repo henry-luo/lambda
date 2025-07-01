@@ -1,8 +1,4 @@
-#include "transpiler.h"
-#include "../lib/strbuf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
+#include "../transpiler.h"
 
 static Item parse_element(Input *input, const char **xml);
 static Item parse_comment(Input *input, const char **xml);

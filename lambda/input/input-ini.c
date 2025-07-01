@@ -1,8 +1,4 @@
-#include "transpiler.h"
-#include "../lib/strbuf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
+#include "../transpiler.h"
 
 static void skip_whitespace(const char **ini) {
     while (**ini && (**ini == ' ' || **ini == '\t')) {

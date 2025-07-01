@@ -1,9 +1,4 @@
-#include "transpiler.h"
-#include "../lib/strbuf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <stdbool.h>
+#include "../transpiler.h"
 
 // Forward declarations
 static Item parse_markdown_content(Input *input, char** lines, int line_count);

@@ -1,9 +1,4 @@
-#include "transpiler.h"
-#include "../lib/strbuf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <math.h>
+#include "../transpiler.h"
 
 static Item parse_value(Input *input, const char **toml, int *line_num);
 
