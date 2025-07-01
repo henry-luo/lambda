@@ -244,6 +244,13 @@ static Item parse_latex_command(Input *input, const char **latex) {
         return ITEM_ERROR;
     }
     
+    // Handle \end{} commands - these are handled implicitly by environment parsing
+    if (strcmp(cmd_name->chars, "end") == 0) {
+        // Skip \end{} commands as they are handled by the environment parser
+        Array* end_args = parse_command_arguments(input, latex);
+        return ITEM_NULL; // Don't create an element for \end commands
+    }
+    
     // Create element for the command
     Element* element = elmt_pooled(input->pool);
     if (!element) {
@@ -262,16 +269,20 @@ static Item parse_latex_command(Input *input, const char **latex) {
     
     // Parse arguments
     Array* args = parse_command_arguments(input, latex);
-    if (args && args->length > 0) {
-        for (size_t i = 0; i < args->length; i++) {
-            list_push((List*)element, args->items[i]);
-        }
-    }
     
     // Handle special commands that have content blocks
     if (strcmp(cmd_name->chars, "begin") == 0) {
-        // This is an environment begin - we need the environment name
+        // This is an environment begin - create element with environment name as tag
         if (args && args->length > 0) {
+            String* env_name = (String*)args->items[0];
+            
+            // Replace the command name with the environment name
+            elem_type->name.str = env_name->chars;
+            elem_type->name.length = env_name->len;
+            
+            // Don't add arguments to the element for environments
+            // The environment name becomes the tag, not a child
+            
             // Parse content until \end{environment_name}
             skip_whitespace(latex);
             
@@ -279,8 +290,6 @@ static Item parse_latex_command(Input *input, const char **latex) {
                 // Check for \end{environment_name}
                 if (strncmp(*latex, "\\end{", 5) == 0) {
                     const char* end_check = *latex + 5;
-                    // Extract environment name from args[0]
-                    String* env_name = (String*)((LambdaItem*)&args->items[0])->item;
                     if (strncmp(end_check, env_name->chars, env_name->len) == 0 &&
                         end_check[env_name->len] == '}') {
                         // Found matching \end, skip it
@@ -298,13 +307,54 @@ static Item parse_latex_command(Input *input, const char **latex) {
                 } else if (**latex == '%') {
                     skip_comment(latex);
                 } else {
-                    // Parse text content
+                    // Parse text content with proper escape handling
                     StrBuf* text_sb = input->sb;
                     strbuf_full_reset(text_sb);
                     
-                    while (**latex && **latex != '\\' && **latex != '%') {
-                        strbuf_append_char(text_sb, **latex);
-                        (*latex)++;
+                    int text_chars = 0;
+                    const int max_text_chars = 5000;
+                    
+                    while (**latex && text_chars < max_text_chars) {
+                        // Check for end of environment pattern
+                        if (strncmp(*latex, "\\end{", 5) == 0) {
+                            break;
+                        }
+                        
+                        // Check for other LaTeX commands
+                        if (**latex == '\\') {
+                            // Peek ahead to see if this is a command or just an escape
+                            const char* next_char = *latex + 1;
+                            if (*next_char && strchr("{}$&#^_%~", *next_char)) {
+                                // This is an escaped character, handle it
+                                (*latex)++; // Skip backslash
+                                switch (**latex) {
+                                    case '{': strbuf_append_char(text_sb, '{'); break;
+                                    case '}': strbuf_append_char(text_sb, '}'); break;
+                                    case '$': strbuf_append_char(text_sb, '$'); break;
+                                    case '&': strbuf_append_char(text_sb, '&'); break;
+                                    case '#': strbuf_append_char(text_sb, '#'); break;
+                                    case '^': strbuf_append_char(text_sb, '^'); break;
+                                    case '_': strbuf_append_char(text_sb, '_'); break;
+                                    case '%': strbuf_append_char(text_sb, '%'); break;
+                                    case '~': strbuf_append_char(text_sb, '~'); break;
+                                    default: 
+                                        strbuf_append_char(text_sb, '\\');
+                                        strbuf_append_char(text_sb, **latex);
+                                        break;
+                                }
+                                (*latex)++;
+                            } else {
+                                // This is a LaTeX command, break to let the main parser handle it
+                                break;
+                            }
+                        } else if (**latex == '%') {
+                            // This is a comment, break to let the comment handler deal with it
+                            break;
+                        } else {
+                            strbuf_append_char(text_sb, **latex);
+                            (*latex)++;
+                        }
+                        text_chars++;
                     }
                     
                     if (text_sb->length > sizeof(uint32_t)) {
@@ -332,6 +382,13 @@ static Item parse_latex_command(Input *input, const char **latex) {
                 }
                 
                 skip_whitespace(latex);
+            }
+        }
+    } else {
+        // For non-environment commands, add arguments as children
+        if (args && args->length > 0) {
+            for (size_t i = 0; i < args->length; i++) {
+                list_push((List*)element, args->items[i]);
             }
         }
     }
@@ -456,13 +513,48 @@ static Item parse_latex_element(Input *input, const char **latex) {
         return (Item)element;
     }
     
-    // Parse regular text content
+    // Parse regular text content with escape handling
     StrBuf* text_sb = input->sb;
     strbuf_full_reset(text_sb);
     
-    while (**latex && **latex != '\\' && **latex != '$' && **latex != '%') {
-        strbuf_append_char(text_sb, **latex);
-        (*latex)++;
+    int text_chars = 0;
+    const int max_text_chars = 5000;
+    
+    while (**latex && text_chars < max_text_chars) {
+        if (**latex == '\\') {
+            // Check if this is an escaped character or command
+            const char* next_char = *latex + 1;
+            if (*next_char && strchr("{}$&#^_%~", *next_char)) {
+                // This is an escaped character
+                (*latex)++; // Skip backslash
+                switch (**latex) {
+                    case '{': strbuf_append_char(text_sb, '{'); break;
+                    case '}': strbuf_append_char(text_sb, '}'); break;
+                    case '$': strbuf_append_char(text_sb, '$'); break;
+                    case '&': strbuf_append_char(text_sb, '&'); break;
+                    case '#': strbuf_append_char(text_sb, '#'); break;
+                    case '^': strbuf_append_char(text_sb, '^'); break;
+                    case '_': strbuf_append_char(text_sb, '_'); break;
+                    case '%': strbuf_append_char(text_sb, '%'); break;
+                    case '~': strbuf_append_char(text_sb, '~'); break;
+                    default: 
+                        strbuf_append_char(text_sb, '\\');
+                        strbuf_append_char(text_sb, **latex);
+                        break;
+                }
+                (*latex)++;
+            } else {
+                // This is a LaTeX command, break
+                break;
+            }
+        } else if (**latex == '$' || **latex == '%') {
+            // Math mode or comment, break
+            break;
+        } else {
+            strbuf_append_char(text_sb, **latex);
+            (*latex)++;
+        }
+        text_chars++;
     }
     
     if (text_sb->length > sizeof(uint32_t)) {
@@ -493,18 +585,21 @@ static Item parse_latex_element(Input *input, const char **latex) {
 }
 
 void parse_latex(Input* input, const char* latex_string) {
+    printf("DEBUG: Starting LaTeX parsing...\n");
     input->sb = strbuf_new_pooled(input->pool);
     const char *latex = latex_string;
     
     // Create root document element
     Element* root_element = elmt_pooled(input->pool);
     if (!root_element) {
+        printf("DEBUG: Failed to create root element\n");
         input->root = ITEM_ERROR;
         return;
     }
     
     TypeElmt* root_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!root_type) {
+        printf("DEBUG: Failed to create root type\n");
         input->root = ITEM_ERROR;
         return;
     }
@@ -518,18 +613,30 @@ void parse_latex(Input* input, const char* latex_string) {
     // Parse LaTeX content
     skip_whitespace(&latex);
     
-    while (*latex) {
+    int element_count = 0;
+    while (*latex && element_count < 1000) { // Safety limit
+        printf("DEBUG: Parsing element %d, current position: '%.50s...'\n", element_count, latex);
+        
         Item element = parse_latex_element(input, &latex);
         if (element != ITEM_NULL && element != ITEM_ERROR) {
             list_push((List*)root_element, element);
+            printf("DEBUG: Added element %d to root\n", element_count);
+        } else if (element == ITEM_ERROR) {
+            printf("DEBUG: Error parsing element %d\n", element_count);
+            break;
+        } else {
+            printf("DEBUG: Element %d was null (likely \\end{} or comment)\n", element_count);
         }
         skip_whitespace(&latex);
+        element_count++;
     }
     
+    printf("DEBUG: Parsed %d elements total\n", element_count);
     root_type->content_length = ((List*)root_element)->length;
     
     arraylist_append(input->type_list, root_type);
     root_type->type_index = input->type_list->length - 1;
     
     input->root = (Item)root_element;
+    printf("DEBUG: LaTeX parsing completed\n");
 }
