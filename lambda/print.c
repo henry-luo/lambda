@@ -321,8 +321,8 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
         else if (type_id == LMD_TYPE_ELEMENT) {
             Element *element = (Element*)item;
             TypeElmt *elmt_type = (TypeElmt*)element->type;
-            printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
-                elmt_type->length, elmt_type->content_length, element->length);
+            // printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
+            //     elmt_type->length, elmt_type->content_length, element->length);
             strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
             print_named_items(strbuf, (TypeMap*)elmt_type, element->data);
             // print content
