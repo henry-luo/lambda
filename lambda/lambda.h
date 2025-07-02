@@ -75,7 +75,7 @@ typedef struct Pack Pack;
 
 typedef struct Context {
     Heap* heap;
-    Pack* stack;  // eval stack    
+    // Pack* stack;  // eval stack    
     void* ast_pool;
     void** consts;
     void* type_list;
