@@ -64,6 +64,8 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
 
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool) {
     if (arr->length + 1 > arr->capacity) {
+        printf("array expand: %p, len: %ld, extra: %ld, capacity: %ld\n", arr, 
+            arr->length, arr->extra, arr->capacity);
         arr->capacity = arr->capacity ? arr->capacity * 2 : 8;
         arr->items = !pool ? Realloc(arr->items, arr->capacity * sizeof(Item)) :
             pool_variable_realloc(pool, arr->items, arr->length * sizeof(Item), arr->capacity * sizeof(Item));

@@ -29,4 +29,4 @@ markdown
 format(json, 'json')
 
 "\nFormat Markdown:\n"
-// format(markdown, 'markdown')
+format(markdown, 'markdown')
