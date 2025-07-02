@@ -9,7 +9,6 @@ static void skip_whitespace(const char **json) {
 }
 
 static String* parse_string(Input *input, const char **json) {
-    printf("parse_string: %s\n", *json);
     if (**json != '"') return NULL;
     StrBuf* sb = input->sb;
     
@@ -69,10 +68,8 @@ static Item parse_number(Input *input, const char **json) {
 }
 
 static Array* parse_array(Input *input, const char **json) {
-    printf("parse_array: %s\n", *json);
     if (**json != '[') return NULL;
     Array* arr = array_pooled(input->pool);
-    printf("array_pooled: arr %p\n", arr);
     if (!arr) return NULL;
 
     (*json)++; // skip [ 
@@ -92,7 +89,6 @@ static Array* parse_array(Input *input, const char **json) {
         (*json)++;
         skip_whitespace(json);
     }
-    printf("parsed array length: %ld\n", arr->length);
     return arr;
 }
 
@@ -130,8 +126,6 @@ static Map* parse_object(Input *input, const char **json) {
     }
     arraylist_append(input->type_list, map_type);
     map_type->type_index = input->type_list->length - 1;
-    printf("parsed map length: %ld, byte_size: %ld, shape: %p\n", 
-        map_type->length, map_type->byte_size, map_type->shape);
     return mp;
 }
 

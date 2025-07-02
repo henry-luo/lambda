@@ -220,3 +220,5 @@ Type* const_type(int type_index);
 Type* type(Item item);
 
 Item input(Item url, Item type);
+void print(Item item);
+String* format(Item item, Item type);

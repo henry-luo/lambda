@@ -119,7 +119,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
         if (!field->name) { // nested map
             Map *nest_map = *(Map**)data;
             TypeMap *nest_map_type = (TypeMap*)nest_map->type;
-            print_named_items(strbuf, nest_map_type, nest_map->data);
+            print_named_items_with_depth(strbuf, nest_map_type, nest_map->data, depth + 1);
         }
         else {
             // printf("print_named_item: name %.*s, type %d\n", 
@@ -194,7 +194,7 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
     if (!item) { strbuf_append_str(strbuf, "null"); return; }
 
     LambdaItem ld_item = {.item = item};
-    printf("print_item: type %d\n", !ld_item.type_id ? *((uint8_t*)item) : ld_item.type_id);  
+    // printf("print_item: type %d\n", !ld_item.type_id ? *((uint8_t*)item) : ld_item.type_id);  
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
         if (type_id == LMD_TYPE_NULL) {
@@ -216,7 +216,6 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             int exponent;
             double mantissa = frexp(num, &exponent);
             if (-20 < exponent && exponent < 30) {
-                printf("num f: %.10f, g: %g, exponent: %d\n", num, num, exponent);
                 strbuf_append_format(strbuf, "%.10f", num);
                 // trim trailing zeros
                 char *end = strbuf->str + strbuf->length - 1;

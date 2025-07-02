@@ -772,3 +772,26 @@ Item input(Item url, Item type) {
     // todo: input should be cached in context
     return (input && input->root) ? input->root : ITEM_NULL;
 }
+
+void print(Item item) {
+    String *str = string(item);
+    if (str) {
+        printf("%.*s\n", str->len, str->chars);
+    }
+}
+
+String* format_data(Context* ctx, Item item, String* type);
+
+String* format(Item item, Item type) {
+    LambdaItem type_item = {.item = type};
+    String* type_str;
+    if (type_item.type_id != LMD_TYPE_NULL && type_item.type_id != LMD_TYPE_STRING && type_item.type_id != LMD_TYPE_SYMBOL) {
+        printf("format type must be a string or symbol, got type %d\n", type_item.type_id);
+        return NULL;  // todo: push error
+    }
+    else {
+        type_str = (type_item.type_id == LMD_TYPE_NULL) ? NULL : (String*)type_item.pointer;
+    }
+    printf("format item type: %s\n", type_str ? type_str->chars : "null");
+    return format_data(context, item, type_str);
+}

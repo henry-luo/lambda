@@ -56,6 +56,8 @@ func_obj_t func_list[] = {
     {"const_type", (fn_ptr) const_type},
     {"type", (fn_ptr) type},
     {"input", (fn_ptr) input},
+    {"print", (fn_ptr) print},
+    {"format", (fn_ptr) format},
 };
 
 void *import_resolver(const char *name) {

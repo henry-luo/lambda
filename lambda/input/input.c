@@ -88,7 +88,6 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, Variable
         break;
     case LMD_TYPE_STRING:
         *(String**)field_ptr = (String*)value.pointer;
-        printf("put map string: key %s, %p\n", key->chars, (void*)value.pointer);
         ((String*)value.pointer)->ref_cnt++;
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:

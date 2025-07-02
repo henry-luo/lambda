@@ -29,7 +29,9 @@
         "lambda/input/input-md.c",
         "lambda/input/input-toml.c",
         "lambda/input/input-html.c",
-        "lambda/input/input-latex.c"
+        "lambda/input/input-latex.c",
+        "lambda/format/format.c",
+        "lambda/format/format-json.c"
     ],
     "cpp_files": [
         "lambda/main.cpp"
