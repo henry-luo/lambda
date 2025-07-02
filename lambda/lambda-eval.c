@@ -3,7 +3,8 @@
 
 extern __thread Context* context;
 
-#define stack_alloc(size) pack_alloc(context->stack, size)
+#define stack_alloc(size) alloca(size);
+
 #define Malloc malloc
 #define Realloc realloc
 
@@ -89,7 +90,17 @@ Array* array_fill(Array* arr, int count, ...) {
 
 Item array_get(Array *array, int index) {
     if (index < 0 || index >= array->length) { return ITEM_NULL; }
-    return array->items[index];
+    LambdaItem item = (LambdaItem)array->items[index];
+    switch (item.type_id) {
+    case LMD_TYPE_INT64:
+        long lval = *(long*)item.pointer;
+        return push_l(lval);
+    case LMD_TYPE_FLOAT:
+        double dval = *(double*)item.pointer;
+        return push_d(dval);
+    default:
+        return item.item;
+    }    
 }
 
 ArrayLong* array_long_new(int count, ...) {
@@ -118,16 +129,33 @@ List* list() {
 void expand_list(List *list) {
     printf("expand list: %p, len: %ld, extra: %ld, capacity: %ld\n", list, 
         list->length, list->extra, list->capacity);
-    long old_capacity = list->capacity;
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry
     // need to profile to see which is faster
+    Item* old_items = list->items;
     list->items = Realloc(list->items, list->capacity * sizeof(Item));
     // copy extra items to the end of the list
     if (list->extra) {
         memcpy(list->items + (list->capacity - list->extra), 
-            list->items + (old_capacity - list->extra), list->extra * sizeof(Item));    
+            list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));
+        // scan the list, if the item is long/double,
+        // and is stored in the list extra slots, need to update the pointer
+        for (int i = 0; i < list->length; i++) {
+            LambdaItem itm = (LambdaItem)list->items[i];
+            if (itm.type_id == LMD_TYPE_FLOAT || itm.type_id == LMD_TYPE_INT64) {
+                Item* old_pointer = (Item*)itm.pointer;
+                // Only update pointers that are in the old list buffer's extra space
+                if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
+                    printf("list expand: item %d, old pointer %p\n", i, old_pointer);
+                    int offset = old_items + list->capacity/2 - old_pointer;
+                    void* new_pointer = list->items + list->capacity - offset;
+                    list->items[i] = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : l2it(new_pointer);
+                }
+                // If the pointer is not in the old buffer, it's pointing to stack memory or elsewhere
+                // and doesn't need to be updated - this is valid and expected
+            }
+        }
     }
 }
 
@@ -137,7 +165,8 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
     }
-    printf("list_push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
+    printf("list_push item: %llu, type: %d, list: %p, length: %ld, items: %p\n", item, itm.type_id, 
+        list, list->length, list->items);
     if (itm.type_id == LMD_TYPE_RAW_POINTER) {
         TypeId type_id = *((uint8_t*)itm.raw_pointer);
         // nest list is flattened
@@ -166,8 +195,8 @@ void list_push(List *list, Item item) {
             container->ref_cnt++;
         }
     }
-    // store the value in the list
-    if (list->length + list->extra >= list->capacity) { expand_list(list); }
+    // store the value in the list (and we may need two slots for long/double)
+    if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     // printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
     switch (itm.type_id) {
@@ -176,23 +205,17 @@ void list_push(List *list, Item item) {
         str->ref_cnt++;
         break;
     case LMD_TYPE_FLOAT:
-        if (list->extra + list->length >= list->capacity) { expand_list(list); }
-        double* dval = (double*)(list->items + list->capacity - list->extra - 1);
+        double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
+        printf("list push float: from %p to %p\n", (void*)itm.pointer, dval);
         *dval = *(double*)itm.pointer;  list->items[list->length-1] = d2it(dval);
         list->extra++;
         break;
     case LMD_TYPE_INT64:
-        if (list->extra + list->length >= list->capacity) { expand_list(list); }
-        long* ival = (long*)(list->items + list->capacity - list->extra - 1);
+        long* ival = (long*)(list->items + (list->capacity - list->extra - 1));
         *ival = *(long*)itm.pointer;  list->items[list->length-1] = l2it(ival);
         list->extra++;
         break;
     }
-}
-
-Item list_get(List *list, int index) {
-    if (index < 0 || index >= list->length) { return ITEM_NULL; }
-    return list->items[index];
 }
 
 List* list_fill(List *list, int count, ...) {
@@ -210,6 +233,21 @@ List* list_fill(List *list, int count, ...) {
     printf("list filled: %ld\n", list->length);
     frame_end();
     return list;
+}
+
+Item list_get(List *list, int index) {
+    if (index < 0 || index >= list->length) { return ITEM_NULL; }
+    LambdaItem item = (LambdaItem)list->items[index];
+    switch (item.type_id) {
+    case LMD_TYPE_INT64:
+        long lval = *(long*)item.pointer;
+        return push_l(lval);
+    case LMD_TYPE_FLOAT:
+        double dval = *(double*)item.pointer;
+        return push_d(dval);
+    default:
+        return item.item;
+    }
 }
 
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
@@ -333,6 +371,9 @@ Item _map_get(Map* map, char *key, bool *is_found) {
                     return b2it(*(bool*)field_ptr);
                 case LMD_TYPE_INT:
                     return i2it(*(int*)field_ptr);
+                case LMD_TYPE_INT64:
+                    long lval = *(long*)field_ptr;
+                    return push_l(lval);
                 case LMD_TYPE_FLOAT:
                     double dval = *(double*)field_ptr;
                     return push_d(dval);

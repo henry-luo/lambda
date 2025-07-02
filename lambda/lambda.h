@@ -192,6 +192,7 @@ Item push_l(long lval);
 
 #define const_s(index)      ((String*)*(rt->consts + index))
 
+// item unboxing
 long it2l(Item item);
 double it2d(Item item);
 
