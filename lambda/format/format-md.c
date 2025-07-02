@@ -379,7 +379,7 @@ static void format_item(StrBuf* sb, Item item) {
 // Main format function
 String* format_markdown(VariableMemPool* pool, Item root_item) {
     if (!pool || !root_item) return NULL;
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StrBuf* sb = strbuf_new();  // strbuf_new_pooled(pool);
     if (!sb) return NULL;
     
     format_item(sb, root_item);

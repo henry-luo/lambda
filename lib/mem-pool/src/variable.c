@@ -123,7 +123,6 @@ void* pool_variable_realloc(VariableMemPool *pool, void *ptr, size_t data_size, 
         if (data_size) memcpy(new_ptr, ptr, data_size);
         printf("pool_variable to free: %p\n", (void*)ptr);
         pool_variable_free(pool, ptr);
-
     }
     return new_ptr;
 }
