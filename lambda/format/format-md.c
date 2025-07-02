@@ -376,18 +376,8 @@ static void format_item(StrBuf* sb, Item item) {
     }
 }
 
-// Main format function
-String* format_markdown(VariableMemPool* pool, Item root_item) {
-    if (!pool || !root_item) return NULL;
-    StrBuf* sb = strbuf_new();  // strbuf_new_pooled(pool);
-    if (!sb) return NULL;
-    
-    format_item(sb, root_item);
-    return strbuf_to_string(sb);
-}
-
-// Convenience function that formats markdown to a provided StrBuf
-void format_markdown_to_strbuf(StrBuf* sb, Item root_item) {
+// formats markdown to a provided StrBuf
+void format_markdown(StrBuf* sb, Item root_item) {
     if (!sb) return;
     
     // Handle null/empty root item

@@ -1,7 +1,7 @@
 #include "../transpiler.h"
 
 String* format_json(VariableMemPool* pool, Item root_item);
-String* format_markdown(VariableMemPool* pool, Item root_item);
+void format_markdown(StrBuf* sb, Item root_item);
 
 String* format_data(Context* ctx, Item item, String* type) {
     String* result = NULL;
@@ -9,7 +9,10 @@ String* format_data(Context* ctx, Item item, String* type) {
         result = format_json(ctx->heap->pool, item);
     }
     else if (strcmp(type->chars, "markdown") == 0) {
-        result = format_markdown(ctx->heap->pool, item);
+        StrBuf* sb = strbuf_new_pooled(ctx->heap->pool);
+        format_markdown(sb, item);
+        result = strbuf_to_string(sb);
+        strbuf_free(sb);
     }
     else {
         printf("Unsupported format type: %s\n", type->chars);
