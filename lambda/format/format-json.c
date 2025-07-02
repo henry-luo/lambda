@@ -28,43 +28,42 @@ static void format_string(StrBuf* sb, String* str) {
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         switch (c) {
-            case '"':
-                strbuf_append_str(sb, "\\\"");
-                break;
-            case '\\':
-                strbuf_append_str(sb, "\\\\");
-                break;
-            case '/':
-                strbuf_append_str(sb, "\\/");
-                break;
-            case '\b':
-                strbuf_append_str(sb, "\\b");
-                break;
-            case '\f':
-                strbuf_append_str(sb, "\\f");
-                break;
-            case '\n':
-                strbuf_append_str(sb, "\\n");
-                break;
-            case '\r':
-                strbuf_append_str(sb, "\\r");
-                break;
-            case '\t':
-                strbuf_append_str(sb, "\\t");
-                break;
-            default:
-                if (c < 0x20) {
-                    // Control characters - encode as \uXXXX
-                    char hex_buf[7];
-                    snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", (unsigned char)c);
-                    strbuf_append_str(sb, hex_buf);
-                } else {
-                    strbuf_append_char(sb, c);
-                }
-                break;
+        case '"':
+            strbuf_append_str(sb, "\\\"");
+            break;
+        case '\\':
+            strbuf_append_str(sb, "\\\\");
+            break;
+        case '/':
+            strbuf_append_str(sb, "\\/");
+            break;
+        case '\b':
+            strbuf_append_str(sb, "\\b");
+            break;
+        case '\f':
+            strbuf_append_str(sb, "\\f");
+            break;
+        case '\n':
+            strbuf_append_str(sb, "\\n");
+            break;
+        case '\r':
+            strbuf_append_str(sb, "\\r");
+            break;
+        case '\t':
+            strbuf_append_str(sb, "\\t");
+            break;
+        default:
+            if (c < 0x20) {
+                // Control characters - encode as \uXXXX
+                char hex_buf[7];
+                snprintf(hex_buf, sizeof(hex_buf), "\\u%04x", (unsigned char)c);
+                strbuf_append_str(sb, hex_buf);
+            } else {
+                strbuf_append_char(sb, c);
+            }
+            break;
         }
     }
-    
     strbuf_append_char(sb, '"');
 }
 
@@ -110,19 +109,13 @@ static void format_number(StrBuf* sb, Item item) {
 static void format_array(StrBuf* sb, Array* arr) {
     printf("format_array: arr %p, length %ld\n", (void*)arr, arr ? arr->length : 0);
     strbuf_append_char(sb, '[');
-    
     if (arr && arr->length > 0) {
         for (long i = 0; i < arr->length; i++) {
-            if (i > 0) {
-                strbuf_append_char(sb, ',');
-            }
-            
-            // Access the Item directly from the items array
+            if (i > 0) { strbuf_append_char(sb, ','); }
             Item item = arr->items[i];
             format_item(sb, item);
         }
     }
-    
     strbuf_append_char(sb, ']');
 }
 
@@ -138,7 +131,6 @@ static void format_map(StrBuf* sb, Map* mp) {
 
 static void format_item(StrBuf* sb, Item item) {
     TypeId type = get_type_id((LambdaItem)item);
-    
     switch (type) {
     case LMD_TYPE_NULL:
         strbuf_append_str(sb, "null");
@@ -163,17 +155,17 @@ static void format_item(StrBuf* sb, Item item) {
         break;
     }
     case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)get_pointer(item);
+        Array* arr = (Array*)item;
         format_array(sb, arr);
         break;
     }
     case LMD_TYPE_MAP: {
-        Map* mp = (Map*)get_pointer(item);
+        Map* mp = (Map*)item;
         format_map(sb, mp);
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Map* mp = (Map*)get_pointer(item);
+        Map* mp = (Map*)item;
         format_map(sb, mp);
         break;
     }

@@ -139,7 +139,7 @@ typedef struct List {
     // --------
     Item* items;
     long length;
-    long extra;  // count of extra items
+    long extra;  // count of extra items stored at the end of the list
     long capacity;
 } List;
 

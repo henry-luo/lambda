@@ -1,5 +1,5 @@
 {
-    "output": "lambda.exe",
+    "output": "lambda_debug.exe",
     "source_files": [
         "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
@@ -40,8 +40,6 @@
     "libraries": [
         {
             "name": "lexbor",
-            "_include_original": "/opt/homebrew/opt/lexbor/include",
-            "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
             "include": "/usr/local/include",
             "lib": "/usr/local/lib/liblexbor_static.a",            
             "link": "static"
@@ -79,8 +77,14 @@
     "flags": [
         "fms-extensions",
         "pedantic",
-        "fcolor-diagnostics"
+        "fcolor-diagnostics",
+        "fsanitize=address",
+        "fno-omit-frame-pointer",
+        "O1"
+    ],
+    "linker_flags": [
+        "fsanitize=address"
     ],
     "debug": true,
-    "build_dir": "build"
+    "build_dir": "build_debug"
 }

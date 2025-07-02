@@ -16,8 +16,8 @@ json
 // xml
 // let more_xml = input('./test/input/more_test.xml', 'xml')
 // more_xml
-// let markdown = input('./test/input/test.md', 'markdown')
-// markdown
+let markdown = input('./test/input/test.md', 'markdown')
+markdown
 // let html = input('./test/input/test.html', 'html')
 // html
 // let more_html = input('./test/input/more_test.html', 'html')
@@ -27,3 +27,6 @@ json
 
 "\nFormat JSON:\n"
 format(json, 'json')
+
+"\nFormat Markdown:\n"
+format(markdown, 'markdown')

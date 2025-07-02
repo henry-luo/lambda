@@ -1,6 +1,7 @@
 #include "internals.h"
 #include "../include/mem_pool.h"
 #include <string.h>
+#include <assert.h>
 
 struct SizedBlock {
     Header header;
@@ -81,7 +82,7 @@ static void *best_fit_from_free_list(VariableMemPool *pool, size_t required_size
 MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
 {
     // lock(pool);
-
+    printf("pool_variable_alloc: %zu\n", size);
     Buffer *buff = pool->buff_last;
     size_t block_size = mem_align(size);
 
@@ -103,6 +104,7 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
 
 void* pool_calloc(VariableMemPool* pool, size_t size) {
     void* bytes;
+    printf("pool_calloc: %zu\n", size);
     if (pool_variable_alloc(pool, size, &bytes) == MEM_POOL_ERR_OK) {
         memset(bytes, 0, size);
         return bytes;
@@ -112,10 +114,13 @@ void* pool_calloc(VariableMemPool* pool, size_t size) {
 
 void* pool_variable_realloc(VariableMemPool *pool, void *ptr,  size_t data_size, size_t new_size) {
     void *new_ptr;
+    printf("pool_variable_realloc: %zu\n", new_size);
     MemPoolError err = pool_variable_alloc(pool, new_size, &new_ptr);
     if (err != MEM_POOL_ERR_OK) { return NULL; }
     // copy the old data to the new block
+    assert(new_ptr != ptr);
     if (data_size) memcpy(new_ptr, ptr, data_size);
+    printf("pool_variable to free: %p\n", (void*)ptr);
     pool_variable_free(pool, ptr);
     return new_ptr;
 }
@@ -193,6 +198,7 @@ static SizedBlock *defragment(VariableMemPool *pool, Buffer *buff, SizedBlock *b
 MemPoolError pool_variable_free(VariableMemPool *pool, void *ptr)
 {
     // lock(pool);
+    printf("pool_variable_free: %p\n", ptr);
     Buffer *buff = buffer_list_find(pool->buff_head, ptr);
     SizedBlock *new = (SizedBlock *)((char *)ptr - pool->header_size);
 

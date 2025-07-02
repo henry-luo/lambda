@@ -118,6 +118,7 @@ List* list() {
 void expand_list(List *list) {
     printf("expand list: %p, len: %ld, extra: %ld, capacity: %ld\n", list, 
         list->length, list->extra, list->capacity);
+    long old_capacity = list->capacity;
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry
@@ -126,7 +127,7 @@ void expand_list(List *list) {
     // copy extra items to the end of the list
     if (list->extra) {
         memcpy(list->items + (list->capacity - list->extra), 
-            list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));    
+            list->items + (old_capacity - list->extra), list->extra * sizeof(Item));    
     }
 }
 

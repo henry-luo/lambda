@@ -87,6 +87,12 @@ if command -v jq >/dev/null 2>&1; then
         [ -n "$flag" ] && FLAGS="$FLAGS -$flag"
     done < <(jq -r '.flags[]?' "$CONFIG_FILE")
     
+    # Process linker flags
+    LINKER_FLAGS=""
+    while IFS= read -r flag; do
+        [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
+    done < <(jq -r '.linker_flags[]?' "$CONFIG_FILE")
+    
     # Get source files (using arrays compatible with older bash)
     SOURCE_FILES_ARRAY=()
     CPP_FILES_ARRAY=()
@@ -107,6 +113,12 @@ else
     LINK_LIBS="-L/opt/homebrew/lib -lgmp"
     WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
     FLAGS="-fms-extensions -pedantic -fcolor-diagnostics"
+    LINKER_FLAGS=""
+    
+    # Parse linker flags
+    while IFS= read -r flag; do
+        [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
+    done < <(get_json_array "linker_flags" "$CONFIG_FILE")
     
     # Parse source files into arrays
     SOURCE_FILES_ARRAY=()
@@ -203,7 +215,7 @@ fi
 # Link final executable only if compilation was successful
 if [ "$compilation_success" = true ]; then
     echo "Linking: $OUTPUT"
-    link_output=$(clang++ $OBJECT_FILES $LIBS $LINK_LIBS -o "$OUTPUT" 2>&1)
+    link_output=$(clang++ $OBJECT_FILES $LIBS $LINK_LIBS $LINKER_FLAGS -o "$OUTPUT" 2>&1)
     if [ $? -ne 0 ]; then
         compilation_success=false
     fi
