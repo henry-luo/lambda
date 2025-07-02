@@ -43,11 +43,7 @@ StrBuf* strbuf_create(const char *str) {
 
 void strbuf_free(StrBuf *sb) {
     if (sb->pool) {
-        if (sb->str) {
-            // For pooled strbuf, free the buffer that includes the String header
-            char *buffer_start = sb->str - sizeof(uint32_t);
-            pool_variable_free(sb->pool, buffer_start);
-        }
+        if (sb->str) { pool_variable_free(sb->pool, sb->str);}
         pool_variable_free(sb->pool, sb);
     } else {
         if (sb->str) free(sb->str);
