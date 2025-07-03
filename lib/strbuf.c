@@ -68,8 +68,6 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     if (min_capacity <= sb->capacity) return true;
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
     while (new_capacity < min_capacity) { new_capacity *= 2; }
-
-    printf("strbuf_expand_cap: %zu -> %zu, %p\n", sb->capacity, new_capacity, (void*)sb->str);
     char *new_s;
     if (!sb->pool) new_s = (char*)realloc(sb->str, new_capacity);
     else {
@@ -80,7 +78,7 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
         }
         else { // realloc existing buffer
             new_s = (char*)pool_variable_realloc(sb->pool, sb->str, (sb->length+1), new_capacity);
-            printf("strbuf expanded: %p -> %p\n", (void*)sb->str, (void*)new_s);
+            // printf("strbuf expanded: %p -> %p\n", (void*)sb->str, (void*)new_s);
         }
     }
     if (!new_s) return false;

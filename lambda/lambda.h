@@ -105,33 +105,6 @@ typedef struct Range {
 Range* range();
 long range_get(Range *range, int index);
 
-typedef struct Array {
-    uint8_t type_id;
-    uint8_t flags;
-    uint16_t ref_cnt;  // reference count
-    // --------
-    Item* items;
-    long length;
-    long extra;  // count of extra items
-    long capacity;
-} Array;
-
-typedef struct ArrayLong {
-    uint8_t type_id;
-    uint8_t flags;
-    uint16_t ref_cnt;  // reference count
-    // --------
-    long* items;
-    long length;
-    long extra;  // count of extra items
-    long capacity;
-} ArrayLong;
-
-Array* array();
-Array* array_fill(Array* arr, int count, ...);
-ArrayLong* array_long_new(int count, ...);
-Item array_get(Array *array, int index);
-
 typedef struct List {
     uint8_t type_id;
     uint8_t flags;
@@ -148,8 +121,24 @@ List* list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
 Item list_get(List *list, int index);
 
+typedef struct List Array;
+
+typedef struct ArrayLong {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+    // --------
+    long* items;
+    long length;
+    long extra;  // count of extra items
+    long capacity;
+} ArrayLong;
+
+Array* array();
+ArrayLong* array_long_new(int count, ...);
+Array* array_fill(Array* arr, int count, ...);
 // void array_push(Array *array, Item item);
-// void map_set(Map* map, char *key, Item value);
+Item array_get(Array *array, int index);
 
 typedef struct Map Map;
 Map* map(int type_index);

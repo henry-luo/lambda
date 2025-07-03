@@ -93,10 +93,7 @@ static void *best_fit_from_free_list(VariableMemPool *pool, size_t required_size
     return NULL;
 }
 
-MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
-{
-    // lock(pool);
-    printf("pool_variable_alloc: %zu\n", size);
+MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr) {
     Buffer *buff = pool->buff_last;
     size_t block_size = mem_align(size);
 
@@ -118,7 +115,6 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
 
 void* pool_calloc(VariableMemPool* pool, size_t size) {
     void* bytes;
-    printf("pool_calloc: %zu\n", size);
     if (pool_variable_alloc(pool, size, &bytes) == MEM_POOL_ERR_OK) {
         memset(bytes, 0, size);
         return bytes;
@@ -128,26 +124,21 @@ void* pool_calloc(VariableMemPool* pool, size_t size) {
 
 void* pool_variable_realloc(VariableMemPool *pool, void *ptr, size_t data_size, size_t new_size) {
     void *new_ptr;
-    printf("pool_variable_realloc: old: %zu, new: %zu\n", data_size, new_size);
     MemPoolError err = pool_variable_alloc(pool, new_size, &new_ptr);
     if (err != MEM_POOL_ERR_OK) { return NULL; }
     // copy the old data to the new block
     assert(new_ptr != ptr);
     if (ptr) {
         if (data_size) memcpy(new_ptr, ptr, data_size);
-        printf("pool_variable to free: %p\n", (void*)ptr);
         pool_variable_free(pool, ptr);
     }
     return new_ptr;
 }
 
-static int delete_block_from_free_list(VariableMemPool *pool, SizedBlock *block)
-{
+static int delete_block_from_free_list(VariableMemPool *pool, SizedBlock *block) {
     SizedBlock **curr = &pool->block_head;
     int iterations = 0;
     const int MAX_ITERATIONS = 10000; // Prevent infinite loops
-    
-    printf("delete_block_from_free_list: looking for block %p\n", (void*)block);
 
     while (*curr && iterations++ < MAX_ITERATIONS) {
         // SAFETY CHECK: Validate pointer before dereferencing
@@ -240,11 +231,7 @@ static SizedBlock *defragment(VariableMemPool *pool, Buffer *buff, SizedBlock *b
     return block;
 }
 
-MemPoolError pool_variable_free(VariableMemPool *pool, void *ptr)
-{
-    // lock(pool);
-    printf("pool_variable_free: %p\n", ptr);
-    
+MemPoolError pool_variable_free(VariableMemPool *pool, void *ptr) {   
     // SAFETY CHECK: Validate input parameters
     if (!pool || !ptr) {
         printf("ERROR: Invalid parameters to pool_variable_free\n");
@@ -267,20 +254,15 @@ MemPoolError pool_variable_free(VariableMemPool *pool, void *ptr)
         }
         
         // SAFETY CHECK: Check if block is already in free list (double-free detection)
-        printf("Checking for double-free of block %p in free list\n", (void*)new);
         SizedBlock *current = pool->block_head;
         int free_list_count = 0;
         while (current) {
-            printf("  Free list block %d: %p\n", free_list_count++, (void*)current);
             if (current == new) {
                 printf("ERROR: Double-free detected for block %p\n", ptr);
                 return MEM_POOL_ERR_UNKNOWN_BLOCK;
             }
             current = current->next_in_free_list;
         }
-        printf("Block %p not found in free list (good for first free)\n", (void*)new);
-        
-        printf("Freeing block: %p, size: %zu\n", (void*)new, new->header.size);
         new = defragment(pool, buff, new);
     }
     SizedBlock *tmp = pool->block_head;

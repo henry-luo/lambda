@@ -8,6 +8,8 @@ extern __thread Context* context;
 #define Malloc malloc
 #define Realloc realloc
 
+void expand_list(List *list);
+
 Array* array() {
     Array *arr = calloc(1, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
@@ -31,19 +33,11 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
     if (pool) return;
     switch (itm.type_id) {
     case LMD_TYPE_FLOAT:
-        if (arr->extra + arr->length >= arr->capacity) {
-            arr->capacity = arr->length + 2*arr->extra + 8;
-            arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
-        }
         double* dval = (double*)(arr->items + (arr->length + arr->extra));
         *dval = *(double*)itm.pointer;  arr->items[index] = d2it(dval);
         arr->extra++;
         break;
     case LMD_TYPE_INT64:
-        if (arr->extra + arr->length >= arr->capacity) {
-            arr->capacity = arr->length + 2*arr->extra + 8;
-            arr->items = Realloc(arr->items, arr->capacity * sizeof(Item));
-        }
         long* ival = (long*)(arr->items + (arr->length + arr->extra));
         *ival = *(long*)itm.pointer;  arr->items[index] = l2it(ival);
         arr->extra++;
@@ -63,12 +57,8 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
 }
 
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool) {
-    if (arr->length + 1 > arr->capacity) {
-        printf("array expand: %p, len: %ld, extra: %ld, capacity: %ld\n", arr, 
-            arr->length, arr->extra, arr->capacity);
-        arr->capacity = arr->capacity ? arr->capacity * 2 : 8;
-        arr->items = !pool ? Realloc(arr->items, arr->capacity * sizeof(Item)) :
-            pool_variable_realloc(pool, arr->items, arr->length * sizeof(Item), arr->capacity * sizeof(Item));
+    if (arr->length + arr->extra + 2 > arr->capacity) {
+        expand_list((List*)arr);
     }
     array_set(arr, arr->length, itm, pool);
     arr->length++;
@@ -167,8 +157,6 @@ void list_push(List *list, Item item) {
     if (itm.type_id == LMD_TYPE_NULL) { 
         return;  // skip NULL value
     }
-    printf("list_push item: %llu, type: %d, list: %p, length: %ld, items: %p\n", item, itm.type_id, 
-        list, list->length, list->items);
     if (itm.type_id == LMD_TYPE_RAW_POINTER) {
         TypeId type_id = *((uint8_t*)itm.raw_pointer);
         // nest list is flattened
@@ -208,7 +196,6 @@ void list_push(List *list, Item item) {
         break;
     case LMD_TYPE_FLOAT:
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
-        printf("list push float: from %p to %p\n", (void*)itm.pointer, dval);
         *dval = *(double*)itm.pointer;  list->items[list->length-1] = d2it(dval);
         list->extra++;
         break;

@@ -49,7 +49,6 @@ static String* get_attribute(Element* elem, const char* attr_name) {
 // Format plain text (escape markdown special characters)
 static void format_text(StrBuf* sb, String* str) {
     if (!sb || !str || !str->chars) return;
-    printf("format_text: str %p, len %d, %s\n", (void*)str, str->len, str->chars);
 
     const char* s = str->chars;
     size_t len = str->len;
@@ -340,17 +339,14 @@ static void format_element(StrBuf* sb, Element* elem) {
 // Format any item to markdown
 static void format_item(StrBuf* sb, Item item) {
     TypeId type = get_type_id((LambdaItem)item);
-    printf("formatting item of type %d\n", type);
+    // printf("formatting item of type %d\n", type);
     switch (type) {
     case LMD_TYPE_NULL:
         // Skip null items in markdown formatting
         break;
     case LMD_TYPE_STRING: {
         String* str = (String*)get_pointer(item);
-        if (str) { 
-            format_text(sb, str); 
-            printf("formatted string: %.*s\n", (int)str->len, str->chars);
-        }
+        if (str) { format_text(sb, str); }
         break;
     }
     case LMD_TYPE_ELEMENT: {
