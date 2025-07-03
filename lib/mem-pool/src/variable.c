@@ -2,6 +2,7 @@
 #include "../include/mem_pool.h"
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
 
 struct SizedBlock {
     Header header;
@@ -61,8 +62,17 @@ static void *best_fit_from_free_list(VariableMemPool *pool, size_t required_size
     size_t block_size;
     long diff;
     size_t diff_percent;
+    int iterations = 0;
+    const int MAX_ITERATIONS = 1000;
 
-    while (*curr) {
+    while (*curr && iterations++ < MAX_ITERATIONS) {
+        // SAFETY CHECK: Validate pointer before dereferencing
+        if (!buffer_list_find(pool->buff_head, *curr)) {
+            printf("ERROR: Corrupted free list pointer in best_fit_from_free_list: %p\n", (void*)*curr);
+            *curr = NULL;
+            break;
+        }
+        
         block_size = (*curr)->header.size;
         diff = labs((long) block_size - (long) required_size);
         diff_percent = ((size_t) diff * 100) / ((block_size + required_size) / 2);
@@ -70,10 +80,14 @@ static void *best_fit_from_free_list(VariableMemPool *pool, size_t required_size
         if (MEM_POOL_NO_BEST_FIT == pool->tolerance_percent || diff_percent <= pool->tolerance_percent) {
             SizedBlock *block = *curr;
             *curr = (*curr)->next_in_free_list;
-
+            printf("Reusing block from free list: %p, size: %zu\n", (void*)block, block->header.size);
             return (char *)block + pool->header_size;
         }
         curr = &(*curr)->next_in_free_list;
+    }
+    
+    if (iterations >= MAX_ITERATIONS) {
+        printf("ERROR: Infinite loop detected in best_fit_from_free_list\n");
     }
 
     return NULL;
@@ -130,15 +144,44 @@ void* pool_variable_realloc(VariableMemPool *pool, void *ptr, size_t data_size, 
 static int delete_block_from_free_list(VariableMemPool *pool, SizedBlock *block)
 {
     SizedBlock **curr = &pool->block_head;
+    int iterations = 0;
+    const int MAX_ITERATIONS = 10000; // Prevent infinite loops
+    
+    printf("delete_block_from_free_list: looking for block %p\n", (void*)block);
 
-    while (*curr) {
+    while (*curr && iterations++ < MAX_ITERATIONS) {
+        // SAFETY CHECK: Validate pointer before dereferencing
+        if (!buffer_list_find(pool->buff_head, *curr)) {
+            printf("ERROR: Corrupted free list pointer detected: %p\n", (void*)*curr);
+            printf("ERROR: This pointer is not in any valid buffer\n");
+            // Remove the corrupted pointer to prevent crash
+            *curr = NULL;
+            return 0;
+        }
+        
+        // Additional safety: Check if the pointer looks reasonable
+        uintptr_t ptr_val = (uintptr_t)*curr;
+        if (ptr_val < 0x1000 || ptr_val == 0x6e6120646c6f6230ULL) {
+            printf("ERROR: Suspicious pointer value detected: 0x%lx\n", (unsigned long)ptr_val);
+            *curr = NULL;
+            return 0;
+        }
+
         if ((*curr) == block) {
-            *curr = block->next_in_free_list;
+            printf("Found block in free list, removing\n");
+            *curr = (*curr)->next_in_free_list;
             return 1;
         }
+        
         curr = &(*curr)->next_in_free_list;
     }
 
+    if (iterations >= MAX_ITERATIONS) {
+        printf("ERROR: Infinite loop detected in free list traversal\n");
+        return 0;
+    }
+
+    printf("Block %p not found in free list\n", (void*)block);
     return 0;
 }
 
@@ -201,13 +244,43 @@ MemPoolError pool_variable_free(VariableMemPool *pool, void *ptr)
 {
     // lock(pool);
     printf("pool_variable_free: %p\n", ptr);
+    
+    // SAFETY CHECK: Validate input parameters
+    if (!pool || !ptr) {
+        printf("ERROR: Invalid parameters to pool_variable_free\n");
+        return MEM_POOL_ERR_UNKNOWN_BLOCK;
+    }
+    
     Buffer *buff = buffer_list_find(pool->buff_head, ptr);
     SizedBlock *new = (SizedBlock *)((char *)ptr - pool->header_size);
 
     if (!buff) {
+        // SAFETY CHECK: Pointer not from this pool
+        printf("ERROR: Attempting to free pointer not allocated by this pool: %p\n", ptr);
         // unlock(pool);
         return MEM_POOL_ERR_UNKNOWN_BLOCK;
     } else {
+        // SAFETY CHECK: Validate header before defragmentation
+        if (new->header.size == 0 || new->header.size > 10*1024*1024) {
+            printf("ERROR: Invalid block size detected: %zu\n", new->header.size);
+            return MEM_POOL_ERR_UNKNOWN_BLOCK;
+        }
+        
+        // SAFETY CHECK: Check if block is already in free list (double-free detection)
+        printf("Checking for double-free of block %p in free list\n", (void*)new);
+        SizedBlock *current = pool->block_head;
+        int free_list_count = 0;
+        while (current) {
+            printf("  Free list block %d: %p\n", free_list_count++, (void*)current);
+            if (current == new) {
+                printf("ERROR: Double-free detected for block %p\n", ptr);
+                return MEM_POOL_ERR_UNKNOWN_BLOCK;
+            }
+            current = current->next_in_free_list;
+        }
+        printf("Block %p not found in free list (good for first free)\n", (void*)new);
+        
+        printf("Freeing block: %p, size: %zu\n", (void*)new, new->header.size);
         new = defragment(pool, buff, new);
     }
     SizedBlock *tmp = pool->block_head;
