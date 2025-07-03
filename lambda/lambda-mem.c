@@ -201,7 +201,6 @@ void free_container(Container* cont, bool clear_entry) {
 
 void free_item(Item item, bool clear_entry) {
     LambdaItem itm = {.item = item};
-    // printf("free item: type: %d, pointer: %llu\n", itm.type_id, itm.pointer);
     if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
         itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)itm.pointer;

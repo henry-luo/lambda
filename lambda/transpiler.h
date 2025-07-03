@@ -12,6 +12,7 @@ extern "C" {
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <inttypes.h>  // for cross-platform integer formatting
 #include <math.h>
 #include <tree_sitter/api.h>
 #include "../lib/strbuf.h"

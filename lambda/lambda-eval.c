@@ -444,7 +444,6 @@ Element* elmt_fill(Element* elmt, ...) {
 
 bool item_true(Item itm) {
     LambdaItem item = {.item = itm};
-    printf("item type: %d, val: %llu\n", item.type_id, item.pointer);
     switch (item.type_id) {
     case LMD_TYPE_NULL:
         return false;

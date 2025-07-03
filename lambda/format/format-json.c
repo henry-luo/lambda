@@ -74,7 +74,7 @@ static void format_number(StrBuf* sb, Item item) {
         // 56-bit signed integer stored directly in the item
         int64_t val = get_int_value(item);
         char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%lld", val);
+        snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
         strbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_FLOAT) {
         // Double stored as pointer
