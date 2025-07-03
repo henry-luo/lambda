@@ -381,7 +381,6 @@ void transpile_items(Transpiler* tp, AstNode *item) {
 }
 
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
-    printf("transpile array expr\n");
     TypeArray *type = (TypeArray*)array_node->type;
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
     strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : 

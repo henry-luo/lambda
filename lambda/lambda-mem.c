@@ -158,7 +158,6 @@ void free_container(Container* cont, bool clear_entry) {
         Array *arr = (Array*)cont;
         if (!arr->ref_cnt) {
             // free array items
-            printf("freeing array items: %p, length: %ld\n", arr, arr->length);
             for (int j = 0; j < arr->length; j++) {
                 free_item(arr->items[j], clear_entry);
             }
@@ -169,7 +168,6 @@ void free_container(Container* cont, bool clear_entry) {
     else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayLong *arr = (ArrayLong*)cont;
         if (!arr->ref_cnt) {
-            printf("freeing array int items: %p, length: %ld\n", arr, arr->length);
             if (arr->items) free(arr->items);
             pool_variable_free(context->heap->pool, cont);
         }
@@ -179,7 +177,6 @@ void free_container(Container* cont, bool clear_entry) {
         if (!map->ref_cnt) {
             // free map items based on the shape
             ShapeEntry *field = ((TypeMap*)map->type)->shape;
-            printf("freeing map items: %p, length: %ld\n", map, ((TypeMap*)map->type)->length);
             if (field) { free_map_item(field, map->data, clear_entry); }
             if (map->data) free(map->data);
             pool_variable_free(context->heap->pool, cont);
@@ -190,11 +187,9 @@ void free_container(Container* cont, bool clear_entry) {
         if (!elmt->ref_cnt) {
             // free element attrs based on the shape
             ShapeEntry *field = ((TypeElmt*)elmt->type)->shape;
-            printf("freeing element items: %p, length: %ld\n", elmt, ((TypeElmt*)elmt->type)->length);
             if (field) { free_map_item(field, elmt->data, clear_entry); }
             if (elmt->data) free(elmt->data);
             // free content
-            printf("freeing element content: %p, length: %ld\n", elmt, elmt->length);
             for (long j = 0; j < elmt->length; j++) {
                 free_item(elmt->items[j], clear_entry);
             }

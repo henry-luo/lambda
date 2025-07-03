@@ -7,11 +7,10 @@ b'\64A0FE'; b'\64A0FE gh8='; b'\64A0FE gh=='
 
 // arrays
 [1]; [1, -2, 0]; [1, true, "str"]; [false, null]; 
-[1, ['symbol', null], 0.5, ("great", "!")]
+[1, ['symbol-xyz', null], 0.5, ("great", "!")]
 
 // map
-{}
-{a:123}; {a:123, b:-456, c:0.5, d:true, e:false, f:null, 
+{}; {a:123}; {a:123, b:-456, c:0.5, d:true, e:false, f:null, 
 g:"hello", h:'world', i:t'2025-05-01', j:b'\xA0FE', 
 k:(120, 1e-2), l:[121], m:[true, 124], n:{a:'hello', b:0.5}};
 

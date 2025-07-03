@@ -29,16 +29,19 @@ Array* array_pooled(VariableMemPool *pool) {
 
 void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
     arr->items[index] = itm.item;
-    // mem handling
+    printf("array set item: type: %d, index: %d, length: %ld, extra: %ld\n", 
+        itm.type_id, index, arr->length, arr->extra);
+    // input files uses pool, instead of extra slots in the array
     if (pool) return;
     switch (itm.type_id) {
     case LMD_TYPE_FLOAT:
-        double* dval = (double*)(arr->items + (arr->length + arr->extra));
-        *dval = *(double*)itm.pointer;  arr->items[index] = d2it(dval);
+        double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
+        *dval = *(double*)itm.pointer;  arr->items[index] = d2it(dval);        
         arr->extra++;
+        printf("array set float: %lf\n", *dval);
         break;
     case LMD_TYPE_INT64:
-        long* ival = (long*)(arr->items + (arr->length + arr->extra));
+        long* ival = (long*)(arr->items + (arr->capacity - arr->extra - 1));
         *ival = *(long*)itm.pointer;  arr->items[index] = l2it(ival);
         arr->extra++;
         break;
@@ -57,9 +60,7 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
 }
 
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool) {
-    if (arr->length + arr->extra + 2 > arr->capacity) {
-        expand_list((List*)arr);
-    }
+    if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
     array_set(arr, arr->length, itm, pool);
     arr->length++;
 }
@@ -68,15 +69,19 @@ Array* array_fill(Array* arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->capacity = arr->length = count;
+        arr->capacity = count;
         arr->items = Malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
-            LambdaItem itm = {.item = va_arg(args, Item)};
-            array_set(arr, i, itm, NULL);
+            if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
+            array_set(arr, i, va_arg(args, LambdaItem), NULL);
+            arr->length++;
         }
         va_end(args);
     }
     frame_end();
+    StrBuf *strbuf = strbuf_new();
+    print_item(strbuf, (Item)arr);
+    printf("array_fill: %s\n", strbuf->str);
     return arr;
 }
 
@@ -105,7 +110,6 @@ ArrayLong* array_long_new(int count, ...) {
     arr->length = count;
     for (int i = 0; i < count; i++) {
         arr->items[i] = va_arg(args, long);
-        printf("array int: %ld\n", arr->items[i]);
     }       
     va_end(args);
     return arr;
@@ -119,6 +123,8 @@ List* list() {
 }
 
 void expand_list(List *list) {
+    printf("list expand: old capacity %ld, length %ld, extra %ld\n", 
+        list->capacity, list->length, list->extra);
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry
@@ -137,7 +143,7 @@ void expand_list(List *list) {
                 Item* old_pointer = (Item*)itm.pointer;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
-                    // printf("list expand: item %d, old pointer %p\n", i, old_pointer);
+                    printf("list expand: item %d, old pointer %p\n", i, old_pointer);
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
                     list->items[i] = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : l2it(new_pointer);
@@ -185,7 +191,7 @@ void list_push(List *list, Item item) {
     // store the value in the list (and we may need two slots for long/double)
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
-    // printf("list push item: %llu, type: %d, length: %ld\n", item, itm.type_id, list->length);
+    printf("list push item: type: %d, length: %ld\n", itm.type_id, list->length);
     switch (itm.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         String *str = (String*)itm.pointer;
@@ -195,6 +201,7 @@ void list_push(List *list, Item item) {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = *(double*)itm.pointer;  list->items[list->length-1] = d2it(dval);
         list->extra++;
+        printf("list push float: %f, extra: %ld\n", *dval, list->extra);
         break;
     case LMD_TYPE_INT64:
         long* ival = (long*)(list->items + (list->capacity - list->extra - 1));
@@ -216,7 +223,6 @@ List* list_fill(List *list, int count, ...) {
         list_push(list, itm.item);
     }
     va_end(args);
-    printf("list filled: %ld\n", list->length);
     frame_end();
     return list;
 }

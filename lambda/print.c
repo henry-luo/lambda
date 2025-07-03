@@ -304,7 +304,6 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
         else if (type_id == LMD_TYPE_ARRAY_INT) {
             strbuf_append_char(strbuf, '[');
             ArrayLong *array = (ArrayLong*)item;
-            printf("print array int: %p, length: %ld\n", array, array->length);
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
                 strbuf_append_format(strbuf, "%ld", array->items[i]);
