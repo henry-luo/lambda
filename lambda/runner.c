@@ -232,7 +232,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.type_list = runner->script->type_list;
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
-    // runner->context.stack = pack_init(16);
+    runner->context.num_stack = num_stack_create(16);
     runner->context.result = ITEM_NULL;  // exec result
     runner->context.cwd = get_current_dir();
     context = &runner->context;
@@ -250,7 +250,7 @@ void runner_cleanup(Runner* runner) {
         // check memory leaks
         check_memory_leak();
         heap_destroy();
-        // if (runner->context.stack) pack_free(runner->context.stack);
+        if (runner->context.num_stack) num_stack_destroy(runner->context.num_stack);
     }
 }
 

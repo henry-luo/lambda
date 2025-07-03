@@ -18,6 +18,7 @@ extern "C" {
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
+#include "../lib/num_stack.h"
 
 #include "ts-enum.h"
 

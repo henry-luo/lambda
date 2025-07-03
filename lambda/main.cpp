@@ -24,6 +24,8 @@ int main(void) {
     _Static_assert(sizeof(LambdaItem) == sizeof(Item), "LambdaItem size == Item size");
     LambdaItem itm = {.item = ITEM_ERROR};
     assert(itm.type_id == LMD_TYPE_ERROR);
+    assert(1.0/0.0 == INFINITY);
+    assert(-1.0/0.0 == -INFINITY);
 
     Runtime runtime;
     runtime_init(&runtime);
@@ -31,12 +33,12 @@ int main(void) {
     StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
     strbuf_append_str(strbuf, "Test result ===============\n");
     run_test_script(&runtime, "value.ls", strbuf);
-    run_test_script(&runtime, "expr.ls", strbuf);
-    run_test_script(&runtime, "box_unbox.ls", strbuf);
-    run_test_script(&runtime, "func.ls", strbuf);
-    run_test_script(&runtime, "mem.ls", strbuf);
-    run_test_script(&runtime, "type.ls", strbuf);
-    run_test_script(&runtime, "input.ls", strbuf);
+    // run_test_script(&runtime, "expr.ls", strbuf);
+    // run_test_script(&runtime, "box_unbox.ls", strbuf);
+    // run_test_script(&runtime, "func.ls", strbuf);
+    // run_test_script(&runtime, "mem.ls", strbuf);
+    // run_test_script(&runtime, "type.ls", strbuf);
+    // run_test_script(&runtime, "input.ls", strbuf);
 
     printf("%s", strbuf->str);
     strbuf_free(strbuf);

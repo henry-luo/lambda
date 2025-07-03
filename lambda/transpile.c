@@ -144,7 +144,6 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             else { // bool, null, float
                 TSNode child = ts_node_named_child(pri_node->node, 0);
                 TSSymbol symbol = ts_node_symbol(child);
-                printf("literal symbol: %d\n", symbol);
                 if (symbol == SYM_INF) {
                     strbuf_append_str(tp->code_buf, "infinity");
                 }
@@ -152,7 +151,6 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     strbuf_append_str(tp->code_buf, "not_a_number");
                 }
                 else {
-                    printf("literal type: %d\n", pri_node->type->type_id);
                     writeNodeSource(tp, pri_node->node);
                 }
             }

@@ -74,14 +74,13 @@ typedef struct Heap Heap;
 typedef struct Pack Pack;
 
 typedef struct Context {
-    Heap* heap;
-    // Pack* stack;  // eval stack    
+    Heap* heap;   
     void* ast_pool;
     void** consts;
     void* type_list;
+    void* num_stack;  // for long and double pointers
     void* type_info;  // meta info for the base types
     void* cwd;  // current working directory
-    // void* data_owners;  // hashmap that maps from data => its owner
     Item result; // final exec result
 } Context;
 

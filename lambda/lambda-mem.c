@@ -233,7 +233,8 @@ void free_item(Item item, bool clear_entry) {
 }
 
 void frame_start() {
-    arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | 0));
+    size_t stack_pos = ((num_stack_t *)context->num_stack)->current_position;
+    arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
     arraylist_append(context->heap->entries, (void*)HEAP_ENTRY_START);
 }
 
@@ -262,7 +263,8 @@ void frame_end() {
         }
         else if (itm.type_id == LMD_CONTAINER_HEAP_START) {
             printf("reached container start: %d\n", i);
-            // context->stack->size = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
+            size_t stack_pos = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
+            num_stack_reset_to_index(context->num_stack, stack_pos);
             entries->length = i-1;
             return;
         }

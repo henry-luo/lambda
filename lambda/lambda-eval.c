@@ -119,8 +119,6 @@ List* list() {
 }
 
 void expand_list(List *list) {
-    printf("expand list: %p, len: %ld, extra: %ld, capacity: %ld\n", list, 
-        list->length, list->extra, list->capacity);
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry
@@ -139,13 +137,12 @@ void expand_list(List *list) {
                 Item* old_pointer = (Item*)itm.pointer;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
-                    printf("list expand: item %d, old pointer %p\n", i, old_pointer);
+                    // printf("list expand: item %d, old pointer %p\n", i, old_pointer);
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
                     list->items[i] = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : l2it(new_pointer);
                 }
-                // If the pointer is not in the old buffer, it's pointing to stack memory or elsewhere
-                // and doesn't need to be updated - this is valid and expected
+                // if the pointer is not in the old buffer, it should not be updated
             }
         }
     }
@@ -465,15 +462,13 @@ Item v2it(List* list) {
 
 Item push_d(double dval) {
     printf("push_d: %g\n", dval);
-    double *dptr = stack_alloc(sizeof(double));
-    *dptr = dval;
+    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval); // stack_alloc(sizeof(double));
     return (Item) d2it(dptr);
 }
 
 Item push_l(long lval) {
     printf("push_l: %ld\n", lval);
-    long *lptr = stack_alloc(sizeof(long));
-    *lptr = lval;
+    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval); // stack_alloc(sizeof(long));
     return (Item) l2it(lptr);
 }
 
