@@ -191,7 +191,7 @@ void list_push(List *list, Item item) {
     // store the value in the list (and we may need two slots for long/double)
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
-    printf("list push item: type: %d, length: %ld\n", itm.type_id, list->length);
+    // printf("list push item: type: %d, length: %ld\n", itm.type_id, list->length);
     switch (itm.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         String *str = (String*)itm.pointer;
@@ -808,7 +808,7 @@ Item input(Item url, Item type) {
 void print(Item item) {
     String *str = string(item);
     if (str) {
-        printf("%.*s\n", str->len, str->chars);
+        printf("%s\n", str->chars);
     }
 }
 

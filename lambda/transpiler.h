@@ -11,6 +11,7 @@ extern "C" {
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stdint.h>
 #include <math.h>
 #include <tree_sitter/api.h>
 #include "../lib/strbuf.h"

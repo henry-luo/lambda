@@ -24,7 +24,7 @@ typedef struct {
 } func_obj_t;
 
 func_obj_t func_list[] = {
-    {"printf", (fn_ptr) printf},
+    // {"printf", (fn_ptr) printf}, // printf does not work
     {"pow", (fn_ptr) pow},
     {"array", (fn_ptr) array},
     {"array_fill", (fn_ptr) array_fill},
