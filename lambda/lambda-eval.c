@@ -856,3 +856,26 @@ String* format(Item item, Item type) {
     printf("format item type: %s\n", type_str ? type_str->chars : "null");
     return format_data(context, item, type_str);
 }
+
+// Length function for containers
+Item length(Item item) {
+    LambdaItem litem = (LambdaItem)item;
+    TypeId type_id = get_type_id(litem);
+    switch (litem.type_id) {
+    case LMD_TYPE_LIST:
+        return push_l(((List*)litem.raw_pointer)->length);
+    case LMD_TYPE_ARRAY:
+        return push_l(((Array*)litem.raw_pointer)->length);
+    case LMD_TYPE_ARRAY_INT:
+        return push_l(((ArrayLong*)litem.raw_pointer)->length);
+    case LMD_TYPE_MAP:
+        TypeMap *map_type = (TypeMap*)((Map*)litem.raw_pointer)->type;
+        return push_l(map_type ? map_type->length : 0);
+    case LMD_TYPE_STRING: {
+        String *str = (String*)litem.pointer;
+        return push_l(str ? str->len : 0);
+    }
+    default:
+        return push_l(0);
+    }
+}

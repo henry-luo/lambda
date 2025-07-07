@@ -149,6 +149,9 @@ Item map_get(Map* map, char *key);
 // Generic field access function
 Item field(Item item, long index);
 
+// Length function for containers
+Item length(Item item);
+
 typedef struct Element Element;
 Element* elmt(int type_index);
 Element* elmt_fill(Element *elmt, ...);
