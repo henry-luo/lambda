@@ -1,31 +1,23 @@
-/* Minimal lexbor URL stub header */
-#ifndef LEXBOR_URL_URL_H
-#define LEXBOR_URL_URL_H
+/* Minimal lexbor URL stub header for cross-compilation testing */
+#ifndef LEXBOR_URL_H
+#define LEXBOR_URL_H
+
+#include "../core/core.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct {
-    unsigned char *data;
-    size_t length;
-} lxb_char_t;
+/* Basic URL types */
+typedef struct lxb_url lxb_url_t;
 
-typedef struct {
-    lxb_char_t scheme;
-    lxb_char_t host;
-    lxb_char_t port;
-    lxb_char_t path;
-    lxb_char_t query;
-    lxb_char_t fragment;
-} lxb_url_t;
-
-/* Stub function declarations */
-lxb_url_t* lxb_url_parse(const lxb_char_t *url_str, size_t length);
+/* Basic function declarations */
+lxb_url_t* lxb_url_create(void);
 void lxb_url_destroy(lxb_url_t *url);
+lxb_status_t lxb_url_parse(lxb_url_t *url, const lxb_char_t *input, size_t length);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* LEXBOR_URL_URL_H */
+#endif /* LEXBOR_URL_H */
