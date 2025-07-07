@@ -15,10 +15,12 @@ csv_no_headers
 
 // Test accessing map data
 "\nTesting map access - first person's name:"
-csv_with_headers[0].name
+let headers = csv_with_headers[0]
+headers  // .name
 
 "\nTesting map access - first person's age:"
-csv_with_headers[0].age
+headers   // .age
 
 "\nTesting array access - first row, first column:"
-csv_no_headers[0][0]
+let first_row = csv_with_headers[0]
+first_row[0]

@@ -224,7 +224,7 @@ Item list_fill(List *list, int count, ...) {
     }
     va_end(args);
     frame_end();
-    return list->length ? (list->length == 1 ? list->items[0] : (Item)list) : ITEM_NULL;
+    return list->length ? (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT ? list->items[0] : (Item)list) : ITEM_NULL;
 }
 
 Item list_get(List *list, int index) {

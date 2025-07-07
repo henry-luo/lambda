@@ -152,15 +152,11 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
     TSNode field_node = ts_node_child_by_field_id(array_node, FIELD_FIELD);
     ast_node->field = build_expr(tp, field_node);
 
-    // Check if this is a member expression (obj.field) vs subscript expression (obj[field])
-    TSSymbol symbol = ts_node_symbol(array_node);
-    ast_node->is_member_expr = (symbol == SYM_MEMBER_EXPR);
-
     if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
         ast_node->type = ((TypeArray*)ast_node->object->type)->nested;
     }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
-        ast_node->type = &TYPE_ANY;
+        ast_node->type = &TYPE_ANY;  // todo: derive field type
     }
     else {
         ast_node->type = &TYPE_ANY;

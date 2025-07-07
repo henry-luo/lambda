@@ -606,16 +606,7 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_str(tp->code_buf, "map_get(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
-        // For member expressions (obj.field), always treat the field as a string literal
-        // For subscript expressions (obj[field]), use the field as-is (could be variable or literal)
-        if (field_node->is_member_expr || (field_node->field && field_node->field->node_type == AST_NODE_IDENT)) {
-            strbuf_append_char(tp->code_buf, '"');
-            writeNodeSource(tp, field_node->field->node);
-            strbuf_append_char(tp->code_buf, '"');
-        }
-        else {
-            writeNodeSource(tp, field_node->field->node);
-        }
+        writeNodeSource(tp, field_node->field->node);
         strbuf_append_char(tp->code_buf, ')');
     } 
     else if (field_node->object->type->type_id == LMD_TYPE_ARRAY_INT) {
