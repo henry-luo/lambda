@@ -27,3 +27,6 @@ lambda/vsce/lambda-highlighter-0.0.1.vsix
 lambda/vsce/dist/extension.js
 .gitignore
 lambda/vsce/dist/extension.js.map
+windows-deps/lib
+windows-deps/src/gmp-6.2.1
+windows-deps/src/zlog
