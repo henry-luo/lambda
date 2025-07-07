@@ -194,7 +194,7 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
     if (!item) { strbuf_append_str(strbuf, "null"); return; }
 
     LambdaItem ld_item = {.item = item};
-    // printf("print_item: type %d\n", !ld_item.type_id ? *((uint8_t*)item) : ld_item.type_id);  
+    printf("print_item: type %d\n", !ld_item.type_id ? *((uint8_t*)item) : ld_item.type_id);  
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
         if (type_id == LMD_TYPE_NULL) {

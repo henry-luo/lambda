@@ -118,7 +118,7 @@ typedef struct List {
 } List;
 
 List* list();  // constructs an empty list
-List* list_fill(List *list, int cnt, ...);  // fill the list with the items
+Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
 Item list_get(List *list, int index);
 

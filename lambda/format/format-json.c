@@ -2,12 +2,6 @@
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
 
-// Extract type ID from an Item
-// #define get_type_id(item) ((TypeId)((item) >> 56))
-static inline TypeId get_type_id(LambdaItem value) {
-    return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
-}
-
 // Extract pointer from an Item
 #define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
 

@@ -15,10 +15,10 @@ csv_no_headers
 
 // Test accessing map data
 "\nTesting map access - first person's name:"
-csv_with_headers[0]["name"]
+csv_with_headers[0].name
 
 "\nTesting map access - first person's age:"
-csv_with_headers[0]["age"]
+csv_with_headers[0].age
 
 "\nTesting array access - first row, first column:"
 csv_no_headers[0][0]

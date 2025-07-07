@@ -201,7 +201,7 @@ Test(lambda_tests, test_csv_with_headers_comma) {
     // Create a simple test script
     FILE* temp_file = fopen("temp_csv_test1.ls", "w");
     cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
-    fprintf(temp_file, "let csv = input('test/input/test.csv', 'csv'); csv[0][\"name\"]");
+    fprintf(temp_file, "let csv = input('test/input/test.csv', 'csv'); csv[0].name");
     fclose(temp_file);
     
     Item ret = run_script_at(&runtime, "temp_csv_test1.ls");
@@ -245,7 +245,7 @@ Test(lambda_tests, test_csv_with_tab_separator) {
     // Create a simple test script
     FILE* temp_file = fopen("temp_csv_test2.ls", "w");
     cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
-    fprintf(temp_file, "let csv = input('test/input/test_tab.csv', 'csv'); csv[0][\"name\"]");
+    fprintf(temp_file, "let csv = input('test/input/test_tab.csv', 'csv'); csv[0].name");
     fclose(temp_file);
     
     Item ret = run_script_at(&runtime, "temp_csv_test2.ls");
@@ -330,7 +330,7 @@ Test(lambda_tests, test_csv_field_access_by_name) {
     // Create a simple test script
     FILE* temp_file = fopen("temp_csv_test4.ls", "w");
     cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
-    fprintf(temp_file, "let csv = input('test/input/test.csv', 'csv'); csv[0][\"name\"]");
+    fprintf(temp_file, "let csv = input('test/input/test.csv', 'csv'); csv[0].name");
     fclose(temp_file);
     
     Item ret = run_script_at(&runtime, "temp_csv_test4.ls");
@@ -418,7 +418,7 @@ Test(lambda_tests, test_csv_length_function) {
     // Create a simple test script
     FILE* temp_file = fopen("temp_csv_test6.ls", "w");
     cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
-    fprintf(temp_file, "let csv = input('./test/input/test.csv', 'csv'); len(csv)");
+    fprintf(temp_file, "let csv = input('./test/input/test.csv', 'csv'); length(csv)");
     fclose(temp_file);
     
     Item ret = run_script_at(&runtime, "temp_csv_test6.ls");

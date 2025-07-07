@@ -1,10 +1,5 @@
 #include "../transpiler.h"
 
-// Extract type ID from an Item
-static inline TypeId get_type_id(LambdaItem value) {
-    return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
-}
-
 // Extract pointer from an Item
 #define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
 

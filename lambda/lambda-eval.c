@@ -211,7 +211,7 @@ void list_push(List *list, Item item) {
     }
 }
 
-List* list_fill(List *list, int count, ...) {
+Item list_fill(List *list, int count, ...) {
     printf("list_fill cnt: %d\n", count);
     va_list args;
     va_start(args, count);
@@ -224,7 +224,7 @@ List* list_fill(List *list, int count, ...) {
     }
     va_end(args);
     frame_end();
-    return list;
+    return list->length ? (list->length == 1 ? list->items[0] : (Item)list) : ITEM_NULL;
 }
 
 Item list_get(List *list, int index) {
@@ -402,32 +402,33 @@ Item map_get(Map* map, char *key) {
     return _map_get(map, key, &is_found);
 }
 
-// Generic field access function for any type
+// generic field access function for any type
 Item field(Item item, long index) {
     // Determine the type and delegate to appropriate getter
-    LambdaItem *litem = (LambdaItem*)&item;
-    
-    switch (litem->type_id) {
-        case LMD_TYPE_ARRAY:
-            return array_get((Array*)litem->pointer, (int)index);
-        case LMD_TYPE_ARRAY_INT:
-            {
-                ArrayLong *arr = (ArrayLong*)litem->pointer;
-                if (index < 0 || index >= arr->length) { return ITEM_NULL; }
-                return push_l(arr->items[index]);
-            }
-        case LMD_TYPE_LIST:
-            return list_get((List*)litem->pointer, (int)index);
-        case LMD_TYPE_MAP:
-            {
-                // For maps with numeric index, we need to convert to string
-                char index_str[32];
-                snprintf(index_str, sizeof(index_str), "%ld", index);
-                return map_get((Map*)litem->pointer, index_str);
-            }
-        default:
-            // For unknown types, try to access by index
-            return ITEM_NULL;
+    LambdaItem litem = (LambdaItem)item;
+    TypeId type_id = get_type_id(litem);
+
+    switch (type_id) {
+    case LMD_TYPE_ARRAY:
+        return array_get((Array*)litem.raw_pointer, (int)index);
+    case LMD_TYPE_ARRAY_INT:
+        {
+            ArrayLong *arr = (ArrayLong*)litem.raw_pointer;
+            if (index < 0 || index >= arr->length) { return ITEM_NULL; }
+            return push_l(arr->items[index]);
+        }
+    case LMD_TYPE_LIST:
+        return list_get((List*)litem.raw_pointer, (int)index);
+    case LMD_TYPE_MAP:
+        {
+            // For maps with numeric index, we need to convert to string
+            char index_str[32];
+            snprintf(index_str, sizeof(index_str), "%ld", index);
+            return map_get((Map*)litem.raw_pointer, index_str);
+        }
+    default:
+        // For unknown types, try to access by index
+        return ITEM_NULL;
     }
 }
 

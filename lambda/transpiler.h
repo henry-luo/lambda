@@ -534,6 +534,11 @@ typedef union LambdaItem {
     void* raw_pointer;
 } LambdaItem;
 
+// get type_id from an Item
+static inline TypeId get_type_id(LambdaItem value) {
+    return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
+}
+
 extern String EMPTY_STRING;
 String* strbuf_to_string(StrBuf *sb);
 

@@ -156,4 +156,6 @@ void parse_csv(Input* input, const char* csv_string) {
     }
     
     input->root = (Item)rows;
+    printf("CSV parsed with %ld rows, root type: %d\n", rows->length, 
+        !input->root ? 0 : ((Array*)input->root)->type_id);
 }
