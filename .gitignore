@@ -32,3 +32,5 @@ windows-deps/src/gmp-6.2.1
 windows-deps/src/zlog
 windows-deps/src/lexbor
 windows-deps/include/lexbor
+windows-deps/src/**.xz
+windows-deps/src/**.bz2

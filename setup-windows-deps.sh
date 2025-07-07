@@ -2019,7 +2019,6 @@ echo "- lexbor: $([ -f "$DEPS_DIR/lib/liblexbor_static.a" ] && echo "✓ Built (
 echo "- zlog: $([ -f "$DEPS_DIR/lib/libzlog.a" ] && echo "✓ Built ($([ -f "$DEPS_DIR/src/zlog_stub.c" ] && echo "stub" || echo "real"))" || echo "✗ Missing (optional)")"
 echo ""
 echo "Next steps:"
-echo "1. Build required dependencies manually (see windows-deps/README.md)"
-echo "2. Run: ./compile-lambda-cross.sh build_lambda_windows_config.json"
+echo "1. Run: ./compile-lambda-cross.sh build_lambda_windows_config.json"
 echo ""
 echo "To clean up intermediate files later, run: ./setup-windows-deps.sh clean"
