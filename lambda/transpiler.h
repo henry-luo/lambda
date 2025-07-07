@@ -387,6 +387,7 @@ struct AstNode {
 typedef struct {
     AstNode;  // extends AstNode
     AstNode *object, *field;
+    bool is_member_expr;  // true for obj.field, false for obj[field]
 } AstFieldNode;
 
 typedef struct {
