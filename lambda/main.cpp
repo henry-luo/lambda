@@ -13,6 +13,17 @@ void run_test_script(Runtime *runtime, const char *script, StrBuf *strbuf) {
 }
 
 int main(void) {
+#ifdef __cplusplus
+    static_assert(sizeof(bool) == 1, "bool size == 1 byte");
+    static_assert(sizeof(uint8_t) == 1, "uint8_t size == 1 byte");
+    static_assert(sizeof(uint16_t) == 2, "uint16_t size == 2 bytes");
+    static_assert(sizeof(uint32_t) == 4, "uint32_t size == 4 bytes");
+    static_assert(sizeof(uint64_t) == 8, "uint64_t size == 8 bytes");
+    static_assert(sizeof(int32_t) == 4, "int32_t size == 4 bytes");
+    static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
+    static_assert(sizeof(Item) == sizeof(double), "Item size == double size");
+    static_assert(sizeof(LambdaItem) == sizeof(Item), "LambdaItem size == Item size");
+#else
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
     _Static_assert(sizeof(uint8_t) == 1, "uint8_t size == 1 byte");
     _Static_assert(sizeof(uint16_t) == 2, "uint16_t size == 2 bytes");
@@ -22,6 +33,7 @@ int main(void) {
     _Static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
     _Static_assert(sizeof(Item) == sizeof(double), "Item size == double size");
     _Static_assert(sizeof(LambdaItem) == sizeof(Item), "LambdaItem size == Item size");
+#endif
     LambdaItem itm = {.item = ITEM_ERROR};
     assert(itm.type_id == LMD_TYPE_ERROR);
     assert(1.0/0.0 == INFINITY);
@@ -29,7 +41,7 @@ int main(void) {
 
     Runtime runtime;
     runtime_init(&runtime);
-    runtime.current_dir = "test/lambda/";
+    runtime.current_dir = const_cast<char*>("test/lambda/");
     StrBuf *strbuf = strbuf_new_cap(256);  Item ret;
     strbuf_append_str(strbuf, "Test result ===============\n");
     run_test_script(&runtime, "value.ls", strbuf);

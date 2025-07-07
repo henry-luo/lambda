@@ -1033,7 +1033,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
     while (!ts_node_is_null(child)) {
         TSSymbol symbol = ts_node_symbol(child);
         // named map item, or dynamic expr
-        AstNode* item = (symbol == SYM_MAP_ITEM) ? build_key_expr(tp, child) : build_expr(tp, child);
+        AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
         if (!prev_item) { ast_node->item = item; } 
         else { prev_item->next = item; }
         prev_item = item;
@@ -1079,7 +1079,7 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             ast_node->content = build_content(tp, child, false, false);
         }        
         else {  // attrs
-            AstNode* item = (symbol == SYM_ATTR) ? build_key_expr(tp, child) : build_expr(tp, child);
+            AstNode* item = (symbol == SYM_ATTR) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
             if (!prev_item) { ast_node->item = item; } 
             else { prev_item->next = item; }
             prev_item = item;

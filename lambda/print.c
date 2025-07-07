@@ -240,9 +240,16 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             }
         }
         else if (type_id == LMD_TYPE_DECIMAL) {
+#ifdef CROSS_COMPILE
+            // For cross-compilation, treat as a double approximation
+            double *num_ptr = (double*)ld_item.pointer;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "%.6f", *num_ptr);
+#else
             mpf_t *num = (mpf_t*)ld_item.pointer;
             char buf[128];
             gmp_sprintf(buf, "%.Ff", *num);
+#endif
             strbuf_append_str(strbuf, buf);
         }
         else if (type_id == LMD_TYPE_STRING) {

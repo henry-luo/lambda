@@ -77,7 +77,8 @@
     ],
     "flags": [
         "fms-extensions",
-        "static"
+        "static",
+        "DCROSS_COMPILE"
     ],
     "linker_flags": [
         "static-libgcc",

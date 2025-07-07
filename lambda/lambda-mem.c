@@ -31,8 +31,9 @@ void* heap_alloc(size_t size, TypeId type_id) {
         return NULL;
     }
     // scalar pointers needs to be tagged
-    arraylist_append(heap->entries, type_id < LMD_TYPE_CONTAINER ?
-        ((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data);
+    void* entry = type_id < LMD_TYPE_CONTAINER ?
+        (void*)((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data;
+    arraylist_append(heap->entries, entry);
     return data;
 }
 
@@ -74,7 +75,7 @@ void print_heap_entries() {
 }
 
 void check_memory_leak() {
-    StrBuf *strbuf = strbuf_new(1024);
+    StrBuf *strbuf = strbuf_new_cap(1024);
     ArrayList *entries = context->heap->entries;
     printf("check heap entries: %d\n", entries->length);
     for (int i = 0; i < entries->length; i++) {

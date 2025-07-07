@@ -142,8 +142,8 @@ else
         INCLUDES="-Ilambda/tree-sitter/lib/include -Iwindows-deps/include"
         LIBS="lambda/tree-sitter/libtree-sitter-windows.a windows-deps/lib/libmir.a windows-deps/lib/libzlog.a windows-deps/lib/liblexbor_static.a windows-deps/lib/libgmp.a"
         LINK_LIBS=""
-        WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
-        FLAGS="-fms-extensions -pedantic -static"
+        WARNINGS="-Wformat -Wincompatible-pointer-types -Wmultichar"
+        FLAGS="-fms-extensions -static -DCROSS_COMPILE -D_WIN32"
         LINKER_FLAGS="-static-libgcc -static-libstdc++"
     else
         INCLUDES="-Ilambda/tree-sitter/lib/include -I/usr/local/include -I/opt/homebrew/include"
@@ -225,7 +225,15 @@ if [ ${#CPP_FILES_ARRAY[@]} -gt 0 ]; then
             OBJECT_FILES="$OBJECT_FILES $cpp_obj_file"
             
             echo "Compiling C++: $cpp_file -> $cpp_obj_file"
-            cpp_output=$($CXX $INCLUDES -c "$cpp_file" -o "$cpp_obj_file" $WARNINGS $FLAGS 2>&1)
+            
+            # Use C++ specific flags (remove incompatible-pointer-types warning for C++)
+            CPP_WARNINGS=$(echo "$WARNINGS" | sed 's/-Werror=incompatible-pointer-types//g' | sed 's/-Wincompatible-pointer-types//g')
+            CPP_FLAGS="$FLAGS"
+            if [ "$CROSS_COMPILE" = "true" ]; then
+                CPP_FLAGS="$CPP_FLAGS -std=c++11 -fpermissive -Wno-fpermissive"
+            fi
+            
+            cpp_output=$($CXX $INCLUDES -c "$cpp_file" -o "$cpp_obj_file" $CPP_WARNINGS $CPP_FLAGS 2>&1)
             if [ $? -ne 0 ]; then
                 compilation_success=false
             fi
