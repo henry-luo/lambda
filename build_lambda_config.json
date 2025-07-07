@@ -54,6 +54,12 @@
             "link": "static"
         },
         {
+            "name": "tree-sitter-lambda",
+            "include": "lambda/tree-sitter-lambda/bindings/c",
+            "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+            "link": "static"
+        },
+        {
             "name": "mir",
             "include": "/usr/local/include",
             "lib": "/usr/local/lib/libmir.a",
@@ -91,7 +97,13 @@
                 {
                     "name": "tree-sitter",
                     "include": "lambda/tree-sitter/lib/include",
-                    "lib": "windows-deps/lib/libtree-sitter.a",
+                    "lib": "lambda/tree-sitter/libtree-sitter-windows.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter-lambda",
+                    "include": "lambda/tree-sitter-lambda/bindings/c",
+                    "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "link": "static"
                 },
                 {

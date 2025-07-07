@@ -250,15 +250,15 @@ else
     # Fallback without jq - basic parsing
     if [ "$CROSS_COMPILE" = "true" ] || [ "$PLATFORM" = "windows" ]; then
         echo "Warning: jq not found, using fallback parsing for cross-compilation"
-        INCLUDES="-Ilambda/tree-sitter/lib/include -Iwindows-deps/include"
-        LIBS="lambda/tree-sitter/libtree-sitter-windows.a windows-deps/lib/libmir.a windows-deps/lib/libzlog.a windows-deps/lib/liblexbor_static.a windows-deps/lib/libgmp.a"
+        INCLUDES="-Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -Iwindows-deps/include"
+        LIBS="lambda/tree-sitter/libtree-sitter-windows.a lambda/tree-sitter-lambda/libtree-sitter-lambda.a windows-deps/lib/libmir.a windows-deps/lib/libzlog.a windows-deps/lib/liblexbor_static.a windows-deps/lib/libgmp.a"
         LINK_LIBS=""
         WARNINGS="-Wformat -Wincompatible-pointer-types -Wmultichar"
         FLAGS="-fms-extensions -static -DCROSS_COMPILE -D_WIN32"
         LINKER_FLAGS="-static-libgcc -static-libstdc++"
     else
-        INCLUDES="-Ilambda/tree-sitter/lib/include -I/usr/local/include -I/opt/homebrew/include"
-        LIBS="lambda/tree-sitter/libtree-sitter.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a"
+        INCLUDES="-Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/include"
+        LIBS="lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter-lambda/libtree-sitter-lambda.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
         LINK_LIBS="-L/opt/homebrew/lib -lgmp"
         WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
         FLAGS="-fms-extensions -pedantic -fcolor-diagnostics"
