@@ -39,7 +39,7 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
         if [ -d "$DEPS_DIR/src/lexbor" ]; then
             cd "$DEPS_DIR/src/lexbor"
             rm -rf build-windows CMakeCache.txt CMakeFiles/ cmake_install.cmake 2>/dev/null || true
-            find . -name "*.cmake" -type f -delete 2>/dev/null || true
+            find . -name "*.cmake" -type f ! -path "./cmake/*" -delete 2>/dev/null || true
             cd - > /dev/null
         fi
         
@@ -50,6 +50,21 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
             find . -name "*.cmake" -type f ! -path "./cmake/*" -delete 2>/dev/null || true
             make clean 2>/dev/null || true
             rm -f *.o *.a src/*.o 2>/dev/null || true
+            cd - > /dev/null
+        fi
+        
+        # Clean up MIR-specific build files
+        if [ -d "$DEPS_DIR/src/mir" ]; then
+            cd "$DEPS_DIR/src/mir"
+            make clean 2>/dev/null || true
+            rm -f *.o *.a 2>/dev/null || true
+            cd - > /dev/null
+        fi
+        
+        # Clean up GMP build files
+        if [ -d "$DEPS_DIR/src/gmp-6.2.1" ]; then
+            cd "$DEPS_DIR/src/gmp-6.2.1"
+            make distclean 2>/dev/null || true
             cd - > /dev/null
         fi
     fi
@@ -155,6 +170,7 @@ cleanup_intermediate_files() {
         if [ -d "$DEPS_DIR/src/lexbor" ]; then
             rm -rf "$DEPS_DIR/src/lexbor/build-windows" 2>/dev/null || true
             rm -f "$DEPS_DIR/src/lexbor/CMakeCache.txt" 2>/dev/null || true
+            find "$DEPS_DIR/src/lexbor" -name "*.cmake" -type f ! -path "./cmake/*" -delete 2>/dev/null || true
         fi
         
         # Clean zlog build files
@@ -164,6 +180,21 @@ cleanup_intermediate_files() {
             find . -name "*.cmake" -type f ! -path "./cmake/*" -delete 2>/dev/null || true
             make clean 2>/dev/null || true
             rm -f *.o *.a src/*.o 2>/dev/null || true
+            cd - > /dev/null
+        fi
+        
+        # Clean MIR build files
+        if [ -d "$DEPS_DIR/src/mir" ]; then
+            cd "$DEPS_DIR/src/mir"
+            make clean 2>/dev/null || true
+            rm -f *.o *.a 2>/dev/null || true
+            cd - > /dev/null
+        fi
+        
+        # Clean GMP build files
+        if [ -d "$DEPS_DIR/src/gmp-6.2.1" ]; then
+            cd "$DEPS_DIR/src/gmp-6.2.1"
+            make distclean 2>/dev/null || true
             cd - > /dev/null
         fi
     fi
@@ -358,11 +389,16 @@ build_mir_for_windows() {
         
         # Copy headers
         mkdir -p "../../../$DEPS_DIR/include"
-        for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h; do
+        for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h mir-alloc.h mir-bitmap.h mir-code-alloc.h; do
             if [ -f "$header" ]; then
                 cp "$header" "../../../$DEPS_DIR/include/"
             fi
         done
+        
+        # Copy c2mir header
+        if [ -f "c2mir/c2mir.h" ]; then
+            cp "c2mir/c2mir.h" "../../../$DEPS_DIR/include/"
+        fi
     else
         # Build manually if no build system
         echo "Building MIR manually..."
@@ -388,11 +424,16 @@ build_mir_for_windows() {
             
             # Copy headers
             mkdir -p "../../../$DEPS_DIR/include"
-            for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h; do
+            for header in mir.h mir-gen.h mir-varr.h mir-dlist.h mir-hash.h mir-htab.h mir-alloc.h mir-bitmap.h mir-code-alloc.h; do
                 if [ -f "$header" ]; then
                     cp "$header" "../../../$DEPS_DIR/include/"
                 fi
             done
+            
+            # Copy c2mir header
+            if [ -f "c2mir/c2mir.h" ]; then
+                cp "c2mir/c2mir.h" "../../../$DEPS_DIR/include/"
+            fi
         else
             echo "Warning: No MIR source files found"
             cd - > /dev/null
@@ -825,18 +866,55 @@ EOF
 #define LEXBOR_URL_H
 
 #include "../core/core.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Basic URL types */
-typedef struct lxb_url lxb_url_t;
+/* URL scheme types */
+typedef enum {
+    LXB_URL_SCHEMEL_TYPE_FILE = 1,
+    LXB_URL_SCHEMEL_TYPE_HTTP = 2,
+    LXB_URL_SCHEMEL_TYPE_HTTPS = 3
+} lxb_url_scheme_type_t;
+
+/* URL structures */
+typedef struct {
+    lxb_url_scheme_type_t type;
+} lxb_url_scheme_t;
+
+typedef struct {
+    size_t length;
+    struct {
+        const lxb_char_t *data;
+    } str;
+} lxb_url_path_t;
+
+typedef struct lxb_url {
+    lxb_url_scheme_t scheme;
+    lxb_url_path_t path;
+} lxb_url_t;
+
+typedef struct lxb_url_parser {
+    int dummy; /* stub field */
+} lxb_url_parser_t;
 
 /* Basic function declarations */
 lxb_url_t* lxb_url_create(void);
 void lxb_url_destroy(lxb_url_t *url);
-lxb_status_t lxb_url_parse(lxb_url_t *url, const lxb_char_t *input, size_t length);
+
+/* URL parser functions */
+lxb_status_t lxb_url_parser_init(lxb_url_parser_t *parser, void *memory);
+void lxb_url_parser_destroy(lxb_url_parser_t *parser, bool self_destroy);
+lxb_url_t* lxb_url_parse_with_parser(lxb_url_parser_t *parser, lxb_url_t *base, const lxb_char_t *input, size_t length);
+
+/* URL utility functions */
+lxb_url_path_t* lxb_url_path(lxb_url_t *url);
+void lxb_url_serialize_path(lxb_url_path_t *path, lxb_status_t (*callback)(const lxb_char_t *, size_t, void *), void *ctx);
+
+/* Compatibility macro for parser version */
+#define lxb_url_parse(parser, base, input, length) lxb_url_parse_with_parser(parser, base, input, length)
 
 #ifdef __cplusplus
 }
@@ -879,16 +957,41 @@ lxb_status_t lxb_html_document_parse(lxb_html_document_t *document,
 
 /* URL functions */
 lxb_url_t* lxb_url_create(void) {
-    return (lxb_url_t*)malloc(sizeof(void*));
+    lxb_url_t* url = (lxb_url_t*)malloc(sizeof(lxb_url_t));
+    if (url) {
+        url->scheme.type = LXB_URL_SCHEMEL_TYPE_FILE;
+        url->path.length = 0;
+        url->path.str.data = NULL;
+    }
+    return url;
 }
 
 void lxb_url_destroy(lxb_url_t *url) {
     if (url) free(url);
 }
 
-lxb_status_t lxb_url_parse(lxb_url_t *url, const lxb_char_t *input, size_t length) {
-    (void)url; (void)input; (void)length;
+/* URL parser functions */
+lxb_status_t lxb_url_parser_init(lxb_url_parser_t *parser, void *memory) {
+    (void)parser; (void)memory;
     return LXB_STATUS_OK;
+}
+
+void lxb_url_parser_destroy(lxb_url_parser_t *parser, bool self_destroy) {
+    (void)parser; (void)self_destroy;
+}
+
+lxb_url_t* lxb_url_parse_with_parser(lxb_url_parser_t *parser, lxb_url_t *base, const lxb_char_t *input, size_t length) {
+    (void)parser; (void)base; (void)input; (void)length;
+    return lxb_url_create();
+}
+
+/* URL utility functions */
+lxb_url_path_t* lxb_url_path(lxb_url_t *url) {
+    return url ? &url->path : NULL;
+}
+
+void lxb_url_serialize_path(lxb_url_path_t *path, lxb_status_t (*callback)(const lxb_char_t *, size_t, void *), void *ctx) {
+    (void)path; (void)callback; (void)ctx;
 }
 EOF
 
@@ -1539,6 +1642,8 @@ if [ ! -f "$DEPS_DIR/lib/libtree-sitter.a" ]; then
     
     # Copy to windows deps
     cp libtree-sitter.a "../../$DEPS_DIR/lib/libtree-sitter.a"
+    # Also create the expected Windows-specific name for cross-compilation script
+    cp libtree-sitter.a "libtree-sitter-windows.a"
     mkdir -p "../../$DEPS_DIR/include"
     cp -r lib/include/* "../../$DEPS_DIR/include/"
     
@@ -1607,8 +1712,7 @@ if [ ! -f "$DEPS_DIR/lib/libgmp.a" ]; then
                 --disable-fast-install \
                 --enable-cxx=no \
                 CFLAGS=\"-O1 -fno-stack-protector\" \
-                CPPFLAGS=\"-DNDEBUG\" \
-                ABI=longlong
+                CPPFLAGS=\"-DNDEBUG\"
             make -j\$(nproc || echo 4)
             make install
         "; then
@@ -1621,6 +1725,14 @@ if [ ! -f "$DEPS_DIR/lib/libgmp.a" ]; then
         echo "Warning: GMP source not available, using stub implementation"
         build_gmp_stub
     fi
+else
+    echo "GMP already built for Windows"
+fi
+
+# Check if GMP build was successful, if not, create stub
+if [ ! -f "$DEPS_DIR/lib/libgmp.a" ]; then
+    echo "GMP library not found, creating stub implementation..."
+    build_gmp_stub
 fi
 
 # Build zlog for Windows

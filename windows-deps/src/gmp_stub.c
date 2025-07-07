@@ -17,10 +17,12 @@ void mpz_clear(mpz_t x) {
 }
 
 void mpz_set_str(mpz_t rop, const char *str, int base) {
+    // Stub implementation
     (void)rop; (void)str; (void)base;
 }
 
 char* mpz_get_str(char *str, int base, const mpz_t op) {
+    // Stub implementation
     (void)base; (void)op;
     if (!str) str = malloc(32);
     strcpy(str, "0");
@@ -28,14 +30,17 @@ char* mpz_get_str(char *str, int base, const mpz_t op) {
 }
 
 void mpz_add(mpz_t rop, const mpz_t op1, const mpz_t op2) {
+    // Stub implementation
     (void)rop; (void)op1; (void)op2;
 }
 
 void mpz_sub(mpz_t rop, const mpz_t op1, const mpz_t op2) {
+    // Stub implementation  
     (void)rop; (void)op1; (void)op2;
 }
 
 void mpz_mul(mpz_t rop, const mpz_t op1, const mpz_t op2) {
+    // Stub implementation
     (void)rop; (void)op1; (void)op2;
 }
 
@@ -55,5 +60,6 @@ void mpf_clear(mpf_t x) {
 }
 
 void mpf_set_str(mpf_t rop, const char *str, int base) {
+    // Stub implementation
     (void)rop; (void)str; (void)base;
 }
