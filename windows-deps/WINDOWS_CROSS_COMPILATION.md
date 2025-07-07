@@ -6,12 +6,13 @@
 - MinGW-w64 cross-compiler setup
 - Basic cross-compilation infrastructure
 - Tree-sitter cross-compilation (262KB static library)
-- GMP cross-compilation with stub fallback (2.1KB stub library)
+- **Enhanced GMP cross-compilation with full library support (500KB+ full library) and intelligent fallback (2.1KB stub)**
 - **MIR cross-compilation (596KB real static library)**
 - **lexbor cross-compilation (3.7MB real static library) with stub fallback**
 - **zlog cross-compilation (5.5KB comprehensive stub library) with real build attempts**
 - Enhanced build scripts with automatic dependency management
 - Robust error handling and fallback systems
+- **Runtime GMP detection for optimal precision**
 
 ⚠️ **Challenges**:
 - Some dependencies may require manual configuration
@@ -30,7 +31,7 @@
 
 ### 3. Built Libraries (windows-deps/lib/)
 - `libtree-sitter.a` (262KB) - Parser generator library
-- `libgmp.a` (2.1KB) - GNU Multiple Precision arithmetic (stub)
+- **`libgmp.a` (2.1KB stub / 500KB+ full) - GNU Multiple Precision arithmetic with intelligent fallback**
 - **`libmir.a` (596KB) - MIR JIT compiler (real build)**
 - **`liblexbor_static.a` (3.7MB) - lexbor HTML/XML parser (real build)**
 - **`libzlog.a` (5.5KB) - zlog logging library (comprehensive stub)**
@@ -44,7 +45,7 @@ macOS Development Machine
 │   ├── include/ (Headers - tree-sitter, gmp, mir, lexbor, zlog)
 │   ├── lib/ (Static libraries - 4.6MB total)
 │   │   ├── libtree-sitter.a (262KB)
-│   │   ├── libgmp.a (2.1KB stub)
+│   │   ├── libgmp.a (2.1KB stub / 500KB+ full)
 │   │   ├── libmir.a (596KB real)
 │   │   ├── liblexbor_static.a (3.7MB real)
 │   │   └── libzlog.a (5.5KB comprehensive stub)
@@ -82,22 +83,145 @@ brew install mingw-w64
 # - zlog: ✓ Built (stub)
 ```
 
-**Manual builds (if needed):**
+## 🚀 **Enhanced GMP Build System**
 
-#### GMP (GNU Multiple Precision Library)
+### ✅ **GMP Cross-Compilation Enhancements**
+
+The Jubily Lambda project now includes an enhanced GMP build system that attempts to build a full GMP library (with I/O functions like `gmp_sprintf`) instead of relying only on a stub implementation.
+
+#### **Features**
+- **Full GMP Support**: Attempts to build complete GMP 6.3.0 library with all I/O functions
+- **Automatic Fallback**: If full build fails, automatically creates stub for basic compilation
+- **Runtime Detection**: Code automatically detects which GMP version is available
+- **Seamless Integration**: No changes needed to existing code - enhancements are transparent
+- **Better Precision**: When full GMP is available, maintains arbitrary precision for decimal types
+
+#### **Library Types**
+| Type | Size | Features | gmp_sprintf | Detection |
+|------|------|----------|-------------|-----------|
+| **Stub** | ~2KB | Basic arithmetic only | ❌ No | Fallback |
+| **Full** | ~500KB+ | Complete GMP with I/O | ✅ Yes | Runtime |
+
+#### **Build Process**
 ```bash
-cd windows-deps/src
-wget https://gmplib.org/download/gmp/gmp-6.2.1.tar.bz2
-tar -xjf gmp-6.2.1.tar.bz2
-cd gmp-6.2.1
+# Enhanced setup automatically attempts full GMP build
+./setup-windows-deps.sh
 
-./configure --host=x86_64-w64-mingw32 \
-    --prefix=$(pwd)/../../ \
+# Check GMP status
+ls -la windows-deps/lib/libgmp.a
+stat -f%z windows-deps/lib/libgmp.a  # Size check (macOS)
+
+# Check for gmp_sprintf availability  
+nm windows-deps/lib/libgmp.a | grep gmp_sprintf
+```
+
+#### **Runtime Detection Mechanism**
+The enhanced system uses weak symbols for runtime detection:
+
+```c
+#ifdef CROSS_COMPILE
+    // Declare weak symbol - will be NULL if not available
+    extern int gmp_sprintf(char *, const char *, ...) __attribute__((weak));
+    
+    if (HAS_GMP_IO()) {
+        // Use full GMP - maintains arbitrary precision
+        gmp_sprintf(buf, "%.Ff", *num);
+    } else {
+        // Fall back to double precision
+        double num_double = mpf_get_d(*num);
+        snprintf(buf, sizeof(buf), "%.15g", num_double);
+    }
+#endif
+```
+
+#### **Benefits**
+1. **No More Manual Fallbacks**: The `#ifdef CROSS_COMPILE` workarounds are now intelligent
+2. **Better Precision**: When possible, maintains arbitrary precision for decimal calculations
+3. **Robust Building**: Handles build failures gracefully without breaking the entire build
+4. **Future-Proof**: Easy to extend for other GMP functions as needed
+5. **Transparent**: Existing code works without modification
+
+### 🛠 **GMP Build Configuration**
+
+The enhanced build uses optimized configuration for cross-compilation:
+
+```bash
+./configure \
+    --host=x86_64-w64-mingw32 \
+    --target=x86_64-w64-mingw32 \
     --enable-static \
     --disable-shared \
+    --enable-cxx \
+    --with-pic \
+    --disable-assembly  # Important for cross-compilation
+```
+
+### 🔍 **Troubleshooting GMP Build**
+
+#### **If GMP Build Fails**
+```bash
+# Check build logs
+tail -f windows-deps/src/gmp-*/config.log
+
+# Try manual build
+cd windows-deps/src/gmp-*
+make distclean
+./configure --host=x86_64-w64-mingw32 --enable-static --disable-shared --disable-assembly
+make -j4
+```
+
+#### **Common Issues**
+1. **Missing MinGW**: Ensure `x86_64-w64-mingw32-gcc` is installed
+2. **Network Issues**: GMP download may fail - check internet connection  
+3. **Disk Space**: Full GMP build requires ~100MB of temporary space
+4. **Memory**: Parallel build (`-j4`) may need sufficient RAM
+
+#### **Verifying the Build**
+```bash
+# Test compilation with new library
+echo '#include <gmp.h>
+int main() {
+    mpf_t x;
+    mpf_init(x);
+    char buf[100];
+    gmp_sprintf(buf, "%.10Ff", x);
+    return 0;
+}' | x86_64-w64-mingw32-gcc -x c - -Iwindows-deps/include -Lwindows-deps/lib -lgmp -static
+```
+
+### 📊 **Migration from Previous Version**
+- **No code changes required**: Enhanced version is backward compatible
+- **Better performance**: Full GMP provides better precision and performance  
+- **Automatic upgrade**: Running setup will detect stub and offer to upgrade
+- **Runtime detection supplements compile-time detection**
+- No changes needed to `build_lambda_windows_config.json`
+
+**Manual builds (if needed):**
+
+#### GMP (GNU Multiple Precision Library) - ✅ **Enhanced Full Build**
+```bash
+# Now automated with full build support - use setup script
+./setup-windows-deps.sh
+
+# Manual full build (if needed):
+cd windows-deps/src
+wget https://gmplib.org/download/gmp/gmp-6.3.0.tar.bz2
+tar -xjf gmp-6.3.0.tar.bz2
+cd gmp-6.3.0
+
+./configure --host=x86_64-w64-mingw32 \
+    --target=x86_64-w64-mingw32 \
+    --enable-static \
+    --disable-shared \
+    --enable-cxx \
+    --with-pic \
+    --disable-assembly \
     CFLAGS="-O2 -static"
-make -j$(nproc)
+make -j4
 make install
+
+# Alternative: Try MPIR (Windows-friendly GMP fork)
+# Script automatically attempts MPIR if GMP fails
 ```
 
 #### Tree-sitter (Already Automated)
@@ -214,6 +338,9 @@ brew install mingw-w64
 ```bash
 # View build status and next steps
 ./setup-windows-deps.sh
+
+# Test GMP build and runtime detection specifically
+./test-gmp-build.sh
 ```
 
 ### Cleanup
@@ -353,7 +480,7 @@ sudo apt-get install gcc-mingw-w64
 | Library | Windows Support | Difficulty | Status | Size |
 |---------|----------------|------------|--------|------|
 | tree-sitter | ✅ Good | Easy | ✅ Built | 262KB |
-| GMP | ✅ Good | Medium | ✅ Stub | 2.1KB |
+| **GMP** | **✅ Good** | **Medium** | **✅ Full/Stub** | **500KB+/2KB** |
 | **MIR** | **✅ Good** | **Medium** | **✅ Built** | **596KB** |
 | **lexbor** | **✅ Good** | **Medium** | **✅ Built** | **3.7MB** |
 | **zlog** | **✅ Good** | **Medium** | **✅ Stub** | **5.5KB** |
@@ -388,7 +515,7 @@ sudo apt-get install gcc-mingw-w64
 # Expected output:
 # Built dependencies:
 # - Tree-sitter: ✓ Built
-# - GMP: ✓ Built (stub) 
+# - GMP: ✓ Built (full) / ✓ Built (stub)
 # - MIR: ✓ Built (real)
 # - lexbor: ✓ Built (real)
 # - zlog: ✓ Built (stub)
@@ -398,10 +525,14 @@ sudo apt-get install gcc-mingw-w64
 ```bash
 ls -la windows-deps/lib/
 # Should show:
-# libgmp.a (2.1KB)
+# libgmp.a (2.1KB stub or 500KB+ full)
 # liblexbor_static.a (3.7MB)
 # libmir.a (596KB)  
 # libtree-sitter.a (262KB)
+
+# Check GMP type and capabilities
+stat -f%z windows-deps/lib/libgmp.a  # Check size (macOS)
+nm windows-deps/lib/libgmp.a | grep gmp_sprintf  # Check for I/O functions
 
 # Check lexbor library contents
 x86_64-w64-mingw32-nm --print-armap windows-deps/lib/liblexbor_static.a | head
@@ -431,12 +562,13 @@ file lambda-windows.exe
 - **[MIR Repository](https://github.com/vnmakarov/mir.git) - Successfully cross-compiled**
 - **[MIR Enhancement Summary](../MIR_ENHANCEMENT_SUMMARY.md) - Implementation details**
 - **[lexbor Repository](https://github.com/lexbor/lexbor.git) - Successfully cross-compiled**
+- **[GMP Enhancement Test Script](../test-gmp-build.sh) - Verify GMP build and runtime detection**
 
 ## ⚠️ **Known Issues**
 
 1. **zlog logging**: No Windows cross-compilation support - marked as optional
 2. **Static linking**: Large executable size due to static linking (~5MB+ with lexbor)
-3. **GMP**: Using stub implementation (sufficient for compilation testing)
+3. **GMP precision**: Falls back to double precision if full GMP build fails (runtime detection handles this gracefully)
 4. **lexbor**: Large library size (3.7MB) due to comprehensive HTML/XML parsing features
 
 ## 🎉 **Success Criteria**

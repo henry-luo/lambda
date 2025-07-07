@@ -202,6 +202,258 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
+# Function to build full GMP library for Windows
+build_gmp_full() {
+    echo "Building full GMP library for Windows..."
+    
+    # Try using MPIR (Windows-friendly GMP fork) first, then GMP
+    MPIR_VERSION="3.0.0"
+    MPIR_DIR="mpir-${MPIR_VERSION}"
+    MPIR_ARCHIVE="${MPIR_DIR}.tar.bz2"
+    MPIR_URL="http://mpir.org/${MPIR_ARCHIVE}"
+    
+    GMP_VERSION="6.2.1"  # Use older, more stable version
+    GMP_DIR="gmp-${GMP_VERSION}"
+    GMP_ARCHIVE="${GMP_DIR}.tar.xz"
+    GMP_URL="https://gmplib.org/download/gmp/${GMP_ARCHIVE}"
+    
+    mkdir -p "$DEPS_DIR/src"
+    cd "$DEPS_DIR/src"
+    
+    # Try MPIR first (Windows-friendly)
+    if [ ! -f "$MPIR_ARCHIVE" ] && [ ! -d "$MPIR_DIR" ]; then
+        echo "Trying MPIR (Windows-friendly GMP fork)..."
+        if command -v curl >/dev/null 2>&1; then
+            if curl -L --fail --connect-timeout 10 -o "$MPIR_ARCHIVE" "$MPIR_URL" 2>/dev/null; then
+                echo "✅ Downloaded MPIR successfully"
+                if tar -xjf "$MPIR_ARCHIVE" 2>/dev/null; then
+                    echo "✅ Extracted MPIR successfully"
+                    if build_mpir_windows "$MPIR_DIR"; then
+                        cd "$SCRIPT_DIR"
+                        return 0
+                    fi
+                fi
+            fi
+        fi
+        echo "MPIR download/build failed, trying GMP..."
+    fi
+    
+    # Fall back to GMP
+    if [ ! -f "$GMP_ARCHIVE" ]; then
+        echo "Downloading GMP $GMP_VERSION..."
+        
+        # Try curl first
+        if command -v curl >/dev/null 2>&1; then
+            echo "Using curl to download..."
+            if curl -L --fail --retry 3 --retry-delay 5 -o "$GMP_ARCHIVE" "$GMP_URL"; then
+                echo "✅ Downloaded successfully with curl"
+            else
+                echo "❌ Curl download failed, trying wget..."
+                rm -f "$GMP_ARCHIVE"  # Remove partial file
+                
+                if command -v wget >/dev/null 2>&1; then
+                    if wget --tries=3 --timeout=30 -O "$GMP_ARCHIVE" "$GMP_URL"; then
+                        echo "✅ Downloaded successfully with wget"
+                    else
+                        echo "❌ All download attempts failed"
+                        rm -f "$GMP_ARCHIVE"  # Remove partial file
+                        echo "Please manually download GMP from $GMP_URL and place it in $DEPS_DIR/src/"
+                        return 1
+                    fi
+                else
+                    echo "❌ Neither curl nor wget available for download"
+                    echo "Please install curl or wget, or manually download GMP from:"
+                    echo "  $GMP_URL"
+                    echo "Place the file in: $DEPS_DIR/src/$GMP_ARCHIVE"
+                    return 1
+                fi
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            echo "Using wget to download..."
+            if wget --tries=3 --timeout=30 -O "$GMP_ARCHIVE" "$GMP_URL"; then
+                echo "✅ Downloaded successfully with wget"
+            else
+                echo "❌ Wget download failed"
+                rm -f "$GMP_ARCHIVE"  # Remove partial file
+                echo "Please manually download GMP from $GMP_URL and place it in $DEPS_DIR/src/"
+                return 1
+            fi
+        else
+            echo "❌ Neither curl nor wget available"
+            echo "Please install curl or wget, or manually download GMP from:"
+            echo "  $GMP_URL"
+            echo "Place the file in: $DEPS_DIR/src/$GMP_ARCHIVE"
+            return 1
+        fi
+    else
+        echo "✅ GMP archive already exists: $GMP_ARCHIVE"
+    fi
+
+    # Extract GMP
+    if [ ! -d "$GMP_DIR" ]; then
+        echo "Extracting GMP..."
+        # Try different extraction methods based on file extension
+        case "$GMP_ARCHIVE" in
+            *.tar.xz)
+                if command -v xz >/dev/null 2>&1; then
+                    xz -dc "$GMP_ARCHIVE" | tar -xf - || {
+                        echo "Failed to extract with xz, trying tar directly..."
+                        tar -xf "$GMP_ARCHIVE" || {
+                            echo "Failed to extract GMP archive"
+                            return 1
+                        }
+                    }
+                else
+                    tar -xf "$GMP_ARCHIVE" || {
+                        echo "Failed to extract GMP archive (xz not available)"
+                        return 1
+                    }
+                fi
+                ;;
+            *.tar.bz2)
+                tar -xjf "$GMP_ARCHIVE" || {
+                    echo "Failed to extract GMP archive"
+                    return 1
+                }
+                ;;
+            *.tar.gz)
+                tar -xzf "$GMP_ARCHIVE" || {
+                    echo "Failed to extract GMP archive"
+                    return 1
+                }
+                ;;
+            *)
+                tar -xf "$GMP_ARCHIVE" || {
+                    echo "Failed to extract GMP archive"
+                    return 1
+                }
+                ;;
+        esac
+        echo "✅ Extraction completed"
+    else
+        echo "✅ GMP source directory already exists: $GMP_DIR"
+    fi
+    
+    # Try building GMP with simpler configuration
+    if build_gmp_simple_windows "$GMP_DIR"; then
+        cd "$SCRIPT_DIR"
+        return 0
+    fi
+    
+    cd "$SCRIPT_DIR"
+    return 1
+}
+
+# Function to build MPIR for Windows
+build_mpir_windows() {
+    local MPIR_DIR="$1"
+    echo "Building MPIR for Windows..."
+    
+    cd "$MPIR_DIR" || return 1
+    
+    # Clean previous builds
+    make distclean 2>/dev/null || true
+    
+    # Set cross-compilation environment
+    export CC="$TARGET_TRIPLET-gcc"
+    export AR="$TARGET_TRIPLET-ar"
+    export RANLIB="$TARGET_TRIPLET-ranlib"
+    export STRIP="$TARGET_TRIPLET-strip"
+    
+    # MPIR has better Windows support
+    export CFLAGS="-O2"
+    export LDFLAGS=""
+    
+    # Configure MPIR
+    if ./configure \
+        --host=$TARGET_TRIPLET \
+        --enable-static \
+        --disable-shared \
+        --prefix="$(pwd)/../../../../$DEPS_DIR" \
+        --enable-gmpcompat; then
+        
+        echo "Building MPIR..."
+        if make -j$(nproc 2>/dev/null || echo 4); then
+            echo "Installing MPIR..."
+            if make install; then
+                echo "✅ MPIR built and installed successfully"
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ MPIR build failed"
+    return 1
+}
+
+# Function to build GMP with simple configuration
+build_gmp_simple_windows() {
+    local GMP_DIR="$1"
+    echo "Building GMP with simple configuration..."
+    
+    cd "$GMP_DIR" || return 1
+    
+    # Clean previous builds
+    make distclean 2>/dev/null || true
+    
+    # Very simple cross-compilation setup
+    export CC="$TARGET_TRIPLET-gcc"
+    export AR="$TARGET_TRIPLET-ar"
+    export RANLIB="$TARGET_TRIPLET-ranlib"
+    
+    # Minimal flags to avoid test failures
+    export CFLAGS="-O1"
+    export LDFLAGS=""
+    
+    # Try minimal configure - avoid problematic options
+    if ./configure \
+        --host=$TARGET_TRIPLET \
+        --disable-assembly \
+        --disable-shared \
+        --enable-static \
+        --disable-cxx; then
+        
+        echo "Building GMP..."
+        if make -j2; then  # Use fewer parallel jobs
+            echo "Installing GMP..."
+            # Manual install to avoid test failures
+            mkdir -p "../../../../$DEPS_DIR/lib"
+            mkdir -p "../../../../$DEPS_DIR/include"
+            
+            if [ -f ".libs/libgmp.a" ]; then
+                cp ".libs/libgmp.a" "../../../../$DEPS_DIR/lib/"
+            elif [ -f "libgmp.a" ]; then
+                cp "libgmp.a" "../../../../$DEPS_DIR/lib/"
+            else
+                echo "❌ Could not find built GMP library"
+                return 1
+            fi
+            
+            # Copy headers
+            if [ -f "gmp.h" ]; then
+                cp "gmp.h" "../../../../$DEPS_DIR/include/"
+            fi
+            
+            # Verify the build
+            if [ -f "../../../../$DEPS_DIR/lib/libgmp.a" ]; then
+                LIB_SIZE=$(stat -f%z "../../../../$DEPS_DIR/lib/libgmp.a" 2>/dev/null || stat -c%s "../../../../$DEPS_DIR/lib/libgmp.a" 2>/dev/null)
+                echo "✅ GMP library built successfully: ${LIB_SIZE} bytes"
+                
+                # Check if gmp_sprintf is available
+                if nm "../../../../$DEPS_DIR/lib/libgmp.a" 2>/dev/null | grep -q gmp_sprintf; then
+                    echo "✅ Full GMP with I/O functions (including gmp_sprintf) built successfully!"
+                else
+                    echo "⚠️  GMP built but I/O functions may not be available"
+                fi
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ Simple GMP build failed"
+    return 1
+}
+
 # Function to build GMP stub as fallback
 build_gmp_stub() {
     echo "Building GMP stub library..."
@@ -255,6 +507,7 @@ void mpf_set_str(mpf_t rop, const char *str, int base);
 EOF
 
     # Create stub implementation
+    mkdir -p "$DEPS_DIR/src"
     cat > "$DEPS_DIR/src/gmp_stub.c" << 'EOF'
 /* Minimal GMP stub implementation */
 #include "../include/gmp.h"
@@ -325,6 +578,7 @@ EOF
 
     # Compile stub library
     cd "$DEPS_DIR/src"
+    mkdir -p "../lib"  # Ensure lib directory exists
     $TARGET_TRIPLET-gcc -I../include -c gmp_stub.c -o gmp_stub.o
     $TARGET_TRIPLET-ar rcs ../lib/libgmp.a gmp_stub.o
     cd - > /dev/null
@@ -1670,69 +1924,36 @@ fi
 
 # Download and build GMP if not available
 if [ ! -f "$DEPS_DIR/lib/libgmp.a" ]; then
-    echo "Downloading and building GMP for Windows..."
+    echo "Building full GMP for Windows..."
     
-    # Try multiple GMP download sources
-    if [ ! -d "$DEPS_DIR/src/gmp-6.2.1" ]; then
-        cd "$DEPS_DIR/src"
-        
-        # Try primary source
-        if ! curl -L "https://gmplib.org/download/gmp/gmp-6.2.1.tar.bz2" -o "gmp-6.2.1.tar.bz2"; then
-            # Try alternative mirror
-            echo "Primary download failed, trying alternative source..."
-            if ! curl -L "https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.bz2" -o "gmp-6.2.1.tar.bz2"; then
-                echo "Warning: Could not download GMP source"
-                cd - > /dev/null
-                echo "Please manually download GMP from https://gmplib.org/download/gmp/"
-                echo "For now, using stub GMP library..."
-                # Fall back to stub
-                build_gmp_stub
-            else
-                tar -xjf "gmp-6.2.1.tar.bz2" && rm "gmp-6.2.1.tar.bz2"
-                cd - > /dev/null
-            fi
-        else
-            tar -xjf "gmp-6.2.1.tar.bz2" && rm "gmp-6.2.1.tar.bz2"
-            cd - > /dev/null
-        fi
-    fi
-    
-    if [ -d "$DEPS_DIR/src/gmp-6.2.1" ]; then
-        # Try building real GMP, but fall back to stub if it fails
-        if ! build_dependency "gmp" "gmp-6.2.1" "
-            # Clean any previous build attempts
-            make distclean 2>/dev/null || true
-            
-            # Try with minimal configuration that avoids problematic tests
-            ./configure --host=$TARGET_TRIPLET \
-                --prefix=\$(pwd)/../../../$DEPS_DIR \
-                --enable-static \
-                --disable-shared \
-                --disable-assembly \
-                --disable-fast-install \
-                --enable-cxx=no \
-                CFLAGS=\"-O1 -fno-stack-protector\" \
-                CPPFLAGS=\"-DNDEBUG\"
-            make -j\$(nproc || echo 4)
-            make install
-        "; then
-            echo "Warning: GMP build failed, falling back to stub implementation"
-            build_gmp_stub
-        else
-            echo "GMP built successfully"
-        fi
+    # Try building full GMP first
+    if build_gmp_full; then
+        echo "✅ Full GMP built successfully"
     else
-        echo "Warning: GMP source not available, using stub implementation"
+        echo "❌ Full GMP build failed, falling back to stub implementation"
         build_gmp_stub
     fi
 else
     echo "GMP already built for Windows"
-fi
-
-# Check if GMP build was successful, if not, create stub
-if [ ! -f "$DEPS_DIR/lib/libgmp.a" ]; then
-    echo "GMP library not found, creating stub implementation..."
-    build_gmp_stub
+    
+    # Check if it's a stub by size
+    LIB_SIZE=$(stat -f%z "$DEPS_DIR/lib/libgmp.a" 2>/dev/null || stat -c%s "$DEPS_DIR/lib/libgmp.a" 2>/dev/null)
+    if [ "$LIB_SIZE" -lt 100000 ]; then
+        echo "Detected stub GMP library (${LIB_SIZE} bytes), attempting full build..."
+        if build_gmp_full; then
+            echo "✅ Upgraded to full GMP successfully"
+        else
+            echo "❌ Full GMP build failed, keeping stub implementation"
+        fi
+    else
+        echo "Full GMP library detected (${LIB_SIZE} bytes)"
+        # Check if gmp_sprintf is available
+        if nm "$DEPS_DIR/lib/libgmp.a" 2>/dev/null | grep -q gmp_sprintf; then
+            echo "✅ gmp_sprintf function is available in GMP library"
+        else
+            echo "⚠️  gmp_sprintf not found in GMP library"
+        fi
+    fi
 fi
 
 # Build zlog for Windows

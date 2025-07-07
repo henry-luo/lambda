@@ -240,14 +240,21 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             }
         }
         else if (type_id == LMD_TYPE_DECIMAL) {
-#ifdef CROSS_COMPILE
-            // For cross-compilation, treat as a double approximation
-            double *num_ptr = (double*)ld_item.pointer;
-            char buf[128];
-            snprintf(buf, sizeof(buf), "%.6f", *num_ptr);
-#else
             mpf_t *num = (mpf_t*)ld_item.pointer;
             char buf[128];
+            
+#ifdef CROSS_COMPILE
+            // For cross-compilation, check if full GMP I/O is available
+            if (HAS_GMP_IO()) {
+                // Use full GMP formatting
+                gmp_sprintf(buf, "%.Ff", *num);
+            } else {
+                // Fall back to double precision - convert mpf_t to double
+                double num_double = mpf_get_d(*num);
+                snprintf(buf, sizeof(buf), "%.15g", num_double);
+            }
+#else
+            // Native compilation - use full GMP
             gmp_sprintf(buf, "%.Ff", *num);
 #endif
             strbuf_append_str(strbuf, buf);

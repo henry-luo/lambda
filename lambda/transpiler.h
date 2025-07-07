@@ -1,6 +1,21 @@
 #pragma once
 
-#include <gmp.h>
+// Enhanced GMP configuration for cross-compilation
+#ifdef CROSS_COMPILE
+    // For cross-compilation, we may have either full or stub GMP
+    #include <gmp.h>
+    
+    // Declare weak symbols for GMP I/O functions to detect availability at runtime
+    extern int gmp_sprintf(char *, const char *, ...) __attribute__((weak));
+    extern double mpf_get_d(const mpf_t) __attribute__((weak));
+    
+    // Helper macro to check if full GMP I/O is available
+    #define HAS_GMP_IO() (gmp_sprintf != NULL)
+#else
+    // Native compilation should have full GMP
+    #include <gmp.h>
+    #define HAS_GMP_IO() 1
+#endif
 
 #ifdef __cplusplus
 extern "C" {
