@@ -16,7 +16,63 @@ The compilation system has been enhanced to support both native and cross-platfo
 
 ### Dependency Setup Scripts
 - `setup-mac-deps.sh` - Mac native dependency setup script
+- `setup-linux-deps.sh` - Linux (Ubuntu) native dependency setup script
 - `setup-windows-deps.sh` - Windows cross-compilation dependency setup script
+
+## Linux Native Compilation (Ubuntu)
+
+### Prerequisites
+
+1. **Build Essential Tools**: Required for compilation
+   ```bash
+   sudo apt update
+   sudo apt install build-essential
+   ```
+
+2. **Git and CMake**: Required for dependency building
+   ```bash
+   sudo apt install git cmake pkg-config
+   ```
+
+### Dependency Setup
+
+Run the Linux dependency setup script to install all required dependencies:
+
+```bash
+./setup-linux-deps.sh
+```
+
+This script will:
+- Install/build **tree-sitter** and **tree-sitter-lambda** from local sources
+- Install **GMP** via apt (or build from source if apt fails)
+- Build **lexbor** from source (not commonly available in Ubuntu repos)
+- Build **MIR** from source (JIT compiler infrastructure)
+- Build **zlog** from source (logging library, optional)
+
+#### Dependencies Installed
+
+- **tree-sitter**: Incremental parsing library
+- **tree-sitter-lambda**: Lambda language parser
+- **GMP**: GNU Multiple Precision arithmetic library (via `libgmp-dev` package)
+- **lexbor**: Fast HTML/XML parsing library (built from source)
+- **MIR**: Lightweight JIT compiler infrastructure (built from source)
+- **zlog**: High-performance logging library (built from source, optional)
+
+### Native Compilation
+
+After dependencies are set up, compile the project:
+
+```bash
+./compile-lambda.sh build_lambda_config.json
+```
+
+### Clean Up
+
+To clean intermediate build files:
+
+```bash
+./setup-linux-deps.sh clean
+```
 
 ## Mac Native Compilation
 
@@ -99,7 +155,12 @@ Compile for Windows:
 
 ## Usage
 
-### Native Compilation (macOS/Linux)
+### Linux Native Compilation (Ubuntu)
+```bash
+./compile-lambda.sh
+```
+
+### Mac Native Compilation (macOS)
 ```bash
 ./compile-lambda.sh
 ```
@@ -181,7 +242,13 @@ The `build_lambda_config.json` includes platform-specific configurations and dep
 
 ## Dependency Locations
 
-### Mac Native Dependencies
+### Linux Dependency Locations
+
+- **System libraries**: Installed to `/usr/local/lib` and `/usr/local/include`
+- **APT packages**: Available at `/usr/lib` and `/usr/include` (e.g., GMP via `libgmp-dev`)
+- **Local tree-sitter**: Built in `lambda/tree-sitter/` and `lambda/tree-sitter-lambda/`
+
+### Mac Dependency Locations
 
 - **System libraries**: Installed to `/usr/local/lib` and `/usr/local/include`
 - **Homebrew libraries**: Available at `/opt/homebrew/lib` and `/opt/homebrew/include`
@@ -200,6 +267,27 @@ When a platform is specified:
 3. Arrays (like libraries, flags) are completely overridden by platform-specific versions
 
 ## Troubleshooting
+
+### Linux Issues
+
+1. **Missing Build Tools**:
+   ```bash
+   sudo apt update && sudo apt install build-essential cmake git
+   ```
+
+2. **Permission Issues**: Some system installations may require `sudo`
+
+3. **Package Manager Issues**: 
+   ```bash
+   sudo apt update
+   sudo apt install pkg-config libtool autoconf automake
+   ```
+
+4. **Library Path Issues**: Ensure `/usr/local/lib` is in your library path:
+   ```bash
+   echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/local.conf
+   sudo ldconfig
+   ```
 
 ### Mac Issues
 
@@ -230,6 +318,11 @@ When a platform is specified:
 
 1. **Clean and Rebuild**:
    ```bash
+   # For Linux
+   ./setup-linux-deps.sh clean
+   ./setup-linux-deps.sh
+   
+   # For Mac
    ./setup-mac-deps.sh clean
    ./setup-mac-deps.sh
    ```
