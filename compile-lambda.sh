@@ -1,7 +1,52 @@
 #!/bin/bash
 
-# Configuration file
-CONFIG_FILE="${1:-build_lambda_config.json}"
+# Enhanced unified compilation script with cross-compilation support
+# Usage: ./compile-lambda.sh [config_file] [--platform=PLATFORM]
+#        ./compile-lambda.sh --help
+
+# Configuration file default
+CONFIG_FILE="build_lambda_config.json"
+PLATFORM=""
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --platform=*)
+            PLATFORM="${1#*=}"
+            shift
+            ;;
+        --platform)
+            PLATFORM="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: $0 [config_file] [--platform=PLATFORM]"
+            echo ""
+            echo "Arguments:"
+            echo "  config_file           JSON configuration file (default: build_lambda_config.json)"
+            echo "  --platform=PLATFORM   Target platform for cross-compilation"
+            echo ""
+            echo "Available platforms:"
+            echo "  windows               Cross-compile for Windows using MinGW"
+            echo "  (none)                Native compilation for current platform"
+            echo ""
+            echo "Examples:"
+            echo "  $0                               # Native compilation"
+            echo "  $0 --platform=windows           # Cross-compile for Windows"
+            echo "  $0 custom.json --platform=windows"
+            exit 0
+            ;;
+        --*)
+            echo "Error: Unknown option $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+        *)
+            CONFIG_FILE="$1"
+            shift
+            ;;
+    esac
+done
 
 # Check if config file exists
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -13,11 +58,30 @@ fi
 get_json_value() {
     local key="$1"
     local file="$2"
+    local platform_prefix="$3"
     
     if command -v jq >/dev/null 2>&1; then
-        jq -r ".$key // empty" "$file" 2>/dev/null
+        if [ -n "$platform_prefix" ]; then
+            # Try platform-specific value first, fallback to default
+            local platform_value=$(jq -r ".platforms.$platform_prefix.$key // empty" "$file" 2>/dev/null)
+            if [ -n "$platform_value" ] && [ "$platform_value" != "null" ]; then
+                echo "$platform_value"
+            else
+                jq -r ".$key // empty" "$file" 2>/dev/null
+            fi
+        else
+            jq -r ".$key // empty" "$file" 2>/dev/null
+        fi
     else
         # Fallback to grep/sed for basic JSON parsing
+        if [ -n "$platform_prefix" ]; then
+            # Try platform-specific value first
+            local platform_value=$(grep -A 20 "\"platforms\"" "$file" | grep -A 10 "\"$platform_prefix\"" | grep "\"$key\"" | head -1 | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*"([^"]*).*/\1/' | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*([^,}]*).*/\1/' | sed 's/[",]//g')
+            if [ -n "$platform_value" ]; then
+                echo "$platform_value"
+                return
+            fi
+        fi
         grep "\"$key\"" "$file" | head -1 | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*"([^"]*).*/\1/' | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*([^,}]*).*/\1/' | sed 's/[",]//g'
     fi
 }
@@ -26,19 +90,40 @@ get_json_value() {
 get_json_array() {
     local key="$1"
     local file="$2"
+    local platform_prefix="$3"
     
     if command -v jq >/dev/null 2>&1; then
-        jq -r ".$key[]? // empty" "$file" 2>/dev/null
+        if [ -n "$platform_prefix" ]; then
+            # Try platform-specific array first, fallback to default
+            local platform_array=$(jq -r ".platforms.$platform_prefix.$key[]? // empty" "$file" 2>/dev/null)
+            if [ -n "$platform_array" ]; then
+                echo "$platform_array"
+            else
+                jq -r ".$key[]? // empty" "$file" 2>/dev/null
+            fi
+        else
+            jq -r ".$key[]? // empty" "$file" 2>/dev/null
+        fi
     else
-        # Fallback parsing for arrays - extract content between quotes in the array
+        # Fallback parsing for arrays
+        if [ -n "$platform_prefix" ]; then
+            # Try platform-specific array first
+            local platform_section=$(sed -n '/"platforms"/,/}/p' "$file" | sed -n '/"'$platform_prefix'"/,/}/p')
+            if echo "$platform_section" | grep -q "\"$key\""; then
+                echo "$platform_section" | sed -n '/"'$key'":/,/]/p' | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | grep -v '^[[:space:]]*$' | grep -v "$key"
+                return
+            fi
+        fi
         sed -n '/"'$key'":/,/]/p' "$file" | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | grep -v '^[[:space:]]*$' | grep -v "$key"
     fi
 }
 
-# Read configuration
-BUILD_DIR=$(get_json_value "build_dir" "$CONFIG_FILE")
-OUTPUT=$(get_json_value "output" "$CONFIG_FILE")
-DEBUG=$(get_json_value "debug" "$CONFIG_FILE")
+# Read configuration with platform override support
+BUILD_DIR=$(get_json_value "build_dir" "$CONFIG_FILE" "$PLATFORM")
+OUTPUT=$(get_json_value "output" "$CONFIG_FILE" "$PLATFORM")
+DEBUG=$(get_json_value "debug" "$CONFIG_FILE" "$PLATFORM")
+CROSS_COMPILE=$(get_json_value "cross_compile" "$CONFIG_FILE" "$PLATFORM")
+TARGET_TRIPLET=$(get_json_value "target_triplet" "$CONFIG_FILE" "$PLATFORM")
 
 # Validate required fields
 if [ -z "$BUILD_DIR" ]; then
@@ -48,6 +133,42 @@ fi
 if [ -z "$OUTPUT" ]; then
     OUTPUT="lambda.exe"  # Default fallback
 fi
+
+# Set cross-compilation if platform is specified
+if [ -n "$PLATFORM" ]; then
+    if [ "$PLATFORM" = "windows" ]; then
+        CROSS_COMPILE="true"
+        if [ -z "$TARGET_TRIPLET" ]; then
+            TARGET_TRIPLET="x86_64-w64-mingw32"
+        fi
+    fi
+fi
+
+# Set compilers based on cross-compilation target
+if [ "$CROSS_COMPILE" = "true" ] && [ -n "$TARGET_TRIPLET" ]; then
+    echo "Cross-compiling for target: $TARGET_TRIPLET"
+    CC="${TARGET_TRIPLET}-gcc"
+    CXX="${TARGET_TRIPLET}-g++"
+    
+    # Check if cross-compiler exists
+    if ! command -v "$CC" >/dev/null 2>&1; then
+        echo "Error: Cross-compiler '$CC' not found!"
+        echo "Install it with: brew install mingw-w64"
+        exit 1
+    fi
+    
+    if ! command -v "$CXX" >/dev/null 2>&1; then
+        echo "Error: Cross-compiler '$CXX' not found!"
+        echo "Install it with: brew install mingw-w64"
+        exit 1
+    fi
+else
+    CC="clang"
+    CXX="clang++"
+fi
+
+echo "Using C compiler: $CC"
+echo "Using C++ compiler: $CXX"
 
 # Create build directory
 mkdir -p "$BUILD_DIR"
@@ -59,39 +180,58 @@ LINK_LIBS=""
 WARNINGS=""
 FLAGS=""
 
-# Process libraries
+# Process libraries with platform override support
 if command -v jq >/dev/null 2>&1; then
     # Extract library information using jq
-    while IFS= read -r lib_info; do
-        name=$(echo "$lib_info" | jq -r '.name')
-        include=$(echo "$lib_info" | jq -r '.include // empty')
-        lib=$(echo "$lib_info" | jq -r '.lib // empty')
-        link=$(echo "$lib_info" | jq -r '.link // "static"')
-        
-        [ -n "$include" ] && INCLUDES="$INCLUDES -I$include"
-        
-        if [ "$link" = "static" ]; then
-            [ -n "$lib" ] && LIBS="$LIBS $lib"
-        else
-            [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS -L$lib -l$name"
-        fi
-    done < <(jq -c '.libraries[]?' "$CONFIG_FILE")
+    if [ -n "$PLATFORM" ]; then
+        # Use platform-specific libraries if available
+        while IFS= read -r lib_info; do
+            name=$(echo "$lib_info" | jq -r '.name')
+            include=$(echo "$lib_info" | jq -r '.include // empty')
+            lib=$(echo "$lib_info" | jq -r '.lib // empty')
+            link=$(echo "$lib_info" | jq -r '.link // "static"')
+            
+            [ -n "$include" ] && INCLUDES="$INCLUDES -I$include"
+            
+            if [ "$link" = "static" ]; then
+                [ -n "$lib" ] && LIBS="$LIBS $lib"
+            else
+                [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS -L$lib -l$name"
+            fi
+        done < <(jq -c ".platforms.$PLATFORM.libraries[]? // .libraries[]?" "$CONFIG_FILE")
+    else
+        # Use default libraries
+        while IFS= read -r lib_info; do
+            name=$(echo "$lib_info" | jq -r '.name')
+            include=$(echo "$lib_info" | jq -r '.include // empty')
+            lib=$(echo "$lib_info" | jq -r '.lib // empty')
+            link=$(echo "$lib_info" | jq -r '.link // "static"')
+            
+            [ -n "$include" ] && INCLUDES="$INCLUDES -I$include"
+            
+            if [ "$link" = "static" ]; then
+                [ -n "$lib" ] && LIBS="$LIBS $lib"
+            else
+                [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS -L$lib -l$name"
+            fi
+        done < <(jq -c '.libraries[]?' "$CONFIG_FILE")
+    fi
     
-    # Process warnings
+    # Process warnings with platform override
     while IFS= read -r warning; do
         [ -n "$warning" ] && WARNINGS="$WARNINGS -Werror=$warning"
-    done < <(jq -r '.warnings[]?' "$CONFIG_FILE")
+    done < <(get_json_array "warnings" "$CONFIG_FILE" "$PLATFORM")
     
-    # Process flags
+    # Process flags with platform override
     while IFS= read -r flag; do
         [ -n "$flag" ] && FLAGS="$FLAGS -$flag"
-    done < <(jq -r '.flags[]?' "$CONFIG_FILE")
+    done < <(get_json_array "flags" "$CONFIG_FILE" "$PLATFORM")
     
-    # Process linker flags
+    # Process linker flags with platform override
     LINKER_FLAGS=""
     while IFS= read -r flag; do
         [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
-    done < <(jq -r '.linker_flags[]?' "$CONFIG_FILE")
+    done < <(get_json_array "linker_flags" "$CONFIG_FILE" "$PLATFORM")
     
     # Get source files (using arrays compatible with older bash)
     SOURCE_FILES_ARRAY=()
@@ -108,17 +248,22 @@ if command -v jq >/dev/null 2>&1; then
     done < <(jq -r '.cpp_files[]?' "$CONFIG_FILE" 2>/dev/null)
 else
     # Fallback without jq - basic parsing
-    INCLUDES="-Ilambda/tree-sitter/lib/include -I/usr/local/include -I/opt/homebrew/include"
-    LIBS="lambda/tree-sitter/libtree-sitter.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a"
-    LINK_LIBS="-L/opt/homebrew/lib -lgmp"
-    WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
-    FLAGS="-fms-extensions -pedantic -fcolor-diagnostics"
-    LINKER_FLAGS=""
-    
-    # Parse linker flags
-    while IFS= read -r flag; do
-        [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
-    done < <(get_json_array "linker_flags" "$CONFIG_FILE")
+    if [ "$CROSS_COMPILE" = "true" ] || [ "$PLATFORM" = "windows" ]; then
+        echo "Warning: jq not found, using fallback parsing for cross-compilation"
+        INCLUDES="-Ilambda/tree-sitter/lib/include -Iwindows-deps/include"
+        LIBS="lambda/tree-sitter/libtree-sitter-windows.a windows-deps/lib/libmir.a windows-deps/lib/libzlog.a windows-deps/lib/liblexbor_static.a windows-deps/lib/libgmp.a"
+        LINK_LIBS=""
+        WARNINGS="-Wformat -Wincompatible-pointer-types -Wmultichar"
+        FLAGS="-fms-extensions -static -DCROSS_COMPILE -D_WIN32"
+        LINKER_FLAGS="-static-libgcc -static-libstdc++"
+    else
+        INCLUDES="-Ilambda/tree-sitter/lib/include -I/usr/local/include -I/opt/homebrew/include"
+        LIBS="lambda/tree-sitter/libtree-sitter.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a"
+        LINK_LIBS="-L/opt/homebrew/lib -lgmp"
+        WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
+        FLAGS="-fms-extensions -pedantic -fcolor-diagnostics"
+        LINKER_FLAGS=""
+    fi
     
     # Parse source files into arrays
     SOURCE_FILES_ARRAY=()
@@ -140,18 +285,14 @@ fi
 
 # Debug output
 echo "Configuration loaded from: $CONFIG_FILE"
-echo "Raw BUILD_DIR: '$BUILD_DIR'"
-echo "Raw OUTPUT: '$OUTPUT'"
-echo "Raw DEBUG: '$DEBUG'"
+if [ -n "$PLATFORM" ]; then
+    echo "Target platform: $PLATFORM"
+fi
+echo "Cross-compilation: $CROSS_COMPILE"
 echo "Build directory: $BUILD_DIR"
 echo "Output executable: $OUTPUT"
 echo "Source files count: ${#SOURCE_FILES_ARRAY[@]}"
 echo "C++ files count: ${#CPP_FILES_ARRAY[@]}"
-
-# Debug: Show first few source files
-if [ ${#SOURCE_FILES_ARRAY[@]} -gt 0 ]; then
-    echo "First source file: '${SOURCE_FILES_ARRAY[0]}'"
-fi
 echo
 
 # Compile each C source file individually
@@ -168,8 +309,8 @@ for source in "${SOURCE_FILES_ARRAY[@]}"; do
         
         echo "Compiling: $source -> $obj_file"
         
-        # Compile individual source file (only use includes and warnings/flags, not linker flags)
-        compile_output=$(clang $INCLUDES \
+        # Compile individual source file
+        compile_output=$($CC $INCLUDES \
           -c "$source" -o "$obj_file" \
           $WARNINGS $FLAGS 2>&1)
         
@@ -198,7 +339,15 @@ if [ ${#CPP_FILES_ARRAY[@]} -gt 0 ]; then
             OBJECT_FILES="$OBJECT_FILES $cpp_obj_file"
             
             echo "Compiling C++: $cpp_file -> $cpp_obj_file"
-            cpp_output=$(clang++ $INCLUDES -c "$cpp_file" -o "$cpp_obj_file" $WARNINGS $FLAGS 2>&1)
+            
+            # Use C++ specific flags (remove incompatible-pointer-types warning for C++)
+            CPP_WARNINGS=$(echo "$WARNINGS" | sed 's/-Werror=incompatible-pointer-types//g' | sed 's/-Wincompatible-pointer-types//g')
+            CPP_FLAGS="$FLAGS"
+            if [ "$CROSS_COMPILE" = "true" ]; then
+                CPP_FLAGS="$CPP_FLAGS -std=c++11 -fpermissive -Wno-fpermissive"
+            fi
+            
+            cpp_output=$($CXX $INCLUDES -c "$cpp_file" -o "$cpp_obj_file" $CPP_WARNINGS $CPP_FLAGS 2>&1)
             if [ $? -ne 0 ]; then
                 compilation_success=false
             fi
@@ -215,7 +364,7 @@ fi
 # Link final executable only if compilation was successful
 if [ "$compilation_success" = true ]; then
     echo "Linking: $OUTPUT"
-    link_output=$(clang++ $OBJECT_FILES $LIBS $LINK_LIBS $LINKER_FLAGS -o "$OUTPUT" 2>&1)
+    link_output=$($CXX $OBJECT_FILES $LIBS $LINK_LIBS $LINKER_FLAGS -o "$OUTPUT" 2>&1)
     if [ $? -ne 0 ]; then
         compilation_success=false
     fi
@@ -224,7 +373,7 @@ if [ "$compilation_success" = true ]; then
     fi
 fi
 
-# Output the captured, colorized messages
+# Output the captured messages
 echo -e "$output"
 
 # Count errors and warnings (ignores color codes)
@@ -249,6 +398,13 @@ echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
 # Final build status
 if [ "$compilation_success" = true ]; then
     echo -e "${GREEN}Build successful: $OUTPUT${RESET}"
+    
+    # Show file info for cross-compiled binaries
+    if [ "$CROSS_COMPILE" = "true" ]; then
+        echo "File type information:"
+        file "$OUTPUT" 2>/dev/null || echo "file command not available"
+    fi
+    
     exit 0
 else
     echo -e "${RED}Build failed${RESET}"
