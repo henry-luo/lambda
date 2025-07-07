@@ -145,6 +145,19 @@ clang -o test_lambda.exe test_lambda.c "${OBJECT_FILES[@]}" \
 if [ $? -eq 0 ]; then
     echo "Build successful! Running tests..."
     echo "=================================="
+    
+    # Show available CSV test files
+    echo "Available CSV test files:"
+    ls -la "$PROJECT_ROOT/test/input/"*.csv 2>/dev/null || echo "No CSV test files found"
+    echo ""
+    
+    # Show available lambda test files
+    echo "Available lambda test scripts:"
+    ls -la "$PROJECT_ROOT/test/lambda/"*.ls 2>/dev/null || echo "No lambda test scripts found"
+    echo ""
+    echo "Running criterion tests..."
+    echo "=================================="
+    
     ./test_lambda.exe --verbose
 else
     echo "Build failed!"

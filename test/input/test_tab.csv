@@ -1,0 +1,6 @@
+name	age	city	salary	active
+John Doe	30	New York	50000.50	true
+Jane Smith	25	San Francisco	75000	false
+Bob Johnson	35	Boston	60000.75	true
+Alice Brown	28	Los Angeles	45000	true
+Charlie Wilson	40	Chicago	80000	false

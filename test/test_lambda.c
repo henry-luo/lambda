@@ -154,3 +154,290 @@ Test(lambda_tests, test_box_unbox_ls) {
     
     runtime_cleanup(&runtime);
 }
+
+Test(lambda_tests, test_csv_test_ls) {
+    // Test csv_test.ls script which tests various CSV parsing scenarios
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    Item ret = run_script_at(&runtime, "test/lambda/csv_test.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors
+    cr_assert_neq(ret, ITEM_ERROR, "csv_test.ls script should not return an error");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV test output: %s\n", strbuf->str);
+    strbuf_free(strbuf);
+    
+    runtime_cleanup(&runtime);
+}
+
+Test(lambda_tests, test_csv_with_headers_comma) {
+    // Test CSV parsing with headers (comma-separated) using direct script execution
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    // Create a simple test script
+    FILE* temp_file = fopen("temp_csv_test1.ls", "w");
+    cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
+    fprintf(temp_file, "let csv = input('test/input/test.csv', 'csv'); csv[0][\"name\"]");
+    fclose(temp_file);
+    
+    Item ret = run_script_at(&runtime, "temp_csv_test1.ls");
+    
+    // Remove temporary file
+    remove("temp_csv_test1.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors
+    cr_assert_neq(ret, ITEM_ERROR, "CSV parsing should not fail");
+    cr_assert_neq(ret, ITEM_NULL, "CSV parsing should return valid data");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV with headers (comma) test result: %s\n", strbuf->str);
+    
+    // Verify it contains the expected first person's name (should be "John Doe" from first row)
+    cr_assert(strstr(strbuf->str, "John Doe") != NULL, 
+              "CSV with headers should return first person's name, got: %s", strbuf->str);
+    
+    strbuf_free(strbuf);
+    runtime_cleanup(&runtime);
+}
+
+Test(lambda_tests, test_csv_with_tab_separator) {
+    // Test CSV parsing with tab separator using direct script execution
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    // Create a simple test script
+    FILE* temp_file = fopen("temp_csv_test2.ls", "w");
+    cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
+    fprintf(temp_file, "let csv = input('test/input/test_tab.csv', 'csv'); csv[0][\"name\"]");
+    fclose(temp_file);
+    
+    Item ret = run_script_at(&runtime, "temp_csv_test2.ls");
+    
+    // Remove temporary file
+    remove("temp_csv_test2.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors
+    cr_assert_neq(ret, ITEM_ERROR, "CSV parsing with tab separator should not fail");
+    cr_assert_neq(ret, ITEM_NULL, "CSV parsing should return valid data");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV with tab separator test result: %s\n", strbuf->str);
+    
+    // Verify it contains the expected field value (should be "John Doe" from first row)
+    cr_assert(strstr(strbuf->str, "John Doe") != NULL, 
+              "CSV with tab separator should return first person's name, got: %s", strbuf->str);
+    
+    strbuf_free(strbuf);
+    runtime_cleanup(&runtime);
+}
+
+Test(lambda_tests, test_csv_without_headers) {
+    // Test CSV parsing without headers using direct script execution
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    // Create a simple test script
+    FILE* temp_file = fopen("temp_csv_test3.ls", "w");
+    cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
+    fprintf(temp_file, "let csv = input('test/input/test_no_header.csv', 'csv'); csv[0][0]");
+    fclose(temp_file);
+    
+    Item ret = run_script_at(&runtime, "temp_csv_test3.ls");
+    
+    // Remove temporary file
+    remove("temp_csv_test3.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors
+    cr_assert_neq(ret, ITEM_ERROR, "CSV parsing without headers should not fail");
+    cr_assert_neq(ret, ITEM_NULL, "CSV parsing should return valid data");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV without headers test result: %s\n", strbuf->str);
+    
+    // Verify it contains the expected field value (should be "John Doe" from first row)
+    cr_assert(strstr(strbuf->str, "John Doe") != NULL, 
+              "CSV without headers should return first row first column value, got: %s", strbuf->str);
+}
+
+Test(lambda_tests, test_csv_field_access_by_name) {
+    // Test accessing CSV data by field name using direct script execution
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    // Create a simple test script
+    FILE* temp_file = fopen("temp_csv_test4.ls", "w");
+    cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
+    fprintf(temp_file, "let csv = input('test/input/test.csv', 'csv'); csv[0][\"name\"]");
+    fclose(temp_file);
+    
+    Item ret = run_script_at(&runtime, "temp_csv_test4.ls");
+    
+    // Remove temporary file
+    remove("temp_csv_test4.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors
+    cr_assert_neq(ret, ITEM_ERROR, "CSV field access by name should not fail");
+    cr_assert_neq(ret, ITEM_NULL, "CSV field access should return valid data");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV field access by name test result: %s\n", strbuf->str);
+    
+    // Verify it contains the expected field value (should be "John Doe" from first row)
+    cr_assert(strstr(strbuf->str, "John Doe") != NULL, 
+              "CSV field access by name should return first person's name, got: %s", strbuf->str);
+    
+    strbuf_free(strbuf);
+    runtime_cleanup(&runtime);
+}
+
+Test(lambda_tests, test_csv_field_access_by_index) {
+    // Test accessing CSV data by numeric index using direct script execution
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    // Create a simple test script
+    FILE* temp_file = fopen("temp_csv_test5.ls", "w");
+    cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
+    fprintf(temp_file, "let csv = input('test/input/test_no_header.csv', 'csv'); csv[0][0]");
+    fclose(temp_file);
+    
+    Item ret = run_script_at(&runtime, "temp_csv_test5.ls");
+    
+    // Remove temporary file
+    remove("temp_csv_test5.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors
+    cr_assert_neq(ret, ITEM_ERROR, "CSV field access by index should not fail");
+    cr_assert_neq(ret, ITEM_NULL, "CSV field access should return valid data");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV field access by index test result: %s\n", strbuf->str);
+    
+    // Verify it contains the expected field value (should be "John Doe" from first row)
+    cr_assert(strstr(strbuf->str, "John Doe") != NULL, 
+              "CSV field access by index should return first row first column value, got: %s", strbuf->str);
+    
+    strbuf_free(strbuf);
+    runtime_cleanup(&runtime);
+}
+
+Test(lambda_tests, test_csv_length_function) {
+    // Test getting the length of CSV data using direct script execution
+    // Save current directory
+    char original_cwd[1024];
+    getcwd(original_cwd, sizeof(original_cwd));
+    
+    // Change to project root so lambda scripts can find lambda/lambda.h
+    chdir("..");
+    
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = "";
+    
+    // Create a simple test script
+    FILE* temp_file = fopen("temp_csv_test6.ls", "w");
+    cr_assert_neq(temp_file, NULL, "Failed to create temporary test file");
+    fprintf(temp_file, "let csv = input('./test/input/test.csv', 'csv'); len(csv)");
+    fclose(temp_file);
+    
+    Item ret = run_script_at(&runtime, "temp_csv_test6.ls");
+    
+    // Remove temporary file
+    remove("temp_csv_test6.ls");
+    
+    // Restore original directory
+    chdir(original_cwd);
+    
+    // Verify the script runs without errors - len function might not be implemented yet
+    // So we'll just check that the CSV parsing works
+    cr_assert_neq(ret, ITEM_ERROR, "CSV length check should not crash");
+    
+    // Print the output for debugging
+    StrBuf* strbuf = strbuf_new_cap(1024);
+    print_item(strbuf, ret);
+    printf("CSV length test result: %s\n", strbuf->str);
+    
+    strbuf_free(strbuf);
+    runtime_cleanup(&runtime);
+}

@@ -146,6 +146,9 @@ Map* map(int type_index);
 Map* map_fill(Map* map, ...);
 Item map_get(Map* map, char *key);
 
+// Generic field access function
+Item field(Item item, long index);
+
 typedef struct Element Element;
 Element* elmt(int type_index);
 Element* elmt_fill(Element *elmt, ...);

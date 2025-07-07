@@ -80,7 +80,6 @@ void run_repl(Runtime *runtime) {
     }
     
     strbuf_free(repl_history);
-    printf("Goodbye!\n");
 }
 
 void run_script_file(Runtime *runtime, const char *script_path) {
