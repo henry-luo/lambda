@@ -76,6 +76,12 @@
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib",
             "link": "dynamic"
+        },
+        {
+            "name": "readline",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib",
+            "link": "dynamic"
         }
     ],
     "warnings": [
