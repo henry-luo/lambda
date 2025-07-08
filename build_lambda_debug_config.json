@@ -30,6 +30,8 @@
         "lambda/input/input-toml.c",
         "lambda/input/input-html.c",
         "lambda/input/input-latex.c",
+        "lambda/input/input-rtf.c",
+        "lambda/input/input-pdf.c",
         "lambda/format/format.c",
         "lambda/format/format-json.c",
         "lambda/format/format-md.c"
