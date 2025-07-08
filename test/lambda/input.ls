@@ -24,9 +24,14 @@ markdown
 // more_html
 // let latex = input('./test/input/test.tex', 'latex')
 // latex
+let rtf = input('./test/input/test.rtf', 'rtf')
+rtf
 
 "\nFormat JSON:\n"
 format(json, 'json')
 
 "\nFormat Markdown:\n"
 format(markdown, 'markdown')
+
+"\nFormat RTF:\n"
+format(rtf, 'json')

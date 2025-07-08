@@ -35,3 +35,4 @@ windows-deps/include/lexbor
 windows-deps/src/**.xz
 windows-deps/src/**.bz2
 .obsidian
+site
