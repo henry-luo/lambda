@@ -63,7 +63,7 @@ enum ts_symbol_identifiers {
   anon_sym_pub = 59,
   anon_sym_fn = 60,
   anon_sym_EQ_GT = 61,
-  anon_sym_length = 62,
+  anon_sym_len = 62,
   anon_sym_type = 63,
   anon_sym_int = 64,
   anon_sym_float = 65,

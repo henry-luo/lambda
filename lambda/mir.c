@@ -51,15 +51,15 @@ func_obj_t func_list[] = {
     {"fn_is", (fn_ptr) fn_is},
     {"fn_in", (fn_ptr) fn_in},
     {"fn_to", (fn_ptr) fn_to},
-    {"string", (fn_ptr) string},
     {"base_type", (fn_ptr) base_type},
     {"const_type", (fn_ptr) const_type},
-    {"type", (fn_ptr) type},
-    {"input", (fn_ptr) input},
-    {"print", (fn_ptr) print},
-    {"format", (fn_ptr) format},
-    {"field", (fn_ptr) field},
-    {"length", (fn_ptr) length},
+    {"fn_string", (fn_ptr) fn_string},
+    {"fn_type", (fn_ptr) fn_type},
+    {"fn_input", (fn_ptr) fn_input},
+    {"fn_print", (fn_ptr) fn_print},
+    {"fn_format", (fn_ptr) fn_format},
+    {"fn_field", (fn_ptr) fn_field},
+    {"fn_len", (fn_ptr) fn_len},
 };
 
 void *import_resolver(const char *name) {

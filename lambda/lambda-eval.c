@@ -224,7 +224,8 @@ Item list_fill(List *list, int count, ...) {
     }
     va_end(args);
     frame_end();
-    return list->length ? (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT ? list->items[0] : (Item)list) : ITEM_NULL;
+    return list->length ? (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT 
+        ? list->items[0] : (Item)list) : ITEM_NULL;
 }
 
 Item list_get(List *list, int index) {
@@ -403,7 +404,7 @@ Item map_get(Map* map, char *key) {
 }
 
 // generic field access function for any type
-Item field(Item item, long index) {
+Item fn_field(Item item, long index) {
     // Determine the type and delegate to appropriate getter
     LambdaItem litem = (LambdaItem)item;
     TypeId type_id = get_type_id(litem);
@@ -731,7 +732,7 @@ String STR_NULL = {.chars = "null", .len = 4};
 String STR_TRUE = {.chars = "true", .len = 4};
 String STR_FALSE = {.chars = "false", .len = 5};
 
-String* string(Item item) {
+String* fn_string(Item item) {
     LambdaItem itm = {.item = item};
     if (itm.type_id == LMD_TYPE_NULL) {
         return &STR_NULL;
@@ -794,7 +795,7 @@ Type* const_type(int type_index) {
     return type;
 }
 
-Type* type(Item item) {
+Type* fn_type(Item item) {
     LambdaItem itm = {.item = item};
     TypeType *type = calloc(1, sizeof(TypeType) + sizeof(Type)); 
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
@@ -810,7 +811,7 @@ Type* type(Item item) {
 
 Input* input_data(Context* ctx, String* url, String* type);
 
-Item input(Item url, Item type) {
+Item fn_input(Item url, Item type) {
     String* url_str;
     LambdaItem url_item = {.item = url};
     if (url_item.type_id != LMD_TYPE_STRING && url_item.type_id != LMD_TYPE_SYMBOL) {
@@ -834,8 +835,8 @@ Item input(Item url, Item type) {
     return (input && input->root) ? input->root : ITEM_NULL;
 }
 
-void print(Item item) {
-    String *str = string(item);
+void fn_print(Item item) {
+    String *str = fn_string(item);
     if (str) {
         printf("%s\n", str->chars);
     }
@@ -843,7 +844,7 @@ void print(Item item) {
 
 String* format_data(Context* ctx, Item item, String* type);
 
-String* format(Item item, Item type) {
+String* fn_format(Item item, Item type) {
     LambdaItem type_item = {.item = type};
     String* type_str;
     if (type_item.type_id != LMD_TYPE_NULL && type_item.type_id != LMD_TYPE_STRING && type_item.type_id != LMD_TYPE_SYMBOL) {
@@ -857,25 +858,51 @@ String* format(Item item, Item type) {
     return format_data(context, item, type_str);
 }
 
-// Length function for containers
-Item length(Item item) {
+// length function for item
+Item fn_len(Item item) {
     LambdaItem litem = (LambdaItem)item;
     TypeId type_id = get_type_id(litem);
+    long size = 0;
     switch (litem.type_id) {
     case LMD_TYPE_LIST:
-        return push_l(((List*)litem.raw_pointer)->length);
+        size = ((List*)litem.raw_pointer)->length;
+        break;
+    case LMD_TYPE_RANGE:
+        size = ((Range*)litem.raw_pointer)->length;
+        break;
     case LMD_TYPE_ARRAY:
-        return push_l(((Array*)litem.raw_pointer)->length);
+        size = ((Array*)litem.raw_pointer)->length;
+        break;
     case LMD_TYPE_ARRAY_INT:
-        return push_l(((ArrayLong*)litem.raw_pointer)->length);
+        size = ((ArrayLong*)litem.raw_pointer)->length;
+        break;
     case LMD_TYPE_MAP:
         TypeMap *map_type = (TypeMap*)((Map*)litem.raw_pointer)->type;
-        return push_l(map_type ? map_type->length : 0);
-    case LMD_TYPE_STRING: {
+        // returns the num of fields in the map
+        size = map_type ? map_type->length : 0;
+        break;
+    case LMD_TYPE_ELEMENT: {
+        Element *elmt = (Element*)litem.raw_pointer;
+        TypeElmt *elmt_type = (TypeElmt*)elmt->type;
+        // returns the num of fields in the element
+        size = (elmt_type ? elmt_type->length : 0) + elmt->length;
+        break;
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+        // returns the length of the string
+        // todo: binary length
         String *str = (String*)litem.pointer;
-        return push_l(str ? str->len : 0);
+        size = str ? str->len : 0;
+        break;
     }
+    case LMD_TYPE_NULL:
+        size = 0;
+        break;
+    case LMD_TYPE_ERROR:
+        return ITEM_ERROR;
     default:
-        return push_l(0);
+        size = 1;  // for scalar types, return 1
+        break;
     }
+    return i2it(size);
 }

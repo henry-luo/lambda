@@ -154,7 +154,7 @@ typedef enum {
 } Operator ;
 
 typedef enum {
-    SYSFUNC_LENGTH,
+    SYSFUNC_LEN,
     SYSFUNC_TYPE,
     SYSFUNC_INT,
     SYSFUNC_FLOAT,

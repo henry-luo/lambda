@@ -174,9 +174,9 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, 
             AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
         StrView func_name = ts_node_source(tp, function_node);
-        if (strview_equal(&func_name, "length")) {
-            fn_node->fn = SYSFUNC_LENGTH;
-            fn_node->type = &TYPE_INT64;
+        if (strview_equal(&func_name, "len")) {
+            fn_node->fn = SYSFUNC_LEN;
+            fn_node->type = &TYPE_INT;
         }
         else if (strview_equal(&func_name, "type")) {
             fn_node->fn = SYSFUNC_TYPE;
@@ -184,7 +184,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
         else if (strview_equal(&func_name, "int")) {
             fn_node->fn = SYSFUNC_INT;
-            fn_node->type = &TYPE_INT64;
+            fn_node->type = &TYPE_INT;
         }
         else if (strview_equal(&func_name, "float")) {
             fn_node->fn = SYSFUNC_FLOAT;

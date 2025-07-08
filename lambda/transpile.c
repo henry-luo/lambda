@@ -517,6 +517,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     TypeFunc *fn_type = NULL;
     if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
         StrView fn = ts_node_source(tp, call_node->function->node);
+        strbuf_append_str(tp->code_buf, "fn_");
         strbuf_append_str_n(tp->code_buf, fn.str, fn.length);
     }
     else {

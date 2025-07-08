@@ -146,11 +146,11 @@ Map* map(int type_index);
 Map* map_fill(Map* map, ...);
 Item map_get(Map* map, char *key);
 
-// Generic field access function
-Item field(Item item, long index);
+// generic field access function
+Item fn_field(Item item, long index);
 
-// Length function for containers
-Item length(Item item);
+// length function
+Item fn_len(Item item);
 
 typedef struct Element Element;
 Element* elmt(int type_index);
@@ -168,6 +168,7 @@ Item push_l(long lval);
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
+// todo: int overflow check and promotion to decimal
 #define i2it(int_val)        (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
 #define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
 #define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
@@ -208,14 +209,14 @@ Function* to_fn(fn_ptr ptr);
 bool fn_is(Item a, Item b);
 bool fn_in(Item a, Item b);
 Range* fn_to(Item a, Item b);
-String* string(Item item);
+String* fn_string(Item item);
 
 Type* base_type(TypeId type_id);
 Type* const_type(int type_index);
 
 // returns the type of the item
-Type* type(Item item);
+Type* fn_type(Item item);
 
-Item input(Item url, Item type);
-void print(Item item);
-String* format(Item item, Item type);
+Item fn_input(Item url, Item type);
+void fn_print(Item item);
+String* fn_format(Item item, Item type);
