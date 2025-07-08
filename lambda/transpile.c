@@ -31,6 +31,7 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
 }
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
+    printf("transpile box item: %d\n", item->type->type_id);
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
@@ -113,6 +114,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
+    printf("transpile primary expr\n");
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
@@ -931,8 +933,10 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     case AST_NODE_IMPORT:
         define_module_import(tp, (AstImportNode*)node);
         break;
+    case AST_NODE_SYS_FUNC:
+        break;
     default:
-        printf("unknown expression type\n");
+        printf("unknown expression type: %d\n", node->node_type);
         break;
     }
 }
@@ -951,7 +955,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     child = script->child;
     bool has_content = false;
     while (child) {
-        if (child->node_type == AST_NODE_CONTENT) {
+        if (child->node_type == AST_NODE_CONTENT || child->node_type == AST_NODE_PRIMARY) {
             transpile_box_item(tp, child);
             has_content = true;
         }

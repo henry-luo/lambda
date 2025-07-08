@@ -858,12 +858,15 @@ String* fn_format(Item item, Item type) {
     return format_data(context, item, type_str);
 }
 
+int utf8_char_count(const char* utf8_string);
+
 // length function for item
 Item fn_len(Item item) {
     LambdaItem litem = (LambdaItem)item;
     TypeId type_id = get_type_id(litem);
+    printf("fn_len item: %d\n", type_id);
     long size = 0;
-    switch (litem.type_id) {
+    switch (type_id) {
     case LMD_TYPE_LIST:
         size = ((List*)litem.raw_pointer)->length;
         break;
@@ -891,17 +894,14 @@ Item fn_len(Item item) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         // returns the length of the string
         // todo: binary length
-        String *str = (String*)litem.pointer;
-        size = str ? str->len : 0;
+        String *str = (String*)litem.pointer;  // todo:: should return char length
+        size = str ? utf8_char_count(str->chars) : 0;
         break;
     }
-    case LMD_TYPE_NULL:
-        size = 0;
-        break;
     case LMD_TYPE_ERROR:
         return ITEM_ERROR;
-    default:
-        size = 1;  // for scalar types, return 1
+    default: // NULL and scalar types
+        size = 0;
         break;
     }
     return i2it(size);

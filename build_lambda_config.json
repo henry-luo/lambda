@@ -12,6 +12,7 @@
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
         "lib/url.c",
+        "lib/utf.c",
         "lib/num_stack.c",
         "lambda/runner.c",
         "lambda/transpile.c",

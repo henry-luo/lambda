@@ -1,7 +1,7 @@
 #include "utf.h"
 
 // decode UTF8 to UTF32 codepoint, returns number of bytes consumed, or -1 on error.
-static int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
+int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
     unsigned char c = utf8[0];
     
     if (c <= 0x7F) {  // 1-byte sequence (ASCII)
@@ -27,3 +27,26 @@ static int utf8_to_codepoint(const unsigned char* utf8, uint32_t* codepoint) {
     }
     return -1;  // Invalid UTF-8 sequence
 }
+
+// Count the number of UTF-8 characters in a string
+int utf8_char_count(const char* utf8_string) {
+    if (!utf8_string) return 0;
+    
+    int char_count = 0;
+    const unsigned char* ptr = (const unsigned char*)utf8_string;
+    uint32_t codepoint;
+    
+    while (*ptr) {
+        int bytes_consumed = utf8_to_codepoint(ptr, &codepoint);
+        if (bytes_consumed <= 0) {
+            // Invalid UTF-8 sequence, skip this byte
+            ptr++;
+        } else {
+            ptr += bytes_consumed;
+            char_count++;
+        }
+    }
+    
+    return char_count;
+}
+
