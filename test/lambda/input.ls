@@ -18,6 +18,8 @@ csv
 // more_xml
 let markdown = input('./test/input/test.md', 'markdown')
 markdown
+let rst = input('./test/input/test.rst', 'rst')
+rst
 // let html = input('./test/input/test.html', 'html')
 // html
 // let more_html = input('./test/input/more_test.html', 'html')
@@ -34,6 +36,9 @@ format(json, 'json')
 
 "\nFormat Markdown:\n"
 format(markdown, 'markdown')
+
+"\nFormat RST:\n"
+format(rst, 'json')
 
 "\nFormat RTF:\n"
 format(rtf, 'json')

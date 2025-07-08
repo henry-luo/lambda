@@ -27,6 +27,7 @@
         "lambda/input/input-xml.c",
         "lambda/input/input-yaml.c",
         "lambda/input/input-md.c",
+        "lambda/input/input-rst.c",
         "lambda/input/input-toml.c",
         "lambda/input/input-html.c",
         "lambda/input/input-latex.c",

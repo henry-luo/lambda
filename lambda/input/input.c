@@ -10,6 +10,7 @@ void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_markdown(Input* input, const char* markdown_string);
+void parse_rst(Input* input, const char* rst_string);
 void parse_html(Input* input, const char* html_string);
 void parse_latex(Input* input, const char* latex_string);
 void parse_rtf(Input* input, const char* rtf_string);
@@ -154,6 +155,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(type->chars, "markdown") == 0) {
             parse_markdown(input, source);
+        }
+        else if (strcmp(type->chars, "rst") == 0) {
+            parse_rst(input, source);
         }
         else if (strcmp(type->chars, "html") == 0) {
             parse_html(input, source);
