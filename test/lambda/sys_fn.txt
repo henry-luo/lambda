@@ -1,0 +1,1 @@
+("len of null:",0,"len of bool:",0,"len of int:",0,"len of float:",0,"len of string:",5,"len of utf string:",2,"len of range:",5,"len of list:",3,"len of array:",3,"len of map:",2,"len of element:",2,"len of element:",0)

@@ -633,7 +633,7 @@ void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_char(tp->code_buf, ')');
     }    
     else {
-        strbuf_append_str(tp->code_buf, "field(");
+        strbuf_append_str(tp->code_buf, "fn_field(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         writeNodeSource(tp, field_node->field->node);
