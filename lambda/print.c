@@ -106,14 +106,46 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
 void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth) {
     // Prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
+    
+    if (!map_type) {
+        strbuf_append_str(strbuf, "[null map_type]");
+        return;
+    }
+
+    // Safety check for map_type length
+    if (map_type->length < 0 || map_type->length > 10000) {
+        strbuf_append_str(strbuf, "[invalid map_type length]");
+        return;
+    }
 
     ShapeEntry *field = map_type->shape;
+    ShapeEntry *visited_fields[500]; // Track visited fields to detect cycles
+    int visited_count = 0;
+    
     for (int i = 0; i < map_type->length; i++) {
+        // Safety check for valid field pointer
+        if (!field || (uintptr_t)field < 0x1000) {
+            strbuf_append_str(strbuf, "[invalid field pointer]");
+            break;
+        }
+        
+        // Check for circular reference
+        for (int j = 0; j < visited_count; j++) {
+            if (field == visited_fields[j]) {
+                strbuf_append_str(strbuf, "[circular reference]");
+                return;
+            }
+        }
+        
+        // Add to visited list
+        if (visited_count < 500) {
+            visited_fields[visited_count++] = field;
+        }
+        
         if (i) strbuf_append_char(strbuf, ',');
         if (!field) {
-            printf("ERROR: missing map field for index %d\n", i);
             strbuf_append_str(strbuf, "[null field shape]");
-            continue;
+            break; // exit loop if field is null
         }
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
@@ -122,8 +154,23 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             print_named_items_with_depth(strbuf, nest_map_type, nest_map->data, depth + 1);
         }
         else {
-            // printf("print_named_item: name %.*s, type %d\n", 
-            //     (int)field->name->length, field->name->str, field->type ? field->type->type_id : 0);
+            // Safety check for field name and type
+            if (!field->name || (uintptr_t)field->name < 0x1000) {
+                strbuf_append_str(strbuf, "[invalid field name]");
+                goto advance_field;
+            }
+            
+            if (!field->type || (uintptr_t)field->type < 0x1000) {
+                strbuf_append_str(strbuf, "[invalid field type]");
+                goto advance_field;
+            }
+            
+            // Safety check for type_id range
+            if (field->type->type_id < 0 || field->type->type_id > 50) {
+                strbuf_append_str(strbuf, "[invalid type_id]");
+                goto advance_field;
+            }
+            
             strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
@@ -178,7 +225,21 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 strbuf_append_format(strbuf, "unknown");
             }
         }
-        field = field->next;
+        
+advance_field:
+        ShapeEntry *next_field = field->next;
+        
+        // Safety check for next field pointer
+        if (next_field && (uintptr_t)next_field < 0x1000) {
+            break;
+        }
+        
+        field = next_field;
+        
+        // Additional safety check: if we've reached the end early
+        if (!field && i < map_type->length - 1) {
+            break;
+        }
     }
 }
 
@@ -193,8 +254,7 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!item) { strbuf_append_str(strbuf, "null"); return; }
 
-    LambdaItem ld_item = {.item = item};
-    printf("print_item: type %d\n", !ld_item.type_id ? *((uint8_t*)item) : ld_item.type_id);  
+    LambdaItem ld_item = {.item = item};  
     if (ld_item.type_id) { // packed value
         TypeId type_id = ld_item.type_id;
         if (type_id == LMD_TYPE_NULL) {
@@ -225,7 +285,6 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
                 strbuf->length = end - strbuf->str + 1;
             }
             else if (-30 < exponent && exponent <= -20) {
-                printf("num g: %g, exp: %d\n", num, exponent);
                 strbuf_append_format(strbuf, "%.g", num);
                 // remove the zero in exponent, like 'e07'
                 char *end = strbuf->str + strbuf->length - 1;
@@ -235,7 +294,6 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
                 }
             }
             else {
-                printf("num g: %g, exponent: %d\n", num, exponent);
                 strbuf_append_format(strbuf, "%g", num);
             }
         }

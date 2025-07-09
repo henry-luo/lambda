@@ -159,8 +159,34 @@ static void format_item(StrBuf* sb, Item item) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Map* mp = (Map*)item;
-        format_map(sb, mp);
+        Element* element = (Element*)item;
+        TypeElmt* elmt_type = (TypeElmt*)element->type;
+        
+        strbuf_append_char(sb, '{');
+        strbuf_append_str(sb, "\"tag\":\"");
+        if (elmt_type && elmt_type->name.str) {
+            strbuf_append_str_n(sb, elmt_type->name.str, elmt_type->name.length);
+        }
+        strbuf_append_str(sb, "\"");
+        
+        // Add attributes if any
+        if (elmt_type && elmt_type->length > 0 && element->data) {
+            strbuf_append_str(sb, ",\"attributes\":");
+            Map temp_map = {0};
+            temp_map.type = (Type*)elmt_type;
+            temp_map.data = element->data;
+            temp_map.data_cap = element->data_cap;
+            format_map(sb, &temp_map);
+        }
+        
+        // Add children if any
+        if (elmt_type && elmt_type->content_length > 0) {
+            strbuf_append_str(sb, ",\"children\":");
+            List* list = (List*)element;
+            format_array(sb, (Array*)list);
+        }
+        
+        strbuf_append_char(sb, '}');
         break;
     }
     default:
