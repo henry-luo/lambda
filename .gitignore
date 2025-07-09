@@ -77,6 +77,7 @@ lambda/vsce/dist/
 *.temp
 *.bak
 *.backup
+temp/
 
 # Logs
 *.log

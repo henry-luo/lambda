@@ -45,3 +45,9 @@ format(pdf, 'json')
 
 "\nFormat RST:\n"
 format(rst, 'json')
+
+"\nFormat XML:\n"
+format(json, 'xml')
+
+"\nFormat Markdown as XML:\n"
+format(markdown, 'xml')

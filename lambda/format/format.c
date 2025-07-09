@@ -2,6 +2,7 @@
 
 String* format_json(VariableMemPool* pool, Item root_item);
 void format_markdown(StrBuf* sb, Item root_item);
+String* format_xml(VariableMemPool* pool, Item root_item);
 
 String* format_data(Context* ctx, Item item, String* type) {
     String* result = NULL;
@@ -13,6 +14,9 @@ String* format_data(Context* ctx, Item item, String* type) {
         format_markdown(sb, item);
         result = strbuf_to_string(sb);
         strbuf_free(sb);
+    }
+    else if (strcmp(type->chars, "xml") == 0) {
+        result = format_xml(ctx->heap->pool, item);
     }
     else {
         printf("Unsupported format type: %s\n", type->chars);

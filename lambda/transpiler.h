@@ -276,7 +276,7 @@ typedef struct {
 typedef struct {
     TypeMap; // extends TypeMap
     StrView name;  // name of the element
-    long content_length;  // no. of content items
+    long content_length;  // no. of content items, needed for element type
 } TypeElmt;
 
 typedef struct {
