@@ -1,6 +1,5 @@
 .DS_Store
 *.o
-transpile
 *.a
 *.dylib
 *.pc
@@ -22,8 +21,8 @@ windows-deps/src/gmp-6.2.1
 windows-deps/src/zlog
 windows-deps/src/lexbor
 windows-deps/include/lexbor
-windows-deps/src/**.xz
-windows-deps/src/**.bz2
+windows-deps/**/*.xz
+windows-deps/**/*.bz2
 .obsidian
 site
 
@@ -33,5 +32,4 @@ site
 Cargo.lock
 
 # Tree-sitter generated parser files
-**/src/parser.c
 **/tree-sitter-*/src/parser.c
