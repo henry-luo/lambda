@@ -115,12 +115,12 @@ static void format_array(StrBuf* sb, Array* arr) {
 
 static void format_map(StrBuf* sb, Map* mp) {
     printf("format_map: mp %p, type %p, data %p\n", (void*)mp, (void*)mp->type, (void*)mp->data);
-    strbuf_append_char(sb, '{');
+    if (mp->type_id != LMD_TYPE_ELEMENT) strbuf_append_char(sb, '{');
     if (mp && mp->type) {
         TypeMap* map_type = (TypeMap*)mp->type;
         print_named_items(sb, map_type, mp->data);
     }
-    strbuf_append_char(sb, '}');
+    if (mp->type_id != LMD_TYPE_ELEMENT) strbuf_append_char(sb, '}');
 }
 
 static void format_item(StrBuf* sb, Item item) {
@@ -162,17 +162,12 @@ static void format_item(StrBuf* sb, Item item) {
         Element* element = (Element*)item;
         TypeElmt* elmt_type = (TypeElmt*)element->type;
         
-        strbuf_append_char(sb, '{');
-        strbuf_append_str(sb, "\"tag\":\"");
-        if (elmt_type && elmt_type->name.str) {
-            strbuf_append_str_n(sb, elmt_type->name.str, elmt_type->name.length);
-        }
-        strbuf_append_str(sb, "\"");
+        strbuf_append_format(sb, "\n{\"$\":\"%.*s\"", (int)elmt_type->name.length, elmt_type->name.str);
         
         // Add attributes if any
         if (elmt_type && elmt_type->length > 0 && element->data) {
-            strbuf_append_str(sb, ",\"attributes\":");
-            Map temp_map = {0};
+            strbuf_append_str(sb, ",");
+            Map temp_map = {.type_id = LMD_TYPE_ELEMENT};
             temp_map.type = (Type*)elmt_type;
             temp_map.data = element->data;
             temp_map.data_cap = element->data_cap;
@@ -181,7 +176,7 @@ static void format_item(StrBuf* sb, Item item) {
         
         // Add children if any
         if (elmt_type && elmt_type->content_length > 0) {
-            strbuf_append_str(sb, ",\"children\":");
+            strbuf_append_str(sb, ",\"_\":");
             List* list = (List*)element;
             format_array(sb, (Array*)list);
         }
