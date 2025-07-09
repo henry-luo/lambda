@@ -30,10 +30,15 @@ while [[ $# -gt 0 ]]; do
             echo "  windows               Cross-compile for Windows using MinGW"
             echo "  (none)                Native compilation for current platform"
             echo ""
+            echo "Configuration files:"
+            echo "  build_lambda_config.json    Compile lambda project"
+            echo "  build_radiant_config.json   Compile radiant project"
+            echo ""
             echo "Examples:"
-            echo "  $0                               # Native compilation"
-            echo "  $0 --platform=windows           # Cross-compile for Windows"
-            echo "  $0 custom.json --platform=windows"
+            echo "  $0                                       # Native lambda compilation"
+            echo "  $0 build_radiant_config.json            # Native radiant compilation"
+            echo "  $0 --platform=windows                   # Cross-compile lambda for Windows"
+            echo "  $0 build_radiant_config.json --platform=windows"
             exit 0
             ;;
         --*)

@@ -1,5 +1,4 @@
 {
-   "_tmp":["event.c"],
     "output": "window.exe",
     "source_files": [
         "radiant/window.c",
@@ -28,6 +27,7 @@
         "lib/url.c",
         "lib/utf.c"
     ],
+    "cpp_files": [],
     "libraries": [
         {
             "name": "lexbor",
@@ -93,21 +93,25 @@
         },
         {
             "name": "GL",
+            "include": null,
             "lib": "-framework OpenGL",
             "link": "static"
         },
         {
             "name": "Cocoa",
+            "include": null,
             "lib": "-framework Cocoa",
             "link": "static"
         },
         {
             "name": "IOKit",
+            "include": null,
             "lib": "-framework IOKit",
             "link": "static"
         },    
         {
             "name": "CoreVideo",
+            "include": null,
             "lib": "-framework CoreVideo",
             "link": "static"
         },
@@ -142,5 +146,41 @@
     "flags": [
         "fwrapv",
         "fms-extensions"
-    ]
+    ],
+    "linker_flags": [],
+    "debug": false,
+    "build_dir": "build",
+    "platforms": {
+        "windows": {
+            "output": "window-windows.exe",
+            "libraries": [
+                {
+                    "name": "lexbor",
+                    "include": "windows-deps/include",
+                    "lib": "windows-deps/lib/liblexbor_static.a",
+                    "link": "static"
+                },
+                {
+                    "name": "zlog",
+                    "include": "windows-deps/include",
+                    "lib": "windows-deps/lib/libzlog.a",
+                    "link": "static"
+                }
+            ],
+            "flags": [
+                "fwrapv",
+                "fms-extensions",
+                "static",
+                "DCROSS_COMPILE"
+            ],
+            "linker_flags": [
+                "static-libgcc",
+                "static-libstdc++",
+                "Wl,--subsystem,console"
+            ],
+            "build_dir": "build_windows",
+            "cross_compile": true,
+            "target_triplet": "x86_64-w64-mingw32"
+        }
+    }
 }
