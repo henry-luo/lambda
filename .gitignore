@@ -92,7 +92,7 @@ windows-deps/include/lexbor/
 windows-deps/**/*.xz
 windows-deps/**/*.bz2
 
-# Documentation site
+# Documentation related
 .obsidian/
 site/
 
