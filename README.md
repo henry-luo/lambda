@@ -14,7 +14,7 @@ Lambda is a modern scripting language that combines:
 ## Features
 
 ### Document Format Support
-- **Input Formats**: JSON, XML, HTML, Markdown, PDF, CSV, YAML, TOML, LaTeX, RTF, reStructuredText, INI
+- **Input Formats**: JSON, XML, HTML, Markdown, PDF, CSV, YAML, TOML, LaTeX, RTF, RST, INI
 - **Output Formats**: JSON, Markdown, and more
 - **Native Parsing**: Built-in parsers for all supported formats with no external dependencies
 
@@ -22,7 +22,7 @@ Lambda is a modern scripting language that combines:
 - **Modern Syntax**: Clean, expressive syntax inspired by functional programming
 - **Type System**: Strong typing with type inference
 - **Memory Safe**: Advanced memory pool management prevents common memory issues
-- **JIT Performance**: Near-native performance through MIR compilation
+- **JIT Performance**: Near-native performance through MIR JIT compilation
 - **Interactive Development**: Full REPL with history and auto-completion
 
 ### Technical Architecture
@@ -126,33 +126,22 @@ Lambda is a modern scripting language that combines:
 ### Document Processing
 ```lambda
 // Parse JSON and convert to Markdown
-let data = parse_json("data.json")
-let markdown = format_md(data)
-write_file("output.md", markdown)
+let data = input("data.json", 'json')
+format(data, 'markdown')
 
 // Process CSV data
-let csv = parse_csv("data.csv")
-let filtered = filter(csv, row => row.age > 25)
-write_json("filtered.json", filtered)
-```
-
-### Data Transformation
-```lambda
-// Transform nested data structures
-let config = parse_yaml("config.yaml")
-let processed = map(config.servers, server => {
-    host: server.hostname,
-    port: server.port ?? 8080,
-    secure: server.ssl == true
-})
+let csv = input("data.csv", 'csv')
+for (row in csv) {
+  if (row.age > 25) row
+}
 ```
 
 ### Interactive Analysis
 ```lambda
-λ> let data = parse_json("sample.json")
+λ> let data = input("sample.json", 'json')
 λ> data.users.length
 42
-λ> filter(data.users, u => u.active).map(u => u.name)
+λ> for (u in data.users) { if (u.active) u.name }
 ["Alice", "Bob", "Charlie"]
 ```
 
