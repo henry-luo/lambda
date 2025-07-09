@@ -66,13 +66,13 @@
  * ======
  * 
  * Run all tests:
- *   cd /Users/henryluo/Projects/Jubily/test && ./test_lib.sh
+ *   cd ./test && ./test_lib.sh
  * 
  * Run only variable pool tests:
- *   cd /Users/henryluo/Projects/Jubily/test && ./test_variable_pool.exe --verbose
+ *   cd ./test && ./test_variable_pool.exe --verbose
  * 
  * Run with TAP output:
- *   cd /Users/henryluo/Projects/Jubily/test && ./test_variable_pool.exe --tap
+ *   cd ./test && ./test_variable_pool.exe --tap
  * 
  * Integration Notes:
  * ==================
