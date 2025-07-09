@@ -1,4 +1,3 @@
-
 .DS_Store
 *.o
 transpile
@@ -27,3 +26,8 @@ windows-deps/src/**.xz
 windows-deps/src/**.bz2
 .obsidian
 site
+
+# Rust build artifacts
+**/target/release/
+**/target/debug/
+Cargo.lock
