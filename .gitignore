@@ -31,3 +31,7 @@ site
 **/target/release/
 **/target/debug/
 Cargo.lock
+
+# Tree-sitter generated parser files
+**/src/parser.c
+**/tree-sitter-*/src/parser.c
