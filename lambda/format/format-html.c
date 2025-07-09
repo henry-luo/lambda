@@ -297,7 +297,7 @@ static void format_item(StrBuf* sb, Item item, int depth) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* element = (Element*)get_pointer(item);
+        Element* element = (Element*)item;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
@@ -384,7 +384,7 @@ String* format_html(VariableMemPool* pool, Item root_item) {
                 TypeId first_type = get_type_id(first_lambda);
                 
                 if (first_type == LMD_TYPE_ELEMENT) {
-                    Element* element = (Element*)get_pointer(first_item);
+                    Element* element = (Element*)first_item;
                     if (element && element->type) {
                         TypeElmt* elmt_type = (TypeElmt*)element->type;
                         // Check if this is an HTML element
@@ -399,7 +399,7 @@ String* format_html(VariableMemPool* pool, Item root_item) {
                 }
             }
         } else if (type == LMD_TYPE_ELEMENT) {
-            Element* element = (Element*)get_pointer(root_item);
+            Element* element = (Element*)root_item;
             if (element && element->type) {
                 TypeElmt* elmt_type = (TypeElmt*)element->type;
                 // Check if this is an HTML element
