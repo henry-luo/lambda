@@ -150,6 +150,7 @@ static void format_map_attributes(StrBuf* sb, TypeMap* map_type, void* map_data)
 
 static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
     if (!map_type || !map_data || !map_type->shape) return;
+    printf("format_map_elements: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
     
     ShapeEntry* field = map_type->shape;
     for (int i = 0; i < map_type->length && field; i++) {
@@ -163,6 +164,7 @@ static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
                    i, field->name->length, (int)field->name->length, field->name->str);
             
             if (field_type == LMD_TYPE_STRING) {
+                printf("format string field");
                 String* str = *(String**)data;
                 
                 // Use field->name->length to get proper field name length
@@ -202,8 +204,12 @@ static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
                 strbuf_append_str(sb, "</");
                 strbuf_append_format(sb, "%.*s", (int)field->name->length, field->name->str);
                 strbuf_append_char(sb, '>');
+            }
+            else if (field_type == LMD_TYPE_NULL) {
+                strbuf_append_str(sb, "\"\"");
             } else {
                 // For complex types, create a proper null-terminated tag name
+                printf("format complex field: %d\n", field_type);
                 StrBuf* tag_buf = strbuf_new();
                 strbuf_append_format(tag_buf, "%.*s", (int)field->name->length, field->name->str);
                 char* tag_name = tag_buf->str;
