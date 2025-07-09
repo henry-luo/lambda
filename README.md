@@ -57,7 +57,7 @@ Lambda is a modern scripting language that combines:
 ./compile.sh
 ```
 
-**Radiant project:**
+**Radiant sub-project:**
 ```bash
 ./compile.sh build_radiant_config.json
 ```
@@ -66,9 +66,6 @@ Lambda is a modern scripting language that combines:
 ```bash
 # Lambda for Windows
 ./compile.sh --platform=windows
-
-# Radiant for Windows
-./compile.sh build_radiant_config.json --platform=windows
 ```
 
 **Help and options:**
@@ -119,9 +116,6 @@ Lambda is a modern scripting language that combines:
    ```bash
    # Build lambda project
    ./compile.sh
-   
-   # Build radiant project
-   ./compile.sh build_radiant_config.json
    
    # Cross-compile for Windows
    ./compile.sh --platform=windows
@@ -203,20 +197,6 @@ Lambda uses a unified build system that supports multiple projects and platforms
 - **JSON-based**: Flexible configuration files for each project
 - **Platform-specific**: Override settings for different target platforms
 - **Modular**: Separate library and dependency management
-
-### Build Examples
-```bash
-# Native builds
-./compile.sh                              # Lambda (default)
-./compile.sh build_radiant_config.json    # Radiant
-
-# Cross-compilation
-./compile.sh --platform=windows           # Lambda for Windows
-./compile.sh build_radiant_config.json --platform=windows  # Radiant for Windows
-
-# Help
-./compile.sh --help                       # Show all options
-```
 
 ## Testing
 

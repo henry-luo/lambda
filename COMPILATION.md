@@ -1,19 +1,15 @@
 # Unified Compilation System
 
-This document describes the enhanced compilation system that provides a single unified script for building both the lambda and radiant projects, supporting both native and cross-platform compilation.
-
-## Overview
-
-The compilation system has been enhanced to support both lambda and radiant projects through a single script with platform-specific configuration. The unified script replaces the previous separate compilation scripts and provides consistent building across different projects and platforms.
+This document describes the enhanced compilation system that provides a single unified script for building both the Lambda and Radiant projects, supporting both native and cross-platform compilation.
 
 ## Files
 
 ### Main Script
-- `compile.sh` - Unified compilation script supporting both lambda and radiant projects with native and cross-compilation capabilities
+- `compile.sh` - Unified compilation script supporting both Lambda and Radiant projects with native and cross-compilation capabilities
 
 ### Configuration
 - `build_lambda_config.json` - Configuration file for the lambda project with platform-specific sections
-- `build_radiant_config.json` - Configuration file for the radiant project with platform-specific sections
+- `build_radiant_config.json` - Configuration file for the radiant sub-project
 
 ### Dependency Setup Scripts
 - `setup-mac-deps.sh` - Mac native dependency setup script
@@ -64,7 +60,7 @@ This script will:
 After dependencies are set up, compile the project:
 
 ```bash
-./compile.sh build_lambda_config.json
+./compile.sh
 ```
 
 ### Clean Up
@@ -79,14 +75,9 @@ To clean intermediate build files:
 
 ### Prerequisites
 
-1. **Xcode Command Line Tools**: Required for basic build tools
+1. **Homebrew** (recommended): Package manager for easier dependency installation
    ```bash
-   xcode-select --install
-   ```
-
-2. **Homebrew** (recommended): Package manager for easier dependency installation
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    ```
 
 ### Dependency Setup
@@ -118,7 +109,7 @@ This script will:
 After dependencies are set up, compile the project:
 
 ```bash
-./compile.sh build_lambda_config.json
+./compile.sh
 ```
 
 ### Clean Up
@@ -175,24 +166,9 @@ Compile for Windows:
 
 ### Building Radiant Project
 
-**Linux Native Compilation (Ubuntu):**
-```bash
-./compile.sh build_radiant_config.json
-```
-
 **Mac Native Compilation (macOS):**
 ```bash
 ./compile.sh build_radiant_config.json
-```
-
-**Cross-compilation for Windows:**
-```bash
-./compile.sh build_radiant_config.json --platform=windows
-```
-
-### Using Custom Configuration
-```bash
-./compile.sh custom_config.json --platform=windows
 ```
 
 ### Help
@@ -301,13 +277,7 @@ When a platform is specified:
 
 2. **Permission Issues**: Some system installations may require `sudo`
 
-3. **Package Manager Issues**: 
-   ```bash
-   sudo apt update
-   sudo apt install pkg-config libtool autoconf automake
-   ```
-
-4. **Library Path Issues**: Ensure `/usr/local/lib` is in your library path:
+3. **Library Path Issues**: Ensure `/usr/local/lib` is in your library path:
    ```bash
    echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/local.conf
    sudo ldconfig
@@ -315,19 +285,7 @@ When a platform is specified:
 
 ### Mac Issues
 
-1. **Missing Xcode Command Line Tools**:
-   ```bash
-   xcode-select --install
-   ```
-
-2. **Homebrew Not Found**:
-   ```bash
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-   ```
-
-3. **Permission Issues**: Some system installations may require `sudo`
-
-4. **Architecture Issues**: The script automatically detects Apple Silicon vs Intel and sets appropriate flags
+1. **Permission Issues**: Some system installations may require `sudo`
 
 ### Windows Cross-compilation Issues
 
@@ -354,14 +312,6 @@ When a platform is specified:
 2. **Check Dependencies**: The setup scripts provide detailed status reports
 
 ## Advanced Usage
-
-### Building Individual Dependencies
-
-You can build specific dependencies by modifying the setup scripts or using the build functions directly.
-
-### Custom Library Paths
-
-Modify the `build_lambda_config.json` to point to custom library installations if needed.
 
 ### Debug vs Release Builds
 
