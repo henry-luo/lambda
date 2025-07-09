@@ -24,8 +24,9 @@
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
-        "lib/utf.c",
-        "lib/file.c"
+        "lib/file.c",
+        "lib/url.c",
+        "lib/utf.c"
     ],
     "libraries": [
         {

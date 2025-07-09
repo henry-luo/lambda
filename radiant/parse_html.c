@@ -1,5 +1,7 @@
 #include "dom.h"
 
+char* read_text_doc(lxb_url_t *url);
+
 static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
     // Append data to string buffer
     lxb_char_t **output = (lxb_char_t **)ctx;

@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include "layout.h"
 
+lxb_url_t* get_current_dir();
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, View* root_view);
 Document* load_html_doc(lxb_url_t *base, char* doc_filename);
