@@ -107,6 +107,7 @@ collections:
         host: localhost
         port: 5432
         credentials:
+          # NOTE: These are test credentials only - not real passwords
           username: admin
           password: secret
       
@@ -239,6 +240,7 @@ real_world_examples:
       host: localhost
       port: 5432
       database: myapp_dev
+      # NOTE: These are test credentials only - not real passwords
       username: developer
       password: dev_password
       pool: 5
@@ -249,6 +251,7 @@ real_world_examples:
       host: db.example.com
       port: 5432
       database: myapp_prod
+      # NOTE: These are test credentials only - not real passwords
       username: prod_user
       password: prod_password
       pool: 20

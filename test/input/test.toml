@@ -93,6 +93,7 @@ ssl_enabled = false
 
 # Nested configuration
 [database.credentials]
+# NOTE: These are test credentials only - not real passwords
 username = "admin"
 password = "secret123"
 timeout = 30.5
