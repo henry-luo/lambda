@@ -38,7 +38,8 @@
         "lambda/format/format.c",
         "lambda/format/format-json.c",
         "lambda/format/format-md.c",
-        "lambda/format/format-xml.c"
+        "lambda/format/format-xml.c",
+        "lambda/format/format-html.c"
     ],
     "cpp_files": [
         "lambda/main.cpp"
