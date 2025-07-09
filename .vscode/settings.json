@@ -48,6 +48,5 @@
         "optional": "c",
         "unistd.h": "c",
         "lambda.h": "c"
-    },
-    "cmake.sourceDirectory": "/Users/henryluo/Projects/Jubily/lambda-parser/tree-sitter-javascript"
+    }
 }
