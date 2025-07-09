@@ -52,8 +52,28 @@ Lambda is a modern scripting language that combines:
 
 ### Building
 
+**Lambda project (default):**
 ```bash
-./compile-lambda.sh
+./compile.sh
+```
+
+**Radiant project:**
+```bash
+./compile.sh build_radiant_config.json
+```
+
+**Cross-compilation for Windows:**
+```bash
+# Lambda for Windows
+./compile.sh --platform=windows
+
+# Radiant for Windows
+./compile.sh build_radiant_config.json --platform=windows
+```
+
+**Help and options:**
+```bash
+./compile.sh --help
 ```
 
 ### Running
@@ -97,7 +117,14 @@ Lambda is a modern scripting language that combines:
 
 3. **Build:**
    ```bash
-   ./compile-lambda.sh
+   # Build lambda project
+   ./compile.sh
+   
+   # Build radiant project
+   ./compile.sh build_radiant_config.json
+   
+   # Cross-compile for Windows
+   ./compile.sh --platform=windows
    ```
 
 ## Language Examples
@@ -159,6 +186,37 @@ Lambda uses advanced memory pool management:
 - **Memory Pools**: Reduced allocation overhead
 - **Optimized Parsing**: Fast document processing
 - **Lazy Evaluation**: Efficient handling of large datasets
+
+## Build System
+
+Lambda uses a unified build system that supports multiple projects and platforms:
+
+### Supported Projects
+- **Lambda**: Main scripting language and document processing engine
+- **Radiant**: GUI framework and rendering engine
+
+### Supported Platforms
+- **Native**: macOS, Linux compilation using system tools
+- **Cross-compilation**: Windows binaries using MinGW-w64
+
+### Configuration
+- **JSON-based**: Flexible configuration files for each project
+- **Platform-specific**: Override settings for different target platforms
+- **Modular**: Separate library and dependency management
+
+### Build Examples
+```bash
+# Native builds
+./compile.sh                              # Lambda (default)
+./compile.sh build_radiant_config.json    # Radiant
+
+# Cross-compilation
+./compile.sh --platform=windows           # Lambda for Windows
+./compile.sh build_radiant_config.json --platform=windows  # Radiant for Windows
+
+# Help
+./compile.sh --help                       # Show all options
+```
 
 ## Testing
 

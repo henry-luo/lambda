@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Enhanced unified compilation script with cross-compilation support
-# Usage: ./compile-lambda.sh [config_file] [--platform=PLATFORM]
-#        ./compile-lambda.sh --help
+# Usage: ./compile.sh [config_file] [--platform=PLATFORM]
+#        ./compile.sh --help
 
 # Configuration file default
 CONFIG_FILE="build_lambda_config.json"

@@ -1,18 +1,19 @@
 # Unified Compilation System
 
-This document describes the enhanced compilation system that merges the functionality of `compile-lambda.sh` and `compile-lambda-cross.sh` into a single unified script, along with dependency setup scripts for different platforms.
+This document describes the enhanced compilation system that provides a single unified script for building both the lambda and radiant projects, supporting both native and cross-platform compilation.
 
 ## Overview
 
-The compilation system has been enhanced to support both native and cross-platform compilation through a single script with platform-specific configuration. Additionally, dedicated dependency setup scripts are provided for different platforms.
+The compilation system has been enhanced to support both lambda and radiant projects through a single script with platform-specific configuration. The unified script replaces the previous separate compilation scripts and provides consistent building across different projects and platforms.
 
 ## Files
 
 ### Main Script
-- `compile-lambda.sh` - Unified compilation script supporting both native and cross-compilation
+- `compile.sh` - Unified compilation script supporting both lambda and radiant projects with native and cross-compilation capabilities
 
 ### Configuration
-- `build_lambda_config.json` - Main configuration file with platform-specific sections
+- `build_lambda_config.json` - Configuration file for the lambda project with platform-specific sections
+- `build_radiant_config.json` - Configuration file for the radiant project with platform-specific sections
 
 ### Dependency Setup Scripts
 - `setup-mac-deps.sh` - Mac native dependency setup script
@@ -63,7 +64,7 @@ This script will:
 After dependencies are set up, compile the project:
 
 ```bash
-./compile-lambda.sh build_lambda_config.json
+./compile.sh build_lambda_config.json
 ```
 
 ### Clean Up
@@ -117,7 +118,7 @@ This script will:
 After dependencies are set up, compile the project:
 
 ```bash
-./compile-lambda.sh build_lambda_config.json
+./compile.sh build_lambda_config.json
 ```
 
 ### Clean Up
@@ -150,39 +151,62 @@ Run the Windows cross-compilation dependency setup script:
 Compile for Windows:
 
 ```bash
-./compile-lambda.sh --platform=windows
+./compile.sh --platform=windows
 ```
 
 ## Usage
 
-### Linux Native Compilation (Ubuntu)
+### Building Lambda Project
+
+**Linux Native Compilation (Ubuntu):**
 ```bash
-./compile-lambda.sh
+./compile.sh
 ```
 
-### Mac Native Compilation (macOS)
+**Mac Native Compilation (macOS):**
 ```bash
-./compile-lambda.sh
+./compile.sh
 ```
 
-### Cross-compilation for Windows
+**Cross-compilation for Windows:**
 ```bash
-./compile-lambda.sh --platform=windows
+./compile.sh --platform=windows
+```
+
+### Building Radiant Project
+
+**Linux Native Compilation (Ubuntu):**
+```bash
+./compile.sh build_radiant_config.json
+```
+
+**Mac Native Compilation (macOS):**
+```bash
+./compile.sh build_radiant_config.json
+```
+
+**Cross-compilation for Windows:**
+```bash
+./compile.sh build_radiant_config.json --platform=windows
 ```
 
 ### Using Custom Configuration
 ```bash
-./compile-lambda.sh custom_config.json --platform=windows
+./compile.sh custom_config.json --platform=windows
 ```
 
 ### Help
 ```bash
-./compile-lambda.sh --help
+./compile.sh --help
 ```
 
 ## Configuration Structure
 
-The `build_lambda_config.json` includes platform-specific configurations and dependency paths:
+The build system uses JSON configuration files for each project:
+
+### Lambda Configuration (`build_lambda_config.json`)
+
+The lambda configuration includes platform-specific configurations and dependency paths:
 
 ```json
 {

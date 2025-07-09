@@ -44,7 +44,7 @@ Before running the tests, ensure you have:
 1. **MIR library** installed at `/usr/local/lib/libmir.a` with headers in `/usr/local/include`
 2. **Criterion testing framework** installed (available via Homebrew: `brew install criterion`)
 3. **zlog library** for logging functionality
-4. **Project built** - Run `./compile-lambda.sh` from the project root to build required object files
+4. **Project built** - Run `./compile.sh` from the project root to build required object files
 
 ## Running the Tests
 
@@ -120,7 +120,7 @@ This makes it suitable for integration with continuous integration systems.
    - Verify installation: `pkg-config --exists criterion`
 
 3. **Compilation Errors**:
-   - Ensure project is built: `./compile-lambda.sh`
+   - Ensure project is built: `./compile.sh`
    - Check object files: `ls build/`
 
 4. **Function Not Found Errors**:

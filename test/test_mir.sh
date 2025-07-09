@@ -42,7 +42,7 @@ echo "Found ${#OBJECT_FILES[@]} object files"
 # Check if we have any object files
 if [ ${#OBJECT_FILES[@]} -eq 0 ]; then
     echo "Error: No object files found. Please build the project first using:"
-    echo "  cd $PROJECT_ROOT && ./compile-lambda.sh"
+    echo "  cd $PROJECT_ROOT && ./compile.sh"
     exit 1
 fi
 

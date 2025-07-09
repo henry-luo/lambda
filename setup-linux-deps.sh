@@ -531,6 +531,6 @@ echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo 
 echo "- zlog: $([ -f "$SYSTEM_PREFIX/lib/libzlog.a" ] && echo "✓ Built" || echo "✗ Missing (optional)")"
 echo ""
 echo "Next steps:"
-echo "1. Run: ./compile-lambda.sh"
+echo "1. Run: ./compile.sh"
 echo ""
 echo "To clean up intermediate files later, run: ./setup-linux-deps.sh clean"
