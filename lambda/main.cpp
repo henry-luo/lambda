@@ -42,11 +42,12 @@ void simple_add_history(const char *line) {
 #endif
 
 void print_help() {
-    printf("Lambda Script Interpreter\n");
+    printf("Lambda Script Interpreter v1.0\n");
     printf("Usage:\n");
     printf("  lambda [script.ls]           - Run a script file\n");
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
-    printf("  lambda                       - Start REPL mode\n");
+    printf("  lambda --repl                - Start REPL mode\n");
+    printf("  lambda --repl --mir          - Start REPL with MIR JIT\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nREPL Commands:\n");
     printf("  :quit, :q, :exit     - Exit REPL\n");
@@ -167,6 +168,12 @@ int main(int argc, char *argv[]) {
     // Run basic assertions
     run_assertions();
     
+    // If no arguments provided, show help by default
+    if (argc == 1) {
+        print_help();
+        return 0;
+    }
+    
     // Parse command line arguments
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
@@ -179,27 +186,32 @@ int main(int argc, char *argv[]) {
     runtime.current_dir = const_cast<char*>("./");
     
     bool use_mir = false;
+    bool repl_mode = false;
     
-    if (argc == 1) {
-        // No arguments - start REPL
-        run_repl(&runtime, use_mir);
-    } else if (argc == 2) {
-        // One argument - check if it's MIR flag or script file
-        if (strcmp(argv[1], "--mir") == 0) {
+    // Parse arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--mir") == 0) {
             use_mir = true;
-            // Start REPL in MIR mode
-            run_repl(&runtime, use_mir);
+        } else if (strcmp(argv[i], "--repl") == 0) {
+            repl_mode = true;
+        } else if (argv[i][0] != '-') {
+            // This is a script file - run it
+            run_script_file(&runtime, argv[i], use_mir);
+            return 0;
         } else {
-            // Run script file
-            run_script_file(&runtime, argv[1], use_mir);
+            // Unknown option
+            printf("Error: Unknown option '%s'\n", argv[i]);
+            print_help();
+            return 1;
         }
-    } else if (argc == 3 && strcmp(argv[1], "--mir") == 0) {
-        // MIR flag with script file
-        use_mir = true;
-        run_script_file(&runtime, argv[2], use_mir);
+    }
+    
+    // If --repl was specified, start REPL
+    if (repl_mode) {
+        run_repl(&runtime, use_mir);
     } else {
-        // Too many arguments or invalid combination
-        printf("Error: Invalid arguments\n");
+        // No script file specified and no --repl flag
+        printf("Error: No script file specified. Use --repl for interactive mode.\n");
         print_help();
         return 1;
     }

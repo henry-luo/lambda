@@ -68,6 +68,40 @@ make cross-compile     # Cross-compile for Windows
 ./compile.sh --force               # Force rebuild
 ```
 
+### Running Lambda
+
+After building, you can run the Lambda interpreter:
+
+**Show help (default behavior):**
+```bash
+./lambda
+```
+
+**Interactive REPL:**
+```bash
+./lambda --repl
+```
+
+**Interactive REPL with MIR JIT:**
+```bash
+./lambda --repl --mir
+```
+
+**Run a script file:**
+```bash
+./lambda script.ls
+```
+
+**Run a script with MIR JIT:**
+```bash
+./lambda --mir script.ls
+```
+
+**Show help:**
+```bash
+./lambda --help
+```
+
 ## Build Options
 
 ### Makefile Targets (Recommended)

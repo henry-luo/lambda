@@ -75,14 +75,29 @@ Lambda is a modern scripting language that combines:
 
 ### Running
 
-**Interactive REPL:**
+**Show help (default):**
 ```bash
 ./lambda
+```
+
+**Interactive REPL:**
+```bash
+./lambda --repl
+```
+
+**Interactive REPL with MIR JIT:**
+```bash
+./lambda --repl --mir
 ```
 
 **Run a script:**
 ```bash
 ./lambda script.ls
+```
+
+**Run a script with MIR JIT:**
+```bash
+./lambda --mir script.ls
 ```
 
 **REPL Commands:**
