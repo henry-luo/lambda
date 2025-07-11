@@ -1,6 +1,6 @@
 # Unified Compilation System
 
-This document describes the enhanced compilation system that provides a single unified script for building both the Lambda and Radiant projects, supporting both native and cross-platform compilation.
+This document describes the compilation system that provides a single unified script for building both the Lambda and Radiant projects, supporting both native and cross-platform compilation.
 
 ## Files
 
@@ -137,6 +137,11 @@ Run the Windows cross-compilation dependency setup script:
 ./setup-windows-deps.sh
 ```
 
+### Cross-compilation Dependency Location
+
+- **Cross-compiled libraries**: Installed to `windows-deps/lib` and `windows-deps/include`
+- **Tree-sitter**: Built as `lambda/tree-sitter/libtree-sitter-windows.a`
+
 ### Cross-compilation
 
 Compile for Windows:
@@ -240,61 +245,7 @@ The lambda configuration includes platform-specific configurations and dependenc
 }
 ```
 
-## Dependency Locations
-
-### Linux Dependency Locations
-
-- **System libraries**: Installed to `/usr/local/lib` and `/usr/local/include`
-- **APT packages**: Available at `/usr/lib` and `/usr/include` (e.g., GMP via `libgmp-dev`)
-- **Local tree-sitter**: Built in `lambda/tree-sitter/` and `lambda/tree-sitter-lambda/`
-
-### Mac Dependency Locations
-
-- **System libraries**: Installed to `/usr/local/lib` and `/usr/local/include`
-- **Homebrew libraries**: Available at `/opt/homebrew/lib` and `/opt/homebrew/include`
-- **Local tree-sitter**: Built in `lambda/tree-sitter/` and `lambda/tree-sitter-lambda/`
-
-### Windows Cross-compilation Dependencies
-
-- **Cross-compiled libraries**: Installed to `windows-deps/lib` and `windows-deps/include`
-- **Tree-sitter**: Built as `lambda/tree-sitter/libtree-sitter-windows.a`
-
-## Platform Override Logic
-
-When a platform is specified:
-1. Platform-specific values override default values
-2. If a platform-specific value doesn't exist, the default value is used
-3. Arrays (like libraries, flags) are completely overridden by platform-specific versions
-
 ## Troubleshooting
-
-### Linux Issues
-
-1. **Missing Build Tools**:
-   ```bash
-   sudo apt update && sudo apt install build-essential cmake git
-   ```
-
-2. **Permission Issues**: Some system installations may require `sudo`
-
-3. **Library Path Issues**: Ensure `/usr/local/lib` is in your library path:
-   ```bash
-   echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/local.conf
-   sudo ldconfig
-   ```
-
-### Mac Issues
-
-1. **Permission Issues**: Some system installations may require `sudo`
-
-### Windows Cross-compilation Issues
-
-1. **MinGW-w64 Not Found**:
-   ```bash
-   brew install mingw-w64
-   ```
-
-2. **Dependency Build Failures**: The Windows setup script includes fallback stub implementations
 
 ### General Issues
 
