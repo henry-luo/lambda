@@ -105,15 +105,6 @@ This script will:
 - Build **MIR** from source (JIT compiler infrastructure)
 - Build **zlog** from source (logging library, optional)
 
-#### Dependencies Installed
-
-- **tree-sitter**: Incremental parsing library
-- **tree-sitter-lambda**: Lambda language parser
-- **GMP**: GNU Multiple Precision arithmetic library
-- **lexbor**: Fast HTML/XML parsing library
-- **MIR**: Lightweight JIT compiler infrastructure
-- **zlog**: High-performance logging library (optional)
-
 ### Native Compilation
 
 After dependencies are set up, compile the project with enhanced options:
@@ -129,18 +120,6 @@ make build          # Incremental build
 make rebuild        # Force full rebuild
 make debug          # Debug build
 make clean          # Clean build artifacts
-```
-
-**Advanced compilation options:**
-```bash
-# Parallel compilation with specific job count
-./compile.sh --jobs=4
-
-# Force complete rebuild
-./compile.sh --force
-
-# Combine options
-./compile.sh --jobs=8 --force
 ```
 
 ### Clean Up
@@ -186,18 +165,6 @@ Compile for Windows with enhanced options:
 ```bash
 make cross-compile     # Cross-compile for Windows
 make build-windows     # Same as above
-```
-
-**Advanced cross-compilation:**
-```bash
-# Parallel cross-compilation
-./compile.sh --platform=windows --jobs=6
-
-# Force rebuild for Windows
-./compile.sh --platform=windows --force
-
-# Maximum parallel cross-compilation
-./compile.sh --platform=windows --jobs=8 --force
 ```
 
 ## Usage
@@ -322,9 +289,7 @@ make debug             # Debug build with symbols
 make rebuild           # Force complete rebuild
 
 # Code quality
-make format            # Format source code
 make lint              # Run static analysis
-make check             # General code checks
 ```
 
 **Performance testing:**
@@ -632,15 +597,9 @@ make what-will-build        # Preview compilation needs
 
 ### Development Tools Integration
 
-**Code formatting:**
-```bash
-make format                 # Format with clang-format
-```
-
 **Static analysis:**
 ```bash
 make lint                   # Run cppcheck
-make check                  # General code checks
 ```
 
 **Testing:**
@@ -692,8 +651,6 @@ make cross-compile
 
 **Build verification:**
 ```bash
-make check                  # Static analysis
-make format                 # Code formatting check
 make info                   # Build system information
 ```
 

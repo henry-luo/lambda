@@ -183,20 +183,20 @@ run: build
 	fi
 
 # Code quality targets
-check:
-	@echo "Running static analysis..."
-	@echo "Checking for common issues in source files..."
-	@find lambda -name "*.c" -o -name "*.h" | xargs -I {} sh -c 'echo "Checking: {}"; grep -n "TODO\|FIXME\|XXX" {} || true' 2>/dev/null
-	@echo "Static analysis complete."
+# check:
+# 	@echo "Running static analysis..."
+# 	@echo "Checking for common issues in source files..."
+# 	@find lambda -name "*.c" -o -name "*.h" | xargs -I {} sh -c 'echo "Checking: {}"; grep -n "TODO\|FIXME\|XXX" {} || true' 2>/dev/null
+# 	@echo "Static analysis complete."
 
-format:
-	@echo "Formatting source code..."
-	@if command -v clang-format >/dev/null 2>&1; then \
-		find lambda -name "*.c" -o -name "*.h" | xargs clang-format -i; \
-		echo "Code formatted with clang-format."; \
-	else \
-		echo "clang-format not found. Install with: brew install clang-format"; \
-	fi
+# format:
+# 	@echo "Formatting source code..."
+# 	@if command -v clang-format >/dev/null 2>&1; then \
+# 		find lambda -name "*.c" -o -name "*.h" | xargs clang-format -i; \
+# 		echo "Code formatted with clang-format."; \
+# 	else \
+# 		echo "clang-format not found. Install with: brew install clang-format"; \
+# 	fi
 
 lint:
 	@echo "Running linter..."
@@ -219,15 +219,15 @@ uninstall:
 	@echo "$(PROJECT_NAME) uninstalled."
 
 # Documentation generation (if docs exist)
-docs:
-	@echo "Generating documentation..."
-	@if [ -f "README.md" ]; then \
-		echo "README.md found."; \
-		if command -v pandoc >/dev/null 2>&1; then \
-			pandoc README.md -o README.html; \
-			echo "Generated README.html"; \
-		fi; \
-	fi
+# docs:
+# 	@echo "Generating documentation..."
+# 	@if [ -f "README.md" ]; then \
+# 		echo "README.md found."; \
+# 		if command -v pandoc >/dev/null 2>&1; then \
+# 			pandoc README.md -o README.html; \
+# 			echo "Generated README.html"; \
+# 		fi; \
+# 	fi
 
 # Advanced targets for development workflow
 quick: 
