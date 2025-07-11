@@ -27,7 +27,6 @@
         "lib/url.c",
         "lib/utf.c"
     ],
-    "cpp_files": [],
     "libraries": [
         {
             "name": "lexbor",

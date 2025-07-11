@@ -22,7 +22,7 @@ PARALLEL_JOBS=""
 DEBUG_BUILD=false
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --platform=*)
+        --porm=*)
             PLATFORM="${1#*=}"
             shift
             ;;
@@ -77,10 +77,11 @@ while [[ $# -gt 0 ]]; do
             echo "  build_radiant_config.json   Compile radiant project"
             echo ""
             echo "Configuration file format:"
-            echo "  source_files              Array of individual source files to compile"
-            echo "  cpp_files                 Array of individual C++ files to compile"
+            echo "  source_files              Array of source files to compile (C and C++ auto-detected)"
+
             echo "  source_dirs               Array of directories to recursively scan for source files"
             echo "                            (automatically detects .c, .cpp, .cc, .cxx, .c++ files)"
+            echo "                            File types are auto-detected and compiled with appropriate compilers"
             echo ""
             echo "Examples:"
             echo "  $0                                      # Native lambda compilation (incremental with .d files)"
@@ -224,6 +225,54 @@ collect_source_files_from_dirs() {
     
     # Output collected files (one per line)
     printf '%s\n' "${collected_files[@]}"
+}
+
+# Function to determine if a file is C++ based on extension
+is_cpp_file() {
+    local file="$1"
+    case "$file" in
+        *.cpp|*.cc|*.cxx|*.c++|*.C|*.CPP)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Function to get appropriate compiler and flags for a file
+get_compiler_for_file() {
+    local file="$1"
+    if is_cpp_file "$file"; then
+        echo "$CXX"
+    else
+        echo "$CC"
+    fi
+}
+
+# Function to get appropriate warnings for a file type
+get_warnings_for_file() {
+    local file="$1"
+    if is_cpp_file "$file"; then
+        # Remove C-specific warnings that don't apply to C++
+        echo "$WARNINGS" | sed 's/-Werror=incompatible-pointer-types//g' | sed 's/-Wincompatible-pointer-types//g'
+    else
+        echo "$WARNINGS"
+    fi
+}
+
+# Function to get appropriate flags for a file type
+get_flags_for_file() {
+    local file="$1"
+    if is_cpp_file "$file"; then
+        local cpp_flags="$FLAGS"
+        if [ "$CROSS_COMPILE" = "true" ]; then
+            cpp_flags="$cpp_flags -std=c++11 -fpermissive -Wno-fpermissive"
+        fi
+        echo "$cpp_flags"
+    else
+        echo "$FLAGS"
+    fi
 }
 
 # Global cache for header file timestamps (populated once)
@@ -496,33 +545,17 @@ if command -v jq >/dev/null 2>&1; then
         [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
     done < <(get_json_array "linker_flags" "$CONFIG_FILE" "$PLATFORM")
     
-    # Get source files (using arrays compatible with older bash)
+    # Get all source files (unified approach with auto-detection)
     SOURCE_FILES_ARRAY=()
-    CPP_FILES_ARRAY=()
     
-    # Read source files into array
+    # Read legacy source_files entries
     while IFS= read -r line; do
         [ -n "$line" ] && SOURCE_FILES_ARRAY+=("$line")
     done < <(jq -r '.source_files[]?' "$CONFIG_FILE" 2>/dev/null)
     
-    # Read cpp files into array
-    while IFS= read -r line; do
-        [ -n "$line" ] && CPP_FILES_ARRAY+=("$line")
-    done < <(jq -r '.cpp_files[]?' "$CONFIG_FILE" 2>/dev/null)
-    
     # Collect additional source files from source_dirs
     while IFS= read -r line; do
-        if [ -n "$line" ]; then
-            # Determine if it's a C++ file based on extension
-            case "$line" in
-                *.cpp|*.cc|*.cxx|*.c++)
-                    CPP_FILES_ARRAY+=("$line")
-                    ;;
-                *.c)
-                    SOURCE_FILES_ARRAY+=("$line")
-                    ;;
-            esac
-        fi
+        [ -n "$line" ] && SOURCE_FILES_ARRAY+=("$line")
     done < <(collect_source_files_from_dirs "$CONFIG_FILE" "$PLATFORM")
 else
     # Fallback without jq - basic parsing
@@ -543,31 +576,17 @@ else
         LINKER_FLAGS=""
     fi
     
-    # Parse source files into arrays
+    # Parse all source files into unified array
     SOURCE_FILES_ARRAY=()
-    CPP_FILES_ARRAY=()
     
+    # Read legacy source_files entries
     while IFS= read -r line; do
         [ -n "$line" ] && SOURCE_FILES_ARRAY+=("$line")
     done < <(get_json_array "source_files" "$CONFIG_FILE")
     
-    while IFS= read -r line; do
-        [ -n "$line" ] && CPP_FILES_ARRAY+=("$line")
-    done < <(get_json_array "cpp_files" "$CONFIG_FILE")
-    
     # Collect additional source files from source_dirs
     while IFS= read -r line; do
-        if [ -n "$line" ]; then
-            # Determine if it's a C++ file based on extension
-            case "$line" in
-                *.cpp|*.cc|*.cxx|*.c++)
-                    CPP_FILES_ARRAY+=("$line")
-                    ;;
-                *.c)
-                    SOURCE_FILES_ARRAY+=("$line")
-                    ;;
-            esac
-        fi
+        [ -n "$line" ] && SOURCE_FILES_ARRAY+=("$line")
     done < <(collect_source_files_from_dirs "$CONFIG_FILE" "$PLATFORM")
 fi
 
@@ -603,8 +622,19 @@ else
 fi
 echo "Build directory: $BUILD_DIR"
 echo "Output executable: $OUTPUT"
-echo "Source files count: ${#SOURCE_FILES_ARRAY[@]}"
-echo "C++ files count: ${#CPP_FILES_ARRAY[@]}"
+
+# Count C and C++ files automatically
+C_FILES_COUNT=0
+CPP_FILES_COUNT=0
+for file in "${SOURCE_FILES_ARRAY[@]}"; do
+    if is_cpp_file "$file"; then
+        CPP_FILES_COUNT=$((CPP_FILES_COUNT + 1))
+    else
+        C_FILES_COUNT=$((C_FILES_COUNT + 1))
+    fi
+done
+
+echo "Source files count: ${#SOURCE_FILES_ARRAY[@]} (${C_FILES_COUNT} C files, ${CPP_FILES_COUNT} C++ files)"
 
 # Report source directories if any are configured
 SOURCE_DIRS_COUNT=0
@@ -654,7 +684,7 @@ compilation_success=true
 files_compiled=0
 files_skipped=0
 
-# Scan C source files
+# Scan all source files (unified C and C++ handling with auto-detection)
 for source in "${SOURCE_FILES_ARRAY[@]}"; do
     if [ -f "$source" ]; then
         obj_name=$(basename "$source" | sed 's/\.[^.]*$//')
@@ -662,11 +692,12 @@ for source in "${SOURCE_FILES_ARRAY[@]}"; do
         OBJECT_FILES="$OBJECT_FILES $obj_file"
         
         if needs_recompilation "$source" "$obj_file"; then
+            # Auto-detect file type and get appropriate compiler settings
             FILES_TO_COMPILE+=("$source")
             FILES_TO_COMPILE_OBJ+=("$obj_file")
-            FILES_TO_COMPILE_COMPILER+=("$CC")
-            FILES_TO_COMPILE_WARNINGS+=("$WARNINGS")
-            FILES_TO_COMPILE_FLAGS+=("$FLAGS")
+            FILES_TO_COMPILE_COMPILER+=("$(get_compiler_for_file "$source")")
+            FILES_TO_COMPILE_WARNINGS+=("$(get_warnings_for_file "$source")")
+            FILES_TO_COMPILE_FLAGS+=("$(get_flags_for_file "$source")")
             files_compiled=$((files_compiled + 1))
         else
             echo "Up-to-date: $source"
@@ -678,38 +709,6 @@ for source in "${SOURCE_FILES_ARRAY[@]}"; do
     fi
 done
 
-# Scan C++ files
-if [ ${#CPP_FILES_ARRAY[@]} -gt 0 ]; then
-    for cpp_file in "${CPP_FILES_ARRAY[@]}"; do
-        if [ -f "$cpp_file" ]; then
-            cpp_obj_name=$(basename "$cpp_file" | sed 's/\.[^.]*$//')
-            cpp_obj_file="$BUILD_DIR/${cpp_obj_name}.o"
-            OBJECT_FILES="$OBJECT_FILES $cpp_obj_file"
-            
-            if needs_recompilation "$cpp_file" "$cpp_obj_file"; then
-                # Use C++ specific flags
-                CPP_WARNINGS=$(echo "$WARNINGS" | sed 's/-Werror=incompatible-pointer-types//g' | sed 's/-Wincompatible-pointer-types//g')
-                CPP_FLAGS="$FLAGS"
-                if [ "$CROSS_COMPILE" = "true" ]; then
-                    CPP_FLAGS="$CPP_FLAGS -std=c++11 -fpermissive -Wno-fpermissive"
-                fi
-                
-                FILES_TO_COMPILE+=("$cpp_file")
-                FILES_TO_COMPILE_OBJ+=("$cpp_obj_file")
-                FILES_TO_COMPILE_COMPILER+=("$CXX")
-                FILES_TO_COMPILE_WARNINGS+=("$CPP_WARNINGS")
-                FILES_TO_COMPILE_FLAGS+=("$CPP_FLAGS")
-                files_compiled=$((files_compiled + 1))
-            else
-                echo "Up-to-date: $cpp_file"
-                files_skipped=$((files_skipped + 1))
-            fi
-        else
-            echo "Warning: C++ file '$cpp_file' not found"
-            compilation_success=false
-        fi
-    done
-fi
 
 # Perform compilation (parallel if multiple files)
 output=""

@@ -87,7 +87,7 @@ To clean intermediate build files:
 
 1. **Homebrew** (recommended): Package manager for easier dependency installation
    ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
    ```
 
 ### Dependency Setup
@@ -233,20 +233,12 @@ make rebuild             # Force rebuild lambda
 
 **Using compile.sh directly:**
 
-**Linux Native Compilation (Ubuntu):**
+**Native Compilation (Ubuntu & macOS):**
 ```bash
 ./compile.sh                    # Incremental build
 ./compile.sh --debug            # Debug build with AddressSanitizer
 ./compile.sh --jobs=4           # Parallel build
 ./compile.sh --force            # Complete rebuild
-```
-
-**Mac Native Compilation (macOS):**
-```bash
-./compile.sh                    # Incremental build
-./compile.sh --debug            # Debug build with AddressSanitizer
-./compile.sh --jobs=8           # Maximum parallel build
-./compile.sh --force --jobs=6   # Force rebuild with 6 jobs
 ```
 
 **Cross-compilation for Windows:**
@@ -309,24 +301,27 @@ make help                # Show all Makefile targets
 
 ### Incremental Compilation
 
-The build system now includes intelligent incremental compilation that significantly speeds up development:
+The build system includes intelligent incremental compilation with precise dependency tracking that significantly speeds up development:
 
-**How it works:**
-- Only recompiles source files that have changed since last build
-- Checks header file dependencies automatically
-- Compares file modification timestamps efficiently
-- Uses cached header scanning for performance
+**Dependency file management:**
+- **Precise dependency tracking** using `.d` files generated with `-MMD -MP` flags
+- `.d` files generated automatically for each compiled source file
+- Contains exact header dependencies for each source file
+- Enables precise incremental builds that only recompile affected files
+- Clean dependency files with `./compile.sh --clean-deps`
 
 **Benefits:**
+- **Precise tracking**: Only recompiles files actually affected by changes
 - 5-10x faster builds when only few files changed
-- 50-100x faster when only headers changed
-- Automatic dependency tracking
-- No manual dependency management required
+- 50-100x faster when only headers changed (with precise dependency tracking)
+- Automatic dependency tracking with no manual management required
+- Superior accuracy compared to traditional timestamp-only approaches
 
-**Force full rebuild when needed:**
+**Dependency tracking modes:**
 ```bash
-./compile.sh --force       # Via script
-make rebuild               # Via Makefile
+./compile.sh               # Uses .d files (precise) + header cache (fallback)
+./compile.sh --clean-deps  # Clean all .d dependency files
+./compile.sh --force       # Force full rebuild (regenerates all .d files)
 ```
 
 ### Parallel Compilation
@@ -404,8 +399,16 @@ The lambda configuration includes platform-specific configurations and dependenc
 ```json
 {
   "output": "lambda.exe",
-  "source_files": [...],
-  "cpp_files": [...],
+  "source_files": [
+    "lambda/tree-sitter-lambda/src/parser.c",
+    "lambda/main.cpp",
+    "lib/strbuf.c",
+    "lib/utils.cpp"
+  ],
+  "source_dirs": [
+    "lambda/input",
+    "lambda/format"
+  ],
   "libraries": [
     {
       "name": "tree-sitter",
@@ -457,127 +460,74 @@ The lambda configuration includes platform-specific configurations and dependenc
 }
 ```
 
-## Troubleshooting
+### Source Directory Scanning (`source_dirs`) and Unified File Handling
 
-### General Issues
+The build system supports automatic source file discovery from directories and unified handling of C and C++ files:
 
-1. **Clean and Rebuild**:
-   ```bash
-   # Using Makefile (recommended)
-   make clean && make rebuild
-   make distclean && make      # Complete cleanup
-   
-   # Using setup scripts
-   # For Linux
-   ./setup-linux-deps.sh clean
-   ./setup-linux-deps.sh
-   
-   # For Mac
-   ./setup-mac-deps.sh clean
-   ./setup-mac-deps.sh
-   ```
-
-2. **Force complete rebuild**:
-   ```bash
-   ./compile.sh --force        # Force rebuild
-   make rebuild                # Makefile equivalent
-   ```
-
-3. **Check Dependencies**: The setup scripts provide detailed status reports
-
-4. **Debug build issues**:
-   ```bash
-   make debug                  # Build with debug symbols
-   make check                  # Run static analysis
-   ./compile.sh --help         # Show all options
-   ```
-
-### Performance Issues
-
-1. **Slow incremental builds**:
-   ```bash
-   # Check what will be built
-   make what-will-build
-   
-   # Benchmark build performance
-   make time-build
-   
-   # Try parallel compilation
-   ./compile.sh --jobs=4
-   ```
-
-2. **Memory issues during parallel compilation**:
-   ```bash
-   # Reduce parallel jobs
-   ./compile.sh --jobs=2
-   make build JOBS=2
-   ```
-
-### Cross-compilation Issues
-
-1. **MinGW-w64 not found**:
-   ```bash
-   # On macOS
-   brew install mingw-w64
-   
-   # On Ubuntu
-   sudo apt install mingw-w64
-   ```
-
-2. **Windows dependencies missing**:
-   ```bash
-   ./setup-windows-deps.sh     # Rebuild Windows dependencies
-   ```
-
-## Advanced Usage
-
-### Build Configurations
-
-The system supports multiple build configurations:
-
-**Debug vs Release Builds:**
-```bash
-make debug                  # Debug build with AddressSanitizer
-make release                # Optimized release build
-./compile.sh --debug        # Debug build via script
-./compile.sh --platform=debug  # Explicit debug platform
-```
-
-**Configuration files:**
-```bash
-./compile.sh build_lambda_config.json          # Lambda project
-./compile.sh build_radiant_config.json         # Radiant project  
-./compile.sh --debug                            # Debug lambda build
-./compile.sh --platform=debug                  # Explicit debug platform
-```
-
-**Integrated debug configuration:**
-The debug configuration is now integrated into the main `build_lambda_config.json` file as a platform variant. 
-It includes AddressSanitizer for memory debugging and uses a separate build directory (`build_debug`).
-
-**Custom configurations:**
-The configuration supports platform-specific settings including debug mode:
-
+**Unified source file configuration:**
 ```json
 {
+  "source_files": [
+    "main.c",
+    "utils.cpp",
+    "module.cc",
+    "legacy.cxx"
+  ],
+  "source_dirs": [
+    "lambda/input",
+    "lambda/format",
+    "src/modules"
+  ]
+}
+```
+
+**How it works:**
+- **Automatic file type detection**: Files are automatically identified as C or C++ based on extension
+- **Unified source array**: Both C and CPP files are merged into a single `source_files` array
+- **Appropriate compiler selection**: C files compiled with `$CC` (clang/gcc), C++ files with `$CXX` (clang++/g++)
+- **Type-specific compilation flags**: C++ files get appropriate flags (e.g., `-std=c++11` for cross-compilation)
+- **Recursive scanning**: Automatically finds all source files in specified directories
+- **File type detection**: Recognizes `.c`, `.cpp`, `.cc`, `.cxx`, `.c++`, `.C`, `.CPP` extensions
+- **Platform support**: Can be specified per-platform in the `platforms` section
+
+**Supported file extensions:**
+- **C files**: `.c`
+- **C++ files**: `.cpp`, `.cc`, `.cxx`, `.c++`, `.C`, `.CPP`
+
+**Benefits:**
+- **Simplified configuration**: No need to separate C and C++ files manually
+- **Automatic maintenance**: New files are automatically included and compiled with correct compiler
+- **Modular organization**: Group related files in directories regardless of language
+- **Precise dependency tracking**: All discovered files get `.d` file generation
+- **Type-specific optimization**: Each file type gets appropriate compiler flags and warnings
+
+**Platform-specific source directories:**
+```json
+{
+  "source_dirs": ["common", "shared"],
   "platforms": {
+    "windows": {
+      "source_dirs": ["windows-specific", "platform/win32"]
+    },
     "debug": {
-      "output": "lambda_debug.exe",
-      "flags": [
-        "fms-extensions",
-        "pedantic", 
-        "fcolor-diagnostics",
-        "fsanitize=address",
-        "fno-omit-frame-pointer",
-        "O1"
-      ],
-      "linker_flags": ["fsanitize=address"],
-      "build_dir": "build_debug",
-      "debug": true
+      "source_dirs": ["debug", "testing"]
     }
   }
 }
 ```
+
+**Build output example:**
+```
+Source files count: 42 (40 C files, 2 C++ files)
+Source directories: 2 directories scanned for source files
+```
+
+**Compilation behavior:**
+- C files compiled with: `clang -Iinclude -c file.c -o file.o $C_FLAGS $C_WARNINGS`
+- C++ files compiled with: `clang++ -Iinclude -c file.cpp -o file.o $CPP_FLAGS $CPP_WARNINGS`
+- Automatic flag adaptation (e.g., removes `-Wincompatible-pointer-types` from C++ compilation)
+
+## Advanced Usage
 
 ### Performance Monitoring
 
@@ -597,61 +547,14 @@ make what-will-build        # Preview compilation needs
 
 ### Development Tools Integration
 
-**Static analysis:**
+**Static analysis (TODO):**
 ```bash
 make lint                   # Run cppcheck
 ```
 
-**Testing:**
+**Testing (TODO):**
 ```bash
 make test                   # Run available tests
-make run                    # Build and run executable
-```
-
-### Advanced Compilation Options
-
-**Compiler selection:**
-- Automatic detection: clang (macOS), gcc (Linux), mingw (Windows cross-compile)
-- Override via configuration files
-- Platform-specific optimization flags
-
-**Library management:**
-- Static and dynamic library support
-- Platform-specific library paths
-- Automatic dependency resolution
-
-**Memory and performance:**
-- Optimized incremental builds
-- Parallel compilation with job limiting
-- Cached header dependency checking
-
-### Continuous Integration
-
-The build system is designed for CI/CD environments:
-
-**Automated builds:**
-```bash
-make build                  # Standard incremental build
-make rebuild                # Force complete rebuild
-make test                   # Run test suite
-make clean                  # Clean for fresh build
-```
-
-**Cross-platform CI:**
-```bash
-# Linux CI
-make build
-
-# macOS CI  
-make build
-
-# Windows cross-compile CI
-make cross-compile
-```
-
-**Build verification:**
-```bash
-make info                   # Build system information
 ```
 
 ## Build System Analysis and Comparison
@@ -661,14 +564,17 @@ This section provides a comprehensive analysis of our custom `compile.sh` build 
 ### Our Custom Build System Features
 
 **Strengths:**
-1. **JSON-based configuration** - Clean, readable configuration files
+1. **JSON-based configuration** - Clean, readable configuration files with `source_dirs` support
 2. **Cross-compilation support** - Built-in Windows cross-compilation via MinGW
-3. **Incremental compilation** - Smart dependency checking with header file caching
-4. **Parallel compilation** - Multi-threaded builds with automatic CPU detection
-5. **Platform-specific overrides** - Different settings per target platform
-6. **Rich diagnostics** - Clickable error links, colored output, build summaries
-7. **Flexible flags** - Easy to add/modify compiler and linker flags
-8. **Force rebuild option** - Clean builds when needed
+3. **Precise dependency tracking** - Automatic `.d` file generation with `-MMD -MP` flags
+4. **Incremental compilation** - Smart dependency checking with precise header tracking
+5. **Parallel compilation** - Multi-threaded builds with automatic CPU detection
+6. **Platform-specific overrides** - Different settings per target platform
+7. **Rich diagnostics** - Clickable error links, colored output, build summaries
+8. **Automatic source discovery** - `source_dirs` for directory-based file inclusion
+9. **Unified file handling** - Automatic C/C++ detection with appropriate compiler selection
+10. **Flexible flags** - Easy to add/modify compiler and linker flags
+11. **Force rebuild option** - Clean builds when needed
 
 ### Comparison with Major Build Systems
 
@@ -747,12 +653,11 @@ Our script is particularly well-suited for:
 
 ### Limitations Compared to Industrial Tools
 
-1. **Scalability**: Manual file listing doesn't scale to thousands of files
-2. **Dependency tracking**: No automatic header dependency generation
-3. **Library management**: No built-in package manager integration
-4. **IDE integration**: No project file generation for IDEs
-5. **Testing integration**: No built-in test framework support
-6. **Installation**: No standardized install/packaging mechanism
+1. **Scalability**: Manual file listing doesn't scale to thousands of files (partially addressed by `source_dirs`)
+2. **Library management**: No built-in package manager integration
+3. **IDE integration**: No project file generation for IDEs
+4. **Testing integration**: No built-in test framework support
+5. **Installation**: No standardized install/packaging mechanism
 
 ### Recommendations for Future Improvements
 
@@ -766,18 +671,21 @@ To make our script more competitive with industrial tools:
 
 **Build Speed:**
 - Parallel compilation with job limiting (max 8 jobs)
-- Incremental builds with header file caching
+- **Precise incremental builds** with `.d` file dependency tracking
+- **Automatic source discovery** from `source_dirs` reduces configuration overhead
 - Smart linking decisions based on timestamp comparison
 
 **Memory Usage:**
-- Efficient header cache initialization
+- Efficient header cache initialization (fallback for files without `.d` files)
 - Batch processing of file operations
 - Minimal memory footprint for build tracking
+- **Precise dependency files** eliminate unnecessary rebuilds
 
-**Scalability Limits:**
-- Optimal for projects with < 500 source files
+**Scalability Improvements:**
+- **`source_dirs` feature** reduces manual file management burden
+- Optimal for projects with < 500 source files (with automatic discovery)
 - JSON parsing overhead becomes noticeable with > 1000 files
-- Manual file enumeration requires maintenance
+- **Reduced maintenance** with directory-based file inclusion
 
 ### Verdict
 
@@ -788,9 +696,12 @@ Our script represents a **pragmatic middle ground** between simple Makefiles and
 - **Hackability**: Easy to modify and extend for specific needs
 - **Modern UX**: Colored output, clickable links, informative summaries
 - **Cross-compilation**: Excellent Windows cross-compile support
+- **Precise dependency tracking**: `.d` file generation for accurate incremental builds
+- **Automatic source discovery**: `source_dirs` reduces configuration maintenance
+- **Industrial-grade features**: Dependency tracking comparable to CMake/Make
 
 **Best Use Case:** Projects that need more sophistication than a simple Makefile but want to avoid the complexity and learning curve of CMake or Autotools.
 
-For our current project size (~40 source files) and requirements (cross-compilation, incremental builds, modern developer experience), this custom build system is actually quite competitive with industrial tools while maintaining much better transparency and hackability.
+For our current project size (~40 source files) and requirements (cross-compilation, incremental builds, modern developer experience), this custom build system is actually quite competitive with industrial tools while maintaining much better transparency and hackability. The recent additions of precise `.d` file dependency tracking and automatic source directory scanning bring it closer to industrial-grade build systems while preserving simplicity.
 
 

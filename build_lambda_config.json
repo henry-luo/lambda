@@ -26,9 +26,7 @@
         "lambda/pack.c",
         "lambda/print.c",
         "lambda/lambda-eval.c",
-        "lambda/lambda-mem.c"
-    ],
-    "cpp_files": [
+        "lambda/lambda-mem.c",
         "lambda/main.cpp"
     ],
     "libraries": [
