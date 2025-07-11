@@ -76,6 +76,12 @@ while [[ $# -gt 0 ]]; do
             echo "  build_lambda_config.json    Compile lambda project"
             echo "  build_radiant_config.json   Compile radiant project"
             echo ""
+            echo "Configuration file format:"
+            echo "  source_files              Array of individual source files to compile"
+            echo "  cpp_files                 Array of individual C++ files to compile"
+            echo "  source_dirs               Array of directories to recursively scan for source files"
+            echo "                            (automatically detects .c, .cpp, .cc, .cxx, .c++ files)"
+            echo ""
             echo "Examples:"
             echo "  $0                                      # Native lambda compilation (incremental with .d files)"
             echo "  $0 --debug                              # Debug build with AddressSanitizer"
@@ -168,6 +174,56 @@ get_json_array() {
         fi
         sed -n '/"'$key'":/,/]/p' "$file" | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | grep -v '^[[:space:]]*$' | grep -v "$key"
     fi
+}
+
+# Function to collect source files from directories
+collect_source_files_from_dirs() {
+    local config_file="$1"
+    local platform="$2"
+    local collected_files=()
+    
+    # Get source_dirs array
+    local source_dirs_list
+    if command -v jq >/dev/null 2>&1; then
+        if [ -n "$platform" ]; then
+            # Try platform-specific source_dirs first, fallback to default
+            source_dirs_list=$(jq -r ".platforms.$platform.source_dirs[]? // empty" "$config_file" 2>/dev/null)
+            if [ -z "$source_dirs_list" ]; then
+                source_dirs_list=$(jq -r ".source_dirs[]? // empty" "$config_file" 2>/dev/null)
+            fi
+        else
+            source_dirs_list=$(jq -r ".source_dirs[]? // empty" "$config_file" 2>/dev/null)
+        fi
+    else
+        # Fallback parsing without jq
+        if [ -n "$platform" ]; then
+            # Try platform-specific array first
+            local platform_section=$(sed -n '/"platforms"/,/}/p' "$config_file" | sed -n '/"'$platform'"/,/}/p')
+            if echo "$platform_section" | grep -q '"source_dirs"'; then
+                source_dirs_list=$(echo "$platform_section" | sed -n '/"source_dirs":/,/]/p' | grep '"' | sed 's/.*"\([^"]*\)".*/\1/' | grep -v '^[[:space:]]*$' | grep -v "source_dirs")
+            else
+                source_dirs_list=$(get_json_array "source_dirs" "$config_file")
+            fi
+        else
+            source_dirs_list=$(get_json_array "source_dirs" "$config_file")
+        fi
+    fi
+    
+    # Process each directory
+    while IFS= read -r dir; do
+        if [ -n "$dir" ] && [ -d "$dir" ]; then
+            # Find all C and C++ source files in the directory (recursively)
+            # Include common C/C++ extensions: .c, .cpp, .cc, .cxx, .c++
+            while IFS= read -r -d '' file; do
+                collected_files+=("$file")
+            done < <(find "$dir" -type f \( -name "*.c" -o -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" -o -name "*.c++" \) -print0 2>/dev/null)
+        elif [ -n "$dir" ]; then
+            echo "Warning: source_dirs entry '$dir' is not a valid directory" >&2
+        fi
+    done <<< "$source_dirs_list"
+    
+    # Output collected files (one per line)
+    printf '%s\n' "${collected_files[@]}"
 }
 
 # Global cache for header file timestamps (populated once)
@@ -453,6 +509,21 @@ if command -v jq >/dev/null 2>&1; then
     while IFS= read -r line; do
         [ -n "$line" ] && CPP_FILES_ARRAY+=("$line")
     done < <(jq -r '.cpp_files[]?' "$CONFIG_FILE" 2>/dev/null)
+    
+    # Collect additional source files from source_dirs
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            # Determine if it's a C++ file based on extension
+            case "$line" in
+                *.cpp|*.cc|*.cxx|*.c++)
+                    CPP_FILES_ARRAY+=("$line")
+                    ;;
+                *.c)
+                    SOURCE_FILES_ARRAY+=("$line")
+                    ;;
+            esac
+        fi
+    done < <(collect_source_files_from_dirs "$CONFIG_FILE" "$PLATFORM")
 else
     # Fallback without jq - basic parsing
     if [ "$CROSS_COMPILE" = "true" ] || [ "$PLATFORM" = "windows" ]; then
@@ -483,6 +554,21 @@ else
     while IFS= read -r line; do
         [ -n "$line" ] && CPP_FILES_ARRAY+=("$line")
     done < <(get_json_array "cpp_files" "$CONFIG_FILE")
+    
+    # Collect additional source files from source_dirs
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            # Determine if it's a C++ file based on extension
+            case "$line" in
+                *.cpp|*.cc|*.cxx|*.c++)
+                    CPP_FILES_ARRAY+=("$line")
+                    ;;
+                *.c)
+                    SOURCE_FILES_ARRAY+=("$line")
+                    ;;
+            esac
+        fi
+    done < <(collect_source_files_from_dirs "$CONFIG_FILE" "$PLATFORM")
 fi
 
 # Add debug flag if enabled
@@ -519,6 +605,25 @@ echo "Build directory: $BUILD_DIR"
 echo "Output executable: $OUTPUT"
 echo "Source files count: ${#SOURCE_FILES_ARRAY[@]}"
 echo "C++ files count: ${#CPP_FILES_ARRAY[@]}"
+
+# Report source directories if any are configured
+SOURCE_DIRS_COUNT=0
+if command -v jq >/dev/null 2>&1; then
+    if [ -n "$PLATFORM" ]; then
+        SOURCE_DIRS_COUNT=$(jq -r ".platforms.$PLATFORM.source_dirs[]? // empty" "$CONFIG_FILE" 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$SOURCE_DIRS_COUNT" -eq 0 ]; then
+            SOURCE_DIRS_COUNT=$(jq -r ".source_dirs[]? // empty" "$CONFIG_FILE" 2>/dev/null | wc -l | tr -d ' ')
+        fi
+    else
+        SOURCE_DIRS_COUNT=$(jq -r ".source_dirs[]? // empty" "$CONFIG_FILE" 2>/dev/null | wc -l | tr -d ' ')
+    fi
+else
+    SOURCE_DIRS_COUNT=$(get_json_array "source_dirs" "$CONFIG_FILE" "$PLATFORM" | wc -l | tr -d ' ')
+fi
+
+if [ "$SOURCE_DIRS_COUNT" -gt 0 ]; then
+    echo "Source directories: $SOURCE_DIRS_COUNT directories scanned for source files"
+fi
 echo
 
 # Function to compile a single file (for parallel execution)
@@ -822,5 +927,3 @@ else
     echo -e "${RED}Build failed${RESET}"
     exit 1
 fi
-
-

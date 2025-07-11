@@ -758,11 +758,9 @@ Our script is particularly well-suited for:
 
 To make our script more competitive with industrial tools:
 
-1. **Auto-discovery**: Add glob patterns for source files instead of manual listing
-2. **Dependency generation**: Use `-MMD -MP` flags to generate `.d` files for precise dependency tracking
-3. **Library detection**: Add automatic library finding (pkg-config integration)
-4. **Modular config**: Support importing/including config files
-5. **Tool integration**: Add hooks for formatters, linters, static analyzers
+1. **Library detection**: Add automatic library finding (pkg-config integration)
+2. **Modular config**: Support importing/including config files
+3. **Tool integration**: Add hooks for formatters, linters, static analyzers
 
 ### Performance Characteristics
 

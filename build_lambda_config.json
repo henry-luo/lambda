@@ -1,5 +1,9 @@
 {
     "output": "lambda.exe",
+    "source_dirs": [
+        "lambda/input",
+        "lambda/format"
+    ],
     "source_files": [
         "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
@@ -22,25 +26,7 @@
         "lambda/pack.c",
         "lambda/print.c",
         "lambda/lambda-eval.c",
-        "lambda/lambda-mem.c",
-        "lambda/input/input.c",
-        "lambda/input/input-json.c",
-        "lambda/input/input-csv.c",
-        "lambda/input/input-ini.c",
-        "lambda/input/input-xml.c",
-        "lambda/input/input-yaml.c",
-        "lambda/input/input-md.c",
-        "lambda/input/input-rst.c",
-        "lambda/input/input-toml.c",
-        "lambda/input/input-html.c",
-        "lambda/input/input-latex.c",
-        "lambda/input/input-rtf.c",
-        "lambda/input/input-pdf.c",
-        "lambda/format/format.c",
-        "lambda/format/format-json.c",
-        "lambda/format/format-md.c",
-        "lambda/format/format-xml.c",
-        "lambda/format/format-html.c"
+        "lambda/lambda-mem.c"
     ],
     "cpp_files": [
         "lambda/main.cpp"
