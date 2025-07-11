@@ -664,21 +664,86 @@ echo -e "$output"
 # Count errors and warnings (ignores color codes)
 num_errors=$(echo "$output" | grep -c "error:")
 num_warnings=$(echo "$output" | grep -c "warning:")
+num_notes=$(echo "$output" | grep -c "note:")
+
+# Extract and format errors and warnings with clickable links
+format_diagnostics() {
+    local diagnostic_type="$1"
+    local grep_pattern="$2"
+    local color="$3"
+    
+    local diagnostics=$(echo "$output" | grep "$grep_pattern" | head -20)  # Limit to 20 entries
+    if [ -n "$diagnostics" ]; then
+        echo
+        echo -e "${color}${diagnostic_type} Summary (clickable links):${RESET}"
+        echo -e "${color}=====================================${RESET}"
+        
+        echo "$diagnostics" | while IFS= read -r line; do
+            # Extract file path and line number from compiler output
+            # Supports formats like: file.c:123:45: error: message
+            if echo "$line" | grep -qE '^[^:]+:[0-9]+:[0-9]*:'; then
+                # Extract components using more robust pattern
+                local file_path=$(echo "$line" | sed -E 's/^([^:]+):[0-9]+:[0-9]*:.*/\1/')
+                local line_num=$(echo "$line" | sed -E 's/^[^:]+:([0-9]+):[0-9]*:.*/\1/')
+                local col_num=$(echo "$line" | sed -E 's/^[^:]+:[0-9]+:([0-9]*):.*$/\1/')
+                local message=$(echo "$line" | sed -E 's/^[^:]+:[0-9]+:[0-9]*:[[:space:]]*(.*)/\1/')
+                
+                # Handle case where column number might be missing
+                if [ -z "$col_num" ]; then
+                    col_num="1"
+                fi
+                
+                # Convert absolute path to relative path if needed
+                if [[ "$file_path" == /* ]]; then
+                    # Convert absolute path to relative path
+                    local current_dir="$(pwd)"
+                    if [[ "$file_path" == "$current_dir"/* ]]; then
+                        file_path="${file_path#$current_dir/}"
+                    fi
+                fi
+                
+                # Output clickable link (VS Code and most modern terminals support this format)
+                echo -e "  ${color}${file_path}:${line_num}:${col_num}${RESET} - $message"
+            else
+                # Fallback for non-standard format
+                echo -e "  ${color}$line${RESET}"
+            fi
+        done
+        
+        local total_count=$(echo "$output" | grep -c "$grep_pattern")
+        if [ "$total_count" -gt 20 ]; then
+            echo -e "  ${color}... and $(($total_count - 20)) more${RESET}"
+        fi
+    fi
+}
 
 # Print summary with optional coloring
 RED="\033[0;31m"
 YELLOW="\033[1;33m"
 GREEN="\033[0;32m"
+BLUE="\033[0;34m"
 RESET="\033[0m"
 
+# Format errors and notes with clickable links (warnings only show count)
+if [ "$num_errors" -gt 0 ]; then
+    format_diagnostics "ERRORS" "error:" "$RED"
+fi
+
+if [ "$num_notes" -gt 0 ]; then
+    format_diagnostics "NOTES" "note:" "$BLUE"
+fi
+
 echo
-echo -e "${YELLOW}Summary:${RESET}"
+echo -e "${YELLOW}Build Summary:${RESET}"
 if [ "$num_errors" -gt 0 ]; then
     echo -e "${RED}Errors:   $num_errors${RESET}"
 else
     echo -e "Errors:   $num_errors"
 fi
 echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
+if [ "$num_notes" -gt 0 ]; then
+    echo -e "${BLUE}Notes:    $num_notes${RESET}"
+fi
 echo "Files compiled: $files_compiled"
 echo "Files up-to-date: $files_skipped"
 if [ "$linking_performed" = true ]; then
