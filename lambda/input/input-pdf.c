@@ -1314,7 +1314,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         const char* xref_start = scan_pdf;
                         xref_table = parse_pdf_xref_table(input, &scan_pdf);
                         if (xref_table != ITEM_ERROR) {
-                            printf("Found and parsed xref table at offset %ld\n", xref_start - pdf_string);
+                            printf("Found and parsed xref table at offset %lld\n", (long long)(xref_start - pdf_string));
                         }
                         continue;
                     }
@@ -1326,7 +1326,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         const char* trailer_start = scan_pdf;
                         trailer = parse_pdf_trailer(input, &scan_pdf);
                         if (trailer != ITEM_ERROR) {
-                            printf("Found and parsed trailer at offset %ld\n", trailer_start - pdf_string);
+                            printf("Found and parsed trailer at offset %lld\n", (long long)(trailer_start - pdf_string));
                         }
                         if (trailer != ITEM_ERROR) break; // Done after finding trailer
                     }

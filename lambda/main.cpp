@@ -4,10 +4,42 @@
 extern "C" Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
 
 // Forward declare readline functions to avoid header conflicts
+#ifndef _WIN32
 extern "C" {
     char *readline(const char *);
     int add_history(const char *);
 }
+#else
+// Simple Windows fallback for readline functionality
+char *simple_readline(const char *prompt) {
+    printf("%s", prompt);
+    fflush(stdout);
+    
+    char *line = (char*)malloc(1024);
+    if (!line) return NULL;
+    
+    if (fgets(line, 1024, stdin) == NULL) {
+        free(line);
+        return NULL;
+    }
+    
+    // Remove trailing newline
+    size_t len = strlen(line);
+    if (len > 0 && line[len-1] == '\n') {
+        line[len-1] = '\0';
+    }
+    
+    return line;
+}
+
+void simple_add_history(const char *line) {
+    // Simple stub - no history on Windows for now
+    (void)line;
+}
+
+#define readline simple_readline
+#define add_history simple_add_history
+#endif
 
 void print_help() {
     printf("Lambda Script Interpreter\n");

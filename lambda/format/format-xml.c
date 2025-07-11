@@ -166,8 +166,8 @@ static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
             TypeId field_type = field->type->type_id;
             
             // Debug: print field information
-            printf("Field %d: name length=%ld, name str='%.*s'\n", 
-                   i, field->name->length, (int)field->name->length, field->name->str);
+            printf("Field %d: name length=%lld, name str='%.*s'\n", 
+                   i, (long long)field->name->length, (int)field->name->length, field->name->str);
             
             // Only handle complex types as child elements (simple types are attributes)
             if (!is_simple_type(field_type)) {
