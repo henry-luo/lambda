@@ -10,6 +10,7 @@ PLATFORM=""
 # Parse command line arguments
 FORCE_REBUILD=false
 PARALLEL_JOBS=""
+DEBUG_BUILD=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --platform=*)
@@ -19,6 +20,11 @@ while [[ $# -gt 0 ]]; do
         --platform)
             PLATFORM="$2"
             shift 2
+            ;;
+        --debug|-d)
+            DEBUG_BUILD=true
+            PLATFORM="debug"
+            shift
             ;;
         --force|-f)
             FORCE_REBUILD=true
@@ -33,16 +39,18 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: $0 [config_file] [--platform=PLATFORM] [--force] [--jobs=N]"
+            echo "Usage: $0 [config_file] [--platform=PLATFORM] [--debug] [--force] [--jobs=N]"
             echo ""
             echo "Arguments:"
             echo "  config_file           JSON configuration file (default: build_lambda_config.json)"
             echo "  --platform=PLATFORM   Target platform for cross-compilation"
+            echo "  --debug, -d           Build debug version with AddressSanitizer"
             echo "  --force, -f           Force rebuild all files (disable incremental compilation)"
             echo "  --jobs=N, -j N        Number of parallel compilation jobs (default: auto-detect)"
             echo ""
             echo "Available platforms:"
             echo "  windows               Cross-compile for Windows using MinGW"
+            echo "  debug                 Debug build with AddressSanitizer (same as --debug)"
             echo "  (none)                Native compilation for current platform (e.g., macOS, Linux)"
             echo ""
             echo "Configuration files:"
@@ -51,10 +59,12 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Examples:"
             echo "  $0                                      # Native lambda compilation (incremental)"
+            echo "  $0 --debug                              # Debug build with AddressSanitizer"
             echo "  $0 --force                              # Native lambda compilation (full rebuild)"
             echo "  $0 --jobs=4                             # Native lambda compilation with 4 parallel jobs"
             echo "  $0 build_radiant_config.json            # Native radiant compilation (incremental)"
             echo "  $0 --platform=windows                   # Cross-compile lambda for Windows (incremental)"
+            echo "  $0 --platform=debug --force             # Force debug rebuild"
             echo "  $0 --platform=windows --force           # Cross-compile lambda for Windows (full rebuild)"
             exit 0
             ;;
@@ -270,6 +280,9 @@ if [ -n "$PLATFORM" ]; then
         if [ -z "$TARGET_TRIPLET" ]; then
             TARGET_TRIPLET="x86_64-w64-mingw32"
         fi
+    elif [ "$PLATFORM" = "debug" ]; then
+        # Debug platform uses native compilation with debug flags
+        CROSS_COMPILE="false"
     fi
 fi
 
@@ -446,6 +459,9 @@ fi
 echo "Configuration loaded from: $CONFIG_FILE"
 if [ -n "$PLATFORM" ]; then
     echo "Target platform: $PLATFORM"
+fi
+if [ "$DEBUG_BUILD" = true ]; then
+    echo "Debug build: enabled (AddressSanitizer)"
 fi
 echo "Cross-compilation: $CROSS_COMPILE"
 if [ "$FORCE_REBUILD" = true ]; then

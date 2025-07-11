@@ -104,6 +104,22 @@
     "debug": true,
     "build_dir": "build",
     "platforms": {
+        "debug": {
+            "output": "lambda_debug.exe",
+            "flags": [
+                "fms-extensions",
+                "pedantic",
+                "fcolor-diagnostics",
+                "fsanitize=address",
+                "fno-omit-frame-pointer",
+                "O1"
+            ],
+            "linker_flags": [
+                "fsanitize=address"
+            ],
+            "build_dir": "build_debug",
+            "debug": true
+        },
         "windows": {
             "output": "lambda-windows.exe",
             "libraries": [
