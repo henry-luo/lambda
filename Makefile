@@ -35,7 +35,8 @@ JOBS := $(shell echo $$(($(NPROCS) > 8 ? 8 : $(NPROCS))))
 # Phony targets (don't correspond to actual files)
 .PHONY: all build clean debug release rebuild test run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
-        build-windows build-debug build-release clean-all distclean
+        build-windows build-debug build-release clean-all distclean \
+        verify-windows test-windows
 
 # Help target - shows available commands
 help:
@@ -62,6 +63,8 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run tests (if available)"
+	@echo "  verify-windows - Verify Windows cross-compiled executable with Wine"
+	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  run           - Build and run the default executable"
 	@echo "  check         - Run static analysis and checks"
 	@echo "  format        - Format source code"
@@ -172,6 +175,31 @@ test:
 	else \
 		echo "No test directory found. Tests not available."; \
 	fi
+
+# Windows verification targets
+verify-windows:
+	@echo "Verifying Windows cross-compiled executable..."
+	@if [ ! -f "lambda-windows.exe" ]; then \
+		echo "Windows executable not found. Building..."; \
+		$(MAKE) build-windows; \
+	fi
+	@if [ ! -f "test/verify-windows-exe.sh" ]; then \
+		echo "Error: Windows verification script not found at test/verify-windows-exe.sh"; \
+		exit 1; \
+	fi
+	@cd test && ./verify-windows-exe.sh
+
+test-windows:
+	@echo "Running CI tests for Windows executable..."
+	@if [ ! -f "lambda-windows.exe" ]; then \
+		echo "Windows executable not found. Building..."; \
+		$(MAKE) build-windows; \
+	fi
+	@if [ ! -f "test/test-windows-exe-ci.sh" ]; then \
+		echo "Error: Windows CI test script not found at test/test-windows-exe-ci.sh"; \
+		exit 1; \
+	fi
+	@cd test && ./test-windows-exe-ci.sh
 
 run: build
 	@echo "Running $(LAMBDA_EXE)..."
