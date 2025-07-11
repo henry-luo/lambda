@@ -163,7 +163,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 }
 
 void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
-    printf("transpile unary expr\n");
+    // printf("transpile unary expr\n");
     if (unary_node->op == OPERATOR_NOT) { strbuf_append_str(tp->code_buf, "!"); }
     else strbuf_append_str_n(tp->code_buf, unary_node->op_str.str, unary_node->op_str.length);
     strbuf_append_char(tp->code_buf, '(');
@@ -217,7 +217,8 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            else if (bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->left->type->type_id == LMD_TYPE_INT64 ||
+            else if (bi_node->left->type->type_id == LMD_TYPE_INT || 
+                bi_node->left->type->type_id == LMD_TYPE_INT64 ||
                 bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
@@ -679,7 +680,6 @@ void transpile_base_type(Transpiler* tp, AstTypeNode* type_node) {
 }
 
 void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
-    printf("transpile binary type\n");
     TypeBinary* binary_type = (TypeBinary*)((TypeType*)bin_node->type)->type;
     strbuf_append_format(tp->code_buf, "const_type(%d)", binary_type->type_index);
 }
@@ -955,9 +955,14 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     child = script->child;
     bool has_content = false;
     while (child) {
-        if (child->node_type == AST_NODE_CONTENT || child->node_type == AST_NODE_PRIMARY) {
+        switch (child->node_type) {
+        case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
+        case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
+            break;  // skip defintion nodes
+        default:
+            // AST_NODE_CONTENT, AST_NODE_PRIMARY, AST_NODE_BINARY, etc.
             transpile_box_item(tp, child);
-            has_content = true;
+            has_content = true;            
         }
         child = child->next;
     }

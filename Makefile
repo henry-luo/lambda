@@ -80,11 +80,11 @@ help:
 	@echo "  make rebuild              # Force complete rebuild"
 
 # Main build target (incremental)
-build: $(LAMBDA_EXE)
-
-$(LAMBDA_EXE):
+build:
 	@echo "Building $(PROJECT_NAME) (incremental)..."
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+
+$(LAMBDA_EXE): build
 
 # Debug build
 debug:
