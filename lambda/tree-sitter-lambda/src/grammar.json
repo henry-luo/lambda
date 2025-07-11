@@ -1388,7 +1388,7 @@
                 "members": [
                   {
                     "type": "PATTERN",
-                    "value": "\\s+"
+                    "value": "\\s+|T|t"
                   },
                   {
                     "type": "SEQ",
@@ -4512,7 +4512,7 @@
         "members": [
           {
             "type": "PATTERN",
-            "value": "[a-zA-Z_]"
+            "value": "[^\\x00-\\x1F\\s\\p{Zs}0-9:;`\"'@#.,|^&<=>+\\-*/\\\\%?!~()\\[\\]{}\\uFEFF\\u2060\\u200B\\u2028\\u2029]|\\\\u[0-9a-fA-F]{4}|\\\\u\\{[0-9a-fA-F]+\\}"
           },
           {
             "type": "REPEAT",

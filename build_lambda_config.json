@@ -16,6 +16,7 @@
         "lib/num_stack.c",
         "lambda/runner.c",
         "lambda/transpile.c",
+        "lambda/transpile-mir.c",
         "lambda/build_ast.c",
         "lambda/mir.c",
         "lambda/pack.c",

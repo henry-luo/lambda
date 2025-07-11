@@ -628,6 +628,9 @@ void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_data(MIR_context_t ctx, const char *data_name);
 void jit_cleanup(MIR_context_t ctx);
 
+// MIR transpiler functions
+Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
+
 typedef uint64_t Item;
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source);

@@ -1,27 +1,29 @@
-
 #include "transpiler.h"
+
+// Forward declare MIR transpiler function
+extern "C" Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
 
 // Forward declare readline functions to avoid header conflicts
 extern "C" {
     char *readline(const char *);
     int add_history(const char *);
 }
-// extern "C" {}
 
 void print_help() {
     printf("Lambda Script Interpreter\n");
     printf("Usage:\n");
-    printf("  lambda [script.ls]    - Run a script file\n");
-    printf("  lambda               - Start REPL mode\n");
-    printf("  lambda --help        - Show this help message\n");
+    printf("  lambda [script.ls]           - Run a script file\n");
+    printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
+    printf("  lambda                       - Start REPL mode\n");
+    printf("  lambda --help                - Show this help message\n");
     printf("\nREPL Commands:\n");
     printf("  :quit, :q, :exit     - Exit REPL\n");
     printf("  :help, :h            - Show help\n");
     printf("  :clear               - Clear REPL history\n");
 }
 
-void run_repl(Runtime *runtime) {
-    printf("Lambda Script REPL v1.0\n");
+void run_repl(Runtime *runtime, bool use_mir) {
+    printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
     printf("Type :help for commands, :quit to exit\n");
     
     StrBuf *repl_history = strbuf_new_cap(1024);
@@ -68,7 +70,12 @@ void run_repl(Runtime *runtime) {
         snprintf(script_path, sizeof(script_path), "<repl-%d>", ++exec_count);
         
         // Run the accumulated script
-        Item result = run_script(runtime, repl_history->str, script_path);
+        Item result;
+        if (use_mir) {
+            result = run_script_mir(runtime, repl_history->str, script_path);
+        } else {
+            result = run_script(runtime, repl_history->str, script_path);
+        }
         
         // Print result
         StrBuf *output = strbuf_new_cap(256);
@@ -82,8 +89,13 @@ void run_repl(Runtime *runtime) {
     strbuf_free(repl_history);
 }
 
-void run_script_file(Runtime *runtime, const char *script_path) {
-    Item result = run_script_at(runtime, (char*)script_path);
+void run_script_file(Runtime *runtime, const char *script_path, bool use_mir) {
+    Item result;
+    if (use_mir) {
+        result = run_script_mir(runtime, NULL, (char*)script_path);
+    } else {
+        result = run_script_at(runtime, (char*)script_path);
+    }
     
     StrBuf *output = strbuf_new_cap(256);
     print_item(output, result);
@@ -124,7 +136,7 @@ int main(int argc, char *argv[]) {
     run_assertions();
     
     // Parse command line arguments
-    if (argc == 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+    if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
         return 0;
     }
@@ -134,20 +146,31 @@ int main(int argc, char *argv[]) {
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
     
+    bool use_mir = false;
+    
     if (argc == 1) {
         // No arguments - start REPL
-        run_repl(&runtime);
+        run_repl(&runtime, use_mir);
     } else if (argc == 2) {
-        // One argument - run script file
-        run_script_file(&runtime, argv[1]);
+        // One argument - check if it's MIR flag or script file
+        if (strcmp(argv[1], "--mir") == 0) {
+            use_mir = true;
+            // Start REPL in MIR mode
+            run_repl(&runtime, use_mir);
+        } else {
+            // Run script file
+            run_script_file(&runtime, argv[1], use_mir);
+        }
+    } else if (argc == 3 && strcmp(argv[1], "--mir") == 0) {
+        // MIR flag with script file
+        use_mir = true;
+        run_script_file(&runtime, argv[2], use_mir);
     } else {
-        // Too many arguments
-        printf("Error: Too many arguments\n");
+        // Too many arguments or invalid combination
+        printf("Error: Invalid arguments\n");
         print_help();
-        runtime_cleanup(&runtime);
         return 1;
     }
     
-    runtime_cleanup(&runtime);
     return 0;
 }

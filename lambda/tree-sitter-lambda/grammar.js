@@ -88,7 +88,7 @@ function type_pattern(type_expr) {
 }
 
 function time() { 
-  // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
+  // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm or hh
   return seq(digit, digit, optional(seq(':', digit, digit)), optional(seq(':', digit, digit)), 
     optional((seq('.', digit, digit, digit))),
     // timezone
@@ -289,7 +289,7 @@ module.exports = grammar({
     // date-time
     datetime: _ => token.immediate(
       seq(optional('-'), digit, digit, digit, digit, optional(seq('-', digit, digit)), optional(seq('-', digit, digit)),
-        optional(seq(/\s+/, time()))
+        optional(seq(/\s+|T|t/, time()))
       )),
 
     _datetime: $ => seq("t'", /\s*/, choice($.datetime, $.time), /\s*/, "'"),
@@ -477,8 +477,12 @@ module.exports = grammar({
     )),
 
     identifier: _ => {
-      // copied from JS grammar
-      const alpha = /[a-zA-Z_]/;
+      // ECMAScript 2023-compliant identifier regex:
+      // const identifierRegex = /^[$_\p{ID_Start}][$_\u200C\u200D\p{ID_Continue}]*$/u;
+
+      // 'alpha' and 'alphanumeric' here, copied from Tree-sitter JS grammar, 
+      // are not exactly the same as ECMA standard, which is a limitation of Tree-sitter RegEx
+      const alpha = /[^\x00-\x1F\s\p{Zs}0-9:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       return token(seq(alpha, repeat(alphanumeric)));
     },  
