@@ -7,6 +7,15 @@
 CONFIG_FILE="build_lambda_config.json"
 PLATFORM=""
 
+# Function to clean dependency files (.d files)
+clean_dependency_files() {
+    local build_dir="${1:-build}"
+    if [ -d "$build_dir" ]; then
+        echo "Cleaning dependency files in $build_dir..."
+        find "$build_dir" -name "*.d" -delete 2>/dev/null || true
+    fi
+}
+
 # Parse command line arguments
 FORCE_REBUILD=false
 PARALLEL_JOBS=""
@@ -30,6 +39,15 @@ while [[ $# -gt 0 ]]; do
             FORCE_REBUILD=true
             shift
             ;;
+        --clean-deps)
+            # Clean standard build directories
+            echo "Cleaning dependency files..."
+            clean_dependency_files "build"
+            clean_dependency_files "build_windows" 
+            clean_dependency_files "build_debug"
+            echo "Dependency files cleaned from standard build directories."
+            exit 0
+            ;;
         --jobs=*|-j=*)
             PARALLEL_JOBS="${1#*=}"
             shift
@@ -39,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            echo "Usage: $0 [config_file] [--platform=PLATFORM] [--debug] [--force] [--jobs=N]"
+            echo "Usage: $0 [config_file] [--platform=PLATFORM] [--debug] [--force] [--jobs=N] [--clean-deps]"
             echo ""
             echo "Arguments:"
             echo "  config_file           JSON configuration file (default: build_lambda_config.json)"
@@ -47,6 +65,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --debug, -d           Build debug version with AddressSanitizer"
             echo "  --force, -f           Force rebuild all files (disable incremental compilation)"
             echo "  --jobs=N, -j N        Number of parallel compilation jobs (default: auto-detect)"
+            echo "  --clean-deps          Clean dependency files (.d files) and exit"
             echo ""
             echo "Available platforms:"
             echo "  windows               Cross-compile for Windows using MinGW"
@@ -58,9 +77,10 @@ while [[ $# -gt 0 ]]; do
             echo "  build_radiant_config.json   Compile radiant project"
             echo ""
             echo "Examples:"
-            echo "  $0                                      # Native lambda compilation (incremental)"
+            echo "  $0                                      # Native lambda compilation (incremental with .d files)"
             echo "  $0 --debug                              # Debug build with AddressSanitizer"
             echo "  $0 --force                              # Native lambda compilation (full rebuild)"
+            echo "  $0 --clean-deps                         # Clean dependency files"
             echo "  $0 --jobs=4                             # Native lambda compilation with 4 parallel jobs"
             echo "  $0 build_radiant_config.json            # Native radiant compilation (incremental)"
             echo "  $0 --platform=windows                   # Cross-compile lambda for Windows (incremental)"
@@ -184,6 +204,7 @@ init_header_cache() {
 needs_recompilation() {
     local source_file="$1"
     local object_file="$2"
+    local dep_file="${object_file%.o}.d"
     
     # If force rebuild is enabled, always recompile
     if [ "$FORCE_REBUILD" = true ]; then
@@ -200,16 +221,41 @@ needs_recompilation() {
         return 0
     fi
     
-    # Quick header check using cached timestamp
-    if [ -n "$NEWEST_HEADER_TIME" ]; then
-        local obj_time=$(stat -f "%m" "$object_file" 2>/dev/null || stat -c "%Y" "$object_file" 2>/dev/null)
-        if [ -n "$obj_time" ] && [ "$NEWEST_HEADER_TIME" -gt "$obj_time" ]; then
-            return 0
+    # Check precise dependencies from .d file if it exists
+    if [ -f "$dep_file" ]; then
+        # Parse the .d file to check each dependency
+        local needs_rebuild=false
+        
+        # Read the dependency file and extract dependencies
+        # .d file format: target.o: source.c dep1.h dep2.h \
+        #                 dep3.h dep4.h
+        local deps=$(sed -e 's/\\$//' -e 's/^[^:]*://' "$dep_file" | tr -s ' ' '\n' | sed '/^$/d' | sort -u)
+        
+        # Check if any dependency is newer than the object file
+        while IFS= read -r dep; do
+            # Skip empty lines and the target itself
+            if [ -n "$dep" ] && [ "$dep" != "$object_file" ]; then
+                if [ -f "$dep" ] && [ "$dep" -nt "$object_file" ]; then
+                    echo "Dependency changed: $dep"
+                    return 0
+                fi
+            fi
+        done <<< "$deps"
+        
+        # All dependencies checked, no rebuild needed
+        return 1
+    else
+        # No .d file exists, fall back to header cache method for compatibility
+        if [ -n "$NEWEST_HEADER_TIME" ]; then
+            local obj_time=$(stat -f "%m" "$object_file" 2>/dev/null || stat -c "%Y" "$object_file" 2>/dev/null)
+            if [ -n "$obj_time" ] && [ "$NEWEST_HEADER_TIME" -gt "$obj_time" ]; then
+                return 0
+            fi
         fi
+        
+        # No recompilation needed
+        return 1
     fi
-    
-    # No recompilation needed
-    return 1
 }
 
 # Function to check if linking is needed
@@ -444,14 +490,14 @@ if [ "$DEBUG" = "true" ]; then
     FLAGS="$FLAGS -g"
 fi
 
-# Initialize header file cache for faster incremental builds
+# Initialize header file cache for faster incremental builds (fallback for files without .d files)
 if [ "$FORCE_REBUILD" != true ]; then
-    echo "Initializing incremental build cache..."
+    echo "Initializing dependency tracking..."
     init_header_cache
     if [ -n "$NEWEST_HEADER_TIME" ]; then
-        echo "Header cache: Found newest header timestamp"
+        echo "Dependency tracking: Using .d files (precise) + header cache (fallback)"
     else
-        echo "Header cache: No headers found or timestamps unavailable"
+        echo "Dependency tracking: Using .d files (precise) only"
     fi
 fi
 
@@ -484,7 +530,8 @@ compile_single_file() {
     local flags="$5"
     
     echo "Compiling: $source -> $obj_file"
-    $compiler $INCLUDES -c "$source" -o "$obj_file" $warnings $flags 2>&1
+    # Add -MMD -MP flags for automatic dependency generation
+    $compiler $INCLUDES -MMD -MP -c "$source" -o "$obj_file" $warnings $flags 2>&1
 }
 
 # Pre-scan all files to determine what needs compilation
@@ -750,6 +797,14 @@ if [ "$linking_performed" = true ]; then
     echo "Linking: performed"
 else
     echo "Linking: skipped (up-to-date)"
+fi
+
+# Show dependency tracking info
+dep_files_count=$(find "$BUILD_DIR" -name "*.d" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$dep_files_count" -gt 0 ]; then
+    echo "Dependency tracking: $dep_files_count .d files (precise tracking)"
+else
+    echo "Dependency tracking: header cache fallback"
 fi
 
 # Final build status
