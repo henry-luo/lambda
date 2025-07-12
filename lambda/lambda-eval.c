@@ -339,13 +339,13 @@ Map* map_fill(Map* map, ...) {
     return map;
 }
 
-Item _map_get(Map* map, char *key, bool *is_found) {
-    ShapeEntry *field = ((TypeMap*)map->type)->shape;
+Item _map_get(TypeMap* map_type,void* map_data, char *key, bool *is_found) {
+    ShapeEntry *field = map_type->shape;
     while (field) {
         if (!field->name) { // nested map, skip
-            Map* nested_map = *(Map**)((char*)map->data + field->byte_offset);
+            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
             bool nested_is_found;
-            Item result = _map_get(nested_map, key, &nested_is_found);
+            Item result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found);
             if (nested_is_found) {
                 *is_found = true;
                 return result;
@@ -356,7 +356,7 @@ Item _map_get(Map* map, char *key, bool *is_found) {
         if (strncmp(field->name->str, key, field->name->length) == 0) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
-            void* field_ptr = (char*)map->data + field->byte_offset;
+            void* field_ptr = (char*)map_data + field->byte_offset;
             switch (type_id) {
                 case LMD_TYPE_NULL:
                     return ITEM_NULL;
@@ -410,41 +410,7 @@ Item map_get(Map* map, Item key) {
         return ITEM_NULL;  // only string or symbol keys are supported
     }
     printf("map_get key: %s\n", key_str);
-    return _map_get(map, key_str, &is_found);
-}
-
-// generic field access function for any type
-Item fn_index(Item item, long index) {
-    // Determine the type and delegate to appropriate getter
-    LambdaItem litem = (LambdaItem)item;
-    TypeId type_id = get_type_id(litem);
-
-    switch (type_id) {
-    case LMD_TYPE_RANGE: {
-        Range *range = (Range*)litem.raw_pointer;
-        if (index < range->start || index > range->end) { return ITEM_NULL; }
-        long value = range->start + index;
-        return i2it(value);
-    }
-    case LMD_TYPE_ARRAY:
-        return array_get((Array*)litem.raw_pointer, (int)index);
-    case LMD_TYPE_ARRAY_INT: {
-        ArrayLong *arr = (ArrayLong*)litem.raw_pointer;
-        if (index < 0 || index >= arr->length) { return ITEM_NULL; }
-        return i2it(arr->items[index]);
-    }
-    case LMD_TYPE_LIST:
-        return list_get((List*)litem.raw_pointer, (int)index);
-    case LMD_TYPE_ELEMENT:
-        // treat element as list for index access
-        return list_get((List*)litem.raw_pointer, (int)index);
-    case LMD_TYPE_MAP:
-        // to consider: should we return ITEM_NULL or ITEM_ERROR? 
-        return ITEM_NULL;
-    // todo: string, symbol, dtime, binary, etc.
-    default:
-        return ITEM_NULL;
-    }
+    return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
 Element* elmt(int type_index) {
@@ -485,6 +451,22 @@ Element* elmt_fill(Element* elmt, ...) {
     set_fields((TypeMap*)elmt_type, elmt->data, args);
     va_end(args);
     return elmt;
+}
+
+Item elmt_get(Element* elmt, Item key) {
+    printf("elmt_get %p\n", elmt);
+    if (!elmt || !key) { return ITEM_NULL;}
+    bool is_found;
+    char *key_str = NULL;
+    LambdaItem key_item = {.item = key};
+    if (key_item.type_id == LMD_TYPE_STRING || key_item.type_id == LMD_TYPE_SYMBOL) {
+        key_str = ((String*)key_item.pointer)->chars;
+    } else {
+        printf("elmt_get: key must be string or symbol, got type %d\n", key_item.type_id);
+        return ITEM_NULL;  // only string or symbol keys are supported
+    }
+    printf("elmt_get key: %s\n", key_str);
+    return _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
 }
 
 bool item_true(Item itm) {
@@ -873,6 +855,56 @@ String* fn_format(Item item, Item type) {
 }
 
 int utf8_char_count(const char* utf8_string);
+
+// generic field access function for any type
+Item fn_index(Item item, long index) {
+    // Determine the type and delegate to appropriate getter
+    LambdaItem litem = (LambdaItem)item;
+    TypeId type_id = get_type_id(litem);
+
+    switch (type_id) {
+    case LMD_TYPE_RANGE: {
+        Range *range = (Range*)litem.raw_pointer;
+        if (index < range->start || index > range->end) { return ITEM_NULL; }
+        long value = range->start + index;
+        return i2it(value);
+    }
+    case LMD_TYPE_ARRAY:
+        return array_get((Array*)litem.raw_pointer, (int)index);
+    case LMD_TYPE_ARRAY_INT: {
+        ArrayLong *arr = (ArrayLong*)litem.raw_pointer;
+        if (index < 0 || index >= arr->length) { return ITEM_NULL; }
+        return i2it(arr->items[index]);
+    }
+    case LMD_TYPE_LIST:
+        return list_get((List*)litem.raw_pointer, (int)index);
+    case LMD_TYPE_ELEMENT:
+        // treat element as list for index access
+        return list_get((List*)litem.raw_pointer, (int)index);
+    case LMD_TYPE_MAP:
+        // to consider: should we return ITEM_NULL or ITEM_ERROR? 
+        return ITEM_NULL;
+    // todo: string, symbol, dtime, binary, etc.
+    default:
+        return ITEM_NULL;
+    }
+}
+
+Item fn_member(Item item, Item key) {
+    LambdaItem litem = (LambdaItem)item;
+    TypeId type_id = get_type_id(litem);
+    switch (type_id) {
+    case LMD_TYPE_MAP:
+        Map *map = (Map*)litem.raw_pointer;
+        return map_get(map, key);
+    case LMD_TYPE_ELEMENT:
+        Element *elmt = (Element*)litem.raw_pointer;
+        return elmt_get(elmt, key);
+    // todo: built-in properties for other types
+    default:
+        return ITEM_NULL;
+    }
+}
 
 // length function for item
 Item fn_len(Item item) {

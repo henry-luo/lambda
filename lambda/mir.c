@@ -39,6 +39,7 @@ func_obj_t func_list[] = {
     {"map_get", (fn_ptr) map_get},
     {"elmt", (fn_ptr) elmt},
     {"elmt_fill", (fn_ptr) elmt_fill},
+    {"elmt_get", (fn_ptr) elmt_get},
     {"item_true", (fn_ptr) item_true},
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
@@ -59,6 +60,7 @@ func_obj_t func_list[] = {
     {"fn_print", (fn_ptr) fn_print},
     {"fn_format", (fn_ptr) fn_format},
     {"fn_index", (fn_ptr) fn_index},
+    {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
 };
 

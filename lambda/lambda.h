@@ -148,6 +148,7 @@ Item map_get(Map* map, Item key);
 
 // generic field access function
 Item fn_index(Item item, long index);
+Item fn_member(Item item, Item key);
 
 // length function
 Item fn_len(Item item);
@@ -155,6 +156,7 @@ Item fn_len(Item item);
 typedef struct Element Element;
 Element* elmt(int type_index);
 Element* elmt_fill(Element *elmt, ...);
+Item elmt_get(Element *elmt, Item key);
 
 bool item_true(Item item);
 Item v2it(List *list);
