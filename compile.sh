@@ -78,7 +78,6 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Configuration file format:"
             echo "  source_files              Array of source files to compile (C and C++ auto-detected)"
-
             echo "  source_dirs               Array of directories to recursively scan for source files"
             echo "                            (automatically detects .c, .cpp, .cc, .cxx, .c++ files)"
             echo "                            File types are auto-detected and compiled with appropriate compilers"
@@ -414,6 +413,40 @@ OUTPUT=$(get_json_value "output" "$CONFIG_FILE" "$PLATFORM")
 DEBUG=$(get_json_value "debug" "$CONFIG_FILE" "$PLATFORM")
 CROSS_COMPILE=$(get_json_value "cross_compile" "$CONFIG_FILE" "$PLATFORM")
 TARGET_TRIPLET=$(get_json_value "target_triplet" "$CONFIG_FILE" "$PLATFORM")
+
+# Auto-regenerate lambda-embed.h if lambda.h is newer or lambda-embed.h doesn't exist
+LAMBDA_H_FILE="lambda/lambda.h"
+LAMBDA_EMBED_H_FILE="lambda/lambda-embed.h"
+
+if [ -f "$LAMBDA_H_FILE" ]; then
+    # Check if lambda_embed.h needs to be regenerated
+    NEED_REGENERATE=false
+    
+    if [ ! -f "$LAMBDA_EMBED_H_FILE" ]; then
+        echo "lambda/lambda-embed.h not found, generating..."
+        NEED_REGENERATE=true
+    elif [ "$LAMBDA_H_FILE" -nt "$LAMBDA_EMBED_H_FILE" ]; then
+        echo "lambda.h is newer than lambda/lambda-embed.h, regenerating..."
+        NEED_REGENERATE=true
+    fi
+    
+    if [ "$NEED_REGENERATE" = true ]; then
+        if command -v xxd >/dev/null 2>&1; then
+            echo "Regenerating $LAMBDA_EMBED_H_FILE from $LAMBDA_H_FILE..."
+            xxd -i "$LAMBDA_H_FILE" > "$LAMBDA_EMBED_H_FILE"
+            if [ $? -eq 0 ]; then
+                echo "Successfully regenerated $LAMBDA_EMBED_H_FILE"
+            else
+                echo "Error: Failed to regenerate $LAMBDA_EMBED_H_FILE"
+                exit 1
+            fi
+        else
+            echo "Error: xxd command not found! Cannot regenerate $LAMBDA_EMBED_H_FILE"
+            echo "Install xxd or manually run: xxd -i $LAMBDA_H_FILE > $LAMBDA_EMBED_H_FILE"
+            exit 1
+        fi
+    fi
+fi
 
 # Validate required fields
 if [ -z "$BUILD_DIR" ]; then
