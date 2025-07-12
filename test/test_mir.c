@@ -85,7 +85,6 @@ Test(mir_tests, test_jit_compile_math_function) {
 // Test JIT compilation of a function that returns a value
 Test(mir_tests, test_jit_compile_return_value) {
     const char *return_code = 
-        "#include \"../lambda/lambda.h\"\n"
         "int get_constant() {\n"
         "    if (sizeof(int64_t) == 8 && sizeof(uint64_t) == 8 && sizeof(int32_t) == 4 && sizeof(uint32_t) == 4 && sizeof(int16_t) == 2 && sizeof(uint16_t) == 2) {\n"
         "        return 1;\n"

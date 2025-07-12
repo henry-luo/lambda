@@ -956,8 +956,10 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     }
 }
 
+#include "lambda-embed.h"
+
 void transpile_ast(Transpiler* tp, AstScript *script) {
-    strbuf_append_str(tp->code_buf, "#include \"lambda/lambda.h\"\n");
+    strbuf_append_str_n(tp->code_buf, lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
     AstNode* child = script->child;
     while (child) {
