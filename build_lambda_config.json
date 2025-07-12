@@ -142,17 +142,31 @@
                     "include": "windows-deps/include",
                     "lib": "windows-deps/lib/libgmp.a",
                     "link": "static"
+                },
+                {
+                    "name": "clock_compat",
+                    "lib": "clock_compat_windows.o",
+                    "link": "static"
                 }
             ],
             "flags": [
                 "fms-extensions",
                 "static",
-                "DCROSS_COMPILE"
+                "DCROSS_COMPILE",
+                "D_WIN32",
+                "DWINVER=0x0601",
+                "D_WIN32_WINNT=0x0601",
+                "D__USE_MINGW_ANSI_STDIO=1",
+                "D_POSIX_C_SOURCE=199309L",
+                "D_TIMESPEC_DEFINED"
             ],
             "linker_flags": [
                 "static-libgcc",
                 "static-libstdc++",
-                "Wl,--subsystem,console"
+                "Wl,--subsystem,console",
+                "lwinmm",
+                "lkernel32",
+                "lpthread"
             ],
             "build_dir": "build_windows",
             "cross_compile": true,

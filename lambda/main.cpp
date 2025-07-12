@@ -1,5 +1,16 @@
 #include "transpiler.h"
 
+// System includes for environment and string functions
+#include <stdlib.h>
+#include <string.h>
+
+// Windows-specific includes for console encoding
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#endif
+
 // Forward declare MIR transpiler function
 extern "C" Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
 
@@ -55,15 +66,57 @@ void print_help() {
     printf("  :clear               - Clear REPL history\n");
 }
 
+// Function to determine the best REPL prompt based on system capabilities
+const char* get_repl_prompt() {
+#ifdef _WIN32
+    // Try to enable UTF-8 support on Windows
+    UINT old_cp = GetConsoleOutputCP();
+    UINT old_input_cp = GetConsoleCP();
+    
+    if (SetConsoleOutputCP(CP_UTF8) && SetConsoleCP(CP_UTF8)) {
+        // Check Windows version - lambda works reliably on Windows 10+
+        DWORD version = GetVersion();
+        DWORD major = (DWORD)(LOBYTE(LOWORD(version)));
+        
+        if (major >= 10) {
+            return "λ> ";  // Use lambda on Windows 10+
+        } else {
+            // Restore old code pages and use fallback
+            SetConsoleOutputCP(old_cp);
+            SetConsoleCP(old_input_cp);
+            return "L> ";
+        }
+    } else {
+        // Failed to set UTF-8, use safe ASCII prompt
+        return "L> ";
+    }
+#else
+    // On Unix-like systems, UTF-8 is usually supported
+    // Check if LANG/LC_ALL suggests UTF-8 support
+    const char* lang = getenv("LANG");
+    const char* lc_all = getenv("LC_ALL");
+    
+    if ((lang && strstr(lang, "UTF-8")) || (lc_all && strstr(lc_all, "UTF-8"))) {
+        return "λ> ";
+    } else {
+        // Fallback for non-UTF-8 locales
+        return "L> ";
+    }
+#endif
+}
+
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
     printf("Type :help for commands, :quit to exit\n");
+    
+    // Get the best prompt for this system
+    const char* prompt = get_repl_prompt();
     
     StrBuf *repl_history = strbuf_new_cap(1024);
     char *line;
     int exec_count = 0;
     
-    while ((line = readline("λ> ")) != NULL) {
+    while ((line = readline(prompt)) != NULL) {
         // Skip empty lines
         if (strlen(line) == 0) {
             free(line);

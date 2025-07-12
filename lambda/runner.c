@@ -1,6 +1,47 @@
 #include "transpiler.h"
 #include <time.h>
 
+#ifdef _WIN32
+#include <windows.h>
+
+// Windows-specific timing implementation
+typedef struct {
+    LARGE_INTEGER counter;
+} win_timer;
+
+static void get_time(win_timer* timer) {
+    QueryPerformanceCounter(&timer->counter);
+}
+
+static void print_elapsed_time(const char* label, win_timer start, win_timer end) {
+    LARGE_INTEGER frequency;
+    QueryPerformanceFrequency(&frequency);
+    
+    double elapsed_ms = ((double)(end.counter.QuadPart - start.counter.QuadPart) * 1000.0) / frequency.QuadPart;
+    printf("%s took %.3f ms\n", label, elapsed_ms);
+}
+
+#else
+// Unix/Linux/macOS version
+typedef struct timespec win_timer;
+
+static void get_time(win_timer* timer) {
+    clock_gettime(CLOCK_MONOTONIC, timer);
+}
+
+static void print_elapsed_time(const char* label, win_timer start, win_timer end) {
+    // Calculate elapsed time in milliseconds
+    long seconds = end.tv_sec - start.tv_sec;
+    long nanoseconds = end.tv_nsec - start.tv_nsec;
+    if (nanoseconds < 0) {
+        seconds--;
+        nanoseconds += 1000000000;
+    }
+    double elapsed_ms = seconds * 1000.0 + nanoseconds / 1e6;
+    printf("%s took %.3f ms\n", label, elapsed_ms);
+}
+#endif
+
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
@@ -23,18 +64,6 @@ void find_errors(TSNode node) {
     for (uint32_t i = 0; i < child_count; ++i) {
         find_errors(ts_node_child(node, i));
     }
-}
-
-void print_time_elapsed(char* label, struct timespec start, struct timespec end) {
-    // Calculate elapsed time in milliseconds
-    long seconds = end.tv_sec - start.tv_sec;
-    long nanoseconds = end.tv_nsec - start.tv_nsec;
-    if (nanoseconds < 0) {
-        seconds--;
-        nanoseconds += 1000000000;
-    }
-    double elapsed_ms = seconds * 1000.0 + nanoseconds / 1e6;
-    printf("%s took %.3f ms\n", label, elapsed_ms);
 }
 
 void find_script_func() {
@@ -118,10 +147,10 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
         return; 
     }
     printf("Start transpiling %s...\n", script_path);
-    struct timespec start, end;
+    win_timer start, end;
     
     // create a parser
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    get_time(&start);
     // parse the source
     tp->source = source;
     tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
@@ -129,8 +158,8 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
         printf("Error: Failed to parse the source code.\n");
         return;
     }
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    print_time_elapsed("parsing", start, end);
+    get_time(&end);
+    print_elapsed_time("parsing", start, end);
 
     // print the syntax tree as an s-expr.
     printf("Syntax tree: ---------\n");
@@ -146,7 +175,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     }
 
     // build the AST from the syntax tree
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    get_time(&start);
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
     pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
@@ -158,22 +187,22 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     }
     // build the AST
     tp->ast_root = build_script(tp, root_node);
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    print_time_elapsed("building AST", start, end);
+    get_time(&end);
+    print_elapsed_time("building AST", start, end);
     // print the AST for debugging
     printf("AST: %s ---------\n", tp->reference);
     print_ast_node(tp->ast_root, 0);
 
     // transpile the AST to C code
     printf("transpiling...\n");
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    get_time(&start);
     tp->code_buf = strbuf_new_cap(1024);
     transpile_ast(tp, (AstScript*)tp->ast_root);
-    clock_gettime(CLOCK_MONOTONIC, &end);
-    print_time_elapsed("transpiling", start, end);
+    get_time(&end);
+    print_elapsed_time("transpiling", start, end);
 
     // JIT compile the C code
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    get_time(&start);
     tp->jit_context = jit_init();
     // compile user code to MIR
     write_text_file("_transpiled.c", tp->code_buf->str);
@@ -182,13 +211,13 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;
     // generate native code and return the function
     tp->main_func = jit_gen_func(tp->jit_context, "main");
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    get_time(&end);
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
 
     printf("JIT compiled %s\n", script_path);
     printf("jit_context: %p, main_func: %p\n", tp->jit_context, tp->main_func);
-    print_time_elapsed(":", start, end);
+    print_elapsed_time(":", start, end);
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {

@@ -22,7 +22,7 @@ PARALLEL_JOBS=""
 DEBUG_BUILD=false
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --porm=*)
+        --platform=*)
             PLATFORM="${1#*=}"
             shift
             ;;
