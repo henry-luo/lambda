@@ -3551,7 +3551,7 @@
           },
           {
             "type": "SYMBOL",
-            "name": "subscript_expr"
+            "name": "index_expr"
           },
           {
             "type": "SYMBOL",
@@ -3706,7 +3706,7 @@
         }
       ]
     },
-    "subscript_expr": {
+    "index_expr": {
       "type": "SEQ",
       "members": [
         {

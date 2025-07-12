@@ -1282,6 +1282,52 @@
     }
   },
   {
+    "type": "index_expr",
+    "named": true,
+    "fields": {
+      "field": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "fn_expr",
+            "named": true
+          },
+          {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "primary_expr",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      },
+      "object": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "primary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "let_stam",
     "named": true,
     "fields": {
@@ -1720,6 +1766,10 @@
           "named": true
         },
         {
+          "type": "index_expr",
+          "named": true
+        },
+        {
           "type": "inf",
           "named": true
         },
@@ -1753,10 +1803,6 @@
         },
         {
           "type": "string",
-          "named": true
-        },
-        {
-          "type": "subscript_expr",
           "named": true
         },
         {
@@ -1944,52 +1990,6 @@
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "subscript_expr",
-    "named": true,
-    "fields": {
-      "field": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "binary_expr",
-            "named": true
-          },
-          {
-            "type": "fn_expr",
-            "named": true
-          },
-          {
-            "type": "for_expr",
-            "named": true
-          },
-          {
-            "type": "if_expr",
-            "named": true
-          },
-          {
-            "type": "primary_expr",
-            "named": true
-          },
-          {
-            "type": "unary_expr",
-            "named": true
-          }
-        ]
-      },
-      "object": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "primary_expr",
-            "named": true
-          }
-        ]
-      }
     }
   },
   {

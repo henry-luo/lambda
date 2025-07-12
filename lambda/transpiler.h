@@ -66,7 +66,7 @@ extern "C" {
 
 #define SYM_IDENT sym_identifier
 #define SYM_MEMBER_EXPR sym_member_expr
-#define SYM_SUBSCRIPT_EXPR sym_subscript_expr
+#define SYM_INDEX_EXPR sym_index_expr
 #define SYM_CALL_EXPR sym_call_expr
 #define SYM_PRIMARY_EXPR sym_primary_expr
 #define SYM_UNARY_EXPR sym_unary_expr
@@ -358,7 +358,8 @@ typedef enum AstNodeType {
     AST_NODE_FOR_EXPR,
     AST_NODE_LET_STAM,
     AST_NODE_PUB_STAM,
-    AST_NODE_FIELD_EXPR,
+    AST_NODE_INDEX_EXPR,
+    AST_NODE_MEMBER_EXPR,
     AST_NODE_CALL_EXPR,
     AST_NODE_SYS_FUNC,
     AST_NODE_IDENT,

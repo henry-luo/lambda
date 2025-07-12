@@ -609,8 +609,9 @@ void print_ast_node(AstNode *node, int indent) {
         AstNamedNode* param = (AstNamedNode*)node;
         printf("[param: %.*s:%s]\n", (int)param->name.length, param->name.str, format_type(node->type));
         break;
-    case AST_NODE_FIELD_EXPR:
-        printf("[field expr:%s]\n", format_type(node->type));
+    case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
+        printf("[%s expr:%s]\n", node->node_type == AST_NODE_MEMBER_EXPR ? "member" : "index", 
+            format_type(node->type));
         print_label(indent + 1, "object:");
         print_ast_node(((AstFieldNode*)node)->object, indent + 1);
         print_label(indent + 1, "field:");     

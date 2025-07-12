@@ -875,13 +875,9 @@ GREEN="\033[0;32m"
 BLUE="\033[0;34m"
 RESET="\033[0m"
 
-# Format errors and notes with clickable links (warnings only show count)
+# Format errors with clickable links (warnings and notes only show count)
 if [ "$num_errors" -gt 0 ]; then
     format_diagnostics "ERRORS" "error:" "$RED"
-fi
-
-if [ "$num_notes" -gt 0 ]; then
-    format_diagnostics "NOTES" "note:" "$BLUE"
 fi
 
 echo
@@ -892,9 +888,6 @@ else
     echo -e "Errors:   $num_errors"
 fi
 echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
-if [ "$num_notes" -gt 0 ]; then
-    echo -e "${BLUE}Notes:    $num_notes${RESET}"
-fi
 echo "Files compiled: $files_compiled"
 echo "Files up-to-date: $files_skipped"
 if [ "$linking_performed" = true ]; then

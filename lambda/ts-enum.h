@@ -128,7 +128,7 @@ enum ts_symbol_identifiers {
   sym_spread_argument = 124,
   sym_import = 125,
   sym_call_expr = 126,
-  sym_subscript_expr = 127,
+  sym_index_expr = 127,
   sym_member_expr = 128,
   sym_binary_expr = 129,
   sym_unary_expr = 130,

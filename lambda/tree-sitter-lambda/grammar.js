@@ -435,7 +435,7 @@ module.exports = grammar({
       $.element,
       alias($._non_null_base_type, $.base_type),
       $.identifier,
-      $.subscript_expr,
+      $.index_expr,  // like Go
       $.member_expr,
       $.call_expr,
       $.sys_func,
@@ -456,9 +456,8 @@ module.exports = grammar({
       $._arguments,
     ),
 
-    subscript_expr: $ => seq(
+    index_expr: $ => seq(
       field('object', $.primary_expr),
-      // optional(field('optional_chain', $.optional_chain)),
       '[', field('field', $._expression), ']',
     ),
     

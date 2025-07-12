@@ -3,6 +3,7 @@
 extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
+Type* build_lit_string(Transpiler* tp, TSNode node);
 
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
     if (import) {
@@ -604,42 +605,53 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     strbuf_append_char(tp->code_buf, ')');
 }
 
-void transpile_field_expr(Transpiler* tp, AstFieldNode *field_node) {
-    printf("transpile field expr\n");
-    if (field_node->object->type->type_id == LMD_TYPE_MAP) {
-        strbuf_append_str(tp->code_buf, "map_get(");
-        transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        writeNodeSource(tp, field_node->field->node);
-        strbuf_append_char(tp->code_buf, ')');
-    } 
-    else if (field_node->object->type->type_id == LMD_TYPE_ARRAY_INT) {
+void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
+    if (field_node->object->type->type_id == LMD_TYPE_ARRAY_INT) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");
-        writeNodeSource(tp, field_node->field->node);
+        transpile_expr(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ']');
+        return;
     }
     else if (field_node->object->type->type_id == LMD_TYPE_ARRAY) {
         strbuf_append_str(tp->code_buf, "array_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        writeNodeSource(tp, field_node->field->node);
-        strbuf_append_char(tp->code_buf, ')');
     }    
     else if (field_node->object->type->type_id == LMD_TYPE_LIST) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        writeNodeSource(tp, field_node->field->node);
-        strbuf_append_char(tp->code_buf, ')');
     }    
     else {
-        strbuf_append_str(tp->code_buf, "fn_field(");
+        strbuf_append_str(tp->code_buf, "fn_index(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_char(tp->code_buf, ',');
-        writeNodeSource(tp, field_node->field->node);
-        strbuf_append_char(tp->code_buf, ')');
     }
+    strbuf_append_char(tp->code_buf, ',');
+    transpile_expr(tp, field_node->field);
+    strbuf_append_char(tp->code_buf, ')');
+}
+
+void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
+    if (field_node->object->type->type_id == LMD_TYPE_MAP) {
+        strbuf_append_str(tp->code_buf, "map_get(");
+        transpile_expr(tp, field_node->object);
+    } 
+    else if (field_node->object->type->type_id == LMD_TYPE_ELEMENT) {
+        strbuf_append_str(tp->code_buf, "elmt_get(");
+        transpile_expr(tp, field_node->object);
+    }
+    else {
+        strbuf_append_str(tp->code_buf, "fn_member(");
+        transpile_expr(tp, field_node->object);
+    }
+    strbuf_append_char(tp->code_buf, ',');
+    if (field_node->field->node_type == AST_NODE_IDENT) {
+        TypeString* type = (TypeString*)build_lit_string(tp, field_node->field->node);
+        strbuf_append_format(tp->code_buf, "const_s2it(%d)", type->const_index);
+    } 
+    else {
+        transpile_box_item(tp, field_node->field);
+    }
+    strbuf_append_char(tp->code_buf, ')');    
 }
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
@@ -723,8 +735,11 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_ELEMENT:
         transpile_element(tp, (AstElementNode*)expr_node);
         break;
-    case AST_NODE_FIELD_EXPR:
-        transpile_field_expr(tp, (AstFieldNode*)expr_node);
+    case AST_NODE_MEMBER_EXPR:
+        transpile_member_expr(tp, (AstFieldNode*)expr_node);
+        break;
+    case AST_NODE_INDEX_EXPR:
+        transpile_index_expr(tp, (AstFieldNode*)expr_node);
         break;
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
@@ -770,7 +785,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         printf("import module\n");
         break;
     default:
-        printf("unknown expression type!!!\n");
+        printf("unknown expression type: %d!!!\n", expr_node->node_type);
         break;
     }
 }
@@ -908,7 +923,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             nm_item = nm_item->next;
         }
         break;
-    case AST_NODE_FIELD_EXPR:
+    case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
         define_ast_node(tp, ((AstFieldNode*)node)->object);
         define_ast_node(tp, ((AstFieldNode*)node)->field);
         break;

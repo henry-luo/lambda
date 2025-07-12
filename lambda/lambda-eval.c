@@ -397,38 +397,52 @@ Item _map_get(Map* map, char *key, bool *is_found) {
     return ITEM_NULL;
 }
 
-Item map_get(Map* map, char *key) {
+Item map_get(Map* map, Item key) {
+    printf("map_get %p\n", map);
     if (!map || !key) { return ITEM_NULL;}
     bool is_found;
-    return _map_get(map, key, &is_found);
+    char *key_str = NULL;
+    LambdaItem key_item = {.item = key};
+    if (key_item.type_id == LMD_TYPE_STRING || key_item.type_id == LMD_TYPE_SYMBOL) {
+        key_str = ((String*)key_item.pointer)->chars;
+    } else {
+        printf("map_get: key must be string or symbol, got type %d\n", key_item.type_id);
+        return ITEM_NULL;  // only string or symbol keys are supported
+    }
+    printf("map_get key: %s\n", key_str);
+    return _map_get(map, key_str, &is_found);
 }
 
 // generic field access function for any type
-Item fn_field(Item item, long index) {
+Item fn_index(Item item, long index) {
     // Determine the type and delegate to appropriate getter
     LambdaItem litem = (LambdaItem)item;
     TypeId type_id = get_type_id(litem);
 
     switch (type_id) {
+    case LMD_TYPE_RANGE: {
+        Range *range = (Range*)litem.raw_pointer;
+        if (index < range->start || index > range->end) { return ITEM_NULL; }
+        long value = range->start + index;
+        return i2it(value);
+    }
     case LMD_TYPE_ARRAY:
         return array_get((Array*)litem.raw_pointer, (int)index);
-    case LMD_TYPE_ARRAY_INT:
-        {
-            ArrayLong *arr = (ArrayLong*)litem.raw_pointer;
-            if (index < 0 || index >= arr->length) { return ITEM_NULL; }
-            return push_l(arr->items[index]);
-        }
+    case LMD_TYPE_ARRAY_INT: {
+        ArrayLong *arr = (ArrayLong*)litem.raw_pointer;
+        if (index < 0 || index >= arr->length) { return ITEM_NULL; }
+        return i2it(arr->items[index]);
+    }
     case LMD_TYPE_LIST:
         return list_get((List*)litem.raw_pointer, (int)index);
+    case LMD_TYPE_ELEMENT:
+        // treat element as list for index access
+        return list_get((List*)litem.raw_pointer, (int)index);
     case LMD_TYPE_MAP:
-        {
-            // For maps with numeric index, we need to convert to string
-            char index_str[32];
-            snprintf(index_str, sizeof(index_str), "%ld", index);
-            return map_get((Map*)litem.raw_pointer, index_str);
-        }
+        // to consider: should we return ITEM_NULL or ITEM_ERROR? 
+        return ITEM_NULL;
+    // todo: string, symbol, dtime, binary, etc.
     default:
-        // For unknown types, try to access by index
         return ITEM_NULL;
     }
 }

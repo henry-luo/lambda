@@ -143,9 +143,9 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
     return (AstNode*)ast_node;
 }
 
-AstNode* build_field_expr(Transpiler* tp, TSNode array_node) {
+AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_type) {
     printf("build field expr\n");
-    AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, AST_NODE_FIELD_EXPR, array_node, sizeof(AstFieldNode));
+    AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, node_type, array_node, sizeof(AstFieldNode));
     TSNode object_node = ts_node_child_by_field_id(array_node, FIELD_OBJECT);
     ast_node->object = build_expr(tp, object_node);
 
@@ -308,7 +308,8 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     printf("looking up name: %.*s\n", (int)var_name.length, var_name.str);
     NameEntry *entry = lookup_name(tp, var_name);
     if (!entry) {
-        ast_node->type = &TYPE_ERROR;
+        // ident is used for member access, thus we return TYPE_ANY
+        ast_node->type = &TYPE_ANY;
     } else {
         printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
         ast_node->entry = entry;
@@ -331,7 +332,8 @@ Type* build_lit_string(Transpiler* tp, TSNode node) {
     TSSymbol symbol = ts_node_symbol(node);
     // todo: exclude zero-length string
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int len =  end - start - (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : symbol == SYM_BINARY ? 3:2);  // -2 to exclude the quotes
+    int len =  end - start - (symbol == SYM_IDENT || symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : 
+        symbol == SYM_BINARY ? 3:2);  // -2 to exclude the quotes
     TypeString *str_type = (TypeString*)alloc_type(tp->ast_pool, 
         (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
         symbol == SYM_STRING ? LMD_TYPE_STRING : 
@@ -343,7 +345,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node) {
     pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str);
     str_type->string = (String*)str;
     const char* str_content = tp->source + start + 
-        (symbol == SYM_DATETIME || symbol == SYM_TIME ? 0: symbol == SYM_BINARY ? 2:1);
+        (symbol == SYM_IDENT || symbol == SYM_DATETIME || symbol == SYM_TIME ? 0: symbol == SYM_BINARY ? 2:1);
     memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
     str->chars[len] = '\0';  str->len = len;  str->ref_cnt = 1;
     // add to const list
@@ -428,11 +430,11 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_MEMBER_EXPR) {
-        ast_node->expr = build_field_expr(tp, child);
+        ast_node->expr = build_field_expr(tp, child, AST_NODE_MEMBER_EXPR);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == SYM_SUBSCRIPT_EXPR) {
-        ast_node->expr = build_field_expr(tp, child);
+    else if (symbol == SYM_INDEX_EXPR) {
+        ast_node->expr = build_field_expr(tp, child, AST_NODE_INDEX_EXPR);
         ast_node->type = ast_node->expr->type;
     }
     else if (symbol == SYM_CALL_EXPR || symbol == SYM_SYS_FUNC) {

@@ -144,10 +144,10 @@ Item array_get(Array *array, int index);
 typedef struct Map Map;
 Map* map(int type_index);
 Map* map_fill(Map* map, ...);
-Item map_get(Map* map, char *key);
+Item map_get(Map* map, Item key);
 
 // generic field access function
-Item fn_field(Item item, long index);
+Item fn_index(Item item, long index);
 
 // length function
 Item fn_len(Item item);
