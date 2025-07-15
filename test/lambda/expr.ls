@@ -39,3 +39,6 @@ nested.a;  nested.b;  nested.c;  nested.d;
 for r in 1 to 5 { r+1 }
 for (r in 10 to 15) r+1
 type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3);
+
+({a: 1, b: 2, c: 3}.b)
+(<e a:"str", b:2>.a)

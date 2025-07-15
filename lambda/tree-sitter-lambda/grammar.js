@@ -559,7 +559,7 @@ module.exports = grammar({
     if_stam: $ => prec.right(seq(
       'if', field('cond', $._expression), '{', field('then', $.content), '}',
       optional(seq('else', '{', field('else', $.content), '}')),
-    )),    
+    )),
 
     loop_expr: $ => seq(
       field('name', $.identifier), 'in', field('as', $._expression),

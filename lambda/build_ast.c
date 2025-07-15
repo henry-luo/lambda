@@ -306,6 +306,13 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 
     // get the identifier name
     StrView var_name = ts_node_source(tp, id_node);
+    
+    // Trim leading whitespace (workaround for tree-sitter parsing issue)
+    while (var_name.length > 0 && isspace(var_name.str[0])) {
+        var_name.str++;
+        var_name.length--;
+    }
+    
     ast_node->name = var_name;
     
     // lookup the name
