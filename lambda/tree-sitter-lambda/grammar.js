@@ -20,20 +20,21 @@ const digit = /\d/;
 const linebreak = /\r\n|\n/;
 const ws = /\s*/;
 const decimal_digits = /\d+/;
+const sign = optional(seq('-', ws));
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
-const signed_integer_literal = seq(optional('-'), ws, integer_literal);
-const signed_integer = seq(optional('-'), ws, decimal_digits);
+const signed_integer_literal = seq(sign, integer_literal);
+const signed_integer = seq(sign, decimal_digits);
 const exponent_part = seq(choice('e', 'E'), signed_integer);
 const float_literal = choice(
   seq(signed_integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
-  seq(optional('-'), ws, '.', decimal_digits, optional(exponent_part)),
+  seq(sign, '.', decimal_digits, optional(exponent_part)),
   seq(signed_integer_literal, exponent_part),
-  seq(optional('-'), ws, 'inf'),
-  seq(optional('-'), ws, 'nan'),
+  seq(sign, 'inf'),
+  seq(sign, 'nan'),
 );
 const decimal_literal = choice(
   seq(signed_integer_literal, '.', optional(decimal_digits)),
-  seq(optional('-'), ws, '.', decimal_digits),
+  seq(sign, '.', decimal_digits),
 );
 
 const base64_unit = /[A-Za-z0-9+/]{4}/;
