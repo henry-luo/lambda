@@ -147,15 +147,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             else { // bool, null, float
                 TSNode child = ts_node_named_child(pri_node->node, 0);
                 TSSymbol symbol = ts_node_symbol(child);
-                if (symbol == SYM_INF) {
-                    strbuf_append_str(tp->code_buf, "infinity");
-                }
-                else if (symbol == SYM_NAN) {
-                    strbuf_append_str(tp->code_buf, "not_a_number");
-                }
-                else {
-                    writeNodeSource(tp, pri_node->node);
-                }
+                writeNodeSource(tp, pri_node->node);
             }
         } else {
             writeNodeSource(tp, pri_node->node);

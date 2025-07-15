@@ -155,14 +155,15 @@ module.exports = grammar({
     $._parenthesized_expr,
     $._arguments,
     $._content_item,
-    $._content_expr,
+    $._expr_stam,
     $._number,
     $._datetime,
-    $._unsigned_number,
     $._expression,
     $._attr_expr,
     $._import_stam,
     $._type_expr,
+    $._statements,
+    $._statement
   ],
 
   precedences: $ => [[
@@ -263,26 +264,18 @@ module.exports = grammar({
       return token(signed_integer_literal);
     },
 
-    float: _ => {
-      return token(float_literal);
+    float: $ => {
+      return choice(
+        token(float_literal),
+        token(seq(optional('-'), 'inf')),
+        token(seq(optional('-'), 'nan')),
+      );
     },
 
     decimal: $ => {
       // no e-notation for decimal
       return token( seq(choice(decimal_literal, signed_integer_literal), choice('n','N')) );
     },
-
-    unsigned_float: _ => {
-      const signed_integer = seq(optional('-'), decimal_digits);
-      const exponent_part = seq(choice('e', 'E'), signed_integer);
-      const float_literal = choice(
-        seq(integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
-        seq(integer_literal, exponent_part),
-      );
-      return token(float_literal);
-    },    
-
-    _unsigned_number: $ => choice(alias(integer_literal, $.integer), alias($.unsigned_float, $.float)),
 
     // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm
     time: _ => token.immediate(time()),
@@ -306,42 +299,71 @@ module.exports = grammar({
 
     // Containers: list, array, map, element
 
-    _content_item: $ => choice(
-      $.if_stam, 
-      $.for_stam,
-      $.fn_stam,
+    _content_literal: $ => choice(
+      $._number,
       $.string,
-      $.map,
-      $.element,
-      $.object_type,
-      $.entity_type,
+      // $.symbol, // not allowed, as it is ambiguous with fn call
+      $._datetime,
+      $.binary,
+      $.true,
+      $.false,
+      $.null
     ),
 
-    _content_expr: $ => choice(
-      $._attr_expr, 
+    // expr statements that need ';'
+    _expr_stam: $ => choice(
       $.let_stam,
       $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
-    ),    
+    ),  
 
-    content: $ => seq(
-      repeat(
-        choice( 
-          seq($._content_expr, choice(linebreak, ';')), 
-          $._content_item
-        )
-      ), 
-      // for last content expr, ';' is optional
-      choice(
-        seq($._content_expr, optional(choice(linebreak, ';'))), 
-        $._content_item
-      )
+    _content_item: $ => choice(
+      $._content_literal,
+      $.map,
+      $.element,
+      // $.array, // ambiguous
+      $.list,
+      // $._parenthesized_expr,
+      $.object_type,
+      $.entity_type,
+      $.if_stam, 
+      $.for_stam,
+      $.fn_stam,         
+      seq($._expr_stam, choice(linebreak, ';')), 
     ),
+
+    content: $ => choice(
+      seq(
+        repeat1($._content_item), 
+        // for last _expr_stam, ';' is optional
+        optional($._expr_stam)
+      ),
+      $._expr_stam
+    ),
+
+    // statement content
+    _statement: $ => choice(
+      $.object_type,
+      $.entity_type,
+      $.if_stam, 
+      $.for_stam,
+      $.fn_stam,         
+      seq($._expression, choice(linebreak, ';')), 
+    ),
+
+    _statements: $ => choice(
+      seq(
+        repeat1($._content_item), 
+        // for last _expr_stam, ';' is optional
+        optional($._expression)
+      ),
+      $._expression
+    ),    
 
     list: $ => seq('(', 
       choice($._expression, $.assign_expr), 
-      repeat1(seq(',', choice($._expression, $.assign_expr))), ')'
+      repeat(seq(',', choice($._expression, $.assign_expr))), ')'
     ),
 
     // Literals and Containers
@@ -396,7 +418,7 @@ module.exports = grammar({
       choice(
         seq(choice($.attr, seq('&', $._attr_expr)), 
           repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
-          optional(seq(choice(linebreak, ';'), $.content))
+          optional(seq(choice(linebreak, ','), $.content))
         ),
         optional($.content)
       ),'>'
@@ -557,8 +579,8 @@ module.exports = grammar({
     )),
 
     if_stam: $ => prec.right(seq(
-      'if', field('cond', $._expression), '{', field('then', $.content), '}',
-      optional(seq('else', '{', field('else', $.content), '}')),
+      'if', field('cond', $._expression), '{', field('then', alias($._statements, $.content)), '}',
+      optional(seq('else', '{', field('else', alias($._statements, $.content)), '}')),
     )),    
 
     loop_expr: $ => seq(

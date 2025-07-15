@@ -495,6 +495,9 @@ void print_ast_node(AstNode *node, int indent) {
         printf("[primary expr:%s,const:%d]\n", format_type(node->type), node->type->is_const);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
+        } else {
+            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            printf("(%s)\n", ts_node_type(node->node));
         }
         break;
     case AST_NODE_UNARY:

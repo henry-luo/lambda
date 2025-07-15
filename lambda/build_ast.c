@@ -356,16 +356,10 @@ Type* build_lit_string(Transpiler* tp, TSNode node) {
 
 Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
     TypeFloat *item_type = (TypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
-    if (symbol == SYM_INF) {
-        item_type->double_val = INFINITY;
-    }
-    else if (symbol == SYM_NAN) {
-        item_type->double_val = NAN;
-    }
-    else {
-        const char* num_str = tp->source + ts_node_start_byte(node);
-        item_type->double_val = atof(num_str);
-    }
+    // C supports inf and nan
+    printf("build lit float: normal\n");
+    const char* num_str = tp->source + ts_node_start_byte(node);
+    item_type->double_val = atof(num_str);
     arraylist_append(tp->const_list, &item_type->double_val);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
@@ -406,7 +400,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_DECIMAL) {
         ast_node->type = build_lit_decimal(tp, child);
     }
-    else if (symbol == SYM_FLOAT || symbol == SYM_INF || symbol == SYM_NAN) {
+    else if (symbol == SYM_FLOAT) {
         ast_node->type = build_lit_float(tp, child, symbol);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 

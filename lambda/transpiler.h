@@ -45,8 +45,6 @@ extern "C" {
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
 #define SYM_FALSE sym_false
-#define SYM_INF sym_inf
-#define SYM_NAN sym_nan
 #define SYM_INT sym_integer
 #define SYM_FLOAT sym_float
 #define SYM_DECIMAL sym_decimal
