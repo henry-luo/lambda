@@ -119,7 +119,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
-            if (ident_node->entry->node->node_type == AST_NODE_FUNC) {
+            if (ident_node->entry->node && ident_node->entry->node->node_type == AST_NODE_FUNC) {
                 write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node, 
                     (AstImportNode*)ident_node->entry->import);
             }

@@ -18,19 +18,22 @@ function comma_sep(rule) {
 
 const digit = /\d/;
 const linebreak = /\r\n|\n/;
+const ws = /\s*/;
 const decimal_digits = /\d+/;
 const integer_literal = seq(choice('0', seq(/[1-9]/, optional(decimal_digits))));
-const signed_integer_literal = seq(optional('-'), integer_literal);
-const signed_integer = seq(optional('-'), decimal_digits);
+const signed_integer_literal = seq(optional('-'), ws, integer_literal);
+const signed_integer = seq(optional('-'), ws, decimal_digits);
 const exponent_part = seq(choice('e', 'E'), signed_integer);
 const float_literal = choice(
   seq(signed_integer_literal, '.', optional(decimal_digits), optional(exponent_part)),
-  seq(optional('-'), '.', decimal_digits, optional(exponent_part)),
+  seq(optional('-'), ws, '.', decimal_digits, optional(exponent_part)),
   seq(signed_integer_literal, exponent_part),
+  seq(optional('-'), ws, 'inf'),
+  seq(optional('-'), ws, 'nan'),
 );
 const decimal_literal = choice(
   seq(signed_integer_literal, '.', optional(decimal_digits)),
-  seq(optional('-'), '.', decimal_digits),
+  seq(optional('-'), ws, '.', decimal_digits),
 );
 
 const base64_unit = /[A-Za-z0-9+/]{4}/;
@@ -154,7 +157,6 @@ module.exports = grammar({
     $._non_null_literal,
     $._parenthesized_expr,
     $._arguments,
-    $._content_item,
     $._expr_stam,
     $._number,
     $._datetime,
@@ -162,8 +164,8 @@ module.exports = grammar({
     $._attr_expr,
     $._import_stam,
     $._type_expr,
-    $._statements,
-    $._statement
+    $._statement,
+    $._content_expr,
   ],
 
   precedences: $ => [[
@@ -260,20 +262,12 @@ module.exports = grammar({
 
     _number: $ => choice($.integer, $.float, $.decimal),
 
-    integer: $ => {
-      return token(signed_integer_literal);
-    },
+    integer: _ => token(signed_integer_literal),
 
-    float: $ => {
-      return choice(
-        token(float_literal),
-        token(seq(optional('-'), 'inf')),
-        token(seq(optional('-'), 'nan')),
-      );
-    },
+    float: _ => token(float_literal),
 
     decimal: $ => {
-      // no e-notation for decimal
+      // no e-notation for decimal, following JS bigint
       return token( seq(choice(decimal_literal, signed_integer_literal), choice('n','N')) );
     },
 
@@ -300,9 +294,9 @@ module.exports = grammar({
     // Containers: list, array, map, element
 
     _content_literal: $ => choice(
-      $._number,
+      // $._number, // not allowed, as 123 - 456 is expr
+      // $.symbol, // not allowed, as it is ambiguous with ident expr
       $.string,
-      // $.symbol, // not allowed, as it is ambiguous with fn call
       $._datetime,
       $.binary,
       $.true,
@@ -318,48 +312,29 @@ module.exports = grammar({
       $.type_stam,
     ),  
 
-    _content_item: $ => choice(
-      $._content_literal,
-      $.map,
-      $.element,
-      // $.array, // ambiguous
-      $.list,
-      // $._parenthesized_expr,
+    _content_expr: $ => choice(
+      repeat1(choice($.string, $.map, $.element)),
+      $._attr_expr, 
+      $._expr_stam
+    ),
+    
+    // statement content
+    _statement: $ => choice(   
       $.object_type,
       $.entity_type,
       $.if_stam, 
       $.for_stam,
-      $.fn_stam,         
-      seq($._expr_stam, choice(linebreak, ';')), 
+      $.fn_stam,
+      seq($._content_expr, choice(linebreak, ';')), 
     ),
 
     content: $ => choice(
       seq(
-        repeat1($._content_item), 
-        // for last _expr_stam, ';' is optional
-        optional($._expr_stam)
+        repeat1($._statement),
+        optional($._content_expr)
       ),
-      $._expr_stam
+      $._content_expr
     ),
-
-    // statement content
-    _statement: $ => choice(
-      $.object_type,
-      $.entity_type,
-      $.if_stam, 
-      $.for_stam,
-      $.fn_stam,         
-      seq($._expression, choice(linebreak, ';')), 
-    ),
-
-    _statements: $ => choice(
-      seq(
-        repeat1($._content_item), 
-        // for last _expr_stam, ';' is optional
-        optional($._expression)
-      ),
-      $._expression
-    ),    
 
     list: $ => seq('(', 
       choice($._expression, $.assign_expr), 
@@ -414,11 +389,14 @@ module.exports = grammar({
       ':', field('as', $._attr_expr)
     ),
 
-    element: $ => seq('<', $.identifier,
+    element: $ => seq('<', 
+      $.identifier,
       choice(
         seq(choice($.attr, seq('&', $._attr_expr)), 
           repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
-          optional(seq(choice(linebreak, ','), $.content))
+          optional(
+            seq(choice(linebreak, ';'), $.content),
+          )
         ),
         optional($.content)
       ),'>'
@@ -440,7 +418,7 @@ module.exports = grammar({
     )),
 
     // prec(50) to make primary_expr higher priority than content
-    primary_expr: $ => prec(50,choice(
+    primary_expr: $ => prec(50, choice(
       $.null,
       $.true,
       $.false,
@@ -579,8 +557,8 @@ module.exports = grammar({
     )),
 
     if_stam: $ => prec.right(seq(
-      'if', field('cond', $._expression), '{', field('then', alias($._statements, $.content)), '}',
-      optional(seq('else', '{', field('else', alias($._statements, $.content)), '}')),
+      'if', field('cond', $._expression), '{', field('then', $.content), '}',
+      optional(seq('else', '{', field('else', $.content), '}')),
     )),    
 
     loop_expr: $ => seq(
@@ -596,7 +574,7 @@ module.exports = grammar({
     for_stam: $ => seq(
       'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
       '{', field('then', $.content), '}'
-    ),    
+    ),
 
     // Type Definitions
 

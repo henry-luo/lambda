@@ -56,19 +56,36 @@ uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
 __thread Context* context = NULL;
 
 void find_errors(TSNode node) {
+    const char *node_type = ts_node_type(node);
+    TSPoint start_point = ts_node_start_point(node);
+    TSPoint end_point = ts_node_end_point(node);
+    
+    // Check for direct syntax error nodes
     if (ts_node_is_error(node)) {
-        TSPoint point = ts_node_start_point(node);
-        printf("Syntax error at Ln %u, Col %u\n", point.row + 1, point.column + 1);
+        printf("Syntax error at Ln %u, Col %u - %u, Col %u: %s\n", 
+               start_point.row + 1, start_point.column + 1,
+               end_point.row + 1, end_point.column + 1, node_type);
     }
+    
+    // Check for missing nodes (inserted by parser for error recovery)
+    if (ts_node_is_missing(node)) {
+        printf("Missing node at Ln %u, Col %u: expected %s\n", 
+               start_point.row + 1, start_point.column + 1, node_type);
+    }
+    
+    // Check for ERROR node type specifically (some parsers use this)
+    if (strcmp(node_type, "ERROR") == 0) {
+        printf("ERROR node at Ln %u, Col %u - %u, Col %u\n", 
+               start_point.row + 1, start_point.column + 1,
+               end_point.row + 1, end_point.column + 1);
+    }
+    
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; ++i) {
         find_errors(ts_node_child(node, i));
     }
 }
 
-void find_script_func() {
-
-}
 void init_module_import(Transpiler *tp, AstScript *script) {
     printf("init imports of script\n");
     AstNode* child = script->child;
@@ -169,6 +186,12 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     // check if the syntax tree is valid
     if (ts_node_has_error(root_node)) {
         printf("Syntax tree has errors.\n");
+        printf("Root node type: %s\n", ts_node_type(root_node));
+        printf("Root node is_error: %d\n", ts_node_is_error(root_node));
+        printf("Root node is_missing: %d\n", ts_node_is_missing(root_node));
+        printf("Root node has_error: %d\n", ts_node_has_error(root_node));
+        printf("Source pointer: %p\n", source);
+        
         // find and print syntax errors
         find_errors(root_node);
         return;

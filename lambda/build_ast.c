@@ -109,7 +109,7 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 }
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
-    printf("pushing name %.*s\n", (int)node->name.length, node->name.str);
+    printf("pushing name %.*s, %p\n", (int)node->name.length, node->name.str, node->type);
     NameEntry *entry = (NameEntry*)pool_calloc(tp->ast_pool, sizeof(NameEntry));
     entry->name = node->name;  
     entry->node = (AstNode*)node;  entry->import = import;
@@ -230,6 +230,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             fn_node->fn = SYSFUNC_ERROR;
             fn_node->type = &TYPE_ERROR;
         }
+        else {
+            printf("unknown system function: %.*s\n", (int)func_name.length, func_name.str);
+            return NULL;
+        }
         ast_node->function = (AstNode*)fn_node;
         ast_node->type = fn_node->type;
     }
@@ -265,7 +269,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
-    printf("end building call expr\n");
+    printf("end building call expr type: %p\n", ast_node->type);
     return (AstNode*)ast_node;
 }
 
@@ -323,17 +327,17 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             assert(ast_node->type->is_const == 0);
         }
         else { ast_node->type = entry->node->type; }
-        printf("ident %.*s type: %d\n", (int)entry->name.length, entry->name.str, ast_node->type->type_id);
+        printf("ident %p type: %d\n", ast_node->type, ast_node->type ? ast_node->type->type_id : -1);
     }
     return (AstNode*)ast_node;
 }
 
-Type* build_lit_string(Transpiler* tp, TSNode node) {
-    TSSymbol symbol = ts_node_symbol(node);
+Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
+    StrView sv = ts_node_source(tp, node);
+    printf("build lit string: %.*s\n", (int)sv.length, sv.str);
     // todo: exclude zero-length string
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int len =  end - start - (symbol == SYM_IDENT || symbol == SYM_DATETIME || symbol == SYM_TIME ? 0 : 
-        symbol == SYM_BINARY ? 3:2);  // -2 to exclude the quotes
+    int len =  end - start;
     TypeString *str_type = (TypeString*)alloc_type(tp->ast_pool, 
         (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
         symbol == SYM_STRING ? LMD_TYPE_STRING : 
@@ -344,10 +348,11 @@ Type* build_lit_string(Transpiler* tp, TSNode node) {
     String *str;
     pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void **)&str);
     str_type->string = (String*)str;
-    const char* str_content = tp->source + start + 
-        (symbol == SYM_IDENT || symbol == SYM_DATETIME || symbol == SYM_TIME ? 0: symbol == SYM_BINARY ? 2:1);
+    const char* str_content = tp->source + start;
     memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
     str->chars[len] = '\0';  str->len = len;  str->ref_cnt = 1;
+    printf("build lit string: %.*s, type: %d\n", 
+        (int)str->len, str->chars, str_type->type_id);
     // add to const list
     arraylist_append(tp->const_list, str_type->string);
     str_type->const_index = tp->const_list->length - 1;
@@ -359,7 +364,12 @@ Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // C supports inf and nan
     printf("build lit float: normal\n");
     const char* num_str = tp->source + ts_node_start_byte(node);
+    // check if there's sign
+    bool has_sign = false;
+    if (num_str[0] == '-') { has_sign = true;  num_str++; } // skip the sign
+    // atof is able to skip leading spaces
     item_type->double_val = atof(num_str);
+    if (has_sign) { item_type->double_val = -item_type->double_val; }
     arraylist_append(tp->const_list, &item_type->double_val);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
@@ -403,10 +413,13 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_FLOAT) {
         ast_node->type = build_lit_float(tp, child, symbol);
     }
-    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || 
-        symbol == SYM_DATETIME || symbol == SYM_TIME || symbol == SYM_BINARY) {
-        ast_node->type = build_lit_string(tp, child);
+    else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
+        TSNode str_node = ts_node_named_child(child, 0);
+        ast_node->type = build_lit_string(tp, str_node, symbol);
     }
+    else if (symbol == SYM_DATETIME || symbol == SYM_TIME) {
+        ast_node->type = build_lit_string(tp, child, symbol);
+    }    
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
         ast_node->type = ast_node->expr->type;
@@ -1285,6 +1298,14 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
     return (AstNode*)ast_node;
 }
 
+AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol) {
+    printf("build lit node\n");
+    AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, lit_node, sizeof(AstPrimaryNode));
+    TSNode val_node = quoted_value ? ts_node_named_child(lit_node, 0) : lit_node;
+    ast_node->type = build_lit_string(tp, val_node, symbol);
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     // get the function name
     TSSymbol symbol = ts_node_symbol(expr_node);
@@ -1326,10 +1347,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_func(tp, expr_node, true, false);
     case SYM_FUNC_EXPR:  // anonymous function
         return build_func(tp, expr_node, false, false);
-    case SYM_STRING:  case SYM_SYMBOL:  case SYM_DATETIME:  case SYM_TIME:  case SYM_BINARY:
-        AstPrimaryNode* s_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        s_node->type = build_lit_string(tp, expr_node);
-        return (AstNode*)s_node;
+    case SYM_STRING:  case SYM_SYMBOL:  case SYM_BINARY:
+        return build_lit_node(tp, expr_node, true, symbol);
+    case SYM_DATETIME:  case SYM_TIME:
+        return build_lit_node(tp, expr_node, false, symbol);
+        break;
     case SYM_TRUE:  case SYM_FALSE:
         AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         b_node->type = &LIT_BOOL;
@@ -1465,6 +1487,9 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
             break;
         case SYM_CONTENT:
             ast = build_content(tp, child, true, true);
+            break;
+        case SYM_COMMENT:
+            // skip comments
             break;
         default:
             printf("unknown script child: %s\n", ts_node_type(child));

@@ -517,15 +517,7 @@
       "required": true,
       "types": [
         {
-          "type": "binary",
-          "named": true
-        },
-        {
-          "type": "datetime",
-          "named": true
-        },
-        {
-          "type": "decimal",
+          "type": "binary_expr",
           "named": true
         },
         {
@@ -537,11 +529,7 @@
           "named": true
         },
         {
-          "type": "false",
-          "named": true
-        },
-        {
-          "type": "float",
+          "type": "fn_expr",
           "named": true
         },
         {
@@ -553,7 +541,15 @@
           "named": true
         },
         {
+          "type": "for_expr",
+          "named": true
+        },
+        {
           "type": "for_stam",
+          "named": true
+        },
+        {
+          "type": "if_expr",
           "named": true
         },
         {
@@ -561,15 +557,7 @@
           "named": true
         },
         {
-          "type": "integer",
-          "named": true
-        },
-        {
           "type": "let_stam",
-          "named": true
-        },
-        {
-          "type": "list",
           "named": true
         },
         {
@@ -577,11 +565,11 @@
           "named": true
         },
         {
-          "type": "null",
+          "type": "object_type",
           "named": true
         },
         {
-          "type": "object_type",
+          "type": "primary_expr",
           "named": true
         },
         {
@@ -593,15 +581,11 @@
           "named": true
         },
         {
-          "type": "time",
-          "named": true
-        },
-        {
-          "type": "true",
-          "named": true
-        },
-        {
           "type": "type_stam",
+          "named": true
+        },
+        {
+          "type": "unary_expr",
           "named": true
         }
       ]
@@ -749,11 +733,6 @@
         }
       ]
     }
-  },
-  {
-    "type": "float",
-    "named": true,
-    "fields": {}
   },
   {
     "type": "fn_expr",
@@ -2509,6 +2488,10 @@
   },
   {
     "type": "float",
+    "named": true
+  },
+  {
+    "type": "float",
     "named": false
   },
   {
@@ -2673,11 +2656,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",
