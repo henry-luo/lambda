@@ -1,6 +1,6 @@
 # Lambda Script
 
-A general-purpose, pure functional scripting language for data processing and presentation.
+A general-purpose, cross-platform. pure functional scripting language for data processing and presentation.
 
 The script engine is built from scratch in C, with JIT compilation, and reference counting memory mgt.
 
