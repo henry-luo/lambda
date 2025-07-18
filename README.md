@@ -1,15 +1,17 @@
-# Lambda
+# Lambda Script
 
-A powerful scripting language and document processing engine with JIT compilation capabilities.
+A general-purpose, pure functional scripting language for data processing and presentation.
+
+The script engine is built from scratch in C, with JIT compilation, and reference counting memory mgt.
 
 ## Overview
 
 Lambda is a modern scripting language that combines:
 - **Document Processing**: Native support for parsing and transforming various document formats (JSON, XML, HTML, Markdown, PDF, CSV, YAML, TOML, LaTeX, RTF, reStructuredText, INI)
 - **JIT Compilation**: Built on MIR (Medium Internal Representation) for high-performance execution
-- **Memory Pool Management**: Advanced memory management with custom allocators
-- **Interactive REPL**: Full-featured Read-Eval-Print Loop for interactive development
-- **Tree-sitter Integration**: Robust syntax parsing and analysis
+- **Memory Pool Management**: memory management with reference counting and custom pooled allocators.
+- **Interactive REPL**: Read-Eval-Print Loop for interactive development
+- **Tree-sitter Integration**: Fast syntax parsing and language prototyping based on Tree-sitter parser generator.
 
 ## Features
 
@@ -211,13 +213,7 @@ cd test
 ./test_lib.sh
 ```
 
-**Test Coverage:**
-- 63 tests total, all passing ✅
-- Memory pool stress testing
-- Document format parsing
-- String manipulation
-- Error handling
-- Performance benchmarks
+Test coverage is still very limited at the moment.
 
 ## Dependencies
 
@@ -227,11 +223,6 @@ cd test
 - **Lexbor**: HTML/XML processing
 - **zlog**: Logging (optional)
 - **GMP**: Arbitrary precision arithmetic
-
-### Development Dependencies
-- **Criterion**: Testing framework
-- **CMake**: Build system
-- **pkg-config**: Dependency management
 
 ## Platform Support
 
@@ -244,27 +235,8 @@ cd test
 ## Documentation
 
 - [Compilation Guide](COMPILATION.md) - Detailed build instructions
-- [Language Reference](docs/language.md) - Complete language specification
-- [API Documentation](docs/api.md) - Built-in function reference
-- [Examples](examples/) - Sample scripts and use cases
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes and add tests
-4. Run the test suite: `cd test && ./test_lib.sh`
-5. Commit your changes: `git commit -am 'Add feature'`
-6. Push to the branch: `git push origin feature-name`
-7. Submit a pull request
-
-### Development Guidelines
-
-- Follow C99/C17 standards
-- Add tests for new features
-- Update documentation
-- Ensure cross-platform compatibility
-- Use memory pools for allocations
+- [Language Reference](docs/language.md) - Todo
+- [Examples](examples/) - Todo
 
 ## License
 
@@ -276,14 +248,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Tree-sitter**: Incremental parsing framework
 - **Lexbor**: Fast HTML/XML parsing library
 - **Criterion**: C testing framework
-- **Contributors**: Thanks to all who have contributed to this project
 
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/henry-luo/lambda/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/henry-luo/lambda/discussions)
-- **Wiki**: [Project Wiki](https://github.com/henry-luo/lambda/wiki)
 
----
 
-**Lambda** - *Powerful document processing and scripting language with JIT compilation*

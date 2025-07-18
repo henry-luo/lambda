@@ -360,6 +360,7 @@ module.exports = grammar({
     ),
 
     map: $ => seq(
+      // $._expression for dynamic map items
       '{', comma_sep(choice($.map_item, $._expression)), '}',
     ),
 
@@ -386,12 +387,12 @@ module.exports = grammar({
     )),
 
     attr: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)), 
+      field('name', choice($.string, $.symbol, $.identifier)), // string accepted for JSON compatibility
       ':', field('as', $._attr_expr)
     ),
 
     element: $ => seq('<', 
-      $.identifier,
+      choice($.symbol, $.identifier), // string not accepted for element name
       choice(
         seq(choice($.attr, seq('&', $._attr_expr)), 
           repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
