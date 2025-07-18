@@ -4,6 +4,10 @@ A general-purpose, cross-platform. pure functional scripting language for data p
 
 The script engine is built from scratch in C, with JIT compilation, and reference counting memory mgt.
 
+(Note: this project and the Lambda Script is still in its early stage of development. It's syntax, semantics and implementation may change substantially. 
+
+However, a subset of it, the literal data format, is separately formalised and released under [Mark Notation](https://github.com/henry-luo/mark).)
+
 ## Overview
 
 Lambda is a modern scripting language that combines:
