@@ -53,13 +53,11 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             strbuf_append_str(sb, value ? "true" : "false");
             break;
         }
-        case LMD_TYPE_INT:
-        case LMD_TYPE_INT64:
-        case LMD_TYPE_FLOAT: {
+        case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT: {
             format_number(sb, item);
             break;
         }
-        case LMD_TYPE_STRING: {
+        case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
             String* str = (String*)get_pointer(item);
             strbuf_append_str(sb, "\"");
             if (str && str->len > 0) {
@@ -68,8 +66,8 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             strbuf_append_str(sb, "\"");
             break;
         }
-        case LMD_TYPE_ARRAY: {
-            Array* arr = (Array*)get_pointer(item);
+        case LMD_TYPE_ARRAY:  case LMD_TYPE_LIST:{
+            Array* arr = (Array*)item;
             if (arr && arr->length > 0) {
                 strbuf_append_str(sb, "[");
                 format_array_items(sb, arr, depth + 1);
@@ -80,7 +78,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_MAP: {
-            Map* map = (Map*)get_pointer(item);
+            Map* map = (Map*)item;
             if (map && map->type && map->data) {
                 format_inline_table(sb, map, depth + 1);
             } else {
@@ -89,37 +87,10 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_NULL: {
-            strbuf_append_str(sb, "\"\"  # null");
+            strbuf_append_str(sb, "\"\"");
             break;
         }
         default: {
-            // enhanced fallback - try to detect arrays or maps by structure
-            void* ptr = get_pointer(item);
-            
-            // try as array first
-            Array* potential_array = (Array*)ptr;
-            if (potential_array && 
-                potential_array->length > 0 && 
-                potential_array->length < 1000 && 
-                potential_array->items != NULL) {
-                
-                // validate first item looks reasonable
-                Item first_test = potential_array->items[0];
-                if ((first_test & 0xFF00000000000000ULL) != 0xFF00000000000000ULL) {
-                    strbuf_append_str(sb, "[");
-                    format_array_items(sb, potential_array, depth + 1);
-                    strbuf_append_str(sb, "]");
-                    break;
-                }
-            }
-            
-            // try as map
-            Map* potential_map = (Map*)ptr;
-            if (potential_map && potential_map->type && potential_map->data) {
-                format_inline_table(sb, potential_map, depth + 1);
-                break;
-            }
-            
             // fallback to type placeholder
             strbuf_append_format(sb, "\"[type_%d]\"", (int)type_id);
             break;
