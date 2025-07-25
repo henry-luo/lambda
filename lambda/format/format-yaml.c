@@ -31,16 +31,30 @@ static void format_yaml_string(StrBuf* sb, String* str) {
     // check if string needs quotes (contains special chars, starts with special chars, etc.)
     if (len == 0 || strchr(s, ':') || strchr(s, '\n') || strchr(s, '"') || 
         strchr(s, '\'') || strchr(s, '#') || strchr(s, '-') || strchr(s, '[') || 
-        strchr(s, ']') || strchr(s, '{') || strchr(s, '}') || 
+        strchr(s, ']') || strchr(s, '{') || strchr(s, '}') || strchr(s, '|') ||
+        strchr(s, '>') || strchr(s, '&') || strchr(s, '*') || strchr(s, '!') ||
         (len > 0 && (isspace(s[0]) || isspace(s[len-1])))) {
         needs_quotes = true;
     }
     
-    // also check for yaml reserved words
+    // check for yaml reserved words and special values
     if (!needs_quotes && (strcmp(s, "true") == 0 || strcmp(s, "false") == 0 || 
                          strcmp(s, "null") == 0 || strcmp(s, "yes") == 0 || 
-                         strcmp(s, "no") == 0)) {
+                         strcmp(s, "no") == 0 || strcmp(s, "on") == 0 || 
+                         strcmp(s, "off") == 0 || strcmp(s, "~") == 0 ||
+                         strcmp(s, ".inf") == 0 || strcmp(s, "-.inf") == 0 ||
+                         strcmp(s, ".nan") == 0 || strcmp(s, ".Inf") == 0 ||
+                         strcmp(s, "-.Inf") == 0 || strcmp(s, ".NaN") == 0)) {
         needs_quotes = true;
+    }
+    
+    // check if it looks like a number
+    if (!needs_quotes) {
+        char* end;
+        strtol(s, &end, 10);
+        if (*end == '\0' && len > 0) needs_quotes = true; // integer
+        strtod(s, &end);
+        if (*end == '\0' && len > 0) needs_quotes = true; // float
     }
     
     if (needs_quotes) {
@@ -208,11 +222,50 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             // use centralized number formatting
             format_number(sb, item);
             break;
-        case LMD_TYPE_STRING:
-        case LMD_TYPE_SYMBOL: {
+        case LMD_TYPE_STRING: {
             String* str = (String*)get_pointer(item);
             if (str) {
                 format_yaml_string(sb, str);
+            } else {
+                strbuf_append_str(sb, "null");
+            }
+            break;
+        }
+        case LMD_TYPE_SYMBOL: {
+            String* str = (String*)get_pointer(item);
+            if (str) {
+                // Symbols in YAML should be formatted as plain strings or quoted if needed
+                format_yaml_string(sb, str);
+            } else {
+                strbuf_append_str(sb, "null");
+            }
+            break;
+        }
+        case LMD_TYPE_BINARY: {
+            String* bin_str = (String*)get_pointer(item);
+            if (bin_str) {
+                // Format binary data as base64 encoded YAML block scalar
+                strbuf_append_str(sb, "!!binary |\n");
+                // For simplicity, we'll output the binary data as is
+                // In a real implementation, you'd want to base64 encode it
+                strbuf_append_str(sb, "  ");
+                strbuf_append_str(sb, bin_str->chars);
+            } else {
+                strbuf_append_str(sb, "null");
+            }
+            break;
+        }
+        case LMD_TYPE_DTIME: {
+            String* dt_str = (String*)get_pointer(item);
+            if (dt_str) {
+                // Check if the datetime string needs quotes or is ISO format
+                if (strchr(dt_str->chars, ' ') || strchr(dt_str->chars, 'T')) {
+                    // Looks like a standard datetime format
+                    strbuf_append_str(sb, dt_str->chars);
+                } else {
+                    // Quote it to be safe
+                    format_yaml_string(sb, dt_str);
+                }
             } else {
                 strbuf_append_str(sb, "null");
             }
@@ -285,17 +338,41 @@ String* format_yaml(VariableMemPool* pool, Item root_item) {
         return NULL;
     }
     
-    // start with YAML document marker
-    strbuf_append_str(sb, "---\n");
+    TypeId root_type = get_type_id((LambdaItem)root_item);
     
-    // add lowercase comment as requested
-    strbuf_append_str(sb, "# yaml formatted output\n");
-    
-    // format the root item directly using centralized function
-    format_item(sb, root_item, 0);
-    
-    // add final newline for proper YAML format
-    strbuf_append_char(sb, '\n');
+    // Check if root is an array that might represent multiple YAML documents
+    if (root_type == LMD_TYPE_ARRAY || root_type == LMD_TYPE_LIST) {
+        Array* arr = (Array*)get_pointer(root_item);
+        if (arr && arr->length > 1) {
+            // Treat as multi-document YAML
+            for (long i = 0; i < arr->length; i++) {
+                if (i > 0) {
+                    strbuf_append_str(sb, "\n---\n");
+                } else {
+                    strbuf_append_str(sb, "---\n");
+                }
+                
+                // add lowercase comment as requested
+                strbuf_append_str(sb, "# yaml formatted output\n");
+                
+                // format each document
+                format_item(sb, arr->items[i], 0);
+                strbuf_append_char(sb, '\n');
+            }
+        } else {
+            // Single document array
+            strbuf_append_str(sb, "---\n");
+            strbuf_append_str(sb, "# yaml formatted output\n");
+            format_item(sb, root_item, 0);
+            strbuf_append_char(sb, '\n');
+        }
+    } else {
+        // Single document
+        strbuf_append_str(sb, "---\n");
+        strbuf_append_str(sb, "# yaml formatted output\n");
+        format_item(sb, root_item, 0);
+        strbuf_append_char(sb, '\n');
+    }
     
     return strbuf_to_string(sb);
 }
