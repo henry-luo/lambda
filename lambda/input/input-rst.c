@@ -447,6 +447,11 @@ static Item parse_heading(Input *input, char** lines, int* current_line, int tot
     Element* header = create_rst_element(input, tag_name);
     if (!header) return ITEM_NULL;
     
+    // Add level attribute as required by PandocSchema
+    char level_str[10];
+    snprintf(level_str, sizeof(level_str), "%d", level);
+    add_attribute_to_element(input, header, "level", level_str);
+    
     // add content
     char* content = trim_whitespace(title_line);
     if (content && strlen(content) > 0) {
@@ -473,6 +478,17 @@ static Item parse_bullet_list(Input *input, char** lines, int* current_line, int
     Element* list = create_rst_element(input, "ul");
     if (!list) return ITEM_NULL;
     
+    // Add bullet-style attribute according to PandocSchema
+    char bullet_char = lines[*current_line][count_leading_spaces(lines[*current_line])];
+    const char* bullet_style;
+    switch (bullet_char) {
+        case '*': bullet_style = "asterisk"; break;
+        case '+': bullet_style = "plus"; break;
+        case '-': bullet_style = "dash"; break;
+        default: bullet_style = "asterisk"; break;
+    }
+    add_attribute_to_element(input, list, "style", bullet_style);
+    
     while (*current_line < total_lines && is_bullet_list_item(lines[*current_line])) {
         const char* line = lines[*current_line];
         
@@ -487,9 +503,15 @@ static Item parse_bullet_list(Input *input, char** lines, int* current_line, int
         
         char* content = trim_whitespace(content_start);
         if (content && strlen(content) > 0) {
-            Item text_content = parse_inline_content(input, content);
-            if (text_content != ITEM_NULL) {
-                list_push((List*)list_item, text_content);
+            // Create paragraph inside list item according to schema
+            Element* paragraph = create_rst_element(input, "p");
+            if (paragraph) {
+                Item text_content = parse_inline_content(input, content);
+                if (text_content != ITEM_NULL) {
+                    list_push((List*)paragraph, text_content);
+                    ((TypeElmt*)paragraph->type)->content_length++;
+                }
+                list_push((List*)list_item, (Item)paragraph);
                 ((TypeElmt*)list_item->type)->content_length++;
             }
         }
@@ -539,16 +561,52 @@ static Item parse_enumerated_list(Input *input, char** lines, int* current_line,
     Element* list = create_rst_element(input, "ol");
     if (!list) return ITEM_NULL;
     
-    // add enumeration type attribute
-    char enum_str[20];
+    // Add attributes according to PandocSchema
+    char start_str[20];
+    snprintf(start_str, sizeof(start_str), "%d", number);
+    add_attribute_to_element(input, list, "start", start_str);
+    
+    // Determine list type and style based on enum_type
+    char type_str[20];
+    char style_str[30];
+    char delim_str[10];
+    
     switch (enum_type) {
-        case '1': strcpy(enum_str, "decimal"); break;
-        case 'a': strcpy(enum_str, "lower-alpha"); break;
-        case 'A': strcpy(enum_str, "upper-alpha"); break;
-        case 'i': strcpy(enum_str, "lower-roman"); break;
-        default: strcpy(enum_str, "decimal"); break;
+        case '1': 
+            strcpy(type_str, "1");
+            strcpy(style_str, "decimal");
+            strcpy(delim_str, "period");
+            break;
+        case ')':
+            strcpy(type_str, "1");
+            strcpy(style_str, "decimal");
+            strcpy(delim_str, "paren");
+            break;
+        case 'a': 
+            strcpy(type_str, "a");
+            strcpy(style_str, "lower-alpha");
+            strcpy(delim_str, "period");
+            break;
+        case 'A': 
+            strcpy(type_str, "A");
+            strcpy(style_str, "upper-alpha");
+            strcpy(delim_str, "period");
+            break;
+        case 'i': 
+            strcpy(type_str, "i");
+            strcpy(style_str, "lower-roman");
+            strcpy(delim_str, "period");
+            break;
+        default: 
+            strcpy(type_str, "1");
+            strcpy(style_str, "decimal");
+            strcpy(delim_str, "period");
+            break;
     }
-    add_attribute_to_element(input, list, "type", enum_str);
+    
+    add_attribute_to_element(input, list, "type", type_str);
+    add_attribute_to_element(input, list, "style", style_str);
+    add_attribute_to_element(input, list, "delim", delim_str);
     
     while (*current_line < total_lines && 
            is_enumerated_list_item(lines[*current_line], NULL, NULL)) {
@@ -566,9 +624,15 @@ static Item parse_enumerated_list(Input *input, char** lines, int* current_line,
         
         char* content = trim_whitespace(ptr);
         if (content && strlen(content) > 0) {
-            Item text_content = parse_inline_content(input, content);
-            if (text_content != ITEM_NULL) {
-                list_push((List*)list_item, text_content);
+            // Create paragraph inside list item according to schema
+            Element* paragraph = create_rst_element(input, "p");
+            if (paragraph) {
+                Item text_content = parse_inline_content(input, content);
+                if (text_content != ITEM_NULL) {
+                    list_push((List*)paragraph, text_content);
+                    ((TypeElmt*)paragraph->type)->content_length++;
+                }
+                list_push((List*)list_item, (Item)paragraph);
                 ((TypeElmt*)list_item->type)->content_length++;
             }
         }
@@ -656,8 +720,9 @@ static Item parse_literal_block(Input *input, char** lines, int* current_line, i
         if (!ends_with_double_colon) return ITEM_NULL;
     }
     
-    Element* pre = create_rst_element(input, "pre");
-    if (!pre) return ITEM_NULL;
+    // Create code element directly (following updated schema - no pre wrapper)
+    Element* code_block = create_rst_element(input, "code");
+    if (!code_block) return ITEM_NULL;
     
     (*current_line)++;
     
@@ -714,11 +779,11 @@ static Item parse_literal_block(Input *input, char** lines, int* current_line, i
     
     // add content as text
     if (content_str->len > 0) {
-        list_push((List*)pre, s2it(content_str));
-        ((TypeElmt*)pre->type)->content_length++;
+        list_push((List*)code_block, s2it(content_str));
+        ((TypeElmt*)code_block->type)->content_length++;
     }
     
-    return (Item)pre;
+    return (Item)code_block;
 }
 
 static Item parse_comment(Input *input, char** lines, int* current_line, int total_lines) {
@@ -1246,8 +1311,24 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_rst_content(Input *input, char** lines, int line_count) {
-    Element* document = create_rst_element(input, "document");
-    if (!document) return ITEM_NULL;
+    // Create the root document element according to PandocSchema
+    Element* doc = create_rst_element(input, "doc");
+    if (!doc) return ITEM_NULL;
+    
+    // Add version attribute to doc
+    add_attribute_to_element(input, doc, "version", "1.0");
+    
+    // Create meta element for metadata
+    Element* meta = create_rst_element(input, "meta");
+    if (!meta) return (Item)doc;
+    
+    // Add meta to doc
+    list_push((List*)doc, (Item)meta);
+    ((TypeElmt*)doc->type)->content_length++;
+    
+    // Create body element for content
+    Element* body = create_rst_element(input, "body");
+    if (!body) return (Item)doc;
     
     int current_line = 0;
     
@@ -1261,15 +1342,19 @@ static Item parse_rst_content(Input *input, char** lines, int line_count) {
         Item element = parse_block_element(input, lines, &current_line, line_count);
         
         if (element != ITEM_NULL) {
-            list_push((List*)document, element);
-            ((TypeElmt*)document->type)->content_length++;
+            list_push((List*)body, element);
+            ((TypeElmt*)body->type)->content_length++;
         } else {
             // if no element was parsed, advance to avoid infinite loop
             current_line++;
         }
     }
     
-    return (Item)document;
+    // Add body to doc
+    list_push((List*)doc, (Item)body);
+    ((TypeElmt*)doc->type)->content_length++;
+    
+    return (Item)doc;
 }
 
 void parse_rst(Input* input, const char* rst_string) {
