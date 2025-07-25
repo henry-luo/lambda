@@ -1,5 +1,6 @@
 #include "../transpiler.h"
 #include <lexbor/url/url.h>
+#include "mime-detect.h"
 
 lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
 char* read_text_doc(lxb_url_t *url);
@@ -115,6 +116,50 @@ Input* input_new(lxb_url_t* abs_url) {
     return input;
 }
 
+// Helper function to map MIME types to parser types
+static const char* mime_to_parser_type(const char* mime_type) {
+    if (!mime_type) return "text";
+    
+    // Direct mappings
+    if (strcmp(mime_type, "application/json") == 0) return "json";
+    if (strcmp(mime_type, "text/csv") == 0) return "csv";
+    if (strcmp(mime_type, "application/xml") == 0) return "xml";
+    if (strcmp(mime_type, "text/html") == 0) return "html";
+    if (strcmp(mime_type, "text/markdown") == 0) return "markdown";
+    if (strcmp(mime_type, "text/x-rst") == 0) return "rst";
+    if (strcmp(mime_type, "application/rtf") == 0) return "rtf";
+    if (strcmp(mime_type, "application/pdf") == 0) return "pdf";
+    if (strcmp(mime_type, "application/x-tex") == 0) return "latex";
+    if (strcmp(mime_type, "application/x-latex") == 0) return "latex";
+    if (strcmp(mime_type, "application/toml") == 0) return "toml";
+    if (strcmp(mime_type, "application/x-yaml") == 0) return "yaml";
+    
+    // Check for XML-based formats
+    if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
+    
+    // Check for text formats
+    if (strstr(mime_type, "text/") == mime_type) {
+        // Handle specific text subtypes
+        if (strstr(mime_type, "x-c") || strstr(mime_type, "x-java") || 
+            strstr(mime_type, "javascript") || strstr(mime_type, "x-python")) {
+            return "text";
+        }
+        if (strstr(mime_type, "ini")) return "ini";
+        return "text";
+    }
+    
+    // For unsupported formats, default to text if it might be readable
+    if (strstr(mime_type, "application/") == mime_type) {
+        if (strstr(mime_type, "javascript") || strstr(mime_type, "typescript") ||
+            strstr(mime_type, "x-sh") || strstr(mime_type, "x-bash")) {
+            return "text";
+        }
+    }
+    
+    // Default fallback
+    return "text";
+}
+
 Input* input_data(Context* ctx, String* url, String* type) {
     printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
     lxb_url_t* abs_url = parse_url((lxb_url_t*)ctx->cwd, url->chars);
@@ -125,8 +170,33 @@ Input* input_data(Context* ctx, String* url, String* type) {
         lxb_url_destroy(abs_url);
         return NULL;
     }
+    
+    const char* effective_type = NULL;
+    
+    // Determine the effective type to use
+    if (!type || strcmp(type->chars, "auto") == 0) {
+        // Auto-detect MIME type
+        MimeDetector* detector = mime_detector_init();
+        if (detector) {
+            const char* detected_mime = detect_mime_type(detector, url->chars, source, strlen(source));
+            if (detected_mime) {
+                effective_type = mime_to_parser_type(detected_mime);
+                printf("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
+            } else {
+                effective_type = "text";
+                printf("MIME detection failed, defaulting to text\n");
+            }
+            mime_detector_destroy(detector);
+        } else {
+            effective_type = "text";
+            printf("Failed to initialize MIME detector, defaulting to text\n");
+        }
+    } else {
+        effective_type = type->chars;
+    }
+    
     Input* input = NULL;
-    if (!type || strcmp(type->chars, "text") == 0) { // treat as plain text
+    if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
         input = (Input*)calloc(1, sizeof(Input));
         input->url = abs_url;
         String *str = (String*)malloc(sizeof(String) + strlen(source) + 1);
@@ -137,47 +207,47 @@ Input* input_data(Context* ctx, String* url, String* type) {
     }
     else {
         input = input_new(abs_url);
-        if (strcmp(type->chars, "json") == 0) {
+        if (strcmp(effective_type, "json") == 0) {
             parse_json(input, source);
         }
-        else if (strcmp(type->chars, "csv") == 0) {
+        else if (strcmp(effective_type, "csv") == 0) {
             parse_csv(input, source);
         }
-        else if (strcmp(type->chars, "ini") == 0) {
+        else if (strcmp(effective_type, "ini") == 0) {
             parse_ini(input, source);
         }
-        else if (strcmp(type->chars, "toml") == 0) {
+        else if (strcmp(effective_type, "toml") == 0) {
             parse_toml(input, source);
         }
-        else if (strcmp(type->chars, "yaml") == 0) {
+        else if (strcmp(effective_type, "yaml") == 0) {
             parse_yaml(input, source);
         }
-        else if (strcmp(type->chars, "xml") == 0) {
+        else if (strcmp(effective_type, "xml") == 0) {
             parse_xml(input, source);
         }
-        else if (strcmp(type->chars, "markdown") == 0) {
+        else if (strcmp(effective_type, "markdown") == 0) {
             parse_markdown(input, source);
         }
-        else if (strcmp(type->chars, "rst") == 0) {
+        else if (strcmp(effective_type, "rst") == 0) {
             parse_rst(input, source);
         }
-        else if (strcmp(type->chars, "html") == 0) {
+        else if (strcmp(effective_type, "html") == 0) {
             parse_html(input, source);
         }
-        else if (strcmp(type->chars, "latex") == 0) {
+        else if (strcmp(effective_type, "latex") == 0) {
             parse_latex(input, source);
         }
-        else if (strcmp(type->chars, "rtf") == 0) {
+        else if (strcmp(effective_type, "rtf") == 0) {
             parse_rtf(input, source);
         }
-        else if (strcmp(type->chars, "pdf") == 0) {
+        else if (strcmp(effective_type, "pdf") == 0) {
             parse_pdf(input, source);
         }
-        else if (strcmp(type->chars, "wiki") == 0) {
+        else if (strcmp(effective_type, "wiki") == 0) {
             parse_mediawiki(input, source);
         }
         else {
-            printf("Unknown input type: %s\n", type->chars);
+            printf("Unknown input type: %s\n", effective_type);
         }
     }
     free(source);

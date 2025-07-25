@@ -14,7 +14,12 @@ clang -o test_num_stack.exe test_num_stack.c ../lib/num_stack.c \
 -lcriterion -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -I/opt/homebrew/Cellar/criterion/2.4.2_2/include \
 -fms-extensions
 
+clang -o test_mime_detect.exe test_mime_detect.c ../lambda/input/mime-detect.c ../lambda/input/mime-types.c \
+-lcriterion -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -I/opt/homebrew/Cellar/criterion/2.4.2_2/include \
+-fms-extensions
+
 ./test_strbuf.exe --verbose
 ./test_strview.exe --verbose
 ./test_variable_pool.exe --verbose
 ./test_num_stack.exe --verbose
+./test_mime_detect.exe --verbose

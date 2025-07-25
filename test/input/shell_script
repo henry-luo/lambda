@@ -1,0 +1,37 @@
+#!/bin/bash
+# Shell script without extension
+
+# Function to backup files
+backup_files() {
+    local source_dir="$1"
+    local backup_dir="$2"
+    
+    if [ ! -d "$source_dir" ]; then
+        echo "Error: Source directory $source_dir does not exist"
+        return 1
+    fi
+    
+    mkdir -p "$backup_dir"
+    cp -r "$source_dir"/* "$backup_dir"/ 2>/dev/null
+    echo "Backup completed from $source_dir to $backup_dir"
+}
+
+# Set variables
+LOG_FILE="/tmp/backup.log"
+SOURCE="/home/user/documents"
+BACKUP="/backup/$(date +%Y%m%d)"
+
+# Log the backup operation
+echo "$(date): Starting backup process" >> "$LOG_FILE"
+
+# Check if source exists
+if [ -d "$SOURCE" ]; then
+    backup_files "$SOURCE" "$BACKUP"
+    echo "$(date): Backup completed successfully" >> "$LOG_FILE"
+else
+    echo "$(date): Source directory not found" >> "$LOG_FILE"
+fi
+
+# Display disk usage
+echo "Disk usage after backup:"
+df -h "$BACKUP" 2>/dev/null || echo "Backup directory not accessible"

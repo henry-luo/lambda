@@ -1,0 +1,26 @@
+// JavaScript file without extension
+function calculateSum(a, b) {
+    return a + b;
+}
+
+const numbers = [1, 2, 3, 4, 5];
+const sum = numbers.reduce((acc, num) => acc + num, 0);
+
+console.log('Sum:', sum);
+
+// Object example
+const person = {
+    name: 'John Doe',
+    age: 30,
+    greet: function() {
+        console.log(`Hello, I'm ${this.name}`);
+    }
+};
+
+person.greet();
+
+// Array methods
+const doubled = numbers.map(n => n * 2);
+const filtered = numbers.filter(n => n > 2);
+
+export { calculateSum, person };

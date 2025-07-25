@@ -1,0 +1,33 @@
+# Markdown Document
+
+This is a test markdown document without an extension.
+
+## Features
+
+- **Bold text**
+- *Italic text*
+- `Code snippets`
+
+### Code Block
+
+```python
+def hello_world():
+    print("Hello, World!")
+```
+
+### Lists
+
+1. First item
+2. Second item
+3. Third item
+
+### Links
+
+[Visit GitHub](https://github.com)
+
+### Table
+
+| Name | Age | City |
+|------|-----|------|
+| John | 30  | NYC  |
+| Jane | 25  | LA   |

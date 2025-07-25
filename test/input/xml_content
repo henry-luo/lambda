@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog>
+    <book id="1">
+        <title>Learning XML</title>
+        <author>John Doe</author>
+        <price>29.99</price>
+    </book>
+    <book id="2">
+        <title>Advanced XML</title>
+        <author>Jane Smith</author>
+        <price>39.99</price>
+    </book>
+</catalog>
