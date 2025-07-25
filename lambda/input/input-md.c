@@ -5,6 +5,9 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count);
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines);
 static Item parse_inline_content(Input *input, const char* text);
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines);
+static Item parse_strikethrough(Input *input, const char* text, int* pos);
+static Item parse_superscript(Input *input, const char* text, int* pos);
+static Item parse_subscript(Input *input, const char* text, int* pos);
 static bool is_table_row(const char* line);
 static bool is_table_separator(const char* line);
 static Element* create_markdown_element(Input *input, const char* tag_name);
@@ -206,6 +209,15 @@ static bool is_list_marker(const char* line, bool* is_ordered, int* number) {
     return false;
 }
 
+static bool is_blockquote(const char* line) {
+    int pos = 0;
+    
+    // Skip up to 3 spaces
+    while (pos < 3 && line[pos] == ' ') pos++;
+    
+    return line[pos] == '>';
+}
+
 // Table parsing functions
 static bool is_table_row(const char* line) {
     if (!line) return false;
@@ -274,6 +286,81 @@ static bool is_table_separator(const char* line) {
     }
     
     return true;
+}
+
+static char** parse_table_alignment(const char* line, int* cell_count) {
+    if (!is_table_separator(line)) return NULL;
+    
+    *cell_count = 0;
+    
+    // Count cells first
+    const char* ptr = line;
+    while (*ptr && isspace(*ptr)) ptr++; // Skip leading whitespace
+    if (*ptr == '|') ptr++; // Skip leading |
+    
+    int count = 0;
+    bool in_cell = false;
+    
+    while (*ptr) {
+        if (*ptr == '|') {
+            if (in_cell) count++;
+            in_cell = false;
+        } else if (!isspace(*ptr)) {
+            in_cell = true;
+        }
+        ptr++;
+    }
+    if (in_cell) count++; // Last cell without trailing |
+    
+    if (count == 0) return NULL;
+    
+    // Allocate array
+    char** alignments = malloc(count * sizeof(char*));
+    *cell_count = count;
+    
+    // Parse alignments
+    ptr = line;
+    while (*ptr && isspace(*ptr)) ptr++; // Skip leading whitespace
+    if (*ptr == '|') ptr++; // Skip leading |
+    
+    int cell_index = 0;
+    const char* cell_start = ptr;
+    
+    while (*ptr && cell_index < count) {
+        if (*ptr == '|' || *ptr == '\0') {
+            // Extract cell content
+            int cell_len = ptr - cell_start;
+            char* cell_content = malloc(cell_len + 1);
+            strncpy(cell_content, cell_start, cell_len);
+            cell_content[cell_len] = '\0';
+            
+            // Determine alignment
+            char* trimmed = trim_whitespace(cell_content);
+            bool has_left = (trimmed[0] == ':');
+            bool has_right = (trimmed[strlen(trimmed) - 1] == ':');
+            
+            if (has_left && has_right) {
+                alignments[cell_index] = strdup("center");
+            } else if (has_right) {
+                alignments[cell_index] = strdup("right");
+            } else {
+                alignments[cell_index] = strdup("left");
+            }
+            
+            free(cell_content);
+            free(trimmed);
+            cell_index++;
+            
+            if (*ptr == '|') {
+                ptr++;
+                cell_start = ptr;
+            }
+        } else {
+            ptr++;
+        }
+    }
+    
+    return alignments;
 }
 
 static char** parse_table_row(const char* line, int* cell_count) {
@@ -354,37 +441,85 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
         return ITEM_NULL;
     }
     
+    // Parse alignment from separator line
+    int alignment_count;
+    char** alignments = parse_table_alignment(lines[*current_line + 1], &alignment_count);
+    
     // Create table element
     Element* table = create_markdown_element(input, "table");
-    if (!table) return ITEM_NULL;
+    if (!table) {
+        if (alignments) {
+            for (int i = 0; i < alignment_count; i++) free(alignments[i]);
+            free(alignments);
+        }
+        return ITEM_NULL;
+    }
+    
+    // Create colgroup for column specifications
+    if (alignments) {
+        Element* colgroup = create_markdown_element(input, "colgroup");
+        if (colgroup) {
+            for (int i = 0; i < alignment_count; i++) {
+                Element* col = create_markdown_element(input, "col");
+                if (col) {
+                    add_attribute_to_element(input, col, "align", alignments[i]);
+                    list_push((List*)colgroup, (Item)col);
+                    ((TypeElmt*)colgroup->type)->content_length++;
+                }
+            }
+            list_push((List*)table, (Item)colgroup);
+            ((TypeElmt*)table->type)->content_length++;
+        }
+    }
     
     // Parse header row
     int header_cell_count;
     char** header_cells = parse_table_row(lines[*current_line], &header_cell_count);
     
-    if (!header_cells) return ITEM_NULL;
+    if (!header_cells) {
+        if (alignments) {
+            for (int i = 0; i < alignment_count; i++) free(alignments[i]);
+            free(alignments);
+        }
+        return ITEM_NULL;
+    }
     
     // Create thead
     Element* thead = create_markdown_element(input, "thead");
     if (!thead) {
         free_table_row(header_cells, header_cell_count);
+        if (alignments) {
+            for (int i = 0; i < alignment_count; i++) free(alignments[i]);
+            free(alignments);
+        }
         return ITEM_NULL;
     }
     
     Element* header_row = create_markdown_element(input, "tr");
     if (!header_row) {
         free_table_row(header_cells, header_cell_count);
+        if (alignments) {
+            for (int i = 0; i < alignment_count; i++) free(alignments[i]);
+            free(alignments);
+        }
         return ITEM_NULL;
     }
     
     // Add header cells
     for (int i = 0; i < header_cell_count; i++) {
         Element* th = create_markdown_element(input, "th");
-        if (th && header_cells[i] && strlen(header_cells[i]) > 0) {
-            Item cell_content = parse_inline_content(input, header_cells[i]);
-            if (cell_content != ITEM_NULL) {
-                list_push((List*)th, cell_content);
-                ((TypeElmt*)th->type)->content_length++;
+        if (th) {
+            // Add alignment attribute
+            if (alignments && i < alignment_count) {
+                add_attribute_to_element(input, th, "align", alignments[i]);
+            }
+            
+            if (header_cells[i] && strlen(header_cells[i]) > 0) {
+                Item cell_content = parse_inline_content(input, header_cells[i]);
+                if (cell_content != ITEM_NULL) {
+                    list_push((List*)th, cell_content);
+                    ((TypeElmt*)th->type)->content_length++;
+                }
             }
         }
         if (th) {
@@ -405,7 +540,13 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     
     // Create tbody
     Element* tbody = create_markdown_element(input, "tbody");
-    if (!tbody) return (Item)table;
+    if (!tbody) {
+        if (alignments) {
+            for (int i = 0; i < alignment_count; i++) free(alignments[i]);
+            free(alignments);
+        }
+        return (Item)table;
+    }
     
     // Parse data rows
     while (*current_line < total_lines && is_table_row(lines[*current_line])) {
@@ -424,6 +565,11 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
         for (int i = 0; i < header_cell_count; i++) {
             Element* td = create_markdown_element(input, "td");
             if (td) {
+                // Add alignment attribute
+                if (alignments && i < alignment_count) {
+                    add_attribute_to_element(input, td, "align", alignments[i]);
+                }
+                
                 if (i < cell_count && cells[i] && strlen(cells[i]) > 0) {
                     Item cell_content = parse_inline_content(input, cells[i]);
                     if (cell_content != ITEM_NULL) {
@@ -446,6 +592,12 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     if (((TypeElmt*)tbody->type)->content_length > 0) {
         list_push((List*)table, (Item)tbody);
         ((TypeElmt*)table->type)->content_length++;
+    }
+    
+    // Clean up alignments
+    if (alignments) {
+        for (int i = 0; i < alignment_count; i++) free(alignments[i]);
+        free(alignments);
     }
     
     return (Item)table;
@@ -526,6 +678,11 @@ static Item parse_header(Input *input, const char* line) {
     Element* header = create_markdown_element(input, tag_name);
     if (!header) return ITEM_NULL;
     
+    // Add level attribute as required by PandocSchema
+    char level_str[10];
+    snprintf(level_str, sizeof(level_str), "%d", hash_count);
+    add_attribute_to_element(input, header, "level", level_str);
+    
     // Add content if present
     if (*content_start != '\0') {
         char* content = trim_whitespace(content_start);
@@ -562,6 +719,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     
     char* info_string = trim_whitespace(info_start);
     
+    // Create code element directly (no pre wrapper)
     Element* code_block = create_markdown_element(input, "code");
     if (!code_block) {
         free(info_string);
@@ -617,7 +775,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     content_str->ref_cnt = 0;
     strbuf_full_reset(sb);
     
-    // Add content as text
+    // Add content as text to code element
     if (content_str->len > 0) {
         list_push((List*)code_block, s2it(content_str));
         ((TypeElmt*)code_block->type)->content_length++;
@@ -638,9 +796,26 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
     if (!list) return ITEM_NULL;
     
     if (is_ordered) {
+        // Add attributes according to PandocSchema
         char start_str[20];
         snprintf(start_str, sizeof(start_str), "%d", number);
         add_attribute_to_element(input, list, "start", start_str);
+        
+        // Determine list type and style based on marker
+        const char* line = lines[*current_line];
+        int pos = 0;
+        while (pos < 3 && line[pos] == ' ') pos++;
+        while (isdigit(line[pos])) pos++;
+        
+        char delimiter = line[pos]; // '.' or ')'
+        if (delimiter == '.') {
+            add_attribute_to_element(input, list, "delim", "period");
+        } else if (delimiter == ')') {
+            add_attribute_to_element(input, list, "delim", "paren");
+        }
+        
+        add_attribute_to_element(input, list, "type", "1");
+        add_attribute_to_element(input, list, "style", "decimal");
     }
     
     while (*current_line < total_lines) {
@@ -677,9 +852,15 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
         
         char* content = trim_whitespace(line + pos);
         if (content && strlen(content) > 0) {
-            Item text_content = parse_inline_content(input, content);
-            if (text_content != ITEM_NULL) {
-                list_push((List*)list_item, text_content);
+            // Create paragraph inside list item according to schema
+            Element* paragraph = create_markdown_element(input, "p");
+            if (paragraph) {
+                Item text_content = parse_inline_content(input, content);
+                if (text_content != ITEM_NULL) {
+                    list_push((List*)paragraph, text_content);
+                    ((TypeElmt*)paragraph->type)->content_length++;
+                }
+                list_push((List*)list_item, (Item)paragraph);
                 ((TypeElmt*)list_item->type)->content_length++;
             }
         }
@@ -692,6 +873,64 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
     }
     
     return (Item)list;
+}
+
+static Item parse_blockquote(Input *input, char** lines, int* current_line, int total_lines) {
+    if (!is_blockquote(lines[*current_line])) return ITEM_NULL;
+    
+    Element* blockquote = create_markdown_element(input, "blockquote");
+    if (!blockquote) return ITEM_NULL;
+    
+    StrBuf* content_buffer = strbuf_new_cap(512);
+    bool first_line = true;
+    
+    // Collect all blockquote lines
+    while (*current_line < total_lines && is_blockquote(lines[*current_line])) {
+        const char* line = lines[*current_line];
+        
+        // Skip leading spaces and >
+        int pos = 0;
+        while (pos < 3 && line[pos] == ' ') pos++;
+        if (line[pos] == '>') pos++;
+        if (line[pos] == ' ') pos++; // Optional space after >
+        
+        // Add line content
+        if (!first_line) {
+            strbuf_append_char(content_buffer, '\n');
+        }
+        
+        strbuf_append_str(content_buffer, line + pos);
+        first_line = false;
+        (*current_line)++;
+    }
+    
+    // Parse the collected content as markdown
+    if (content_buffer->length > 0) {
+        strbuf_append_char(content_buffer, '\0');
+        int sub_line_count;
+        char** sub_lines = split_lines(content_buffer->str, &sub_line_count);
+        
+        int sub_current_line = 0;
+        while (sub_current_line < sub_line_count) {
+            if (!sub_lines[sub_current_line] || is_empty_line(sub_lines[sub_current_line])) {
+                sub_current_line++;
+                continue;
+            }
+            
+            Item element = parse_block_element(input, sub_lines, &sub_current_line, sub_line_count);
+            if (element != ITEM_NULL) {
+                list_push((List*)blockquote, element);
+                ((TypeElmt*)blockquote->type)->content_length++;
+            } else {
+                sub_current_line++;
+            }
+        }
+        
+        free_lines(sub_lines, sub_line_count);
+    }
+    
+    strbuf_free(content_buffer);
+    return (Item)blockquote;
 }
 
 static Item parse_paragraph(Input *input, const char* line) {
@@ -981,6 +1220,147 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     return (Item)link_elem;
 }
 
+static Item parse_strikethrough(Input *input, const char* text, int* pos) {
+    if (text[*pos] != '~' || text[*pos + 1] != '~') return ITEM_NULL;
+    
+    int start_pos = *pos;
+    *pos += 2; // Skip ~~
+    
+    int content_start = *pos;
+    int content_end = -1;
+    
+    // Find closing ~~
+    while (text[*pos] != '\0' && text[*pos + 1] != '\0') {
+        if (text[*pos] == '~' && text[*pos + 1] == '~') {
+            content_end = *pos;
+            *pos += 2;
+            break;
+        }
+        (*pos)++;
+    }
+    
+    if (content_end == -1) {
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    Element* strike_elem = create_markdown_element(input, "s");
+    if (!strike_elem) return ITEM_NULL;
+    
+    // Extract content
+    int content_len = content_end - content_start;
+    char* content = malloc(content_len + 1);
+    strncpy(content, text + content_start, content_len);
+    content[content_len] = '\0';
+    
+    if (strlen(content) > 0) {
+        Item text_content = parse_inline_content(input, content);
+        if (text_content != ITEM_NULL) {
+            list_push((List*)strike_elem, text_content);
+            ((TypeElmt*)strike_elem->type)->content_length++;
+        }
+    }
+    
+    free(content);
+    return (Item)strike_elem;
+}
+
+static Item parse_superscript(Input *input, const char* text, int* pos) {
+    if (text[*pos] != '^') return ITEM_NULL;
+    
+    int start_pos = *pos;
+    (*pos)++; // Skip ^
+    
+    int content_start = *pos;
+    int content_end = -1;
+    
+    // Find closing ^ or end of word
+    while (text[*pos] != '\0') {
+        if (text[*pos] == '^') {
+            content_end = *pos;
+            (*pos)++;
+            break;
+        } else if (isspace(text[*pos])) {
+            content_end = *pos;
+            break;
+        }
+        (*pos)++;
+    }
+    
+    if (content_end == -1) content_end = *pos;
+    
+    if (content_end == content_start) {
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    Element* sup_elem = create_markdown_element(input, "sup");
+    if (!sup_elem) return ITEM_NULL;
+    
+    // Extract content
+    int content_len = content_end - content_start;
+    char* content = malloc(content_len + 1);
+    strncpy(content, text + content_start, content_len);
+    content[content_len] = '\0';
+    
+    String* sup_str = create_string(input, content);
+    if (sup_str) {
+        list_push((List*)sup_elem, s2it(sup_str));
+        ((TypeElmt*)sup_elem->type)->content_length++;
+    }
+    
+    free(content);
+    return (Item)sup_elem;
+}
+
+static Item parse_subscript(Input *input, const char* text, int* pos) {
+    if (text[*pos] != '~' || text[*pos + 1] == '~') return ITEM_NULL; // Not ~ or ~~
+    
+    int start_pos = *pos;
+    (*pos)++; // Skip ~
+    
+    int content_start = *pos;
+    int content_end = -1;
+    
+    // Find closing ~ or end of word
+    while (text[*pos] != '\0') {
+        if (text[*pos] == '~') {
+            content_end = *pos;
+            (*pos)++;
+            break;
+        } else if (isspace(text[*pos])) {
+            content_end = *pos;
+            break;
+        }
+        (*pos)++;
+    }
+    
+    if (content_end == -1) content_end = *pos;
+    
+    if (content_end == content_start) {
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    Element* sub_elem = create_markdown_element(input, "sub");
+    if (!sub_elem) return ITEM_NULL;
+    
+    // Extract content
+    int content_len = content_end - content_start;
+    char* content = malloc(content_len + 1);
+    strncpy(content, text + content_start, content_len);
+    content[content_len] = '\0';
+    
+    String* sub_str = create_string(input, content);
+    if (sub_str) {
+        list_push((List*)sub_elem, s2it(sub_str));
+        ((TypeElmt*)sub_elem->type)->content_length++;
+    }
+    
+    free(content);
+    return (Item)sub_elem;
+}
+
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
         return s2it(create_string(input, ""));
@@ -1014,6 +1394,51 @@ static Item parse_inline_content(Input *input, const char* text) {
             Item emphasis = parse_emphasis(input, text, &pos, ch);
             if (emphasis != ITEM_NULL) {
                 list_push((List*)span, emphasis);
+                ((TypeElmt*)span->type)->content_length++;
+                continue;
+            }
+        } else if (ch == '~') {
+            // Flush any accumulated text
+            if (text_buffer->length > 0) {
+                strbuf_append_char(text_buffer, '\0');
+                String* text_str = create_string(input, text_buffer->str);
+                if (text_str && text_str->len > 0) {
+                    list_push((List*)span, s2it(text_str));
+                    ((TypeElmt*)span->type)->content_length++;
+                }
+                strbuf_reset(text_buffer);
+            }
+            
+            // Try strikethrough first
+            Item strikethrough = parse_strikethrough(input, text, &pos);
+            if (strikethrough != ITEM_NULL) {
+                list_push((List*)span, strikethrough);
+                ((TypeElmt*)span->type)->content_length++;
+                continue;
+            }
+            
+            // Try subscript
+            Item subscript = parse_subscript(input, text, &pos);
+            if (subscript != ITEM_NULL) {
+                list_push((List*)span, subscript);
+                ((TypeElmt*)span->type)->content_length++;
+                continue;
+            }
+        } else if (ch == '^') {
+            // Flush any accumulated text
+            if (text_buffer->length > 0) {
+                strbuf_append_char(text_buffer, '\0');
+                String* text_str = create_string(input, text_buffer->str);
+                if (text_str && text_str->len > 0) {
+                    list_push((List*)span, s2it(text_str));
+                    ((TypeElmt*)span->type)->content_length++;
+                }
+                strbuf_reset(text_buffer);
+            }
+            
+            Item superscript = parse_superscript(input, text, &pos);
+            if (superscript != ITEM_NULL) {
+                list_push((List*)span, superscript);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
             }
@@ -1106,6 +1531,9 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     } else if (is_fenced_code_block_start(line, NULL, NULL)) {
         // parse_code_block handles line advancement internally
         return parse_code_block(input, lines, current_line, total_lines);
+    } else if (is_blockquote(line)) {
+        // parse_blockquote handles line advancement internally
+        return parse_blockquote(input, lines, current_line, total_lines);
     } else {
         bool is_ordered;
         int number;
@@ -1121,8 +1549,24 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_markdown_content(Input *input, char** lines, int line_count) {
-    Element* document = create_markdown_element(input, "document");
-    if (!document) return ITEM_NULL;
+    // Create the root document element according to PandocSchema
+    Element* doc = create_markdown_element(input, "doc");
+    if (!doc) return ITEM_NULL;
+    
+    // Add version attribute to doc
+    add_attribute_to_element(input, doc, "version", "1.0");
+    
+    // Create meta element for metadata
+    Element* meta = create_markdown_element(input, "meta");
+    if (!meta) return (Item)doc;
+    
+    // Add meta to doc
+    list_push((List*)doc, (Item)meta);
+    ((TypeElmt*)doc->type)->content_length++;
+    
+    // Create body element for content
+    Element* body = create_markdown_element(input, "body");
+    if (!body) return (Item)doc;
     
     int current_line = 0;
     
@@ -1136,15 +1580,19 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count) {
         Item element = parse_block_element(input, lines, &current_line, line_count);
         
         if (element != ITEM_NULL) {
-            list_push((List*)document, element);
-            ((TypeElmt*)document->type)->content_length++;
+            list_push((List*)body, element);
+            ((TypeElmt*)body->type)->content_length++;
         } else {
             // If no element was parsed, advance to avoid infinite loop
             current_line++;
         }
     }
     
-    return (Item)document;
+    // Add body to doc
+    list_push((List*)doc, (Item)body);
+    ((TypeElmt*)doc->type)->content_length++;
+    
+    return (Item)doc;
 }
 
 void parse_markdown(Input* input, const char* markdown_string) {

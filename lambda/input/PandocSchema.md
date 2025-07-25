@@ -67,11 +67,9 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       <line "Violets are blue">
     >
     // CodeBlock
-    <pre id:code1, class:sourceCode
-      <code language:python, 'data-executable':true
+    <code language:python, 'data-executable':true
         "def greet(name):\n    return f\"Hello, {name}!\"\nprint(greet(\"World\"))"
-      >
-    >
+    >	
     // RawBlock
     <raw format:html, id:raw1 "<div class=\"custom\">Raw HTML content</div>">
     // BlockQuote
@@ -188,11 +186,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Attributes**: None.
   - **Purpose**: A single line within `<line_block>`.
   - **Content**: Inline elements.
-- **`<pre>`**
-  - **Attributes**: `id`, `class` (array format for multiple classes), `'data-*'` (same as `<p>`).
-  - **Purpose**: Wraps `<code>` for code blocks.
-  - **Content**: `<code>` element.
-- **`<code>`** (within `<pre>`)
+- **`<code>`**
   - **Attributes**:
     - `language`: String, optional, programming language (e.g., 'python').
     - `'data-executable'`: Boolean, optional, indicates executable code ("true", "false").
