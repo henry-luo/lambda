@@ -1,15 +1,6 @@
-#include "../transpiler.h"
+#include "format.h"
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
-
-// Extract pointer from an Item
-#define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
-
-// Extract boolean value from an Item
-#define get_bool_value(item) ((bool)((item) & 0xFF))
-
-// Extract integer value from an Item (for 56-bit signed integers)
-#define get_int_value(item) ((int64_t)(((int64_t)((item) & 0x00FFFFFFFFFFFFFF)) << 8) >> 8)
 
 static void format_item(StrBuf* sb, Item item);
 
@@ -59,45 +50,6 @@ static void format_string(StrBuf* sb, String* str) {
         }
     }
     strbuf_append_char(sb, '"');
-}
-
-static void format_number(StrBuf* sb, Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
-    
-    if (type == LMD_TYPE_INT) {
-        // 56-bit signed integer stored directly in the item
-        int64_t val = get_int_value(item);
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
-        strbuf_append_str(sb, num_buf);
-    } else if (type == LMD_TYPE_FLOAT) {
-        // Double stored as pointer
-        double* dptr = (double*)get_pointer(item);
-        if (dptr) {
-            char num_buf[32];
-            // Check for special values
-            if (isnan(*dptr)) {
-                strbuf_append_str(sb, "null");
-            } else if (isinf(*dptr)) {
-                strbuf_append_str(sb, "null");
-            } else {
-                snprintf(num_buf, sizeof(num_buf), "%.15g", *dptr);
-                strbuf_append_str(sb, num_buf);
-            }
-        } else {
-            strbuf_append_str(sb, "null");
-        }
-    } else if (type == LMD_TYPE_INT64) {
-        // 64-bit integer stored as pointer
-        long* lptr = (long*)get_pointer(item);
-        if (lptr) {
-            char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
-            strbuf_append_str(sb, num_buf);
-        } else {
-            strbuf_append_str(sb, "null");
-        }
-    }
 }
 
 static void format_array(StrBuf* sb, Array* arr) {

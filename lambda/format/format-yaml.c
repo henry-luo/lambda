@@ -1,15 +1,6 @@
-#include "../transpiler.h"
+#include "format.h"
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
-
-// extract pointer from an Item
-#define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
-
-// extract boolean value from an Item
-#define get_bool_value(item) ((bool)((item) & 0xFF))
-
-// extract integer value from an Item (for 56-bit signed integers)
-#define get_int_value(item) ((int64_t)(((int64_t)((item) & 0x00FFFFFFFFFFFFFF)) << 8) >> 8)
 
 static void format_yaml_item(StrBuf* sb, Item item, int indent_level);
 

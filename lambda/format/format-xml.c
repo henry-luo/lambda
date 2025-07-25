@@ -1,15 +1,6 @@
-#include "../transpiler.h"
+#include "format.h"
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
-
-// Extract pointer from an Item
-#define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
-
-// Extract boolean value from an Item
-#define get_bool_value(item) ((bool)((item) & 0xFF))
-
-// Extract integer value from an Item (for 56-bit signed integers)
-#define get_int_value(item) ((int64_t)(((int64_t)((item) & 0x00FFFFFFFFFFFFFF)) << 8) >> 8)
 
 static void format_item(StrBuf* sb, Item item, const char* tag_name);
 
@@ -54,50 +45,6 @@ static void format_xml_string(StrBuf* sb, String* str) {
                 strbuf_append_char(sb, c);
             }
             break;
-        }
-    }
-}
-
-static void format_number(StrBuf* sb, Item item) {
-    if (item == 0) return;
-    
-    LambdaItem lambda_item = (LambdaItem)item;
-    if (lambda_item.type_id == 0 && lambda_item.raw_pointer == NULL) return;
-    
-    TypeId type = get_type_id(lambda_item);
-    
-    if (type == LMD_TYPE_INT) {
-        // 56-bit signed integer stored directly in the item
-        int64_t val = get_int_value(item);
-        char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
-        strbuf_append_str(sb, num_buf);
-    } else if (type == LMD_TYPE_FLOAT) {
-        // Double stored as pointer
-        double* dptr = (double*)get_pointer(item);
-        if (dptr) {
-            char num_buf[32];
-            // Check for special values
-            if (isnan(*dptr)) {
-                strbuf_append_str(sb, "NaN");
-            } else if (isinf(*dptr)) {
-                if (*dptr > 0) {
-                    strbuf_append_str(sb, "INF");
-                } else {
-                    strbuf_append_str(sb, "-INF");
-                }
-            } else {
-                snprintf(num_buf, sizeof(num_buf), "%.15g", *dptr);
-                strbuf_append_str(sb, num_buf);
-            }
-        }
-    } else if (type == LMD_TYPE_INT64) {
-        // 64-bit integer stored as pointer
-        long* lptr = (long*)get_pointer(item);
-        if (lptr) {
-            char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
-            strbuf_append_str(sb, num_buf);
         }
     }
 }

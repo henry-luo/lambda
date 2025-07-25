@@ -1,13 +1,4 @@
-#include "../transpiler.h"
-
-// Extract pointer from an Item
-#define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
-
-// Extract boolean value from an Item
-#define get_bool_value(item) ((bool)((item) & 0xFF))
-
-// Extract integer value from an Item (for 56-bit signed integers)
-#define get_int_value(item) ((int64_t)(((int64_t)((item) & 0x00FFFFFFFFFFFFFF)) << 8) >> 8)
+#include "format.h"
 
 static void format_item(StrBuf* sb, Item item);
 static void format_element(StrBuf* sb, Element* elem);
