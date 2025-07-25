@@ -1,0 +1,524 @@
+loading script: test/lambda/simple_yaml_test.ls
+Script test/lambda/simple_yaml_test.ls not found, loading...
+Start transpiling test/lambda/simple_yaml_test.ls...
+parsing took 0.054 ms
+Syntax tree: ---------
+(document
+  (comment '// simple YAML formatter test')
+  (comment '// this script tests YAML formatting with simple data')
+  (content
+    (primary_expr
+      (string
+        ('"')
+        (string_content 'testing YAML formatter with simple data:')
+        ('"')
+      )
+    )
+    (let_stam
+      (let 'let')
+      (assign_expr
+        (identifier 'simple_data')
+        ('=')
+        (primary_expr
+          (map
+            ('{')
+            (map_item
+              (identifier 'name')
+              (':')
+              (primary_expr
+                (string
+                  ('"')
+                  (string_content 'test')
+                  ('"')
+                )
+              )
+            )
+            (',')
+            (map_item
+              (identifier 'count')
+              (':')
+              (primary_expr
+                (integer '42')
+              )
+            )
+            (',')
+            (map_item
+              (identifier 'active')
+              (':')
+              (primary_expr
+                (true 'true')
+              )
+            )
+            ('}')
+          )
+        )
+      )
+    )
+    (primary_expr
+      (string
+        ('"')
+        (string_content 'original data:')
+        ('"')
+      )
+    )
+    (primary_expr
+      (identifier 'simple_data')
+    )
+    (primary_expr
+      (string
+        ('"')
+        (string_content 'formatting as YAML:')
+        ('"')
+      )
+    )
+    (primary_expr
+      (sys_func
+        (format 'format')
+        ('(')
+        (primary_expr
+          (identifier 'simple_data')
+        )
+        (',')
+        (primary_expr
+          (symbol
+            ("'")
+            (symbol_content 'yaml')
+            ("'")
+          )
+        )
+        (')')
+      )
+    )
+    (primary_expr
+      (string
+        ('"')
+        (string_content 'test completed.')
+        ('"')
+      )
+    )
+  )
+)
+build script
+build content
+build primary expr
+build lit string: testing YAML formatter with simple data:
+build lit string: testing YAML formatter with simple data:, type: 10
+end build primary expr
+build primary expr
+build key expr
+build key as
+build primary expr
+build lit string: test
+build lit string: test, type: 10
+end build primary expr
+build key expr
+build key as
+build primary expr
+end build primary expr
+build key expr
+build key as
+build primary expr
+end build primary expr
+end build primary expr
+pushing name simple_data, 0x15200a120
+build primary expr
+build lit string: original data:
+build lit string: original data:, type: 10
+end build primary expr
+build primary expr
+building identifier
+looking up name: simple_data
+checking name: simple_data vs. simple_data
+found identifier simple_data
+found identifier simple_data
+ident 0x15200a120 type: 16
+end build primary expr
+build primary expr
+build lit string: formatting as YAML:
+build lit string: formatting as YAML:, type: 10
+end build primary expr
+build primary expr
+build call expr: 135
+build sys call
+build primary expr
+building identifier
+looking up name: simple_data
+checking name: simple_data vs. simple_data
+found identifier simple_data
+found identifier simple_data
+ident 0x15200a120 type: 16
+end build primary expr
+got argument type 1
+build primary expr
+build lit string: yaml
+build lit string: yaml, type: 9
+end build primary expr
+got argument type 1
+end building call expr type: 0x1042ed9f6
+end build primary expr
+build primary expr
+build lit string: test completed.
+build lit string: test completed., type: 10
+end build primary expr
+end building content item: 0x152009f20, 7
+build script child: 0x152009e90
+building AST took 0.022 ms
+AST: test/lambda/simple_yaml_test.ls ---------
+[script:List*]
+  [content:List*[7]]
+    no declare
+    item:
+    [primary expr:char*,const:1]
+      (primary_expr)
+    item:
+    [let stam:void*]
+      declare:
+      [assign expr:simple_data:Map*]
+        [primary expr:Map*,const:0]
+          [map expr:Map*]
+            map item:
+            [key expr:name:char*]
+              [primary expr:char*,const:1]
+                (primary_expr)
+            map item:
+            [key expr:count:int^]
+              [primary expr:int^,const:1]
+                (primary_expr)
+            map item:
+            [key expr:active:bool]
+              [primary expr:bool,const:1]
+                (primary_expr)
+    item:
+    [primary expr:char*,const:1]
+      (primary_expr)
+    item:
+    [primary expr:Map*,const:0]
+      [ident:simple_data:Map*,const:0]
+    item:
+    [primary expr:char*,const:1]
+      (primary_expr)
+    item:
+    [primary expr:char*,const:0]
+      [call expr:char*]
+        [sys func:27:char*]
+        args:
+        [primary expr:Map*,const:0]
+          [ident:simple_data:Map*,const:0]
+        [primary expr:char*,const:1]
+          (primary_expr)
+    item:
+    [primary expr:char*,const:1]
+      (primary_expr)
+transpiling...
+transpile box item: 12
+transpile assign expr
+transpile primary expr
+transpile primary expr
+transpile primary expr
+transpile primary expr
+transpile box item: 10
+transpile box item: 10
+transpile box item: 16
+transpile primary expr
+transpile box item: 10
+transpile box item: 10
+transpile primary expr
+transpile call expr
+transpile box item: 16
+transpile primary expr
+transpile box item: 9
+transpile box item: 10
+transpiling took 0.009 ms
+transpiled code:
+----------------
+#pragma once
+// #include <math.h>  // MIR has problem parsing math.h
+// #include <stdint.h>
+
+#if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT) && !defined(__STDINT_H_INCLUDED)
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+typedef signed char int8_t;
+typedef short int16_t;
+typedef int int32_t;
+typedef long long int64_t;
+#endif
+
+#ifndef bool
+#define bool uint8_t
+#endif
+
+#define true 1
+#define false 0
+#define null 0
+// #define infinity (1.0 / 0.0)
+// #define not_a_number (0.0 / 0.0)
+
+enum EnumTypeId {
+    LMD_TYPE_RAW_POINTER = 0,
+    LMD_TYPE_NULL,
+
+    // scalar types
+    LMD_TYPE_BOOL,
+    LMD_TYPE_INT,  // implicit int literal, store value up to 32-bit
+    LMD_TYPE_INT64,  // explicit int, 64-bit
+    LMD_TYPE_FLOAT,  // explicit float, 64-bit
+    LMD_TYPE_DECIMAL,
+    LMD_TYPE_NUMBER,  // explicit number, which includes decimal
+    LMD_TYPE_DTIME,
+    LMD_TYPE_SYMBOL,
+    LMD_TYPE_STRING,
+    LMD_TYPE_BINARY,
+
+    // container types, LMD_TYPE_CONTAINER 
+    LMD_TYPE_LIST,
+    LMD_TYPE_RANGE,
+    LMD_TYPE_ARRAY_INT,
+    LMD_TYPE_ARRAY,
+    LMD_TYPE_MAP,
+    LMD_TYPE_ELEMENT,
+    LMD_TYPE_TYPE,
+    LMD_TYPE_FUNC,
+
+    LMD_TYPE_ANY,
+    LMD_TYPE_ERROR,
+    LMD_CONTAINER_HEAP_START, // special value for container heap entry start
+};
+typedef uint8_t TypeId;
+
+# define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
+
+typedef struct Type {
+    TypeId type_id;
+    uint8_t is_literal:1;  // is a literal value
+    uint8_t is_const:1;  // is a constant expr
+} Type;
+
+typedef uint64_t Item;
+
+// a fat string with prefixed length and flags
+typedef struct String {
+    uint32_t len:22;  // string len , up to 4MB;
+    uint32_t ref_cnt:10;  // ref_cnt, up to 1024 refs
+    char chars[];
+} String;
+
+typedef struct Heap Heap;
+typedef struct Pack Pack;
+
+typedef struct Context {
+    Heap* heap;   
+    void* ast_pool;
+    void** consts;
+    void* type_list;
+    void* num_stack;  // for long and double pointers
+    void* type_info;  // meta info for the base types
+    void* cwd;  // current working directory
+    Item result; // final exec result
+} Context;
+
+// Array and List struct defintions needed for for-loop
+typedef struct Container {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+} Container;
+
+typedef struct Range {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+    // --------
+    long start;  // inclusive start
+    long end;    // inclusive end
+    long length;
+} Range;
+
+Range* range();
+long range_get(Range *range, int index);
+
+typedef struct List {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+    // --------
+    Item* items;
+    long length;
+    long extra;  // count of extra items stored at the end of the list
+    long capacity;
+} List;
+
+List* list();  // constructs an empty list
+Item list_fill(List *list, int cnt, ...);  // fill the list with the items
+void list_push(List *list, Item item);
+Item list_get(List *list, int index);
+
+typedef struct List Array;
+
+typedef struct ArrayLong {
+    uint8_t type_id;
+    uint8_t flags;
+    uint16_t ref_cnt;  // reference count
+    // --------
+    long* items;
+    long length;
+    long extra;  // count of extra items
+    long capacity;
+} ArrayLong;
+
+Array* array();
+ArrayLong* array_long_new(int count, ...);
+Array* array_fill(Array* arr, int count, ...);
+// void array_push(Array *array, Item item);
+Item array_get(Array *array, int index);
+
+typedef struct Map Map;
+Map* map(int type_index);
+Map* map_fill(Map* map, ...);
+Item map_get(Map* map, Item key);
+
+// generic field access function
+Item fn_index(Item item, long index);
+Item fn_member(Item item, Item key);
+
+// length function
+Item fn_len(Item item);
+
+typedef struct Element Element;
+Element* elmt(int type_index);
+Element* elmt_fill(Element *elmt, ...);
+Item elmt_get(Element *elmt, Item key);
+
+bool item_true(Item item);
+Item v2it(List *list);
+
+Item push_d(double dval);
+Item push_l(long lval);
+
+#define ITEM_UNDEFINED      0
+#define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
+#define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
+#define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
+
+#define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
+// todo: int overflow check and promotion to decimal
+#define i2it(int_val)        (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
+#define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
+#define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
+#define c2it(decimal_ptr)    ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr))
+#define s2it(str_ptr)        ((((uint64_t)LMD_TYPE_STRING)<<56) | (uint64_t)(str_ptr))
+#define y2it(sym_ptr)        ((((uint64_t)LMD_TYPE_SYMBOL)<<56) | (uint64_t)(sym_ptr))
+#define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
+#define k2it(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
+#define r2it(range_ptr)      ((((uint64_t)LMD_TYPE_RANGE)<<56) | (uint64_t)(range_ptr))
+
+#define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
+#define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
+#define const_c2it(index)    c2it((uint64_t)*(rt->consts + index))
+#define const_s2it(index)    s2it((uint64_t)*(rt->consts + index))
+#define const_y2it(index)    y2it((uint64_t)*(rt->consts + index))
+#define const_k2it(index)    k2it((uint64_t)*(rt->consts + index))
+#define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
+
+#define const_s(index)      ((String*)*(rt->consts + index))
+
+// item unboxing
+long it2l(Item item);
+double it2d(Item item);
+
+double pow(double x, double y);
+Item add(Item a, Item b);
+String *str_cat(String *left, String *right);
+
+typedef void* (*fn_ptr)();
+typedef struct Function {
+    uint8_t type_id;
+    void* fn;  // fn definition, TypeFunc
+    fn_ptr ptr;
+} Function;
+
+Function* to_fn(fn_ptr ptr);
+
+bool fn_is(Item a, Item b);
+bool fn_in(Item a, Item b);
+Range* fn_to(Item a, Item b);
+String* fn_string(Item item);
+
+Type* base_type(TypeId type_id);
+Type* const_type(int type_index);
+
+// returns the type of the item
+Type* fn_type(Item item);
+
+Item fn_input(Item url, Item type);
+void fn_print(Item item);
+String* fn_format(Item item, Item type);
+Item main(Context *rt){
+ return ({
+ List* ls = list();
+ Map* _simple_data=({Map* m = map(0);
+ map_fill(m,const_s(1),42L,true);});
+ list_fill(ls,6,const_s2it(0), const_s2it(2), _simple_data, const_s2it(3), s2it(fn_format(_simple_data,const_y2it(4))), const_s2it(5));});
+}
+
+compiling C code in 'test/lambda/simple_yaml_test.ls' to MIR
+C2MIR init end           -- 415 usec
+test/lambda/simple_yaml_test.ls:1:2: warning -- unknown pragma
+    preprocessor tokens -- 1568, parse tokens -- 988
+  C2MIR preprocessor end    -- 721 usec
+  C2MIR parser end          -- 797 usec
+test/lambda/simple_yaml_test.ls:230:76: warning -- using pointer without cast for integer type parameter
+  C2MIR context checker end -- 849 usec
+  C2MIR generator end       -- 897 usec
+C2MIR compiler end                -- 913 usec
+finding and to load module: main
+module item proto: 1 proto0
+module item proto: 1 proto1
+module item proto: 1 proto2
+module item proto: 1 proto3
+module item proto: 1 proto4
+module item import: 2 list
+module item import: 2 list_fill
+module item import: 2 map
+module item import: 2 map_fill
+module item import: 2 fn_format
+module item func: 0 main, addr 0x0, call addr 0x0
+module item export: 3 main
+generating native code...
+generated fn ptr: 0x104444170
+init imports of script
+JIT compiled test/lambda/simple_yaml_test.ls
+jit_context: 0x151e049f0, main_func: 0x104444170
+: took 1.420 ms
+loaded main func: 0x104444170
+Executing JIT compiled code...
+runner setup exec context
+Current working directory: file:///Users/henryluo/Projects/Jubily/
+heap init: 0x16bd9ed18
+exec main func
+map with type 0
+map byte_size: 17
+map length: 3
+field string value: test
+field int value: 42
+field bool value: true
+free heap entry index: 7
+reached container start: 7
+format item type: yaml
+format_yaml: ENTRY - starting with item type 16
+format_yaml: created strbuf, adding document marker
+format_yaml: about to call format_item
+format_item: ENTRY - item type=16, indent=0
+format_item: formatting MAP
+format_item: calling format_map_yaml
+format_map_yaml: ENTRY - map_type=0x15200a120, indent=0
+format_map_yaml: map_type->length=3
+format_map_yaml: first field=0x15200a250
+format_map_yaml: processing field 0
+format_map_yaml: field[0] name=field_name, type_id=10
+format_map_yaml: formatting field
+format_map_yaml: processing field 1
+format_map_yaml: field[1] name=field_name, type_id=3
+format_map_yaml: formatting field
