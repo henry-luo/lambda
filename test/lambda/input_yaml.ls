@@ -21,4 +21,7 @@ format(yaml_data, 'markdown')
 "formatting YAML as YAML:"
 format(yaml_data, 'yaml')
 
+"formatting YAML as TOML:"
+format(yaml_data, 'toml')
+
 "test completed."
