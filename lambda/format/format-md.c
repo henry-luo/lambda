@@ -69,7 +69,14 @@ static void format_heading(StrBuf* sb, Element* elem) {
     const char* tag_name = elem_type->name.str;
     int level = 1;
     
-    if (strlen(tag_name) >= 2 && tag_name[0] == 'h' && isdigit(tag_name[1])) {
+    // First try to get level from attribute (Pandoc schema)
+    String* level_attr = get_attribute(elem, "level");
+    if (level_attr && level_attr->len > 0) {
+        level = atoi(level_attr->chars);
+        if (level < 1) level = 1;
+        if (level > 6) level = 6;
+    } else if (strlen(tag_name) >= 2 && tag_name[0] == 'h' && isdigit(tag_name[1])) {
+        // Fallback: parse level from tag name
         level = tag_name[1] - '0';
         if (level < 1) level = 1;
         if (level > 6) level = 6;
@@ -81,7 +88,6 @@ static void format_heading(StrBuf* sb, Element* elem) {
     }
     strbuf_append_char(sb, ' ');
 
-    printf("before format_element_children of: %s, level %d\n", tag_name, level);
     format_element_children(sb, elem);
     strbuf_append_char(sb, '\n');
 }
@@ -156,10 +162,26 @@ static void format_list(StrBuf* sb, Element* elem) {
     const char* tag_name = elem_type->name.str;
     bool is_ordered = (strcmp(tag_name, "ol") == 0);
     
+    // Get list attributes from Pandoc schema
     String* start_attr = get_attribute(elem, "start");
+    String* style_attr = get_attribute(elem, "style");
+    String* type_attr = get_attribute(elem, "type");
+    
     int start_num = 1;
     if (start_attr && start_attr->len > 0) {
         start_num = atoi(start_attr->chars);
+    }
+    
+    // Determine bullet style for unordered lists
+    const char* bullet_char = "-";
+    if (!is_ordered && style_attr && style_attr->len > 0) {
+        if (strcmp(style_attr->chars, "asterisk") == 0) {
+            bullet_char = "*";
+        } else if (strcmp(style_attr->chars, "plus") == 0) {
+            bullet_char = "+";
+        } else if (strcmp(style_attr->chars, "dash") == 0) {
+            bullet_char = "-";
+        }
     }
     
     // Format list items - access through List interface
@@ -174,10 +196,30 @@ static void format_list(StrBuf* sb, Element* elem) {
                 if (li_type && li_type->name.str && strcmp(li_type->name.str, "li") == 0) {
                     if (is_ordered) {
                         char num_buf[16];
-                        snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
+                        // Use appropriate numbering style based on type attribute
+                        if (type_attr && type_attr->len > 0) {
+                            if (strcmp(type_attr->chars, "a") == 0) {
+                                // Lower alpha
+                                char alpha = 'a' + (start_num + i - 1) % 26;
+                                snprintf(num_buf, sizeof(num_buf), "%c. ", alpha);
+                            } else if (strcmp(type_attr->chars, "A") == 0) {
+                                // Upper alpha
+                                char alpha = 'A' + (start_num + i - 1) % 26;
+                                snprintf(num_buf, sizeof(num_buf), "%c. ", alpha);
+                            } else if (strcmp(type_attr->chars, "i") == 0) {
+                                // Lower roman - simplified, just use numbers for now
+                                snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
+                            } else {
+                                // Default decimal
+                                snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
+                            }
+                        } else {
+                            snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
+                        }
                         strbuf_append_str(sb, num_buf);
                     } else {
-                        strbuf_append_str(sb, "- ");
+                        strbuf_append_str(sb, bullet_char);
+                        strbuf_append_char(sb, ' ');
                     }
                     
                     format_element_children(sb, li_elem);
@@ -276,7 +318,7 @@ static void format_element_children(StrBuf* sb, Element* elem) {
     // Element extends List, so access content through List interface
     List* list = (List*)elem;
     if (list->length == 0) return;
-    printf("formatting element children: %ld\n", list->length);
+    
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         format_item(sb, child_item);
@@ -287,12 +329,11 @@ static void format_element_children(StrBuf* sb, Element* elem) {
 static void format_element(StrBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) {
-        printf("missing element type\n");
         return;
     }
     
     const char* tag_name = elem_type->name.str;
-    printf("formatting element: %s\n", tag_name);
+    
     // Handle different element types
     if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
         format_heading(sb, elem);
@@ -312,12 +353,15 @@ static void format_element(StrBuf* sb, Element* elem) {
     } else if (strcmp(tag_name, "table") == 0) {
         format_table(sb, elem);
         strbuf_append_char(sb, '\n');
-    } else if (strcmp(tag_name, "document") == 0 || strcmp(tag_name, "span") == 0) {
-        // Just format children for document root and span containers
+    } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
+               strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
+        // Just format children for document root, body, and span containers
         format_element_children(sb, elem);
+    } else if (strcmp(tag_name, "meta") == 0) {
+        // Skip meta elements in markdown output
+        return;
     } else {
         // for unknown elements, just format children
-        printf("Unknown element name: %s\n", tag_name);
         format_element_children(sb, elem);
     }
 }
@@ -325,7 +369,7 @@ static void format_element(StrBuf* sb, Element* elem) {
 // Format any item to markdown
 static void format_item(StrBuf* sb, Item item) {
     TypeId type = get_type_id((LambdaItem)item);
-    // printf("formatting item of type %d\n", type);
+    
     switch (type) {
     case LMD_TYPE_NULL:
         // Skip null items in markdown formatting
@@ -352,8 +396,7 @@ static void format_item(StrBuf* sb, Item item) {
         break;
     }
     default:
-        // For other types, try to convert to string representation
-        printf("Unsupported type %d in markdown formatting\n", type);
+        // For other types, skip or handle gracefully
         break;
     }
 }
