@@ -20,5 +20,6 @@ String* format_xml(VariableMemPool* pool, Item root_item);
 String* format_html(VariableMemPool* pool, Item root_item);
 String* format_yaml(VariableMemPool* pool, Item root_item);
 String* format_toml(VariableMemPool* pool, Item root_item);
+String* format_ini(VariableMemPool* pool, Item root_item);
 
 #endif // FORMAT_H

@@ -102,6 +102,9 @@ String* format_data(Context* ctx, Item item, String* type) {
     else if (strcmp(type->chars, "toml") == 0) {
         result = format_toml(ctx->heap->pool, item);
     }
+    else if (strcmp(type->chars, "ini") == 0) {
+        result = format_ini(ctx->heap->pool, item);
+    }
     else {
         printf("Unsupported format type: %s\n", type->chars);
     }

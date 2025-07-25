@@ -67,42 +67,7 @@ Formatters convert Lambda data structures (Items) into specific output formats. 
 ### 3. Registration
 - Add to `format_data()` function in `format.c`
 
-## Critical Implementation Lessons
-
-### Safe Lambda Data Structure Traversal
-
-Recent formatter implementations revealed critical insights about preventing code hangs and safely traversing Lambda data structures.
-
-### 1. Proper Type Identification and Extraction
-
-**Root Cause of Hangs**: Incorrect type identification and data extraction methods are the primary cause of infinite loops and crashes.
-
-**Critical Discovery**: Use `get_type_id()` function from `LambdaItem` struct for reliable type extraction, not manual bit shifting.
-
-See `format-toml.c` for complete type extraction patterns.
-
-### 2. Safe Field Traversal and Loop Termination
-
-**Critical Requirements**:
-- Use `type_map->length` as the authoritative field count
-- Validate field count matches expectations
-- Always advance both pointer and counter in ShapeEntry traversal
-
-Reference `format-toml.c` for safe traversal implementation.
-
-### 3. Robust Item Creation from Field Data
-
-**Major Breakthrough**: Implement a robust `create_item_from_field_data()` function that properly handles the Lambda type system by converting raw field data to proper Lambda Items with correct type tagging.
-
-See `format-toml.c` for complete implementation.
-
-### 4. Depth Limiting and Recursion Prevention
-
-- Implement depth limiting in recursive functions (depth > 10)
-- Use fixed buffers to prevent runaway allocation
-- Handle nested structures with parent context preservation
-
-### 5. Modular Design Patterns
+### 4. Modular Design Patterns
 
 **Success Pattern**: Central `format_item()` function with format-specific helper functions:
 - Single entry point for all data type formatting
@@ -116,8 +81,6 @@ Reference `format-toml.c` for complete modular design implementation.
 - Free temporary StrBuf objects with `strbuf_free()`
 - Let `format_data()` handle final string registration
 
-## Testing and Debugging
-
 ### Testing and Debugging
 - **Test Incrementally**: Start with simple data, gradually add complexity
 - **Add Debug Prints**: Include debug output to trace execution flow
@@ -128,17 +91,9 @@ Reference `format-toml.c` for complete modular design implementation.
 - **Use timeouts during testing** to catch hanging formatters (`timeout 5s`)
 - **Reference Implementation**: When debugging type issues, compare with `print_item_with_depth()`
 
-## Implementation Quick Reference
-
 ### File References
 - **Basic Pattern**: `format-json.c` - Basic reference implementation
 - **Direct Traversal**: `format-yaml.c` - Updated direct traversal implementation
 - **Latest Best Practices**: `format-toml.c` - Most recent implementation with proper Lambda type handling
 - **Registration**: `format.c` - Add new formatters to `format_data()`
 - **Lambda Type Reference**: `print.c` - See `print_item_with_depth()` for authoritative type handling
-
-## Conclusion
-
-The Lambda formatter system prioritizes reliability and format-specific output quality.
-
-For new formatters, start with the latest implementation patterns in `format-toml.c` which demonstrate proper Lambda API usage and robust type handling, then adapt the format-specific logic for your target format.

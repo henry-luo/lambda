@@ -14,3 +14,9 @@ Lambda runtime uses the following to represent its runtime data:
 	- and the actual data are stored as a packed struct;
 - Lambda element/LMD_TYPE_ELEMENT, extends Lambda list/LMD_TYPE_LIST, and it's also a map/LMD_TYPE_MAP at the same time;
 	- note that it can be casted as List directly, but not Map directly;
+
+### Coding Guidelines
+- Start comments in lowercase.
+- **Add debug logging** for development and troubleshooting.
+- **Test with comprehensive nested data structures** and use timeout (default: 5s) to catch hangs early
+- **Back up the file** before major refactoring or rewrite. Remove the backup at the end of successful refactoring or rewrite.
