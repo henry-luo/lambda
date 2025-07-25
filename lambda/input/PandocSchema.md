@@ -1,6 +1,6 @@
 # Pandoc Mark Schema Documentation
 
-This document provides a comprehensive Mark schema for representing document structures from Markdown, wiki, and HTML inputThe schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom Mark tags for Pandoc-specific features (e.g., `<cite>`, `<math>`). Attributes reflect Pandoc's AST `Attr` type (identifier, classes, key-value pairs) and HTML attributes. Belo- **Attribute Structure**: Reflects Pandoc's `Attr` type (identifier, classes, key-value pairs) and HTML attributes for flexibility. Class attributes can be single strings for one class or arrays for multiple classes (e.g., `class:['section', 'main']`). Below is a detailed list of all elements and their attributes., based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible and uses custom Mark tags for Pandoc-specific features, supporting document transformation and validation. It includes all Pandoc formatting options, such as citations, math, figures, and code blocks, with detailed attribute documentation and examples of all block and inline elements.
+This document provides a comprehensive Mark schema for representing document structures from Markdown, wiki, anThe schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom Mark tags for Pandoc-specific features (e.g., `<cite>`, `<math>`). Attributes reflect Pandoc's AST `Attr` type (identifier, classes, key-value pairs) and HTML attributes. Below is a detailed list of all elements and their attributes. HTML inputs, based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible and uses custom Mark tags for Pandoc-specific features, supporting document transformation and validation. It includes all Pandoc formatting options, such as citations, math, figures, and code blocks, with detailed attribute documentation and examples of all block and inline elements.
 
 ## Mark Schema
 
@@ -14,27 +14,27 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
     // Field for key-value metadata
     <field name:title, type:string
       <inlines
-        <str "Comprehensive Pandoc Document">
+        "Comprehensive Pandoc Document"
       >
     >
     <field name:author, type:string
       <inlines
-        <str "John Doe">
+        "John Doe"
       >
     >
     <field name:date, type:string
       <inlines
-        <str "2025-07-25">
+        "2025-07-25"
       >
     >
     // References for citations
     <field name:references, type:list
       <inlines
         <reference id:smith2020, type:book
-          <str "Smith, J. (2020). Understanding Pandoc. Academic Press.">
+          "Smith, J. (2020). Understanding Pandoc. Academic Press."
         >
         <reference id:jones2021, type:article
-          <str "Jones, A. (2021). Document Transformation. Journal of Docs, 12(3), 45-60.">
+          "Jones, A. (2021). Document Transformation. Journal of Docs, 12(3), 45-60."
         >
       >
     >
@@ -42,18 +42,18 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
   // Document body with block-level elements
   <body
     // Header (level 1 to 6)
-    <h1 id:intro, class:['section', 'main'], level:1, data-custom:value "Introduction">
+    <h1 id:intro, class:['section', 'main'], level:1, 'data-custom':value "Introduction">
     <h2 id:subintro, class:subsection, level:2 "Subsection">
     // Paragraph (Para) with various inline elements
     <p id:p1, class:text
       "This paragraph includes " <em "emphasized"> ", " <strong "strong"> ", " <s "strikethrough"> ", "
-      <sup "superscript"> ", " <sub "subscript"> ", and " <span style:"font-variant: small-caps;" "small caps"> " text. "
+      <sup "superscript"> ", " <sub "subscript"> ", and " <span style:{'font-variant': 'small-caps'} "small caps"> " text. "
       "It also has a " <q type:double "double-quoted"> " and " <q type:single "single-quoted"> " phrase, "
       "an inline " <code language:python "print(\"Hello\")"> ", and a citation "
       <cite
         <citations
-          <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, note-num:1, hash:0>
-          <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, note-num:2, hash:1>
+          <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, note_num:1, hash:0>
+          <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, note_num:2, hash:1>
         >
       >
       ". A " <a href:"http://example.com", title:Example "link"> " and " <img src:"inline.jpg", alt:"Inline image", width:50> " are included, "
@@ -62,13 +62,13 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
     // Plain (similar to Para, without paragraph styling)
     <p id:p2, class:plain "Plain text with " <em "minimal"> " formatting.">
     // LineBlock for poetry or addresses
-    <line-block id:poem1
-      <line <str "Roses are red"> <em " with emphasis">>
-      <line <str "Violets are blue">>
+    <line_block id:poem1
+      <line "Roses are red" <em " with emphasis">>
+      <line "Violets are blue">
     >
     // CodeBlock
     <pre id:code1, class:sourceCode
-      <code language:python, data-executable:true
+      <code language:python, 'data-executable':true
         "def greet(name):\n    return f\"Hello, {name}!\"\nprint(greet(\"World\"))"
       >
     >
@@ -83,7 +83,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       <li <p "Item 1">>
       <li <p "Item 2 with " <strong "strong"> " text">>
     >
-    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:upper-alpha
+    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:'upper-alpha'
       <li <p "Item A">>
       <li <p "Item B">>
     >
@@ -94,16 +94,16 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
     >
     // DefinitionList
     <dl id:deflist1
-      <dt <str "Term 1">>
+      <dt "Term 1">
       <dd <p "Definition with " <a href:"http://example.com" "link"> ".">>
-      <dt <str "Term 2">>
+      <dt "Term 2">
       <dd <p "Another definition.">>
     >
     // HorizontalRule
     <hr id:hr1, class:separator>
     // Table with alignment and width
     <table id:table1, class:data
-      <caption <str "Sample Table">>
+      <caption "Sample Table">
       <colgroup
         <col align:left, width:"50%">
         <col align:center, width:"50%">
@@ -122,13 +122,13 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       >
     >
     // Div with nested content
-    <div id:section1, class:['section', 'container'], data-role:container
+    <div id:section1, class:['section', 'container'], 'data-role':container
       <p "Content in a div with " <sub "subscript"> " and a " <raw format:latex "\\textbf{bold}"> " LaTeX element.">
     >
     // Figure with image and caption
     <figure id:fig1, class:image
       <img src:"image.jpg", alt:"Sample image", title:Image, width:300, height:200>
-      <figcaption <str "Figure 1: Sample image with "> <em "caption">>
+      <figcaption "Figure 1: Sample image with " <em "caption">>
     >
     // Footnote
     <note id:note1
@@ -162,63 +162,63 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
 - **`<field>`**
   - **Attributes**:
     - `name`: String, required, metadata key (e.g., "title", "author", "references").
-    - `type`: String, optional, data type (e.g., "string", "list", "map").
+    - `type`: String, optional, data type (e.g., 'string', 'list', 'map').
   - **Purpose**: Represents a metadata key-value pair.
   - **Content**: `<inlines>` or `<blocks>` (typically `<inlines>`).
 - **`<reference>`** (within `<field name="references">`)
   - **Attributes**:
     - `id`: String, required, unique citation identifier (e.g., "smith2020").
-    - `type`: String, optional, citation type (e.g., "book", "article").
+    - `type`: String, optional, citation type (e.g., 'book', 'article').
   - **Purpose**: Stores citation details for `<cite>`.
-  - **Content**: Inline elements (e.g., `<str>`).
+  - **Content**: Inline elements (plain text).
 
 ### Block-Level Elements
 - **`<p>`** (Para, Plain)
   - **Attributes**:
     - `id`: String, optional, unique identifier.
     - `class`: Array of strings, optional, CSS classes (e.g., `['text', 'content']`).
-    - `data-*`: Custom key-value pairs, optional, for metadata.
+    - `'data-*'`: Custom key-value pairs, optional, for metadata.
   - **Purpose**: Paragraphs or plain text blocks.
   - **Content**: Inline elements.
-- **`<line-block>`**
-  - **Attributes**: `id`, `class` (array format for multiple classes), `data-*` (same as `<p>`).
+- **`<line_block>`**
+  - **Attributes**: `id`, `class` (array format for multiple classes), `'data-*'` (same as `<p>`).
   - **Purpose**: Groups lines for poetry or addresses.
   - **Content**: One or more `<line>` elements.
 - **`<line>`**
   - **Attributes**: None.
-  - **Purpose**: A single line within `<line-block>`.
+  - **Purpose**: A single line within `<line_block>`.
   - **Content**: Inline elements.
 - **`<pre>`**
-  - **Attributes**: `id`, `class` (array format for multiple classes), `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class` (array format for multiple classes), `'data-*'` (same as `<p>`).
   - **Purpose**: Wraps `<code>` for code blocks.
   - **Content**: `<code>` element.
 - **`<code>`** (within `<pre>`)
   - **Attributes**:
-    - `language`: String, optional, programming language (e.g., "python").
-    - `data-executable`: Boolean, optional, indicates executable code ("true", "false").
+    - `language`: String, optional, programming language (e.g., 'python').
+    - `'data-executable'`: Boolean, optional, indicates executable code ("true", "false").
   - **Purpose**: Contains code with syntax highlighting.
   - **Content**: Raw code text.
 - **`<raw>`**
   - **Attributes**:
     - `format`: String, required, content format (e.g., "html", "latex").
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Embeds format-specific content.
   - **Content**: Raw text in specified format.
 - **`<blockquote>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Quoted content.
   - **Content**: Block elements.
 - **`<ol>`**
   - **Attributes**:
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
     - `start`: Integer, optional, starting number (default: 1).
-    - `type`: String, optional, numbering style (e.g., "1", "A", "i").
-    - `delim`: String, optional, delimiter (e.g., "period", "paren").
-    - `style`: String, optional, list style (e.g., "decimal", "upper-alpha").
+    - `type`: String, optional, numbering style (e.g., '1', 'A', 'i').
+    - `delim`: String, optional, delimiter (e.g., 'period', 'paren').
+    - `style`: String, optional, list style (e.g., 'decimal', `'upper-alpha'`).
   - **Purpose**: Ordered list with customizable numbering.
   - **Content**: `<li>` elements.
 - **`<ul>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Unordered list.
   - **Content**: `<li>` elements.
 - **`<li>`**
@@ -226,7 +226,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Purpose**: List item.
   - **Content**: Block elements.
 - **`<dl>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Definition list.
   - **Content**: `<dt>` and `<dd>` elements.
 - **`<dt>`**
@@ -239,16 +239,16 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: Block elements.
 - **`<h1>` to `<h6>`**
   - **Attributes**:
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
     - `level`: Integer, required, header level (1 to 6).
   - **Purpose**: Headers with level-specific tags.
   - **Content**: Inline elements.
 - **`<hr>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Horizontal rule.
   - **Content**: None (empty element).
 - **`<table>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Table container.
   - **Content**: `<caption>`, `<colgroup>`, `<thead>`, `<tbody>`.
 - **`<caption>`**
@@ -261,7 +261,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: `<col>` elements.
 - **`<col>`**
   - **Attributes**:
-    - `align`: String, optional, column alignment (e.g., "left", "center", "right").
+    - `align`: String, optional, column alignment (e.g., 'left', 'center', 'right').
     - `width`: String, optional, column width (e.g., "50%").
   - **Purpose**: Specifies column properties.
   - **Content**: None (empty element).
@@ -280,11 +280,11 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Purpose**: Table header or data cell.
   - **Content**: Block elements.
 - **`<div>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Generic block container.
   - **Content**: Block elements.
 - **`<figure>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Contains image and caption.
   - **Content**: `<img>`, `<figcaption>`.
 - **`<img>`**
@@ -292,7 +292,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
     - `src`: String, required, image URL.
     - `alt`: String, optional, alternative text.
     - `title`: String, optional, image title.
-    - `width`, `height`: String, optional, dimensions (e.g., "300", "200px").
+    - `width`, `height`: String, optional, dimensions (e.g., 300, "200px").
   - **Purpose**: Embeds images.
   - **Content**: None (empty element).
 - **`<figcaption>`**
@@ -300,55 +300,51 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Purpose**: Figure caption.
   - **Content**: Inline elements.
 - **`<note>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Footnote content.
   - **Content**: Block elements.
 - **`<math>`**
   - **Attributes**:
     - `type`: String, required, math type ("inline" or "display").
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Contains LaTeX math expressions.
   - **Content**: LaTeX code.
 
 ### Inline-Level Elements
-- **`<str>`**
-  - **Attributes**: None.
-  - **Purpose**: Unformatted text.
-  - **Content**: Plain text.
 - **`<em>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Emphasized text.
   - **Content**: Inline elements.
 - **`<strong>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Strong text.
   - **Content**: Inline elements.
 - **`<s>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Strikethrough text.
   - **Content**: Inline elements.
 - **`<sup>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Superscript text.
   - **Content**: Inline elements.
 - **`<sub>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Subscript text.
   - **Content**: Inline elements.
 - **`<span>`**
   - **Attributes**:
-    - `id`, `class`, `data-*` (same as `<p>`).
-    - `style`: String, optional, inline CSS (e.g., "font-variant: small-caps").
+    - `id`, `class`, `'data-*'` (same as `<p>`).
+    - `style`: Object, optional, inline CSS (e.g., `{'font-variant': 'small-caps'}`).
   - **Purpose**: Generic inline container (e.g., for SmallCaps).
   - **Content**: Inline elements.
 - **`<q>`**
   - **Attributes**:
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
     - `type`: String, required, quote type ("single" or "double").
   - **Purpose**: Quoted text.
   - **Content**: Inline elements.
 - **`<cite>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Wraps `<citations>` for citation content.
   - **Content**: `<citations>` element.
 - **`<citations>`**
@@ -361,31 +357,31 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
     - `prefix`: String, optional, text before citation (e.g., "see ").
     - `suffix`: String, optional, text after citation (e.g., ", p. 15").
     - `mode`: String, required, citation mode ("NormalCitation", "AuthorInText", "SuppressAuthor").
-    - `note-num`: Integer, optional, footnote number for citations in notes.
+    - `note_num`: Integer, optional, footnote number for citations in notes.
     - `hash`: Integer, optional, unique hash for citation instance.
   - **Purpose**: Represents a single citation with Pandoc’s attributes.
   - **Content**: None (empty element).
 - **`<code>`** (inline)
   - **Attributes**:
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
     - `language`: String, optional, programming language.
   - **Purpose**: Inline code.
   - **Content**: Code text.
 - **`<raw>`** (inline)
   - **Attributes**:
     - `format`: String, required, content format (e.g., "html", "latex").
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Raw inline content.
   - **Content**: Raw text.
 - **`<a>`**
   - **Attributes**:
     - `href`: String, required, link URL.
     - `title`: String, optional, link title.
-    - `id`, `class`, `data-*` (same as `<p>`).
+    - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Hyperlink.
   - **Content**: Inline elements.
 - **`<br>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Line break.
   - **Content**: None (empty element).
 
@@ -406,7 +402,7 @@ The Mark schema is designed to represent document structures from Markdown, wiki
   - `id`: Links to a reference.
   - `prefix`, `suffix`: Contextual text (e.g., "see [Smith, 2020, p. 15]").
   - `mode`: Citation style ("NormalCitation", "AuthorInText", "SuppressAuthor").
-  - `note-num`: Footnote number for note-based citations.
+  - `note_num`: Footnote number for note-based citations.
   - `hash`: Unique identifier for citation instances.
 - **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage.
 
