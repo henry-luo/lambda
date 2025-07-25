@@ -90,6 +90,12 @@ String* format_data(Context* ctx, Item item, String* type) {
         result = strbuf_to_string(sb);
         strbuf_free(sb);
     }
+    else if (strcmp(type->chars, "rst") == 0) {
+        StrBuf* sb = strbuf_new_pooled(ctx->heap->pool);
+        format_rst(sb, item);
+        result = strbuf_to_string(sb);
+        strbuf_free(sb);
+    }
     else if (strcmp(type->chars, "xml") == 0) {
         result = format_xml(ctx->heap->pool, item);
     }
