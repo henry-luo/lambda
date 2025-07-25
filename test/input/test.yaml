@@ -6,6 +6,10 @@ city: New York
 address:
   street: 123 Main St
   zip: 10001
+  coordinates:
+    latitude: 40.7589
+    longitude: -73.9851
+    elevation: 10.5
 hobbies:
   - reading
   - swimming
@@ -18,4 +22,41 @@ metadata:
   created: 2023-01-15
   updated: null
   tags: [important, personal]
-  end: end of yaml
+  audit:
+    version: 1
+    history:
+      - date: 2023-01-01
+        action: created
+        user: system
+      - date: 2023-01-15
+        action: updated
+        user: admin
+        changes:
+          - field: name
+            old: ""
+            new: John Doe
+          - field: age
+            old: null
+            new: 30
+  settings:
+    notifications:
+      email: true
+      sms: false
+      push:
+        enabled: true
+        frequency: daily
+        topics:
+          - updates
+          - alerts
+          - reminders
+    privacy:
+      public: false
+      friends: true
+      analytics:
+        tracking: false
+        cookies: true
+        data_sharing:
+          partners: false
+          research: true
+          marketing: false
+end: end of yaml
