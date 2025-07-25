@@ -850,7 +850,7 @@ String* fn_format(Item item, Item type) {
     else {
         type_str = (type_item.type_id == LMD_TYPE_NULL) ? NULL : (String*)type_item.pointer;
     }
-    printf("format item type: %s\n", type_str ? type_str->chars : "null");
+    // printf("format item type: %s\n", type_str ? type_str->chars : "null");
     return format_data(context, item, type_str);
 }
 

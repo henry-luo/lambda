@@ -1,0 +1,400 @@
+= Comprehensive MediaWiki Test Document =
+
+This document tests all common MediaWiki syntax elements to ensure proper parsing and rendering.
+
+== Headers ==
+
+= Level 1 Header =
+== Level 2 Header ==
+=== Level 3 Header ===
+==== Level 4 Header ====
+===== Level 5 Header =====
+====== Level 6 Header ======
+
+== Text Formatting ==
+
+'''Bold text''' and '''also bold text'''
+
+''Italic text'' and ''also italic text''
+
+'''''Bold and italic'''''
+
+== Line Breaks and Paragraphs ==
+
+This is a paragraph with content.
+
+This is a new paragraph separated by a blank line.
+
+This is another paragraph.
+This line has no line break before it.
+
+== Lists ==
+
+=== Unordered Lists ===
+
+* Item 1
+* Item 2
+** Nested item 2.1
+** Nested item 2.2
+*** Triple nested item 2.2.1
+*** Triple nested item 2.2.2
+* Item 3
+
+=== Ordered Lists ===
+
+# First item
+# Second item
+## Nested ordered item
+## Another nested item
+### Triple nested
+### Another triple nested
+# Third item
+
+=== Definition Lists ===
+
+; Term 1
+: Definition of term 1
+; Term 2
+: Definition of term 2
+: Another definition of term 2
+
+=== Mixed Lists ===
+
+# Ordered item
+#* Unordered nested item
+#* Another unordered nested item
+# Another ordered item
+## Ordered nested item
+## Another ordered nested item
+
+=== Indented Lists ===
+
+: Indented item 1
+: Indented item 2
+:: Double indented item
+:: Another double indented item
+: Back to single indent
+
+== Links ==
+
+=== Internal Links ===
+
+[[Main Page]]
+
+[[Main Page|Custom link text]]
+
+[[Category:Test]]
+
+[[File:Example.jpg]]
+
+[[User:TestUser]]
+
+=== External Links ===
+
+[https://www.example.com External link with text]
+
+[https://www.example.com]
+
+https://www.example.com
+
+[mailto:user@example.com Email link]
+
+== Tables ==
+
+=== Basic Table ===
+
+{|
+|-
+| Cell 1 || Cell 2 || Cell 3
+|-
+| Row 2 Cell 1 || Row 2 Cell 2 || Row 2 Cell 3
+|}
+
+=== Table with Headers ===
+
+{| class="wikitable"
+|-
+! Header 1 !! Header 2 !! Header 3
+|-
+| Row 1 Data || Row 1 Data || Row 1 Data
+|-
+| Row 2 Data || Row 2 Data || Row 2 Data
+|}
+
+=== Complex Table ===
+
+{| border="1" cellpadding="5"
+|-
+! Name !! Age !! City
+|-
+| John || 25 || New York
+|-
+| Jane || 30 || Los Angeles
+|-
+| Bob || 35 || Chicago
+|}
+
+== Templates ==
+
+{{citation needed}}
+
+{{stub}}
+
+{{main|Main article}}
+
+{{see also|Related article}}
+
+{{template with|parameter1|parameter2}}
+
+{{nested{{template}}example}}
+
+== Horizontal Rules ==
+
+----
+
+== Code and Preformatted Text ==
+
+=== Inline Code (using nowiki) ===
+
+Use <nowiki>console.log()</nowiki> to print to console.
+
+Variables like <nowiki>userName</nowiki> and <nowiki>userAge</nowiki>.
+
+=== Code Blocks ===
+
+<pre>
+Plain preformatted text
+No syntax highlighting
+Multiple lines supported
+</pre>
+
+<code>
+Inline code block
+function example() {
+    return "Hello World";
+}
+</code>
+
+=== Nowiki Blocks ===
+
+<nowiki>
+This text will not be parsed as wiki markup.
+'''This will not be bold'''
+[[This will not be a link]]
+{{This will not be a template}}
+</nowiki>
+
+== HTML Elements ==
+
+=== Basic HTML ===
+
+<div>
+    <p>Raw HTML is supported in MediaWiki.</p>
+    <strong>Bold HTML tag</strong>
+    <em>Italic HTML tag</em>
+</div>
+
+<br>
+
+Line break above using HTML.
+
+<hr>
+
+Horizontal rule above using HTML.
+
+=== HTML Lists ===
+
+<ul>
+<li>HTML unordered list item 1</li>
+<li>HTML unordered list item 2</li>
+</ul>
+
+<ol>
+<li>HTML ordered list item 1</li>
+<li>HTML ordered list item 2</li>
+</ol>
+
+== Special Characters and Entities ==
+
+Copyright: &copy;
+Trademark: &trade;
+Registered: &reg;
+Less than: &lt;
+Greater than: &gt;
+Ampersand: &amp;
+
+Mathematical symbols: &alpha; &beta; &gamma; &sum; &prod;
+
+== Magic Words ==
+
+Current page: {{PAGENAME}}
+
+Namespace: {{NAMESPACE}}
+
+Today's date: {{CURRENTDAY}} {{CURRENTMONTHNAME}} {{CURRENTYEAR}}
+
+== Parser Functions ==
+
+{{#if: condition | true value | false value }}
+
+{{#switch: value
+| case1 = result1
+| case2 = result2
+| default result
+}}
+
+{{#expr: 2 + 2 }}
+
+== Comments ==
+
+<!-- This is a comment and should not be visible -->
+
+Visible text <!-- inline comment --> more visible text.
+
+== Escaping and Special Cases ==
+
+=== Escaping Wiki Markup ===
+
+<nowiki>'''This is not bold'''</nowiki>
+
+<nowiki>[[This is not a link]]</nowiki>
+
+<nowiki>{{This is not a template}}</nowiki>
+
+=== Special Link Cases ===
+
+[[Link with (parentheses) in title]]
+
+[[Link with "quotes" in title]]
+
+[[Link|Display text with '''formatting''']]
+
+=== Mixed Formatting ===
+
+'''Bold with ''italic'' inside'''
+
+''Italic with '''bold''' inside''
+
+'''Bold with <nowiki>code</nowiki> inside'''
+
+== Categories and Files ==
+
+[[Category:Test Category]]
+
+[[File:Example.jpg|thumb|Caption for the image]]
+
+[[File:Example.jpg|200px|left|Image with size and alignment]]
+
+[[Media:Example.pdf|Link to media file]]
+
+== Redirects ==
+
+#REDIRECT [[Target Page]]
+
+== Complex Nested Structures ==
+
+# '''Ordered list''' with formatting
+#: Indented content under list item
+#: More indented content
+#* Unordered list inside ordered list
+#** ''Italic'' formatting
+#** '''Bold''' formatting
+#** <nowiki>Code</nowiki> formatting
+# Another '''ordered item''' with [[Internal Link]]
+
+{|
+|-
+! Table !! Inside !! List
+|-
+| Cell || Data || Here
+|-
+| More || Table || Content
+|}
+
+== Unicode and International Characters ==
+
+=== Unicode Characters ===
+
+Unicode characters: α β γ δ ε ζ η θ
+
+Emojis: 😀 😃 😄 😁 🚀 ⭐️ 🌟 💫
+
+Math symbols: ∑ ∏ ∫ ∂ ∞ ≠ ≤ ≥
+
+=== International Text ===
+
+English: Hello World
+
+Spanish: Hola Mundo
+
+French: Bonjour le Monde
+
+German: Hallo Welt
+
+Chinese: 你好世界
+
+Japanese: こんにちは世界
+
+Russian: Привет мир
+
+Arabic: مرحبا بالعالم
+
+== Edge Cases ==
+
+=== Empty Elements ===
+
+[[]]
+
+{{}}
+
+=== Long Lines ===
+
+This is a very long line that should be wrapped appropriately when rendered. It contains multiple words and should demonstrate how the parser handles long continuous text without any special formatting or line breaks in the middle of the content.
+
+=== Multiple Consecutive Markup ===
+
+'''Bold''' followed by ''italic'' followed by '''bold again'''.
+
+[[Link1]] followed by [[Link2]] followed by [[Link3|Custom text]].
+
+{{Template1}} followed by {{Template2}} followed by {{Template3|param}}.
+
+=== Nested Templates with Links ===
+
+{{template with [[internal link]] and [https://example.com external link]}}
+
+=== Complex Table with All Features ===
+
+{| class="wikitable" border="1"
+|-
+! colspan="3" | Table Header Spanning 3 Columns
+|-
+! Name !! Description !! Links
+|-
+| '''Bold Name''' || ''Italic description'' with [[internal link]] || [https://example.com External]
+|-
+| {{template|parameter}} || <nowiki>Code example</nowiki> || [[Category:Example]]
+|-
+| Multi-line<br>content || Content with<br>line breaks || Multiple [[Link1|links]] and [[Link2]]
+|}
+
+== Conclusion ==
+
+This document covers most common MediaWiki syntax elements including:
+
+* Headers (levels 1-6)
+* Text formatting (bold, italic, combined)
+* Lists (ordered, unordered, definition, indented, nested)
+* Links (internal, external, with custom text)
+* Tables (basic, with headers, complex formatting)
+* Templates (simple, with parameters, nested)
+* Code and preformatted text (nowiki, pre, code tags)
+* HTML elements and entities
+* Magic words and parser functions
+* Categories and file links
+* Special characters and internationalization
+* Edge cases and complex nested structures
+
+----
+
+''End of MediaWiki test document''

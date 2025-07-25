@@ -15,6 +15,8 @@ void parse_html(Input* input, const char* html_string);
 void parse_latex(Input* input, const char* latex_string);
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
+void parse_mediawiki(Input* input, const char* mediawiki_string);
+
 
 String* strbuf_to_string(StrBuf *sb) {
     String *string = (String*)sb->str;
@@ -170,6 +172,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(type->chars, "pdf") == 0) {
             parse_pdf(input, source);
+        }
+        else if (strcmp(type->chars, "wiki") == 0) {
+            parse_mediawiki(input, source);
         }
         else {
             printf("Unknown input type: %s\n", type->chars);
