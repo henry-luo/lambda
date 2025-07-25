@@ -216,7 +216,7 @@ struct Map {
 
 struct Element {
     List;  // extends List for content
-    // attributes
+    // attributes map
     void* type;  // attr type/shape
     void* data;  // packed data struct of the attrs
     int data_cap;  // capacity of the data struct

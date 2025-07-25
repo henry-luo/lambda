@@ -88,13 +88,13 @@ typedef struct Context {
 
 // Array and List struct defintions needed for for-loop
 typedef struct Container {
-    uint8_t type_id;
+    TypeId type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
 } Container;
 
 typedef struct Range {
-    uint8_t type_id;
+    TypeId type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
     // --------
@@ -107,7 +107,7 @@ Range* range();
 long range_get(Range *range, int index);
 
 typedef struct List {
-    uint8_t type_id;
+    TypeId type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
     // --------
@@ -125,7 +125,7 @@ Item list_get(List *list, int index);
 typedef struct List Array;
 
 typedef struct ArrayLong {
-    uint8_t type_id;
+    TypeId type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
     // --------

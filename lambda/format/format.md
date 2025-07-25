@@ -82,19 +82,240 @@ else if (strcmp(type->chars, "<name>") == 0) {
     result = format_<name>(ctx->heap->pool, item);
 }
 ```
-## Critical Lessons from YAML and TOML Formatter Development
+## Critical Lessons from TOML Formatter Rewrite
 
-### Direct Traversal vs JSON Intermediate
+### Safe Lambda Data Structure Traversal
 
-**Key Insight**: The approach should match the output format requirements, not be driven by implementation convenience.
+The TOML formatter rewrite revealed critical insights about preventing code hangs and safely traversing Lambda data structures:
 
-**For Non-JSON Formats**: Use direct traversal for proper format-specific output structure.
-- **YAML Example**: Requires specific indentation, array bullets (`-`), and field separators (`:`)
-- **XML Example**: Requires element tags, attributes, and hierarchical structure
-- **TOML Example**: Requires key-value pairs, sections, and TOML-specific syntax
-- **Solution**: Implement `format_<type>_item()` that handles each Lambda data type appropriately
+#### 1. Proper Type Identification and Extraction
 
-**For JSON-like Formats**: `print_named_items()` may be appropriate only if the output closely matches JSON structure.
+**Root Cause of Hangs**: Incorrect type identification and data extraction methods.
+
+**The Lambda Type System Challenge**: Lambda uses a mixed type system where some types store values directly in the Item, while others store pointers. Misunderstanding this leads to crashes and infinite loops.
+
+**Safe Type Extraction Pattern**:
+```c
+// 1. Always extract type ID first via bit shifting
+TypeId type = (TypeId)(item >> 56);
+
+// 2. Use appropriate extraction method based on type category
+switch (type) {
+    case LMD_TYPE_BOOL:
+    case LMD_TYPE_INT:
+        // Packed types - value stored directly in item
+        bool val = get_bool_value(item);
+        int64_t val = get_int_value(item);
+        break;
+        
+    case LMD_TYPE_STRING:
+    case LMD_TYPE_FLOAT:
+        // Packed pointer types - use get_pointer()
+        String* str = (String*)get_pointer(item);
+        double* dptr = (double*)get_pointer(item);
+        break;
+        
+    case LMD_TYPE_ARRAY:
+    case LMD_TYPE_MAP:
+        // Pure pointer types - item IS the pointer
+        Array* arr = (Array*)item;
+        Map* map = (Map*)item;
+        break;
+}
+```
+
+#### 2. Robust Field Count and Loop Termination
+
+**Critical Insight**: Field count mismatches and infinite loops were major hang sources.
+
+**Safe ShapeEntry Traversal Pattern**:
+```c
+static void format_toml_attrs_from_shape(StrBuf* sb, TypeMap* type_map, void* data, const char* parent_name) {
+    if (!type_map || !type_map->shape || !data) {
+        return;  // Critical: Always validate pointers
+    }
+    
+    ShapeEntry* shape_entry = type_map->shape;
+    int field_count = 0;
+    
+    // Triple safety: field pointer + counter + reasonable limit
+    while (shape_entry && field_count < 56) {  // 56 matches expected max field count
+        if (shape_entry->name && shape_entry->name->str && shape_entry->name->length > 0) {
+            // Safe data extraction with validation
+            void* field_data = ((char*)data) + shape_entry->byte_offset;
+            TypeId field_type = shape_entry->type->type_id;
+            
+            // Process field safely...
+        }
+        
+        // Critical: Always advance both pointer and counter
+        shape_entry = shape_entry->next;
+        field_count++;
+    }
+}
+```
+
+#### 3. Recursive Depth Limiting with Context Preservation
+
+**Key Learning**: The TOML formatter needed to handle nested sections like `[database.credentials]` while preventing infinite recursion.
+
+**Safe Recursive Pattern with Parent Context**:
+```c
+static void format_toml_attrs_from_shape(StrBuf* sb, TypeMap* type_map, void* data, 
+                                       const char* parent_name) {
+    // Implicit depth limiting through parent_name chain length
+    if (!type_map || !type_map->shape || !data) return;
+    
+    // For nested maps that should become table sections
+    if (should_format_as_table_section) {
+        // Build full section name with parent context
+        char full_section_name[256];  // Fixed buffer prevents runaway allocation
+        if (parent_name && strlen(parent_name) > 0) {
+            snprintf(full_section_name, sizeof(full_section_name), "%s.%.*s", 
+                parent_name, (int)shape_entry->name->length, shape_entry->name->str);
+        } else {
+            snprintf(full_section_name, sizeof(full_section_name), "%.*s", 
+                (int)shape_entry->name->length, shape_entry->name->str);
+        }
+        
+        // Recursive call with full context - depth naturally limited by string length
+        format_toml_attrs_from_shape(sb, map_type_map, map->data, full_section_name);
+    }
+}
+```
+
+#### 4. Fallback Logic and Type Validation
+
+**Major Insight**: The TOML formatter required robust fallback logic when type detection fails.
+
+**Enhanced Type Detection with Fallbacks**:
+```c
+case LMD_TYPE_ARRAY: {
+    Array* arr = (Array*)get_pointer(field_value);
+    if (arr && arr->length > 0 && arr->length < 1000 && arr->items != NULL) {
+        // Process valid array
+        for (long i = 0; i < arr->length && i < 10; i++) {
+            Item item = arr->items[i];
+            TypeId item_type = (TypeId)(item >> 56);
+            
+            // Handle each item with type validation
+            switch (item_type) {
+                case LMD_TYPE_STRING:
+                case LMD_TYPE_INT:
+                case LMD_TYPE_BOOL:
+                case LMD_TYPE_FLOAT:
+                    // Handle known types
+                    break;
+                default: {
+                    // Enhanced fallback for untyped items
+                    void* item_ptr = get_pointer(item);
+                    
+                    // Try array interpretation with validation
+                    Array* potential_array = (Array*)item_ptr;
+                    if (potential_array && 
+                        potential_array->length > 0 && 
+                        potential_array->length < 1000 && 
+                        potential_array->items != NULL) {
+                        
+                        // Validate first item to ensure array structure is reasonable
+                        Item first_test = potential_array->items[0];
+                        if ((first_test & 0xFF00000000000000ULL) != 0xFF00000000000000ULL) {
+                            // Process as nested array
+                        }
+                    }
+                    
+                    // Try map interpretation
+                    Map* potential_map = (Map*)item_ptr;
+                    if (potential_map && potential_map->type && potential_map->data) {
+                        // Process as inline table
+                    }
+                    
+                    // Final fallback
+                    strbuf_append_format(sb, "\"[type_%d]\"", (int)item_type);
+                    break;
+                }
+            }
+        }
+    } else {
+        strbuf_append_str(sb, "[]");  // Safe empty array fallback
+    }
+    break;
+}
+```
+
+#### 5. Memory Safety and Pointer Validation
+
+**Critical Pattern**: Always validate pointers before dereferencing, especially in complex nested structures.
+
+**Safe Pointer Validation**:
+```c
+// Always validate pointer chains
+Map* map = *(Map**)field_data;
+if (map && map->type && map->data) {
+    TypeMap* map_type_map = (TypeMap*)map->type;
+    if (map_type_map->length > 0 && map_type_map->shape) {
+        // Safe to process
+    }
+}
+
+// Validate string pointers
+String* str = *(String**)field_data;
+if (str && str->len > 0) {
+    // Safe to access str->chars
+} else {
+    // Safe fallback
+    strbuf_append_str(sb, "\"\"");
+}
+```
+
+#### 6. Format-Specific Decision Logic
+
+**TOML-Specific Learning**: The formatter needed intelligent decisions about when to format maps as table sections vs inline tables.
+
+**Smart Formatting Decisions**:
+```c
+// Criteria for table section formatting
+bool should_format_as_table_section = false;
+if (map_type_map->length >= 3) {  // 3 or more fields
+    should_format_as_table_section = true;
+} else {
+    // Check for complex content (arrays or nested maps) even with fewer fields
+    ShapeEntry* check_shape = map_type_map->shape;
+    int check_count = 0;
+    while (check_shape && check_count < map_type_map->length) {
+        if (check_shape->type && 
+            (check_shape->type->type_id == LMD_TYPE_ARRAY || 
+             check_shape->type->type_id == LMD_TYPE_MAP)) {
+            should_format_as_table_section = true;
+            break;
+        }
+        check_shape = check_shape->next;
+        check_count++;
+    }
+}
+```
+
+### Anti-Patterns That Cause Hangs
+
+Based on the TOML formatter debugging experience:
+
+1. **Wrong Type Extraction**: Using `get_pointer()` on pure pointer types like arrays/maps
+2. **Missing Pointer Validation**: Not checking if pointers are valid before dereferencing
+3. **Infinite Field Traversal**: Not checking both field pointer AND counter in loops
+4. **Unlimited Recursion**: No depth limiting in recursive functions
+5. **Invalid Array Processing**: Not validating array structure before iteration
+6. **Memory Access Violations**: Dereferencing invalid pointers in complex nested structures
+
+### Debugging Techniques That Work
+
+**Essential for preventing hangs**:
+
+1. **Incremental Testing**: Start with simple data, gradually add complexity
+2. **Timeout Testing**: Always use `timeout 10s` during development
+3. **Pointer Validation Logging**: Log pointer values before dereferencing
+4. **Type ID Logging**: Log extracted type IDs to verify correct extraction
+5. **Field Count Monitoring**: Log field counts vs expected counts
+6. **Memory Pool Monitoring**: Watch for "Block not found in free list" warnings
 
 ### Lambda Type System: Packed vs Pointer Types
 
