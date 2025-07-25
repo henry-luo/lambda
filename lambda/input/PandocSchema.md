@@ -52,8 +52,8 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       "an inline " <code language:python "print(\"Hello\")"> ", and a citation "
       <cite
         <citations
-          <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, note_num:1, hash:0>
-          <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, note_num:2, hash:1>
+          <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, 'note-num':1, hash:0>
+          <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, 'note-num':2, hash:1>
         >
       >
       ". A " <a href:"http://example.com", title:Example "link"> " and " <img src:"inline.jpg", alt:"Inline image", width:50> " are included, "
@@ -357,7 +357,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
     - `prefix`: String, optional, text before citation (e.g., "see ").
     - `suffix`: String, optional, text after citation (e.g., ", p. 15").
     - `mode`: String, required, citation mode ("NormalCitation", "AuthorInText", "SuppressAuthor").
-    - `note_num`: Integer, optional, footnote number for citations in notes.
+    - `'note-num'`: Integer, optional, footnote number for citations in notes.
     - `hash`: Integer, optional, unique hash for citation instance.
   - **Purpose**: Represents a single citation with Pandoc’s attributes.
   - **Content**: None (empty element).
@@ -402,7 +402,7 @@ The Mark schema is designed to represent document structures from Markdown, wiki
   - `id`: Links to a reference.
   - `prefix`, `suffix`: Contextual text (e.g., "see [Smith, 2020, p. 15]").
   - `mode`: Citation style ("NormalCitation", "AuthorInText", "SuppressAuthor").
-  - `note_num`: Footnote number for note-based citations.
+  - `'note-num'`: Footnote number for note-based citations.
   - `hash`: Unique identifier for citation instances.
 - **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage.
 
