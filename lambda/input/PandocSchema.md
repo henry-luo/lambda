@@ -1,156 +1,154 @@
-# Pandoc XML Schema Documentation
+# Pandoc Mark Schema Documentation
 
-This document provides a comprehensive XML schema for representing document structures from Markdown, wiki, and HTML inputs, based on Pandoc’s Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible and uses custom XML tags for Pandoc-specific features, supporting document transformation and validation. It includes all Pandoc formatting options, such as citations, math, figures, and code blocks, with detailed attribute documentation and examples of all block and inline elements.
+This document provides a comprehensive Mark schema for representing document structures from Markdown, wiki, and HTML inputThe schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom Mark tags for Pandoc-specific features (e.g., `<cite>`, `<math>`). Attributes reflect Pandoc's AST `Attr` type (identifier, classes, key-value pairs) and HTML attributes. Belo- **Attribute Structure**: Reflects Pandoc's `Attr` type (identifier, classes, key-value pairs) and HTML attributes for flexibility. Class attributes can be single strings for one class or arrays for multiple classes (e.g., `class:['section', 'main']`). Below is a detailed list of all elements and their attributes., based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible and uses custom Mark tags for Pandoc-specific features, supporting document transformation and validation. It includes all Pandoc formatting options, such as citations, math, figures, and code blocks, with detailed attribute documentation and examples of all block and inline elements.
 
-## XML Schema
+## Mark Schema
 
-Below is the complete XML schema sample, illustrating all Pandoc AST block and inline elements, including code, citations, math, and figures.
+Below is the complete Mark schema sample, illustrating all Pandoc AST block and inline elements, including code, citations, math, and figures.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- XML Schema for Pandoc AST with HTML elements, illustrating all block and inline elements -->
-<pandoc version="1.0">
-  <!-- Metadata section for document properties -->
-  <meta>
-    <!-- Field for key-value metadata -->
-    <field name="title" type="string">
-      <inlines>
-        <str>Comprehensive Pandoc Document</str>
-     {IC0
-      </inlines>
-    </field>
-    <field name="author" type="string">
-      <inlines>
-        <str>John Doe</str>
-      </inlines>
-    </field>
-    <field name="date" type="string">
-      <inlines>
-        <str>2025-07-25</str>
-      </inlines>
-    </field>
-    <!-- References for citations -->
-    <field name="references" type="list">
-      <inlines>
-        <reference id="smith2020" type="book">
-          <str>Smith, J. (2020). Understanding Pandoc. Academic Press.</str>
-        </reference>
-        <reference id="jones2021" type="article">
-          <str>Jones, A. (2021). Document Transformation. Journal of Docs, 12(3), 45-60.</str>
-        </reference>
-      </inlines>
-    </field>
-  </meta>
-  <!-- Document body with block-level elements -->
-  <body>
-    <!-- Header (level 1 to 6) -->
-    <h1 id="intro" class="section main" level="1" data-custom="value">Introduction</h1>
-    <h2 id="subintro" class="subsection" level="2">Subsection</h2>
-    <!-- Paragraph (Para) with various inline elements -->
-    <p id="p1" class="text">
-      This paragraph includes <em>emphasized</em>, <strong>strong</strong>, <s>strikethrough</s>,
-      <sup>superscript</sup>, <sub>subscript</sub>, and <span style="font-variant: small-caps;">small caps</span> text.
-      It also has a <q type="double">double-quoted</q> and <q type="single">single-quoted</q> phrase,
-      an inline <code language="python">print("Hello")</code>, and a citation 
-      <cite>
-        <citations>
-          <citation id="smith2020" prefix="see " suffix=", p. 15" mode="NormalCitation" note-num="1" hash="0"/>
-          <citation id="jones2021" prefix="" suffix="" mode="AuthorInText" note-num="2" hash="1"/>
-        </citations>
-      </cite>.
-      A <a href="http://example.com" title="Example">link</a> and <img src="inline.jpg" alt="Inline image" width="50"/> are included,
-      with a <br/> line break and <note id="note2"><p>Inline footnote</p></note>.
-    </p>
-    <!-- Plain (similar to Para, without paragraph styling) -->
-    <p id="p2" class="plain">Plain text with <em>minimal</em> formatting.</p>
-    <!-- LineBlock for poetry or addresses -->
-    <line-block id="poem1">
-      <line><str>Roses are red</str><em> with emphasis</em></line>
-      <line><str>Violets are blue</str></line>
-    </line-block>
-    <!-- CodeBlock -->
-    <pre id="code1" class="sourceCode"><code language="python" data-executable="true">
-def greet(name):
-    return f"Hello, {name}!"
-print(greet("World"))
-    </code></pre>
-    <!-- RawBlock -->
-    <raw format="html" id="raw1"><div class="custom">Raw HTML content</div></raw>
-    <!-- BlockQuote -->
-    <blockquote id="quote1" class="quote">
-      <p>Quoted text with <strong>emphasis</strong>.</p>
-    </blockquote>
-    <!-- OrderedList with different attributes -->
-    <ol id="list1" start="1" type="1" class="numbered" delim="period" style="decimal">
-      <li><p>Item 1</p></li>
-      <li><p>Item 2 with <strong>strong</strong> text</p></li>
-    </ol>
-    <ol id="list2" start="2" type="A" class="lettered" delim="paren" style="upper-alpha">
-      <li><p>Item A</p></li>
-      <li><p>Item B</p></li>
-    </ol>
-    <!-- BulletList -->
-    <ul id="list3" class="bulleted">
-      <li><p>Bullet item A</p></li>
-      <li><p>Bullet item B with <code>code</code></p></li>
-    </ul>
-    <!-- DefinitionList -->
-    <dl id="deflist1">
-      <dt><str>Term 1</str></dt>
-      <dd><p>Definition with <a href="http://example.com">link</a>.</p></dd>
-      <dt><str>Term 2</str></dt>
-      <dd><p>Another definition.</p></dd>
-    </dl>
-    <!-- HorizontalRule -->
-    <hr id="hr1" class="separator"/>
-    <!-- Table with alignment and width -->
-    <table id="table1" class="data">
-      <caption><str>Sample Table</str></caption>
-      <colgroup>
-        <col align="left" width="50%"/>
-        <col align="center" width="50%"/>
-      </colgroup>
-      <thead>
-        <tr>
-          <th align="left"><p>Header 1</p></th>
-          <th align="center"><p>Header 2</p></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td align="left"><p>Cell 1 with <em>emphasis</em></p></td>
-          <td align="center"><p>Cell 2</p></td>
-        </tr>
-      </tbody>
-    </table>
-    <!-- Div with nested content -->
-    <div id="section1" class="section" data-role="container">
-      <p>Content in a div with <sub>subscript</sub> and a <raw format="latex">\textbf{bold}</raw> LaTeX element.</p>
-    </div>
-    <!-- Figure with image and caption -->
-    <figure id="fig1" class="image">
-      <img src="image.jpg" alt="Sample image" title="Image" width="300" height="200"/>
-      <figcaption><str>Figure 1: Sample image with </str><em>caption</em></figcaption>
-    </figure>
-    <!-- Footnote -->
-    <note id="note1">
-      <p>Footnote content with <strong>strong</strong> text.</p>
-    </note>
-    <!-- Math (display and inline) -->
-    <math type="display" id="math1">
-      \[ E = mc^2 \]
-    </math>
-    <p>Inline math: <math type="inline" id="math2">\( x^2 + y^2 = z^2 \)</math>.</p>
-  </body>
-</pandoc>
+```mark
+// Mark Schema for Pandoc AST with HTML elements, illustrating all block and inline elements
+<doc version:'1.0'
+  // Metadata section for document properties
+  <meta
+    // Field for key-value metadata
+    <field name:title, type:string
+      <inlines
+        <str "Comprehensive Pandoc Document">
+      >
+    >
+    <field name:author, type:string
+      <inlines
+        <str "John Doe">
+      >
+    >
+    <field name:date, type:string
+      <inlines
+        <str "2025-07-25">
+      >
+    >
+    // References for citations
+    <field name:references, type:list
+      <inlines
+        <reference id:smith2020, type:book
+          <str "Smith, J. (2020). Understanding Pandoc. Academic Press.">
+        >
+        <reference id:jones2021, type:article
+          <str "Jones, A. (2021). Document Transformation. Journal of Docs, 12(3), 45-60.">
+        >
+      >
+    >
+  >
+  // Document body with block-level elements
+  <body
+    // Header (level 1 to 6)
+    <h1 id:intro, class:['section', 'main'], level:1, data-custom:value "Introduction">
+    <h2 id:subintro, class:subsection, level:2 "Subsection">
+    // Paragraph (Para) with various inline elements
+    <p id:p1, class:text
+      "This paragraph includes " <em "emphasized"> ", " <strong "strong"> ", " <s "strikethrough"> ", "
+      <sup "superscript"> ", " <sub "subscript"> ", and " <span style:"font-variant: small-caps;" "small caps"> " text. "
+      "It also has a " <q type:double "double-quoted"> " and " <q type:single "single-quoted"> " phrase, "
+      "an inline " <code language:python "print(\"Hello\")"> ", and a citation "
+      <cite
+        <citations
+          <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, note-num:1, hash:0>
+          <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, note-num:2, hash:1>
+        >
+      >
+      ". A " <a href:"http://example.com", title:Example "link"> " and " <img src:"inline.jpg", alt:"Inline image", width:50> " are included, "
+      "with a " <br> " line break and " <note id:note2 <p "Inline footnote">> "."
+    >
+    // Plain (similar to Para, without paragraph styling)
+    <p id:p2, class:plain "Plain text with " <em "minimal"> " formatting.">
+    // LineBlock for poetry or addresses
+    <line-block id:poem1
+      <line <str "Roses are red"> <em " with emphasis">>
+      <line <str "Violets are blue">>
+    >
+    // CodeBlock
+    <pre id:code1, class:sourceCode
+      <code language:python, data-executable:true
+        "def greet(name):\n    return f\"Hello, {name}!\"\nprint(greet(\"World\"))"
+      >
+    >
+    // RawBlock
+    <raw format:html, id:raw1 "<div class=\"custom\">Raw HTML content</div>">
+    // BlockQuote
+    <blockquote id:quote1, class:quote
+      <p "Quoted text with " <strong "emphasis"> ".">
+    >
+    // OrderedList with different attributes
+    <ol id:list1, start:1, type:1, class:numbered, delim:period, style:decimal
+      <li <p "Item 1">>
+      <li <p "Item 2 with " <strong "strong"> " text">>
+    >
+    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:upper-alpha
+      <li <p "Item A">>
+      <li <p "Item B">>
+    >
+    // BulletList
+    <ul id:list3, class:bulleted
+      <li <p "Bullet item A">>
+      <li <p "Bullet item B with " <code "code">>>
+    >
+    // DefinitionList
+    <dl id:deflist1
+      <dt <str "Term 1">>
+      <dd <p "Definition with " <a href:"http://example.com" "link"> ".">>
+      <dt <str "Term 2">>
+      <dd <p "Another definition.">>
+    >
+    // HorizontalRule
+    <hr id:hr1, class:separator>
+    // Table with alignment and width
+    <table id:table1, class:data
+      <caption <str "Sample Table">>
+      <colgroup
+        <col align:left, width:"50%">
+        <col align:center, width:"50%">
+      >
+      <thead
+        <tr
+          <th align:left <p "Header 1">>
+          <th align:center <p "Header 2">>
+        >
+      >
+      <tbody
+        <tr
+          <td align:left <p "Cell 1 with " <em "emphasis">>>
+          <td align:center <p "Cell 2">>
+        >
+      >
+    >
+    // Div with nested content
+    <div id:section1, class:['section', 'container'], data-role:container
+      <p "Content in a div with " <sub "subscript"> " and a " <raw format:latex "\\textbf{bold}"> " LaTeX element.">
+    >
+    // Figure with image and caption
+    <figure id:fig1, class:image
+      <img src:"image.jpg", alt:"Sample image", title:Image, width:300, height:200>
+      <figcaption <str "Figure 1: Sample image with "> <em "caption">>
+    >
+    // Footnote
+    <note id:note1
+      <p "Footnote content with " <strong "strong"> " text.">
+    >
+    // Math (display and inline)
+    <math type:display, id:math1
+      "\\[ E = mc^2 \\]"
+    >
+    <p "Inline math: " <math type:inline, id:math2 "\\( x^2 + y^2 = z^2 \\)"> ".">
+  >
+>
 ```
 
 ## Element and Attribute Documentation
 
-The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom XML tags for Pandoc-specific features (e.g., `<cite>`, `<math>`). Attributes reflect Pandoc’s AST `Attr` type (identifier, classes, key-value pairs) and HTML attributes. Below is a detailed list of all elements and their attributes.
+The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom element for Pandoc-specific features (e.g., `<cite>`, `<math>`). Attributes reflect Pandoc’s AST `Attr` type (identifier, classes, key-value pairs) and HTML attributes. Below is a detailed list of all elements and their attributes.
 
 ### Root Element
-- **`<pandoc>`**
+- **`<doc>`**
   - **Attributes**:
     - `version`: String, schema version (e.g., "1.0").
   - **Purpose**: Root element containing metadata and body.
@@ -178,12 +176,12 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom XM
 - **`<p>`** (Para, Plain)
   - **Attributes**:
     - `id`: String, optional, unique identifier.
-    - `class`: Space-separated strings, optional, CSS classes (e.g., "text").
+    - `class`: Array of strings, optional, CSS classes (e.g., `['text', 'content']`).
     - `data-*`: Custom key-value pairs, optional, for metadata.
   - **Purpose**: Paragraphs or plain text blocks.
   - **Content**: Inline elements.
 - **`<line-block>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class` (array format for multiple classes), `data-*` (same as `<p>`).
   - **Purpose**: Groups lines for poetry or addresses.
   - **Content**: One or more `<line>` elements.
 - **`<line>`**
@@ -191,7 +189,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom XM
   - **Purpose**: A single line within `<line-block>`.
   - **Content**: Inline elements.
 - **`<pre>`**
-  - **Attributes**: `id`, `class`, `data-*` (same as `<p>`).
+  - **Attributes**: `id`, `class` (array format for multiple classes), `data-*` (same as `<p>`).
   - **Purpose**: Wraps `<code>` for code blocks.
   - **Content**: `<code>` element.
 - **`<code>`** (within `<pre>`)
@@ -394,16 +392,16 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom XM
 ## Overall Notes
 
 ### Purpose
-The XML schema is designed to represent document structures from Markdown, wiki, and HTML inputs, leveraging Pandoc’s AST for semantic richness and HTML elements for web compatibility. It supports document transformation (e.g., Markdown to HTML) and validation, ensuring structural integrity across formats.
+The Mark schema is designed to represent document structures from Markdown, wiki, and HTML inputs, leveraging Pandoc’s AST for semantic richness and HTML elements for web compatibility. It supports document transformation (e.g., Markdown to HTML) and validation, ensuring structural integrity across formats.
 
 ### Design Principles
 - **HTML Priority**: Uses HTML elements (e.g., `<p>`, `<h1>`, `<a>`) for familiar structures, enhancing compatibility with web-based workflows.
-- **Pandoc AST Fallback**: Custom XML tags (e.g., `<cite>`, `<math>`) are used for Pandoc-specific features without direct HTML equivalents.
+- **Pandoc AST Fallback**: Custom Mark tags (e.g., `<cite>`, `<math>`) are used for Pandoc-specific features without direct HTML equivalents.
 - **Comprehensive Coverage**: Includes all Pandoc formatting options (citations, math, figures, code blocks) with detailed attributes, illustrating every block and inline element.
 - **Attribute Structure**: Reflects Pandoc’s `Attr` type (identifier, classes, key-value pairs) and HTML attributes for flexibility.
 
 ### Citation System
-- **Structure**: Citations use `<cite><citations><citation>...</citation></citations></cite>`, with each `<citation>` referencing a `<reference>` in `<meta><field name="references">` via `id`.
+- **Structure**: Citations use `<cite <citations <citation>...> >`, with each `<citation>` referencing a `<reference>` in `<meta <field name:references>` via `id`.
 - **Attributes**:
   - `id`: Links to a reference.
   - `prefix`, `suffix`: Contextual text (e.g., "see [Smith, 2020, p. 15]").
@@ -421,5 +419,6 @@ The XML schema is designed to represent document structures from Markdown, wiki,
 ### References
 - [Pandoc API Documentation](https://pandoc.org/using-the-pandoc-api.html)
 - [Pandoc Types Documentation](https://hackage.haskell.org/package/pandoc-types/docs/Text-Pandoc-Definition.html)
+- [Mark Notation](https://github.com/henry-luo/mark) - The unified notation for both object and markup data used in this schema
 
 This Markdown document can be downloaded and rendered using tools like Pandoc to generate HTML, PDF, or other formats.
