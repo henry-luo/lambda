@@ -1311,7 +1311,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_rst_content(Input *input, char** lines, int line_count) {
-    // Create the root document element according to PandocSchema
+    // Create the root document element according to schema
     Element* doc = create_rst_element(input, "doc");
     if (!doc) return ITEM_NULL;
     
@@ -1321,6 +1321,10 @@ static Item parse_rst_content(Input *input, char** lines, int line_count) {
     // Create meta element for metadata
     Element* meta = create_rst_element(input, "meta");
     if (!meta) return (Item)doc;
+    
+    // Add basic metadata attributes
+    add_attribute_to_element(input, meta, "title", "reStructuredText Document");
+    add_attribute_to_element(input, meta, "language", "en");
     
     // Add meta to doc
     list_push((List*)doc, (Item)meta);
