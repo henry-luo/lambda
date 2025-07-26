@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 #include <lexbor/url/url.h>
 #include "mime-detect.h"
 
@@ -160,6 +160,181 @@ static const char* mime_to_parser_type(const char* mime_type) {
     
     // Default fallback
     return "text";
+}
+
+// Common utility functions for input parsers
+void input_skip_whitespace(const char **text) {
+    while (**text && (**text == ' ' || **text == '\n' || **text == '\r' || **text == '\t')) {
+        (*text)++;
+    }
+}
+
+bool input_is_whitespace_char(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+bool input_is_empty_line(const char* line) {
+    while (*line) {
+        if (!isspace(*line)) return false;
+        line++;
+    }
+    return true;
+}
+
+int input_count_leading_chars(const char* str, char ch) {
+    int count = 0;
+    while (str[count] == ch) count++;
+    return count;
+}
+
+char* input_trim_whitespace(const char* str) {
+    if (!str) return NULL;
+    
+    // Find start
+    while (isspace(*str)) str++;
+    
+    if (*str == '\0') return strdup("");
+    
+    // Find end
+    const char* end = str + strlen(str) - 1;
+    while (end > str && isspace(*end)) end--;
+    
+    // Create trimmed copy
+    int len = end - str + 1;
+    char* result = malloc(len + 1);
+    strncpy(result, str, len);
+    result[len] = '\0';
+    
+    return result;
+}
+
+String* input_create_string(Input *input, const char* text) {
+    if (!text) return NULL;
+    strbuf_reset(input->sb);
+    strbuf_append_str(input->sb, text);
+    return strbuf_to_string(input->sb);
+}
+
+char** input_split_lines(const char* text, int* line_count) {
+    *line_count = 0;
+    
+    if (!text) {
+        return NULL;
+    }
+    
+    // Count lines
+    const char* ptr = text;
+    while (*ptr) {
+        if (*ptr == '\n') (*line_count)++;
+        ptr++;
+    }
+    if (ptr > text && *(ptr-1) != '\n') {
+        (*line_count)++; // Last line without \n
+    }
+    
+    if (*line_count == 0) {
+        return NULL;
+    }
+    
+    // Allocate array
+    char** lines = malloc(*line_count * sizeof(char*));
+    
+    // Split into lines
+    int line_index = 0;
+    const char* line_start = text;
+    ptr = text;
+    
+    while (*ptr && line_index < *line_count) {
+        if (*ptr == '\n') {
+            int len = ptr - line_start;
+            lines[line_index] = malloc(len + 1);
+            strncpy(lines[line_index], line_start, len);
+            lines[line_index][len] = '\0';
+            line_index++;
+            line_start = ptr + 1;
+        }
+        ptr++;
+    }
+    
+    // Handle last line if it doesn't end with newline
+    if (line_index < *line_count && line_start < ptr) {
+        int len = ptr - line_start;
+        lines[line_index] = malloc(len + 1);
+        strncpy(lines[line_index], line_start, len);
+        lines[line_index][len] = '\0';
+        line_index++;
+    }
+    
+    // Adjust line count to actual lines created
+    *line_count = line_index;
+    
+    return lines;
+}
+
+void input_free_lines(char** lines, int line_count) {
+    if (!lines) return;
+    for (int i = 0; i < line_count; i++) {
+        free(lines[i]);
+    }
+    free(lines);
+}
+
+Element* input_create_element(Input *input, const char* tag_name) {
+    Element* element = elmt_pooled(input->pool);
+    if (!element) return NULL;
+    
+    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!element_type) return element;
+    
+    element->type = element_type;
+    
+    // Set element name
+    String* name_str = input_create_string(input, tag_name);
+    if (name_str) {
+        element_type->name.str = name_str->chars;
+        element_type->name.length = name_str->len;
+    }
+    
+    // Initialize with no attributes
+    element->data = NULL;
+    element->data_cap = 0;
+    element_type->shape = NULL;
+    element_type->length = 0;
+    element_type->byte_size = 0;
+    element_type->content_length = 0;
+    
+    arraylist_append(input->type_list, element_type);
+    element_type->type_index = input->type_list->length - 1;
+    
+    return element;
+}
+
+void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
+    TypeElmt *element_type = (TypeElmt*)element->type;
+    
+    // Create key and value strings
+    String* key = input_create_string(input, attr_name);
+    String* value = input_create_string(input, attr_value);
+    if (!key || !value) return;
+    
+    // Always create a fresh map structure
+    Map* attr_map = map_pooled(input->pool);
+    if (!attr_map) return;
+    
+    // Initialize the map type
+    TypeMap* map_type = map_init_cap(attr_map, input->pool);
+    if (!map_type) return;
+    
+    // Just add the new attribute (don't try to copy existing ones for now)
+    LambdaItem lambda_value = (LambdaItem)s2it(value);
+    map_put(attr_map, map_type, key, lambda_value, input->pool);
+    
+    // Update element with the new map data
+    element->data = attr_map->data;
+    element->data_cap = attr_map->data_cap;
+    element_type->shape = map_type->shape;
+    element_type->length = map_type->length;
+    element_type->byte_size = map_type->byte_size;
 }
 
 Input* input_data(Context* ctx, String* url, String* type) {

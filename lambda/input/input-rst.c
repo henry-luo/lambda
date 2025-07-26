@@ -1,6 +1,6 @@
-#include "../transpiler.h"
+#include "input.h"
 
-// forward declarations
+// Forward declarations
 static Item parse_rst_content(Input *input, char** lines, int line_count);
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines);
 static Item parse_inline_content(Input *input, const char* text);
@@ -10,120 +10,23 @@ static Item parse_grid_table(Input *input, char** lines, int* current_line, int 
 static bool is_heading_underline(const char* line, char* marker);
 static bool is_table_separator(const char* line);
 static bool is_grid_table_line(const char* line);
-static Element* create_rst_element(Input *input, const char* tag_name);
-static void add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
 
-// utility functions
-static void skip_whitespace(const char **text) {
-    while (**text && (**text == ' ' || **text == '\n' || **text == '\r' || **text == '\t')) {
-        (*text)++;
-    }
-}
-
-static bool is_whitespace_char(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
-
-static bool is_empty_line(const char* line) {
-    while (*line) {
-        if (!isspace(*line)) return false;
-        line++;
-    }
-    return true;
-}
-
-static int count_leading_chars(const char* str, char ch) {
-    int count = 0;
-    while (str[count] == ch) count++;
-    return count;
-}
+// Use common utility functions from input.c
+#define skip_whitespace input_skip_whitespace
+#define is_whitespace_char input_is_whitespace_char
+#define is_empty_line input_is_empty_line
+#define count_leading_chars input_count_leading_chars
+#define trim_whitespace input_trim_whitespace
+#define create_string input_create_string
+#define split_lines input_split_lines
+#define free_lines input_free_lines
+#define create_rst_element input_create_element
+#define add_attribute_to_element input_add_attribute_to_element
 
 static int count_leading_spaces(const char* str) {
     int count = 0;
     while (str[count] == ' ') count++;
     return count;
-}
-
-static char* trim_whitespace(const char* str) {
-    if (!str) return NULL;
-    
-    // find start
-    while (isspace(*str)) str++;
-    
-    if (*str == '\0') return strdup("");
-    
-    // find end
-    const char* end = str + strlen(str) - 1;
-    while (end > str && isspace(*end)) end--;
-    
-    // create trimmed copy
-    int len = end - str + 1;
-    char* result = malloc(len + 1);
-    strncpy(result, str, len);
-    result[len] = '\0';
-    
-    return result;
-}
-
-static String* create_string(Input *input, const char* text) {
-    if (!text) return NULL;
-    strbuf_append_str(input->sb, text);
-    return strbuf_to_string(input->sb);
-}
-
-static char** split_lines(const char* text, int* line_count) {
-    *line_count = 0;
-    
-    // count lines
-    const char* ptr = text;
-    while (*ptr) {
-        if (*ptr == '\n') (*line_count)++;
-        ptr++;
-    }
-    if (ptr > text && *(ptr-1) != '\n') {
-        (*line_count)++; // last line without \n
-    }
-    
-    // allocate array
-    char** lines = malloc(*line_count * sizeof(char*));
-    
-    // split into lines
-    int line_index = 0;
-    const char* line_start = text;
-    ptr = text;
-    
-    while (*ptr && line_index < *line_count) {
-        if (*ptr == '\n') {
-            int len = ptr - line_start;
-            lines[line_index] = malloc(len + 1);
-            strncpy(lines[line_index], line_start, len);
-            lines[line_index][len] = '\0';
-            line_index++;
-            line_start = ptr + 1;
-        }
-        ptr++;
-    }
-    
-    // handle last line if it doesn't end with newline
-    if (line_index < *line_count && line_start < ptr) {
-        int len = ptr - line_start;
-        lines[line_index] = malloc(len + 1);
-        strncpy(lines[line_index], line_start, len);
-        lines[line_index][len] = '\0';
-        line_index++;
-    }
-    
-    // adjust line count to actual lines created
-    *line_count = line_index;
-    
-    return lines;
-}
-
-static void free_lines(char** lines, int line_count) {
-    for (int i = 0; i < line_count; i++) {
-        free(lines[i]);
-    }
-    free(lines);
 }
 
 // block parsing functions
@@ -319,105 +222,6 @@ static bool is_grid_table_line(const char* line) {
     }
     
     return has_plus && has_dash_or_pipe;
-}
-
-static Element* create_rst_element(Input *input, const char* tag_name) {
-    Element* element = elmt_pooled(input->pool);
-    if (!element) return NULL;
-    
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return element;
-    
-    element->type = element_type;
-    
-    // set element name
-    String* name_str = create_string(input, tag_name);
-    if (name_str) {
-        element_type->name.str = name_str->chars;
-        element_type->name.length = name_str->len;
-    }
-    
-    // properly initialize the list structure
-    List* list = (List*)element;
-    list->items = NULL;
-    list->length = 0;
-    list->extra = 0;
-    list->capacity = 0;
-    
-    // initialize type - properly set defaults
-    element_type->shape = NULL;
-    element_type->last = NULL;
-    element_type->length = 0;
-    element_type->byte_size = 0;
-    element_type->content_length = 0;
-    
-    // initialize element data
-    element->data = NULL;
-    element->data_cap = 0;
-    
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    
-    return element;
-}
-
-static void add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
-    if (!element || !attr_name || !attr_value) return;
-    
-    TypeElmt *element_type = (TypeElmt*)element->type;
-    if (!element_type) return;
-    
-    // create key and value strings
-    String* key = create_string(input, attr_name);
-    String* value = create_string(input, attr_value);
-    if (!key || !value) return;
-    
-    // If this is the first attribute, create a new map
-    if (element_type->length == 0 || !element->data) {
-        Map* attr_map = map_pooled(input->pool);
-        if (!attr_map) return;
-        
-        // initialize the map type
-        TypeMap* map_type = map_init_cap(attr_map, input->pool);
-        if (!map_type) return;
-        
-        // add the first attribute
-        LambdaItem lambda_value = (LambdaItem)s2it(value);
-        map_put(attr_map, map_type, key, lambda_value, input->pool);
-        
-        // copy map structure to element
-        element_type->shape = map_type->shape;
-        element_type->last = map_type->last;
-        element_type->length = map_type->length;
-        element_type->byte_size = map_type->byte_size;
-        
-        // copy attribute data to element
-        element->data = attr_map->data;
-        element->data_cap = attr_map->data_cap;
-    } else {
-        // Add to existing attributes - reconstruct the map temporarily
-        Map temp_map = {0};
-        temp_map.data = element->data;
-        temp_map.data_cap = element->data_cap;
-        
-        TypeMap temp_type = {0};
-        temp_type.shape = element_type->shape;
-        temp_type.last = element_type->last;
-        temp_type.length = element_type->length;
-        temp_type.byte_size = element_type->byte_size;
-        
-        // add the new attribute
-        LambdaItem lambda_value = (LambdaItem)s2it(value);
-        map_put(&temp_map, &temp_type, key, lambda_value, input->pool);
-        
-        // update element with new structure
-        element_type->shape = temp_type.shape;
-        element_type->last = temp_type.last;
-        element_type->length = temp_type.length;
-        element_type->byte_size = temp_type.byte_size;
-        element->data = temp_map.data;
-        element->data_cap = temp_map.data_cap;
-    }
 }
 
 static Item parse_heading(Input *input, char** lines, int* current_line, int total_lines) {
