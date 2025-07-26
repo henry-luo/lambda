@@ -21,6 +21,7 @@ void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_man(Input* input, const char* man_string);
 void parse_eml(Input* input, const char* eml_string);
 void parse_vcf(Input* input, const char* vcf_string);
+void parse_ics(Input* input, const char* ics_string);
 
 
 String* strbuf_to_string(StrBuf *sb) {
@@ -104,7 +105,7 @@ void map_put(Map* mp, String* key, LambdaItem value, Input *input) {
         *(String**)field_ptr = (String*)value.pointer;
         ((String*)value.pointer)->ref_cnt++;
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:
         *(Map**)field_ptr = (Map*)value.raw_pointer;
         break;
     default:
@@ -180,7 +181,7 @@ void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* poo
         *(String**)field_ptr = (String*)value.pointer;
         ((String*)value.pointer)->ref_cnt++;
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:
         *(Map**)field_ptr = (Map*)value.raw_pointer;
         break;
     default:
@@ -220,6 +221,9 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "message/rfc822") == 0) return "eml";
     if (strcmp(mime_type, "application/eml") == 0) return "eml";
     if (strcmp(mime_type, "message/eml") == 0) return "eml";
+    if (strcmp(mime_type, "text/vcard") == 0) return "vcf";
+    if (strcmp(mime_type, "text/calendar") == 0) return "ics";
+    if (strcmp(mime_type, "application/ics") == 0) return "ics";
     
     // Check for XML-based formats
     if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
@@ -478,6 +482,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(effective_type, "vcf") == 0) {
             parse_vcf(input, source);
+        }
+        else if (strcmp(effective_type, "ics") == 0) {
+            parse_ics(input, source);
         }
         else {
             printf("Unknown input type: %s\n", effective_type);

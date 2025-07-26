@@ -900,6 +900,18 @@ Item fn_member(Item item, Item key) {
     case LMD_TYPE_ELEMENT:
         Element *elmt = (Element*)litem.raw_pointer;
         return elmt_get(elmt, key);
+    case LMD_TYPE_LIST: {
+        // Handle built-in properties for List type
+        LambdaItem key_item = (LambdaItem)key;
+        if (key_item.type_id == LMD_TYPE_STRING || key_item.type_id == LMD_TYPE_SYMBOL) {
+            String *key_str = (String*)key_item.pointer;
+            if (key_str && strcmp(key_str->chars, "length") == 0) {
+                List *list = (List*)litem.raw_pointer;
+                return i2it(list->length);
+            }
+        }
+        return ITEM_NULL;
+    }
     // todo: built-in properties for other types
     default:
         return ITEM_NULL;

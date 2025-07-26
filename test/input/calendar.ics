@@ -1,0 +1,57 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Complex Calendar Example//Advanced iCal//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:Advanced Calendar
+X-WR-CALDESC:A calendar with multiple event types
+BEGIN:VEVENT
+UID:20240716T140000Z-001@advanced.com
+DTSTART:20240716T140000Z
+DTEND:20240716T160000Z
+SUMMARY:Project Review Meeting
+DESCRIPTION:Quarterly project review meeting with stakeholders.\nPlease bring your progress reports and any blockers you're facing.
+LOCATION:Main Conference Room\, Building A
+STATUS:CONFIRMED
+PRIORITY:2
+ORGANIZER;CN=Project Manager:MAILTO:pm@advanced.com
+ATTENDEE;CN=John Doe;RSVP=TRUE:MAILTO:john.doe@advanced.com
+ATTENDEE;CN=Jane Smith;RSVP=TRUE:MAILTO:jane.smith@advanced.com
+ATTENDEE;CN=Bob Wilson;RSVP=FALSE:MAILTO:bob.wilson@advanced.com
+CATEGORIES:MEETING,PROJECT
+END:VEVENT
+BEGIN:VTODO
+UID:20240717T100000Z-002@advanced.com
+DTSTART:20240717T100000Z
+DUE:20240720T170000Z
+SUMMARY:Complete quarterly report
+DESCRIPTION:Prepare and submit the quarterly project report
+PRIORITY:1
+STATUS:NEEDS-ACTION
+CATEGORIES:WORK,REPORT
+PERCENT-COMPLETE:25
+END:VTODO
+BEGIN:VEVENT
+UID:20240718T120000Z-003@advanced.com
+DTSTART:20240718T120000Z
+DURATION:PT1H30M
+SUMMARY:Lunch with Client
+DESCRIPTION:Business lunch with potential new client
+LOCATION:Downtown Restaurant
+STATUS:TENTATIVE
+PRIORITY:3
+ORGANIZER:MAILTO:sales@advanced.com
+CATEGORIES:BUSINESS,LUNCH
+END:VEVENT
+BEGIN:VTODO
+UID:20240719T080000Z-004@advanced.com
+DTSTART:20240719T080000Z
+DUE:20240725T170000Z
+SUMMARY:Update website content
+DESCRIPTION:Review and update the company website with new product information
+PRIORITY:2
+STATUS:IN-PROCESS
+CATEGORIES:MARKETING,WEBSITE
+PERCENT-COMPLETE:60
+END:VTODO
+END:VCALENDAR
