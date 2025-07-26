@@ -4,4 +4,7 @@ json
 "\nFormat JSON:\n"
 format(json, 'json')
 
+"\nFormat XML:\n"
+format(json, 'xml')
+
 "All tests completed!"
