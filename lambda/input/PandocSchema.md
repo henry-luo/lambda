@@ -1,6 +1,6 @@
-# Pandoc Mark Schema Documentation
+# Mark Doc Schema
 
-This document provides a comprehensive Mark schema for representing document structures from Markdown, wiki, anThe schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom Mark tags for Pandoc-specific features (e.g., `<cite>`, `<math>`). Attributes reflect Pandoc's AST `Attr` type (identifier, classes, key-value pairs) and HTML attributes. Below is a detailed list of all elements and their attributes. HTML inputs, based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible and uses custom Mark tags for Pandoc-specific features, supporting document transformation and validation. It includes all Pandoc formatting options, such as citations, math, figures, and code blocks, with detailed attribute documentation and examples of all block and inline elements.
+This document provides a unified Mark schema for representing document structures from Markdown, wiki, etc, to support document transformation and validation. It is based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible, and uses custom Mark elements for Pandoc-specific features (e.g., `<cite>`, `<math>`). Below is a detailed list of all elements and their attributes.
 
 ## Mark Schema
 
@@ -9,35 +9,134 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
 ```mark
 // Mark Schema for Pandoc AST with HTML elements, illustrating all block and inline elements
 <doc version:'1.0'
-  // Metadata section for document properties
+  // Metadata section for document properties using unified metadata schema
   <meta
-    // Field for key-value metadata
-    <field name:title, type:string
-      <inlines
-        "Comprehensive Pandoc Document"
-      >
-    >
-    <field name:author, type:string
-      <inlines
-        "John Doe"
-      >
-    >
-    <field name:date, type:string
-      <inlines
-        "2025-07-25"
-      >
-    >
+    // Core document metadata
+    title:"Comprehensive Pandoc Document",
+    subtitle:"A Complete Mark Schema Example",
+    author:[
+      {
+        name:"John Doe",
+        orcid:"0000-0002-1825-0097",
+        email:"john.doe@example.com",
+        affiliation:"University of Examples",
+        roles:[author, corresponding-author],
+        address:"123 Academic Lane, Research City, RC 12345",
+        website:"https://johndoe.example.com",
+        identifier:"author-001",
+        bio:<p "John Doe is a researcher in document processing and markup languages.">,
+        initials:"J.D.",
+        contributed:true
+      },
+      {
+        name:"Jane Smith",
+        orcid:"0000-0002-1825-0098",
+        email:"jane.smith@example.com",
+        affiliation:"Institute of Technology",
+        roles:[author],
+        website:"https://janesmith.example.com",
+        identifier:"author-002",
+        initials:"J.S.",
+        contributed:true
+      }
+    ]
+    
+    // Date metadata
+    created:t'2025-07-25T10:30:00Z',
+    modified:t'2025-07-25T15:45:00Z',
+    published:t'2025-07-25',
+    version:"1.2.0",
+    revision:"rev-003",
+    
+    // Language and status
+    language:en,
+    lang:en,
+    status:draft,
+    
+    // Content description
+    description:"A comprehensive Mark schema example demonstrating all Pandoc AST elements with unified metadata structure",
+    keywords:[mark, schema, pandoc, ast, document, metadata],
+    subject:[document-processing, markup-languages, technical-documentation],
+    tags:[mark, schema, pandoc, ast, document],
+    
+    // Rights and licensing
+    license:"CC-BY-4.0",
+    copyright:"This work is licensed under Creative Commons Attribution 4.0 International License",
+    doi:"10.1000/xyz123",
+    source:"original.md",
+    
+    // Bibliography and citations
+    bibliography:["references.bib", "additional.json"],
+    csl:"chicago-author-date.csl",
+    'link-citations':true,
+    
+    // Document structure
+    abstract:<div
+      <p "This document provides a comprehensive Mark schema for representing document structures from Markdown, wiki, and HTML inputs, based on Pandoc's Abstract Syntax Tree (AST).">
+      <p "The schema prioritizes HTML elements where possible and uses custom Mark tags for Pandoc-specific features.">
+    >,
+    toc:true,
+    'toc-depth':3,
+    'document-class':article,
+    'class-option':["12pt", "a4paper"],
+    geometry:"margin=1in",
+    
+    // Publication metadata
+    publisher:"Academic Press International",
+    institution:"University of Examples",
+    location:"Research City, Country",
+    department:"Department of Computer Science",
+    funding:"Grant XYZ-2025-001 from Research Foundation",
+    sponsor:"National Science Foundation",
+    'conflict-of-interest':"The authors declare no conflicts of interest",
+    
+    // Academic journal metadata
+    journal:{
+      name:"Journal of Document Processing",
+      volume:"15",
+      issue:"3",
+      pages:"123-145",
+      issn:"1234-5678"
+    },
+    
+    // Conference metadata
+    conference:{
+      name:"International Conference on Document Technologies",
+      location:"Tech City, Country",
+      date:t'2025-09-15'
+    },
+    
+    // Custom metadata
+    custom:{
+      "review-round":"second",
+      "editor":"Dr. Sarah Wilson",
+      "submission-date":t'2025-06-01'
+    },
+    
     // References for citations
-    <field name:references, type:list
-      <inlines
-        <reference id:smith2020, type:book
-          "Smith, J. (2020). Understanding Pandoc. Academic Press."
-        >
-        <reference id:jones2021, type:article
-          "Jones, A. (2021). Document Transformation. Journal of Docs, 12(3), 45-60."
-        >
-      >
-    >
+    references:[
+      {
+        id:smith2020,
+        type:book,
+        title:"Understanding Pandoc",
+        author:["Smith, J."],
+        publisher:"Academic Press",
+        year:2020,
+        isbn:"978-0-123456-78-9"
+      },
+      {
+        id:jones2021,
+        type:article,
+        title:"Document Transformation",
+        author:["Jones, A."],
+        journal:"Journal of Docs",
+        volume:12,
+        issue:3,
+        pages:"45-60",
+        year:2021,
+        doi:"10.1000/abc123"
+      }
+    ]
   >
   // Document body with block-level elements
   <body
@@ -51,10 +150,8 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       "It also has a " <q type:double "double-quoted"> " and " <q type:single "single-quoted"> " phrase, "
       "an inline " <code language:python "print(\"Hello\")"> ", and a citation "
       <cite
-        <citations
-          <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, 'note-num':1, hash:0>
-          <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, 'note-num':2, hash:1>
-        >
+        <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, 'note-num':1, hash:0>
+        <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, 'note-num':2, hash:1>
       >
       ". A " <a href:"http://example.com", title:Example "link"> " and " <img src:"inline.jpg", alt:"Inline image", width:50> " are included, "
       "with a " <br> " line break and " <note id:note2 <p "Inline footnote">> "."
@@ -81,7 +178,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       <li <p "Item 1">>
       <li <p "Item 2 with " <strong "strong"> " text">>
     >
-    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:'upper-alpha'
+    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:upper-alpha
       <li <p "Item A">>
       <li <p "Item B">>
     >
@@ -153,17 +250,125 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: `<meta>` and `<body>`.
 
 ### Metadata Elements
+
+The Meta schema is designed aiming to unify all the common metadata elements across formats like Markdown (YAML), Docx, JATS, TEI, LaTeX, and Org-mode. It uses Mark/Lambda data types directly without wrapper elements for cleaner and more efficient representation.
+
 - **`<meta>`**
-  - **Attributes**: None.
-  - **Purpose**: Contains `<field>` elements for document metadata.
-  - **Content**: Zero or more `<field>` elements.
-- **`<field>`**
+  - **Purpose**: Contains unified metadata using Mark data types directly.
+  - **Meta Type Mapping**:
+    - `MetaString` → Mark string values: `"text"`
+    - `MetaInlines` → Mark inline content: `"text with <em>markup</em>"`
+    - `MetaBlocks` → Mark block content: `<div><p>content</p></div>`
+    - `MetaList` → Mark arrays: `["item1", "item2"]`
+    - `MetaMap` → Mark map: `{key:value, ...}`
+    - `MetaBool` → Mark boolean values: `true` or `false`
+    - `MetaValue` → Any Mark meta type (used in custom fields)
+  
+  - **Core Document Fields**:
+    - `title`: Mark inlines, document title
+    - `subtitle`: Mark inlines, document subtitle
+    - `author`: Mark list of objects with detailed author information
+      - `name`: Mark inlines, author full name
+      - `orcid`: Mark string, ORCID identifier
+      - `email`: Mark string, contact email
+      - `affiliation`: Mark inlines, institutional affiliation
+      - `roles`: Mark list, author roles (e.g., [author, corresponding-author])
+      - `address`: Mark inlines, postal address
+      - `website`: Mark string, personal/professional website
+      - `identifier`: Mark string, unique author identifier
+      - `bio`: Mark blocks, author biography
+      - `initials`: Mark string, author initials
+      - `contributed`: Mark boolean, contribution status
+  
+  - **Date and Version Fields**:
+    - `created`: Mark string, creation date (ISO 8601)
+    - `modified`: Mark string, last modification date (ISO 8601)
+    - `published`: Mark string, publication date (ISO 8601)
+    - `version`: Mark string, document version
+    - `revision`: Mark string, revision identifier
+  
+  - **Language and Status Fields**:
+    - `language`: Mark string, ISO 639-1 language code
+    - `lang`: Mark string, alias for language compatibility
+    - `status`: Mark string, document status (e.g., draft, final, peer-reviewed)
+  
+  - **Content Description Fields**:
+    - `description`: Mark inlines, abstract or summary
+    - `keywords`: Mark list, searchable keywords
+    - `subject`: Mark list, topical categories
+    - `tags`: Mark list, synonym/alias for keywords
+    - `abstract`: Mark blocks, formal abstract section
+  
+  - **Rights and Legal Fields**:
+    - `license`: Mark string, license identifier (e.g., "CC-BY-4.0")
+    - `copyright`: Mark inlines, legal/copyright notice
+    - `doi`: Mark string, DOI, ISBN, or URI
+    - `source`: Mark string, source file or document
+  
+  - **Bibliography and Citation Fields**:
+    - `bibliography`: Mark list, bibliography file paths
+    - `csl`: Mark string, CSL (Citation Style Language) file path
+    - `link-citations`: Mark boolean, enable citation linking
+    - `references`: Mark list, inline bibliography entries
+  
+  - **Document Structure Fields**:
+    - `toc`: Mark boolean, table of contents generation
+    - `toc-depth`: Mark string, table of contents depth
+    - `document-class`: Mark string, document class (e.g., article)
+    - `class-option`: Mark list, document class options
+    - `geometry`: Mark string, page layout configuration
+  
+  - **Publication Fields**:
+    - `publisher`: Mark inlines, publishing organization
+    - `institution`: Mark inlines, affiliated institution
+    - `location`: Mark inlines, publication location
+    - `department`: Mark inlines, departmental affiliation
+    - `funding`: Mark inlines, grant or funding information
+    - `sponsor`: Mark inlines, sponsoring organization
+    - `conflict-of-interest`: Mark inlines, conflict of interest statement
+  
+  - **Academic Journal Fields** (nested object):
+    - `journal`: Mark map containing:
+      - `name`: Mark inlines, journal name
+      - `volume`: Mark string, volume number
+      - `issue`: Mark string, issue number
+      - `pages`: Mark string, page range
+      - `issn`: Mark string, ISSN identifier
+  
+  - **Conference Fields** (nested object):
+    - `conference`: Mark map containing:
+      - `name`: Mark inlines, conference name
+      - `location`: Mark inlines, conference location
+      - `date`: Mark string, conference date
+  
+  - **Custom Metadata Fields**:
+    - `custom`: Mark map of custom fields with arbitrary key-value pairs
+
+#### Compatibility Mapping Summary
+
+| **Field**        | **Markdown (YAML)** | **Docx**        | **JATS**                         | **TEI**             | **LaTeX**                  | **Org-mode**      |
+| ---------------- | ------------------- | --------------- | -------------------------------- | ------------------- | -------------------------- | ----------------- |
+| **title**        | `title`             | `dc:title`      | `<article-title>`                | `<title>`           | `\title{}`                 | `#+TITLE:`        |
+| **author**       | `author`            | `dc:creator`    | `<contrib>`                      | `<author>`          | `\author{}`                | `#+AUTHOR:`       |
+| **created**      | `date`              | `dc:date`       | `<pub-date>`                     | `<date>`            | `\date{}`                  | `#+DATE:`         |
+| **keywords**     | `keywords`          | `cp:keywords`   | `<kwd-group>`                    | `<keywords>`        | `\keywords{}`              | `#+KEYWORDS:`     |
+| **language**     | `lang`              | `dc:language`   | `@xml:lang`                      | `@xml:lang`         | `\usepackage[lang]{babel}` | `#+LANGUAGE:`     |
+| **publisher**    | `publisher`         | `dc:publisher`  | `<publisher-name>`               | `<publisher>`       | `\publisher{}`             | `#+PUBLISHER:`    |
+| **subject**      | `tags`              | `dc:subject`    | `<subject>`                      | `<keywords>`        | `\subject{}`               | `#+TAGS:`         |
+| **copyright**    | `copyright`         | `dc:rights`     | `<copyright>`                    | `<availability>`    | `\copyright{}`             | `#+COPYRIGHT:`    |
+| **version**      | `version`           | `dc:identifier` | `<article-version>`              | `<edition>`         | `\version{}`               | `#+VERSION:`      |
+| **doi**          | `doi`               | Custom property | `<article-id pub-id-type="doi">` | `<idno type="DOI">` | `\doi{}`                   | `#+DOI:`          |
+| **abstract**     | `abstract`          | Custom property | `<abstract>`                     | `<abstract>`        | `\begin{abstract}`         | `#+ABSTRACT:`     |
+| **bibliography** | `bibliography`      | Custom property | `<ref-list>`                     | `<listBibl>`        | `\bibliography{}`          | `#+BIBLIOGRAPHY:` |
+| **status**       | `status`            | Custom property | `<article-type>`                 | `<revisionDesc>`    | Custom command             | `#+STATUS:`       |
+
+- **`<field>`** (deprecated in favor of direct attributes)
   - **Attributes**:
     - `name`: String, required, metadata key (e.g., "title", "author", "references").
     - `type`: String, optional, data type (e.g., 'string', 'list', 'map').
   - **Purpose**: Represents a metadata key-value pair.
   - **Content**: `<inlines>` or `<blocks>` (typically `<inlines>`).
-- **`<reference>`** (within `<field name="references">`)
+- **`<reference>`** (now part of references array)
   - **Attributes**:
     - `id`: String, required, unique citation identifier (e.g., "smith2020").
     - `type`: String, optional, citation type (e.g., 'book', 'article').
@@ -188,7 +393,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: Inline elements.
 - **`<code>`**
   - **Attributes**:
-    - `language`: String, optional, programming language (e.g., 'python').
+    - `language`: String, optional, programming language (e.g., python).
     - `'data-executable'`: Boolean, optional, indicates executable code ("true", "false").
   - **Purpose**: Contains code with syntax highlighting.
   - **Content**: Raw code text.
@@ -208,7 +413,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
     - `start`: Integer, optional, starting number (default: 1).
     - `type`: String, optional, numbering style (e.g., '1', 'A', 'i').
     - `delim`: String, optional, delimiter (e.g., 'period', 'paren').
-    - `style`: String, optional, list style (e.g., 'decimal', `'upper-alpha'`).
+    - `style`: String, optional, list style (e.g., decimal, upper-alpha).
   - **Purpose**: Ordered list with customizable numbering.
   - **Content**: `<li>` elements.
 - **`<ul>`**
@@ -255,7 +460,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: `<col>` elements.
 - **`<col>`**
   - **Attributes**:
-    - `align`: String, optional, column alignment (e.g., 'left', 'center', 'right').
+    - `align`: String, optional, column alignment (e.g., left, center, right).
     - `width`: String, optional, column width (e.g., "50%").
   - **Purpose**: Specifies column properties.
   - **Content**: None (empty element).
@@ -269,7 +474,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: `<th>` or `<td>` elements.
 - **`<th>`**, **`<td>`**
   - **Attributes**:
-    - `align`: String, optional, cell alignment (e.g., "left", "center", "right").
+    - `align`: String, optional, cell alignment (e.g., left, center, right).
     - `rowspan`, `colspan`: Integer, optional, cell spanning.
   - **Purpose**: Table header or data cell.
   - **Content**: Block elements.
@@ -299,7 +504,7 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: Block elements.
 - **`<math>`**
   - **Attributes**:
-    - `type`: String, required, math type ("inline" or "display").
+    - `type`: String, required, math type (inline or display).
     - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Contains LaTeX math expressions.
   - **Content**: LaTeX code.
@@ -334,23 +539,23 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
 - **`<q>`**
   - **Attributes**:
     - `id`, `class`, `'data-*'` (same as `<p>`).
-    - `type`: String, required, quote type ("single" or "double").
+    - `type`: String, required, quote type (single or double).
   - **Purpose**: Quoted text.
   - **Content**: Inline elements.
 - **`<cite>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Wraps `<citations>` for citation content.
-  - **Content**: `<citations>` element.
-- **`<citations>`**
+  - **Purpose**: Contains one or more `<citation>` elements for citation content.
+  - **Content**: One or more `<citation>` elements.
+- **`<citations>`** (deprecated)
   - **Attributes**: None.
-  - **Purpose**: Groups multiple `<citation>` elements.
+  - **Purpose**: Groups multiple `<citation>` elements (now handled directly by `<cite>`).
   - **Content**: One or more `<citation>` elements.
 - **`<citation>`**
   - **Attributes**:
     - `id`: String, required, citation identifier (e.g., "smith2020").
     - `prefix`: String, optional, text before citation (e.g., "see ").
     - `suffix`: String, optional, text after citation (e.g., ", p. 15").
-    - `mode`: String, required, citation mode ("NormalCitation", "AuthorInText", "SuppressAuthor").
+    - `mode`: String, required, citation mode (NormalCitation, AuthorInText, SuppressAuthor).
     - `'note-num'`: Integer, optional, footnote number for citations in notes.
     - `hash`: Integer, optional, unique hash for citation instance.
   - **Purpose**: Represents a single citation with Pandoc’s attributes.
@@ -391,14 +596,14 @@ The Mark schema is designed to represent document structures from Markdown, wiki
 - **Attribute Structure**: Reflects Pandoc’s `Attr` type (identifier, classes, key-value pairs) and HTML attributes for flexibility.
 
 ### Citation System
-- **Structure**: Citations use `<cite <citations <citation>...> >`, with each `<citation>` referencing a `<reference>` in `<meta <field name:references>` via `id`.
+- **Structure**: Citations use `<cite <citation>... <citation>... >`, with each `<citation>` referencing an entry in the `references` metadata array via `id`.
 - **Attributes**:
-  - `id`: Links to a reference.
+  - `id`: Links to a reference object in the metadata `references` array.
   - `prefix`, `suffix`: Contextual text (e.g., "see [Smith, 2020, p. 15]").
-  - `mode`: Citation style ("NormalCitation", "AuthorInText", "SuppressAuthor").
+  - `mode`: Citation style (NormalCitation, AuthorInText, SuppressAuthor).
   - `'note-num'`: Footnote number for note-based citations.
   - `hash`: Unique identifier for citation instances.
-- **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage.
+- **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage with references stored as objects in the metadata.
 
 ### Usage
 - **Transformation**: Facilitates conversion between formats (e.g., Markdown to LaTeX) by preserving semantic structure.
