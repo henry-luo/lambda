@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_element(Input *input, const char **xml);
 static Item parse_comment(Input *input, const char **xml);
@@ -145,47 +145,35 @@ static String* parse_tag_name(Input *input, const char **xml) {
     return strbuf_to_string(sb);
 }
 
-static Map* parse_attributes(Input *input, const char **xml) {
-    Map* mp = map_pooled(input->pool);
-    if (!mp) return NULL;
-    
-    // Initialize map using shared function
-    TypeMap* map_type = map_init_cap(mp, input->pool);
-    if (!map_type) return mp;
-
+static bool parse_attributes(Input *input, Element *element, const char **xml) {
     skip_whitespace(xml);
     while (**xml && **xml != '>' && **xml != '/' && **xml != '?') {
         // parse attribute name
         String* attr_name = parse_tag_name(input, xml);
-        if (!attr_name) break;
-        
+        if (!attr_name) return false;
+
         skip_whitespace(xml);
-        if (**xml != '=') break;
+        if (**xml != '=') return false;
         (*xml)++; // skip =
         
         skip_whitespace(xml);
-        if (**xml != '"' && **xml != '\'') break;
+        if (**xml != '"' && **xml != '\'') return false;
         
         char quote_char = **xml;
         (*xml)++; // skip opening quote
 
         String* attr_value = parse_string_content(input, xml, quote_char);
-        if (!attr_value) break;
+        if (!attr_value) return false;
 
         if (**xml == quote_char) { (*xml)++; } // skip closing quote
         
         // Add to map using shared function
         LambdaItem value = (LambdaItem)s2it(attr_value);
-        map_put(mp, map_type, attr_name, value, input->pool);
-        
+        elmt_put(element, attr_name, value, input->pool);
+
         skip_whitespace(xml);
     }
-    
-    // Add map type to type list
-    arraylist_append(input->type_list, map_type);
-    map_type->type_index = input->type_list->length - 1;
-    
-    return mp;
+    return true;
 }
 
 static Item parse_comment(Input *input, const char **xml) {
@@ -200,24 +188,8 @@ static Item parse_comment(Input *input, const char **xml) {
     }
     
     // Create comment element
-    Element* element = elmt_pooled(input->pool);
+    Element* element = input_create_element(input, "!--");
     if (!element) return ITEM_ERROR;
-
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return (Item)element;
-    element->type = element_type;
-    
-    // Set element name to "!--"
-    element_type->name.str = "!--";
-    element_type->name.length = 3;
-    
-    // No attributes for comments
-    element->data = NULL;
-    element->data_cap = 0;
-    element_type->shape = NULL;
-    element_type->length = 0;
-    element_type->byte_size = 0;
-    element_type->content_length = 0;
     
     // Add comment content as text
     if (comment_end > comment_start) {
@@ -230,7 +202,7 @@ static Item parse_comment(Input *input, const char **xml) {
         String* comment_text = strbuf_to_string(sb);
         if (comment_text && comment_text->len > 0) {
             list_push((List*)element, s2it(comment_text));
-            element_type->content_length = 1;
+            ((TypeElmt*)element->type)->content_length = 1;
         }
     }
     
@@ -240,10 +212,6 @@ static Item parse_comment(Input *input, const char **xml) {
     } else {
         *xml = comment_end;
     }
-    
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    
     return (Item)element;
 }
 
@@ -323,129 +291,73 @@ static Item parse_entity(Input *input, const char **xml) {
     }
     
     // Create entity element
-    Element* element = elmt_pooled(input->pool);
+    Element* element = input_create_element(input, "!ENTITY");
     if (!element) return ITEM_ERROR;
-
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return (Item)element;
-    element->type = element_type;
     
-    // Set element name to "!ENTITY"
-    element_type->name.str = "!ENTITY";
-    element_type->name.length = 7;
-    
-    // Create attributes map for entity name and value
-    Map* mp = map_pooled(input->pool);
-    if (mp) {
-        TypeMap* map_type = map_init_cap(mp, input->pool);
-        if (map_type) {
-            // Add entity name as "name" attribute
-            if (entity_name_end > entity_name_start) {
-                StrBuf* sb = input->sb;
-                strbuf_reset(sb);
-                const char* temp = entity_name_start;
-                while (temp < entity_name_end) {
-                    strbuf_append_char(sb, *temp);
-                    temp++;
-                }
-                String* name_str = strbuf_to_string(sb);
-                
-                String* attr_name = pool_calloc(input->pool, sizeof(String) + 5);
-                if (attr_name) {
-                    attr_name->len = 4;
-                    memcpy(attr_name->chars, "name", 4);
-                    attr_name->chars[4] = '\0';
-                    
-                    LambdaItem value = (LambdaItem)s2it(name_str);
-                    map_put(mp, map_type, attr_name, value, input->pool);
-                }
-            }
+    // Add entity name as "name" attribute
+    if (entity_name_end > entity_name_start) {
+        StrBuf* sb = input->sb;
+        strbuf_reset(sb);
+        const char* temp = entity_name_start;
+        while (temp < entity_name_end) {
+            strbuf_append_char(sb, *temp);
+            temp++;
+        }
+        String* name_str = strbuf_to_string(sb);
+        
+        String* attr_name = pool_calloc(input->pool, sizeof(String) + 5);
+        if (attr_name) {
+            attr_name->len = 4;
+            memcpy(attr_name->chars, "name", 4);
+            attr_name->chars[4] = '\0';
             
-            // Add entity value/reference as "value" attribute
-            if (entity_value_end > entity_value_start) {
-                StrBuf* sb = input->sb;
-                strbuf_reset(sb);
-                const char* temp = entity_value_start;
-                while (temp < entity_value_end) {
-                    strbuf_append_char(sb, *temp);
-                    temp++;
-                }
-                String* value_str = strbuf_to_string(sb);
-                
-                String* attr_name = pool_calloc(input->pool, sizeof(String) + 6);
-                if (attr_name) {
-                    attr_name->len = 5;
-                    memcpy(attr_name->chars, "value", 5);
-                    attr_name->chars[5] = '\0';
-                    
-                    LambdaItem value = (LambdaItem)s2it(value_str);
-                    map_put(mp, map_type, attr_name, value, input->pool);
-                }
-            }
-            
-            // Add type attribute (internal/external)
-            String* type_attr_name = pool_calloc(input->pool, sizeof(String) + 5);
-            if (type_attr_name) {
-                type_attr_name->len = 4;
-                memcpy(type_attr_name->chars, "type", 4);
-                type_attr_name->chars[4] = '\0';
-                
-                String* type_value = pool_calloc(input->pool, sizeof(String) + 9);
-                if (type_value) {
-                    if (is_external) {
-                        type_value->len = 8;
-                        memcpy(type_value->chars, "external", 8);
-                        type_value->chars[8] = '\0';
-                    } else {
-                        type_value->len = 8;
-                        memcpy(type_value->chars, "internal", 8);
-                        type_value->chars[8] = '\0';
-                    }
-                    
-                    LambdaItem value = (LambdaItem)s2it(type_value);
-                    map_put(mp, map_type, type_attr_name, value, input->pool);
-                }
-            }
-            
-            arraylist_append(input->type_list, map_type);
-            map_type->type_index = input->type_list->length - 1;
-            
-            // Set up attributes in the Element's Map data
-            if (map_type->length > 0) {
-                element_type->shape = map_type->shape;
-                element_type->length = map_type->length;
-                element_type->byte_size = map_type->byte_size;
-                
-                // Allocate and copy attributes data to element
-                element->data = pool_calloc(input->pool, element_type->byte_size);
-                element->data_cap = element_type->byte_size;
-                if (element->data) {
-                    memcpy(element->data, mp->data, element_type->byte_size);
-                }
-            } else {
-                element->data = NULL;
-                element->data_cap = 0;
-                element_type->shape = NULL;
-                element_type->length = 0;
-                element_type->byte_size = 0;
-            }
+            LambdaItem value = (LambdaItem)s2it(name_str);
+            elmt_put(element, attr_name, value, input->pool);
         }
     }
-    
-    if (!element->data) {
-        // Fallback if map creation failed
-        element->data = NULL;
-        element->data_cap = 0;
-        element_type->shape = NULL;
-        element_type->length = 0;
-        element_type->byte_size = 0;
+            
+    // Add entity value/reference as "value" attribute
+    if (entity_value_end > entity_value_start) {
+        StrBuf* sb = input->sb;
+        strbuf_reset(sb);
+        const char* temp = entity_value_start;
+        while (temp < entity_value_end) {
+            strbuf_append_char(sb, *temp);
+            temp++;
+        }
+        String* value_str = strbuf_to_string(sb);
+        String* attr_name = pool_calloc(input->pool, sizeof(String) + 6);
+        if (attr_name) {
+            attr_name->len = 5;
+            memcpy(attr_name->chars, "value", 5);
+            attr_name->chars[5] = '\0';
+            LambdaItem value = (LambdaItem)s2it(value_str);
+            elmt_put(element, attr_name, value, input->pool);
+        }
     }
-    
-    element_type->content_length = 0;
-    
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    
+            
+    // Add type attribute (internal/external)
+    String* type_attr_name = pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_attr_name) {
+        type_attr_name->len = 4;
+        memcpy(type_attr_name->chars, "type", 4);
+        type_attr_name->chars[4] = '\0';
+        
+        String* type_value = pool_calloc(input->pool, sizeof(String) + 9);
+        if (type_value) {
+            if (is_external) {
+                type_value->len = 8;
+                memcpy(type_value->chars, "external", 8);
+                type_value->chars[8] = '\0';
+            } else {
+                type_value->len = 8;
+                memcpy(type_value->chars, "internal", 8);
+                type_value->chars[8] = '\0';
+            }
+            LambdaItem value = (LambdaItem)s2it(type_value);
+            elmt_put(element, type_attr_name, value, input->pool);
+        }
+    }
     return (Item)element;
 }
 
@@ -492,24 +404,8 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
     }
     
     // Create DTD declaration element
-    Element* element = elmt_pooled(input->pool);
+    Element* element = input_create_element(input, decl_element_name->chars);
     if (!element) return ITEM_ERROR;
-
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return (Item)element;
-    element->type = element_type;
-    
-    // Set element name to "!DECLARATION_TYPE"
-    element_type->name.str = decl_element_name->chars;
-    element_type->name.length = decl_element_name->len;
-    
-    // No attributes for DTD declarations (content is stored as text)
-    element->data = NULL;
-    element->data_cap = 0;
-    element_type->shape = NULL;
-    element_type->length = 0;
-    element_type->byte_size = 0;
-    element_type->content_length = 0;
     
     // Add declaration content as text
     if (content_end > content_start) {
@@ -522,13 +418,9 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
         String* content_text = strbuf_to_string(sb);
         if (content_text && content_text->len > 0) {
             list_push((List*)element, s2it(content_text));
-            element_type->content_length = 1;
+            ((TypeElmt*)element->type)->content_length = 1;
         }
     }
-    
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    
     return (Item)element;
 }
 
@@ -546,28 +438,9 @@ static Item parse_doctype(Input *input, const char **xml) {
         (*xml)++; // skip [
         
         // Create a document fragment to hold DTD declarations
-        Element* doctype_element = elmt_pooled(input->pool);
-        if (!doctype_element) return ITEM_ERROR;
+        Element* dt_elmt = input_create_element(input, "!DOCTYPE");
+        if (!dt_elmt) return ITEM_ERROR;
 
-        TypeElmt *doctype_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        if (!doctype_type) return (Item)doctype_element;
-        doctype_element->type = doctype_type;
-        
-        // Set element name to "!DOCTYPE"
-        doctype_type->name.str = "!DOCTYPE";
-        doctype_type->name.length = 8;
-        
-        // No attributes for DOCTYPE
-        doctype_element->data = NULL;
-        doctype_element->data_cap = 0;
-        doctype_type->shape = NULL;
-        doctype_type->length = 0;
-        doctype_type->byte_size = 0;
-        doctype_type->content_length = 0;
-        
-        arraylist_append(input->type_list, doctype_type);
-        doctype_type->type_index = input->type_list->length - 1;
-        
         // Parse internal subset content
         while (**xml && **xml != ']') {
             skip_whitespace(xml);
@@ -580,23 +453,23 @@ static Item parse_doctype(Input *input, const char **xml) {
                         *xml += 6;
                         Item entity = parse_entity(input, xml);
                         if (entity != ITEM_ERROR) {
-                            list_push((List*)doctype_element, entity);
-                            doctype_type->content_length++;
+                            list_push((List*)dt_elmt, entity);
+                            ((TypeElmt*)dt_elmt->type)->content_length++;
                         }
                     } else if (strncmp(*xml, "ELEMENT", 7) == 0 || 
                                strncmp(*xml, "ATTLIST", 7) == 0 || 
                                strncmp(*xml, "NOTATION", 8) == 0) {
                         Item decl = parse_dtd_declaration(input, xml);
                         if (decl != ITEM_ERROR) {
-                            list_push((List*)doctype_element, decl);
-                            doctype_type->content_length++;
+                            list_push((List*)dt_elmt, decl);
+                            ((TypeElmt*)dt_elmt->type)->content_length++;
                         }
                     } else {
                         // Generic DTD declaration
                         Item decl = parse_dtd_declaration(input, xml);
                         if (decl != ITEM_ERROR) {
-                            list_push((List*)doctype_element, decl);
-                            doctype_type->content_length++;
+                            list_push((List*)dt_elmt, decl);
+                            ((TypeElmt*)dt_elmt->type)->content_length++;
                         }
                     }
                 } else {
@@ -604,8 +477,8 @@ static Item parse_doctype(Input *input, const char **xml) {
                     (*xml)--; // back up to <
                     Item element = parse_element(input, xml);
                     if (element != ITEM_ERROR) {
-                        list_push((List*)doctype_element, element);
-                        doctype_type->content_length++;
+                        list_push((List*)dt_elmt, element);
+                        ((TypeElmt*)dt_elmt->type)->content_length++;
                     }
                 }
             } else {
@@ -625,7 +498,7 @@ static Item parse_doctype(Input *input, const char **xml) {
             (*xml)++; // skip >
         }
         
-        return (Item)doctype_element;
+        return (Item)dt_elmt;
     } else {
         // No internal subset, just skip to end
         while (**xml && **xml != '>') {
@@ -706,24 +579,7 @@ static Item parse_element(Input *input, const char **xml) {
         }
         
         // Create processing instruction element
-        Element* element = elmt_pooled(input->pool);
-        if (!element) return ITEM_ERROR;
-
-        TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        if (!element_type) return (Item)element;
-        element->type = element_type;
-        
-        // Set element name to "?target"
-        element_type->name.str = pi_name->chars;
-        element_type->name.length = pi_name->len;
-        
-        // No attributes for processing instructions (data is stored as content)
-        element->data = NULL;
-        element->data_cap = 0;
-        element_type->shape = NULL;
-        element_type->length = 0;
-        element_type->byte_size = 0;
-        element_type->content_length = 0;
+        Element* element = input_create_element(input, pi_name->chars);
         
         // Add PI data as text content
         if (pi_data_end > pi_data_start) {
@@ -735,13 +591,9 @@ static Item parse_element(Input *input, const char **xml) {
             String* pi_data = strbuf_to_string(sb);
             if (pi_data && pi_data->len > 0) {
                 list_push((List*)element, s2it(pi_data));
-                element_type->content_length = 1;
+                ((TypeElmt*)element->type)->content_length = 1;
             }
         }
-        
-        arraylist_append(input->type_list, element_type);
-        element_type->type_index = input->type_list->length - 1;
-        
         return (Item)element;
     }
 
@@ -749,10 +601,13 @@ static Item parse_element(Input *input, const char **xml) {
     String* tag_name = parse_tag_name(input, xml);
     if (!tag_name) return ITEM_ERROR;
 
+        // Create element
+    Element* element = input_create_element(input, tag_name->chars);
+    if (!element) return ITEM_ERROR;
+
     // parse attributes
-    Map* attributes = parse_attributes(input, xml);
-    if (!attributes) return ITEM_ERROR;
-    
+    if (!parse_attributes(input, element, xml)) return ITEM_ERROR;
+
     skip_whitespace(xml);
 
     // check for self-closing tag
@@ -764,42 +619,6 @@ static Item parse_element(Input *input, const char **xml) {
     
     if (**xml != '>') return ITEM_ERROR;
     (*xml)++; // skip >
-
-    // Create element
-    Element* element = elmt_pooled(input->pool);
-    if (!element) return ITEM_ERROR;
-
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return (Item)element;
-    element->type = element_type;
-    
-    // Set element name
-    element_type->name.str = tag_name->chars;
-    element_type->name.length = tag_name->len;
-    
-    // Set up attributes in the Element's Map data
-    if (attributes->type && ((TypeMap*)attributes->type)->length > 0) {
-        TypeMap* attr_map_type = (TypeMap*)attributes->type;
-        element_type->shape = attr_map_type->shape;
-        element_type->length = attr_map_type->length;
-        element_type->byte_size = attr_map_type->byte_size;
-        
-        // Allocate and copy attributes data to element
-        element->data = pool_calloc(input->pool, element_type->byte_size);
-        element->data_cap = element_type->byte_size;
-        if (element->data) {
-            memcpy(element->data, attributes->data, element_type->byte_size);
-        }
-    } else {
-        // No attributes
-        element->data = NULL;
-        element->data_cap = 0;
-        element_type->shape = NULL;
-        element_type->length = 0;
-        element_type->byte_size = 0;
-    }
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
         
     if (!self_closing) {
         // Parse content and add to Element's List part
@@ -811,7 +630,7 @@ static Item parse_element(Input *input, const char **xml) {
                 Item child = parse_element(input, xml);
                 if (child != ITEM_ERROR) {
                     list_push((List*)element, child);
-                    element_type->content_length++;
+                    ((TypeElmt*)element->type)->content_length++;
                 }
             } else {
                 // Text content - trim leading/trailing whitespace for better handling
@@ -889,7 +708,7 @@ static Item parse_element(Input *input, const char **xml) {
                         String* processed_text = strbuf_to_string(sb);
                         if (processed_text && processed_text->len > 0) {
                             list_push((List*)element, s2it(processed_text));
-                            element_type->content_length++;
+                            ((TypeElmt*)element->type)->content_length++;
                         }
                     }
                 }
@@ -916,34 +735,9 @@ void parse_xml(Input* input, const char* xml_string) {
     skip_whitespace(&xml);
     
     // Create a document root element to contain all top-level elements
-    Element* doc_element = elmt_pooled(input->pool);
-    if (!doc_element) {
-        input->root = ITEM_ERROR;
-        return;
-    }
+    Element* doc_element = input_create_element(input, "document");
+    if (!doc_element) { input->root = ITEM_ERROR;  return; }
 
-    TypeElmt *doc_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!doc_type) {
-        input->root = (Item)doc_element;
-        return;
-    }
-    doc_element->type = doc_type;
-    
-    // Set document element name
-    doc_type->name.str = "document";
-    doc_type->name.length = 8;
-    
-    // No attributes for document
-    doc_element->data = NULL;
-    doc_element->data_cap = 0;
-    doc_type->shape = NULL;
-    doc_type->length = 0;
-    doc_type->byte_size = 0;
-    doc_type->content_length = 0;
-    
-    arraylist_append(input->type_list, doc_type);
-    doc_type->type_index = input->type_list->length - 1;
-    
     // Parse all top-level elements (including XML declaration, comments, PIs, and the main element)
     while (*xml) {
         skip_whitespace(&xml);
@@ -953,7 +747,7 @@ void parse_xml(Input* input, const char* xml_string) {
             Item element = parse_element(input, &xml);
             if (element != ITEM_ERROR) {
                 list_push((List*)doc_element, element);
-                doc_type->content_length++;
+                ((TypeElmt*)doc_element->type)->content_length++;
             }
         } else {
             // Skip any stray text content at document level
@@ -965,13 +759,12 @@ void parse_xml(Input* input, const char* xml_string) {
     
     // If document has only one child element, return that as root
     // Otherwise return the document element containing all elements
-    if (doc_type->content_length == 1) {
+    if (((TypeElmt*)doc_element->type)->content_length == 1) {
         List* doc_list = (List*)doc_element;
         if (doc_list->items && doc_list->items[0] != ITEM_ERROR) {
             input->root = doc_list->items[0];
             return;
         }
     }
-    
     input->root = (Item)doc_element;
 }

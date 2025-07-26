@@ -16,7 +16,7 @@ static String* create_string_from_cstr(Input *input, const char* str) {
 }
 
 // Utility functions
-static void trim_string_inplace(char* str) {
+void trim_string_inplace(char* str) {
     // Trim leading whitespace
     char* start = str;
     while (*start && isspace(*start)) start++;
@@ -32,7 +32,7 @@ static void trim_string_inplace(char* str) {
     }
 }
 
-static Item parse_scalar_value(Input *input, const char* str) {
+Item parse_scalar_value(Input *input, const char* str) {
     if (!str) return ITEM_NULL;
     
     char* copy = strdup(str);
@@ -121,7 +121,7 @@ static Item parse_scalar_value(Input *input, const char* str) {
 }
 
 // Parse flow array like [item1, item2, item3]
-static Array* parse_flow_array(Input *input, const char* str) {
+Array* parse_flow_array(Input *input, const char* str) {
     Array* array = array_pooled(input->pool);
     if (!array) return NULL;
     

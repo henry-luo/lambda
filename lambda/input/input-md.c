@@ -24,6 +24,7 @@ static bool is_table_separator(const char* line);
 #define free_lines input_free_lines
 #define create_markdown_element input_create_element
 #define add_attribute_to_element input_add_attribute_to_element
+#define add_attribute_item_to_element input_add_attribute_item_to_element
 
 // Block parsing functions
 static bool is_atx_heading(const char* line) {
@@ -545,46 +546,49 @@ static int parse_yaml_frontmatter(Input *input, char** lines, int line_count, El
 }
 
 static void parse_yaml_line(Input *input, const char* line, Element* meta) {
-    // Simple YAML key-value parsing
-    char* trimmed = trim_whitespace(line);
-    if (!trimmed || *trimmed == '#') { // Skip comments
-        if (trimmed) free(trimmed);
+    // Enhanced YAML key-value parsing using robust YAML functions
+    char* line_copy = strdup(line);
+    trim_string_inplace(line_copy);
+    
+    // Skip empty lines and comments
+    if (!line_copy || *line_copy == '\0' || *line_copy == '#') {
+        free(line_copy);
         return;
     }
     
-    char* colon = strchr(trimmed, ':');
+    char* colon = strchr(line_copy, ':');
     if (!colon) {
-        free(trimmed);
+        free(line_copy);
         return;
     }
     
     // Extract key
     *colon = '\0';
-    char* key = trim_whitespace(trimmed);
+    char* key = line_copy;
+    trim_string_inplace(key);
     
     // Extract value
     char* value_start = colon + 1;
-    char* value = trim_whitespace(value_start);
+    trim_string_inplace(value_start);
     
-    if (key && value && strlen(value) > 0) {
-        // Remove quotes if present
-        char* final_value = value;
-        if (strlen(value) >= 2 && 
-            ((value[0] == '"' && value[strlen(value)-1] == '"') ||
-             (value[0] == '\'' && value[strlen(value)-1] == '\''))) {
-            // Create a copy without quotes
-            size_t len = strlen(value) - 2;
-            final_value = strndup(value + 1, len);
-            add_attribute_to_element(input, meta, key, final_value);
-            free(final_value);
+    if (key && strlen(key) > 0 && value_start && strlen(value_start) > 0) {
+        // Use robust YAML parsing for the value
+        if (value_start[0] == '[') {
+            // Array value - use parse_flow_array
+            Array* array = parse_flow_array(input, value_start);
+            if (array) {
+                add_attribute_item_to_element(input, meta, key, (Item)array);
+            }
         } else {
-            add_attribute_to_element(input, meta, key, value);
+            // Scalar value - use parse_scalar_value for proper type handling
+            Item parsed_value = parse_scalar_value(input, value_start);
+            
+            // Store the parsed Item directly as the attribute value
+            add_attribute_item_to_element(input, meta, key, parsed_value);
         }
     }
     
-    if (key) free(key);
-    if (value) free(value);
-    free(trimmed);
+    free(line_copy);
 }
 
 static Item parse_header(Input *input, const char* line) {

@@ -35,4 +35,6 @@ format(md, 'markdown')
 print("\nYAML frontmatter markdown formatted:")
 format(yaml_md, 'markdown')
 
+yaml_md
+"meta:"; yaml_md[0]
 "Markdown schema compliance and YAML frontmatter tests completed!"

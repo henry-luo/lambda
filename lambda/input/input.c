@@ -57,7 +57,7 @@ TypeMap* map_init_cap(Map* mp, VariableMemPool* pool) {
 }
 
 void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool) {
-    TypeId type_id = value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
+    TypeId type_id = get_type_id(value);
     ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, map_type->last);
     if (!map_type->shape) { map_type->shape = shape_entry; }
     map_type->last = shape_entry;
@@ -78,6 +78,82 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, Variable
 
     // store the value
     void* field_ptr = (char*)mp->data + byte_offset - bsize;
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        *(void**)field_ptr = NULL;
+        break;
+    case LMD_TYPE_BOOL:
+        *(bool*)field_ptr = value.bool_val;             
+        break;
+    case LMD_TYPE_INT:
+        *(long*)field_ptr = value.long_val;
+        break;
+    case LMD_TYPE_INT64:
+        *(long*)field_ptr = *(long*)value.pointer;
+        break;        
+    case LMD_TYPE_FLOAT:
+        *(double*)field_ptr = *(double*)value.pointer;
+        break;
+    case LMD_TYPE_STRING:
+        *(String**)field_ptr = (String*)value.pointer;
+        ((String*)value.pointer)->ref_cnt++;
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:
+        *(Map**)field_ptr = (Map*)value.raw_pointer;
+        break;
+    default:
+        printf("unknown type %d\n", value.type_id);
+    }
+}
+
+Element* input_create_element(Input *input, const char* tag_name) {
+    Element* element = elmt_pooled(input->pool);
+    if (!element) return NULL;
+    
+    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
+    if (!element_type) return NULL;
+    element->type = element_type;
+    arraylist_append(input->type_list, element_type);
+    element_type->type_index = input->type_list->length - 1;    
+    // initialize with no attributes
+    
+    // Set element name
+    String* name_str = input_create_string(input, tag_name);
+    if (name_str) {
+        element_type->name.str = name_str->chars;
+        element_type->name.length = name_str->len;
+    }
+    return element;
+}
+
+extern TypeElmt EmptyElmt;
+void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool) {
+    assert(elmt->type != &EmptyElmt);
+    TypeId type_id = get_type_id(value);
+    TypeElmt* elmt_type = (TypeElmt*)elmt->type;
+    ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, elmt_type->last);
+    if (!elmt_type->shape) { elmt_type->shape = shape_entry; }
+    elmt_type->last = shape_entry;
+    elmt_type->length++;
+
+    // ensure data capacity
+    int bsize = type_info[type_id].byte_size;
+    int byte_offset = shape_entry->byte_offset + bsize;
+    if (byte_offset > elmt->data_cap) { // resize map data
+        // elmt->data_cap could be 0
+        int byte_cap = max(elmt->data_cap, byte_offset) * 2;
+        void* new_data = pool_calloc(pool, byte_cap);
+        if (!new_data) return;
+        if (elmt->data) {
+            memcpy(new_data, elmt->data, byte_offset - bsize);
+            pool_variable_free(pool, elmt->data);
+        }
+        elmt->data = new_data;  elmt->data_cap = byte_cap;
+    }
+    elmt_type->byte_size = byte_offset;
+
+    // store the value
+    void* field_ptr = (char*)elmt->data + byte_offset - bsize;
     switch (type_id) {
     case LMD_TYPE_NULL:
         *(void**)field_ptr = NULL;
@@ -279,36 +355,6 @@ void input_free_lines(char** lines, int line_count) {
     free(lines);
 }
 
-Element* input_create_element(Input *input, const char* tag_name) {
-    Element* element = elmt_pooled(input->pool);
-    if (!element) return NULL;
-    
-    TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!element_type) return element;
-    
-    element->type = element_type;
-    
-    // Set element name
-    String* name_str = input_create_string(input, tag_name);
-    if (name_str) {
-        element_type->name.str = name_str->chars;
-        element_type->name.length = name_str->len;
-    }
-    
-    // Initialize with no attributes
-    element->data = NULL;
-    element->data_cap = 0;
-    element_type->shape = NULL;
-    element_type->length = 0;
-    element_type->byte_size = 0;
-    element_type->content_length = 0;
-    
-    arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;
-    
-    return element;
-}
-
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
     TypeElmt *element_type = (TypeElmt*)element->type;
     
@@ -317,19 +363,104 @@ void input_add_attribute_to_element(Input *input, Element* element, const char* 
     String* value = input_create_string(input, attr_value);
     if (!key || !value) return;
     
-    // Always create a fresh map structure
-    Map* attr_map = map_pooled(input->pool);
-    if (!attr_map) return;
+    Map* attr_map;
+    TypeMap* map_type;
     
-    // Initialize the map type
-    TypeMap* map_type = map_init_cap(attr_map, input->pool);
-    if (!map_type) return;
+    // Check if element already has attributes (data exists)
+    if (element->data && element_type->shape) {
+        // Reuse existing map - reconstruct it from element data
+        attr_map = map_pooled(input->pool);
+        if (!attr_map) return;
+        
+        // Set up the map to use existing data
+        attr_map->data = element->data;
+        attr_map->data_cap = element->data_cap;
+        
+        // Recreate the TypeMap from existing element type data
+        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!map_type) return;
+        
+        attr_map->type = map_type;
+        map_type->shape = element_type->shape;
+        map_type->length = element_type->length;
+        map_type->byte_size = element_type->byte_size;
+        map_type->last = element_type->shape;
+        
+        // Find the last shape entry
+        while (map_type->last && map_type->last->next) {
+            map_type->last = map_type->last->next;
+        }
+    } else {
+        // Create a fresh map structure (first attribute)
+        attr_map = map_pooled(input->pool);
+        if (!attr_map) return;
+        
+        // Initialize the map type
+        map_type = map_init_cap(attr_map, input->pool);
+        if (!map_type) return;
+    }
     
-    // Just add the new attribute (don't try to copy existing ones for now)
+    // Add the new attribute to the (possibly existing) map
     LambdaItem lambda_value = (LambdaItem)s2it(value);
     map_put(attr_map, map_type, key, lambda_value, input->pool);
     
-    // Update element with the new map data
+    // Update element with the (updated) map data
+    element->data = attr_map->data;
+    element->data_cap = attr_map->data_cap;
+    element_type->shape = map_type->shape;
+    element_type->length = map_type->length;
+    element_type->byte_size = map_type->byte_size;
+}
+
+void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value) {
+    TypeElmt *element_type = (TypeElmt*)element->type;
+    
+    // Create key string
+    String* key = input_create_string(input, attr_name);
+    if (!key) return;
+    
+    Map* attr_map;
+    TypeMap* map_type;
+    
+    // Check if element already has attributes (data exists)
+    if (element->data && element_type->shape) {
+        // Reuse existing map - reconstruct it from element data
+        attr_map = map_pooled(input->pool);
+        if (!attr_map) return;
+        
+        // Set up the map to use existing data
+        attr_map->data = element->data;
+        attr_map->data_cap = element->data_cap;
+        
+        // Recreate the TypeMap from existing element type data
+        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!map_type) return;
+        
+        attr_map->type = map_type;
+        map_type->shape = element_type->shape;
+        map_type->length = element_type->length;
+        map_type->byte_size = element_type->byte_size;
+        map_type->last = element_type->shape;
+        
+        // Find the last shape entry
+        while (map_type->last && map_type->last->next) {
+            map_type->last = map_type->last->next;
+        }
+    } else {
+        // Create a fresh map structure (first attribute)
+        attr_map = map_pooled(input->pool);
+        if (!attr_map) return;
+        
+        // Initialize the map type
+        map_type = map_init_cap(attr_map, input->pool);
+        if (!map_type) return;
+    }
+    
+    // Add the new attribute to the (possibly existing) map
+    LambdaItem lambda_value = (LambdaItem)attr_value;
+    map_put(attr_map, map_type, key, lambda_value, input->pool);
+    
+    // Update element with the (updated) map data
     element->data = attr_map->data;
     element->data_cap = attr_map->data_cap;
     element_type->shape = map_type->shape;

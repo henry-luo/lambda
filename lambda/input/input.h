@@ -11,3 +11,11 @@ char** input_split_lines(const char* text, int* line_count);
 void input_free_lines(char** lines, int line_count);
 Element* input_create_element(Input *input, const char* tag_name);
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
+void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value);
+
+void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool);
+
+// YAML parsing utility functions (from input-yaml.c)
+void trim_string_inplace(char* str);
+Item parse_scalar_value(Input *input, const char* str);
+Array* parse_flow_array(Input *input, const char* str);

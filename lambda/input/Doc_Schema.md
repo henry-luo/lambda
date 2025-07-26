@@ -412,8 +412,8 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
     - `id`, `class`, `'data-*'` (same as `<p>`).
     - `start`: Integer, optional, starting number (default: 1).
     - `type`: String, optional, numbering style (e.g., '1', 'A', 'i').
-    - `delim`: String, optional, delimiter (e.g., 'period', 'paren').
-    - `style`: String, optional, list style (e.g., decimal, 'upper-alpha').
+    - `delim`: Symbol, optional, delimiter (e.g., 'period', 'paren').
+    - `style`: Symbol, optional, list style (e.g., decimal, 'upper-alpha').
   - **Purpose**: Ordered list with customizable numbering.
   - **Content**: `<li>` elements.
 - **`<ul>`**
@@ -460,7 +460,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Content**: `<col>` elements.
 - **`<col>`**
   - **Attributes**:
-    - `align`: String, optional, column alignment (e.g., left, center, right).
+    - `align`: Symbol, optional, column alignment (e.g., left, center, right).
     - `width`: String, optional, column width (e.g., "50%").
   - **Purpose**: Specifies column properties.
   - **Content**: None (empty element).
@@ -474,7 +474,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Content**: `<th>` or `<td>` elements.
 - **`<th>`**, **`<td>`**
   - **Attributes**:
-    - `align`: String, optional, cell alignment (e.g., left, center, right).
+    - `align`: Symbol, optional, cell alignment (e.g., left, center, right).
     - `rowspan`, `colspan`: Integer, optional, cell spanning.
   - **Purpose**: Table header or data cell.
   - **Content**: Block elements.
@@ -533,13 +533,13 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
 - **`<span>`**
   - **Attributes**:
     - `id`, `class`, `'data-*'` (same as `<p>`).
-    - `style`: Object, optional, inline CSS (e.g., `{'font-variant': 'small-caps'}`).
+    - `style`: Map, optional, inline CSS (e.g., `{'font-variant': 'small-caps'}`).
   - **Purpose**: Generic inline container (e.g., for SmallCaps).
   - **Content**: Inline elements.
 - **`<q>`**
   - **Attributes**:
     - `id`, `class`, `'data-*'` (same as `<p>`).
-    - `type`: String, required, quote type (single or double).
+    - `type`: Symbol, required, quote type (single or double).
   - **Purpose**: Quoted text.
   - **Content**: Inline elements.
 - **`<cite>`**
@@ -555,7 +555,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
     - `id`: String, required, citation identifier (e.g., "smith2020").
     - `prefix`: String, optional, text before citation (e.g., "see ").
     - `suffix`: String, optional, text after citation (e.g., ", p. 15").
-    - `mode`: String, required, citation mode (NormalCitation, AuthorInText, SuppressAuthor).
+    - `mode`: Symbol, required, citation mode (NormalCitation, AuthorInText, SuppressAuthor).
     - `'note-num'`: Integer, optional, footnote number for citations in notes.
     - `hash`: Integer, optional, unique hash for citation instance.
   - **Purpose**: Represents a single citation with Pandoc’s attributes.
@@ -563,12 +563,12 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
 - **`<code>`** (inline)
   - **Attributes**:
     - `id`, `class`, `'data-*'` (same as `<p>`).
-    - `language`: String, optional, programming language.
+    - `language`: Symbol, optional, programming language.
   - **Purpose**: Inline code.
   - **Content**: Code text.
 - **`<raw>`** (inline)
   - **Attributes**:
-    - `format`: String, required, content format (e.g., "html", "latex").
+    - `format`: Symbol, required, content format (e.g., "html", "latex").
     - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Raw inline content.
   - **Content**: Raw text.
