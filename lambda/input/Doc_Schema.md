@@ -1,6 +1,6 @@
 # Mark Doc Schema
 
-This document provides a unified Mark schema for representing document structures from Markdown, wiki, etc, to support document transformation and validation. It is based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html). The schema prioritizes HTML elements where possible, and uses custom Mark elements for Pandoc-specific features (e.g., `<cite>`, `<math>`). Below is a detailed list of all elements and their attributes.
+This document provides a unified schema (in Mark Notation) for representing document structures from Markdown, wiki, etc, which can be used for document transformation and validation. It is based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https:- **Pandoc AST Fallback**: Custom Mark tags (e.g., `<cite>`, `<math>`). The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom element for 'Pandoc-specific' features (e.g., `<cite>`, `<math>`). Below is a detailed list of all elements and their attributes.
 
 ## Mark Schema
 
@@ -20,7 +20,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
         orcid:"0000-0002-1825-0097",
         email:"john.doe@example.com",
         affiliation:"University of Examples",
-        roles:[author, corresponding-author],
+        roles:[author, 'corresponding-author'],
         address:"123 Academic Lane, Research City, RC 12345",
         website:"https://johndoe.example.com",
         identifier:"author-001",
@@ -56,7 +56,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
     // Content description
     description:"A comprehensive Mark schema example demonstrating all Pandoc AST elements with unified metadata structure",
     keywords:[mark, schema, pandoc, ast, document, metadata],
-    subject:[document-processing, markup-languages, technical-documentation],
+    subject:['document-processing', 'markup-languages', 'technical-documentation'],
     tags:[mark, schema, pandoc, ast, document],
     
     // Rights and licensing
@@ -73,7 +73,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
     // Document structure
     abstract:<div
       <p "This document provides a comprehensive Mark schema for representing document structures from Markdown, wiki, and HTML inputs, based on Pandoc's Abstract Syntax Tree (AST).">
-      <p "The schema prioritizes HTML elements where possible and uses custom Mark tags for Pandoc-specific features.">
+      <p "The schema prioritizes HTML elements where possible and uses custom Mark tags for 'Pandoc-specific' features.">
     >,
     toc:true,
     'toc-depth':3,
@@ -138,7 +138,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       }
     ]
   >
-  // Document body with block-level elements
+  // Document body with 'block-level' elements
   <body
     // Header (level 1 to 6)
     <h1 id:intro, class:['section', 'main'], level:1, 'data-custom':value "Introduction">
@@ -178,7 +178,7 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       <li <p "Item 1">>
       <li <p "Item 2 with " <strong "strong"> " text">>
     >
-    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:upper-alpha
+    <ol id:list2, start:2, type:A, class:lettered, delim:paren, style:'upper-alpha'
       <li <p "Item A">>
       <li <p "Item B">>
     >
@@ -272,7 +272,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
       - `orcid`: Mark string, ORCID identifier
       - `email`: Mark string, contact email
       - `affiliation`: Mark inlines, institutional affiliation
-      - `roles`: Mark list, author roles (e.g., [author, corresponding-author])
+      - `roles`: Mark list, author roles (e.g., [author, 'corresponding-author'])
       - `address`: Mark inlines, postal address
       - `website`: Mark string, personal/professional website
       - `identifier`: Mark string, unique author identifier
@@ -290,7 +290,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Language and Status Fields**:
     - `language`: Mark string, ISO 639-1 language code
     - `lang`: Mark string, alias for language compatibility
-    - `status`: Mark string, document status (e.g., draft, final, peer-reviewed)
+    - `status`: Mark string, document status (e.g., draft, final, 'peer-reviewed')
   
   - **Content Description Fields**:
     - `description`: Mark inlines, abstract or summary
@@ -342,7 +342,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
       - `date`: Mark string, conference date
   
   - **Custom Metadata Fields**:
-    - `custom`: Mark map of custom fields with arbitrary key-value pairs
+    - `custom`: Mark map of custom fields with arbitrary 'key-value' pairs
 
 #### Compatibility Mapping Summary
 
@@ -357,7 +357,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
 | **subject**      | `tags`              | `dc:subject`    | `<subject>`                      | `<keywords>`        | `\subject{}`               | `#+TAGS:`         |
 | **copyright**    | `copyright`         | `dc:rights`     | `<copyright>`                    | `<availability>`    | `\copyright{}`             | `#+COPYRIGHT:`    |
 | **version**      | `version`           | `dc:identifier` | `<article-version>`              | `<edition>`         | `\version{}`               | `#+VERSION:`      |
-| **doi**          | `doi`               | Custom property | `<article-id pub-id-type="doi">` | `<idno type="DOI">` | `\doi{}`                   | `#+DOI:`          |
+| **doi**          | `doi`               | Custom property | `<article-id 'pub-id-type'="doi">` | `<idno type="DOI">` | `\doi{}`                   | `#+DOI:`          |
 | **abstract**     | `abstract`          | Custom property | `<abstract>`                     | `<abstract>`        | `\begin{abstract}`         | `#+ABSTRACT:`     |
 | **bibliography** | `bibliography`      | Custom property | `<ref-list>`                     | `<listBibl>`        | `\bibliography{}`          | `#+BIBLIOGRAPHY:` |
 | **status**       | `status`            | Custom property | `<article-type>`                 | `<revisionDesc>`    | Custom command             | `#+STATUS:`       |
@@ -366,7 +366,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**:
     - `name`: String, required, metadata key (e.g., "title", "author", "references").
     - `type`: String, optional, data type (e.g., 'string', 'list', 'map').
-  - **Purpose**: Represents a metadata key-value pair.
+  - **Purpose**: Represents a metadata 'key-value' pair.
   - **Content**: `<inlines>` or `<blocks>` (typically `<inlines>`).
 - **`<reference>`** (now part of references array)
   - **Attributes**:
@@ -380,7 +380,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**:
     - `id`: String, optional, unique identifier.
     - `class`: Array of strings, optional, CSS classes (e.g., `['text', 'content']`).
-    - `'data-*'`: Custom key-value pairs, optional, for metadata.
+    - `'data-*'`: Custom 'key-value' pairs, optional, for metadata.
   - **Purpose**: Paragraphs or plain text blocks.
   - **Content**: Inline elements.
 - **`<line_block>`**
@@ -401,7 +401,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**:
     - `format`: String, required, content format (e.g., "html", "latex").
     - `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Embeds format-specific content.
+  - **Purpose**: Embeds 'format-specific' content.
   - **Content**: Raw text in specified format.
 - **`<blockquote>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
@@ -413,7 +413,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
     - `start`: Integer, optional, starting number (default: 1).
     - `type`: String, optional, numbering style (e.g., '1', 'A', 'i').
     - `delim`: String, optional, delimiter (e.g., 'period', 'paren').
-    - `style`: String, optional, list style (e.g., decimal, upper-alpha).
+    - `style`: String, optional, list style (e.g., decimal, 'upper-alpha').
   - **Purpose**: Ordered list with customizable numbering.
   - **Content**: `<li>` elements.
 - **`<ul>`**
@@ -440,7 +440,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**:
     - `id`, `class`, `'data-*'` (same as `<p>`).
     - `level`: Integer, required, header level (1 to 6).
-  - **Purpose**: Headers with level-specific tags.
+  - **Purpose**: Headers with 'level-specific' tags.
   - **Content**: Inline elements.
 - **`<hr>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
@@ -590,7 +590,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
 The Mark schema is designed to represent document structures from Markdown, wiki, and HTML inputs, leveraging Pandoc’s AST for semantic richness and HTML elements for web compatibility. It supports document transformation (e.g., Markdown to HTML) and validation, ensuring structural integrity across formats.
 
 ### Design Principles
-- **HTML Priority**: Uses HTML elements (e.g., `<p>`, `<h1>`, `<a>`) for familiar structures, enhancing compatibility with web-based workflows.
+- **HTML Priority**: Uses HTML elements (e.g., `<p>`, `<h1>`, `<a>`) for familiar structures, enhancing compatibility with 'web-based' workflows.
 - **Pandoc AST Fallback**: Custom Mark tags (e.g., `<cite>`, `<math>`) are used for Pandoc-specific features without direct HTML equivalents.
 - **Comprehensive Coverage**: Includes all Pandoc formatting options (citations, math, figures, code blocks) with detailed attributes, illustrating every block and inline element.
 - **Attribute Structure**: Reflects Pandoc’s `Attr` type (identifier, classes, key-value pairs) and HTML attributes for flexibility.
@@ -601,7 +601,7 @@ The Mark schema is designed to represent document structures from Markdown, wiki
   - `id`: Links to a reference object in the metadata `references` array.
   - `prefix`, `suffix`: Contextual text (e.g., "see [Smith, 2020, p. 15]").
   - `mode`: Citation style (NormalCitation, AuthorInText, SuppressAuthor).
-  - `'note-num'`: Footnote number for note-based citations.
+  - `'note-num'`: Footnote number for 'note-based' citations.
   - `hash`: Unique identifier for citation instances.
 - **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage with references stored as objects in the metadata.
 
