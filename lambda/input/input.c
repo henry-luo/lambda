@@ -17,6 +17,7 @@ void parse_latex(Input* input, const char* latex_string);
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
 void parse_mediawiki(Input* input, const char* mediawiki_string);
+void parse_asciidoc(Input* input, const char* asciidoc_string);
 
 
 String* strbuf_to_string(StrBuf *sb) {
@@ -245,6 +246,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(effective_type, "wiki") == 0) {
             parse_mediawiki(input, source);
+        }
+        else if (strcmp(effective_type, "asciidoc") == 0) {
+            parse_asciidoc(input, source);
         }
         else {
             printf("Unknown input type: %s\n", effective_type);

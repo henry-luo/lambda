@@ -1,0 +1,40 @@
+= AsciiDoc Test Document
+
+This is a test document for the AsciiDoc parser.
+
+== Introduction
+
+AsciiDoc is a *lightweight markup language* for authoring _documents_, articles, books, ebooks, and more.
+
+=== Features
+
+* *Bold text* and _italic text_ 
+* `inline code` formatting
+* Links to http://example.com[External sites]
+
+==== Code Blocks
+
+----
+def hello_world():
+    print("Hello, World!")
+----
+
+===== Admonitions
+
+NOTE: This is a note admonition.
+
+WARNING: This is a warning admonition.
+
+====== Tables
+
+|===
+|Name |Age |City
+
+|John |25 |New York
+|Jane |30 |London
+|Bob  |35 |Paris
+|===
+
+== Conclusion
+
+This document demonstrates basic AsciiDoc features.
