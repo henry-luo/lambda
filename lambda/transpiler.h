@@ -600,9 +600,8 @@ struct Runtime {
 Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
 Map* map_pooled(VariableMemPool *pool);
-TypeMap* map_init_cap(Map* mp, VariableMemPool* pool);
-void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool);
 Element* elmt_pooled(VariableMemPool *pool);
+void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool);
 
 void* alloc_const(Transpiler* tp, size_t size);
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);

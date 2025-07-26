@@ -1,6 +1,7 @@
 #include "../transpiler.h"
 
 // Common input utility functions
+void map_put(Map* mp, String* key, LambdaItem value, Input *input);
 void input_skip_whitespace(const char **text);
 bool input_is_whitespace_char(char c);
 bool input_is_empty_line(const char* line);
@@ -12,8 +13,6 @@ void input_free_lines(char** lines, int line_count);
 Element* input_create_element(Input *input, const char* tag_name);
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value);
-
-void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool);
 
 // YAML parsing utility functions (from input-yaml.c)
 void trim_string_inplace(char* str);

@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent);
 
@@ -228,10 +228,6 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
         Map* map = map_pooled(input->pool);
         if (!map) return ITEM_ERROR;
         
-        // Initialize map using shared function
-        TypeMap* map_type = map_init_cap(map, input->pool);
-        if (!map_type) return ITEM_ERROR;
-        
         while (*current_line < total_lines) {
             line = lines[*current_line];
             indent = 0;
@@ -283,13 +279,8 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             
             // Add to map using shared function
             LambdaItem lambda_value = (LambdaItem)value;
-            map_put(map, map_type, key, lambda_value, input->pool);
-        }
-        
-        // Add map type to type list
-        arraylist_append(input->type_list, map_type);
-        map_type->type_index = input->type_list->length - 1;
-        
+            map_put(map, key, lambda_value, input);
+        }        
         return (Item)map;
     }
     

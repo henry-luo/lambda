@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_value(Input *input, const char **json);
 
@@ -103,9 +103,6 @@ static Map* parse_object(Input *input, const char **json) {
         (*json)++;  return mp;
     }
 
-    TypeMap* map_type = map_init_cap(mp, input->pool);
-    if (!mp->data) return mp;
-
     while (**json) {
         String* key = parse_string(input, json);
         if (!key) return mp;
@@ -116,7 +113,7 @@ static Map* parse_object(Input *input, const char **json) {
         skip_whitespace(json);
 
         LambdaItem value = (LambdaItem)parse_value(input, json);
-        map_put(mp, map_type, key, value, input->pool);
+        map_put(mp, key, value, input);
 
         skip_whitespace(json);
         if (**json == '}') { (*json)++;  break; }
@@ -124,8 +121,6 @@ static Map* parse_object(Input *input, const char **json) {
         (*json)++;
         skip_whitespace(json);
     }
-    arraylist_append(input->type_list, map_type);
-    map_type->type_index = input->type_list->length - 1;
     return mp;
 }
 

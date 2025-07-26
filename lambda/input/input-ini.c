@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static void skip_whitespace(const char **ini) {
     while (**ini && (**ini == ' ' || **ini == '\t')) {
@@ -210,10 +210,6 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
     
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
-    
-    
-    TypeMap* map_type = map_init_cap(section_map, input->pool);
-    if (!section_map->data) return section_map;
 
     while (**ini) {
         skip_whitespace(ini);
@@ -243,15 +239,10 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
         
         String* value_str = parse_raw_value(input, ini);
         Item value = value_str ? ( value_str == &EMPTY_STRING ? ITEM_NULL : parse_typed_value(input, value_str)) : (Item)NULL;
-        map_put(section_map, map_type, key, (LambdaItem)value, input->pool);
+        map_put(section_map, key, (LambdaItem)value, input);
 
         skip_to_newline(ini);
     }
-    arraylist_append(input->type_list, map_type);
-    map_type->type_index = input->type_list->length - 1;
-    
-    printf("parsed section '%.*s' with %ld entries, byte_size: %ld\n", 
-        (int)section_name->len, section_name->chars, map_type->length, map_type->byte_size);
     return section_map;
 }
 
@@ -262,14 +253,6 @@ void parse_ini(Input* input, const char* ini_string) {
     Map* root_map = map_pooled(input->pool);
     if (!root_map) { return; }
     input->root = (Item)root_map;
-
-    TypeMap *root_map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!root_map_type) { return; }
-    root_map->type = root_map_type;
-    
-    int byte_cap = 64;
-    root_map->data = pool_calloc(input->pool, byte_cap);
-    root_map->data_cap = root_map->data ? byte_cap : 0;
     
     const char *current = ini_string;
     String* current_section_name = NULL;
@@ -298,8 +281,8 @@ void parse_ini(Input* input, const char* ini_string) {
             Map* section_map = parse_section(input, &current, current_section_name);
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
-                map_put(root_map, root_map_type, current_section_name, 
-                    (LambdaItem)(Item)section_map, input->pool);
+                map_put(root_map, current_section_name, 
+                    (LambdaItem)(Item)section_map, input);
             }
         } else {
             // key-value pair outside of any section (global)
@@ -316,8 +299,8 @@ void parse_ini(Input* input, const char* ini_string) {
                     global_section = parse_section(input, &current, global_name);
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
-                        map_put(root_map, root_map_type, global_name, 
-                            (LambdaItem)(Item)global_section, input->pool);
+                        map_put(root_map, global_name, 
+                            (LambdaItem)(Item)global_section, input);
                     }
                 }
             } else {
@@ -325,7 +308,4 @@ void parse_ini(Input* input, const char* ini_string) {
             }
         }
     }
-    arraylist_append(input->type_list, root_map_type);
-    root_map_type->type_index = input->type_list->length - 1;
-    printf("ini_file_parse completed, root map has %ld sections\n", root_map_type->length);
 }

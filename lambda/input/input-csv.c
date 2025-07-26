@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 // Helper macro to extract pointer from Item
 #define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
@@ -109,9 +109,6 @@ void parse_csv(Input* input, const char* csv_string) {
             Map* row_map = map_pooled(input->pool);
             if (!row_map) { break; }
             
-            TypeMap* map_type = map_init_cap(row_map, input->pool);
-            if (!row_map->data) { break; }
-            
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
                 String *field = parse_csv_field(input, &csv, separator);
@@ -123,7 +120,7 @@ void parse_csv(Input* input, const char* csv_string) {
                     if (header_item.item != ITEM_NULL) {
                         String* key = (String*)get_pointer(header_item.item);
                         if (key && key != &EMPTY_STRING) {
-                            map_put(row_map, map_type, key, (LambdaItem)item, input->pool);
+                            map_put(row_map, key, (LambdaItem)item, input);
                         }
                     }
                 }
@@ -131,9 +128,6 @@ void parse_csv(Input* input, const char* csv_string) {
                 field_index++;
                 if (*csv == separator) csv++;
             }
-            
-            arraylist_append(input->type_list, map_type);
-            map_type->type_index = input->type_list->length - 1;
             array_append(rows, (LambdaItem)(Item)row_map, input->pool);
         } else {
             // Create an array for each row (original behavior)

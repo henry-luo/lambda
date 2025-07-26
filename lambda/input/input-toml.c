@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_value(Input *input, const char **toml, int *line_num);
 
@@ -425,9 +425,6 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
         return mp;
     }
 
-    TypeMap* map_type = map_init_cap(mp, input->pool);
-    if (!mp->data) return NULL;
-
     while (**toml) {
         String* key = parse_key(input, toml);
         if (!key) {
@@ -447,7 +444,7 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
         }
         
         LambdaItem lambda_value = {.item = value};
-        map_put(mp, map_type, key, lambda_value, input->pool);
+        map_put(mp, key, lambda_value, input);
 
         skip_whitespace(toml);
         if (**toml == '}') { 
@@ -460,9 +457,6 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
         (*toml)++;
         skip_whitespace(toml);
     }
-    
-    arraylist_append(input->type_list, map_type);
-    map_type->type_index = input->type_list->length - 1;
     return mp;
 }
 
@@ -551,13 +545,12 @@ static String* create_string_key(Input *input, const char* key_str) {
 }
 
 // Helper function to find or create a section in the root map
-static Map* find_or_create_section(Input *input, Map* root_map, 
-    TypeMap* root_map_type, const char* section_name) {
+static Map* find_or_create_section(Input *input, Map* root_map, const char* section_name) {
     String* key = create_string_key(input, section_name);
     if (!key) return NULL;
     
     // Look for existing section in root map
-    ShapeEntry* entry = root_map_type->shape;
+    ShapeEntry* entry = ((TypeMap*)root_map->type)->shape;
     while (entry) {
         if (entry->name->length == key->len && 
             strncmp(entry->name->str, key->chars, key->len) == 0) {
@@ -572,22 +565,15 @@ static Map* find_or_create_section(Input *input, Map* root_map,
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
     
-    TypeMap* section_map_type = map_init_cap(section_map, input->pool);
-    if (!section_map->data) return NULL;
-    
-    arraylist_append(input->type_list, section_map_type);
-    section_map_type->type_index = input->type_list->length - 1;
-    
     // Add section to root map
     LambdaItem section_value = {.item = (Item)section_map};
-    map_put(root_map, root_map_type, key, section_value, input->pool);
-    
+    map_put(root_map, key, section_value, input);
+
     return section_map;
 }
 
 // Helper function to handle nested sections (like "database.credentials")
-static Map* handle_nested_section(Input *input, Map* root_map, 
-    TypeMap* root_map_type, const char* section_path) {
+static Map* handle_nested_section(Input *input, Map* root_map, const char* section_path) {
     char path_copy[512];
     strncpy(path_copy, section_path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
@@ -599,7 +585,7 @@ static Map* handle_nested_section(Input *input, Map* root_map,
     if (!first_part) return NULL;
     
     // Get or create the first level section
-    Map* current_map = find_or_create_section(input, root_map, root_map_type, first_part);
+    Map* current_map = find_or_create_section(input, root_map, first_part);
     if (!current_map) return NULL;
     
     // If there's no remaining path, return the current section
@@ -638,14 +624,8 @@ static Map* handle_nested_section(Input *input, Map* root_map,
             nested_map = map_pooled(input->pool);
             if (!nested_map) return NULL;
             
-            TypeMap* nested_map_type = map_init_cap(nested_map, input->pool);
-            if (!nested_map->data) return NULL;
-            
-            arraylist_append(input->type_list, nested_map_type);
-            nested_map_type->type_index = input->type_list->length - 1;
-            
             LambdaItem table_value = {.item = (Item)nested_map};
-            map_put(current_map, current_map_type, key, table_value, input->pool);
+            map_put(current_map, key, table_value, input);
         }
         
         current_map = nested_map;
@@ -696,22 +676,15 @@ void parse_toml(Input* input, const char* toml_string) {
     }
 
     Map* root_map = map_pooled(input->pool);
-    if (!root_map) {
-        return;
-    }
+    if (!root_map) { return; }
     input->root = (Item)root_map;
-    
-    TypeMap* root_map_type = map_init_cap(root_map, input->pool);
-    if (!root_map->data) {
-        return;
-    }
 
     const char *toml = toml_string;
     int line_num = 1;
     
     // Current table context
     Map* current_table = root_map;
-    TypeMap* current_table_type = root_map_type;
+    TypeMap* current_table_type = (TypeMap*)root_map->type;
 
     while (*toml) {
         skip_whitespace_and_comments(&toml, &line_num);
@@ -729,7 +702,7 @@ void parse_toml(Input* input, const char* toml_string) {
             char table_name[256];
             if (parse_table_header(&toml, table_name, &line_num)) {
                 // Handle sections using the new refactored function
-                Map* section_map = handle_nested_section(input, root_map, root_map_type, table_name);
+                Map* section_map = handle_nested_section(input, root_map, table_name);
                 if (section_map) {
                     current_table = section_map;
                     current_table_type = section_map->type;
@@ -760,12 +733,8 @@ void parse_toml(Input* input, const char* toml_string) {
         }
         
         LambdaItem lambda_value = {.item = value};
-        map_put(current_table, current_table_type, key, lambda_value, input->pool);
+        map_put(current_table, key, lambda_value, input);
         
         skip_line(&toml, &line_num);
     }
-
-    // Finalize root map type
-    arraylist_append(input->type_list, root_map_type);
-    root_map_type->type_index = input->type_list->length - 1;
 }

@@ -45,20 +45,23 @@ ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id
     return shape_entry;
 }
 
-TypeMap* map_init_cap(Map* mp, VariableMemPool* pool) {
-    // alloc map type and data chunk
-    TypeMap *map_type = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    if (!map_type) { return NULL; }
-    mp->type = map_type;
-    int byte_cap = 64;
-    mp->data = pool_calloc(pool, byte_cap);  mp->data_cap = byte_cap;
-    if (!mp->data) return NULL;
-    return map_type;
-}
-
-void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, VariableMemPool* pool) {
+extern TypeMap EmptyMap;
+void map_put(Map* mp, String* key, LambdaItem value, Input *input) {
+    TypeMap *map_type = (TypeMap*)mp->type;
+    if (map_type == &EmptyMap) {
+        // alloc map type and data chunk
+        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
+        if (!map_type) { return; }
+        mp->type = map_type;
+        arraylist_append(input->type_list, map_type);
+        map_type->type_index = input->type_list->length - 1;        
+        int byte_cap = 64;
+        mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
+        if (!mp->data) return;
+    }
+    
     TypeId type_id = get_type_id(value);
-    ShapeEntry* shape_entry = alloc_shape_entry(pool, key, type_id, map_type->last);
+    ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);
     if (!map_type->shape) { map_type->shape = shape_entry; }
     map_type->last = shape_entry;
     map_type->length++;
@@ -67,11 +70,12 @@ void map_put(Map* mp, TypeMap *map_type, String* key, LambdaItem value, Variable
     int bsize = type_info[type_id].byte_size;
     int byte_offset = shape_entry->byte_offset + bsize;
     if (byte_offset > mp->data_cap) { // resize map data
+        assert(mp->data_cap > 0);
         int byte_cap = mp->data_cap * 2;
-        void* new_data = pool_calloc(pool, byte_cap);
+        void* new_data = pool_calloc(input->pool, byte_cap);
         if (!new_data) return;
         memcpy(new_data, mp->data, byte_offset - bsize);
-        pool_variable_free(pool, mp->data);
+        pool_variable_free(input->pool, mp->data);
         mp->data = new_data;  mp->data_cap = byte_cap;
     }
     map_type->byte_size = byte_offset;

@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_rtf_content(Input *input, const char **rtf);
 
@@ -62,43 +62,61 @@ static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) 
                 strbuf_append_char(sb, '\t');
             } else if (**rtf == 'r') {
                 strbuf_append_char(sb, '\r');
-            } else if (**rtf >= '0' && **rtf <= '9') {
+            } else if (strncmp(*rtf, "par", 3) == 0) {
+                // Handle paragraph break
+                strbuf_append_char(sb, '\n');
+                *rtf += 2; // Skip 'ar' (we already skipped 'p')
+            } else if (strncmp(*rtf, "line", 4) == 0) {
+                // Handle line break
+                strbuf_append_char(sb, '\n');
+                *rtf += 3; // Skip 'ine'
+            } else if (strncmp(*rtf, "tab", 3) == 0) {
+                // Handle tab
+                strbuf_append_char(sb, '\t');
+                *rtf += 2; // Skip 'ab'
+            } else if (**rtf == 'u') {
                 // Unicode escape sequence \uNNNN
-                if (strncmp(*rtf, "u", 1) == 0) {
-                    (*rtf)++; // Skip 'u'
-                    int unicode_value = 0;
-                    int digits = 0;
-                    while (**rtf && **rtf >= '0' && **rtf <= '9' && digits < 5) {
-                        unicode_value = unicode_value * 10 + (**rtf - '0');
-                        (*rtf)++;
-                        digits++;
-                    }
-                    // Convert Unicode to UTF-8
-                    if (unicode_value < 0x80) {
-                        strbuf_append_char(sb, (char)unicode_value);
-                    } else if (unicode_value < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (unicode_value >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
-                    } else {
-                        strbuf_append_char(sb, (char)(0xE0 | (unicode_value >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((unicode_value >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
-                    }
-                    (*rtf)--; // Compensate for the increment at the end
-                } else {
-                    // Hex escape sequence \'HH
-                    if (**rtf == '\'') {
-                        (*rtf)++; // Skip quote
-                        char hex[3] = {0};
-                        if (**rtf && *(*rtf + 1)) {
-                            hex[0] = **rtf;
-                            hex[1] = *(*rtf + 1);
-                            int char_code = (int)strtol(hex, NULL, 16);
-                            strbuf_append_char(sb, (char)char_code);
-                            (*rtf)++; // Skip second hex digit
-                        }
-                    }
+                (*rtf)++; // Skip 'u'
+                int unicode_value = 0;
+                int digits = 0;
+                while (**rtf && **rtf >= '0' && **rtf <= '9' && digits < 5) {
+                    unicode_value = unicode_value * 10 + (**rtf - '0');
+                    (*rtf)++;
+                    digits++;
                 }
+                // Convert Unicode to UTF-8
+                if (unicode_value < 0x80) {
+                    strbuf_append_char(sb, (char)unicode_value);
+                } else if (unicode_value < 0x800) {
+                    strbuf_append_char(sb, (char)(0xC0 | (unicode_value >> 6)));
+                    strbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
+                } else {
+                    strbuf_append_char(sb, (char)(0xE0 | (unicode_value >> 12)));
+                    strbuf_append_char(sb, (char)(0x80 | ((unicode_value >> 6) & 0x3F)));
+                    strbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
+                }
+                (*rtf)--; // Compensate for the increment at the end
+            } else if (**rtf == '\'') {
+                // Hex escape sequence \'HH
+                (*rtf)++; // Skip quote
+                char hex[3] = {0};
+                if (**rtf && *(*rtf + 1)) {
+                    hex[0] = **rtf;
+                    hex[1] = *(*rtf + 1);
+                    int char_code = (int)strtol(hex, NULL, 16);
+                    strbuf_append_char(sb, (char)char_code);
+                    (*rtf)++; // Skip second hex digit
+                }
+            } else if (isalpha(**rtf)) {
+                // Handle other control words by skipping them
+                while (**rtf && (isalnum(**rtf) || **rtf == '-')) {
+                    (*rtf)++;
+                }
+                // Skip optional space after control word
+                if (**rtf == ' ') {
+                    (*rtf)++;
+                }
+                (*rtf)--; // Compensate for the increment at the end
             } else {
                 // Unknown escape, just add the character
                 strbuf_append_char(sb, **rtf);
@@ -241,9 +259,6 @@ static Map* parse_document_properties(Input *input, const char **rtf) {
     Map* props = map_pooled(input->pool);
     if (!props) return NULL;
     
-    TypeMap* prop_type = map_init_cap(props, input->pool);
-    if (!props->data) return props;
-    
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
             RTFControlWord cw = parse_control_word(input, rtf);
@@ -262,16 +277,12 @@ static Map* parse_document_properties(Input *input, const char **rtf) {
                 } else {
                     value = (LambdaItem)b2it(true);
                 }
-                
-                map_put(props, prop_type, cw.keyword, value, input->pool);
+                map_put(props, cw.keyword, value, input);
             }
         } else {
             (*rtf)++;
         }
     }
-    
-    arraylist_append(input->type_list, prop_type);
-    prop_type->type_index = input->type_list->length - 1;
     return props;
 }
 
@@ -287,17 +298,11 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     Map* group = map_pooled(input->pool);
     if (!group) return ITEM_ERROR;
     
-    TypeMap* group_type = map_init_cap(group, input->pool);
-    if (!group->data) return (Item)group;
-    
     Array* content = array_pooled(input->pool);
     if (!content) return (Item)group;
     
     Map* formatting = map_pooled(input->pool);
     if (!formatting) return (Item)group;
-    
-    TypeMap* format_type = map_init_cap(formatting, input->pool);
-    if (!formatting->data) return (Item)group;
     
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
@@ -315,7 +320,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                             strcpy(key->chars, "color_table");
                             key->len = 11;
                             key->ref_cnt = 0;
-                            map_put(group, group_type, key, color_table, input->pool);
+                            map_put(group, key, color_table, input);
                         }
                     }
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
@@ -329,7 +334,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                             strcpy(key->chars, "font_table");
                             key->len = 10;
                             key->ref_cnt = 0;
-                            map_put(group, group_type, key, font_table, input->pool);
+                            map_put(group, key, font_table, input);
                         }
                     }
                 } else {
@@ -347,7 +352,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                     } else {
                         value = (LambdaItem)b2it(true);
                     }
-                    map_put(formatting, format_type, cw.keyword, value, input->pool);
+                    map_put(formatting, cw.keyword, value, input);
                 }
             }
         } else if (**rtf == '{') {
@@ -383,7 +388,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
             strcpy(content_key->chars, "content");
             content_key->len = 7;
             content_key->ref_cnt = 0;
-            map_put(group, group_type, content_key, content_item, input->pool);
+            map_put(group, content_key, content_item, input);
         }
     }
     
@@ -396,16 +401,9 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
             strcpy(format_key->chars, "formatting");
             format_key->len = 10;
             format_key->ref_cnt = 0;
-            map_put(group, group_type, format_key, format_item, input->pool);
+            map_put(group, format_key, format_item, input);
         }
     }
-    
-    arraylist_append(input->type_list, group_type);
-    group_type->type_index = input->type_list->length - 1;
-    
-    arraylist_append(input->type_list, format_type);
-    format_type->type_index = input->type_list->length - 1;
-    
     return (Item)group;
 }
 
@@ -433,5 +431,29 @@ void parse_rtf(Input* input, const char* rtf_string) {
         return;
     }
     
-    input->root = parse_rtf_content(input, &rtf);
+    // Create document root to hold all groups
+    Array* document = array_pooled(input->pool);
+    if (!document) {
+        input->root = ITEM_ERROR;
+        return;
+    }
+    
+    // Parse all groups in the document
+    while (*rtf && *rtf != '\0') {
+        skip_whitespace(&rtf);
+        if (*rtf == '\0') break;
+        
+        if (*rtf == '{') {
+            Item group = parse_rtf_group(input, &rtf);
+            if (group != ITEM_ERROR && group != ITEM_NULL) {
+                LambdaItem group_item = {.item = group};
+                array_append(document, group_item, input->pool);
+            }
+        } else {
+            // Skip unknown content
+            rtf++;
+        }
+    }
+    
+    input->root = (Item)document;
 }
