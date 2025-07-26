@@ -356,116 +356,20 @@ void input_free_lines(char** lines, int line_count) {
 }
 
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value) {
-    TypeElmt *element_type = (TypeElmt*)element->type;
-    
     // Create key and value strings
     String* key = input_create_string(input, attr_name);
     String* value = input_create_string(input, attr_value);
     if (!key || !value) return;
-    
-    Map* attr_map;
-    TypeMap* map_type;
-    
-    // Check if element already has attributes (data exists)
-    if (element->data && element_type->shape) {
-        // Reuse existing map - reconstruct it from element data
-        attr_map = map_pooled(input->pool);
-        if (!attr_map) return;
-        
-        // Set up the map to use existing data
-        attr_map->data = element->data;
-        attr_map->data_cap = element->data_cap;
-        
-        // Recreate the TypeMap from existing element type data
-        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-        if (!map_type) return;
-        
-        attr_map->type = map_type;
-        map_type->shape = element_type->shape;
-        map_type->length = element_type->length;
-        map_type->byte_size = element_type->byte_size;
-        map_type->last = element_type->shape;
-        
-        // Find the last shape entry
-        while (map_type->last && map_type->last->next) {
-            map_type->last = map_type->last->next;
-        }
-    } else {
-        // Create a fresh map structure (first attribute)
-        attr_map = map_pooled(input->pool);
-        if (!attr_map) return;
-        
-        // Initialize the map type
-        map_type = map_init_cap(attr_map, input->pool);
-        if (!map_type) return;
-    }
-    
-    // Add the new attribute to the (possibly existing) map
     LambdaItem lambda_value = (LambdaItem)s2it(value);
-    map_put(attr_map, map_type, key, lambda_value, input->pool);
-    
-    // Update element with the (updated) map data
-    element->data = attr_map->data;
-    element->data_cap = attr_map->data_cap;
-    element_type->shape = map_type->shape;
-    element_type->length = map_type->length;
-    element_type->byte_size = map_type->byte_size;
+    elmt_put(element, key, lambda_value, input->pool);
 }
 
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value) {
-    TypeElmt *element_type = (TypeElmt*)element->type;
-    
     // Create key string
     String* key = input_create_string(input, attr_name);
     if (!key) return;
-    
-    Map* attr_map;
-    TypeMap* map_type;
-    
-    // Check if element already has attributes (data exists)
-    if (element->data && element_type->shape) {
-        // Reuse existing map - reconstruct it from element data
-        attr_map = map_pooled(input->pool);
-        if (!attr_map) return;
-        
-        // Set up the map to use existing data
-        attr_map->data = element->data;
-        attr_map->data_cap = element->data_cap;
-        
-        // Recreate the TypeMap from existing element type data
-        map_type = (TypeMap*)alloc_type(input->pool, LMD_TYPE_MAP, sizeof(TypeMap));
-        if (!map_type) return;
-        
-        attr_map->type = map_type;
-        map_type->shape = element_type->shape;
-        map_type->length = element_type->length;
-        map_type->byte_size = element_type->byte_size;
-        map_type->last = element_type->shape;
-        
-        // Find the last shape entry
-        while (map_type->last && map_type->last->next) {
-            map_type->last = map_type->last->next;
-        }
-    } else {
-        // Create a fresh map structure (first attribute)
-        attr_map = map_pooled(input->pool);
-        if (!attr_map) return;
-        
-        // Initialize the map type
-        map_type = map_init_cap(attr_map, input->pool);
-        if (!map_type) return;
-    }
-    
-    // Add the new attribute to the (possibly existing) map
     LambdaItem lambda_value = (LambdaItem)attr_value;
-    map_put(attr_map, map_type, key, lambda_value, input->pool);
-    
-    // Update element with the (updated) map data
-    element->data = attr_map->data;
-    element->data_cap = attr_map->data_cap;
-    element_type->shape = map_type->shape;
-    element_type->length = map_type->length;
-    element_type->byte_size = map_type->byte_size;
+    elmt_put(element, key, lambda_value, input->pool);
 }
 
 Input* input_data(Context* ctx, String* url, String* type) {

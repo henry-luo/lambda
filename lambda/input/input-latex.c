@@ -1,6 +1,10 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_latex_element(Input *input, const char **latex);
+
+// Use common utility functions from input.c
+#define create_latex_element input_create_element
+#define add_attribute_to_element input_add_attribute_to_element
 
 static void skip_whitespace(const char **latex) {
     int whitespace_count = 0;
@@ -267,20 +271,10 @@ static Item parse_latex_command(Input *input, const char **latex) {
     }
     
     // Create element for the command
-    Element* element = elmt_pooled(input->pool);
+    Element* element = create_latex_element(input, cmd_name->chars);
     if (!element) {
         return ITEM_ERROR;
     }
-    
-    TypeElmt* elem_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!elem_type) {
-        return ITEM_ERROR;
-    }
-    element->type = elem_type;
-    
-    // Set command name
-    elem_type->name.str = cmd_name->chars;
-    elem_type->name.length = cmd_name->len;
     
     // Parse arguments
     Array* args = parse_command_arguments(input, latex);
@@ -291,9 +285,11 @@ static Item parse_latex_command(Input *input, const char **latex) {
         if (args && args->length > 0) {
             String* env_name = (String*)args->items[0];
             
-            // Replace the command name with the environment name
-            elem_type->name.str = env_name->chars;
-            elem_type->name.length = env_name->len;
+            // Create a new element with the environment name instead
+            element = create_latex_element(input, env_name->chars);
+            if (!element) {
+                return ITEM_ERROR;
+            }
             
             // Don't add arguments to the element for environments
             // The environment name becomes the tag, not a child
@@ -454,10 +450,8 @@ static Item parse_latex_command(Input *input, const char **latex) {
         }
     }
     
-    elem_type->content_length = ((List*)element)->length;
-    
-    arraylist_append(input->type_list, elem_type);
-    elem_type->type_index = input->type_list->length - 1;
+    // Set content length based on element's list length
+    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
     
     return (Item)element;
 }
@@ -500,20 +494,6 @@ static Item parse_latex_element(Input *input, const char **latex) {
     
     // Handle math mode delimiters
     if (**latex == '$') {
-        // Create math element
-        Element* element = elmt_pooled(input->pool);
-        if (!element) {
-            parse_depth--;
-            return ITEM_ERROR;
-        }
-        
-        TypeElmt* elem_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-        if (!elem_type) {
-            parse_depth--;
-            return ITEM_ERROR;
-        }
-        element->type = elem_type;
-        
         bool display_math = false;
         (*latex)++; // Skip first $
         
@@ -522,10 +502,13 @@ static Item parse_latex_element(Input *input, const char **latex) {
             (*latex)++; // Skip second $
         }
         
-        // Set math mode name
+        // Create math element
         const char* math_name = display_math ? "displaymath" : "math";
-        elem_type->name.str = math_name;
-        elem_type->name.length = strlen(math_name);
+        Element* element = create_latex_element(input, math_name);
+        if (!element) {
+            parse_depth--;
+            return ITEM_ERROR;
+        }
         
         // Parse math content
         StrBuf* math_sb = input->sb;
@@ -565,10 +548,8 @@ static Item parse_latex_element(Input *input, const char **latex) {
             strbuf_full_reset(math_sb);
         }
         
-        elem_type->content_length = ((List*)element)->length;
-        
-        arraylist_append(input->type_list, elem_type);
-        elem_type->type_index = input->type_list->length - 1;
+        // Set content length based on element's list length
+        ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
         
         parse_depth--;
         return (Item)element;
@@ -651,25 +632,12 @@ void parse_latex(Input* input, const char* latex_string) {
     const char *latex = latex_string;
     
     // Create root document element
-    Element* root_element = elmt_pooled(input->pool);
+    Element* root_element = create_latex_element(input, "latex_document");
     if (!root_element) {
         printf("DEBUG: Failed to create root element\n");
         input->root = ITEM_ERROR;
         return;
     }
-    
-    TypeElmt* root_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!root_type) {
-        printf("DEBUG: Failed to create root type\n");
-        input->root = ITEM_ERROR;
-        return;
-    }
-    root_element->type = root_type;
-    
-    // Set root element name
-    const char* root_name = "latex_document";
-    root_type->name.str = root_name;
-    root_type->name.length = strlen(root_name);
     
     // Parse LaTeX content
     skip_whitespace(&latex);
@@ -693,10 +661,7 @@ void parse_latex(Input* input, const char* latex_string) {
     }
     
     printf("DEBUG: Parsed %d elements total\n", element_count);
-    root_type->content_length = ((List*)root_element)->length;
-    
-    arraylist_append(input->type_list, root_type);
-    root_type->type_index = input->type_list->length - 1;
+    ((TypeElmt*)root_element->type)->content_length = ((List*)root_element)->length;
     
     input->root = (Item)root_element;
     printf("DEBUG: LaTeX parsing completed\n");
