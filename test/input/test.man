@@ -1,0 +1,47 @@
+.TH EXAMPLE 1 "July 2025" "Example Manual" "User Commands"
+.SH NAME
+example \- a sample command for demonstration
+.SH SYNOPSIS
+.B example
+[\fIOPTION\fR]...
+[\fIFILE\fR]...
+.SH DESCRIPTION
+.B example
+is a demonstration command that shows various man page formatting features.
+.PP
+This is a paragraph with some
+.B bold text
+and some
+.I italic text
+mixed in.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Display help information and exit.
+.TP
+.B \-v, \-\-verbose
+Enable verbose output mode.
+.IP "\-f, \-\-file FILE" 4
+Specify input file to process.
+.SH EXAMPLES
+.PP
+To run the command with verbose output:
+.RS
+.B example \-v myfile.txt
+.RE
+.PP
+To display help:
+.RS
+.B example \-\-help
+.RE
+.SH FILES
+.TP
+.I /etc/example.conf
+System configuration file.
+.TP
+.I ~/.examplerc
+User configuration file.
+.SH SEE ALSO
+.B grep(1), sed(1), awk(1)
+.SH AUTHOR
+Written by the Example Team.
