@@ -9,6 +9,7 @@ Thumbs.db
 
 # Compiled binaries and objects
 *.o
+*.d
 *.a
 *.so
 *.dylib
