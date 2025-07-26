@@ -266,13 +266,13 @@ static Item parse_heading(Input *input, const char* line) {
     int level;
     if (!is_heading(line, &level)) return ITEM_NULL;
     
-    // Create header element
+    // Create header element with proper HTML tag (h1-h6)
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", level);
     Element* header = create_mediawiki_element(input, tag_name);
     if (!header) return ITEM_NULL;
     
-    // Add level attribute as required by PandocSchema
+    // Add level attribute as required by schema
     char level_str[10];
     snprintf(level_str, sizeof(level_str), "%d", level);
     add_attribute_to_element(input, header, "level", level_str);
@@ -431,9 +431,15 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                 Element* cell = create_mediawiki_element(input, "td");
                 if (cell) {
                     if (strlen(cell_content) > 0) {
-                        Item content = parse_inline_content(input, cell_content);
-                        if (content != ITEM_NULL) {
-                            list_push((List*)cell, content);
+                        // Wrap cell content in paragraph for proper block structure
+                        Element* paragraph = create_mediawiki_element(input, "p");
+                        if (paragraph) {
+                            Item content = parse_inline_content(input, cell_content);
+                            if (content != ITEM_NULL) {
+                                list_push((List*)paragraph, content);
+                                ((TypeElmt*)paragraph->type)->content_length++;
+                            }
+                            list_push((List*)cell, (Item)paragraph);
                             ((TypeElmt*)cell->type)->content_length++;
                         }
                     }
@@ -853,6 +859,11 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     strbuf_free(text_buffer);
     
+    // If span has no content, return empty string
+    if (((TypeElmt*)span->type)->content_length == 0) {
+        return s2it(create_string(input, ""));
+    }
+    
     // If span has only one text child, return just the text
     if (((TypeElmt*)span->type)->content_length == 1) {
         List* span_list = (List*)span;
@@ -895,7 +906,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_mediawiki_content(Input *input, char** lines, int line_count) {
-    // Create the root document element according to PandocSchema
+    // Create the root document element according to schema
     Element* doc = create_mediawiki_element(input, "doc");
     if (!doc) return ITEM_NULL;
     
@@ -905,6 +916,10 @@ static Item parse_mediawiki_content(Input *input, char** lines, int line_count) 
     // Create meta element for metadata
     Element* meta = create_mediawiki_element(input, "meta");
     if (!meta) return (Item)doc;
+    
+    // Add basic metadata attributes
+    add_attribute_to_element(input, meta, "title", "MediaWiki Document");
+    add_attribute_to_element(input, meta, "language", "en");
     
     // Add meta to doc
     list_push((List*)doc, (Item)meta);
