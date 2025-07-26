@@ -8,6 +8,8 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
 static Item parse_strikethrough(Input *input, const char* text, int* pos);
 static Item parse_superscript(Input *input, const char* text, int* pos);
 static Item parse_subscript(Input *input, const char* text, int* pos);
+static int parse_yaml_frontmatter(Input *input, char** lines, int line_count, Element* meta);
+static void parse_yaml_line(Input *input, const char* line, Element* meta);
 static bool is_table_row(const char* line);
 static bool is_table_separator(const char* line);
 static Element* create_markdown_element(Input *input, const char* tag_name);
@@ -601,6 +603,85 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     }
     
     return (Item)table;
+}
+
+// YAML frontmatter parsing functions
+static int parse_yaml_frontmatter(Input *input, char** lines, int line_count, Element* meta) {
+    if (line_count == 0) return 0;
+    
+    // Check if first line is YAML frontmatter delimiter
+    char* first_line = trim_whitespace(lines[0]);
+    if (!first_line || strcmp(first_line, "---") != 0) {
+        if (first_line) free(first_line);
+        return 0;
+    }
+    free(first_line);
+    
+    // Find closing delimiter
+    int yaml_end = -1;
+    for (int i = 1; i < line_count; i++) {
+        char* line = trim_whitespace(lines[i]);
+        if (line && (strcmp(line, "---") == 0 || strcmp(line, "...") == 0)) {
+            yaml_end = i;
+            free(line);
+            break;
+        }
+        if (line) free(line);
+    }
+    
+    if (yaml_end == -1) return 0; // No closing delimiter found
+    
+    // Parse YAML content between delimiters
+    for (int i = 1; i < yaml_end; i++) {
+        if (lines[i] && !is_empty_line(lines[i])) {
+            parse_yaml_line(input, lines[i], meta);
+        }
+    }
+    
+    return yaml_end + 1; // Return number of lines consumed
+}
+
+static void parse_yaml_line(Input *input, const char* line, Element* meta) {
+    // Simple YAML key-value parsing
+    char* trimmed = trim_whitespace(line);
+    if (!trimmed || *trimmed == '#') { // Skip comments
+        if (trimmed) free(trimmed);
+        return;
+    }
+    
+    char* colon = strchr(trimmed, ':');
+    if (!colon) {
+        free(trimmed);
+        return;
+    }
+    
+    // Extract key
+    *colon = '\0';
+    char* key = trim_whitespace(trimmed);
+    
+    // Extract value
+    char* value_start = colon + 1;
+    char* value = trim_whitespace(value_start);
+    
+    if (key && value && strlen(value) > 0) {
+        // Remove quotes if present
+        char* final_value = value;
+        if (strlen(value) >= 2 && 
+            ((value[0] == '"' && value[strlen(value)-1] == '"') ||
+             (value[0] == '\'' && value[strlen(value)-1] == '\''))) {
+            // Create a copy without quotes
+            size_t len = strlen(value) - 2;
+            final_value = strndup(value + 1, len);
+            add_attribute_to_element(input, meta, key, final_value);
+            free(final_value);
+        } else {
+            add_attribute_to_element(input, meta, key, value);
+        }
+    }
+    
+    if (key) free(key);
+    if (value) free(value);
+    free(trimmed);
 }
 
 static Element* create_markdown_element(Input *input, const char* tag_name) {
@@ -1549,7 +1630,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_markdown_content(Input *input, char** lines, int line_count) {
-    // Create the root document element according to PandocSchema
+    // Create the root document element according to schema
     Element* doc = create_markdown_element(input, "doc");
     if (!doc) return ITEM_NULL;
     
@@ -1560,6 +1641,13 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count) {
     Element* meta = create_markdown_element(input, "meta");
     if (!meta) return (Item)doc;
     
+    // Add default metadata
+    add_attribute_to_element(input, meta, "title", "Markdown Document");
+    add_attribute_to_element(input, meta, "language", "en");
+    
+    // Parse YAML frontmatter if present
+    int content_start = parse_yaml_frontmatter(input, lines, line_count, meta);
+    
     // Add meta to doc
     list_push((List*)doc, (Item)meta);
     ((TypeElmt*)doc->type)->content_length++;
@@ -1568,7 +1656,7 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count) {
     Element* body = create_markdown_element(input, "body");
     if (!body) return (Item)doc;
     
-    int current_line = 0;
+    int current_line = content_start; // Start after YAML frontmatter
     
     while (current_line < line_count) {
         // Skip empty lines
