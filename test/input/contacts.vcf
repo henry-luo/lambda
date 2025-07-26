@@ -1,0 +1,37 @@
+BEGIN:VCARD
+VERSION:4.0
+FN:Jane Smith
+N:Smith;Jane;Elizabeth;Dr;PhD
+EMAIL;TYPE=work:jane.smith@company.org
+EMAIL;TYPE=home:jane.personal@gmail.com
+TEL;TYPE=work,voice:+1-555-987-6543
+TEL;TYPE=home,voice:+1-555-555-1234
+TEL;TYPE=cell:+1-555-234-5678
+ORG:Advanced Research Institute;Research Division
+TITLE:Principal Research Scientist
+ADR;TYPE=work:Suite 200;100 Innovation Drive;Tech City;NY;10001;United States
+ADR;TYPE=home:;;456 Residential Lane;Hometown;NY;12345;United States
+URL;TYPE=work:https://research.company.org/jane-smith
+URL;TYPE=personal:https://janesmith.dev
+BDAY:1978-03-22
+NOTE:Leading expert in artificial intelligence and machine learning. Published 
+ over 50 research papers. Fluent in English, Spanish, and French.
+CATEGORIES:Researcher,AI Expert,Author
+PHOTO:https://company.org/photos/jane-smith.jpg
+X-TWITTER:@janesmith_ai
+X-LINKEDIN:jane-elizabeth-smith
+END:VCARD
+
+BEGIN:VCARD
+VERSION:3.0
+FN:Bob Johnson
+N:Johnson;Bob;William;;
+EMAIL:bob@startup.tech
+TEL:+1-555-876-5432
+ORG:Startup Technologies Inc
+TITLE:Chief Technology Officer
+ADR:;;789 Startup Boulevard;Silicon Valley;CA;94000;USA
+URL:https://startup.tech
+BDAY:1990-12-08
+NOTE:Serial entrepreneur and technology innovator.
+END:VCARD

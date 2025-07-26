@@ -118,6 +118,9 @@ MimePattern magic_patterns[] = {
     {"# ", 2, 0, 30, "text/markdown"},
     {"## ", 3, 0, 30, "text/markdown"},
     {"### ", 4, 0, 30, "text/markdown"},
+    
+    // vCard
+    {"BEGIN:VCARD", 11, 0, 60, "text/vcard"},
 };
 
 // File extension patterns
@@ -152,6 +155,8 @@ MimeGlob glob_patterns[] = {
     {"*.rst", "text/x-rst"},
     {"*.tex", "application/x-tex"},
     {"*.latex", "application/x-latex"},
+    {"*.vcf", "text/vcard"},
+    {"*.vcard", "text/vcard"},
     
     // Programming languages
     {"*.c", "text/x-c"},

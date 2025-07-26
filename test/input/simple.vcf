@@ -1,0 +1,13 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:John Doe
+N:Doe;John;Michael;Mr;Jr
+EMAIL:john.doe@example.com
+TEL:+1-555-123-4567
+ORG:Example Corporation
+TITLE:Senior Developer
+ADR:;;123 Main Street;Anytown;CA;12345;USA
+URL:https://johndoe.example.com
+BDAY:1985-01-15
+NOTE:This is a sample contact card for testing purposes.
+END:VCARD

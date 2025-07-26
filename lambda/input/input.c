@@ -20,6 +20,7 @@ void parse_mediawiki(Input* input, const char* mediawiki_string);
 void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_man(Input* input, const char* man_string);
 void parse_eml(Input* input, const char* eml_string);
+void parse_vcf(Input* input, const char* vcf_string);
 
 
 String* strbuf_to_string(StrBuf *sb) {
@@ -474,6 +475,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(effective_type, "eml") == 0) {
             parse_eml(input, source);
+        }
+        else if (strcmp(effective_type, "vcf") == 0) {
+            parse_vcf(input, source);
         }
         else {
             printf("Unknown input type: %s\n", effective_type);
