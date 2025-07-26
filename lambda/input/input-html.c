@@ -1,4 +1,4 @@
-#include "../transpiler.h"
+#include "input.h"
 
 static Item parse_element(Input *input, const char **html);
 
@@ -341,17 +341,7 @@ static String* parse_attribute_value(Input *input, const char **html) {
     }
 }
 
-static Map* parse_attributes(Input *input, const char **html) {
-    Map* attributes = map_pooled(input->pool);
-    if (!attributes) {
-        return NULL;
-    }
-    
-    TypeMap* attr_type = map_init_cap(attributes, input->pool);
-    if (!attributes->data) {
-        return attributes;
-    }
-    
+static bool parse_attributes(Input *input, Element *element, const char **html) {
     skip_whitespace(html);
     
     int attr_count = 0;
@@ -390,7 +380,7 @@ static Map* parse_attributes(Input *input, const char **html) {
                 // Create empty string as fallback
                 StrBuf* fallback_sb = input->sb;
                 if (!fallback_sb || !fallback_sb->str) {
-                    return attributes;
+                    return false;
                 }
                 
                 String *empty_string = (String*)fallback_sb->str;
@@ -404,7 +394,7 @@ static Map* parse_attributes(Input *input, const char **html) {
             StrBuf* empty_sb = input->sb;
             
             if (!empty_sb || !empty_sb->str) {
-                return attributes;
+                return false;
             }
             
             String *empty_string = (String*)empty_sb->str;
@@ -417,7 +407,7 @@ static Map* parse_attributes(Input *input, const char **html) {
         // Double-check that attr_value is not NULL before using it
         if (attr_value) {
             LambdaItem value = (LambdaItem)s2it(attr_value);
-            map_put(attributes, attr_type, attr_name, value, input->pool);
+            elmt_put(element, attr_name, value, input->pool);
         }
         
         skip_whitespace(html);
@@ -427,9 +417,7 @@ static Map* parse_attributes(Input *input, const char **html) {
         printf("WARNING: Hit attribute limit (%d), possible infinite loop\n", max_attributes);
     }
     
-    arraylist_append(input->type_list, attr_type);
-    attr_type->type_index = input->type_list->length - 1;
-    return attributes;
+    return true;
 }
 
 static String* parse_tag_name(Input *input, const char **html) {
@@ -597,8 +585,15 @@ static Item parse_element(Input *input, const char **html) {
         return ITEM_ERROR;
     }
     
-    Map* attributes = parse_attributes(input, html);
-    if (!attributes) {
+    // Create element using shared function
+    Element* element = input_create_element(input, tag_name->chars);
+    if (!element) {
+        parse_depth--;
+        return ITEM_ERROR;
+    }
+    
+    // Parse attributes directly into the element
+    if (!parse_attributes(input, element, html)) {
         parse_depth--;
         return ITEM_ERROR;
     }
@@ -615,43 +610,6 @@ static Item parse_element(Input *input, const char **html) {
         return ITEM_ERROR;
     }
     (*html)++; // Skip >
-    
-    // Create element
-    Element* element = elmt_pooled(input->pool);
-    if (!element) {
-        parse_depth--;
-        return ITEM_ERROR;
-    }
-    
-    TypeElmt* elem_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
-    if (!elem_type) {
-        parse_depth--;
-        return ITEM_ERROR;
-    }
-    element->type = elem_type;
-    // Set element name from tag name
-    elem_type->name.str = tag_name->chars;
-    elem_type->name.length = tag_name->len;
-    
-    // Handle attributes by copying from the parsed attributes map to element shape
-    if (attributes->type && ((TypeMap*)attributes->type)->length > 0) {
-        TypeMap* attr_type = (TypeMap*)attributes->type;
-        
-        // Copy shape from attributes to element
-        elem_type->shape = attr_type->shape;
-        elem_type->last = attr_type->last;
-        elem_type->length = attr_type->length;
-        elem_type->byte_size = attr_type->byte_size;
-        
-        // Copy attribute data to element
-        if (attr_type->byte_size > 0) {
-            element->data = pool_calloc(input->pool, attr_type->byte_size);
-            element->data_cap = attr_type->byte_size;
-            if (attributes->data) {
-                memcpy(element->data, attributes->data, attr_type->byte_size);
-            }
-        }
-    }
     
     // Handle content for non-void elements
     if (!is_self_closing && !is_void_element(tag_name->chars)) {
@@ -810,11 +768,9 @@ static Item parse_element(Input *input, const char **html) {
         }
         
         // Set content length based on element's list length
-        elem_type->content_length = ((List*)element)->length;
+        ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
     }
     
-    arraylist_append(input->type_list, elem_type);
-    elem_type->type_index = input->type_list->length - 1;
     parse_depth--;
     
     return (Item)element;
