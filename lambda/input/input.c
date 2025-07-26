@@ -19,6 +19,7 @@ void parse_pdf(Input* input, const char* pdf_string);
 void parse_mediawiki(Input* input, const char* mediawiki_string);
 void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_man(Input* input, const char* man_string);
+void parse_eml(Input* input, const char* eml_string);
 
 
 String* strbuf_to_string(StrBuf *sb) {
@@ -215,6 +216,9 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/x-latex") == 0) return "latex";
     if (strcmp(mime_type, "application/toml") == 0) return "toml";
     if (strcmp(mime_type, "application/x-yaml") == 0) return "yaml";
+    if (strcmp(mime_type, "message/rfc822") == 0) return "eml";
+    if (strcmp(mime_type, "application/eml") == 0) return "eml";
+    if (strcmp(mime_type, "message/eml") == 0) return "eml";
     
     // Check for XML-based formats
     if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
@@ -467,6 +471,9 @@ Input* input_data(Context* ctx, String* url, String* type) {
         }
         else if (strcmp(effective_type, "man") == 0) {
             parse_man(input, source);
+        }
+        else if (strcmp(effective_type, "eml") == 0) {
+            parse_eml(input, source);
         }
         else {
             printf("Unknown input type: %s\n", effective_type);

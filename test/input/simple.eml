@@ -1,0 +1,8 @@
+From: sender@example.com
+To: recipient@example.com
+Subject: Simple Test Email
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+Message-ID: <simple@example.com>
+
+This is a simple test email body.
+It has just basic content for testing.

@@ -1,0 +1,40 @@
+From: John Doe <john.doe@example.com>
+To: Jane Smith <jane.smith@company.org>
+Subject: Test Email with Multiple Headers
+Date: Mon, 15 Jan 2024 14:30:00 +0000
+Message-ID: <20240115143000.12345@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+X-Mailer: Test Mailer 1.0
+X-Priority: 3
+Return-Path: <john.doe@example.com>
+Reply-To: John Doe Support <support@example.com>
+Cc: team@example.com
+Bcc: archive@example.com
+Received: from mail.example.com (mail.example.com [192.168.1.1])
+    by mx.company.org (Postfix) with ESMTP id ABC123
+    for <jane.smith@company.org>; Mon, 15 Jan 2024 14:30:00 +0000 (UTC)
+Organization: Example Corporation
+User-Agent: TestClient/1.0
+
+Hello Jane,
+
+This is a test email message with multiple lines.
+
+It contains:
+- Plain text content
+- Multiple paragraphs
+- Some formatting elements
+
+The email also tests continuation headers (like the Received header above).
+
+Best regards,
+John Doe
+
+--
+John Doe
+Senior Developer
+Example Corporation
+Phone: +1-555-123-4567
+Email: john.doe@example.com
