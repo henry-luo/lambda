@@ -27,6 +27,8 @@
         "lambda/print.c",
         "lambda/lambda-eval.c",
         "lambda/lambda-mem.c",
+        "lambda/validator/validator.c",
+        "lambda/validator/schema_parser.c",
         "lambda/main.cpp"
     ],
     "libraries": [

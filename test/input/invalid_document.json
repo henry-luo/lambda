@@ -1,0 +1,6 @@
+// Invalid test document - missing required fields
+{
+    "name": "Incomplete Document",
+    // missing version and data fields
+    "extra_field": "This should not be in the schema"
+}

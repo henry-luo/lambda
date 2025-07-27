@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#include "transpiler.h"
+#include "../transpiler.h"
 
 // ==================== Schema Type System Extensions ====================
 
@@ -159,9 +159,12 @@ typedef struct ValidationOptions {
     char** disabled_rules;         // Rules to disable
 } ValidationOptions;
 
+// Forward declaration
+typedef struct ValidationContext ValidationContext;
+
 // Custom validator function type
 typedef ValidationResult* (*CustomValidatorFunc)(Item item, TypeSchema* schema, 
-                                                struct ValidationContext* context);
+                                                ValidationContext* context);
 
 // Custom validator registration
 typedef struct CustomValidator {

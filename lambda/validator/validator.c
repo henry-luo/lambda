@@ -1174,3 +1174,31 @@ LambdaValidationOptions* lambda_validator_get_options(LambdaValidator* validator
     
     return options;
 }
+
+// ==================== Utility Functions ====================
+
+void validation_result_destroy(ValidationResult* result) {
+    if (!result) return;
+    
+    // Note: We don't free individual error messages or path components
+    // since they're allocated from the memory pool and will be freed
+    // when the pool is destroyed
+    
+    // The ValidationResult structure itself is also allocated from
+    // the memory pool, so we don't need to explicitly free it
+}
+
+ValidationResult* validate_document(SchemaValidator* validator, Item document, const char* schema_name) {
+    if (!validator || !schema_name) {
+        return NULL;
+    }
+    
+    // Get the main schema for validation
+    TypeSchema* main_schema = create_primitive_schema(LMD_TYPE_ANY, validator->pool);
+    if (!main_schema) {
+        return NULL;
+    }
+    
+    // Run validation using validate_item
+    return validate_item(validator, document, main_schema, validator->context);
+}

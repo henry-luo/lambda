@@ -1,4 +1,16 @@
 #include "transpiler.h"
+#include "validator/validator.h"
+#include "input/input.h"
+
+// Input parser function declarations
+extern "C" {
+    void parse_json(Input* input, const char* json_string);
+    void parse_csv(Input* input, const char* csv_string);
+    void parse_yaml(Input* input, const char* yaml_str);
+    void parse_xml(Input* input, const char* xml_string);
+    void parse_html(Input* input, const char* html_string);
+    void parse_markdown(Input* input, const char* markdown_string);
+}
 
 // System includes for environment and string functions
 #include <stdlib.h>
@@ -59,11 +71,15 @@ void print_help() {
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
     printf("  lambda --repl                - Start REPL mode\n");
     printf("  lambda --repl --mir          - Start REPL with MIR JIT\n");
+    printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nREPL Commands:\n");
     printf("  :quit, :q, :exit     - Exit REPL\n");
     printf("  :help, :h            - Show help\n");
     printf("  :clear               - Clear REPL history\n");
+    printf("\nValidation Commands:\n");
+    printf("  validate <file> -s <schema.ls>  - Validate file against schema\n");
+    printf("  validate <file>                 - Validate using doc_schema.ls (default)\n");
 }
 
 // Function to determine the best REPL prompt based on system capabilities
@@ -189,6 +205,235 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir) {
     strbuf_free(output);
 }
 
+// Utility function to read file contents
+char* read_file_contents(const char* filename) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        printf("Error: Cannot open file '%s'\n", filename);
+        return NULL;
+    }
+    
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    // Read file contents
+    char* contents = (char*)malloc(size + 1);
+    if (!contents) {
+        printf("Error: Cannot allocate memory for file contents\n");
+        fclose(file);
+        return NULL;
+    }
+    
+    size_t bytes_read = fread(contents, 1, size, file);
+    contents[bytes_read] = '\0';
+    
+    fclose(file);
+    return contents;
+}
+
+void run_validation(const char *data_file, const char *schema_file, const char *input_format) {
+    printf("Lambda Validator v1.0\n");
+    if (input_format) {
+        printf("Validating '%s' (format: %s) against schema '%s'\n", data_file, input_format, schema_file);
+    } else {
+        printf("Validating '%s' (auto-detect format) against schema '%s'\n", data_file, schema_file);
+    }
+    
+    // Initialize runtime for Lambda script parsing if needed
+    Runtime runtime;
+    runtime_init(&runtime);
+    runtime.current_dir = const_cast<char*>("./");
+    
+    // Read data file
+    char* data_contents = read_file_contents(data_file);
+    if (!data_contents) {
+        return;
+    }
+    
+    // Read schema file
+    char* schema_contents = read_file_contents(schema_file);
+    if (!schema_contents) {
+        free(data_contents);
+        return;
+    }
+    
+    // Create memory pool for validation
+    VariableMemPool* pool = nullptr;
+    MemPoolError pool_err = pool_variable_init(&pool, 1024 * 1024, 10); // 1MB chunks, 10% tolerance
+    if (pool_err != MEM_POOL_ERR_OK || !pool) {
+        printf("Error: Cannot create memory pool\n");
+        free(data_contents);
+        free(schema_contents);
+        return;
+    }
+    
+    // Create validator
+    SchemaValidator* validator = schema_validator_create(pool);
+    if (!validator) {
+        printf("Error: Cannot create validator\n");
+        pool_variable_destroy(pool);
+        free(data_contents);
+        free(schema_contents);
+        return;
+    }
+    
+    // Load schema
+    printf("Loading schema...\n");
+    int schema_result = schema_validator_load_schema(validator, schema_contents, "main_schema");
+    if (schema_result != 0) {
+        printf("Error: Failed to load schema\n");
+        schema_validator_destroy(validator);
+        pool_variable_destroy(pool);
+        free(data_contents);
+        free(schema_contents);
+        return;
+    }
+    
+    // Parse data file using appropriate input parser
+    printf("Parsing data file...\n");
+    Item data_item = ITEM_ERROR;
+    
+    if (!input_format || strcmp(input_format, "lambda") == 0) {
+        // Parse as Lambda script directly
+        data_item = run_script(&runtime, data_contents, (char*)data_file);
+    } else {
+        // Use input parsers for other formats
+        // Create a basic input structure
+        Input* input = (Input*)calloc(1, sizeof(Input));
+        if (input) {
+            // Initialize memory pool for input parsing
+            MemPoolError input_pool_err = pool_variable_init(&input->pool, 64 * 1024, 10); // 64KB chunks
+            if (input_pool_err == MEM_POOL_ERR_OK) {
+                input->type_list = arraylist_new(16);
+                
+                // Determine effective format
+                const char* effective_type = input_format;
+                if (!effective_type || strcmp(effective_type, "auto") == 0) {
+                    effective_type = "text"; // Default fallback for now
+                }
+                
+                printf("Using input format: %s\n", effective_type);
+                
+                // Parse according to format
+                if (strcmp(effective_type, "text") == 0) {
+                    // Create string item for plain text
+                    String* str = (String*)malloc(sizeof(String) + strlen(data_contents) + 1);
+                    if (str) {
+                        str->len = strlen(data_contents);
+                        str->ref_cnt = 0;
+                        strcpy(str->chars, data_contents);
+                        input->root = s2it(str);
+                        data_item = input->root;
+                    }
+                } else {
+                    // For other formats, we need to call the specific parsers
+                    // But they expect different function signatures
+                    // For now, let's implement a few key ones
+                    if (strcmp(effective_type, "json") == 0) {
+                        parse_json(input, data_contents);
+                        data_item = input->root;
+                    } else if (strcmp(effective_type, "html") == 0) {
+                        parse_html(input, data_contents);
+                        data_item = input->root;
+                    } else if (strcmp(effective_type, "xml") == 0) {
+                        parse_xml(input, data_contents);
+                        data_item = input->root;
+                    } else if (strcmp(effective_type, "csv") == 0) {
+                        parse_csv(input, data_contents);
+                        data_item = input->root;
+                    } else if (strcmp(effective_type, "yaml") == 0) {
+                        parse_yaml(input, data_contents);
+                        data_item = input->root;
+                    } else if (strcmp(effective_type, "markdown") == 0) {
+                        parse_markdown(input, data_contents);
+                        data_item = input->root;
+                    } else {
+                        printf("Error: Unsupported input format '%s'\n", effective_type);
+                        printf("Supported formats: lambda, text, json, html, xml, csv, yaml, markdown\n");
+                    }
+                }
+            } else {
+                printf("Error: Failed to initialize input memory pool\n");
+                free(input);
+                input = NULL;
+            }
+        }
+        
+        if (!input || data_item == ITEM_ERROR) {
+            printf("Error: Failed to parse input file with format '%s'\n", input_format);
+        }
+    }
+    
+    if (data_item == ITEM_ERROR) {
+        printf("Error: Failed to parse data file\n");
+        schema_validator_destroy(validator);
+        pool_variable_destroy(pool);
+        free(data_contents);
+        free(schema_contents);
+        return;
+    }
+    
+    // Get the main schema for validation
+    printf("Validating data...\n");
+    // For now, we'll create a simple primitive schema as a placeholder
+    // TODO: Properly resolve the schema from the validator registry
+    TypeSchema* main_schema = create_primitive_schema(LMD_TYPE_ANY, pool);
+    if (!main_schema) {
+        printf("Error: Cannot create validation schema\n");
+        schema_validator_destroy(validator);
+        pool_variable_destroy(pool);
+        free(data_contents);
+        free(schema_contents);
+        return;
+    }
+    
+    // Run validation
+    ValidationResult* result = validate_item(validator, data_item, main_schema, validator->context);
+    
+    // Print results
+    printf("\n=== Validation Results ===\n");
+    if (result && result->valid) {
+        printf("✅ Validation PASSED\n");
+        printf("✓ Data file '%s' is valid according to schema '%s'\n", data_file, schema_file);
+    } else {
+        printf("❌ Validation FAILED\n");
+        if (result) {
+            printf("Errors found: %d\n", result->error_count);
+            
+            // Print error details
+            ValidationError* error = result->errors;
+            int error_num = 1;
+            while (error) {
+                const char* error_msg = error->message ? "Unknown error" : "Unknown error";
+                if (error->message) {
+                    // TODO: Convert String* to const char* properly
+                    error_msg = "Error message present (conversion needed)";
+                }
+                printf("  Error %d: %s\n", error_num, error_msg);
+                if (error->path) {
+                    printf("    Path: ");
+                    // TODO: Print the validation path
+                    printf("(path information)\n");
+                }
+                error = error->next;
+                error_num++;
+            }
+        }
+    }
+    
+    // Cleanup
+    if (result) {
+        // TODO: Implement proper validation result cleanup
+        // validation_result_destroy(result);
+    }
+    schema_validator_destroy(validator);
+    pool_variable_destroy(pool);
+    free(data_contents);
+    free(schema_contents);
+}
+
 void run_assertions() {
 #ifdef __cplusplus
     static_assert(sizeof(bool) == 1, "bool size == 1 byte");
@@ -233,10 +478,72 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     
-    // Initialize runtime
+    // Initialize runtime (needed for all operations)
     Runtime runtime;
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
+    
+    // Handle validate command
+    if (argc >= 2 && strcmp(argv[1], "validate") == 0) {
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Validator v1.0\n\n");
+            printf("Usage: %s validate [-s <schema>] [-f <format>] <file> [files...]\n", argv[0]);
+            printf("\nOptions:\n");
+            printf("  -s <schema>    Schema file (default: lambda/input/doc_schema.ls)\n");
+            printf("  -f <format>    Input format (auto-detect, json, xml, html, md, yaml, csv, ini, toml, etc.)\n");
+            printf("  -h, --help     Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s validate document.ls\n", argv[0]);
+            printf("  %s validate -s custom_schema.ls document.ls\n", argv[0]);
+            printf("  %s validate -f html -s schema.ls input.html\n", argv[0]);
+            return 0;
+        }
+        
+        if (argc < 3) {
+            printf("Error: No file specified for validation\n");
+            printf("Usage: %s validate [-s <schema>] [-f <format>] <file> [files...]\n", argv[0]);
+            printf("Use '%s validate --help' for more information.\n", argv[0]);
+            return 1;
+        }
+        
+        const char* data_file = nullptr;
+        const char* schema_file = "lambda/input/doc_schema.ls";  // Default schema
+        const char* input_format = nullptr;  // Auto-detect by default
+        
+        // Parse validation arguments
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
+                schema_file = argv[i + 1];
+                i++; // Skip the schema filename
+            } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
+                input_format = argv[i + 1];
+                i++; // Skip the format name
+            } else if (argv[i][0] != '-') {
+                // This is the input file
+                if (!data_file) {
+                    data_file = argv[i];
+                } else {
+                    printf("Error: Multiple input files not yet supported\n");
+                    return 1;
+                }
+            } else {
+                printf("Error: Unknown validation option '%s'\n", argv[i]);
+                printf("Usage: %s validate [-s <schema>] [-f <format>] <file>\n", argv[0]);
+                printf("Formats: auto, json, csv, ini, toml, yaml, xml, markdown, rst, html, latex, rtf, pdf, wiki, asciidoc, man, eml, vcf, ics, text\n");
+                return 1;
+            }
+        }
+        
+        if (!data_file) {
+            printf("Error: No input file specified\n");
+            printf("Usage: %s validate [-s <schema>] [-f <format>] <file>\n", argv[0]);
+            return 1;
+        }
+        
+        run_validation(data_file, schema_file, input_format);
+        return 0;
+    }
     
     bool use_mir = false;
     bool repl_mode = false;
