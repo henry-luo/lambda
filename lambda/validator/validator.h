@@ -209,14 +209,46 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source);
 TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node);
 TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node);
 
-// Type building functions (similar to existing build_* functions)
-TypeSchema* build_primitive_schema(SchemaParser* parser, TSNode node);
+// Enhanced type building functions with full Tree-sitter symbol support
+TypeSchema* build_primitive_schema(SchemaParser* parser, TSNode node, TypeId type_id);
+TypeSchema* build_primitive_schema_from_symbol(SchemaParser* parser, TSNode node);
 TypeSchema* build_union_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_array_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_map_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_element_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_occurrence_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_reference_schema(SchemaParser* parser, TSNode node);
+
+// Additional enhanced type builders
+TypeSchema* build_list_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_object_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_function_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_primary_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_list_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_function_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_binary_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_binary_expression_schema(SchemaParser* parser, TSNode node);
+
+// ==================== Schema Creation Functions ====================
+
+// Schema factory functions
+TypeSchema* create_primitive_schema(TypeId primitive_type, VariableMemPool* pool);
+TypeSchema* create_array_schema(TypeSchema* element_type, long min_len, long max_len, VariableMemPool* pool);
+TypeSchema* create_union_schema(List* types, VariableMemPool* pool);
+TypeSchema* create_map_schema(TypeSchema* key_type, TypeSchema* value_type, VariableMemPool* pool);
+TypeSchema* create_element_schema(const char* tag_name, VariableMemPool* pool);
+TypeSchema* create_occurrence_schema(TypeSchema* base_type, long min_count, long max_count, VariableMemPool* pool);
+TypeSchema* create_reference_schema(const char* type_name, VariableMemPool* pool);
+TypeSchema* create_literal_schema(Item literal_value, VariableMemPool* pool);
+
+// Utility functions
+StrView strview_from_cstr(const char* str);
+String* string_from_strview(StrView view, VariableMemPool* pool);
+bool is_compatible_type(TypeId actual, TypeId expected);
+TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry);
 
 // ==================== Validation Engine ====================
 
@@ -253,6 +285,7 @@ ValidationResult* validate_map(Item item, TypeSchema* schema, ValidationContext*
 ValidationResult* validate_element(Item item, TypeSchema* schema, ValidationContext* ctx);
 ValidationResult* validate_occurrence(Item item, TypeSchema* schema, ValidationContext* ctx);
 ValidationResult* validate_reference(Item item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_literal(Item item, TypeSchema* schema, ValidationContext* ctx);
 
 // Custom validator registration
 void register_custom_validator(SchemaValidator* validator, const char* name,

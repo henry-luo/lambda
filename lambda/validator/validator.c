@@ -9,13 +9,55 @@
 #include <string.h>
 #include <assert.h>
 
+// ==================== Hashmap Entry Structures ====================
+
+typedef struct {
+    StrView name;
+    TypeSchema* schema;
+} SchemaEntry;
+
+typedef struct {
+    StrView key;
+    bool visited;
+} VisitedEntry;
+
+// ==================== Hashmap Helper Functions ====================
+
+static int schema_compare(const void *a, const void *b, void *udata) {
+    const SchemaEntry *sa = a;
+    const SchemaEntry *sb = b;
+    if (sa->name.length != sb->name.length) {
+        return sa->name.length < sb->name.length ? -1 : 1;
+    }
+    return memcmp(sa->name.str, sb->name.str, sa->name.length);
+}
+
+static uint64_t schema_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const SchemaEntry *entry = item;
+    return hashmap_murmur(entry->name.str, entry->name.length, seed0, seed1);
+}
+
+static int visited_compare(const void *a, const void *b, void *udata) {
+    const VisitedEntry *va = a;
+    const VisitedEntry *vb = b;
+    if (va->key.length != vb->key.length) {
+        return va->key.length < vb->key.length ? -1 : 1;
+    }
+    return memcmp(va->key.str, vb->key.str, va->key.length);
+}
+
+static uint64_t visited_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const VisitedEntry *entry = item;
+    return hashmap_murmur(entry->key.str, entry->key.length, seed0, seed1);
+}
+
 // ==================== Schema Validator Creation ====================
 
 SchemaValidator* schema_validator_create(VariableMemPool* pool) {
     SchemaValidator* validator = (SchemaValidator*)pool_calloc(pool, sizeof(SchemaValidator));
     
     validator->pool = pool;
-    validator->schemas = hashmap_new(sizeof(TypeSchema*), 0, 0, 0, NULL, NULL, NULL);
+    validator->schemas = hashmap_new(sizeof(SchemaEntry), 0, 0, 0, schema_hash, schema_compare, NULL, NULL);
     validator->context = (ValidationContext*)pool_calloc(pool, sizeof(ValidationContext));
     validator->custom_validators = NULL;
     
@@ -30,7 +72,7 @@ SchemaValidator* schema_validator_create(VariableMemPool* pool) {
     validator->context->pool = pool;
     validator->context->path = NULL;
     validator->context->schema_registry = validator->schemas;
-    validator->context->visited = hashmap_new(sizeof(bool), 0, 0, 0, NULL, NULL, NULL);
+    validator->context->visited = hashmap_new(sizeof(VisitedEntry), 0, 0, 0, visited_hash, visited_compare, NULL, NULL);
     validator->context->custom_validators = NULL;
     validator->context->options = validator->default_options;
     validator->context->current_depth = 0;
@@ -62,8 +104,11 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
     }
     
     // Store schema in registry
-    StrView name_key = strview_from_cstr(schema_name);
-    hashmap_set(validator->schemas, &name_key, &schema);
+    SchemaEntry entry = {
+        .name = strview_from_cstr(schema_name),
+        .schema = schema
+    };
+    hashmap_set(validator->schemas, &entry);
     
     schema_parser_destroy(parser);
     return 0;
@@ -426,9 +471,9 @@ ValidationResult* validate_reference(Item item, TypeSchema* schema, ValidationCo
     }
     
     // Check for circular references
-    StrView key = schema->name;
-    bool visited = false;
-    if (hashmap_get(ctx->visited, &key, &visited) && visited) {
+    VisitedEntry lookup = { .key = schema->name };
+    const VisitedEntry* visited_entry = hashmap_get(ctx->visited, &lookup);
+    if (visited_entry && visited_entry->visited) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_CIRCULAR_REFERENCE, "Circular type reference detected", 
             ctx->path, ctx->pool));
@@ -436,15 +481,15 @@ ValidationResult* validate_reference(Item item, TypeSchema* schema, ValidationCo
     }
     
     // Mark as visited and validate
-    visited = true;
-    hashmap_set(ctx->visited, &key, &visited);
+    VisitedEntry visited_entry_set = { .key = schema->name, .visited = true };
+    hashmap_set(ctx->visited, &visited_entry_set);
     
     validation_result_destroy(result);
     result = validate_item(NULL, item, resolved, ctx);
     
     // Unmark as visited
-    visited = false;
-    hashmap_set(ctx->visited, &key, &visited);
+    VisitedEntry visited_entry_unset = { .key = schema->name, .visited = false };
+    hashmap_set(ctx->visited, &visited_entry_unset);
     
     return result;
 }
@@ -580,9 +625,9 @@ TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry) {
         return NULL;
     }
     
-    TypeSchema* resolved = NULL;
-    hashmap_get(registry, &ref_schema->name, &resolved);
-    return resolved;
+    SchemaEntry lookup = { .name = ref_schema->name };
+    const SchemaEntry* entry = hashmap_get(registry, &lookup);
+    return entry ? entry->schema : NULL;
 }
 
 // ==================== Missing Implementation Functions ====================

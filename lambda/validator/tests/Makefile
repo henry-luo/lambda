@@ -45,6 +45,12 @@ VALIDATOR_SOURCES = \
 	$(VALIDATOR_DIR)/doc_validators.c \
 	$(VALIDATOR_DIR)/error_reporting.c
 
+# Minimal validator sources (without doc_validators for basic tests)
+VALIDATOR_CORE_SOURCES = \
+	$(VALIDATOR_DIR)/validator.c \
+	$(VALIDATOR_DIR)/schema_parser.c \
+	$(VALIDATOR_DIR)/error_reporting.c
+
 # Lambda library sources (essential ones needed for testing)
 LAMBDA_SOURCES = \
 	$(LAMBDA_DIR)/lambda.c \
@@ -63,12 +69,13 @@ LAMBDA_SOURCES = \
 TEST_SOURCES = \
 	test_validator.c \
 	test_schema_parser.c \
-	test_doc_schema.c \
+	test_doc_schema_simple.c \
 	test_api.c \
 	test_simple.c
 
 # Object files
 VALIDATOR_OBJECTS = $(VALIDATOR_SOURCES:.c=.o)
+VALIDATOR_CORE_OBJECTS = $(VALIDATOR_CORE_SOURCES:.c=.o)
 LAMBDA_OBJECTS = $(LAMBDA_SOURCES:.c=.o)
 TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 
@@ -76,7 +83,7 @@ TEST_OBJECTS = $(TEST_SOURCES:.c=.o)
 TEST_EXECUTABLES = \
 	test_validator \
 	test_schema_parser \
-	test_doc_schema \
+	test_doc_schema_simple \
 	test_api \
 	test_simple \
 	test_all
@@ -93,10 +100,10 @@ tests: $(TEST_EXECUTABLES)
 test_validator: test_validator.o $(VALIDATOR_OBJECTS) $(LAMBDA_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-test_schema_parser: test_schema_parser.o $(VALIDATOR_OBJECTS) $(LAMBDA_OBJECTS)
+test_schema_parser: test_schema_parser.o $(VALIDATOR_CORE_OBJECTS) $(LAMBDA_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
-test_doc_schema: test_doc_schema.o $(VALIDATOR_OBJECTS) $(LAMBDA_OBJECTS)
+test_doc_schema_simple: test_doc_schema_simple.o $(VALIDATOR_OBJECTS) $(LAMBDA_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
 test_api: test_api.o $(VALIDATOR_OBJECTS) $(LAMBDA_OBJECTS)

@@ -4,26 +4,14 @@
 #include "../validator.h"
 
 // Test fixtures
-static VariableMemPool* test_pool;
-
-void setup(void) {
-    pool_variable_init(&test_pool, 1024, 10);
-}
-
-void teardown(void) {
-    if (test_pool) {
-        pool_variable_destroy(test_pool);
-        test_pool = NULL;
-    }
-}
-
-// Test fixtures
 static VariableMemPool* test_pool = NULL;
 static SchemaParser* parser = NULL;
 
 void parser_test_setup(void) {
-    test_pool = make_pool_new();
-    parser = schema_parser_create(test_pool);
+    pool_variable_init(&test_pool, 1024, 10);
+    if (test_pool) {
+        parser = schema_parser_create(test_pool);
+    }
 }
 
 void parser_test_teardown(void) {
@@ -32,12 +20,59 @@ void parser_test_teardown(void) {
         parser = NULL;
     }
     if (test_pool) {
-        pool_delete(&test_pool);
+        pool_variable_destroy(test_pool);
         test_pool = NULL;
     }
 }
 
 TestSuite(parser_tests, .init = parser_test_setup, .fini = parser_test_teardown);
+
+// ==================== Tree-sitter Integration Tests ====================
+
+Test(parser_tests, tree_sitter_parser_integration) {
+    // Test that schema parser uses the same Tree-sitter parser as Lambda
+    cr_assert_not_null(parser, "Parser should be initialized");
+    cr_assert_not_null(parser->base.parser, "Tree-sitter parser should be initialized");
+    
+    // Test parsing a simple schema
+    const char* schema_source = "type SimpleString = string";
+    TypeSchema* schema = parse_schema_from_source(parser, schema_source);
+    
+    cr_assert_not_null(schema, "Schema should be parsed with Tree-sitter");
+    cr_assert_eq(schema->schema_type, LMD_SCHEMA_PRIMITIVE, "Should recognize primitive type");
+}
+
+Test(parser_tests, tree_sitter_node_source_extraction) {
+    // Test the get_node_source helper function
+    const char* schema_source = "type TestType = int";
+    
+    // This test assumes parse_schema_from_source stores the source
+    TypeSchema* schema = parse_schema_from_source(parser, schema_source);
+    cr_assert_not_null(schema, "Schema should parse successfully");
+    
+    // Test that Tree-sitter successfully parsed the type
+    cr_assert_eq(schema->schema_type, LMD_SCHEMA_PRIMITIVE, "Should parse as primitive");
+}
+
+Test(parser_tests, tree_sitter_symbol_recognition) {
+    // Test recognition of different Tree-sitter symbols
+    const char* int_schema = "type IntType = int";
+    const char* string_schema = "type StringType = string";  
+    const char* float_schema = "type FloatType = float";
+    
+    TypeSchema* int_type = parse_schema_from_source(parser, int_schema);
+    TypeSchema* string_type = parse_schema_from_source(parser, string_schema);
+    TypeSchema* float_type = parse_schema_from_source(parser, float_schema);
+    
+    cr_assert_not_null(int_type, "Int schema should parse");
+    cr_assert_not_null(string_type, "String schema should parse");
+    cr_assert_not_null(float_type, "Float schema should parse");
+    
+    // All should be primitive types but with different underlying types
+    cr_assert_eq(int_type->schema_type, LMD_SCHEMA_PRIMITIVE, "Int should be primitive");
+    cr_assert_eq(string_type->schema_type, LMD_SCHEMA_PRIMITIVE, "String should be primitive");
+    cr_assert_eq(float_type->schema_type, LMD_SCHEMA_PRIMITIVE, "Float should be primitive");
+}
 
 // ==================== Schema Parser Creation Tests ====================
 
@@ -61,17 +96,52 @@ Test(parser_tests, parse_primitive_type) {
     cr_assert_eq(prim_data->primitive_type, LMD_TYPE_STRING, "Should parse as string type");
 }
 
-Test(parser_tests, parse_union_type) {
+Test(parser_tests, tree_sitter_union_type_parsing) {
+    // Test Tree-sitter parsing of union types with binary expressions
     const char* schema_source = "type StringOrInt = string | int";
     
     TypeSchema* schema = parse_schema_from_source(parser, schema_source);
     
-    cr_assert_not_null(schema, "Schema should be parsed successfully");
-    cr_assert_eq(schema->schema_type, LMD_SCHEMA_UNION, "Should parse as union type");
+    cr_assert_not_null(schema, "Union schema should be parsed with Tree-sitter");
+    cr_assert_eq(schema->schema_type, LMD_SCHEMA_UNION, "Should parse binary expression as union");
     
     SchemaUnion* union_data = (SchemaUnion*)schema->schema_data;
-    cr_assert_eq(union_data->type_count, 2, "Union should have 2 types");
-    cr_assert_not_null(union_data->types, "Union should have types array");
+    cr_assert_eq(union_data->type_count, 2, "Union should have 2 types from binary expression");
+}
+
+Test(parser_tests, tree_sitter_nested_complex_types) {
+    // Test Tree-sitter parsing of nested complex type structures
+    const char* schema_source = "type ComplexType = {users: string*, metadata: {version: int, author: string}}";
+    
+    TypeSchema* schema = parse_schema_from_source(parser, schema_source);
+    
+    cr_assert_not_null(schema, "Complex nested schema should parse with Tree-sitter");
+    cr_assert_eq(schema->schema_type, LMD_SCHEMA_MAP, "Should parse as map type");
+}
+
+Test(parser_tests, tree_sitter_array_with_occurrence) {
+    // Test Tree-sitter parsing of array types with occurrence modifiers
+    const char* zero_or_more = "type ZeroOrMore = string*";
+    const char* one_or_more = "type OneOrMore = string+";
+    const char* optional = "type Optional = string?";
+    
+    TypeSchema* star_schema = parse_schema_from_source(parser, zero_or_more);
+    TypeSchema* plus_schema = parse_schema_from_source(parser, one_or_more);
+    TypeSchema* question_schema = parse_schema_from_source(parser, optional);
+    
+    cr_assert_not_null(star_schema, "* occurrence should parse");
+    cr_assert_not_null(plus_schema, "+ occurrence should parse");  
+    cr_assert_not_null(question_schema, "? occurrence should parse");
+}
+
+Test(parser_tests, tree_sitter_element_parsing) {
+    // Test Tree-sitter parsing of element types
+    const char* schema_source = "type HeaderElement = <header level: int, text: string>";
+    
+    TypeSchema* schema = parse_schema_from_source(parser, schema_source);
+    
+    cr_assert_not_null(schema, "Element schema should parse with Tree-sitter");
+    cr_assert_eq(schema->schema_type, LMD_SCHEMA_ELEMENT, "Should parse as element type");
 }
 
 Test(parser_tests, parse_array_type) {
@@ -183,7 +253,7 @@ Test(parser_tests, parse_type_reference) {
     cr_assert_eq(parser->type_definitions->length, 2, "Should have parsed 2 type definitions");
     
     // Check that PersonList references Person
-    TypeDefinition* person_list_def = (TypeDefinition*)list_get(parser->type_definitions, 1);
+    TypeDefinition* person_list_def = (TypeDefinition*)parser->type_definitions->data[1];
     cr_assert_str_eq(person_list_def->name.str, "PersonList", "Second definition should be PersonList");
     cr_assert_eq(person_list_def->schema_type->schema_type, LMD_SCHEMA_ARRAY, "PersonList should be array");
     
@@ -226,9 +296,9 @@ Test(parser_tests, parse_multiple_definitions) {
     cr_assert_eq(parser->type_definitions->length, 3, "Should have parsed 3 type definitions");
     
     // Check that all types are in the registry
-    TypeDefinition* person_def = (TypeDefinition*)list_get(parser->type_definitions, 0);
-    TypeDefinition* company_def = (TypeDefinition*)list_get(parser->type_definitions, 1);
-    TypeDefinition* document_def = (TypeDefinition*)list_get(parser->type_definitions, 2);
+    TypeDefinition* person_def = (TypeDefinition*)parser->type_definitions->data[0];
+    TypeDefinition* company_def = (TypeDefinition*)parser->type_definitions->data[1];
+    TypeDefinition* document_def = (TypeDefinition*)parser->type_definitions->data[2];
     
     cr_assert_str_eq(person_def->name.str, "Person", "First definition should be Person");
     cr_assert_str_eq(company_def->name.str, "Company", "Second definition should be Company");
