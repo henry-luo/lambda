@@ -187,8 +187,11 @@ typedef struct ValidationContext {
 // Schema parser (extends Transpiler)
 typedef struct SchemaParser {
     Transpiler base;               // Reuse transpiler infrastructure
+    VariableMemPool* pool;         // Memory pool for allocations
     HashMap* type_registry;        // Registry of parsed types
-    List* type_definitions;        // List of TypeDefinition*
+    ArrayList* type_definitions;   // List of TypeDefinition*
+    const char* current_source;    // Current source being parsed
+    TSTree* current_tree;          // Current syntax tree
 } SchemaParser;
 
 // Type definition
