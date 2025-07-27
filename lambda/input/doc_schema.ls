@@ -333,4 +333,80 @@ type math = Math
 type line_block = LineBlock
 
 // Complete document type
-type doc = Document
+type Document = {
+    meta?: any,
+    body: [BlockElement*]
+}
+
+// Allowed block elements - iframe is NOT included
+type BlockElement = Para | Header | CodeBlock | BlockQuote | List | HorizontalRule | Div
+
+// Simple content definitions
+type Para = {
+    tag: "p",
+    content: [InlineElement*]
+}
+
+type Header = {
+    tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6", 
+    content: [InlineElement*]
+}
+
+type CodeBlock = {
+    tag: "pre",
+    content: string
+}
+
+type BlockQuote = {
+    tag: "blockquote",
+    content: [BlockElement*]
+}
+
+type List = {
+    tag: "ul" | "ol",
+    content: [ListItem*]
+}
+
+type ListItem = {
+    tag: "li",
+    content: [BlockElement*]
+}
+
+type HorizontalRule = {
+    tag: "hr"
+}
+
+type Div = {
+    tag: "div",
+    content: [BlockElement*]
+}
+
+// Allowed inline elements
+type InlineElement = string | Link | Image | Code | Strong | Emphasis
+
+type Link = {
+    tag: "a",
+    href: string,
+    content: [InlineElement*]
+}
+
+type Image = {
+    tag: "img", 
+    src: string,
+    alt?: string
+}
+
+type Code = {
+    tag: "code",
+    content: string
+}
+
+type Strong = {
+    tag: "strong",
+    content: [InlineElement*]
+}
+
+type Emphasis = {
+    tag: "em",
+    content: [InlineElement*]
+}

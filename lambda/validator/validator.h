@@ -212,6 +212,11 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source);
 TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node);
 TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node);
 
+// Helper functions for parsing type definitions
+void parse_all_type_definitions(SchemaParser* parser, TSNode root);
+void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node);
+TypeSchema* find_type_definition(SchemaParser* parser, const char* type_name);
+
 // Enhanced type building functions with full Tree-sitter symbol support
 TypeSchema* build_primitive_schema(SchemaParser* parser, TSNode node, TypeId type_id);
 TypeSchema* build_primitive_schema_from_symbol(SchemaParser* parser, TSNode node);

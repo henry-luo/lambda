@@ -1,15 +1,19 @@
 #include "transpiler.h"
 #include "validator/validator.h"
 #include "input/input.h"
+#include <lexbor/url/url.h>
+#include <unistd.h>  // for getcwd
 
-// Input parser function declarations
+// External function declarations
 extern "C" {
-    void parse_json(Input* input, const char* json_string);
-    void parse_csv(Input* input, const char* csv_string);
-    void parse_yaml(Input* input, const char* yaml_str);
-    void parse_xml(Input* input, const char* xml_string);
-    void parse_html(Input* input, const char* html_string);
-    void parse_markdown(Input* input, const char* markdown_string);
+    lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+    Input* input_from_url(String* url, String* type, lxb_url_t* cwd);
+    
+    // For accessing the validator's internal structure
+    typedef struct {
+        StrView name;
+        TypeSchema* schema;  
+    } SchemaEntry;
 }
 
 // System includes for environment and string functions
@@ -246,16 +250,9 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
     
-    // Read data file
-    char* data_contents = read_file_contents(data_file);
-    if (!data_contents) {
-        return;
-    }
-    
     // Read schema file
     char* schema_contents = read_file_contents(schema_file);
     if (!schema_contents) {
-        free(data_contents);
         return;
     }
     
@@ -264,7 +261,6 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     MemPoolError pool_err = pool_variable_init(&pool, 1024 * 1024, 10); // 1MB chunks, 10% tolerance
     if (pool_err != MEM_POOL_ERR_OK || !pool) {
         printf("Error: Cannot create memory pool\n");
-        free(data_contents);
         free(schema_contents);
         return;
     }
@@ -274,95 +270,93 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     if (!validator) {
         printf("Error: Cannot create validator\n");
         pool_variable_destroy(pool);
-        free(data_contents);
         free(schema_contents);
         return;
     }
     
     // Load schema
     printf("Loading schema...\n");
-    int schema_result = schema_validator_load_schema(validator, schema_contents, "main_schema");
+    printf("Debug: Schema contents length: %zu\n", strlen(schema_contents));
+    printf("Debug: First 100 chars of schema: '%.100s'\n", schema_contents);
+    
+    // Use the refactored schema parser
+    printf("Debug: Loading schema using file-based parser\n");
+    int schema_result = schema_validator_load_schema(validator, schema_contents, "Document");
+    printf("Debug: Schema loading result: %d\n", schema_result);
     if (schema_result != 0) {
         printf("Error: Failed to load schema\n");
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
-        free(data_contents);
         free(schema_contents);
         return;
     }
     
-    // Parse data file using appropriate input parser
+    // Parse data file using input_from_url function
     printf("Parsing data file...\n");
     Item data_item = ITEM_ERROR;
     
     if (!input_format || strcmp(input_format, "lambda") == 0) {
-        // Parse as Lambda script directly
+        // Parse as Lambda script directly - need to read file contents
+        char* data_contents = read_file_contents(data_file);
+        if (!data_contents) {
+            printf("Error: Cannot read Lambda script file\n");
+            schema_validator_destroy(validator);
+            pool_variable_destroy(pool);
+            free(schema_contents);
+            return;
+        }
         data_item = run_script(&runtime, data_contents, (char*)data_file);
+        free(data_contents);
     } else {
-        // Use input parsers for other formats
-        // Create a basic input structure
-        Input* input = (Input*)calloc(1, sizeof(Input));
-        if (input) {
-            // Initialize memory pool for input parsing
-            MemPoolError input_pool_err = pool_variable_init(&input->pool, 64 * 1024, 10); // 64KB chunks
-            if (input_pool_err == MEM_POOL_ERR_OK) {
-                input->type_list = arraylist_new(16);
-                
-                // Determine effective format
-                const char* effective_type = input_format;
-                if (!effective_type || strcmp(effective_type, "auto") == 0) {
-                    effective_type = "text"; // Default fallback for now
-                }
-                
-                printf("Using input format: %s\n", effective_type);
-                
-                // Parse according to format
-                if (strcmp(effective_type, "text") == 0) {
-                    // Create string item for plain text
-                    String* str = (String*)malloc(sizeof(String) + strlen(data_contents) + 1);
-                    if (str) {
-                        str->len = strlen(data_contents);
-                        str->ref_cnt = 0;
-                        strcpy(str->chars, data_contents);
-                        input->root = s2it(str);
-                        data_item = input->root;
-                    }
-                } else {
-                    // For other formats, we need to call the specific parsers
-                    // But they expect different function signatures
-                    // For now, let's implement a few key ones
-                    if (strcmp(effective_type, "json") == 0) {
-                        parse_json(input, data_contents);
-                        data_item = input->root;
-                    } else if (strcmp(effective_type, "html") == 0) {
-                        parse_html(input, data_contents);
-                        data_item = input->root;
-                    } else if (strcmp(effective_type, "xml") == 0) {
-                        parse_xml(input, data_contents);
-                        data_item = input->root;
-                    } else if (strcmp(effective_type, "csv") == 0) {
-                        parse_csv(input, data_contents);
-                        data_item = input->root;
-                    } else if (strcmp(effective_type, "yaml") == 0) {
-                        parse_yaml(input, data_contents);
-                        data_item = input->root;
-                    } else if (strcmp(effective_type, "markdown") == 0) {
-                        parse_markdown(input, data_contents);
-                        data_item = input->root;
-                    } else {
-                        printf("Error: Unsupported input format '%s'\n", effective_type);
-                        printf("Supported formats: lambda, text, json, html, xml, csv, yaml, markdown\n");
-                    }
-                }
-            } else {
-                printf("Error: Failed to initialize input memory pool\n");
-                free(input);
-                input = NULL;
-            }
+        // Use input_from_url for other formats
+        // Convert file path to file:// URL
+        char cwd_path[1024];
+        if (!getcwd(cwd_path, sizeof(cwd_path))) {
+            printf("Error: Cannot get current working directory\n");
+            schema_validator_destroy(validator);
+            pool_variable_destroy(pool);
+            free(schema_contents);
+            return;
         }
         
-        if (!input || data_item == ITEM_ERROR) {
-            printf("Error: Failed to parse input file with format '%s'\n", input_format);
+        char file_url[1200];
+        if (data_file[0] == '/') {
+            // Absolute path
+            snprintf(file_url, sizeof(file_url), "file://%s", data_file);
+        } else {
+            // Relative path
+            snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, data_file);
+        }
+        
+        String* url_string = (String*)malloc(sizeof(String) + strlen(file_url) + 1);
+        if (url_string) {
+            url_string->len = strlen(file_url);
+            url_string->ref_cnt = 0;
+            strcpy(url_string->chars, file_url);
+            
+            String* type_string = nullptr;
+            if (input_format && strcmp(input_format, "auto-detect") != 0) {
+                type_string = (String*)malloc(sizeof(String) + strlen(input_format) + 1);
+                if (type_string) {
+                    type_string->len = strlen(input_format);
+                    type_string->ref_cnt = 0;
+                    strcpy(type_string->chars, input_format);
+                }
+            }
+            
+            // Use parse_url to create the URL (pass NULL for base to use absolute path)
+            Input* input = input_from_url(url_string, type_string, nullptr);
+            if (input && input->root != ITEM_ERROR) {
+                data_item = input->root;
+                printf("Successfully parsed input file with format '%s'\n", 
+                       input_format ? input_format : "auto-detect");
+            } else {
+                printf("Error: Failed to parse input file with format '%s'\n", 
+                       input_format ? input_format : "auto-detect");
+            }
+            
+            free(url_string);
+            if (type_string) free(type_string);
         }
     }
     
@@ -370,27 +364,25 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         printf("Error: Failed to parse data file\n");
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
-        free(data_contents);
         free(schema_contents);
         return;
     }
     
-    // Get the main schema for validation
+    // Validate using the loaded schema
     printf("Validating data...\n");
-    // For now, we'll create a simple primitive schema as a placeholder
-    // TODO: Properly resolve the schema from the validator registry
-    TypeSchema* main_schema = create_primitive_schema(LMD_TYPE_ANY, pool);
-    if (!main_schema) {
-        printf("Error: Cannot create validation schema\n");
+    LambdaItem lambda_item = {.item = data_item};
+    printf("Debug: data_item type: %d\n", (int)lambda_item.type_id);
+    printf("Debug: About to call validate_document with schema name 'Document'\n");
+    ValidationResult* result = validate_document(validator, data_item, "Document");
+    printf("Debug: validate_document returned, result pointer: %p\n", (void*)result);
+    
+    if (!result) {
+        printf("Error: Validation failed to run\n");
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
-        free(data_contents);
         free(schema_contents);
         return;
     }
-    
-    // Run validation
-    ValidationResult* result = validate_item(validator, data_item, main_schema, validator->context);
     
     // Print results
     printf("\n=== Validation Results ===\n");
@@ -430,7 +422,6 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     }
     schema_validator_destroy(validator);
     pool_variable_destroy(pool);
-    free(data_contents);
     free(schema_contents);
 }
 

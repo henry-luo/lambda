@@ -385,9 +385,9 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, lambda_value, input->pool);
 }
 
-Input* input_data(Context* ctx, String* url, String* type) {
+Input* input_from_url(String* url, String* type, lxb_url_t* cwd) {
     printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
-    lxb_url_t* abs_url = parse_url((lxb_url_t*)ctx->cwd, url->chars);
+    lxb_url_t* abs_url = parse_url(cwd, url->chars);
     if (!abs_url) { printf("Failed to parse URL\n");  return NULL; }
     char* source = read_text_doc(abs_url);
     if (!source) {
@@ -395,7 +395,7 @@ Input* input_data(Context* ctx, String* url, String* type) {
         lxb_url_destroy(abs_url);
         return NULL;
     }
-    
+
     const char* effective_type = NULL;
     
     // Determine the effective type to use
@@ -492,4 +492,8 @@ Input* input_data(Context* ctx, String* url, String* type) {
     }
     free(source);
     return input;
+}
+
+Input* input_data(Context* ctx, String* url, String* type) {
+    return input_from_url(url, type, (lxb_url_t*)ctx->cwd);
 }

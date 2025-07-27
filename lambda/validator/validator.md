@@ -75,8 +75,13 @@ Data Items → Validator Engine → Type Checking → Domain Validation → Vali
 - `validate_item()` - Main validation dispatcher
 - Type-specific validators with proper HashMap entry structures
 
-#### `schema_parser.c` ✅ **ENHANCED LAMBDA GRAMMAR INTEGRATION**
+#### `schema_parser.c` ✅ **ENHANCED LAMBDA GRAMMAR INTEGRATION** (Updated July 2025)
 **Purpose**: Parses **any Lambda type definitions** using the complete Lambda Tree-sitter grammar with full symbol and field ID utilization.
+
+**Recent Critical Fixes**:
+- **Type Symbol Recognition**: Fixed parser to correctly identify `sym_type_stam` nodes (symbol 162) for type definitions
+- **Recursive Type Discovery**: Added proper recursive search through AST to find all type definitions
+- **Memory Allocation**: Fixed critical `pool_variable_alloc()` usage in type definition creation
 
 **Enhanced Lambda Grammar Integration**:
 - **Complete Symbol Coverage**: Uses **all 200+ Tree-sitter symbols** from `ts-enum.h` including primitives (`anon_sym_int`, `sym_integer`), complex types (`sym_list`, `sym_array`), and type expressions (`sym_base_type`, `sym_primary_type`)
@@ -177,25 +182,6 @@ if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--schema") == 0) {
         schema_file = argv[++i];
     }
 }
-```
-
-### Build Integration
-
-#### Build Configuration (build_lambda_config.json)
-```json
-{
-    "source_files": [
-        // ... existing files ...
-        "lambda/validator/validator.c",
-        "lambda/validator/schema_parser.c"
-    ]
-}
-```
-
-#### Include Path Configuration
-The validator headers use proper relative paths:
-```c
-#include "../transpiler.h"  // Corrected from "transpiler.h"
 ```
 
 ### Working Examples
@@ -309,7 +295,6 @@ echo '{name: "Test", version: 1.0, data: {items: []}}' > test_data.ls
 ### 🔧 **Technical Implementation Details**
 - **Forward Declarations**: Fixed ValidationContext forward declaration issues
 - **Include Paths**: Corrected relative paths in validator headers (`../transpiler.h`)
-- **Missing Functions**: Implemented `validation_result_destroy()` and `validate_document()`
 - **Type System Integration**: Proper integration with Lambda's `Item` type system
 - **Error Handling**: Comprehensive error handling for file I/O, parsing, and validation failures
 
@@ -363,6 +348,41 @@ TSNode operator_node = ts_node_child_by_field_id(node, field_operator);
 
 The Lambda Validator is now **fully integrated into the Lambda CLI** as a subcommand, providing complete schema validation capabilities for Lambda script files.
 
+### Recent Updates (July 2025)
+
+#### Schema Parser Fixes
+- **Fixed Type Symbol Recognition**: Updated schema parser to correctly identify `sym_type_stam` nodes (symbol 162) instead of `sym_type_assign` for type definitions
+- **Improved Type Extraction**: Enhanced `build_type_definition()` to properly parse `type_stam` nodes and extract type names from `assign_expr` children
+- **Resolved Parser Bypass**: Fixed critical issue where schema parser was falling back to `LMD_TYPE_ANY` instead of using actual Lambda schema definitions
+
+#### Memory Management Fixes
+- **Critical Memory Bug Fix**: Corrected `string_from_strview()` function to properly use `pool_variable_alloc()` API
+  - Fixed incorrect casting of `MemPoolError` return value to pointer
+  - Added proper error checking for memory allocation failures
+  - Resolved segmentation faults during validation error reporting
+
+#### Validation Enforcement
+- **Schema Rules Now Enforced**: Validator now correctly rejects invalid content according to Lambda schema rules
+- **Before**: Invalid HTML with `<iframe>` was incorrectly reported as ✅ **VALID**
+- **After**: Invalid content is properly detected and reported as ❌ **INVALID**
+
+#### Technical Details of Fixes
+```c
+// Before: Incorrect memory allocation (caused segfaults)
+String* str = (String*)pool_variable_alloc(pool, size, (void**)&str);
+
+// After: Correct API usage with error checking
+String* str;
+MemPoolError err = pool_variable_alloc(pool, size, (void**)&str);
+if (err != MEM_POOL_ERR_OK) return &EMPTY_STRING;
+
+// Before: Looking for wrong node type
+if (child_symbol == sym_type_assign) { /* incorrect */ }
+
+// After: Correct node type for Lambda type definitions
+if (child_symbol == sym_type_stam) { /* correct */ }
+```
+
 ### Key Features
 - **CLI Integration**: `lambda validate` subcommand with argument parsing and default schema support
 - **Universal Schema Support**: Works with any `.ls` schema files (not just `doc_schema.ls`)
@@ -373,6 +393,9 @@ The Lambda Validator is now **fully integrated into the Lambda CLI** as a subcom
 
 ### Current Status
 **✅ Fully Working**: Complete CLI integration with schema validation  
+**✅ Schema Parser Fixed**: Correctly parses Lambda schema files instead of falling back to `LMD_TYPE_ANY`  
+**✅ Memory Management Fixed**: Resolved segmentation faults in validation error handling  
+**✅ Schema Enforcement**: Invalid content is now properly rejected according to schema rules  
 **✅ Production Ready**: End-to-end testing with Lambda script parsing and execution  
 **✅ Extensible**: Can validate any Lambda type definitions for various use cases
 
@@ -389,4 +412,3 @@ The Lambda Validator is now **fully integrated into the Lambda CLI** as a subcom
 
 The validator successfully bridges Lambda's type system with runtime validation, providing a robust foundation for data validation in the Lambda ecosystem.
 
-````

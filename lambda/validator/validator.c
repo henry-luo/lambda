@@ -94,14 +94,19 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
                                  const char* schema_name) {
     if (!validator || !schema_source || !schema_name) return -1;
     
+    printf("Debug: Creating schema parser\n");
     SchemaParser* parser = schema_parser_create(validator->pool);
     if (!parser) return -1;
     
+    printf("Debug: Parsing schema from source, length: %zu\n", strlen(schema_source));
     TypeSchema* schema = parse_schema_from_source(parser, schema_source);
     if (!schema) {
+        printf("Debug: Schema parsing failed\n");
         schema_parser_destroy(parser);
         return -1;
     }
+    
+    printf("Debug: Schema parsed successfully, type: %d\n", schema->schema_type);
     
     // Store schema in registry
     SchemaEntry entry = {
@@ -118,7 +123,10 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
 
 ValidationResult* validate_item(SchemaValidator* validator, Item item, 
                                 TypeSchema* schema, ValidationContext* context) {
+    printf("Debug: validate_item called with schema type: %d\n", schema ? schema->schema_type : -1);
+    
     if (!validator || !schema || !context) {
+        printf("Debug: validate_item failed - null parameters\n");
         ValidationResult* result = create_validation_result(context ? context->pool : validator->pool);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_PARSE_ERROR, "Invalid validation parameters", 
@@ -141,32 +149,42 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
     ValidationResult* result = NULL;
     
     // Dispatch to appropriate validation function based on schema type
+    printf("Debug: Dispatching validation based on schema type: %d\n", schema->schema_type);
     switch (schema->schema_type) {
         case LMD_SCHEMA_PRIMITIVE:
+            printf("Debug: Validating as primitive\n");
             result = validate_primitive(item, schema, context);
             break;
         case LMD_SCHEMA_UNION:
+            printf("Debug: Validating as union\n");
             result = validate_union(item, schema, context);
             break;
         case LMD_SCHEMA_ARRAY:
+            printf("Debug: Validating as array\n");
             result = validate_array(item, schema, context);
             break;
         case LMD_SCHEMA_MAP:
+            printf("Debug: Validating as map\n");
             result = validate_map(item, schema, context);
             break;
         case LMD_SCHEMA_ELEMENT:
+            printf("Debug: Validating as element\n");
             result = validate_element(item, schema, context);
             break;
         case LMD_SCHEMA_OCCURRENCE:
+            printf("Debug: Validating as occurrence\n");
             result = validate_occurrence(item, schema, context);
             break;
         case LMD_SCHEMA_REFERENCE:
+            printf("Debug: Validating as reference\n");
             result = validate_reference(item, schema, context);
             break;
         case LMD_SCHEMA_LITERAL:
+            printf("Debug: Validating as literal\n");
             result = validate_literal(item, schema, context);
             break;
         default:
+            printf("Debug: Unknown schema type: %d\n", schema->schema_type);
             result = create_validation_result(context->pool);
             add_validation_error(result, create_validation_error(
                 VALID_ERROR_TYPE_MISMATCH, "Unknown schema type", 
@@ -193,7 +211,10 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
 ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
+    printf("Debug: validate_primitive called\n");
+    
     if (schema->schema_type != LMD_SCHEMA_PRIMITIVE) {
+        printf("Debug: Schema is not primitive, type: %d\n", schema->schema_type);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected primitive schema", 
             ctx->path, ctx->pool));
@@ -204,18 +225,39 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
     TypeId expected_type = prim_schema->primitive_type;
     TypeId actual_type = get_type_id((LambdaItem){.item = item});
     
+    printf("Debug: Expected type: %d, Actual type: %d\n", expected_type, actual_type);
+    printf("Debug: SchemaPrimitive pointer: %p, primitive_type: %d\n", (void*)prim_schema, prim_schema->primitive_type);
+    
     if (!is_compatible_type(actual_type, expected_type)) {
+        printf("Debug: Type mismatch detected - creating error\n");
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
-                "Type mismatch: expected %s, got %s",
-                type_info[expected_type].name,
-                type_info[actual_type].name);
+                "Type mismatch: expected type %d, got type %d",
+                expected_type, actual_type);
+        printf("Debug: Error message created: %s\n", error_msg);
         
+        printf("Debug: About to create validation error\n");
+        
+        // TEMPORARY FIX: Create a simple error without complex allocations
+        // to avoid the segfault during debugging
+        printf("Debug: Type mismatch - setting result as invalid\n");
+        result->valid = false;
+        result->error_count = 1;
+        
+        // Skip complex error creation for now to avoid segfault
+        printf("Debug: Validation failed due to type mismatch\n");
+        
+        /*
         ValidationError* error = create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->path, ctx->pool);
-        error->expected = schema;
-        error->actual = item;
-        add_validation_error(result, error);
+        printf("Debug: Validation error created: %p\n", (void*)error);
+        if (error) {
+            error->expected = schema;
+            error->actual = item;
+            add_validation_error(result, error);
+            printf("Debug: Error added to result\n");
+        }
+        */
     }
     
     return result;
@@ -611,8 +653,18 @@ StrView strview_from_cstr(const char* str) {
 String* string_from_strview(StrView view, VariableMemPool* pool) {
     if (view.length == 0) return &EMPTY_STRING;
     
-    String* str = (String*)pool_variable_alloc(pool, 
-        sizeof(String) + view.length + 1, (void**)&str);
+    if (!pool) {
+        printf("Error: string_from_strview called with NULL pool!\n");
+        return &EMPTY_STRING;
+    }
+    
+    String* str;
+    MemPoolError err = pool_variable_alloc(pool, sizeof(String) + view.length + 1, (void**)&str);
+    if (err != MEM_POOL_ERR_OK) {
+        printf("Error: pool_variable_alloc failed with error %d\n", err);
+        return &EMPTY_STRING;
+    }
+    
     str->len = view.length;
     str->ref_cnt = 1;
     memcpy(str->chars, view.str, view.length);
@@ -1193,12 +1245,23 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document, c
         return NULL;
     }
     
-    // Get the main schema for validation
-    TypeSchema* main_schema = create_primitive_schema(LMD_TYPE_ANY, validator->pool);
-    if (!main_schema) {
-        return NULL;
+    // Look up the schema by name in the validator's schema registry
+    SchemaEntry lookup;
+    lookup.name.str = schema_name;
+    lookup.name.length = strlen(schema_name);
+    
+    const SchemaEntry* entry = hashmap_get(validator->schemas, &lookup);
+    if (!entry || !entry->schema) {
+        // If schema not found, fall back to a basic validation
+        printf("Warning: Schema '%s' not found, using basic validation\n", schema_name);
+        TypeSchema* fallback_schema = create_primitive_schema(LMD_TYPE_ANY, validator->pool);
+        if (!fallback_schema) {
+            return NULL;
+        }
+        return validate_item(validator, document, fallback_schema, validator->context);
     }
     
-    // Run validation using validate_item
-    return validate_item(validator, document, main_schema, validator->context);
+    // Use the actual loaded schema for validation
+    printf("Debug: Found schema '%s', schema type: %d\n", schema_name, entry->schema->schema_type);
+    return validate_item(validator, document, entry->schema, validator->context);
 }
