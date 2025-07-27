@@ -217,7 +217,8 @@ run_cli_test() {
             CLI_TESTS_PASSED=$((CLI_TESTS_PASSED + 1))
         else
             print_error "UNEXPECTED PASS: $test_name (should have failed)"
-            echo "    Output contained: $(echo "$output" | head -1)"
+            # Show the validation result line instead of just the first line
+            echo "    Validation result: $(echo "$output" | grep -E "(✅ Validation PASSED|❌ Validation FAILED)" | head -1)"
         fi
     else
         if [ "$should_pass" = "false" ]; then
@@ -225,7 +226,13 @@ run_cli_test() {
             CLI_TESTS_PASSED=$((CLI_TESTS_PASSED + 1))
         else
             print_error "FAIL: $test_name"
-            echo "    Output contained: $(echo "$output" | head -1)"
+            # Show the validation result line or error details instead of just the first line
+            local error_line=$(echo "$output" | grep -E "(❌ Validation FAILED|Error:|Segmentation fault|Syntax tree has errors)" | head -1)
+            if [ -n "$error_line" ]; then
+                echo "    Error: $error_line"
+            else
+                echo "    No validation result found in output"
+            fi
         fi
     fi
 }

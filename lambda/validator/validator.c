@@ -146,22 +146,22 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
             result = validate_primitive(item, schema, context);
             break;
         case LMD_SCHEMA_UNION:
-            result = validate_union(item, schema, context);
+            result = validate_union(validator, item, schema, context);
             break;
         case LMD_SCHEMA_ARRAY:
-            result = validate_array(item, schema, context);
+            result = validate_array(validator, item, schema, context);
             break;
         case LMD_SCHEMA_MAP:
-            result = validate_map(item, schema, context);
+            result = validate_map(validator, item, schema, context);
             break;
         case LMD_SCHEMA_ELEMENT:
-            result = validate_element(item, schema, context);
+            result = validate_element(validator, item, schema, context);
             break;
         case LMD_SCHEMA_OCCURRENCE:
-            result = validate_occurrence(item, schema, context);
+            result = validate_occurrence(validator, item, schema, context);
             break;
         case LMD_SCHEMA_REFERENCE:
-            result = validate_reference(item, schema, context);
+            result = validate_reference(validator, item, schema, context);
             break;
         case LMD_SCHEMA_LITERAL:
             result = validate_literal(item, schema, context);
@@ -229,7 +229,7 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
 
 // ==================== Array Validation ====================
 
-ValidationResult* validate_array(Item item, TypeSchema* schema, ValidationContext* ctx) {
+ValidationResult* validate_array(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_ARRAY) {
@@ -269,7 +269,7 @@ ValidationResult* validate_array(Item item, TypeSchema* schema, ValidationContex
             element_ctx.path = element_path;
             
             ValidationResult* element_result = validate_item(
-                NULL, element, array_schema->element_type, &element_ctx);
+                validator, element, array_schema->element_type, &element_ctx);
             
             if (element_result) {
                 merge_validation_results(result, element_result);
@@ -282,7 +282,7 @@ ValidationResult* validate_array(Item item, TypeSchema* schema, ValidationContex
 
 // ==================== Map Validation ====================
 
-ValidationResult* validate_map(Item item, TypeSchema* schema, ValidationContext* ctx) {
+ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_MAP) {
@@ -329,7 +329,7 @@ ValidationResult* validate_map(Item item, TypeSchema* schema, ValidationContext*
             field_ctx.path = field_path;
             
             ValidationResult* field_result = validate_item(
-                NULL, field_value, field->type, &field_ctx);
+                validator, field_value, field->type, &field_ctx);
             
             if (field_result) {
                 merge_validation_results(result, field_result);
@@ -346,7 +346,7 @@ ValidationResult* validate_map(Item item, TypeSchema* schema, ValidationContext*
 
 // ==================== Element Validation ====================
 
-ValidationResult* validate_element(Item item, TypeSchema* schema, ValidationContext* ctx) {
+ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_ELEMENT) {
@@ -417,7 +417,7 @@ ValidationResult* validate_element(Item item, TypeSchema* schema, ValidationCont
                 attr_ctx.path = attr_path;
                 
                 ValidationResult* attr_result = validate_item(
-                    NULL, attr_value, required_attr->type, &attr_ctx);
+                    validator, attr_value, required_attr->type, &attr_ctx);
                 
                 if (attr_result) {
                     merge_validation_results(result, attr_result);
@@ -439,7 +439,7 @@ ValidationResult* validate_element(Item item, TypeSchema* schema, ValidationCont
                 content_ctx.path = content_path;
                 
                 ValidationResult* content_result = validate_item(
-                    NULL, content_item, element_schema->content_types[i], &content_ctx);
+                    validator, content_item, element_schema->content_types[i], &content_ctx);
                 
                 if (content_result) {
                     merge_validation_results(result, content_result);
@@ -465,7 +465,7 @@ ValidationResult* validate_element(Item item, TypeSchema* schema, ValidationCont
 
 // ==================== Union Validation ====================
 
-ValidationResult* validate_union(Item item, TypeSchema* schema, ValidationContext* ctx) {
+ValidationResult* validate_union(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_UNION) {
@@ -480,7 +480,7 @@ ValidationResult* validate_union(Item item, TypeSchema* schema, ValidationContex
     // Try to validate against each type in the union
     for (int i = 0; i < union_schema->type_count; i++) {
         ValidationResult* type_result = validate_item(
-            NULL, item, union_schema->types[i], ctx);
+            validator, item, union_schema->types[i], ctx);
         
         if (type_result && type_result->valid) {
             // Found matching type in union
@@ -504,7 +504,7 @@ ValidationResult* validate_union(Item item, TypeSchema* schema, ValidationContex
 
 // ==================== Occurrence Validation ====================
 
-ValidationResult* validate_occurrence(Item item, TypeSchema* schema, ValidationContext* ctx) {
+ValidationResult* validate_occurrence(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_OCCURRENCE) {
@@ -524,13 +524,13 @@ ValidationResult* validate_occurrence(Item item, TypeSchema* schema, ValidationC
             }
             // Fall through to validate the base type
             validation_result_destroy(result);
-            return validate_item(NULL, item, occur_schema->base_type, ctx);
+            return validate_item(validator, item, occur_schema->base_type, ctx);
             
         case '+': // One or more
         case '*': // Zero or more
             // These should be handled by array validation
             validation_result_destroy(result);
-            return validate_array(item, occur_schema->base_type, ctx);
+            return validate_array(validator, item, occur_schema->base_type, ctx);
             
         default:
             add_validation_error(result, create_validation_error(
@@ -542,7 +542,7 @@ ValidationResult* validate_occurrence(Item item, TypeSchema* schema, ValidationC
 
 // ==================== Reference Validation ====================
 
-ValidationResult* validate_reference(Item item, TypeSchema* schema, ValidationContext* ctx) {
+ValidationResult* validate_reference(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_REFERENCE) {
@@ -580,7 +580,7 @@ ValidationResult* validate_reference(Item item, TypeSchema* schema, ValidationCo
     hashmap_set(ctx->visited, &visited_entry_set);
     
     validation_result_destroy(result);
-    result = validate_item(NULL, item, resolved, ctx);
+    result = validate_item(validator, item, resolved, ctx);
     
     // Unmark as visited
     VisitedEntry visited_entry_unset = { .key = schema->name, .visited = false };
