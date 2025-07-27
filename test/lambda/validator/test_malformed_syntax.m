@@ -4,4 +4,5 @@
     field2: 42,
     field3: {
         nested: "value"
-    // Missing closing brace here
+    }
+    // Missing closing brace for the root object deliberately

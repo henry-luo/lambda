@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comprehensive Test Document</title>
+    <meta name="author" content="Test Author">
+    <meta name="description" content="A comprehensive test document for Lambda validation">
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .highlight { background-color: yellow; }
+        .code-block { background-color: #f4f4f4; padding: 10px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 id="main-title" class="primary-heading">Lambda Validator Test Document</h1>
+        <p class="subtitle">Testing comprehensive schema validation with HTML input</p>
+    </header>
+    
+    <main>
+        <section id="introduction">
+            <h2>Introduction</h2>
+            <p>This document tests various HTML elements and structures against the Lambda validator.</p>
+            <p>It includes <a href="https://example.com" title="Example Link" target="_blank">external links</a>, 
+               <strong>bold text</strong>, <em>italic text</em>, and <code class="inline-code">inline code</code>.</p>
+        </section>
+        
+        <section id="content-examples">
+            <h2>Content Examples</h2>
+            
+            <h3>Images</h3>
+            <img src="https://example.com/image.jpg" alt="Test Image" width="300" height="200">
+            <img src="local-image.png" alt="Local Image" class="responsive-image">
+            
+            <h3>Lists</h3>
+            <ul class="feature-list">
+                <li>Feature one with <span class="highlight">highlighting</span></li>
+                <li>Feature two</li>
+                <li>Feature three with <a href="#section">internal link</a></li>
+            </ul>
+            
+            <ol>
+                <li>First numbered item</li>
+                <li>Second numbered item</li>
+                <li>Third numbered item</li>
+            </ol>
+            
+            <h3>Code Blocks</h3>
+            <pre class="code-block"><code class="language-javascript">
+function validate(schema, data) {
+    return schema.validate(data);
+}
+
+const result = validate(mySchema, testData);
+console.log(result.valid);
+            </code></pre>
+            
+            <h3>Tables</h3>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Status</th>
+                        <th>Priority</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Schema validation</td>
+                        <td class="status-complete">Complete</td>
+                        <td>High</td>
+                    </tr>
+                    <tr>
+                        <td>HTML parsing</td>
+                        <td class="status-inprogress">In Progress</td>
+                        <td>Medium</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+        
+        <section id="nested-structures">
+            <h2>Nested Structures</h2>
+            <div class="container">
+                <div class="row">
+                    <div class="col">
+                        <h4>Column 1</h4>
+                        <p>Content in first column</p>
+                        <div class="nested-content">
+                            <p>Deeply nested paragraph</p>
+                            <span class="label">Label text</span>
+                        </div>
+                    </div>
+                    <div class="col">
+                        <h4>Column 2</h4>
+                        <p>Content in second column</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    
+    <aside class="sidebar">
+        <h3>Related Links</h3>
+        <nav>
+            <ul class="nav-list">
+                <li><a href="#introduction">Introduction</a></li>
+                <li><a href="#content-examples">Content Examples</a></li>
+                <li><a href="#nested-structures">Nested Structures</a></li>
+            </ul>
+        </nav>
+        
+        <div class="widget">
+            <h4>Quick Info</h4>
+            <dl>
+                <dt>Version</dt>
+                <dd>1.0.0</dd>
+                <dt>Last Updated</dt>
+                <dd>2024-07-28</dd>
+                <dt>Status</dt>
+                <dd>Testing</dd>
+            </dl>
+        </div>
+    </aside>
+    
+    <footer>
+        <p>&copy; 2024 Lambda Validator Tests. All rights reserved.</p>
+        <p>
+            <a href="mailto:test@example.com">Contact</a> | 
+            <a href="/privacy">Privacy Policy</a> | 
+            <a href="/terms">Terms of Service</a>
+        </p>
+    </footer>
+</body>
+</html>
