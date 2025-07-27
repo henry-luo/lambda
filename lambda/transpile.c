@@ -388,7 +388,12 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : 
         "({Array* arr = array(); array_fill(arr,");
     strbuf_append_int(tp->code_buf, type->length);
-    strbuf_append_char(tp->code_buf, ',');
+    
+    // Only add comma if there are items to follow
+    if (array_node->item) {
+        strbuf_append_char(tp->code_buf, ',');
+    }
+    
     if (is_int_array) {
         AstNode *item = array_node->item;
         while (item) {
