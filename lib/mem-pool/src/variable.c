@@ -80,7 +80,6 @@ static void *best_fit_from_free_list(VariableMemPool *pool, size_t required_size
         if (MEM_POOL_NO_BEST_FIT == pool->tolerance_percent || diff_percent <= pool->tolerance_percent) {
             SizedBlock *block = *curr;
             *curr = (*curr)->next_in_free_list;
-            printf("Reusing block from free list: %p, size: %zu\n", (void*)block, block->header.size);
             return (char *)block + pool->header_size;
         }
         curr = &(*curr)->next_in_free_list;
@@ -159,7 +158,6 @@ static int delete_block_from_free_list(VariableMemPool *pool, SizedBlock *block)
         }
 
         if ((*curr) == block) {
-            printf("Found block in free list, removing\n");
             *curr = (*curr)->next_in_free_list;
             return 1;
         }
@@ -172,7 +170,6 @@ static int delete_block_from_free_list(VariableMemPool *pool, SizedBlock *block)
         return 0;
     }
 
-    printf("Block %p not found in free list\n", (void*)block);
     return 0;
 }
 

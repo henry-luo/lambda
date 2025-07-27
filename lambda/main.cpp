@@ -276,19 +276,40 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     
     // Load schema
     printf("Loading schema...\n");
-    printf("Debug: Schema contents length: %zu\n", strlen(schema_contents));
-    printf("Debug: First 100 chars of schema: '%.100s'\n", schema_contents);
     
     // Use the refactored schema parser
-    printf("Debug: Loading schema using file-based parser\n");
     int schema_result = schema_validator_load_schema(validator, schema_contents, "Document");
-    printf("Debug: Schema loading result: %d\n", schema_result);
     if (schema_result != 0) {
         printf("Error: Failed to load schema\n");
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
         free(schema_contents);
         return;
+    }
+    
+    // Auto-detect format if not specified
+    if (!input_format) {
+        const char* ext = strrchr(data_file, '.');
+        if (ext) {
+            if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".htm") == 0) {
+                input_format = "html";
+            } else if (strcasecmp(ext, ".md") == 0 || strcasecmp(ext, ".markdown") == 0) {
+                input_format = "markdown";
+            } else if (strcasecmp(ext, ".json") == 0) {
+                input_format = "json";
+            } else if (strcasecmp(ext, ".xml") == 0) {
+                input_format = "xml";
+            } else if (strcasecmp(ext, ".yaml") == 0 || strcasecmp(ext, ".yml") == 0) {
+                input_format = "yaml";
+            } else if (strcasecmp(ext, ".csv") == 0) {
+                input_format = "csv";
+            } else if (strcasecmp(ext, ".ini") == 0) {
+                input_format = "ini";
+            } else if (strcasecmp(ext, ".toml") == 0) {
+                input_format = "toml";
+            }
+            // If no recognized extension, keep as nullptr for Lambda format
+        }
     }
     
     // Parse data file using input_from_url function
@@ -371,10 +392,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     // Validate using the loaded schema
     printf("Validating data...\n");
     LambdaItem lambda_item = {.item = data_item};
-    printf("Debug: data_item type: %d\n", (int)lambda_item.type_id);
-    printf("Debug: About to call validate_document with schema name 'Document'\n");
     ValidationResult* result = validate_document(validator, data_item, "Document");
-    printf("Debug: validate_document returned, result pointer: %p\n", (void*)result);
     
     if (!result) {
         printf("Error: Validation failed to run\n");
@@ -398,10 +416,9 @@ void run_validation(const char *data_file, const char *schema_file, const char *
             ValidationError* error = result->errors;
             int error_num = 1;
             while (error) {
-                const char* error_msg = error->message ? "Unknown error" : "Unknown error";
-                if (error->message) {
-                    // TODO: Convert String* to const char* properly
-                    error_msg = "Error message present (conversion needed)";
+                const char* error_msg = "Unknown error";
+                if (error->message && error->message->chars) {
+                    error_msg = error->message->chars;
                 }
                 printf("  Error %d: %s\n", error_num, error_msg);
                 if (error->path) {

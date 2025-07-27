@@ -240,7 +240,7 @@ run_cli_test "Complex Types" "$TEST_DIR/test_complex.m" "$TEST_DIR/schema_comple
 # Comprehensive HTML/Markdown tests
 print_status "🌐 Running comprehensive HTML/Markdown tests..."
 run_cli_test "HTML Comprehensive" "$TEST_DIR/test_comprehensive.html" "$TEST_DIR/schema_comprehensive.ls" "true" "html"
-run_cli_test "Markdown Comprehensive" "$TEST_DIR/test_comprehensive.md" "$TEST_DIR/schema_comprehensive.ls" "true" "markdown"
+run_cli_test "Markdown Comprehensive" "$TEST_DIR/test_comprehensive.md" "$TEST_DIR/schema_comprehensive_markdown.ls" "true" "markdown"
 run_cli_test "HTML Simple" "$TEST_DIR/test_simple.html" "$TEST_DIR/schema_html.ls" "true" "html"
 run_cli_test "Markdown Simple" "$TEST_DIR/test_simple.md" "$TEST_DIR/schema_markdown.ls" "true" "markdown"
 

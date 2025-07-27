@@ -1,17 +1,8 @@
-// Comprehensive schema covering all Lambda validator features
-// This schema tests all types, occurrences, elements, unions, and complex nesting
+// Comprehensive schema covering all Lambda validator features - for Markdown format
+// This schema tests all types, occurrences, and complex nested structures with Markdown elements
 
-// Basic type definitions
-type DocumentHeader = {
-    title: string,
-    version: string,
-    created: datetime,
-    modified: datetime?,
-    published: bool
-}
-
-// Element types for structured content
-type HeadingElement = <h1 level: int, id: string?, class: string*, text: string>
+// Basic element types matching Markdown parser output
+type HeadingElement = <h1 level: int?, content: string>
 type ParagraphElement = <p id: string?, class: string*, content: string>
 type LinkElement = <a href: string, title: string?, target: string?, text: string>
 type ImageElement = <img src: string, alt: string, width: int?, height: int?, caption: string?>
@@ -45,7 +36,7 @@ type Tag = {
 type Metadata = {
     authors: Author+,              // one or more
     categories: Category*,         // zero or more
-    tags: Tag*,                   // zero or more
+    tags: Tag*,                   // zero or more  
     keywords: string*,            // zero or more strings
     custom_fields: {              // nested map with optional fields
         priority: int?,
@@ -68,11 +59,9 @@ type Section = {
     }?
 }
 
-// Main document type with all features - now as an element type to match HTML parser output
-type Document = <html
-    lang: string?,
-    class: string*,
-    id: string?,
+// Main document type with all features - now as doc element to match Markdown parser output
+type Document = <doc
+    version: string?,
     title: string?,
     children: ContentElement*
 >

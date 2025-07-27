@@ -1,21 +1,6 @@
-// Schema for Markdown document validation
-type MarkdownBlock = <block 
-    type: string,
-    level: int?,
-    content: string?,
-    language: string?,
-    attributes: {
-        id: string?,
-        class: string*
-    }?
+// Schema for Markdown document validation  
+// The Document type should match what the Markdown parser produces: a doc element
+type Document = <doc
+    version: string?,
+    children: Document*
 >
-
-type Document = {
-    frontmatter: {
-        title: string?,
-        author: string?,
-        date: datetime?,
-        tags: string*
-    }?,
-    blocks: MarkdownBlock+
-}

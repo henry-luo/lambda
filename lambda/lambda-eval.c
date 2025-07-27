@@ -123,8 +123,6 @@ List* list() {
 }
 
 void expand_list(List *list) {
-    printf("list expand: old capacity %ld, length %ld, extra %ld\n", 
-        list->capacity, list->length, list->extra);
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry
@@ -143,7 +141,6 @@ void expand_list(List *list) {
                 Item* old_pointer = (Item*)itm.pointer;
                 // Only update pointers that are in the old list buffer's extra space
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
-                    printf("list expand: item %d, old pointer %p\n", i, old_pointer);
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
                     list->items[i] = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : l2it(new_pointer);
@@ -392,7 +389,6 @@ Item _map_get(TypeMap* map_type,void* map_data, char *key, bool *is_found) {
         }
         field = field->next;
     }
-    printf("key %s not found\n", key);
     *is_found = false;
     return ITEM_NULL;
 }
@@ -454,7 +450,6 @@ Element* elmt_fill(Element* elmt, ...) {
 }
 
 Item elmt_get(Element* elmt, Item key) {
-    printf("elmt_get %p\n", elmt);
     if (!elmt || !key) { return ITEM_NULL;}
     bool is_found;
     char *key_str = NULL;
@@ -462,10 +457,8 @@ Item elmt_get(Element* elmt, Item key) {
     if (key_item.type_id == LMD_TYPE_STRING || key_item.type_id == LMD_TYPE_SYMBOL) {
         key_str = ((String*)key_item.pointer)->chars;
     } else {
-        printf("elmt_get: key must be string or symbol, got type %d\n", key_item.type_id);
         return ITEM_NULL;  // only string or symbol keys are supported
     }
-    printf("elmt_get key: %s\n", key_str);
     return _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
 }
 

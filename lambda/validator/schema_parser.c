@@ -68,12 +68,9 @@ void schema_parser_destroy(SchemaParser* parser) {
 TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
     if (!parser || !source) return NULL;
     
-    printf("Debug: SchemaParser - Parsing source: %.100s\n", source);
-    
     // Parse source using Tree-sitter
     TSTree* tree = lambda_parse_source(parser->base.parser, source);
     if (!tree) {
-        printf("Debug: SchemaParser - Failed to parse source with Tree-sitter\n");
         return NULL;
     }
     
@@ -82,7 +79,6 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
     parser->current_tree = tree;
     
     TSNode root = ts_tree_root_node(tree);
-    printf("Debug: SchemaParser - Root node type: %s\n", ts_node_type(root));
     
     // First, collect all type definitions from the source
     parse_all_type_definitions(parser, root);
@@ -90,7 +86,6 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
     // For now, try to find a "Document" type definition, or return the first one
     TypeSchema* document_schema = find_type_definition(parser, "Document");
     if (document_schema) {
-        printf("Debug: SchemaParser - Found Document type definition\n");
         return document_schema;
     }
     
@@ -98,14 +93,11 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
     if (parser->type_definitions && parser->type_definitions->length > 0) {
         TypeDefinition* first_def = (TypeDefinition*)parser->type_definitions->data[0];
         if (first_def && first_def->schema_type) {
-            printf("Debug: SchemaParser - Using first type definition: %.*s\n", 
-                   (int)first_def->name.length, first_def->name.str);
             return first_def->schema_type;
         }
     }
     
     // Fallback: try to build schema directly from root (old behavior)
-    printf("Debug: SchemaParser - Falling back to root node parsing\n");
     TypeSchema* schema = build_schema_type(parser, root);
     
     return schema;
@@ -113,9 +105,6 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
 
 TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node) {
     if (!parser) return NULL;
-    
-    printf("Debug: SchemaParser - Building type definition from node: %s (symbol: %d)\n", 
-           ts_node_type(type_node), ts_node_symbol(type_node));
     
     TypeDefinition* def = (TypeDefinition*)pool_calloc(parser->pool, sizeof(TypeDefinition));
     def->source_node = type_node;
@@ -136,20 +125,16 @@ TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node) {
         TSNode name_node = ts_node_child(assign_expr_node, 0);
         if (!ts_node_is_null(name_node)) {
             def->name = get_node_source(parser, name_node);
-            printf("Debug: SchemaParser - Type name: %.*s\n", (int)def->name.length, def->name.str);
         }
         
         // Get the type expression (third child of assign_expr, after identifier and '=')
         TSNode type_expr_node = ts_node_child(assign_expr_node, 2);
         if (!ts_node_is_null(type_expr_node)) {
-            printf("Debug: SchemaParser - Type expression node: %s\n", ts_node_type(type_expr_node));
             def->schema_type = build_schema_type(parser, type_expr_node);
         } else {
-            printf("Debug: SchemaParser - No type expression found, using ANY\n");
             def->schema_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
         }
     } else {
-        printf("Debug: SchemaParser - No assign_expr found, using fallback\n");
         def->name = strview_from_cstr("UnnamedType");
         def->schema_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
     }
@@ -165,28 +150,22 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     TSSymbol symbol = ts_node_symbol(type_expr_node);
     const char* node_type = ts_node_type(type_expr_node);
     
-    printf("Debug: SchemaParser - Building schema type from node: %s (symbol: %d)\n", node_type, symbol);
-    
     // Handle different node types based on Tree-sitter symbols from ts-enum.h
     switch (symbol) {
         // Base type nodes
         case anon_sym_int:
         case sym_integer:
-            printf("Debug: SchemaParser - Matched int type\n");
             return build_primitive_schema(parser, type_expr_node, LMD_TYPE_INT);
             
         case anon_sym_float:
         case sym_float:
-            printf("Debug: SchemaParser - Matched float type\n");
             return build_primitive_schema(parser, type_expr_node, LMD_TYPE_FLOAT);
             
         case anon_sym_number:
-            printf("Debug: SchemaParser - Matched number type\n");
             return build_primitive_schema(parser, type_expr_node, LMD_TYPE_FLOAT);
             
         case anon_sym_string:
         case sym_string:
-            printf("Debug: SchemaParser - Matched string type\n");
             return build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);
             
         case anon_sym_bool:
@@ -531,9 +510,9 @@ TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    // Extract element tag name and attributes using field IDs
-    TSNode name_node = ts_node_child_by_field_id(node, field_name);
+    // Extract element tag name first
     const char* tag_name = "element";
+    TSNode name_node = ts_node_child_by_field_id(node, field_name);
     
     if (!ts_node_is_null(name_node)) {
         StrView name_view = get_node_source(parser, name_node);
@@ -541,9 +520,98 @@ TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
         memcpy(name_str, name_view.str, name_view.length);
         name_str[name_view.length] = '\0';
         tag_name = name_str;
+    } else {
+        // Look for an identifier child which should be the tag name
+        for (int i = 0; i < ts_node_child_count(node); i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "identifier") == 0) {
+                StrView tag_view = get_node_source(parser, child);
+                char* parsed_tag = (char*)pool_calloc(parser->pool, tag_view.length + 1);
+                memcpy(parsed_tag, tag_view.str, tag_view.length);
+                parsed_tag[tag_view.length] = '\0';
+                tag_name = parsed_tag;
+                break;
+            }
+        }
     }
     
-    return create_element_schema(tag_name, parser->pool);
+    // Create the basic element schema
+    TypeSchema* schema = create_element_schema(tag_name, parser->pool);
+    SchemaElement* element_data = (SchemaElement*)schema->schema_data;
+    
+    // Parse attributes from child nodes
+    SchemaMapField* attributes = NULL;
+    SchemaMapField* last_attr = NULL;
+    int attr_count = 0;
+    
+    for (int i = 0; i < ts_node_child_count(node); i++) {
+        TSNode child = ts_node_child(node, i);
+        TSSymbol child_symbol = ts_node_symbol(child);
+        
+        // Skip the tag name identifier
+        if (child_symbol == sym_identifier) continue;
+        
+        // Parse assign expressions as attributes (name: type format)
+        if (child_symbol == sym_assign_expr || child_symbol == sym_attr) {
+            TSNode key_node = {0};
+            TSNode type_node = {0};
+            
+            if (child_symbol == sym_attr) {
+                // For attr nodes, get name and type from child nodes directly
+                if (ts_node_child_count(child) >= 3) {
+                    key_node = ts_node_child(child, 0);  // identifier (name)
+                    type_node = ts_node_child(child, 2); // type
+                }
+            } else {
+                // For assign_expr nodes, use field IDs
+                key_node = ts_node_child_by_field_id(child, field_name);
+                type_node = ts_node_child_by_field_id(child, field_type);
+            }
+            
+            if (!ts_node_is_null(key_node) && !ts_node_is_null(type_node)) {
+                // Extract attribute name
+                StrView attr_name = get_node_source(parser, key_node);
+                char* attr_name_str = (char*)pool_calloc(parser->pool, attr_name.length + 1);
+                memcpy(attr_name_str, attr_name.str, attr_name.length);
+                attr_name_str[attr_name.length] = '\0';
+                
+                // Parse attribute type schema
+                TypeSchema* attr_type = build_schema_type(parser, type_node);
+                
+                // Determine if attribute is required (no ? or * modifier)
+                bool required = true;
+                if (attr_type && attr_type->schema_type == LMD_SCHEMA_OCCURRENCE) {
+                    SchemaOccurrence* occ = (SchemaOccurrence*)attr_type->schema_data;
+                    if (occ->modifier == '?' || occ->modifier == '*') {
+                        required = false;
+                    }
+                }
+                
+                // Create SchemaMapField for this attribute
+                SchemaMapField* attr_field = (SchemaMapField*)pool_calloc(parser->pool, sizeof(SchemaMapField));
+                attr_field->name = strview_from_cstr(attr_name_str);
+                attr_field->type = attr_type;
+                attr_field->required = required;
+                attr_field->next = NULL;
+                
+                // Add to attributes list
+                if (!attributes) {
+                    attributes = attr_field;
+                    last_attr = attr_field;
+                } else {
+                    last_attr->next = attr_field;
+                    last_attr = attr_field;
+                }
+                attr_count++;
+            }
+        }
+    }
+    
+    // Set the parsed attributes
+    element_data->attributes = attributes;
+    
+    return schema;
 }
 
 TypeSchema* build_function_type_schema(SchemaParser* parser, TSNode node) {
@@ -599,8 +667,6 @@ TypeSchema* build_binary_type_schema(SchemaParser* parser, TSNode node) {
 void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
     if (!parser || ts_node_is_null(root)) return;
     
-    printf("Debug: SchemaParser - Parsing all type definitions from root\n");
-    
     // Clear existing definitions
     if (parser->type_definitions) {
         arraylist_clear(parser->type_definitions);
@@ -610,23 +676,16 @@ void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
     
     // Walk through all children looking for type definitions
     uint32_t child_count = ts_node_child_count(root);
-    printf("Debug: SchemaParser - Root has %d children\n", child_count);
     
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_child(root, i);
         TSSymbol child_symbol = ts_node_symbol(child);
         const char* child_type = ts_node_type(child);
         
-        printf("Debug: SchemaParser - Child %d: %s (symbol: %d)\n", i, child_type, child_symbol);
-        
         // Look for type_stam nodes (which contain type definitions)
         if (child_symbol == sym_type_stam) {
-            
-            printf("Debug: SchemaParser - Found type assignment node: %s\n", child_type);
             TypeDefinition* def = build_type_definition(parser, child);
             if (def) {
-                printf("Debug: SchemaParser - Built type definition: %.*s\n", 
-                       (int)def->name.length, def->name.str);
                 arraylist_append(parser->type_definitions, def);
             }
         } else {
@@ -637,9 +696,6 @@ void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
         // Also recursively search in children for nested type definitions
         parse_all_type_definitions_recursive(parser, child);
     }
-    
-    printf("Debug: SchemaParser - Found %d type definitions total\n", 
-           parser->type_definitions ? parser->type_definitions->length : 0);
 }
 
 void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node) {
@@ -653,12 +709,8 @@ void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node) {
         // Look for type_stam nodes (which contain type definitions)
         TSSymbol child_symbol = ts_node_symbol(child);
         if (child_symbol == sym_type_stam) {
-            
-            printf("Debug: SchemaParser - Found nested type assignment: %s\n", child_type);
             TypeDefinition* def = build_type_definition(parser, child);
             if (def) {
-                printf("Debug: SchemaParser - Built nested type definition: %.*s\n", 
-                       (int)def->name.length, def->name.str);
                 arraylist_append(parser->type_definitions, def);
             }
         }
@@ -671,22 +723,16 @@ void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node) {
 TypeSchema* find_type_definition(SchemaParser* parser, const char* type_name) {
     if (!parser || !type_name || !parser->type_definitions) return NULL;
     
-    printf("Debug: SchemaParser - Looking for type definition: %s\n", type_name);
-    
     size_t name_len = strlen(type_name);
     
     for (long i = 0; i < parser->type_definitions->length; i++) {
         TypeDefinition* def = (TypeDefinition*)parser->type_definitions->data[i];
         if (def && def->name.length == name_len && 
             memcmp(def->name.str, type_name, name_len) == 0) {
-            
-            printf("Debug: SchemaParser - Found matching type definition: %.*s\n",
-                   (int)def->name.length, def->name.str);
             return def->schema_type;
         }
     }
     
-    printf("Debug: SchemaParser - Type definition '%s' not found\n", type_name);
     return NULL;
 }
 

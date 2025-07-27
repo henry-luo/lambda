@@ -4,14 +4,10 @@ type HtmlAttribute = {
     value: string
 }
 
-type HtmlElement = <html 
-    tag: string,
-    attributes: HtmlAttribute*,
-    content: string?,
-    children: HtmlElement*
+// The Document type should match what the HTML parser produces: an HTML element
+type Document = <html 
+    lang: string?,                    // optional lang attribute
+    class: string*,                   // optional class attributes  
+    id: string?,                      // optional id
+    children: Document*               // children elements
 >
-
-type Document = {
-    doctype: string?,
-    html: HtmlElement
-}
