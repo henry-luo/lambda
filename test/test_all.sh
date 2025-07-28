@@ -37,6 +37,10 @@ LIB_TEST_BINARIES=(
     "test_mime_detect.exe"
 )
 
+# MIR Test Configuration
+MIR_TEST_SOURCES="test/test_mir.c"
+MIR_TEST_BINARY="test/test_mir.exe"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -311,6 +315,155 @@ run_library_tests() {
     return $lib_failed_tests
 }
 
+# Function to compile and run MIR JIT tests
+run_mir_tests() {
+    print_status "🔧 Compiling and running MIR JIT tests..."
+    
+    # Check if jq is available
+    if ! command -v jq &> /dev/null; then
+        print_error "jq is required to parse the configuration file"
+        print_error "Please install jq: brew install jq"
+        return 1
+    fi
+
+    # Get the project root and config file
+    CONFIG_FILE="build_lambda_config.json"
+
+    if [ ! -f "$CONFIG_FILE" ]; then
+        print_error "Configuration file $CONFIG_FILE not found!"
+        return 1
+    fi
+
+    print_status "Loading object files from $CONFIG_FILE..."
+
+    # Extract source files from JSON and convert to object file paths
+    OBJECT_FILES=()
+
+    # Process source_files
+    while IFS= read -r source_file; do
+        # Convert source file path to object file path
+        # Remove leading directory path and change extension to .o
+        obj_file="build/$(basename "$source_file" .c).o"
+        if [ -f "$obj_file" ]; then
+            OBJECT_FILES+=("$PWD/$obj_file")
+        else
+            print_warning "Object file $obj_file not found. You may need to build the project first."
+        fi
+    done < <(jq -r '.source_files[]' "$CONFIG_FILE" | grep -E '\.(c|cpp)$')
+
+    # Process source_dirs - find all .c files in the directories
+    SOURCE_DIRS=$(jq -r '.source_dirs[]?' "$CONFIG_FILE" 2>/dev/null)
+    if [ -n "$SOURCE_DIRS" ]; then
+        while IFS= read -r source_dir; do
+            if [ -d "$source_dir" ]; then
+                while IFS= read -r source_file; do
+                    # Convert absolute path to relative path from project root
+                    rel_path="${source_file#$PWD/}"
+                    obj_file="build/$(basename "$rel_path" .c).o"
+                    if [ -f "$obj_file" ]; then
+                        OBJECT_FILES+=("$PWD/$obj_file")
+                    else
+                        print_warning "Object file $obj_file not found for $rel_path. You may need to build the project first."
+                    fi
+                done < <(find "$source_dir" -name "*.c" -type f)
+            fi
+        done <<< "$SOURCE_DIRS"
+    fi
+
+    print_status "Found ${#OBJECT_FILES[@]} object files"
+
+    # Check if we have any object files
+    if [ ${#OBJECT_FILES[@]} -eq 0 ]; then
+        print_error "No object files found. Please build the project first using: ./compile.sh"
+        return 1
+    fi
+
+    # Extract compiler flags from JSON
+    COMPILER_FLAGS=$(jq -r '.compiler_flags // []' "$CONFIG_FILE")
+    LIBRARIES=$(jq -r '.libraries // []' "$CONFIG_FILE")
+
+    # Default compiler flags for MIR testing
+    DEFAULT_FLAGS="-std=c99 -Wall -Wextra -O2 -g -fms-extensions -pedantic"
+
+    # Build include directory flags from libraries
+    INCLUDE_FLAGS=""
+    STATIC_LIBS=""
+    DYNAMIC_LIBS=""
+
+    if [ "$LIBRARIES" != "null" ] && [ "$LIBRARIES" != "[]" ]; then
+        while IFS= read -r lib_info; do
+            name=$(echo "$lib_info" | jq -r '.name')
+            include=$(echo "$lib_info" | jq -r '.include // empty')
+            lib=$(echo "$lib_info" | jq -r '.lib // empty')
+            link=$(echo "$lib_info" | jq -r '.link // "static"')
+            
+            # Add include directory if specified
+            if [ -n "$include" ] && [ "$include" != "null" ]; then
+                INCLUDE_FLAGS="$INCLUDE_FLAGS -I$include"
+            fi
+            
+            # Add library based on link type
+            if [ "$link" = "static" ]; then
+                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                    STATIC_LIBS="$STATIC_LIBS $lib"
+                fi
+            else
+                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                    DYNAMIC_LIBS="$DYNAMIC_LIBS -L$lib -l$name"
+                fi
+            fi
+        done < <(echo "$LIBRARIES" | jq -c '.[]')
+    fi
+
+    # Compile the MIR test
+    print_status "Compiling MIR test..."
+    COMPILE_CMD="gcc $DEFAULT_FLAGS $INCLUDE_FLAGS $CRITERION_FLAGS -o $MIR_TEST_BINARY $MIR_TEST_SOURCES ${OBJECT_FILES[*]} $STATIC_LIBS $DYNAMIC_LIBS"
+
+    if $COMPILE_CMD 2>/dev/null; then
+        print_success "MIR test suite compiled successfully"
+    else
+        print_error "Failed to compile MIR test suite"
+        print_error "Attempting compilation with detailed error output..."
+        $COMPILE_CMD
+        return 1
+    fi
+
+    # Run the MIR tests
+    print_status "🧪 Running MIR JIT tests..."
+    echo ""
+
+    # Run tests with detailed output
+    set +e  # Disable strict error handling for test execution
+    MIR_TEST_OUTPUT=$(./"$MIR_TEST_BINARY" --verbose --tap 2>&1)
+    MIR_TEST_EXIT_CODE=$?
+    set -e  # Re-enable strict error handling
+
+    echo "$MIR_TEST_OUTPUT"
+    echo ""
+
+    # Parse MIR test results
+    MIR_TOTAL_TESTS=$(echo "$MIR_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
+    MIR_FAILED_TESTS=$(echo "$MIR_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
+
+    # Clean numeric values
+    MIR_TOTAL_TESTS=$(echo "$MIR_TOTAL_TESTS" | tr -cd '0-9')
+    MIR_FAILED_TESTS=$(echo "$MIR_FAILED_TESTS" | tr -cd '0-9')
+
+    # Ensure defaults
+    MIR_TOTAL_TESTS=${MIR_TOTAL_TESTS:-0}
+    MIR_FAILED_TESTS=${MIR_FAILED_TESTS:-0}
+    
+    # Store for final summary
+    MIR_PASSED_TESTS=$((MIR_TOTAL_TESTS - MIR_FAILED_TESTS))
+
+    # Cleanup MIR binary
+    if [ -f "$MIR_TEST_BINARY" ]; then
+        rm "$MIR_TEST_BINARY"
+    fi
+
+    return $MIR_FAILED_TESTS
+}
+
 # Main execution
 echo ""
 print_status "🚀 Starting comprehensive test suite..."
@@ -348,6 +501,30 @@ TEST_SUITE_TOTALS+=($LIB_TOTAL_TESTS)
 TEST_SUITE_PASSED+=($LIB_PASSED_TESTS) 
 TEST_SUITE_FAILED+=($LIB_FAILED_TESTS)
 if [ $library_failed -eq 0 ]; then
+    TEST_SUITE_STATUS+=("PASSED")
+else
+    TEST_SUITE_STATUS+=("FAILED")
+fi
+
+echo ""
+
+# Run MIR JIT tests
+print_status "================================================"
+print_status "                 MIR JIT TESTS                 "
+print_status "================================================"
+if run_mir_tests; then
+    mir_failed=0
+else
+    mir_failed=$?
+fi
+
+# Record MIR test suite results
+TEST_SUITE_ORDER+=("MIR")
+TEST_SUITE_NAMES+=("⚡ MIR JIT Tests")
+TEST_SUITE_TOTALS+=($MIR_TOTAL_TESTS)
+TEST_SUITE_PASSED+=($MIR_PASSED_TESTS)
+TEST_SUITE_FAILED+=($MIR_FAILED_TESTS)
+if [ $mir_failed -eq 0 ]; then
     TEST_SUITE_STATUS+=("PASSED")
 else
     TEST_SUITE_STATUS+=("FAILED")
@@ -420,6 +597,8 @@ if [ "$total_failed_tests" -eq 0 ]; then
                 
                 echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed)"
             done
+        elif [ "$suite_type" = "MIR" ]; then
+            echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed)"
         fi
         
         echo "   └─ Total: $suite_total, Passed: $suite_passed, Failed: $suite_failed"
@@ -464,6 +643,12 @@ else
                     echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed, ❌ $test_failed failed) ❌"
                 fi
             done
+        elif [ "$suite_type" = "MIR" ]; then
+            if [ "$suite_failed" -eq 0 ]; then
+                echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed) ✅"
+            else
+                echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed, ❌ $suite_failed failed) ❌"
+            fi
         fi
         
         # Add status indicator for overall suite
@@ -492,6 +677,8 @@ else
             echo "   Library test failures: $suite_failed"
         elif [ "$suite_type" = "VALIDATOR" ]; then
             echo "   Validator test failures: $suite_failed"
+        elif [ "$suite_type" = "MIR" ]; then
+            echo "   MIR JIT test failures: $suite_failed"
         fi
     done
     
