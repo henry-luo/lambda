@@ -7,11 +7,7 @@ set -e  # Exit on any error
 
 echo "================================================"
 echo "     Lambda Comprehensive Test Suite Runner    "
-echo "=========    print_status "📊 Detailed Test Results:"
-    echo ""
-    
-    # Library tests breakdown (run first)
-    print_status "📚 Library Tests:"=============================="
+echo "================================================"
 
 # Configuration
 VALIDATOR_TEST_SOURCES="test/test_validator.c"
@@ -267,10 +263,18 @@ print_status "🚀 Starting comprehensive test suite..."
 # Find Criterion installation
 find_criterion
 
-# Initialize counters
+# Initialize counters and tracking arrays
 total_failed_tests=0
 total_passed_tests=0
 total_tests=0
+
+# Arrays to track test suite execution order and results
+TEST_SUITE_ORDER=()
+TEST_SUITE_NAMES=()
+TEST_SUITE_TOTALS=()
+TEST_SUITE_PASSED=()
+TEST_SUITE_FAILED=()
+TEST_SUITE_STATUS=()
 
 # Run library tests first
 print_status "================================================"
@@ -280,6 +284,18 @@ if run_library_tests; then
     library_failed=0
 else
     library_failed=$?
+fi
+
+# Record library test suite results
+TEST_SUITE_ORDER+=("LIBRARY")
+TEST_SUITE_NAMES+=("📚 Library Tests")
+TEST_SUITE_TOTALS+=($LIB_TOTAL_TESTS)
+TEST_SUITE_PASSED+=($LIB_PASSED_TESTS) 
+TEST_SUITE_FAILED+=($LIB_FAILED_TESTS)
+if [ $library_failed -eq 0 ]; then
+    TEST_SUITE_STATUS+=("PASSED")
+else
+    TEST_SUITE_STATUS+=("FAILED")
 fi
 
 echo ""
@@ -294,17 +310,33 @@ else
     validator_failed=$?
 fi
 
-# Calculate totals
-total_failed_tests=$((validator_failed + library_failed))
+# Record validator test suite results
+TEST_SUITE_ORDER+=("VALIDATOR")
+TEST_SUITE_NAMES+=("🔍 Validator Tests")
+TEST_SUITE_TOTALS+=($VALIDATOR_TOTAL_TESTS)
+TEST_SUITE_PASSED+=($VALIDATOR_PASSED_TESTS)
+TEST_SUITE_FAILED+=($VALIDATOR_FAILED_TESTS)
+if [ $validator_failed -eq 0 ]; then
+    TEST_SUITE_STATUS+=("PASSED")
+else
+    TEST_SUITE_STATUS+=("FAILED")
+fi
+
+# Calculate totals dynamically from all test suites
+total_tests_run=0
+total_passed_tests=0
+total_failed_tests=0
+
+for i in "${!TEST_SUITE_TOTALS[@]}"; do
+    total_tests_run=$((total_tests_run + TEST_SUITE_TOTALS[$i]))
+    total_passed_tests=$((total_passed_tests + TEST_SUITE_PASSED[$i]))
+    total_failed_tests=$((total_failed_tests + TEST_SUITE_FAILED[$i]))
+done
 
 echo ""
 print_status "================================================"
 print_status "              FINAL TEST SUMMARY               "
 print_status "================================================"
-
-# Calculate overall totals
-total_tests_run=$((VALIDATOR_TOTAL_TESTS + LIB_TOTAL_TESTS))
-total_passed_tests=$((VALIDATOR_PASSED_TESTS + LIB_PASSED_TESTS))
 
 if [ "$total_failed_tests" -eq 0 ]; then
     print_success "🎉 ALL TESTS PASSED!"
@@ -314,29 +346,33 @@ if [ "$total_failed_tests" -eq 0 ]; then
     print_status "📊 Detailed Test Results:"
     echo ""
     
-    # Library tests breakdown (run first)
-    print_status "📚 Library Tests:"
-    for i in "${!LIB_TEST_NAMES[@]}"; do
-        test_name="${LIB_TEST_NAMES[$i]}"
-        test_total="${LIB_TEST_TOTALS[$i]}"
-        test_passed="${LIB_TEST_PASSED[$i]}"
-        test_failed="${LIB_TEST_FAILED[$i]}"
+    # Dynamic test suite breakdown based on execution order
+    for i in "${!TEST_SUITE_ORDER[@]}"; do
+        suite_type="${TEST_SUITE_ORDER[$i]}"
+        suite_name="${TEST_SUITE_NAMES[$i]}"
+        suite_total="${TEST_SUITE_TOTALS[$i]}"
+        suite_passed="${TEST_SUITE_PASSED[$i]}"
+        suite_failed="${TEST_SUITE_FAILED[$i]}"
         
-        if [ "$test_failed" -eq 0 ]; then
-            echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed)"
-        else
-            echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed, ❌ $test_failed failed)"
+        print_status "$suite_name:"
+        
+        # Show detailed breakdown for library tests
+        if [ "$suite_type" = "LIBRARY" ]; then
+            for j in "${!LIB_TEST_NAMES[@]}"; do
+                test_name="${LIB_TEST_NAMES[$j]}"
+                test_total="${LIB_TEST_TOTALS[$j]}"
+                test_passed="${LIB_TEST_PASSED[$j]}"
+                
+                echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed)"
+            done
         fi
+        
+        echo "   └─ Total: $suite_total, Passed: $suite_passed, Failed: $suite_failed"
+        echo ""
     done
-    echo "   └─ Total: $LIB_TOTAL_TESTS, Passed: $LIB_PASSED_TESTS, Failed: $LIB_FAILED_TESTS"
     
-    # Validator tests breakdown (run second)
-    print_status "🔍 Validator Tests:"
-    echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS"
-    
-    echo ""
     print_status "🎯 Overall Summary:"
-    echo "   Total Test Suites: $((${#LIB_TEST_NAMES[@]} + 1))"
+    echo "   Total Test Suites: ${#TEST_SUITE_ORDER[@]}"
     echo "   Total Tests: $total_tests_run"
     echo "   Total Passed: $total_passed_tests"
     echo "   Total Failed: 0"
@@ -348,40 +384,62 @@ else
     print_status "📊 Detailed Test Results:"
     echo ""
     
-    # Library tests breakdown (run first)
-    print_status "📚 Library Tests:"
-    for i in "${!LIB_TEST_NAMES[@]}"; do
-        test_name="${LIB_TEST_NAMES[$i]}"
-        test_total="${LIB_TEST_TOTALS[$i]}"
-        test_passed="${LIB_TEST_PASSED[$i]}"
-        test_failed="${LIB_TEST_FAILED[$i]}"
+    # Dynamic test suite breakdown based on execution order
+    for i in "${!TEST_SUITE_ORDER[@]}"; do
+        suite_type="${TEST_SUITE_ORDER[$i]}"
+        suite_name="${TEST_SUITE_NAMES[$i]}"
+        suite_total="${TEST_SUITE_TOTALS[$i]}"
+        suite_passed="${TEST_SUITE_PASSED[$i]}"
+        suite_failed="${TEST_SUITE_FAILED[$i]}"
+        suite_status="${TEST_SUITE_STATUS[$i]}"
         
-        if [ "$test_failed" -eq 0 ]; then
-            echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed) ✅"
-        else
-            echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed, ❌ $test_failed failed) ❌"
+        print_status "$suite_name:"
+        
+        # Show detailed breakdown for library tests
+        if [ "$suite_type" = "LIBRARY" ]; then
+            for j in "${!LIB_TEST_NAMES[@]}"; do
+                test_name="${LIB_TEST_NAMES[$j]}"
+                test_total="${LIB_TEST_TOTALS[$j]}"
+                test_passed="${LIB_TEST_PASSED[$j]}"
+                test_failed="${LIB_TEST_FAILED[$j]}"
+                
+                if [ "$test_failed" -eq 0 ]; then
+                    echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed) ✅"
+                else
+                    echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed, ❌ $test_failed failed) ❌"
+                fi
+            done
         fi
+        
+        # Add status indicator for overall suite
+        if [ "$suite_status" = "PASSED" ]; then
+            echo "   └─ Total: $suite_total, Passed: $suite_passed, Failed: $suite_failed ✅"
+        else
+            echo "   └─ Total: $suite_total, Passed: $suite_passed, Failed: $suite_failed ❌"
+        fi
+        echo ""
     done
-    echo "   └─ Total: $LIB_TOTAL_TESTS, Passed: $LIB_PASSED_TESTS, Failed: $LIB_FAILED_TESTS"
     
-    # Validator tests breakdown (run second)
-    print_status "🔍 Validator Tests:"
-    if [ "$VALIDATOR_FAILED_TESTS" -eq 0 ]; then
-        echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS ✅"
-    else
-        echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS ❌"
-    fi
-    
-    echo ""
     print_status "🎯 Overall Summary:"
-    echo "   Total Test Suites: $((${#LIB_TEST_NAMES[@]} + 1))"
+    echo "   Total Test Suites: ${#TEST_SUITE_ORDER[@]}"
     echo "   Total Tests: $total_tests_run"
     echo "   Total Passed: $total_passed_tests"
     echo "   Total Failed: $total_failed_tests"
     echo ""
     print_status "💡 Breakdown by Suite:"
-    echo "   Library test failures: $library_failed"
-    echo "   Validator test failures: $validator_failed"
+    
+    # Dynamic breakdown by suite
+    for i in "${!TEST_SUITE_ORDER[@]}"; do
+        suite_type="${TEST_SUITE_ORDER[$i]}"
+        suite_failed="${TEST_SUITE_FAILED[$i]}"
+        
+        if [ "$suite_type" = "LIBRARY" ]; then
+            echo "   Library test failures: $suite_failed"
+        elif [ "$suite_type" = "VALIDATOR" ]; then
+            echo "   Validator test failures: $suite_failed"
+        fi
+    done
+    
     echo ""
     print_warning "⚠️  Review failed tests above for details"
     print_status "📋 See lambda/validator/validator.md for comprehensive test coverage information" 
