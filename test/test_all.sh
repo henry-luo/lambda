@@ -7,7 +7,11 @@ set -e  # Exit on any error
 
 echo "================================================"
 echo "     Lambda Comprehensive Test Suite Runner    "
-echo "================================================"
+echo "=========    print_status "📊 Detailed Test Results:"
+    echo ""
+    
+    # Library tests breakdown (run first)
+    print_status "📚 Library Tests:"=============================="
 
 # Configuration
 VALIDATOR_TEST_SOURCES="test/test_validator.c"
@@ -307,14 +311,10 @@ if [ "$total_failed_tests" -eq 0 ]; then
     echo ""
     print_success "✨ Lambda project is ready for production use!"
     echo ""
-    print_status "� Detailed Test Results:"
+    print_status "📊 Detailed Test Results:"
     echo ""
     
-    # Validator tests breakdown
-    print_status "🔍 Validator Tests:"
-    echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS"
-    
-    # Library tests breakdown
+    # Library tests breakdown (run first)
     print_status "📚 Library Tests:"
     for i in "${!LIB_TEST_NAMES[@]}"; do
         test_name="${LIB_TEST_NAMES[$i]}"
@@ -330,6 +330,10 @@ if [ "$total_failed_tests" -eq 0 ]; then
     done
     echo "   └─ Total: $LIB_TOTAL_TESTS, Passed: $LIB_PASSED_TESTS, Failed: $LIB_FAILED_TESTS"
     
+    # Validator tests breakdown (run second)
+    print_status "🔍 Validator Tests:"
+    echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS"
+    
     echo ""
     print_status "🎯 Overall Summary:"
     echo "   Total Test Suites: $((${#LIB_TEST_NAMES[@]} + 1))"
@@ -344,15 +348,7 @@ else
     print_status "📊 Detailed Test Results:"
     echo ""
     
-    # Validator tests breakdown
-    print_status "🔍 Validator Tests:"
-    if [ "$VALIDATOR_FAILED_TESTS" -eq 0 ]; then
-        echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS ✅"
-    else
-        echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS ❌"
-    fi
-    
-    # Library tests breakdown
+    # Library tests breakdown (run first)
     print_status "📚 Library Tests:"
     for i in "${!LIB_TEST_NAMES[@]}"; do
         test_name="${LIB_TEST_NAMES[$i]}"
@@ -368,6 +364,14 @@ else
     done
     echo "   └─ Total: $LIB_TOTAL_TESTS, Passed: $LIB_PASSED_TESTS, Failed: $LIB_FAILED_TESTS"
     
+    # Validator tests breakdown (run second)
+    print_status "🔍 Validator Tests:"
+    if [ "$VALIDATOR_FAILED_TESTS" -eq 0 ]; then
+        echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS ✅"
+    else
+        echo "   └─ Total: $VALIDATOR_TOTAL_TESTS, Passed: $VALIDATOR_PASSED_TESTS, Failed: $VALIDATOR_FAILED_TESTS ❌"
+    fi
+    
     echo ""
     print_status "🎯 Overall Summary:"
     echo "   Total Test Suites: $((${#LIB_TEST_NAMES[@]} + 1))"
@@ -376,8 +380,8 @@ else
     echo "   Total Failed: $total_failed_tests"
     echo ""
     print_status "💡 Breakdown by Suite:"
-    echo "   Validator test failures: $validator_failed"
     echo "   Library test failures: $library_failed"
+    echo "   Validator test failures: $validator_failed"
     echo ""
     print_warning "⚠️  Review failed tests above for details"
     print_status "📋 See lambda/validator/validator.md for comprehensive test coverage information" 
