@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?stylesheet type="text/xsl" href="transform.xsl"?>
+<document version="1.0" standalone="true" xmlns="http://example.com/edgecases">
+    
+    <!-- This is a test comment -->
+    <?processing-instruction data="test"?>
+    
+    <root xmlns="http://example.com/test">
+        <!-- Empty elements -->
+        <empty id="test1" />
+        <empty class="test-class" class="another-class" />
+        <empty />
+        
+        <!-- Self-closing elements -->
+        <selfclosing name="test" value="123" />
+        <selfclosing name="minimal" />
+        
+        <!-- Mixed content elements -->
+        <mixed id="mixed1">
+            This is text content before nested element.
+            <nested level="1" data="nested-data">Nested content</nested>
+            More text after nested element.
+            <![CDATA[This is CDATA content with <special> characters & symbols]]>
+            Final text content.
+        </mixed>
+        
+        <mixed id="mixed2">
+            <nested level="2">
+                Another nested element
+                <nested level="3" data="deep">Deep nesting</nested>
+            </nested>
+        </mixed>
+        
+        <!-- More comments -->
+        <!-- Another comment for testing -->
+    </root>
+    
+    <?final-instruction?>
+</document>

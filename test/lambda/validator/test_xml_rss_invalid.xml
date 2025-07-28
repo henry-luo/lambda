@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+    <channel>
+        <title>Invalid RSS Feed</title>
+        <!-- Missing required link and description -->
+        
+        <item>
+            <!-- Missing required title, link, and description -->
+            <pubDate>Invalid Date Format</pubDate>
+            <author>John Smith</author>
+        </item>
+        
+        <item>
+            <title>Valid Item Title</title>
+            <link>https://example.com/valid</link>
+            <!-- Missing required description -->
+            <category>Technology</category>
+        </item>
+        
+        <!-- Invalid element that shouldn't be in channel -->
+        <invalid_channel_element>This is wrong</invalid_channel_element>
+    </channel>
+    
+    <!-- Extra channel - RSS should have only one -->
+    <channel>
+        <title>Second Channel</title>
+        <link>https://example.com/second</link>
+        <description>This is invalid - RSS can only have one channel</description>
+    </channel>
+</rss>

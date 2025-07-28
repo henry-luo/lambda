@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library established="1925" xmlns="http://example.com/library">
+    <name>Central Public Library</name>
+    <address>123 Main Street, Anytown, State 12345</address>
+    
+    <book category="fiction" inStock="true">
+        <title>The Great Gatsby</title>
+        <author id="fitzgerald">
+            <firstName>F. Scott</firstName>
+            <lastName>Fitzgerald</lastName>
+            <birthYear>1896</birthYear>
+        </author>
+        <isbn>978-0-7432-7356-5</isbn>
+        <publishedYear>1925</publishedYear>
+        <price>12.99</price>
+        <description>A classic American novel set in the Jazz Age</description>
+    </book>
+    
+    <book category="science" inStock="false">
+        <title>A Brief History of Time</title>
+        <author id="hawking">
+            <firstName>Stephen</firstName>
+            <lastName>Hawking</lastName>
+            <birthYear>1942</birthYear>
+        </author>
+        <isbn>978-0-553-38016-3</isbn>
+        <publishedYear>1988</publishedYear>
+        <price>15.99</price>
+        <description>Explores complex cosmological concepts in accessible language</description>
+    </book>
+    
+    <book category="biography">
+        <title>Steve Jobs</title>
+        <author id="isaacson">
+            <firstName>Walter</firstName>
+            <lastName>Isaacson</lastName>
+        </author>
+        <isbn>978-1-4516-4853-9</isbn>
+        <publishedYear>2011</publishedYear>
+        <price>18.95</price>
+    </book>
+    
+    <book category="history" inStock="true">
+        <title>The Guns of August</title>
+        <author id="tuchman">
+            <firstName>Barbara</firstName>
+            <lastName>Tuchman</lastName>
+            <birthYear>1912</birthYear>
+        </author>
+        <isbn>978-0-345-47609-8</isbn>
+        <publishedYear>1962</publishedYear>
+        <price>16.50</price>
+        <description>Account of the first month of World War I</description>
+    </book>
+</library>

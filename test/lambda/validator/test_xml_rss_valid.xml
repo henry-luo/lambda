@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+    <channel>
+        <title>Tech News Feed</title>
+        <link>https://example.com/tech-news</link>
+        <description>Latest technology news and updates</description>
+        <language>en-us</language>
+        <copyright>Copyright 2025 Example Corp</copyright>
+        <managingEditor>editor@example.com</managingEditor>
+        <webMaster>webmaster@example.com</webMaster>
+        <pubDate>Mon, 28 Jul 2025 10:00:00 GMT</pubDate>
+        <lastBuildDate>Mon, 28 Jul 2025 10:00:00 GMT</lastBuildDate>
+        <ttl>60</ttl>
+        
+        <item>
+            <title>AI Breakthrough in Machine Learning</title>
+            <link>https://example.com/ai-breakthrough</link>
+            <description>Scientists achieve major breakthrough in AI research</description>
+            <pubDate>Mon, 28 Jul 2025 09:30:00 GMT</pubDate>
+            <author>John Smith</author>
+            <category>AI</category>
+            <category>Technology</category>
+            <guid>ai-breakthrough-2025-07-28</guid>
+        </item>
+        
+        <item>
+            <title>New Programming Language Released</title>
+            <link>https://example.com/new-language</link>
+            <description>A revolutionary new programming language has been announced</description>
+            <pubDate>Sun, 27 Jul 2025 15:45:00 GMT</pubDate>
+            <author>Jane Doe</author>
+            <category>Programming</category>
+            <guid>new-language-2025-07-27</guid>
+        </item>
+        
+        <item>
+            <title>Cloud Computing Trends</title>
+            <link>https://example.com/cloud-trends</link>
+            <description>Analysis of current cloud computing trends and predictions</description>
+            <pubDate>Sat, 26 Jul 2025 12:00:00 GMT</pubDate>
+            <category>Cloud</category>
+            <category>Infrastructure</category>
+        </item>
+    </channel>
+</rss>

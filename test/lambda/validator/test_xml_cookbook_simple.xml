@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cookbook title="Quick Meals" author="Home Cook">
+    
+    <introduction>Simple recipes for busy weeknights.</introduction>
+    
+    <recipe id="scrambled-eggs" difficulty="easy">
+        <name>Perfect Scrambled Eggs</name>
+        <description>Fluffy, creamy scrambled eggs in minutes.</description>
+        
+        <prepTime unit="minutes">5</prepTime>
+        
+        <ingredients>
+            <ingredient name="eggs" amount="3" unit="large"/>
+            <ingredient name="butter" amount="1" unit="tablespoon"/>
+            <ingredient name="salt" amount="pinch"/>
+            <ingredient name="pepper" amount="pinch"/>
+        </ingredients>
+        
+        <instructions>
+            <step number="1">Crack eggs into bowl and whisk with salt and pepper.</step>
+            <step number="2">Heat butter in non-stick pan over low heat.</step>
+            <step number="3">Pour in eggs and stir constantly until just set.</step>
+            <step number="4">Remove from heat immediately and serve.</step>
+        </instructions>
+    </recipe>
+    
+</cookbook>

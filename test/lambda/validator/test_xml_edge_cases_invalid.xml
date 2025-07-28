@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document version="1.0">
+    
+    <?malformed-pi-without-proper-closing
+    
+    <root>
+        <!-- Unclosed comment
+        
+        <empty id="test1" />
+        
+        <!-- Malformed CDATA -->
+        <mixed id="mixed1">
+            <![CDATA[Unclosed CDATA section without proper ending
+            <nested level="1">Content</nested>
+        </mixed>
+        
+        <!-- Mismatched tags -->
+        <selfclosing name="test">
+            <nested level="2">
+                Content
+            </wrong-closing-tag>
+        </selfclosing>
+        
+        <!-- Invalid nesting -->
+        <mixed id="mixed2">
+            <nested level="invalid-level-should-be-int">
+                <nested level="3">
+                    <nested level="4">
+                </nested>
+            </nested>
+        </mixed>
+    </root>
+    
+<!-- Missing document closing tag -->

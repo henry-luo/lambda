@@ -1,0 +1,53 @@
+# RelaxNG Compact Syntax version of cookbook.rng
+# Recipe cookbook schema with ingredients, instructions, and metadata
+
+namespace recipes = "http://example.com/recipes"
+datatypes xsd = "http://www.w3.org/2001/XMLSchema-datatypes"
+
+start = cookbook
+
+cookbook = element recipes:cookbook {
+  attribute title { text },
+  attribute author { text },
+  attribute year { xsd:gYear }?,
+  
+  element recipes:introduction { text },
+  
+  recipe+
+}
+
+recipe = element recipes:recipe {
+  attribute id { xsd:ID },
+  attribute difficulty { "easy" | "medium" | "hard" },
+  attribute servings { xsd:positiveInteger }?,
+  
+  element recipes:name { text },
+  element recipes:description { text },
+  
+  element recipes:prepTime {
+    attribute unit { "minutes" | "hours" },
+    xsd:positiveInteger
+  },
+  
+  element recipes:ingredients {
+    ingredient+
+  },
+  
+  element recipes:instructions {
+    step+
+  },
+  
+  element recipes:notes { text }?
+}
+
+ingredient = element recipes:ingredient {
+  attribute name { text },
+  attribute amount { text },
+  attribute unit { text }?,
+  attribute optional { xsd:boolean }?
+}
+
+step = element recipes:step {
+  attribute number { xsd:positiveInteger },
+  text
+}

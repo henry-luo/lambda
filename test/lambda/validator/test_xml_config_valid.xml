@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration version="2.1" schema="config.xsd">
+    <section name="database" enabled="true">
+        <property name="host" value="localhost" type="string" />
+        <property name="port" value="5432" type="int" />
+        <property name="ssl" value="true" type="bool" />
+        <subsection name="connection_pool">
+            <property name="max_connections" value="100" type="int" />
+            <property name="timeout" value="30" type="int" />
+        </subsection>
+    </section>
+    <section name="logging" enabled="true">
+        <property name="level" value="INFO" type="string" />
+        <property name="file" value="/var/log/app.log" type="string" />
+        <property name="rotate" value="true" type="bool" />
+    </section>
+    <section name="cache" enabled="false">
+        <property name="type" value="redis" type="string" />
+        <property name="ttl" value="3600" type="int" />
+    </section>
+</configuration>

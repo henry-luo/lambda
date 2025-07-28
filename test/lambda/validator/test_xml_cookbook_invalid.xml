@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cookbook author="Missing Title">  <!-- Missing required 'title' attribute -->
+    
+    <!-- Missing required introduction element -->
+    
+    <recipe difficulty="invalid-level" servings="-5">  <!-- Invalid difficulty and negative servings -->
+        <!-- Missing required 'id' attribute -->
+        <name>Invalid Recipe</name>
+        <description>This recipe has multiple validation errors.</description>
+        
+        <prepTime unit="invalid-unit">not-a-number</prepTime>  <!-- Invalid unit and non-integer value -->
+        
+        <ingredients>
+            <ingredient amount="500">  <!-- Missing required 'name' attribute -->
+                <!-- Ingredient content -->
+            </ingredient>
+        </ingredients>
+        
+        <instructions>
+            <step number="not-a-number">Invalid step number</step>  <!-- Invalid step number type -->
+        </instructions>
+    </recipe>
+    
+    <recipe id="another-invalid" difficulty="medium">
+        <name>Another Invalid Recipe</name>
+        <description>Missing required elements</description>
+        
+        <!-- Missing required prepTime element -->
+        <!-- Missing required ingredients element -->  
+        <!-- Missing required instructions element -->
+    </recipe>
+    
+</cookbook>

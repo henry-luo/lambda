@@ -312,7 +312,7 @@ void test_schema_features_helper(const char* schema_file, const char* expected_f
 }
 
 // =============================================================================
-// COMPREHENSIVE TESTS - HTML and Markdown Format Support
+// COMPREHENSIVE TESTS - HTML, Markdown, and XML Format Support
 // =============================================================================
 
 // Test comprehensive schema features
@@ -341,6 +341,86 @@ Test(validator_tests, markdown_schema_features) {
         "zero-or-more occurrences", "type definitions"
     };
     test_schema_features_helper("test/lambda/validator/schema_markdown.ls", 
+                               expected_features, 5);
+}
+
+Test(validator_tests, xml_basic_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "zero-or-more occurrences",
+        "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_basic.ls", 
+                               expected_features, 5);
+}
+
+Test(validator_tests, xml_config_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "one-or-more occurrences",
+        "zero-or-more occurrences", "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_config.ls", 
+                               expected_features, 6);
+}
+
+Test(validator_tests, xml_rss_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "zero-or-more occurrences",
+        "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_rss.ls", 
+                               expected_features, 5);
+}
+
+Test(validator_tests, xml_soap_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "zero-or-more occurrences",
+        "union types", "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_soap.ls", 
+                               expected_features, 6);
+}
+
+Test(validator_tests, xml_comprehensive_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "zero-or-more occurrences",
+        "union types", "element types", "type definitions", "nested structures"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_comprehensive.ls", 
+                               expected_features, 7);
+}
+
+Test(validator_tests, xml_edge_cases_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "zero-or-more occurrences",
+        "union types", "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_edge_cases.ls", 
+                               expected_features, 6);
+}
+
+Test(validator_tests, xml_minimal_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "element types"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_minimal.ls", 
+                               expected_features, 3);
+}
+
+Test(validator_tests, xml_library_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "one-or-more occurrences",
+        "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_library.ls", 
+                               expected_features, 5);
+}
+
+Test(validator_tests, xml_cookbook_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "one-or-more occurrences",
+        "element types", "type definitions"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_xml_cookbook.ls", 
                                expected_features, 5);
 }
 
@@ -379,6 +459,100 @@ Test(validator_tests, markdown_auto_detection) {
     test_cli_validation_helper("test/lambda/validator/test_simple.md",
                               "test/lambda/validator/schema_markdown.ls", 
                               "auto", true);
+}
+
+// XML positive validation tests
+Test(validator_tests, xml_basic_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_basic_valid.xml",
+                              "test/lambda/validator/schema_xml_basic.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_config_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_config_valid.xml",
+                              "test/lambda/validator/schema_xml_config.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_rss_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_rss_valid.xml",
+                              "test/lambda/validator/schema_xml_rss.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_soap_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_soap_valid.xml",
+                              "test/lambda/validator/schema_xml_soap.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_comprehensive_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_comprehensive_valid.xml",
+                              "test/lambda/validator/schema_xml_comprehensive.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_auto_detection) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_basic_valid.xml",
+                              "test/lambda/validator/schema_xml_basic.ls", 
+                              "auto", true);
+}
+
+// Additional XML positive tests
+Test(validator_tests, xml_simple_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_simple.xml",
+                              "test/lambda/validator/schema_xml_basic.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_config_simple_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_config_simple.xml",
+                              "test/lambda/validator/schema_xml_config.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_soap_fault_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_soap_fault.xml",
+                              "test/lambda/validator/schema_xml_soap.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_edge_cases_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_edge_cases_valid.xml",
+                              "test/lambda/validator/schema_xml_edge_cases.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_minimal_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_minimal.xml",
+                              "test/lambda/validator/schema_xml_minimal.ls", 
+                              "xml", true);
+}
+
+// XML Schema (XSD) based tests
+Test(validator_tests, xml_library_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_library_valid.xml",
+                              "test/lambda/validator/schema_xml_library.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_library_simple_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_library_simple.xml",
+                              "test/lambda/validator/schema_xml_library.ls", 
+                              "xml", true);
+}
+
+// RelaxNG based tests  
+Test(validator_tests, xml_cookbook_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_cookbook_valid.xml",
+                              "test/lambda/validator/schema_xml_cookbook.ls", 
+                              "xml", true);
+}
+
+Test(validator_tests, xml_cookbook_simple_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_cookbook_simple.xml",
+                              "test/lambda/validator/schema_xml_cookbook.ls", 
+                              "xml", true);
 }
 
 // Comprehensive negative tests
@@ -434,11 +608,104 @@ Test(validator_tests, nonexistent_markdown_file) {
                               "markdown", false);
 }
 
+// XML negative validation tests
+Test(validator_tests, invalid_xml_basic_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_basic_invalid.xml",
+                              "test/lambda/validator/schema_xml_basic.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_config_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_config_invalid.xml",
+                              "test/lambda/validator/schema_xml_config.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_rss_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_rss_invalid.xml",
+                              "test/lambda/validator/schema_xml_rss.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_soap_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_soap_invalid.xml",
+                              "test/lambda/validator/schema_xml_soap.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_comprehensive_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_comprehensive_invalid.xml",
+                              "test/lambda/validator/schema_xml_comprehensive.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, nonexistent_xml_file) {
+    test_cli_validation_helper("test/lambda/validator/nonexistent.xml",
+                              "test/lambda/validator/schema_xml_basic.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_edge_cases_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_edge_cases_invalid.xml",
+                              "test/lambda/validator/schema_xml_edge_cases.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_minimal_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_minimal_invalid.xml",
+                              "test/lambda/validator/schema_xml_minimal.ls", 
+                              "xml", false);
+}
+
+// XML Schema (XSD) based negative tests
+Test(validator_tests, invalid_xml_library_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_library_invalid.xml",
+                              "test/lambda/validator/schema_xml_library.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_library_incomplete_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_library_incomplete.xml",
+                              "test/lambda/validator/schema_xml_library.ls", 
+                              "xml", false);
+}
+
+// RelaxNG based negative tests
+Test(validator_tests, invalid_xml_cookbook_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_cookbook_invalid.xml",
+                              "test/lambda/validator/schema_xml_cookbook.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, invalid_xml_cookbook_empty_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_cookbook_empty.xml",
+                              "test/lambda/validator/schema_xml_cookbook.ls", 
+                              "xml", false);
+}
+
 // Cross-format compatibility tests
 Test(validator_tests, lambda_vs_comprehensive_schema) {
     test_cli_validation_helper("test/lambda/validator/test_complex.m",
                               "test/lambda/validator/schema_comprehensive.ls", 
                               "lambda", false);
+}
+
+Test(validator_tests, xml_vs_html_schema_mismatch) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_basic_valid.xml",
+                              "test/lambda/validator/schema_html.ls", 
+                              "xml", false);
+}
+
+Test(validator_tests, html_vs_xml_schema_mismatch) {
+    test_cli_validation_helper("test/lambda/validator/test_simple.html",
+                              "test/lambda/validator/schema_xml_basic.ls", 
+                              "html", false);
+}
+
+Test(validator_tests, xml_vs_markdown_schema_mismatch) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_basic_valid.xml",
+                              "test/lambda/validator/schema_markdown.ls", 
+                              "xml", false);
 }
 
 // Format-specific edge cases
@@ -493,6 +760,59 @@ Test(validator_tests, empty_file_handling) {
         
         // Cleanup
         remove("test/lambda/validator/test_empty.html");
+    }
+}
+
+// XML-specific edge cases
+Test(validator_tests, xml_malformed_structure) {
+    // Test XML with malformed structure
+    FILE* tmp_file = fopen("test/lambda/validator/test_malformed_xml.xml", "w");
+    if (tmp_file) {
+        fprintf(tmp_file, "<?xml version=\"1.0\"?>\n<root><unclosed><nested>content</root>");
+        fclose(tmp_file);
+        
+        test_cli_validation_helper("test/lambda/validator/test_malformed_xml.xml",
+                                  "test/lambda/validator/schema_xml_basic.ls", 
+                                  "xml", false);
+        
+        // Cleanup
+        remove("test/lambda/validator/test_malformed_xml.xml");
+    }
+}
+
+Test(validator_tests, xml_namespace_conflicts) {
+    // Test XML with namespace conflicts
+    FILE* tmp_file = fopen("test/lambda/validator/test_ns_conflict.xml", "w");
+    if (tmp_file) {
+        fprintf(tmp_file, "<?xml version=\"1.0\"?>\n"
+                         "<root xmlns:ns=\"http://example.com/1\" xmlns:ns=\"http://example.com/2\">\n"
+                         "<ns:element>conflict</ns:element>\n"
+                         "</root>");
+        fclose(tmp_file);
+        
+        test_cli_validation_helper("test/lambda/validator/test_ns_conflict.xml",
+                                  "test/lambda/validator/schema_xml_comprehensive.ls", 
+                                  "xml", false);
+        
+        // Cleanup
+        remove("test/lambda/validator/test_ns_conflict.xml");
+    }
+}
+
+Test(validator_tests, xml_invalid_encoding) {
+    // Test XML with invalid encoding declaration
+    FILE* tmp_file = fopen("test/lambda/validator/test_bad_encoding.xml", "w");
+    if (tmp_file) {
+        fprintf(tmp_file, "<?xml version=\"1.0\" encoding=\"INVALID-ENCODING\"?>\n"
+                         "<root><element>content</element></root>");
+        fclose(tmp_file);
+        
+        test_cli_validation_helper("test/lambda/validator/test_bad_encoding.xml",
+                                  "test/lambda/validator/schema_xml_basic.ls", 
+                                  "xml", false);
+        
+        // Cleanup
+        remove("test/lambda/validator/test_bad_encoding.xml");
     }
 }
 

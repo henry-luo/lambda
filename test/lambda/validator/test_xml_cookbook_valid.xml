@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<cookbook title="Modern Home Cooking" author="Chef Maria Rodriguez" year="2024" xmlns="http://example.com/recipes">
+    
+    <introduction>
+        Welcome to Modern Home Cooking! This collection features simple yet delicious recipes 
+        that anyone can master in their own kitchen. Each recipe has been tested and refined 
+        to ensure consistent, flavorful results.
+    </introduction>
+    
+    <recipe id="pasta-carbonara" difficulty="medium" servings="4">
+        <name>Classic Pasta Carbonara</name>
+        <description>
+            A traditional Italian pasta dish with eggs, cheese, pancetta, and black pepper.
+            Simple ingredients combined to create an incredibly rich and satisfying meal.
+        </description>
+        
+        <prepTime unit="minutes">25</prepTime>
+        
+        <ingredients>
+            <ingredient name="spaghetti" amount="400" unit="grams"/>
+            <ingredient name="pancetta" amount="200" unit="grams"/>
+            <ingredient name="eggs" amount="4" unit="large"/>
+            <ingredient name="parmesan cheese" amount="100" unit="grams"/>
+            <ingredient name="black pepper" amount="1" unit="teaspoon"/>
+            <ingredient name="salt" amount="to taste"/>
+            <ingredient name="fresh parsley" amount="2" unit="tablespoons" optional="true"/>
+        </ingredients>
+        
+        <instructions>
+            <step number="1">Bring a large pot of salted water to boil and cook spaghetti according to package directions.</step>
+            <step number="2">While pasta cooks, cut pancetta into small cubes and cook in a large skillet until crispy.</step>
+            <step number="3">In a bowl, whisk together eggs, grated parmesan, and black pepper.</step>
+            <step number="4">Drain pasta, reserving 1 cup of pasta water.</step>
+            <step number="5">Add hot pasta to the skillet with pancetta and toss.</step>
+            <step number="6">Remove from heat and quickly stir in egg mixture, adding pasta water as needed.</step>
+            <step number="7">Serve immediately with extra parmesan and black pepper.</step>
+        </instructions>
+        
+        <notes>
+            The key is to work quickly when adding the eggs to prevent them from scrambling.
+            The residual heat will cook the eggs just enough to create a creamy sauce.
+        </notes>
+    </recipe>
+    
+    <recipe id="chocolate-chip-cookies" difficulty="easy" servings="24">
+        <name>Perfect Chocolate Chip Cookies</name>
+        <description>
+            Soft, chewy chocolate chip cookies with crispy edges. The perfect balance 
+            of texture and flavor that will satisfy any sweet tooth.
+        </description>
+        
+        <prepTime unit="minutes">45</prepTime>
+        
+        <ingredients>
+            <ingredient name="all-purpose flour" amount="2.25" unit="cups"/>
+            <ingredient name="baking soda" amount="1" unit="teaspoon"/>
+            <ingredient name="salt" amount="1" unit="teaspoon"/>
+            <ingredient name="butter" amount="1" unit="cup"/>
+            <ingredient name="brown sugar" amount="0.75" unit="cup"/>
+            <ingredient name="white sugar" amount="0.75" unit="cup"/>
+            <ingredient name="eggs" amount="2" unit="large"/>
+            <ingredient name="vanilla extract" amount="2" unit="teaspoons"/>
+            <ingredient name="chocolate chips" amount="2" unit="cups"/>
+            <ingredient name="walnuts" amount="1" unit="cup" optional="true"/>
+        </ingredients>
+        
+        <instructions>
+            <step number="1">Preheat oven to 375°F (190°C).</step>
+            <step number="2">In a bowl, whisk together flour, baking soda, and salt.</step>
+            <step number="3">In a large bowl, cream together butter and both sugars until fluffy.</step>
+            <step number="4">Beat in eggs one at a time, then stir in vanilla.</step>
+            <step number="5">Gradually blend in flour mixture.</step>
+            <step number="6">Stir in chocolate chips and nuts if using.</step>
+            <step number="7">Drop rounded tablespoons of dough onto ungreased cookie sheets.</step>
+            <step number="8">Bake for 9-11 minutes or until golden brown.</step>
+            <step number="9">Cool on baking sheet for 2 minutes before transferring to wire rack.</step>
+        </instructions>
+        
+        <notes>
+            For chewier cookies, slightly underbake them. For crispier cookies, bake a minute or two longer.
+        </notes>
+    </recipe>
+    
+</cookbook>

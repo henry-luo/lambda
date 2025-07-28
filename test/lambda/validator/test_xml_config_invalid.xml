@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration version="2.1">
+    <!-- Section without required properties -->
+    <section name="database" enabled="true">
+        <!-- Missing required properties -->
+    </section>
+    
+    <!-- Section with invalid property structure -->
+    <section name="logging">
+        <property name="level" type="string" />  <!-- Missing required value attribute -->
+        <property value="INFO" />  <!-- Missing required name attribute -->
+        <invalid_element>This should not be here</invalid_element>
+    </section>
+    
+    <!-- Unclosed section -->
+    <section name="cache" enabled="false">
+        <property name="type" value="redis" type="string" />
+    <!-- Missing closing tag -->
+</configuration>

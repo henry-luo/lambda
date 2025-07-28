@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library>  <!-- Missing required 'established' attribute -->
+    <name>Invalid Library</name>
+    <address>789 Error Street</address>
+    
+    <book category="invalid-category" inStock="true">  <!-- Invalid category -->
+        <title>Invalid Book</title>
+        <!-- Missing required author element -->
+        <isbn>invalid-isbn-format</isbn>  <!-- Invalid ISBN format -->
+        <publishedYear>not-a-number</publishedYear>  <!-- Invalid year type -->
+        <price>invalid-price</price>  <!-- Invalid price type -->
+    </book>
+    
+    <book category="fiction">
+        <title>Another Invalid Book</title>
+        <author>  <!-- Missing required 'id' attribute -->
+            <firstName>John</firstName>
+            <!-- Missing required lastName -->
+            <birthYear>invalid-year</birthYear>  <!-- Invalid year type -->
+        </author>
+        <isbn>978-0-123456789</isbn>
+        <!-- Missing required publishedYear -->
+        <!-- Missing required price -->
+    </book>
+    
+    <!-- No books - violates maxOccurs="unbounded" requirement -->
+</library>

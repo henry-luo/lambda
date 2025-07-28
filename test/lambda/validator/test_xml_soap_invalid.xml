@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Header mustUnderstand="invalid_boolean_value">
+        <!-- Invalid boolean value -->
+    </soap:Header>
+    
+    <soap:Body>
+        <!-- Both content and fault - should be only one -->
+        <content method="getUserInfo">
+            <param name="userId" type="string" />  <!-- Missing required value -->
+            <param type="boolean" value="true" />   <!-- Missing required name -->
+        </content>
+        
+        <Fault>
+            <faultcode>Server.Error</faultcode>
+            <!-- Missing required faultstring -->
+        </Fault>
+    </soap:Body>
+    
+    <!-- Multiple Body elements - should be only one -->
+    <soap:Body>
+        <content method="anotherMethod" />
+    </soap:Body>
+</soap:Envelope>

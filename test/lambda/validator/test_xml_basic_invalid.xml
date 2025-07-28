@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root version="1.0">
+    <!-- Missing closing tag for element -->
+    <element name="person" text="John Doe">
+        <element name="age" text="30" />
+        <element name="city" text="New York"
+    </element>
+    <!-- Malformed attribute quotes -->
+    <element name=invalid text='missing quotes>
+        <element name="department" text="Engineering" />
+    </element>
+</root>

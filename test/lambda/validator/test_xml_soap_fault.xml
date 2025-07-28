@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+    <soap:Body>
+        <Fault>
+            <faultcode>Client.Error</faultcode>
+            <faultstring>Invalid request format</faultstring>
+            <faultactor>http://example.com/service</faultactor>
+            <detail>The request XML was malformed</detail>
+        </Fault>
+    </soap:Body>
+</soap:Envelope>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE document SYSTEM "invalid.dtd">
+<document xmlns="http://example.com/default" 
+          xmlns:invalid="http://example.com/invalid"
+          xmlns:invalid="http://example.com/duplicate">  <!-- Duplicate namespace prefix -->
+    
+    <?invalid-processing-instruction?>  <!-- Malformed PI -->
+    
+    <!-- Unclosed comment
+    
+    <invalid:root name="main">
+        <![CDATA[Unclosed CDATA section
+        
+        <content>
+            This is text content with 
+            <emphasis>unclosed emphasis
+            and more text.
+            
+            <list>
+                <item>First item</item>
+                <item>Unclosed item
+                <item>Third item</item>
+            </list>
+        </content>
+        
+        <!-- Mismatched tags -->
+        <data>
+            <record id="1">
+                <field name="name" value="John Doe" />
+            </wrong_closing_tag>
+        </data>
+    </invalid:root>
+    
+    <!-- Missing root closing tag -->

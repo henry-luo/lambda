@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://example.com/library"
+           xmlns:lib="http://example.com/library"
+           elementFormDefault="qualified">
+
+  <!-- Simple types -->
+  <xs:simpleType name="ISBNType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9]{3}-[0-9]{1}-[0-9]{3}-[0-9]{5}-[0-9]{1}"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="CategoryType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="fiction"/>
+      <xs:enumeration value="non-fiction"/>
+      <xs:enumeration value="science"/>
+      <xs:enumeration value="biography"/>
+      <xs:enumeration value="history"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Complex types -->
+  <xs:complexType name="AuthorType">
+    <xs:sequence>
+      <xs:element name="firstName" type="xs:string"/>
+      <xs:element name="lastName" type="xs:string"/>
+      <xs:element name="birthYear" type="xs:int" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="BookType">
+    <xs:sequence>
+      <xs:element name="title" type="xs:string"/>
+      <xs:element name="author" type="lib:AuthorType" maxOccurs="unbounded"/>
+      <xs:element name="isbn" type="lib:ISBNType"/>
+      <xs:element name="publishedYear" type="xs:int"/>
+      <xs:element name="price" type="xs:decimal"/>
+      <xs:element name="description" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="category" type="lib:CategoryType" use="required"/>
+    <xs:attribute name="inStock" type="xs:boolean" default="true"/>
+  </xs:complexType>
+
+  <!-- Root element -->
+  <xs:element name="library">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="name" type="xs:string"/>
+        <xs:element name="address" type="xs:string"/>
+        <xs:element name="book" type="lib:BookType" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:attribute name="established" type="xs:int" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

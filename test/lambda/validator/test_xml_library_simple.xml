@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library established="2000">
+    <name>Modern Library</name>
+    <address>456 Tech Boulevard, Innovation City</address>
+    
+    <book category="non-fiction" inStock="true">
+        <title>Clean Code</title>
+        <author id="martin">
+            <firstName>Robert</firstName>
+            <lastName>Martin</lastName>
+        </author>
+        <isbn>978-0-13-235088-4</isbn>
+        <publishedYear>2008</publishedYear>
+        <price>42.99</price>
+        <description>A handbook of agile software craftsmanship</description>
+    </book>
+</library>

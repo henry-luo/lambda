@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         ns="http://example.com/recipes"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+
+  <start>
+    <element name="cookbook">
+      <attribute name="title"/>
+      <attribute name="author"/>
+      <optional>
+        <attribute name="year">
+          <data type="gYear"/>
+        </attribute>
+      </optional>
+      
+      <element name="introduction">
+        <text/>
+      </element>
+      
+      <oneOrMore>
+        <element name="recipe">
+          <attribute name="id">
+            <data type="ID"/>
+          </attribute>
+          <attribute name="difficulty">
+            <choice>
+              <value>easy</value>
+              <value>medium</value>
+              <value>hard</value>
+            </choice>
+          </attribute>
+          <optional>
+            <attribute name="servings">
+              <data type="positiveInteger"/>
+            </attribute>
+          </optional>
+          
+          <element name="name">
+            <text/>
+          </element>
+          
+          <element name="description">
+            <text/>
+          </element>
+          
+          <element name="prepTime">
+            <attribute name="unit">
+              <choice>
+                <value>minutes</value>
+                <value>hours</value>
+              </choice>
+            </attribute>
+            <data type="positiveInteger"/>
+          </element>
+          
+          <element name="ingredients">
+            <oneOrMore>
+              <element name="ingredient">
+                <attribute name="name"/>
+                <attribute name="amount"/>
+                <optional>
+                  <attribute name="unit"/>
+                </optional>
+                <optional>
+                  <attribute name="optional">
+                    <data type="boolean"/>
+                  </attribute>
+                </optional>
+              </element>
+            </oneOrMore>
+          </element>
+          
+          <element name="instructions">
+            <oneOrMore>
+              <element name="step">
+                <attribute name="number">
+                  <data type="positiveInteger"/>
+                </attribute>
+                <text/>
+              </element>
+            </oneOrMore>
+          </element>
+          
+          <optional>
+            <element name="notes">
+              <text/>
+            </element>
+          </optional>
+          
+        </element>
+      </oneOrMore>
+    </element>
+  </start>
+  
+</grammar>

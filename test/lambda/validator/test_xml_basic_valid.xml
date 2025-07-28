@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<bookstore>
+  <book id="1" category="fiction">
+    <title>Great Gatsby</title>
+    <author>F. Scott Fitzgerald</author>
+    <price>12.99</price>
+  </book>
+  <book id="2" category="science">
+    <title>Brief History of Time</title>
+    <author>Stephen Hawking</author>
+    <price>15.99</price>
+  </book>
+</bookstore>

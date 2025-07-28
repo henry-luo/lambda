@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library established="1999">
+    <!-- Missing required name element -->
+    <address>Incomplete Address</address>
+    
+    <!-- Missing required book elements -->
+</library>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document version="1.0" standalone="true">
+    <root>
+        <element name="simple" text="Simple content">
+            <nested level="1" data="nested-data">
+                Nested content here
+            </nested>
+        </element>
+        
+        <element name="another" text="More content">
+            <nested level="2">
+                Another nested element
+                <nested level="3" data="deep">Deep nesting</nested>
+            </nested>
+        </element>
+    </root>
+</document>
