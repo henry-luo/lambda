@@ -1,36 +1,35 @@
-# Invalid Markdown Test
+# Valid Markdown with Schema Violations
 
-This markdown has various syntax errors:
+This markdown has valid syntax but violates the doc_schema.ls structure.
 
-## Unclosed Code Block
-```javascript
-function test() {
-    console.log("This code block is never closed");
+## Invalid Elements for Document Schema
 
-## Invalid List Structure
-- Item 1
-    - Nested without proper indentation
-  - Wrong indentation
-- Item 2
-    1. Mixed list types
-    - More mixing
+This document contains an iframe element, which is not allowed in the schema:
 
-## Broken Links
-[Link with no URL]
-[Another broken link](
-[Incomplete reference link][missing-ref]
+<iframe src="https://example.com" width="500" height="300"></iframe>
 
-## Invalid Table
-| Header 1 | Header 2
-| Cell 1 | Cell 2 | Extra cell |
-| Missing cell |
+## Script Tags Not Allowed
 
-## Unclosed HTML
-<div>
-    <p>Unclosed paragraph
-    <span>Multiple unclosed tags
-</div>
+The schema doesn't allow script elements:
 
-*Unclosed emphasis text
+<script>alert('This is not allowed');</script>
 
-**Unclosed strong text
+## Custom HTML Elements
+
+The schema doesn't define these custom elements:
+
+<custom-element>Custom content</custom-element>
+
+<my-widget data-value="123">Widget content</my-widget>
+
+## Unsupported Attributes
+
+This paragraph has attributes not defined in the schema:
+
+<p onclick="handleClick()" data-custom="value" style="color: red;">
+Content with unsupported attributes
+</p>
+
+## Invalid Structure
+
+The schema expects a specific document structure, but this violates it with nested elements in wrong places.
