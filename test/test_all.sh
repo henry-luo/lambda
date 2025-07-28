@@ -173,12 +173,20 @@ run_library_tests() {
     LIB_TEST_PASSED=()
     LIB_TEST_FAILED=()
     
-    # Compile and run each library test
+    # Arrays to store background job PIDs and temporary result files
+    local job_pids=()
+    local result_files=()
+    
+    # Create temporary directory for parallel execution results
+    local temp_dir=$(mktemp -d)
+    
+    # Compile and start each library test in parallel
     for i in "${!LIB_TEST_SOURCES[@]}"; do
         local test_source="test/${LIB_TEST_SOURCES[$i]}"
         local test_binary="test/${LIB_TEST_BINARIES[$i]}"
         local test_deps="${LIB_TEST_DEPENDENCIES[$i]}"
         local test_name="${LIB_TEST_SOURCES[$i]%%.c}"  # Remove .c extension
+        local result_file="$temp_dir/result_$i.txt"
         
         print_status "Compiling $test_source..."
         
@@ -187,6 +195,50 @@ run_library_tests() {
         
         if $COMPILE_CMD 2>/dev/null; then
             print_success "Compiled $test_source successfully"
+            
+            # Start test execution in background
+            print_status "Starting $test_binary in parallel..."
+            (
+                # Run the test and capture output
+                set +e  # Disable strict error handling for test execution
+                LIB_TEST_OUTPUT=$(./"$test_binary" --verbose --tap 2>&1)
+                LIB_TEST_EXIT_CODE=$?
+                set -e  # Re-enable strict error handling
+                
+                # Parse test results
+                TEST_TOTAL=$(echo "$LIB_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
+                TEST_FAILED=$(echo "$LIB_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
+                
+                # Clean numeric values
+                TEST_TOTAL=$(echo "$TEST_TOTAL" | tr -cd '0-9')
+                TEST_FAILED=$(echo "$TEST_FAILED" | tr -cd '0-9')
+                
+                # Ensure defaults
+                TEST_TOTAL=${TEST_TOTAL:-0}
+                TEST_FAILED=${TEST_FAILED:-0}
+                TEST_PASSED=$((TEST_TOTAL - TEST_FAILED))
+                
+                # Write results to temporary file
+                echo "TEST_NAME:$test_name" > "$result_file"
+                echo "TEST_TOTAL:$TEST_TOTAL" >> "$result_file"
+                echo "TEST_PASSED:$TEST_PASSED" >> "$result_file"
+                echo "TEST_FAILED:$TEST_FAILED" >> "$result_file"
+                echo "TEST_OUTPUT_START" >> "$result_file"
+                echo "$LIB_TEST_OUTPUT" >> "$result_file"
+                echo "TEST_OUTPUT_END" >> "$result_file"
+                
+                # Cleanup test binary
+                if [ -f "$test_binary" ]; then
+                    rm "$test_binary"
+                fi
+                
+                exit $TEST_FAILED
+            ) &
+            
+            # Store background job PID and result file
+            job_pids+=($!)
+            result_files+=("$result_file")
+            
         else
             print_error "Failed to compile $test_source"
             print_error "Attempting compilation with detailed error output..."
@@ -198,47 +250,50 @@ run_library_tests() {
             LIB_TEST_TOTALS+=(0)
             LIB_TEST_PASSED+=(0)
             LIB_TEST_FAILED+=(1)
-            continue
-        fi
-        
-        # Run the test
-        print_status "Running $test_binary..."
-        
-        set +e  # Disable strict error handling for test execution
-        LIB_TEST_OUTPUT=$(./"$test_binary" --verbose --tap 2>&1)
-        LIB_TEST_EXIT_CODE=$?
-        set -e  # Re-enable strict error handling
-        
-        echo "$LIB_TEST_OUTPUT"
-        echo ""
-        
-        # Parse test results
-        TEST_TOTAL=$(echo "$LIB_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
-        TEST_FAILED=$(echo "$LIB_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
-        
-        # Clean numeric values
-        TEST_TOTAL=$(echo "$TEST_TOTAL" | tr -cd '0-9')
-        TEST_FAILED=$(echo "$TEST_FAILED" | tr -cd '0-9')
-        
-        # Ensure defaults
-        TEST_TOTAL=${TEST_TOTAL:-0}
-        TEST_FAILED=${TEST_FAILED:-0}
-        TEST_PASSED=$((TEST_TOTAL - TEST_FAILED))
-        
-        # Store individual test results
-        LIB_TEST_NAMES+=("$test_name")
-        LIB_TEST_TOTALS+=($TEST_TOTAL)
-        LIB_TEST_PASSED+=($TEST_PASSED)
-        LIB_TEST_FAILED+=($TEST_FAILED)
-        
-        lib_total_tests=$((lib_total_tests + TEST_TOTAL))
-        lib_failed_tests=$((lib_failed_tests + TEST_FAILED))
-        
-        # Cleanup test binary
-        if [ -f "$test_binary" ]; then
-            rm "$test_binary"
         fi
     done
+    
+    # Wait for all background jobs and collect results
+    print_status "⏳ Waiting for parallel test execution to complete..."
+    
+    for i in "${!job_pids[@]}"; do
+        local pid="${job_pids[$i]}"
+        local result_file="${result_files[$i]}"
+        
+        # Wait for this specific job
+        wait $pid
+        local job_exit_code=$?
+        
+        # Read results from temporary file
+        if [ -f "$result_file" ]; then
+            local test_name=$(grep "^TEST_NAME:" "$result_file" | cut -d: -f2)
+            local test_total=$(grep "^TEST_TOTAL:" "$result_file" | cut -d: -f2)
+            local test_passed=$(grep "^TEST_PASSED:" "$result_file" | cut -d: -f2)
+            local test_failed=$(grep "^TEST_FAILED:" "$result_file" | cut -d: -f2)
+            
+            # Extract and display test output
+            local test_output=$(sed -n '/^TEST_OUTPUT_START$/,/^TEST_OUTPUT_END$/p' "$result_file" | sed '1d;$d')
+            
+            print_status "📋 Results for $test_name:"
+            echo "$test_output"
+            echo ""
+            
+            # Store individual test results
+            LIB_TEST_NAMES+=("$test_name")
+            LIB_TEST_TOTALS+=($test_total)
+            LIB_TEST_PASSED+=($test_passed)
+            LIB_TEST_FAILED+=($test_failed)
+            
+            lib_total_tests=$((lib_total_tests + test_total))
+            lib_failed_tests=$((lib_failed_tests + test_failed))
+        else
+            print_error "Failed to read results for job $i"
+            lib_failed_tests=$((lib_failed_tests + 1))
+        fi
+    done
+    
+    # Cleanup temporary directory
+    rm -rf "$temp_dir"
     
     lib_passed_tests=$((lib_total_tests - lib_failed_tests))
     

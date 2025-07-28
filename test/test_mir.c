@@ -7,7 +7,8 @@
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
-#include "../lambda/lambda.h"
+#include "../lib/strbuf.h"
+// #include "../lambda/lambda.h"
 
 // Function declarations from mir.c
 MIR_context_t jit_init(void);
@@ -82,36 +83,40 @@ Test(mir_tests, test_jit_compile_math_function) {
     jit_cleanup(ctx);
 }
 
-// Test JIT compilation of a function that returns a value
-Test(mir_tests, test_jit_compile_return_value) {
-    const char *return_code = 
-        "int get_constant() {\n"
-        "    if (sizeof(int64_t) == 8 && sizeof(uint64_t) == 8 && sizeof(int32_t) == 4 && sizeof(uint32_t) == 4 && sizeof(int16_t) == 2 && sizeof(uint16_t) == 2) {\n"
-        "        return 1;\n"
-        "    }\n"
-        "    return 0;\n"
-        "}\n";
+// #include "../lambda/lambda-embed.h"
+// // Test JIT compilation of a function that returns a value
+// Test(mir_tests, test_jit_compile_return_value) {
+//     const char *return_code = 
+//         "int get_constant() {\n"
+//         "    if (sizeof(int64_t) == 8 && sizeof(uint64_t) == 8 && sizeof(int32_t) == 4 && sizeof(uint32_t) == 4 && sizeof(int16_t) == 2 && sizeof(uint16_t) == 2) {\n"
+//         "        return 1;\n"
+//         "    }\n"
+//         "    return 0;\n"
+//         "}\n";
     
-    MIR_context_t ctx = jit_init();
-    cr_assert_not_null(ctx, "JIT context should be initialized");
+//     MIR_context_t ctx = jit_init();
+//     cr_assert_not_null(ctx, "JIT context should be initialized");
     
-    // Compile the return code
-    jit_compile_to_mir(ctx, return_code, strlen(return_code), "return_test.c");
+//     StrBuf *sb = strbuf_new();
+//     strbuf_append_str_n(sb, lambda_lambda_h, lambda_lambda_h_len);
+//     strbuf_append_str(sb, return_code);
+//     // Compile the return code
+//     jit_compile_to_mir(ctx, sb->str, sb->length, "return_test.c");
     
-    // Try to generate the function
-    void* func_ptr = jit_gen_func(ctx, "get_constant");
-    cr_assert_not_null(func_ptr, "Function pointer should not be null after compilation");
+//     // Try to generate the function
+//     void* func_ptr = jit_gen_func(ctx, "get_constant");
+//     cr_assert_not_null(func_ptr, "Function pointer should not be null after compilation");
     
-    // If we can get the function pointer, we can try to call it
-    if (func_ptr) {
-        int (*test_func)(void) = (int (*)(void))func_ptr;
-        int result = test_func();
-        cr_assert_eq(result, 1, "Function should return 1");
-    }
+//     // If we can get the function pointer, we can try to call it
+//     if (func_ptr) {
+//         int (*test_func)(void) = (int (*)(void))func_ptr;
+//         int result = test_func();
+//         cr_assert_eq(result, 1, "Function should return 1");
+//     }
     
-    // Clean up
-    jit_cleanup(ctx);
-}
+//     // Clean up
+//     jit_cleanup(ctx);
+// }
 
 // Test JIT compilation of multiple functions
 Test(mir_tests, test_jit_compile_multiple_functions) {

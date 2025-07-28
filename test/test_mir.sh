@@ -26,6 +26,8 @@ echo "Loading object files from $CONFIG_FILE..."
 
 # Extract source files from JSON and convert to object file paths
 OBJECT_FILES=()
+
+# Process source_files
 while IFS= read -r source_file; do
     # Convert source file path to object file path
     # Remove leading directory path and change extension to .o
@@ -36,6 +38,25 @@ while IFS= read -r source_file; do
         echo "Warning: Object file $obj_file not found. You may need to build the project first."
     fi
 done < <(jq -r '.source_files[]' "$CONFIG_FILE" | grep -E '\.(c|cpp)$')
+
+# Process source_dirs - find all .c files in the directories
+SOURCE_DIRS=$(jq -r '.source_dirs[]?' "$CONFIG_FILE" 2>/dev/null)
+if [ -n "$SOURCE_DIRS" ]; then
+    while IFS= read -r source_dir; do
+        if [ -d "$PROJECT_ROOT/$source_dir" ]; then
+            while IFS= read -r source_file; do
+                # Convert absolute path to relative path from project root
+                rel_path="${source_file#$PROJECT_ROOT/}"
+                obj_file="build/$(basename "$rel_path" .c).o"
+                if [ -f "$PROJECT_ROOT/$obj_file" ]; then
+                    OBJECT_FILES+=("$PROJECT_ROOT/$obj_file")
+                else
+                    echo "Warning: Object file $obj_file not found for $rel_path. You may need to build the project first."
+                fi
+            done < <(find "$PROJECT_ROOT/$source_dir" -name "*.c" -type f)
+        fi
+    done <<< "$SOURCE_DIRS"
+fi
 
 echo "Found ${#OBJECT_FILES[@]} object files"
 
