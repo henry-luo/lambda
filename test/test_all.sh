@@ -484,75 +484,195 @@ TEST_SUITE_PASSED=()
 TEST_SUITE_FAILED=()
 TEST_SUITE_STATUS=()
 
-# Run library tests first
-print_status "================================================"
-print_status "                LIBRARY TESTS                  "
-print_status "================================================"
-if run_library_tests; then
-    library_failed=0
-else
-    library_failed=$?
-fi
+# Create temporary directory for parallel test suite execution
+SUITE_TEMP_DIR=$(mktemp -d)
 
-# Record library test suite results
-TEST_SUITE_ORDER+=("LIBRARY")
-TEST_SUITE_NAMES+=("📚 Library Tests")
-TEST_SUITE_TOTALS+=($LIB_TOTAL_TESTS)
-TEST_SUITE_PASSED+=($LIB_PASSED_TESTS) 
-TEST_SUITE_FAILED+=($LIB_FAILED_TESTS)
-if [ $library_failed -eq 0 ]; then
-    TEST_SUITE_STATUS+=("PASSED")
-else
-    TEST_SUITE_STATUS+=("FAILED")
-fi
+# Arrays to store test suite background job PIDs and result files
+SUITE_JOB_PIDS=()
+SUITE_RESULT_FILES=()
+SUITE_TYPES=()
 
+print_status "🚀 Starting all test suites in parallel..."
 echo ""
 
-# Run MIR JIT tests
-print_status "================================================"
-print_status "                 MIR JIT TESTS                 "
-print_status "================================================"
-if run_mir_tests; then
-    mir_failed=0
-else
-    mir_failed=$?
-fi
+# Temporarily disable strict error handling for parallel execution
+set +e
 
-# Record MIR test suite results
-TEST_SUITE_ORDER+=("MIR")
-TEST_SUITE_NAMES+=("⚡ MIR JIT Tests")
-TEST_SUITE_TOTALS+=($MIR_TOTAL_TESTS)
-TEST_SUITE_PASSED+=($MIR_PASSED_TESTS)
-TEST_SUITE_FAILED+=($MIR_FAILED_TESTS)
-if [ $mir_failed -eq 0 ]; then
-    TEST_SUITE_STATUS+=("PASSED")
-else
-    TEST_SUITE_STATUS+=("FAILED")
-fi
+# Start Library tests in background
+print_status "================================================"
+print_status "        STARTING LIBRARY TESTS (PARALLEL)      "
+print_status "================================================"
+LIBRARY_RESULT_FILE="$SUITE_TEMP_DIR/library_results.txt"
+(
+    # Run library tests and capture results
+    print_status "📚 Library Tests - Starting..."
+    if run_library_tests; then
+        library_failed=0
+    else
+        library_failed=$?
+    fi
+    
+    # Write results to file (variables are available in this subshell)
+    echo "SUITE_TYPE:LIBRARY" > "$LIBRARY_RESULT_FILE"
+    echo "SUITE_NAME:📚 Library Tests" >> "$LIBRARY_RESULT_FILE"
+    echo "SUITE_TOTAL:$LIB_TOTAL_TESTS" >> "$LIBRARY_RESULT_FILE"
+    echo "SUITE_PASSED:$LIB_PASSED_TESTS" >> "$LIBRARY_RESULT_FILE"
+    echo "SUITE_FAILED:$LIB_FAILED_TESTS" >> "$LIBRARY_RESULT_FILE"
+    if [ $library_failed -eq 0 ]; then
+        echo "SUITE_STATUS:PASSED" >> "$LIBRARY_RESULT_FILE"
+    else
+        echo "SUITE_STATUS:FAILED" >> "$LIBRARY_RESULT_FILE"
+    fi
+    
+    # Output with prefix for identification
+    echo "[LIBRARY] Library tests completed with exit code: $library_failed"
+    exit $library_failed
+) &
+SUITE_JOB_PIDS+=($!)
+SUITE_RESULT_FILES+=("$LIBRARY_RESULT_FILE")
+SUITE_TYPES+=("LIBRARY")
+
+# Start MIR JIT tests in background
+print_status "================================================"
+print_status "       STARTING MIR JIT TESTS (PARALLEL)       "
+print_status "================================================"
+MIR_RESULT_FILE="$SUITE_TEMP_DIR/mir_results.txt"
+(
+    # Run MIR tests and capture results
+    print_status "⚡ MIR JIT Tests - Starting..."
+    if run_mir_tests; then
+        mir_failed=0
+    else
+        mir_failed=$?
+    fi
+    
+    # Write results to file (variables are available in this subshell)
+    echo "SUITE_TYPE:MIR" > "$MIR_RESULT_FILE"
+    echo "SUITE_NAME:⚡ MIR JIT Tests" >> "$MIR_RESULT_FILE"
+    echo "SUITE_TOTAL:$MIR_TOTAL_TESTS" >> "$MIR_RESULT_FILE"
+    echo "SUITE_PASSED:$MIR_PASSED_TESTS" >> "$MIR_RESULT_FILE"
+    echo "SUITE_FAILED:$MIR_FAILED_TESTS" >> "$MIR_RESULT_FILE"
+    if [ $mir_failed -eq 0 ]; then
+        echo "SUITE_STATUS:PASSED" >> "$MIR_RESULT_FILE"
+    else
+        echo "SUITE_STATUS:FAILED" >> "$MIR_RESULT_FILE"
+    fi
+    
+    # Output with prefix for identification
+    echo "[MIR] MIR JIT tests completed with exit code: $mir_failed"
+    exit $mir_failed
+) &
+SUITE_JOB_PIDS+=($!)
+SUITE_RESULT_FILES+=("$MIR_RESULT_FILE")
+SUITE_TYPES+=("MIR")
+
+# Start Validator tests in background
+print_status "================================================"
+print_status "      STARTING VALIDATOR TESTS (PARALLEL)      "
+print_status "================================================"
+VALIDATOR_RESULT_FILE="$SUITE_TEMP_DIR/validator_results.txt"
+(
+    # Run validator tests and capture results
+    print_status "🔍 Validator Tests - Starting..."
+    if run_validator_tests; then
+        validator_failed=0
+    else
+        validator_failed=$?
+    fi
+    
+    # Write results to file (variables are available in this subshell)
+    echo "SUITE_TYPE:VALIDATOR" > "$VALIDATOR_RESULT_FILE"
+    echo "SUITE_NAME:🔍 Validator Tests" >> "$VALIDATOR_RESULT_FILE"
+    echo "SUITE_TOTAL:$VALIDATOR_TOTAL_TESTS" >> "$VALIDATOR_RESULT_FILE"
+    echo "SUITE_PASSED:$VALIDATOR_PASSED_TESTS" >> "$VALIDATOR_RESULT_FILE"
+    echo "SUITE_FAILED:$VALIDATOR_FAILED_TESTS" >> "$VALIDATOR_RESULT_FILE"
+    if [ $validator_failed -eq 0 ]; then
+        echo "SUITE_STATUS:PASSED" >> "$VALIDATOR_RESULT_FILE"
+    else
+        echo "SUITE_STATUS:FAILED" >> "$VALIDATOR_RESULT_FILE"
+    fi
+    
+    # Output with prefix for identification
+    echo "[VALIDATOR] Validator tests completed with exit code: $validator_failed"
+    exit $validator_failed
+) &
+SUITE_JOB_PIDS+=($!)
+SUITE_RESULT_FILES+=("$VALIDATOR_RESULT_FILE")
+SUITE_TYPES+=("VALIDATOR")
+
+# Re-enable strict error handling now that all background jobs are started
+set -e
 
 echo ""
+print_status "⏳ Waiting for all test suites to complete..."
+print_status "📊 Started ${#SUITE_JOB_PIDS[@]} test suites with PIDs: ${SUITE_JOB_PIDS[*]}"
 
-# Run validator tests
-print_status "================================================"
-print_status "               VALIDATOR TESTS                  "
-print_status "================================================"
-if run_validator_tests; then
-    validator_failed=0
-else
-    validator_failed=$?
-fi
+# Wait for all test suites and collect results
+for i in 0 1 2; do
+    pid="${SUITE_JOB_PIDS[$i]}"
+    result_file="${SUITE_RESULT_FILES[$i]}"
+    suite_type="${SUITE_TYPES[$i]}"
+    
+    print_status "⏳ Waiting for $suite_type test suite (PID: $pid)..."
+    
+    # Simple wait with timeout using background monitoring
+    (
+        sleep 300  # 5 minute timeout
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "TIMEOUT: $suite_type test suite (PID: $pid) timed out after 5 minutes"
+            kill -9 "$pid" 2>/dev/null || true
+        fi
+    ) &
+    timeout_pid=$!
+    
+    # Wait for the actual test suite process
+    wait "$pid" 2>/dev/null
+    suite_exit_code=$?
+    
+    # Kill the timeout monitor since the process completed
+    kill "$timeout_pid" 2>/dev/null || true
+    wait "$timeout_pid" 2>/dev/null || true
+    
+    print_status "📋 $suite_type completed with exit code: $suite_exit_code"
+    
+    # Read results from file
+    if [ -f "$result_file" ]; then
+        suite_type_read=$(grep "^SUITE_TYPE:" "$result_file" 2>/dev/null | cut -d: -f2 || echo "$suite_type")
+        suite_name=$(grep "^SUITE_NAME:" "$result_file" 2>/dev/null | cut -d: -f2 || echo "❌ $suite_type Tests")
+        suite_total=$(grep "^SUITE_TOTAL:" "$result_file" 2>/dev/null | cut -d: -f2 || echo "0")
+        suite_passed=$(grep "^SUITE_PASSED:" "$result_file" 2>/dev/null | cut -d: -f2 || echo "0")
+        suite_failed=$(grep "^SUITE_FAILED:" "$result_file" 2>/dev/null | cut -d: -f2 || echo "1")
+        suite_status=$(grep "^SUITE_STATUS:" "$result_file" 2>/dev/null | cut -d: -f2 || echo "FAILED")
+        
+        # Debug: Show what we read from the file
+        print_status "📊 Results for $suite_type: Total=$suite_total, Passed=$suite_passed, Failed=$suite_failed, Status=$suite_status"
+        
+        # Store results in arrays
+        TEST_SUITE_ORDER+=("$suite_type_read")
+        TEST_SUITE_NAMES+=("$suite_name")
+        TEST_SUITE_TOTALS+=($suite_total)
+        TEST_SUITE_PASSED+=($suite_passed)
+        TEST_SUITE_FAILED+=($suite_failed)
+        TEST_SUITE_STATUS+=("$suite_status")
+        
+        print_success "✅ $suite_name completed"
+    else
+        print_error "❌ Failed to read results for $suite_type test suite (result file not found)"
+        # Add default failed entry
+        TEST_SUITE_ORDER+=("$suite_type")
+        TEST_SUITE_NAMES+=("❌ $suite_type Tests (Failed)")
+        TEST_SUITE_TOTALS+=(0)
+        TEST_SUITE_PASSED+=(0)
+        TEST_SUITE_FAILED+=(1)
+        TEST_SUITE_STATUS+=("FAILED")
+    fi
+done
 
-# Record validator test suite results
-TEST_SUITE_ORDER+=("VALIDATOR")
-TEST_SUITE_NAMES+=("🔍 Validator Tests")
-TEST_SUITE_TOTALS+=($VALIDATOR_TOTAL_TESTS)
-TEST_SUITE_PASSED+=($VALIDATOR_PASSED_TESTS)
-TEST_SUITE_FAILED+=($VALIDATOR_FAILED_TESTS)
-if [ $validator_failed -eq 0 ]; then
-    TEST_SUITE_STATUS+=("PASSED")
-else
-    TEST_SUITE_STATUS+=("FAILED")
-fi
+# Cleanup temporary directory
+rm -rf "$SUITE_TEMP_DIR"
+
+echo ""
+print_success "🎉 All test suites completed!"
 
 # Calculate totals dynamically from all test suites
 total_tests_run=0
