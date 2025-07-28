@@ -30,7 +30,10 @@ The Lambda Validator is now **fully integrated into the Lambda CLI** as a subcom
 # Document Formats (all use doc_schema.ls)
 ./lambda.exe validate document.md           # → doc_schema.ls (Markdown)
 ./lambda.exe validate article.rst           # → doc_schema.ls (reStructuredText) 
+./lambda.exe validate document.adoc         # → doc_schema.ls (AsciiDoc)
 ./lambda.exe validate manual.1              # → doc_schema.ls (man page)
+./lambda.exe validate article.wiki          # → doc_schema.ls (Wiki)
+./lambda.exe validate document.textile      # → doc_schema.ls (Textile)
 ./lambda.exe validate test_document.ls      # → doc_schema.ls (Lambda format)
 
 # ========================================  
@@ -42,58 +45,78 @@ The Lambda Validator is now **fully integrated into the Lambda CLI** as a subcom
 ./lambda.exe validate -s custom.ls test/input/test.html
 
 # Formats requiring explicit schema (no defaults available)
+./lambda.exe validate -s mark_schema.ls document.m
 ./lambda.exe validate -s json_schema.ls data.json
 ./lambda.exe validate -s xml_schema.ls config.xml
 ./lambda.exe validate -s yaml_schema.ls settings.yaml
+./lambda.exe validate -s csv_schema.ls data.csv
+./lambda.exe validate -s ini_config_schema.ls config.ini
+./lambda.exe validate -s toml_schema.ls config.toml
+./lambda.exe validate -s latex_schema.ls document.tex
+./lambda.exe validate -s rtf_schema.ls document.rtf
+./lambda.exe validate -s pdf_schema.ls document.pdf
 
 # ========================================
 # FORMAT OVERRIDE WITH EXPLICIT SCHEMA
 # ========================================
 
 # Force format detection with -f flag
+./lambda.exe validate -f mark data.txt -s mark_schema.ls
 ./lambda.exe validate -f json data.txt -s json_schema.ls
 ./lambda.exe validate -f yaml config.txt -s yaml_schema.ls
+./lambda.exe validate -f xml document.txt -s xml_schema.ls
+./lambda.exe validate -f csv spreadsheet.txt -s csv_schema.ls
 ```
 
-### Schema Selection Logic
+## 2. Supported Input Formats and Parsers
 
-The validator automatically selects the appropriate schema based on file format:
+### Complete Format Support Matrix
 
-#### Formats with Default Schemas (Automatic Selection)
-- **HTML** (`.html`, `.htm`) → `html5_schema.ls`
-- **Email** (`.eml`) → `eml_schema.ls`
-- **Calendar** (`.ics`) → `ics_schema.ls`
-- **vCard** (`.vcf`) → `vcf_schema.ls`
-- **Document Formats** → `doc_schema.ls`:
-  - **AsciiDoc** (`.adoc`, `.asciidoc`)
-  - **Man Pages** (`.1`, `.2`, `.3`, `.4`, `.5`, `.6`, `.7`, `.8`, `.9`, `.man`)
-  - **Markdown** (`.md`, `.markdown`)
-  - **reStructuredText** (`.rst`)
-  - **Wiki** (`.wiki`)
-  - **Lambda Scripts** (`.ls` or no extension)
+The Lambda Validator supports a comprehensive range of input formats through dedicated parser modules located in `lambda/input/`:
 
-#### Formats Requiring Explicit Schema
-These formats require the `-s <schema_file>` option:
-- **JSON** (`.json`)
-- **XML** (`.xml`)
-- **YAML** (`.yaml`, `.yml`)
-- **CSV** (`.csv`)
-- **INI** (`.ini`)
-- **TOML** (`.toml`)
-- **LaTeX** (`.tex`, `.latex`)
-- **RTF** (`.rtf`)
-- **PDF** (`.pdf`)
-- **Plain Text** (`.txt`)
+#### Document Formats (with Automatic Schema Selection)
+| Format | Extensions | Parser Module | Default Schema | Description |
+|--------|------------|---------------|----------------|-------------|
+| **HTML** | `.html`, `.htm` | `input-html.c` | `html5_schema.ls` | Web documents with HTML5 validation |
+| **Email** | `.eml` | `input-eml.c` | `eml_schema.ls` | Email message format (RFC 2822) |
+| **Calendar** | `.ics` | `input-ics.c` | `ics_schema.ls` | iCalendar events (RFC 5545) |
+| **vCard** | `.vcf` | `input-vcf.c` | `vcf_schema.ls` | Contact cards (RFC 6350) |
+| **Markdown** | `.md`, `.markdown` | `input-md.c` | `doc_schema.ls` | Markdown documentation |
+| **reStructuredText** | `.rst` | `input-rst.c` | `doc_schema.ls` | reStructuredText documentation |
+| **AsciiDoc** | `.adoc`, `.asciidoc` | `input-adoc.c` | `doc_schema.ls` | AsciiDoc documentation |
+| **Wiki** | `.wiki` | `input-wiki.c` | `doc_schema.ls` | Wiki markup |
+| **Textile** | `.textile` | `input-textile.c` | `doc_schema.ls` | Textile markup |
+| **Man Pages** | `.1`-`.9`, `.man` | `input-man.c` | `doc_schema.ls` | Unix manual pages |
 
-### Integration Status
-✅ **Complete CLI Integration**: Lambda validator is fully integrated as `lambda validate` subcommand  
-✅ **Memory Pool Integration**: Uses Lambda's VariableMemPool with correct API  
-✅ **Build System Integration**: Included in main Lambda build configuration  
-✅ **Automatic Schema Selection**: Intelligent schema selection based on file format  
-✅ **Multi-Format Support**: Supports HTML, EML, ICS, VCF, and document formats  
-✅ **Tree-sitter Integration**: Complete integration with Lambda grammar and `ts-enum.h`  
+#### Data Formats (Requiring Explicit Schema)
+| Format    | Extensions           | Parser Module   | Schema Required | Description                    |
+| --------- | -------------------- | --------------- | --------------- | ------------------------------ |
+| **Mark**  | `.m`, `.mk`, `.mark` | `input-mark.c`  | Yes             | Mark (Notation) format         |
+| **JSON**  | `.json`              | `input-json.c`  | Yes             | JavaScript Object Notation     |
+| **XML**   | `.xml`               | `input-xml.c`   | Yes             | Extensible Markup Language     |
+| **YAML**  | `.yaml`, `.yml`      | `input-yaml.c`  | Yes             | YAML Ain't Markup Language     |
+| **CSV**   | `.csv`               | `input-csv.c`   | Yes             | Comma-separated values         |
+| **INI**   | `.ini`               | `input-ini.c`   | Yes             | Configuration files            |
+| **TOML**  | `.toml`              | `input-toml.c`  | Yes             | Tom's Obvious Minimal Language |
+| **LaTeX** | `.tex`, `.latex`     | `input-latex.c` | Yes             | LaTeX document format          |
+| **RTF**   | `.rtf`               | `input-rtf.c`   | Yes             | Rich Text Format               |
+| **PDF**   | `.pdf`               | `input-pdf.c`   | Yes             | Portable Document Format       |
 
-## 2. Architecture Overview
+### Format Detection and MIME Type Support
+
+The Lambda Validator uses `mime-detect.c` and `mime-types.c` to automatically detect file formats based on:
+
+- **File Extensions**: Over 60 supported extensions with automatic mapping
+- **Magic Bytes**: Content-based detection for binary formats
+- **Content Analysis**: Header analysis for text-based formats
+
+This enables the validator to:
+1. **Auto-detect** format from file extension or content
+2. **Auto-select** appropriate schema for supported formats
+3. **Require explicit schema** for formats without default schemas
+4. **Override detection** with `-f` flag when needed
+
+## 3. Architecture Overview
 
 ### Design Overview
 The Lambda Validator is a **general-purpose validation system** with **complete Tree-sitter integration**:
@@ -122,11 +145,11 @@ The Lambda Validator implements a comprehensive three-tier validation pipeline:
 
 **Schema Processing Tier (Green)**: Lambda type definitions are parsed using the complete Tree-sitter grammar, generating an AST that populates the TypeSchema registry.
 
-**Data Processing Tier (Yellow)**: Input data files undergo format detection and automatic schema selection, followed by parsing through the appropriate input handler to extract Lambda Items via JIT execution.
+**Data Processing Tier (Yellow)**: Input data files undergo format detection and automatic schema selection, followed by parsing through the appropriate input handler to produce Lambda result tree.
 
 **Validation & Results Tier (Red/Blue)**: The validator engine performs type checking against the schema registry, applies domain-specific validation rules, and produces detailed validation results with success indicators or comprehensive error reporting.
 
-## 2. Schema Selection Architecture
+## 4. Schema Selection Architecture
 
 ### Automatic Schema Selection Logic
 
@@ -137,7 +160,7 @@ The validator implements intelligent schema selection based on file extensions a
 **Category 1: Formats with Built-in Schemas**
 - Automatically selected, no user intervention required
 - Includes HTML, EML, ICS, VCF, and document formats
-- User feedback provided: `"Using HTML5 schema for HTML input"`
+- Console feedback provided: `"Using HTML5 schema for HTML input"`
 
 **Category 2: Formats Requiring Explicit Schema**
 - JSON, XML, YAML, CSV, INI, TOML, LaTeX, RTF, PDF, Text
@@ -149,7 +172,7 @@ The validator implements intelligent schema selection based on file extensions a
 - Supports custom schemas for any format
 - Format detection can be overridden with `-f` option
 
-## 3. Key Files and Functions
+## 5. Key Files and Functions
 
 ### Core Files
 
@@ -219,7 +242,7 @@ The validator implements intelligent schema selection based on file extensions a
 - `Makefile` - Build configuration
 - `run_tests.sh` - Test runner script
 
-## 3. How to Build and Test
+## 6. How to Build and Test
 
 ### Build and Test Lambda Validator
 
@@ -243,7 +266,7 @@ The Lambda Validator includes 137 comprehensive Criterion-based tests covering a
 **🧪 Test Categories:**
 - **Schema Selection Tests (12 tests)** - Automatic schema selection for HTML, EML, ICS, VCF, and document formats
 - **Schema Feature Tests (15 tests)** - Comprehensive/HTML/Markdown/XML/JSON/YAML schema features
-- **Format Validation Tests (40 tests)** - XML/HTML/Markdown/JSON/YAML validation with auto-detection and explicit schema requirements
+- **Format Validation Tests (40 tests)** - XML/HTML/Markdown/JSON/YAML/CSV/INI/TOML/LaTeX/RTF/PDF/Mark validation with auto-detection and explicit schema requirements
 - **Multi-format Tests (25 tests)** - Cross-format compatibility, XSD, RelaxNG, JSON Schema, OpenAPI conversion
 - **Negative Test Cases (20 tests)** - Invalid content, format mismatches, missing files, malformed data, explicit schema requirements
 - **Core Lambda Type Tests (20 tests)** - All Lambda types (primitive, union, array, map, element, reference, function, complex, edge cases) with parsing & validation
@@ -254,8 +277,8 @@ The Lambda Validator includes 137 comprehensive Criterion-based tests covering a
 - **Email Format Support**: `.eml` files automatically use `eml_schema.ls`
 - **Calendar Format Support**: `.ics` files automatically use `ics_schema.ls`
 - **vCard Format Support**: `.vcf` files automatically use `vcf_schema.ls`
-- **Document Format Selection**: `.md`, `.rst`, `.adoc`, `.wiki`, `.man`, `.1-.9` files use `doc_schema.ls`
-- **Explicit Schema Requirements**: JSON, XML, YAML, CSV, INI, TOML formats require `-s` option
+- **Document Format Selection**: `.md`, `.rst`, `.adoc`, `.wiki`, `.textile`, `.man`, `.1-.9` files use `doc_schema.ls`
+- **Explicit Schema Requirements**: JSON, XML, YAML, CSV, INI, TOML, LaTeX, RTF, PDF, Mark, Plain Text formats require `-s` option
 
 **🔬 Schema Features Tested:**
 - Primitive types (string, int, float, bool, datetime)
@@ -266,14 +289,27 @@ The Lambda Validator includes 137 comprehensive Criterion-based tests covering a
 
 **🌐 Input Formats:** 
 - **Lambda** (.ls) - Native Lambda data files
-- **HTML** (.html) - Web document validation with HTML5 schema
-- **EML** (.eml) - Email message validation with EML schema  
-- **ICS** (.ics) - Calendar event validation with ICS schema
-- **VCF** (.vcf) - vCard contact validation with VCF schema
+- **HTML** (.html, .htm) - Web document validation with HTML5 schema
+- **Email** (.eml) - Email message validation with EML schema  
+- **Calendar** (.ics) - Calendar event validation with ICS schema
+- **vCard** (.vcf) - vCard contact validation with VCF schema
 - **XML** (.xml) - Including XSD and RelaxNG schema support
-- **Markdown** (.md) - Documentation validation
+- **Markdown** (.md, .markdown) - Documentation validation
+- **reStructuredText** (.rst) - Documentation format validation
+- **AsciiDoc** (.adoc, .asciidoc) - Documentation format validation
+- **Wiki** (.wiki) - Wiki markup validation
+- **Textile** (.textile) - Textile markup validation
+- **Man Pages** (.1-.9, .man) - Unix manual page validation
 - **JSON** (.json) - JSON Schema and OpenAPI/Swagger support
-- **YAML** (.yaml) - Yamale schema format support
+- **YAML** (.yaml, .yml) - Yamale schema format support
+- **CSV** (.csv) - Comma-separated values validation
+- **INI** (.ini) - Configuration file validation
+- **TOML** (.toml) - Configuration file validation
+- **LaTeX** (.tex, .latex) - LaTeX document validation
+- **RTF** (.rtf) - Rich Text Format validation
+- **PDF** (.pdf) - PDF document validation
+- **Mark** (.m, .mk, .mark) - Mark notation validation
+- **Plain Text** (.txt) - Plain text validation
 
 **📋 Schema Types Tested:**
 - **XML Schemas**: Basic, Configuration, RSS, SOAP, Comprehensive, Edge Cases, Minimal
@@ -363,33 +399,18 @@ Simply provide the LLM with:
 
 The LLM can handle complex nested structures, union types, constraints, and provide clean, idiomatic Lambda schema definitions that work seamlessly with the validator.
 
-### Current Status
-✅ **Complete**: CLI integration, build system, memory pool integration  
-✅ **Working**: Schema parsing, data validation, JIT compilation integration  
-✅ **Enhanced**: Complete Tree-sitter symbol and field ID utilization  
-✅ **Comprehensive Testing**: 108 Criterion tests covering all validator components
-✅ **Multi-Format Support**: Lambda (.m), XML, HTML, Markdown, JSON, YAML with format auto-detection
-✅ **Schema Conversion**: XSD, RelaxNG, JSON Schema, OpenAPI/Swagger to Lambda schema conversion
-✅ **Production Ready**: All memory safety issues resolved, clean output
+## 7. Summary
 
-## 5. Implementation Status and Integration Details
+The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand, providing complete schema validation capabilities with intelligent automatic schema selection.
 
-### ✅ **Complete and Production Ready**
-- **CLI Integration**: Fully integrated as `lambda validate` subcommand 
-- **Memory Management**: Complete VariableMemPool integration with proper error handling
-- **Build System**: Validator included in `build_lambda_config.json`
-- **Tree-sitter Integration**: Complete Lambda grammar integration (51+ symbols, 8 field IDs)
-- **Default Schema**: Uses `lambda/input/doc_schema.ls` with comprehensive document types
-- **Test Coverage**: 108 comprehensive Criterion tests covering all scenarios
-- **Multi-Format Support**: Auto-detection for .m (Lambda), .xml, .html, .md, .json, .yaml files
-- **Schema Standards**: Support for XSD, RelaxNG, JSON Schema, OpenAPI/Swagger, Yamale conversion
-- **Production Ready**: Memory-safe, clean output, proper error handling
-
-### 🔧 **Technical Implementation Details**
-- **Forward Declarations**: Fixed ValidationContext forward declaration issues
-- **Include Paths**: Corrected relative paths in validator headers (`../transpiler.h`)
-- **Type System Integration**: Proper integration with Lambda's `Item` type system
-- **Error Handling**: Comprehensive error handling for file I/O, parsing, and validation failures
+### ✅ Key Features
+- **CLI Integration**: `lambda validate` subcommand with automatic schema selection
+- **Multi-Format Support**: HTML, EML, ICS, VCF, Markdown, reStructuredText, AsciiDoc, Wiki, Textile, Man pages, Mark, JSON, XML, YAML, CSV, INI, TOML, LaTeX, RTF, PDF, Plain Text input support, and auto MIME type detection.
+- **Automatic Schema Selection**: Intelligent schema selection based on file format 
+- **Schema Standards Support**: Existing schema standards, like XSD, RelaxNG, JSON Schema, OpenAPI/Swagger, Yamale, can be easily mapped into Lambda schema
+- **Complete Lambda Grammar**: Uses existing Tree-sitter grammar for full syntax support
+- **Memory Management**: Proper VariableMemPool integration with error handling
+- **Test Coverage**: 137 comprehensive Criterion tests, memory-safe, clean output
 
 ### 🚧 **Future Enhancement Opportunities**
 - **Advanced Validation Rules**: Expand semantic validation beyond basic type checking
@@ -397,27 +418,3 @@ The LLM can handle complex nested structures, union types, constraints, and prov
 - **Performance Optimization**: Optimize schema parsing and validation for large documents
 - **Extended Format Support**: Additional input formats beyond Lambda, HTML, and Markdown
 - **Schema Composition**: Support for schema imports and modular schema definitions
-
-
-**Integration Metrics**:
-- **Symbol Coverage**: 51+ unique Tree-sitter symbols from `ts-enum.h` actively used
-- **Field ID Usage**: 8 field IDs leveraged for robust AST navigation
-- **Type Support**: 100% Lambda type syntax supported with enhanced parsing precision
-- **AST Navigation**: Field-based navigation replaces fragile child indexing
-
-## Summary
-
-The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand, providing complete schema validation capabilities with intelligent automatic schema selection.
-
-### Key Features
-- **CLI Integration**: `lambda validate` subcommand with automatic schema selection
-- **Intelligent Schema Selection**: Automatic schema selection based on file extension
-- **Multi-Format Support**: HTML, EML, ICS, VCF, Markdown, reStructuredText, AsciiDoc, Man pages, Wiki formats
-- **Universal Schema Support**: Works with any `.ls` schema files  
-- **Complete Lambda Grammar**: Uses existing Tree-sitter grammar for full syntax support
-- **Memory Management**: Proper VariableMemPool integration with error handling
-- **Explicit Schema Requirements**: JSON, XML, YAML, CSV, INI, TOML require explicit schema specification
-- **Production Ready**: 137 comprehensive Criterion tests, memory-safe, clean output
-
-
-

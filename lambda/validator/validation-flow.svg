@@ -42,23 +42,26 @@
   
   <!-- Data Processing Flow (Middle) -->
   <rect x="20" y="170" width="140" height="80" class="data-box"/>
-  <text x="90" y="200" text-anchor="middle" class="component-bold">Data Items</text>
-  <text x="90" y="215" text-anchor="middle" class="component">(.html, .json, .md,</text>
-  <text x="90" y="230" text-anchor="middle" class="component">.eml, .ics, .vcf)</text>
+  <text x="90" y="190" text-anchor="middle" class="component-bold">Input Data Files</text>
+  <text x="90" y="205" text-anchor="middle" class="component">(.html, .json, .md, .xml,</text>
+  <text x="90" y="220" text-anchor="middle" class="component">.eml, .ics, .vcf, .yaml,</text>
+  <text x="90" y="235" text-anchor="middle" class="component">.csv, .ini, .tex, etc.)</text>
   
   <rect x="200" y="170" width="140" height="80" class="data-box"/>
-  <text x="270" y="195" text-anchor="middle" class="component-bold">Format Detection</text>
-  <text x="270" y="210" text-anchor="middle" class="component-bold">and Schema Selection</text>
-  <text x="270" y="230" text-anchor="middle" class="component">(main.cpp)</text>
+  <text x="270" y="195" text-anchor="middle" class="component-bold">Format Detection,</text>
+  <text x="270" y="210" text-anchor="middle" class="component-bold">Schema Selection</text>
+  <text x="270" y="230" text-anchor="middle" class="component">(mime-detect.c)</text>
   
   <rect x="380" y="170" width="120" height="80" class="data-box"/>
-  <text x="440" y="205" text-anchor="middle" class="component-bold">Input Parser</text>
-  <text x="440" y="225" text-anchor="middle" class="component">(input.c)</text>
+  <text x="440" y="190" text-anchor="middle" class="component-bold">Input Parser</text>
+  <text x="440" y="205" text-anchor="middle" class="component">(input-html.c,</text>
+  <text x="440" y="220" text-anchor="middle" class="component">input-json.c,</text>
+  <text x="440" y="235" text-anchor="middle" class="component">input-md.c, etc.)</text>
   
   <rect x="540" y="170" width="140" height="80" class="data-box"/>
-  <text x="610" y="195" text-anchor="middle" class="component-bold">Lambda Item</text>
-  <text x="610" y="210" text-anchor="middle" class="component-bold">Extraction</text>
-  <text x="610" y="230" text-anchor="middle" class="component">(JIT execution)</text>
+  <text x="610" y="195" text-anchor="middle" class="component-bold">Lambda Data</text>
+  <text x="610" y="210" text-anchor="middle" class="component-bold">Structure</text>
+  <text x="610" y="230" text-anchor="middle" class="component">(parsed tree)</text>
   
   <!-- Validation Flow (Bottom) -->
   <rect x="200" y="290" width="140" height="80" class="validation-box"/>
