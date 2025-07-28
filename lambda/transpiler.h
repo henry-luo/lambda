@@ -634,6 +634,7 @@ typedef uint64_t Item;
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source);
 void runner_init(Runtime *runtime, Runner* runner);
+void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
 Item run_script(Runtime *runtime, const char* source, char* script_path);
 Item run_script_at(Runtime *runtime, char* script_path);

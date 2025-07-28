@@ -152,6 +152,8 @@ static void normalize_property_name(char* name) {
 
 // Helper function to parse date-time values
 static Map* parse_datetime(Input *input, const char* value) {
+    if (!input || !value) return NULL;
+    
     Map* dt_map = map_pooled(input->pool);
     if (!dt_map) return NULL;
     
@@ -269,6 +271,8 @@ static Map* parse_datetime(Input *input, const char* value) {
 
 // Helper function to parse duration values
 static Map* parse_duration(Input *input, const char* value) {
+    if (!input || !value) return NULL;
+    
     Map* dur_map = map_pooled(input->pool);
     if (!dur_map) return NULL;
     
@@ -371,7 +375,7 @@ void parse_ics(Input* input, const char* ics_string) {
         
         // Parse property name
         String* property_name = parse_property_name(input, &ics);
-        if (!property_name) {
+        if (!property_name || !property_name->chars) {
             skip_to_newline(&ics);
             continue;
         }
@@ -387,7 +391,7 @@ void parse_ics(Input* input, const char* ics_string) {
         
         // Parse property value
         String* property_value = parse_property_value(input, &ics);
-        if (!property_value) {
+        if (!property_value || !property_value->chars) {
             continue;
         }
         
@@ -401,10 +405,18 @@ void parse_ics(Input* input, const char* ics_string) {
                 current_component_props = map_pooled(input->pool);
                 current_component_type = input_create_string(input, property_value->chars);
                 
-                if (current_component && current_component_props && current_component_type) {
+                // Verify all components were created successfully
+                if (!current_component || !current_component_props || !current_component_type) {
+                    // Clean up partially created component
+                    current_component = NULL;
+                    current_component_props = NULL;
+                    current_component_type = NULL;
+                } else {
                     // Store component type
                     String* type_key = input_create_string(input, "type");
-                    map_put(current_component, type_key, (LambdaItem)s2it(current_component_type), input);
+                    if (type_key) {
+                        map_put(current_component, type_key, (LambdaItem)s2it(current_component_type), input);
+                    }
                 }
             }
             continue;
@@ -413,7 +425,8 @@ void parse_ics(Input* input, const char* ics_string) {
         if (strcmp(property_name->chars, "END") == 0) {
             if (strcasecmp(property_value->chars, "VCALENDAR") == 0) {
                 in_calendar = false;
-            } else if (current_component && strcasecmp(property_value->chars, current_component_type->chars) == 0) {
+            } else if (current_component && current_component_type && 
+                      strcasecmp(property_value->chars, current_component_type->chars) == 0) {
                 // End of current component
                 if (current_component_props) {
                     String* props_key = input_create_string(input, "properties");

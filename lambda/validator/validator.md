@@ -174,6 +174,26 @@ The default schema includes comprehensive document type definitions:
 - Complete inline and block element definitions
 - HTML element aliases (p, h1-h6, em, strong, etc.)
 
+#### Test Input Files (test/input/)
+Organized test files for different input formats with auto-detection:
+
+**HTML Files**: `test.html` (basic), `test_html5.html` (comprehensive)  
+**EML Files**: `simple.eml` (basic), `test.eml` (comprehensive)  
+**ICS Files**: `simple.ics` (basic), `calendar.ics` (comprehensive)  
+**VCF Files**: `simple.vcf` (basic), `contacts.vcf` (comprehensive)
+
+**Usage Examples**:
+```bash
+# Auto-detection by file extension
+./lambda.exe validate test/input/test.html        # → HTML5 schema
+./lambda.exe validate test/input/simple.eml       # → EML schema  
+./lambda.exe validate test/input/simple.ics       # → ICS schema
+./lambda.exe validate test/input/simple.vcf       # → VCF schema
+
+# Custom schema validation
+./lambda.exe validate -s custom.ls test/input/test.html
+```
+
 ### Validation Workflow
 
 1. **Parse Schema**: Lambda script parsed using Tree-sitter grammar
@@ -234,9 +254,12 @@ The Lambda Validator includes 108 comprehensive Criterion-based tests covering a
 - Constraints validation (min/max length, patterns, enumerations)
 
 **🌐 Input Formats:** 
-- **Lambda** (.m) - Native Lambda data files
+- **Lambda** (.ls) - Native Lambda data files
+- **HTML** (.html) - Web document validation with HTML5 schema
+- **EML** (.eml) - Email message validation with EML schema  
+- **ICS** (.ics) - Calendar event validation with ICS schema
+- **VCF** (.vcf) - vCard contact validation with VCF schema
 - **XML** (.xml) - Including XSD and RelaxNG schema support
-- **HTML** (.html) - Web document validation  
 - **Markdown** (.md) - Documentation validation
 - **JSON** (.json) - JSON Schema and OpenAPI/Swagger support
 - **YAML** (.yaml) - Yamale schema format support
@@ -374,7 +397,7 @@ The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand
 - **Universal Schema Support**: Works with any `.ls` schema files  
 - **Complete Lambda Grammar**: Uses existing Tree-sitter grammar for full syntax support
 - **Memory Management**: Proper VariableMemPool integration with error handling
-- **Format Support**: Mark Notation (.m), HTML (.html), Markdown (.md) with auto-detection
+- **Format Support**: Mark Notation (.ls), HTML (.html), EML (.eml), ICS (.ics), VCF (.vcf), Markdown (.md) with auto-detection
 - **Production Ready**: 49 comprehensive Criterion tests, memory-safe, clean output
 
 ### Usage Examples
@@ -386,12 +409,15 @@ The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand
 ./lambda.exe validate my_data.ls -s my_schema.ls
 
 # Multi-format validation (auto-detected)
-./lambda.exe validate document.xml     # Uses XML schema
-./lambda.exe validate document.html    # Uses HTML schema
-./lambda.exe validate document.md      # Uses Markdown schema
-./lambda.exe validate data.json        # Uses JSON schema
-./lambda.exe validate config.yaml      # Uses YAML schema
-./lambda.exe validate data.m           # Uses Lambda data schema
+./lambda.exe validate test/input/test.html      # Uses HTML5 schema
+./lambda.exe validate test/input/simple.eml    # Uses EML schema
+./lambda.exe validate test/input/simple.ics    # Uses ICS schema
+./lambda.exe validate test/input/simple.vcf    # Uses VCF schema
+./lambda.exe validate document.xml             # Uses XML schema
+./lambda.exe validate document.md              # Uses Markdown schema
+./lambda.exe validate data.json                # Uses JSON schema
+./lambda.exe validate config.yaml              # Uses YAML schema
+./lambda.exe validate data.ls                  # Uses Lambda data schema
 
 # Format-specific validation with explicit format
 ./lambda.exe validate data.json -f json -s schema.ls

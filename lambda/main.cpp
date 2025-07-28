@@ -250,6 +250,9 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
     
+    // Track if we created a temp_runner for cleanup
+    Runner* temp_runner_ptr = nullptr;
+    
     // Read schema file
     char* schema_contents = read_file_contents(schema_file);
     if (!schema_contents) {
@@ -277,8 +280,20 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     // Load schema
     printf("Loading schema...\n");
     
+    // Determine the root type based on schema file
+    const char* root_type = "Document";  // Default for doc_schema.ls
+    if (strstr(schema_file, "html5_schema.ls")) {
+        root_type = "HTMLDocument";  // Use HTMLDocument for HTML5 schema
+    } else if (strstr(schema_file, "eml_schema.ls")) {
+        root_type = "EMLDocument";   // Use EMLDocument for EML schema
+    } else if (strstr(schema_file, "ics_schema.ls")) {
+        root_type = "ICSDocument";   // Use ICSDocument for ICS schema
+    } else if (strstr(schema_file, "vcf_schema.ls")) {
+        root_type = "VCFDocument";   // Use VCFDocument for VCF schema
+    }
+    
     // Use the refactored schema parser
-    int schema_result = schema_validator_load_schema(validator, schema_contents, "Document");
+    int schema_result = schema_validator_load_schema(validator, schema_contents, root_type);
     if (schema_result != 0) {
         printf("Error: Failed to load schema\n");
         schema_validator_destroy(validator);
@@ -329,11 +344,52 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         data_item = run_script(&runtime, data_contents, (char*)data_file);
         free(data_contents);
     } else {
+        // Set up minimal context for parsing non-Lambda formats
+        Runner* temp_runner = new Runner();
+        temp_runner_ptr = temp_runner;  // Track for cleanup
+        runner_init(&runtime, temp_runner);
+        
+        // Create a minimal script structure for context setup
+        temp_runner->script = (Script*)calloc(1, sizeof(Script));
+        if (!temp_runner->script) {
+            printf("Error: Cannot allocate script structure\n");
+            delete temp_runner;
+            schema_validator_destroy(validator);
+            pool_variable_destroy(pool);
+            free(schema_contents);
+            return;
+        }
+        
+        // Initialize minimal script components needed for context
+        temp_runner->script->ast_pool = nullptr;
+        temp_runner->script->type_list = nullptr;
+        // Create an empty const_list to prevent null pointer dereference
+        temp_runner->script->const_list = (ArrayList*)malloc(sizeof(ArrayList));
+        if (temp_runner->script->const_list) {
+            temp_runner->script->const_list->data = nullptr;
+            temp_runner->script->const_list->length = 0;  
+            temp_runner->script->const_list->_alloced = 0;
+        } else {
+            printf("Error: Cannot allocate const_list\n");
+            free(temp_runner->script);
+            delete temp_runner;
+            schema_validator_destroy(validator);
+            pool_variable_destroy(pool);
+            free(schema_contents);
+            return;
+        }
+        
+        // Set up the context for parsing
+        runner_setup_context(temp_runner);
+        
         // Use input_from_url for other formats
         // Convert file path to file:// URL
         char cwd_path[1024];
         if (!getcwd(cwd_path, sizeof(cwd_path))) {
             printf("Error: Cannot get current working directory\n");
+            runner_cleanup(temp_runner);
+            free(temp_runner->script);
+            delete temp_runner;
             schema_validator_destroy(validator);
             pool_variable_destroy(pool);
             free(schema_contents);
@@ -379,6 +435,9 @@ void run_validation(const char *data_file, const char *schema_file, const char *
             free(url_string);
             if (type_string) free(type_string);
         }
+        
+        // Note: Don't cleanup temp_runner here since context is still needed for validation
+        // We'll clean it up at the end of the function
     }
     
     if (data_item == ITEM_ERROR) {
@@ -392,7 +451,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     // Validate using the loaded schema
     printf("Validating data...\n");
     LambdaItem lambda_item = {.item = data_item};
-    ValidationResult* result = validate_document(validator, data_item, "Document");
+    ValidationResult* result = validate_document(validator, data_item, root_type);
     
     if (!result) {
         printf("Error: Validation failed to run\n");
@@ -437,6 +496,14 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         // TODO: Implement proper validation result cleanup
         // validation_result_destroy(result);
     }
+    
+    // Cleanup temp_runner if we created one for non-Lambda formats
+    if (temp_runner_ptr) {
+        runner_cleanup(temp_runner_ptr);
+        free(temp_runner_ptr->script);
+        delete temp_runner_ptr;
+    }
+    
     schema_validator_destroy(validator);
     pool_variable_destroy(pool);
     free(schema_contents);
@@ -498,12 +565,13 @@ int main(int argc, char *argv[]) {
             printf("Lambda Validator v1.0\n\n");
             printf("Usage: %s validate [-s <schema>] [-f <format>] <file> [files...]\n", argv[0]);
             printf("\nOptions:\n");
-            printf("  -s <schema>    Schema file (default: lambda/input/doc_schema.ls)\n");
+            printf("  -s <schema>    Schema file (default: doc_schema.ls, html5_schema.ls for HTML)\n");
             printf("  -f <format>    Input format (auto-detect, json, xml, html, md, yaml, csv, ini, toml, etc.)\n");
             printf("  -h, --help     Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s validate document.ls\n", argv[0]);
             printf("  %s validate -s custom_schema.ls document.ls\n", argv[0]);
+            printf("  %s validate -f html input.html  # Uses html5_schema.ls automatically\n", argv[0]);
             printf("  %s validate -f html -s schema.ls input.html\n", argv[0]);
             return 0;
         }
@@ -516,13 +584,15 @@ int main(int argc, char *argv[]) {
         }
         
         const char* data_file = nullptr;
-        const char* schema_file = "lambda/input/doc_schema.ls";  // Default schema
+        const char* schema_file = nullptr;  // Will be determined based on format
         const char* input_format = nullptr;  // Auto-detect by default
+        bool schema_explicitly_set = false;
         
         // Parse validation arguments
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
                 schema_file = argv[i + 1];
+                schema_explicitly_set = true;
                 i++; // Skip the schema filename
             } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
                 input_format = argv[i + 1];
@@ -547,6 +617,56 @@ int main(int argc, char *argv[]) {
             printf("Error: No input file specified\n");
             printf("Usage: %s validate [-s <schema>] [-f <format>] <file>\n", argv[0]);
             return 1;
+        }
+        
+        // Auto-detect format if not specified
+        if (!input_format) {
+            const char* ext = strrchr(data_file, '.');
+            if (ext) {
+                if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".htm") == 0) {
+                    input_format = "html";
+                } else if (strcasecmp(ext, ".md") == 0 || strcasecmp(ext, ".markdown") == 0) {
+                    input_format = "markdown";
+                } else if (strcasecmp(ext, ".json") == 0) {
+                    input_format = "json";
+                } else if (strcasecmp(ext, ".xml") == 0) {
+                    input_format = "xml";
+                } else if (strcasecmp(ext, ".yaml") == 0 || strcasecmp(ext, ".yml") == 0) {
+                    input_format = "yaml";
+                } else if (strcasecmp(ext, ".csv") == 0) {
+                    input_format = "csv";
+                } else if (strcasecmp(ext, ".ini") == 0) {
+                    input_format = "ini";
+                } else if (strcasecmp(ext, ".toml") == 0) {
+                    input_format = "toml";
+                } else if (strcasecmp(ext, ".eml") == 0) {
+                    input_format = "eml";
+                } else if (strcasecmp(ext, ".ics") == 0) {
+                    input_format = "ics";
+                } else if (strcasecmp(ext, ".vcf") == 0) {
+                    input_format = "vcf";
+                }
+                // If no recognized extension, keep as nullptr for Lambda format
+            }
+        }
+        
+        // Determine schema file if not explicitly set
+        if (!schema_explicitly_set) {
+            if (input_format && strcmp(input_format, "html") == 0) {
+                schema_file = "lambda/input/html5_schema.ls";
+                printf("Using HTML5 schema for HTML input\n");
+            } else if (input_format && strcmp(input_format, "eml") == 0) {
+                schema_file = "lambda/input/eml_schema.ls";
+                printf("Using EML schema for email input\n");
+            } else if (input_format && strcmp(input_format, "ics") == 0) {
+                schema_file = "lambda/input/ics_schema.ls";
+                printf("Using ICS schema for calendar input\n");
+            } else if (input_format && strcmp(input_format, "vcf") == 0) {
+                schema_file = "lambda/input/vcf_schema.ls";
+                printf("Using VCF schema for vCard input\n");
+            } else {
+                schema_file = "lambda/input/doc_schema.ls";  // Default schema
+            }
         }
         
         run_validation(data_file, schema_file, input_format);

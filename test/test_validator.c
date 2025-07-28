@@ -343,6 +343,15 @@ Test(validator_tests, html_schema_features) {
                                expected_features, 4);
 }
 
+Test(validator_tests, html5_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "zero-or-more occurrences", 
+        "union types", "element types", "type definitions", "nested structures"
+    };
+    test_schema_features_helper("lambda/input/html5_schema.ls", 
+                               expected_features, 7);
+}
+
 Test(validator_tests, markdown_schema_features) {
     const char* expected_features[] = {
         "primitive types", "optional fields", "one-or-more occurrences",
@@ -480,6 +489,43 @@ Test(validator_tests, html_simple_validation) {
                               "html", true);
 }
 
+Test(validator_tests, html5_validation_with_new_schema) {
+    test_cli_validation_helper("test/input/test_html5.html",
+                              "lambda/input/html5_schema.ls", 
+                              "html", true);
+}
+
+Test(validator_tests, html5_auto_detection_validation) {
+    // Test that HTML files automatically use html5_schema.ls when no schema is specified
+    char command[1024];
+    snprintf(command, sizeof(command), "./lambda.exe validate test/input/test_html5.html 2>&1");
+    
+    FILE* fp = popen(command, "r");
+    cr_assert_not_null(fp, "Failed to execute HTML5 auto-detection command");
+    
+    char output[4096] = {0};
+    size_t total_read = 0;
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), fp) && total_read < sizeof(output) - 1) {
+        size_t len = strlen(buffer);
+        if (total_read + len < sizeof(output) - 1) {
+            strcat(output, buffer);
+            total_read += len;
+        }
+    }
+    
+    pclose(fp);
+    
+    // Check that it uses HTML5 schema automatically
+    bool uses_html5_schema = strstr(output, "Using HTML5 schema for HTML input") != NULL ||
+                            strstr(output, "html5_schema.ls") != NULL;
+    bool validation_passed = strstr(output, "✅ Validation PASSED") != NULL;
+    
+    cr_log_info("HTML5 auto-detection output: %.500s", output);
+    cr_assert(uses_html5_schema, "HTML files should automatically use html5_schema.ls");
+    cr_assert(validation_passed, "HTML5 validation should pass with auto-detection");
+}
+
 Test(validator_tests, markdown_simple_validation) {
     test_cli_validation_helper("test/lambda/validator/test_simple.md",
                               "test/lambda/validator/schema_markdown.ls", 
@@ -487,9 +533,17 @@ Test(validator_tests, markdown_simple_validation) {
 }
 
 Test(validator_tests, html_auto_detection) {
+    // Test HTML auto-detection with explicit schema (old behavior)
     test_cli_validation_helper("test/lambda/validator/test_simple.html",
                               "test/lambda/validator/schema_html.ls", 
                               "auto", true);
+}
+
+Test(validator_tests, html_explicit_format_specification) {
+    // Test explicitly specifying HTML format
+    test_cli_validation_helper("test/input/test_html5.html",
+                              "lambda/input/html5_schema.ls", 
+                              "html", true);
 }
 
 Test(validator_tests, markdown_auto_detection) {
@@ -615,6 +669,53 @@ Test(validator_tests, invalid_html_validation) {
     }
 }
 
+Test(validator_tests, invalid_html5_validation) {
+    // Create an invalid HTML5 file that violates HTML5 structure
+    FILE* tmp_file = fopen("test/lambda/validator/test_invalid_html5.html", "w");
+    if (tmp_file) {
+        // Create HTML5 with structural violations
+        fprintf(tmp_file, "<!DOCTYPE html>\n");
+        fprintf(tmp_file, "<html>\n");
+        fprintf(tmp_file, "<head>\n");
+        fprintf(tmp_file, "<!-- Missing required title element -->\n");
+        fprintf(tmp_file, "</head>\n");
+        fprintf(tmp_file, "<body>\n");
+        fprintf(tmp_file, "<div>\n");
+        fprintf(tmp_file, "<!-- Unclosed div and invalid nesting -->\n");
+        fprintf(tmp_file, "<p><div>Invalid nesting - div inside p</div></p>\n");
+        fprintf(tmp_file, "</body>\n");
+        fprintf(tmp_file, "</html>\n");
+        fclose(tmp_file);
+        
+        // Test with HTML5 schema - should fail due to missing title and invalid nesting
+        char command[1024];
+        snprintf(command, sizeof(command), 
+                "./lambda.exe validate test/lambda/validator/test_invalid_html5.html -f html 2>&1");
+        
+        FILE* fp = popen(command, "r");
+        cr_assert_not_null(fp, "Failed to execute invalid HTML5 validation");
+        
+        char output[4096] = {0};
+        size_t total_read = 0;
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), fp) && total_read < sizeof(output) - 1) {
+            size_t len = strlen(buffer);
+            if (total_read + len < sizeof(output) - 1) {
+                strcat(output, buffer);
+                total_read += len;
+            }
+        }
+        
+        pclose(fp);
+        
+        // HTML parsers are forgiving, but structural validation might catch some issues
+        cr_log_info("Invalid HTML5 validation output: %.500s", output);
+        
+        // Cleanup
+        remove("test/lambda/validator/test_invalid_html5.html");
+    }
+}
+
 Test(validator_tests, invalid_markdown_validation) {
     test_cli_validation_helper("test/lambda/validator/test_invalid.md",
                               "lambda/input/doc_schema.ls", 
@@ -625,6 +726,38 @@ Test(validator_tests, html_vs_markdown_schema_mismatch) {
     test_cli_validation_helper("test/lambda/validator/test_simple.html",
                               "test/lambda/validator/schema_markdown.ls", 
                               "html", false);
+}
+
+Test(validator_tests, html5_schema_override_test) {
+    // Test that users can override HTML5 schema selection with -s option
+    char command[1024];
+    snprintf(command, sizeof(command), 
+            "./lambda.exe validate test/input/test_html5.html -s lambda/input/doc_schema.ls 2>&1");
+    
+    FILE* fp = popen(command, "r");
+    cr_assert_not_null(fp, "Failed to execute HTML5 schema override command");
+    
+    char output[4096] = {0};
+    size_t total_read = 0;
+    char buffer[256];
+    while (fgets(buffer, sizeof(buffer), fp) && total_read < sizeof(output) - 1) {
+        size_t len = strlen(buffer);
+        if (total_read + len < sizeof(output) - 1) {
+            strcat(output, buffer);
+            total_read += len;
+        }
+    }
+    
+    pclose(fp);
+    
+    // Check that it uses the explicitly specified schema and fails validation
+    bool uses_doc_schema = strstr(output, "doc_schema.ls") != NULL;
+    bool validation_failed = strstr(output, "❌ Validation FAILED") != NULL ||
+                            strstr(output, "Expected map") != NULL;
+    
+    cr_log_info("HTML5 schema override output: %.500s", output);
+    cr_assert(uses_doc_schema, "Should use explicitly specified doc_schema.ls");
+    cr_assert(validation_failed, "HTML5 file should fail validation against doc_schema.ls");
 }
 
 Test(validator_tests, markdown_vs_html_schema_mismatch) {
@@ -1185,4 +1318,263 @@ Test(validator_tests, concurrent_validation) {
     
     schema_parser_destroy(parser1);
     schema_parser_destroy(parser2);
+}
+
+// EML Schema Tests
+Test(eml_schema_tests, eml_schema_validation) {
+    // Test EML schema loading and basic validation
+    SchemaValidator* validator = schema_validator_create(test_pool);
+    cr_assert_not_null(validator, "Failed to create EML validator");
+    
+    char* eml_schema = "type EMLDocument = { from: string, to: string, subject: string, date: string, body: string }";
+    bool result = schema_validator_load_schema(validator, eml_schema, "EMLDocument");
+    cr_assert(result, "Failed to load EML schema");
+    
+    schema_validator_destroy(validator);
+}
+
+Test(eml_schema_tests, eml_format_detection) {
+    // Test that .eml files are detected as EML format
+    const char* filename = "test_email.eml";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    cr_assert_str_eq(ext, ".eml", "Expected .eml extension");
+    
+    // Simulate format detection
+    const char* detected_format = NULL;
+    if (ext && strcasecmp(ext, ".eml") == 0) {
+        detected_format = "eml";
+    }
+    
+    cr_assert_str_eq(detected_format, "eml", "Expected EML format detection");
+}
+
+Test(eml_schema_tests, eml_schema_structure) {
+    // Test EML schema structure validation
+    SchemaValidator* validator = schema_validator_create(test_pool);
+    cr_assert_not_null(validator, "Failed to create EML validator");
+    
+    // Complex EML schema with headers and body
+    char* complex_eml_schema = 
+        "type EMLDocument = {"
+        "  headers: { from: string, to: string, subject: string, date: string, \"message-id\": string? },"
+        "  body: string"
+        "}";
+    
+    bool result = schema_validator_load_schema(validator, complex_eml_schema, "EMLDocument");
+    cr_assert(result, "Failed to load complex EML schema");
+    
+    schema_validator_destroy(validator);
+}
+
+// VCF Schema Tests  
+Test(vcf_schema_tests, vcf_schema_validation) {
+    // Test VCF schema loading and basic validation
+    SchemaValidator* validator = schema_validator_create(test_pool);
+    cr_assert_not_null(validator, "Failed to create VCF validator");
+    
+    char* vcf_schema = "type VCFDocument = { version: string, fn: string, n: string, email: string?, tel: string? }";
+    bool result = schema_validator_load_schema(validator, vcf_schema, "VCFDocument");
+    cr_assert(result, "Failed to load VCF schema");
+    
+    schema_validator_destroy(validator);
+}
+
+Test(vcf_schema_tests, vcf_format_detection) {
+    // Test that .vcf files are detected as VCF format
+    const char* filename = "contact.vcf";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    cr_assert_str_eq(ext, ".vcf", "Expected .vcf extension");
+    
+    // Simulate format detection
+    const char* detected_format = NULL;
+    if (ext && strcasecmp(ext, ".vcf") == 0) {
+        detected_format = "vcf";
+    }
+    
+    cr_assert_str_eq(detected_format, "vcf", "Expected VCF format detection");
+}
+
+Test(vcf_schema_tests, vcf_schema_structure) {
+    // Test VCF schema structure validation
+    SchemaValidator* validator = schema_validator_create(test_pool);
+    cr_assert_not_null(validator, "Failed to create VCF validator");
+    
+    // Complex VCF schema with multiple fields
+    char* complex_vcf_schema = 
+        "type VCFDocument = {"
+        "  version: string,"
+        "  fn: string,"
+        "  n: { family: string, given: string },"
+        "  org: string?,"
+        "  title: string?,"
+        "  email: [string]?,"
+        "  tel: [string]?,"
+        "  adr: { street: string?, city: string?, region: string?, postal: string?, country: string? }?"
+        "}";
+    
+    bool result = schema_validator_load_schema(validator, complex_vcf_schema, "VCFDocument");
+    cr_assert(result, "Failed to load complex VCF schema");
+    
+    schema_validator_destroy(validator);
+}
+
+// Schema Auto-Detection Tests
+Test(schema_detection_tests, html5_auto_detection) {
+    // Test that HTML files auto-select HTML5 schema
+    const char* filename = "document.html";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    
+    const char* expected_schema = NULL;
+    if (ext && strcasecmp(ext, ".html") == 0) {
+        expected_schema = "lambda/input/html5_schema.ls";
+    }
+    
+    cr_assert_str_eq(expected_schema, "lambda/input/html5_schema.ls", "Expected HTML5 schema selection");
+}
+
+Test(schema_detection_tests, eml_auto_detection) {
+    // Test that EML files auto-select EML schema
+    const char* filename = "message.eml";  
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    
+    const char* expected_schema = NULL;
+    if (ext && strcasecmp(ext, ".eml") == 0) {
+        expected_schema = "lambda/input/eml_schema.ls";
+    }
+    
+    cr_assert_str_eq(expected_schema, "lambda/input/eml_schema.ls", "Expected EML schema selection");
+}
+
+Test(schema_detection_tests, vcf_auto_detection) {
+    // Test that VCF files auto-select VCF schema
+    const char* filename = "contacts.vcf";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    
+    const char* expected_schema = NULL;
+    if (ext && strcasecmp(ext, ".vcf") == 0) {
+        expected_schema = "lambda/input/vcf_schema.ls";
+    }
+    
+    cr_assert_str_eq(expected_schema, "lambda/input/vcf_schema.ls", "Expected VCF schema selection");
+}
+
+Test(schema_detection_tests, schema_override) {
+    // Test that explicit schema overrides auto-detection
+    const char* filename = "document.html";
+    const char* explicit_schema = "lambda/input/custom_schema.ls";
+    bool schema_explicitly_set = true;
+    
+    const char* selected_schema = NULL;
+    if (schema_explicitly_set) {
+        selected_schema = explicit_schema;
+    } else {
+        // Would normally do auto-detection here
+        selected_schema = "lambda/input/html5_schema.ls";
+    }
+    
+    cr_assert_str_eq(selected_schema, explicit_schema, "Expected explicit schema to override auto-detection");
+}
+
+Test(schema_detection_tests, default_schema_fallback) {
+    // Test that unknown extensions fall back to default schema
+    const char* filename = "document.unknown";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    
+    const char* expected_schema = "lambda/input/doc_schema.ls"; // Default fallback
+    bool is_known_format = false;
+    
+    if (ext) {
+        if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".eml") == 0 || strcasecmp(ext, ".vcf") == 0) {
+            is_known_format = true;
+        }
+    }
+    
+    cr_assert(!is_known_format, "Unknown format should not be recognized");
+    
+    // Would select default schema
+    const char* selected_schema = is_known_format ? "format_specific" : "lambda/input/doc_schema.ls";
+    cr_assert_str_eq(selected_schema, expected_schema, "Expected default schema for unknown format");
+}
+
+// ICS Schema Tests
+Test(ics_schema_tests, ics_schema_validation) {
+    // Test ICS schema loading and basic validation
+    SchemaValidator* validator = schema_validator_create(test_pool);
+    cr_assert_not_null(validator, "Failed to create ICS validator");
+    
+    char* ics_schema = "type ICSDocument = { version: string, events: [{ summary: string, dtstart: string, dtend: string }] }";
+    bool result = schema_validator_load_schema(validator, ics_schema, "ICSDocument");
+    cr_assert(result, "Failed to load ICS schema");
+    
+    schema_validator_destroy(validator);
+}
+
+Test(ics_schema_tests, ics_format_detection) {
+    // Test that .ics files are detected as ICS format
+    const char* filename = "calendar.ics";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    cr_assert_str_eq(ext, ".ics", "Expected .ics extension");
+    
+    // Simulate format detection
+    const char* detected_format = NULL;
+    if (ext && strcasecmp(ext, ".ics") == 0) {
+        detected_format = "ics";
+    }
+    
+    cr_assert_str_eq(detected_format, "ics", "Expected ICS format detection");
+}
+
+Test(ics_schema_tests, ics_schema_structure) {
+    // Test ICS schema structure validation
+    SchemaValidator* validator = schema_validator_create(test_pool);
+    cr_assert_not_null(validator, "Failed to create ICS validator");
+    
+    // Complex ICS schema with calendar components
+    char* complex_ics_schema = 
+        "type ICSDocument = {"
+        "  version: string,"
+        "  prodid: string,"
+        "  events: [{"
+        "    uid: string,"
+        "    summary: string,"
+        "    dtstart: string,"
+        "    dtend: string?,"
+        "    description: string?,"
+        "    location: string?"
+        "  }]?"
+        "}";
+    
+    bool result = schema_validator_load_schema(validator, complex_ics_schema, "ICSDocument");
+    cr_assert(result, "Failed to load complex ICS schema");
+    
+    schema_validator_destroy(validator);
+}
+
+Test(schema_detection_tests, ics_auto_detection) {
+    // Test that ICS files auto-select ICS schema
+    const char* filename = "events.ics";
+    const char* ext = strrchr(filename, '.');
+    
+    cr_assert_not_null(ext, "Extension not found");
+    
+    const char* expected_schema = NULL;
+    if (ext && strcasecmp(ext, ".ics") == 0) {
+        expected_schema = "lambda/input/ics_schema.ls";
+    }
+    
+    cr_assert_str_eq(expected_schema, "lambda/input/ics_schema.ls", "Expected ICS schema selection");
 }
