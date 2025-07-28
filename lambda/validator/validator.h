@@ -431,6 +431,19 @@ void print_validation_result(ValidationResult* result);
 void print_validation_path(PathSegment* path);
 #endif
 
+/**
+ * Run validation on a data file against a schema file
+ * @param data_file Path to the data file to validate
+ * @param schema_file Path to the schema file
+ * @param input_format Format of the input file (e.g., "html", "json", etc.) or NULL for auto-detect
+ */
+void run_validation(const char *data_file, const char *schema_file, const char *input_format);
+
 #ifdef __cplusplus
 }
 #endif
+
+
+
+
+

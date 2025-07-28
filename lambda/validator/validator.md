@@ -231,23 +231,8 @@ make   # Builds lambda.exe with validator integration
 
 #### Test the Validator
 ```bash
-# Test with valid document
-./lambda.exe validate test_document.ls -s doc_schema.ls
-
-# Test with default schema
-./lambda.exe validate test_document.ls
-
-# Expected output for valid document:
-# Lambda Validator v1.0
-# Validating 'test_document.ls' against schema 'lambda/input/doc_schema.ls'
-# Loading schema...
-# Parsing data file...
-# [Lambda parsing and JIT compilation output]
-# Validating data...
-# 
-# === Validation Results ===
-# ✅ Validation PASSED
-# ✓ Data file 'test_document.ls' is valid according to schema
+# Run comprehensive test suite (130+ tests)
+./test/test_validator.sh
 ```
 
 ### Test Suite and Quality Assurance
@@ -297,11 +282,6 @@ The Lambda Validator includes 137 comprehensive Criterion-based tests covering a
 - **JSON Schema**: User profiles with comprehensive type coverage
 - **OpenAPI/Swagger**: E-commerce API with realistic data models
 - **Yamale YAML**: Blog post management with recursive structures
-
-**Run Tests:**
-```bash
-cd test && ./test_validator.sh
-```
 
 ### Schema Conversion Examples
 
