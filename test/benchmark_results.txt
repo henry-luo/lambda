@@ -1,0 +1,3 @@
+timestamp,test_name,avg_time,min_time,max_time
+2025-07-28 22:48:35,Full Test Suite,1.629,1.246331000,2.263994000
+2025-07-28 22:48:56,Full Test Suite,1.328,1.258831000,1.418124000

@@ -62,7 +62,14 @@ help:
 	@echo "  distclean     - Complete cleanup (build dirs + executables)"
 	@echo ""
 	@echo "Development:"
-	@echo "  test          - Run tests (if available)"
+	@echo "  test          - Run comprehensive unit tests"
+	@echo "  test-coverage - Run tests with code coverage analysis"
+	@echo "  test-memory   - Run memory leak detection tests"
+	@echo "  test-benchmark- Run performance benchmark tests"  
+	@echo "  test-fuzz     - Run fuzzing tests for robustness"
+	@echo "  test-integration - Run end-to-end integration tests"
+	@echo "  test-all      - Run complete test suite (all test types)"
+	@echo "  test-ci       - Run CI test suite (unit + memory + integration)"
 	@echo "  verify-windows - Verify Windows cross-compiled executable with Wine"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  run           - Build and run the default executable"
@@ -162,19 +169,95 @@ distclean: clean-all
 
 # Development targets
 test:
-	@echo "Running tests..."
-	@if [ -d "test" ]; then \
-		echo "Looking for test files..."; \
-		find test -name "*.ls" -exec echo "Found test: {}" \; 2>/dev/null || true; \
-		if [ -f "test_simple.ls" ]; then \
-			echo "Running simple test..."; \
-			./$(LAMBDA_EXE) test_simple.ls 2>/dev/null || echo "Test file found but execution failed"; \
-		else \
-			echo "No test files found. Create test/*.ls files to enable testing."; \
-		fi; \
+	@echo "Running comprehensive test suite..."
+	@if [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh; \
 	else \
-		echo "No test directory found. Tests not available."; \
+		echo "Error: Comprehensive test suite not found at test/test_all.sh"; \
+		echo "Please ensure the test script exists and is executable."; \
+		exit 1; \
 	fi
+
+test-coverage:
+	@echo "Running tests with coverage analysis..."
+	@if command -v gcov >/dev/null 2>&1 && command -v lcov >/dev/null 2>&1; then \
+		echo "Compiling with coverage flags..."; \
+		gcc --coverage -fprofile-arcs -ftest-coverage -o lambda_coverage.exe $(shell find lambda -name "*.c") -I./include -I./lambda; \
+		./test/test_all.sh; \
+		gcov $(shell find lambda -name "*.c"); \
+		lcov --capture --directory . --output-file coverage.info; \
+		genhtml coverage.info --output-directory coverage-report; \
+		echo "Coverage report generated in coverage-report/"; \
+		echo "Open coverage-report/index.html to view results"; \
+	else \
+		echo "Coverage tools not found. Install with: brew install lcov"; \
+		exit 1; \
+	fi
+
+test-memory:
+	@echo "Running memory leak detection tests..."
+	@if [ -f "test/test_memory.sh" ]; then \
+		chmod +x test/test_memory.sh; \
+		./test/test_memory.sh; \
+	else \
+		echo "Memory test script not found at test/test_memory.sh"; \
+		exit 1; \
+	fi
+
+test-benchmark:
+	@echo "Running performance benchmark tests..."
+	@if [ -f "test/test_benchmark.sh" ]; then \
+		chmod +x test/test_benchmark.sh; \
+		./test/test_benchmark.sh; \
+	else \
+		echo "Benchmark test script not found at test/test_benchmark.sh"; \
+		exit 1; \
+	fi
+
+test-fuzz:
+	@echo "Running fuzzing tests..."
+	@if [ -f "test/test_fuzz.sh" ]; then \
+		chmod +x test/test_fuzz.sh; \
+		./test/test_fuzz.sh; \
+	else \
+		echo "Fuzz test script not found at test/test_fuzz.sh"; \
+		exit 1; \
+	fi
+
+test-integration:
+	@echo "Running integration tests..."
+	@if [ -f "test/test_integration.sh" ]; then \
+		chmod +x test/test_integration.sh; \
+		./test/test_integration.sh; \
+	else \
+		echo "Integration test script not found at test/test_integration.sh"; \
+		exit 1; \
+	fi
+
+test-all:
+	@echo "Running complete test suite (all test types)..."
+	@echo "1. Unit Tests..."
+	@$(MAKE) test
+	@echo ""
+	@echo "2. Memory Tests..."
+	@$(MAKE) test-memory
+	@echo ""
+	@echo "3. Integration Tests..."
+	@$(MAKE) test-integration
+	@echo ""
+	@echo "4. Benchmark Tests..."
+	@$(MAKE) test-benchmark
+	@echo ""
+	@echo "5. Fuzz Tests..."
+	@$(MAKE) test-fuzz
+	@echo ""
+	@echo "🎉 Complete test suite finished!"
+
+test-ci:
+	@echo "Running CI test suite..."
+	@$(MAKE) test
+	@$(MAKE) test-memory
+	@$(MAKE) test-integration
 
 # Windows verification targets
 verify-windows:
