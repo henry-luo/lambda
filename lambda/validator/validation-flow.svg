@@ -1,0 +1,119 @@
+<svg width="800" height="450" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .title { font: bold 16px Arial; fill: #2c3e50; }
+      .component { font: 12px Arial; fill: #34495e; }
+      .component-bold { font: bold 12px Arial; fill: #34495e; }
+      .arrow { stroke: #3498db; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .box { fill: #ecf0f1; stroke: #bdc3c7; stroke-width: 2; rx: 8; }
+      .schema-box { fill: #e8f5e8; stroke: #27ae60; stroke-width: 2; rx: 8; }
+      .data-box { fill: #fff3cd; stroke: #ffc107; stroke-width: 2; rx: 8; }
+      .validation-box { fill: #f8d7da; stroke: #dc3545; stroke-width: 2; rx: 8; }
+      .result-box { fill: #d1ecf1; stroke: #17a2b8; stroke-width: 2; rx: 8; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+            refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#3498db" />
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="400" y="25" text-anchor="middle" class="title">Lambda Validation Flow</text>
+  
+  <!-- Schema Processing Flow (Top) -->
+  <rect x="20" y="50" width="140" height="80" class="schema-box"/>
+  <text x="90" y="80" text-anchor="middle" class="component-bold">Lambda Type</text>
+  <text x="90" y="95" text-anchor="middle" class="component-bold">Definitions</text>
+  <text x="90" y="115" text-anchor="middle" class="component">(.ls schema)</text>
+  
+  <rect x="200" y="50" width="140" height="80" class="schema-box"/>
+  <text x="270" y="80" text-anchor="middle" class="component-bold">Lambda Tree-sitter</text>
+  <text x="270" y="95" text-anchor="middle" class="component-bold">Parser</text>
+  <text x="270" y="115" text-anchor="middle" class="component">(grammar.js)</text>
+  
+  <rect x="380" y="50" width="120" height="80" class="schema-box"/>
+  <text x="440" y="85" text-anchor="middle" class="component-bold">AST</text>
+  <text x="440" y="100" text-anchor="middle" class="component-bold">Parsing</text>
+  
+  <rect x="540" y="50" width="140" height="80" class="schema-box"/>
+  <text x="610" y="80" text-anchor="middle" class="component-bold">TypeSchema</text>
+  <text x="610" y="95" text-anchor="middle" class="component-bold">Registry</text>
+  <text x="610" y="115" text-anchor="middle" class="component">(validator.c)</text>
+  
+  <!-- Data Processing Flow (Middle) -->
+  <rect x="20" y="170" width="140" height="80" class="data-box"/>
+  <text x="90" y="200" text-anchor="middle" class="component-bold">Data Items</text>
+  <text x="90" y="215" text-anchor="middle" class="component">(.html, .json, .md,</text>
+  <text x="90" y="230" text-anchor="middle" class="component">.eml, .ics, .vcf)</text>
+  
+  <rect x="200" y="170" width="140" height="80" class="data-box"/>
+  <text x="270" y="195" text-anchor="middle" class="component-bold">Format Detection</text>
+  <text x="270" y="210" text-anchor="middle" class="component-bold">and Schema Selection</text>
+  <text x="270" y="230" text-anchor="middle" class="component">(main.cpp)</text>
+  
+  <rect x="380" y="170" width="120" height="80" class="data-box"/>
+  <text x="440" y="205" text-anchor="middle" class="component-bold">Input Parser</text>
+  <text x="440" y="225" text-anchor="middle" class="component">(input.c)</text>
+  
+  <rect x="540" y="170" width="140" height="80" class="data-box"/>
+  <text x="610" y="195" text-anchor="middle" class="component-bold">Lambda Item</text>
+  <text x="610" y="210" text-anchor="middle" class="component-bold">Extraction</text>
+  <text x="610" y="230" text-anchor="middle" class="component">(JIT execution)</text>
+  
+  <!-- Validation Flow (Bottom) -->
+  <rect x="200" y="290" width="140" height="80" class="validation-box"/>
+  <text x="270" y="315" text-anchor="middle" class="component-bold">Validator Engine</text>
+  <text x="270" y="330" text-anchor="middle" class="component-bold">Type Checking</text>
+  <text x="270" y="350" text-anchor="middle" class="component">(validate_item)</text>
+  
+  <rect x="380" y="290" width="120" height="80" class="validation-box"/>
+  <text x="440" y="320" text-anchor="middle" class="component-bold">Domain</text>
+  <text x="440" y="335" text-anchor="middle" class="component-bold">Validation</text>
+  <text x="440" y="355" text-anchor="middle" class="component">(doc_validators)</text>
+  
+  <rect x="540" y="290" width="140" height="80" class="result-box"/>
+  <text x="610" y="315" text-anchor="middle" class="component-bold">ValidationResult</text>
+  <text x="610" y="330" text-anchor="middle" class="component-bold">Success</text>
+  <text x="610" y="345" text-anchor="middle" class="component-bold">Errors</text>
+  
+  <!-- Arrows -->
+  <!-- Schema flow arrows -->
+  <line x1="160" y1="90" x2="200" y2="90" class="arrow"/>
+  <line x1="340" y1="90" x2="380" y2="90" class="arrow"/>
+  <line x1="500" y1="90" x2="540" y2="90" class="arrow"/>
+  
+  <!-- Data flow arrows -->
+  <line x1="160" y1="210" x2="200" y2="210" class="arrow"/>
+  <line x1="340" y1="210" x2="380" y2="210" class="arrow"/>
+  <line x1="500" y1="210" x2="540" y2="210" class="arrow"/>
+  
+  <!-- Validation flow arrows -->
+  <line x1="270" y1="250" x2="270" y2="290" class="arrow"/>
+  <line x1="340" y1="330" x2="380" y2="330" class="arrow"/>
+  <line x1="500" y1="330" x2="540" y2="330" class="arrow"/>
+  
+  <!-- Schema to validation connection -->
+  <line x1="610" y1="130" x2="610" y2="170" class="arrow"/>
+  <line x1="610" y1="250" x2="610" y2="290" class="arrow"/>
+  
+  <!-- Connection from data to validation -->
+  <line x1="610" y1="250" x2="270" y2="290" class="arrow" stroke-dasharray="5,5"/>
+  
+  <!-- Labels for flows -->
+  <text x="90" y="45" text-anchor="middle" class="component" style="fill: #27ae60; font-weight: bold;">Schema Processing</text>
+  <text x="90" y="165" text-anchor="middle" class="component" style="fill: #f39c12; font-weight: bold;">Data Processing</text>
+  <text x="400" y="395" text-anchor="middle" class="component" style="fill: #e74c3c; font-weight: bold;">Validation and Results</text>
+  
+  <!-- Legend -->
+  <rect x="720" y="50" width="15" height="15" class="schema-box"/>
+  <text x="745" y="62" class="component" style="font-size: 10px;">Schema</text>
+  
+  <rect x="720" y="75" width="15" height="15" class="data-box"/>
+  <text x="745" y="87" class="component" style="font-size: 10px;">Data</text>
+  
+  <rect x="720" y="100" width="15" height="15" class="validation-box"/>
+  <text x="745" y="112" class="component" style="font-size: 10px;">Validation</text>
+  
+  <rect x="720" y="125" width="15" height="15" class="result-box"/>
+  <text x="745" y="137" class="component" style="font-size: 10px;">Results</text>
+</svg>

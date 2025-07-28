@@ -7,22 +7,90 @@ The Lambda Validator is now **fully integrated into the Lambda CLI** as a subcom
 ### CLI Usage
 
 ```bash
-# Validate with explicit schema
-./lambda.exe validate data_file.ls -s schema_file.ls
+# ========================================
+# AUTOMATIC SCHEMA SELECTION (Recommended)
+# ========================================
 
-# Validate with default schema (uses lambda/input/doc_schema.ls)
-./lambda.exe validate data_file.ls
+# HTML Documents
+./lambda.exe validate document.html         # → html5_schema.ls
+./lambda.exe validate test/input/test.html  # → html5_schema.ls
 
-# Examples
-./lambda.exe validate test_document.ls -s doc_schema.ls
-./lambda.exe validate my_data.ls  # uses default schema
+# Email Messages  
+./lambda.exe validate email.eml             # → eml_schema.ls
+./lambda.exe validate test/input/simple.eml # → eml_schema.ls
+
+# Calendar Events
+./lambda.exe validate calendar.ics          # → ics_schema.ls
+./lambda.exe validate test/input/simple.ics # → ics_schema.ls
+
+# vCard Contacts
+./lambda.exe validate contacts.vcf          # → vcf_schema.ls
+./lambda.exe validate test/input/simple.vcf # → vcf_schema.ls
+
+# Document Formats (all use doc_schema.ls)
+./lambda.exe validate document.md           # → doc_schema.ls (Markdown)
+./lambda.exe validate article.rst           # → doc_schema.ls (reStructuredText) 
+./lambda.exe validate manual.1              # → doc_schema.ls (man page)
+./lambda.exe validate test_document.ls      # → doc_schema.ls (Lambda format)
+
+# ========================================  
+# EXPLICIT SCHEMA SPECIFICATION
+# ========================================
+
+# Override automatic selection with custom schema
+./lambda.exe validate -s custom_schema.ls document.html
+./lambda.exe validate -s custom.ls test/input/test.html
+
+# Formats requiring explicit schema (no defaults available)
+./lambda.exe validate -s json_schema.ls data.json
+./lambda.exe validate -s xml_schema.ls config.xml
+./lambda.exe validate -s yaml_schema.ls settings.yaml
+
+# ========================================
+# FORMAT OVERRIDE WITH EXPLICIT SCHEMA
+# ========================================
+
+# Force format detection with -f flag
+./lambda.exe validate -f json data.txt -s json_schema.ls
+./lambda.exe validate -f yaml config.txt -s yaml_schema.ls
 ```
+
+### Schema Selection Logic
+
+The validator automatically selects the appropriate schema based on file format:
+
+#### Formats with Default Schemas (Automatic Selection)
+- **HTML** (`.html`, `.htm`) → `html5_schema.ls`
+- **Email** (`.eml`) → `eml_schema.ls`
+- **Calendar** (`.ics`) → `ics_schema.ls`
+- **vCard** (`.vcf`) → `vcf_schema.ls`
+- **Document Formats** → `doc_schema.ls`:
+  - **AsciiDoc** (`.adoc`, `.asciidoc`)
+  - **Man Pages** (`.1`, `.2`, `.3`, `.4`, `.5`, `.6`, `.7`, `.8`, `.9`, `.man`)
+  - **Markdown** (`.md`, `.markdown`)
+  - **reStructuredText** (`.rst`)
+  - **Wiki** (`.wiki`)
+  - **Lambda Scripts** (`.ls` or no extension)
+
+#### Formats Requiring Explicit Schema
+These formats require the `-s <schema_file>` option:
+- **JSON** (`.json`)
+- **XML** (`.xml`)
+- **YAML** (`.yaml`, `.yml`)
+- **CSV** (`.csv`)
+- **INI** (`.ini`)
+- **TOML** (`.toml`)
+- **LaTeX** (`.tex`, `.latex`)
+- **RTF** (`.rtf`)
+- **PDF** (`.pdf`)
+- **Plain Text** (`.txt`)
 
 ### Integration Status
 ✅ **Complete CLI Integration**: Lambda validator is fully integrated as `lambda validate` subcommand  
 ✅ **Memory Pool Integration**: Uses Lambda's VariableMemPool with correct API  
 ✅ **Build System Integration**: Included in main Lambda build configuration  
-✅ **Default Schema**: Uses `lambda/input/doc_schema.ls` as default schema file  
+✅ **Automatic Schema Selection**: Intelligent schema selection based on file format  
+✅ **Multi-Format Support**: Supports HTML, EML, ICS, VCF, and document formats  
 ✅ **Tree-sitter Integration**: Complete integration with Lambda grammar and `ts-enum.h`  
 
 ## 2. Architecture Overview
@@ -47,13 +115,41 @@ The Lambda Validator is a **general-purpose validation system** with **complete 
 - **Custom Schemas** - Any type definitions written in Lambda syntax
 
 ### Validation Flow
-```
-Lambda Type Definitions → Lambda Tree-sitter Parser → AST → TypeSchema Registry
-                              ↓
-Data Items → Validator Engine → Type Checking → Domain Validation → ValidationResult
-```
 
-## 2. Key Files and Functions
+![Validation Flow Diagram](validation-flow.svg)
+
+The Lambda Validator implements a comprehensive three-tier validation pipeline:
+
+**Schema Processing Tier (Green)**: Lambda type definitions are parsed using the complete Tree-sitter grammar, generating an AST that populates the TypeSchema registry.
+
+**Data Processing Tier (Yellow)**: Input data files undergo format detection and automatic schema selection, followed by parsing through the appropriate input handler to extract Lambda Items via JIT execution.
+
+**Validation & Results Tier (Red/Blue)**: The validator engine performs type checking against the schema registry, applies domain-specific validation rules, and produces detailed validation results with success indicators or comprehensive error reporting.
+
+## 2. Schema Selection Architecture
+
+### Automatic Schema Selection Logic
+
+The validator implements intelligent schema selection based on file extensions and format detection. This eliminates the need for manual schema specification in most common use cases.
+
+#### Schema Categories
+
+**Category 1: Formats with Built-in Schemas**
+- Automatically selected, no user intervention required
+- Includes HTML, EML, ICS, VCF, and document formats
+- User feedback provided: `"Using HTML5 schema for HTML input"`
+
+**Category 2: Formats Requiring Explicit Schema**
+- JSON, XML, YAML, CSV, INI, TOML, LaTeX, RTF, PDF, Text
+- Requires `-s <schema_file>` option
+- Error message guides user: `"Input format 'json' requires an explicit schema file"`
+
+**Category 3: Override Capability**
+- Any automatic selection can be overridden with `-s` option
+- Supports custom schemas for any format
+- Format detection can be overridden with `-f` option
+
+## 3. Key Files and Functions
 
 ### Core Files
 
@@ -75,7 +171,7 @@ Data Items → Validator Engine → Type Checking → Domain Validation → Vali
 - `validate_item()` - Main validation dispatcher
 - Type-specific validators with proper HashMap entry structures
 
-#### `schema_parser.c` ✅ **ENHANCED LAMBDA GRAMMAR INTEGRATION** (Updated July 2025)
+#### `schema_parser.c`
 **Purpose**: Parses **any Lambda type definitions** using the complete Lambda Tree-sitter grammar with full symbol and field ID utilization.
 
 **Recent Critical Fixes**:
@@ -89,17 +185,6 @@ Data Items → Validator Engine → Type Checking → Domain Validation → Vali
   - **Complex Types**: `list`, `array`, `map`, `element`, `object`, `function`
   - **Type Expressions**: `base_type`, `primary_type`, `list_type`, `array_type`, `map_type`, `element_type`, `fn_type`
   - **Advanced Constructs**: Union types (`|`), binary expressions, type occurrences, references
-
-**Key Functions**:
-- `schema_parser_create()` - Creates parser using Lambda Tree-sitter grammar
-- `parse_schema_from_source()` - Parses any Lambda type definitions with enhanced symbol recognition
-- `build_type_definition()` - Extracts type definitions using field IDs for precise parsing
-- **Enhanced Type Builders**:
-  - `build_primitive_schema(parser, node, type_id)` - Uses type ID parameter for exact type mapping
-  - `build_list_type_schema()` - Leverages `field_type` for element extraction
-  - `build_binary_type_schema()` - Uses `field_left`, `field_right`, `field_operator` for union types
-  - `build_element_type_schema()` - Uses `field_name` for tag extraction
-  - `build_function_type_schema()` - Handles function signatures with field IDs
 
 **Tree-sitter Integration Metrics**:
 - **Type Coverage**: 100% Lambda type syntax supported with enhanced precision
@@ -134,75 +219,7 @@ Data Items → Validator Engine → Type Checking → Domain Validation → Vali
 - `Makefile` - Build configuration
 - `run_tests.sh` - Test runner script
 
-## 3. Implementation Details
-
-### CLI Integration (lambda/main.cpp)
-
-#### Validation Function
-```cpp
-void run_validation(Runtime *runtime, const char *data_file, const char *schema_file) {
-    // Integrated validation workflow:
-    // 1. Initialize memory pool using VariableMemPool API
-    // 2. Create schema validator with Lambda integration
-    // 3. Load schema file and parse as Lambda script
-    // 4. Parse data file using Lambda Tree-sitter grammar
-    // 5. Execute JIT-compiled Lambda script to get data Item
-    // 6. Run validation against schema
-    // 7. Report results and cleanup
-}
-```
-
-#### Command Line Parsing
-```cpp
-// Default schema configuration
-const char* schema_file = "lambda/input/doc_schema.ls";  // Default schema
-
-// Parse -s/--schema argument
-if (strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--schema") == 0) {
-    if (i + 1 < argc) {
-        schema_file = argv[++i];
-    }
-}
-```
-
-### Working Examples
-
-#### Schema File (lambda/input/doc_schema.ls)
-The default schema includes comprehensive document type definitions:
-- Mark Doc Schema types for document validation
-- Author, journal, conference metadata structures
-- Complete inline and block element definitions
-- HTML element aliases (p, h1-h6, em, strong, etc.)
-
-#### Test Input Files (test/input/)
-Organized test files for different input formats with auto-detection:
-
-**HTML Files**: `test.html` (basic), `test_html5.html` (comprehensive)  
-**EML Files**: `simple.eml` (basic), `test.eml` (comprehensive)  
-**ICS Files**: `simple.ics` (basic), `calendar.ics` (comprehensive)  
-**VCF Files**: `simple.vcf` (basic), `contacts.vcf` (comprehensive)
-
-**Usage Examples**:
-```bash
-# Auto-detection by file extension
-./lambda.exe validate test/input/test.html        # → HTML5 schema
-./lambda.exe validate test/input/simple.eml       # → EML schema  
-./lambda.exe validate test/input/simple.ics       # → ICS schema
-./lambda.exe validate test/input/simple.vcf       # → VCF schema
-
-# Custom schema validation
-./lambda.exe validate -s custom.ls test/input/test.html
-```
-
-### Validation Workflow
-
-1. **Parse Schema**: Lambda script parsed using Tree-sitter grammar
-2. **Parse Data**: Data file compiled and executed as Lambda script  
-3. **Extract Item**: JIT execution produces Lambda Item for validation
-4. **Validate**: Item validated against schema using type system
-5. **Report**: Results formatted and displayed to user
-
-## 4. How to Build and Test
+## 3. How to Build and Test
 
 ### Build and Test Lambda Validator
 
@@ -236,15 +253,24 @@ make   # Builds lambda.exe with validator integration
 ### Test Suite and Quality Assurance
 
 #### Comprehensive Criterion Test Suite
-The Lambda Validator includes 108 comprehensive Criterion-based tests covering all validation scenarios:
+The Lambda Validator includes 137 comprehensive Criterion-based tests covering all validation scenarios:
 
 **🧪 Test Categories:**
+- **Schema Selection Tests (12 tests)** - Automatic schema selection for HTML, EML, ICS, VCF, and document formats
 - **Schema Feature Tests (15 tests)** - Comprehensive/HTML/Markdown/XML/JSON/YAML schema features
-- **Format Validation Tests (35 tests)** - XML/HTML/Markdown/JSON/YAML validation with auto-detection  
+- **Format Validation Tests (40 tests)** - XML/HTML/Markdown/JSON/YAML validation with auto-detection and explicit schema requirements
 - **Multi-format Tests (25 tests)** - Cross-format compatibility, XSD, RelaxNG, JSON Schema, OpenAPI conversion
-- **Negative Test Cases (15 tests)** - Invalid content, format mismatches, missing files, malformed data
+- **Negative Test Cases (20 tests)** - Invalid content, format mismatches, missing files, malformed data, explicit schema requirements
 - **Core Lambda Type Tests (20 tests)** - All Lambda types (primitive, union, array, map, element, reference, function, complex, edge cases) with parsing & validation
-- **Error Handling Tests (8 tests)** - Schema parsing errors, memory management, concurrency
+- **Error Handling Tests (5 tests)** - Schema parsing errors, memory management, concurrency
+
+**🔬 Schema Selection Features Tested:**
+- **Automatic HTML Selection**: `.html`/`.htm` files automatically use `html5_schema.ls`
+- **Email Format Support**: `.eml` files automatically use `eml_schema.ls`
+- **Calendar Format Support**: `.ics` files automatically use `ics_schema.ls`
+- **vCard Format Support**: `.vcf` files automatically use `vcf_schema.ls`
+- **Document Format Selection**: `.md`, `.rst`, `.adoc`, `.wiki`, `.man`, `.1-.9` files use `doc_schema.ls`
+- **Explicit Schema Requirements**: JSON, XML, YAML, CSV, INI, TOML formats require `-s` option
 
 **🔬 Schema Features Tested:**
 - Primitive types (string, int, float, bool, datetime)
@@ -346,6 +372,17 @@ type BlogPost = {
 }
 ```
 
+#### AI-Assisted Schema Conversion
+
+For complex schema conversion tasks, **Large Language Models (LLMs) like Claude (Sonnet 4)** can be highly effective at converting existing schemas from various formats (XML Schema, JSON Schema, OpenAPI, etc.) into Lambda schema syntax. 
+
+Simply provide the LLM with:
+- Your existing schema (XSD, JSON Schema, OpenAPI spec, etc.)
+- The Lambda schema examples above as reference
+- A request to convert to Lambda format
+
+The LLM can handle complex nested structures, union types, constraints, and provide clean, idiomatic Lambda schema definitions that work seamlessly with the validator.
+
 ### Current Status
 ✅ **Complete**: CLI integration, build system, memory pool integration  
 ✅ **Working**: Schema parsing, data validation, JIT compilation integration  
@@ -390,42 +427,17 @@ type BlogPost = {
 
 ## Summary
 
-The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand, providing complete schema validation capabilities for Lambda script files.
+The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand, providing complete schema validation capabilities with intelligent automatic schema selection.
 
 ### Key Features
-- **CLI Integration**: `lambda validate` subcommand with default schema support
+- **CLI Integration**: `lambda validate` subcommand with automatic schema selection
+- **Intelligent Schema Selection**: Automatic schema selection based on file extension
+- **Multi-Format Support**: HTML, EML, ICS, VCF, Markdown, reStructuredText, AsciiDoc, Man pages, Wiki formats
 - **Universal Schema Support**: Works with any `.ls` schema files  
 - **Complete Lambda Grammar**: Uses existing Tree-sitter grammar for full syntax support
 - **Memory Management**: Proper VariableMemPool integration with error handling
-- **Format Support**: Mark Notation (.ls), HTML (.html), EML (.eml), ICS (.ics), VCF (.vcf), Markdown (.md) with auto-detection
-- **Production Ready**: 49 comprehensive Criterion tests, memory-safe, clean output
+- **Explicit Schema Requirements**: JSON, XML, YAML, CSV, INI, TOML require explicit schema specification
+- **Production Ready**: 137 comprehensive Criterion tests, memory-safe, clean output
 
-### Usage Examples
-```bash
-# Basic validation with default schema
-./lambda.exe validate my_document.ls
 
-# Validation with custom schema  
-./lambda.exe validate my_data.ls -s my_schema.ls
-
-# Multi-format validation (auto-detected)
-./lambda.exe validate test/input/test.html      # Uses HTML5 schema
-./lambda.exe validate test/input/simple.eml    # Uses EML schema
-./lambda.exe validate test/input/simple.ics    # Uses ICS schema
-./lambda.exe validate test/input/simple.vcf    # Uses VCF schema
-./lambda.exe validate document.xml             # Uses XML schema
-./lambda.exe validate document.md              # Uses Markdown schema
-./lambda.exe validate data.json                # Uses JSON schema
-./lambda.exe validate config.yaml              # Uses YAML schema
-./lambda.exe validate data.ls                  # Uses Lambda data schema
-
-# Format-specific validation with explicit format
-./lambda.exe validate data.json -f json -s schema.ls
-./lambda.exe validate config.yaml -f yaml -s schema.ls
-
-# Run comprehensive test suite (108 tests)
-cd test && ./test_validator.sh
-```
-
-The validator successfully bridges Lambda's type system with runtime validation, providing a robust, tested foundation for data validation in the Lambda ecosystem.
 
