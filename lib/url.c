@@ -84,11 +84,12 @@ char* read_text_doc(lxb_url_t *url) {
             return NULL;
         }
         char* text = read_text_file(local_path);
-        free(local_path);
         if (!text) {
             fprintf(stderr, "Failed to read file: %s\n", local_path);
+            free(local_path);
             return NULL;
         }
+        free(local_path);
         return text;
     }
     return NULL;

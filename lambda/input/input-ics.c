@@ -334,25 +334,41 @@ static Map* parse_duration(Input *input, const char* value) {
 
 // Main iCalendar parsing function
 void parse_ics(Input* input, const char* ics_string) {
-    if (!ics_string || !input) return;
+    if (!ics_string || !input) {
+        return;
+    }
     
     // Initialize string buffer for parsing
     input->sb = strbuf_new_pooled(input->pool);
-    if (!input->sb) return;
+    if (!input->sb) {
+        return;
+    }
     
     const char* ics = ics_string;
     
     // Initialize calendar map
     Map* calendar_map = map_pooled(input->pool);
-    if (!calendar_map) return;
+    if (!calendar_map) {
+        return;
+    }
     
     // Initialize components list to store events, todos, etc.
-    List* components_list = list();
-    if (!components_list) return;
+    List* components_list = (List*)pool_calloc(input->pool, sizeof(List));
+    if (components_list) {
+        components_list->type_id = LMD_TYPE_LIST;
+        components_list->length = 0;
+        components_list->capacity = 0;
+        components_list->items = NULL;
+    }
+    if (!components_list) {
+        return;
+    }
     
     // Initialize properties map to store calendar-level properties
     Map* properties_map = map_pooled(input->pool);
-    if (!properties_map) return;
+    if (!properties_map) {
+        return;
+    }
     
     Map* current_component = NULL;
     Map* current_component_props = NULL;

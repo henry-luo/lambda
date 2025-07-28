@@ -1,4 +1,8 @@
 #include "../transpiler.h"
+#include <lexbor/url/url.h>
+
+// Input creation and management
+Input* input_new(lxb_url_t* abs_url);
 
 // Common input utility functions
 void map_put(Map* mp, String* key, LambdaItem value, Input *input);
