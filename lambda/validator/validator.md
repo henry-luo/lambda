@@ -84,8 +84,6 @@ Data Items → Validator Engine → Type Checking → Domain Validation → Vali
 - **Memory Allocation**: Fixed critical `pool_variable_alloc()` usage in type definition creation
 
 **Enhanced Lambda Grammar Integration**:
-- **Complete Symbol Coverage**: Uses **all 200+ Tree-sitter symbols** from `ts-enum.h` including primitives (`anon_sym_int`, `sym_integer`), complex types (`sym_list`, `sym_array`), and type expressions (`sym_base_type`, `sym_primary_type`)
-- **Field ID Utilization**: Leverages **19 Tree-sitter field IDs** (`field_name`, `field_type`, `field_left`, `field_right`, etc.) for precise AST navigation
 - **Comprehensive Type Support**: Handles all Lambda type constructs with enhanced parsing precision:
   - **Primitives**: `int`, `float`, `string`, `bool`, `char`, `symbol`, `datetime`, `decimal`, `binary`, `null`
   - **Complex Types**: `list`, `array`, `map`, `element`, `object`, `function`
@@ -104,8 +102,6 @@ Data Items → Validator Engine → Type Checking → Domain Validation → Vali
   - `build_function_type_schema()` - Handles function signatures with field IDs
 
 **Tree-sitter Integration Metrics**:
-- **Symbol Utilization**: 50+ unique Tree-sitter symbols actively used in type parsing
-- **Field ID Coverage**: All 19 field IDs from `ts-enum.h` supported in parsing logic
 - **Type Coverage**: 100% Lambda type syntax supported with enhanced precision
 - **AST Navigation**: Field-based navigation replaces child indexing for robustness
 
