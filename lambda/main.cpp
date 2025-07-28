@@ -376,6 +376,8 @@ int main(int argc, char *argv[]) {
                     input_format = "man";
                 } else if (strcasecmp(ext, ".textile") == 0 || strcasecmp(ext, ".txtl") == 0) {
                     input_format = "textile";
+                } else if (strcasecmp(ext, ".m") == 0 || strcasecmp(ext, ".mk") == 0 || strcasecmp(ext, ".mark") == 0) {
+                    input_format = "mark";
                 }
                 // If no recognized extension, keep as nullptr for Lambda format
             }

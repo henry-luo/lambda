@@ -161,6 +161,9 @@ MimeGlob glob_patterns[] = {
     {"*.ical", "text/calendar"},
     {"*.textile", "text/textile"},
     {"*.txtl", "text/textile"},
+    {"*.m", "text/x-mark"},
+    {"*.mk", "text/x-mark"},
+    {"*.mark", "text/x-mark"},
     
     // Programming languages
     {"*.c", "text/x-c"},

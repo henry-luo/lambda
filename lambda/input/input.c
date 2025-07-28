@@ -23,6 +23,7 @@ void parse_eml(Input* input, const char* eml_string);
 void parse_vcf(Input* input, const char* vcf_string);
 void parse_ics(Input* input, const char* ics_string);
 void parse_textile(Input* input, const char* textile_string);
+void parse_mark(Input* input, const char* mark_string);
 
 
 String* strbuf_to_string(StrBuf *sb) {
@@ -227,6 +228,8 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/ics") == 0) return "ics";
     if (strcmp(mime_type, "text/textile") == 0) return "textile";
     if (strcmp(mime_type, "application/textile") == 0) return "textile";
+    if (strcmp(mime_type, "text/x-mark") == 0) return "mark";
+    if (strcmp(mime_type, "application/x-mark") == 0) return "mark";
     
     // Check for XML-based formats
     if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
@@ -491,6 +494,9 @@ Input* input_from_url(String* url, String* type, lxb_url_t* cwd) {
         }
         else if (strcmp(effective_type, "textile") == 0) {
             parse_textile(input, source);
+        }
+        else if (strcmp(effective_type, "mark") == 0) {
+            parse_mark(input, source);
         }
         else {
             printf("Unknown input type: %s\n", effective_type);

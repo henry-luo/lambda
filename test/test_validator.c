@@ -983,6 +983,27 @@ Test(validator_tests, wiki_uses_doc_schema) {
                                      NULL, true);
 }
 
+Test(validator_tests, mark_requires_explicit_schema) {
+    // Test that Mark files require explicit schema (should fail without -s)
+    test_auto_schema_detection_helper("test/input/sample.m",
+                                     "requires an explicit schema file", 
+                                     NULL, false);
+}
+
+Test(validator_tests, mark_sample_validation) {
+    // Test Mark sample.m file validation with explicit schema
+    test_cli_validation_helper("test/input/sample.m",
+                              "test/mark_schema.ls", 
+                              "mark", true);
+}
+
+Test(validator_tests, mark_value_validation) {
+    // Test Mark value.m file validation with explicit schema
+    test_cli_validation_helper("test/input/value.m",
+                              "test/mark_schema.ls", 
+                              "mark", true);
+}
+
 // JSON validation tests - positive cases
 Test(validator_tests, valid_json_user_profile_validation) {
     test_cli_validation_helper("test/lambda/validator/test_json_user_profile_valid.json",
