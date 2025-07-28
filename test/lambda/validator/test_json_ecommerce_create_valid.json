@@ -1,0 +1,15 @@
+{
+  "name": "New Gaming Mouse",
+  "description": "High-precision gaming mouse with customizable RGB lighting and programmable buttons.",
+  "price": 79.99,
+  "category": 2,
+  "tags": ["gaming", "mouse", "rgb", "precision"],
+  "dimensions": {
+    "length": 12.8,
+    "width": 6.8,
+    "height": 4.2,
+    "weight": 95.0
+  },
+  "stockQuantity": 25,
+  "images": ["https://example.com/images/gaming-mouse.jpg"]
+}

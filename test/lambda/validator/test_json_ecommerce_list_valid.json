@@ -1,0 +1,42 @@
+{
+  "products": [
+    {
+      "id": 2001,
+      "name": "Classic T-Shirt",
+      "price": 19.95,
+      "category": "clothing",
+      "inStock": true,
+      "stockQuantity": 150
+    },
+    {
+      "id": 2002,
+      "name": "Programming Fundamentals",
+      "description": "Learn the basics of programming with this comprehensive guide.",
+      "price": 39.99,
+      "category": "books",
+      "tags": ["programming", "education", "beginner"],
+      "inStock": false,
+      "stockQuantity": 0
+    },
+    {
+      "id": 2003,
+      "name": "Yoga Mat",
+      "price": 24.99,
+      "category": "sports",
+      "dimensions": {
+        "length": 183.0,
+        "width": 61.0,
+        "height": 0.6,
+        "weight": 1200.0
+      },
+      "inStock": true,
+      "stockQuantity": 20
+    }
+  ],
+  "pagination": {
+    "total": 156,
+    "limit": 20,
+    "offset": 0,
+    "hasNext": true
+  }
+}

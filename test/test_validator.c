@@ -296,12 +296,20 @@ void test_schema_features_helper(const char* schema_file, const char* expected_f
             found = strstr(schema_content, "<") != NULL && strstr(schema_content, ">") != NULL;
         } else if (strcmp(feature, "type definitions") == 0) {
             found = strstr(schema_content, "type") != NULL && strstr(schema_content, "=") != NULL;
-        } else if (strcmp(feature, "nested structures") == 0) {
+        } else if (strcmp(feature, "nested structures") == 0 || strcmp(feature, "nested types") == 0) {
             // Look for nested braces
             char* first_brace = strstr(schema_content, "{");
             if (first_brace) {
                 found = strstr(first_brace + 1, "{") != NULL;
             }
+        } else if (strcmp(feature, "constraints") == 0) {
+            // Look for constraints like minimum, maximum, or comments with constraints
+            found = strstr(schema_content, "minimum") != NULL ||
+                   strstr(schema_content, "maximum") != NULL ||
+                   strstr(schema_content, "required") != NULL ||
+                   strstr(schema_content, "1-") != NULL ||  // like "1-50 chars"
+                   strstr(schema_content, "min") != NULL ||
+                   strstr(schema_content, "max") != NULL;
         }
         
         cr_assert(found, "Schema feature '%s' not found in %s", feature, schema_file);
@@ -422,6 +430,25 @@ Test(validator_tests, xml_cookbook_schema_features) {
     };
     test_schema_features_helper("test/lambda/validator/schema_xml_cookbook.ls", 
                                expected_features, 5);
+}
+
+// JSON Schema features tests
+Test(validator_tests, json_user_profile_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "nested types",
+        "array types", "union types", "type definitions", "constraints"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_json_user_profile.ls", 
+                               expected_features, 7);
+}
+
+Test(validator_tests, json_ecommerce_api_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "nested types",
+        "array types", "union types", "type definitions", "constraints"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_json_ecommerce_api.ls", 
+                               expected_features, 7);
 }
 
 // Comprehensive positive tests
@@ -681,6 +708,68 @@ Test(validator_tests, invalid_xml_cookbook_empty_validation) {
     test_cli_validation_helper("test/lambda/validator/test_xml_cookbook_empty.xml",
                               "test/lambda/validator/schema_xml_cookbook.ls", 
                               "xml", false);
+}
+
+// JSON validation tests - positive cases
+Test(validator_tests, valid_json_user_profile_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_user_profile_valid.json",
+                              "test/lambda/validator/schema_json_user_profile.ls", 
+                              "json", true);
+}
+
+Test(validator_tests, minimal_json_user_profile_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_user_profile_minimal.json",
+                              "test/lambda/validator/schema_json_user_profile.ls", 
+                              "json", true);
+}
+
+Test(validator_tests, valid_json_ecommerce_product_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_product_valid.json",
+                              "test/lambda/validator/schema_json_ecommerce_api.ls", 
+                              "json", true);
+}
+
+Test(validator_tests, valid_json_ecommerce_list_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_list_valid.json",
+                              "test/lambda/validator/schema_json_ecommerce_api.ls", 
+                              "json", true);
+}
+
+Test(validator_tests, valid_json_ecommerce_create_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_create_valid.json",
+                              "test/lambda/validator/schema_json_ecommerce_api.ls", 
+                              "json", true);
+}
+
+// JSON validation tests - negative cases
+Test(validator_tests, invalid_json_user_profile_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_user_profile_invalid.json",
+                              "test/lambda/validator/schema_json_user_profile.ls", 
+                              "json", false);
+}
+
+Test(validator_tests, incomplete_json_user_profile_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_user_profile_incomplete.json",
+                              "test/lambda/validator/schema_json_user_profile.ls", 
+                              "json", false);
+}
+
+Test(validator_tests, invalid_json_ecommerce_product_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_product_invalid.json",
+                              "test/lambda/validator/schema_json_ecommerce_api.ls", 
+                              "json", false);
+}
+
+Test(validator_tests, invalid_json_ecommerce_list_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_list_invalid.json",
+                              "test/lambda/validator/schema_json_ecommerce_api.ls", 
+                              "json", false);
+}
+
+Test(validator_tests, invalid_json_ecommerce_create_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_create_invalid.json",
+                              "test/lambda/validator/schema_json_ecommerce_api.ls", 
+                              "json", false);
 }
 
 // Cross-format compatibility tests

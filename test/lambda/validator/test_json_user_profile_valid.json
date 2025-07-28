@@ -1,0 +1,38 @@
+{
+  "id": 12345,
+  "username": "john_doe_2024",
+  "email": "john.doe@example.com",
+  "profile": {
+    "firstName": "John",
+    "lastName": "Doe",
+    "dateOfBirth": "1990-05-15",
+    "phoneNumber": "+1-555-123-4567",
+    "address": {
+      "street": "123 Main Street",
+      "city": "Anytown",
+      "state": "CA",
+      "zipCode": "12345",
+      "country": "US"
+    },
+    "status": "active"
+  },
+  "preferences": {
+    "theme": "dark",
+    "language": "en",
+    "notifications": {
+      "email": true,
+      "sms": false,
+      "push": true
+    },
+    "newsletter": true
+  },
+  "roles": ["user", "premium"],
+  "tags": ["developer", "early-adopter", "premium-user", "tech-enthusiast"],
+  "metadata": {
+    "createdAt": "2024-01-15T10:30:00Z",
+    "updatedAt": "2024-07-28T14:22:30Z",
+    "lastLogin": "2024-07-28T09:15:45Z",
+    "isActive": true,
+    "loginCount": 142
+  }
+}

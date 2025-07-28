@@ -1,0 +1,27 @@
+{
+  "id": 1001,
+  "name": "Wireless Bluetooth Headphones",
+  "description": "Premium quality wireless headphones with active noise cancellation, 30-hour battery life, and premium sound quality. Perfect for music lovers and professionals.",
+  "price": 129.99,
+  "category": "electronics",
+  "tags": ["wireless", "bluetooth", "headphones", "noise-cancellation", "premium"],
+  "dimensions": {
+    "length": 20.5,
+    "width": 18.0,
+    "height": 8.5,
+    "weight": 280.0
+  },
+  "inStock": true,
+  "stockQuantity": 45,
+  "images": [
+    "https://example.com/images/headphones-front.jpg",
+    "https://example.com/images/headphones-side.jpg",
+    "https://example.com/images/headphones-back.jpg"
+  ],
+  "metadata": {
+    "createdAt": "2024-01-15T10:30:00Z",
+    "updatedAt": "2024-07-28T14:22:30Z",
+    "createdBy": "product_manager_john",
+    "version": 3
+  }
+}

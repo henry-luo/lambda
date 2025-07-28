@@ -1,0 +1,292 @@
+openapi: 3.0.3
+info:
+  title: E-commerce Product API
+  description: REST API for managing products in an e-commerce system
+  version: 1.2.0
+  contact:
+    name: API Support
+    email: api-support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.example.com/v1
+    description: Production server
+  - url: https://staging-api.example.com/v1
+    description: Staging server
+
+paths:
+  /products:
+    get:
+      summary: List all products
+      description: Retrieve a paginated list of products with optional filtering
+      parameters:
+        - name: category
+          in: query
+          description: Filter by product category
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Number of products to return (max 100)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of products to skip
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductListResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Create new product
+      description: Create a new product in the catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Product created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /products/{productId}:
+    get:
+      summary: Get product by ID
+      description: Retrieve a specific product by its unique identifier
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          description: Unique product identifier
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Product found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    Product:
+      type: object
+      required:
+        - id
+        - name
+        - price
+        - category
+        - inStock
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          description: Unique product identifier
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Product name
+        description:
+          type: string
+          maxLength: 1000
+          description: Product description
+        price:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+          description: Product price in USD
+        category:
+          type: string
+          enum: [electronics, clothing, books, home, sports, toys]
+          description: Product category
+        tags:
+          type: array
+          items:
+            type: string
+          maxItems: 10
+          description: Product tags for search
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        inStock:
+          type: boolean
+          description: Whether product is currently in stock
+        stockQuantity:
+          type: integer
+          minimum: 0
+          description: Number of items in stock
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+          maxItems: 5
+        metadata:
+          $ref: '#/components/schemas/ProductMetadata'
+
+    CreateProductRequest:
+      type: object
+      required:
+        - name
+        - price
+        - category
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        price:
+          type: number
+          minimum: 0
+          multipleOf: 0.01
+        category:
+          type: string
+          enum: [electronics, clothing, books, home, sports, toys]
+        tags:
+          type: array
+          items:
+            type: string
+          maxItems: 10
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+        stockQuantity:
+          type: integer
+          minimum: 0
+
+    ProductListResponse:
+      type: object
+      required:
+        - products
+        - pagination
+      properties:
+        products:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+
+    PaginationInfo:
+      type: object
+      required:
+        - total
+        - limit
+        - offset
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of products
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Number of products per page
+        offset:
+          type: integer
+          minimum: 0
+          description: Number of products skipped
+        hasNext:
+          type: boolean
+          description: Whether there are more products
+
+    Dimensions:
+      type: object
+      properties:
+        length:
+          type: number
+          minimum: 0
+          description: Length in centimeters
+        width:
+          type: number
+          minimum: 0
+          description: Width in centimeters
+        height:
+          type: number
+          minimum: 0
+          description: Height in centimeters
+        weight:
+          type: number
+          minimum: 0
+          description: Weight in grams
+
+    ProductMetadata:
+      type: object
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+          description: Product creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Last update timestamp
+        createdBy:
+          type: string
+          description: User who created the product
+        version:
+          type: integer
+          minimum: 1
+          description: Product data version
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: array
+          items:
+            type: string
+          description: Additional error details

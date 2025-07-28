@@ -1,0 +1,15 @@
+{
+  "id": 67890,
+  "username": "alice_smith",
+  "email": "alice@example.org",
+  "profile": {
+    "firstName": "Alice",
+    "lastName": "Smith",
+    "status": 1
+  },
+  "roles": ["user"],
+  "metadata": {
+    "createdAt": "2024-07-01T08:00:00Z",
+    "isActive": true
+  }
+}

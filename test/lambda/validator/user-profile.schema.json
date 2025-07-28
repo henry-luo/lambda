@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/user-profile.schema.json",
+  "title": "User Profile",
+  "description": "A user profile with personal information, preferences, and settings",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Unique user identifier"
+    },
+    "username": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_]{3,20}$",
+      "description": "Username with 3-20 alphanumeric characters and underscores"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "User's email address"
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "firstName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "lastName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "dateOfBirth": {
+          "type": "string",
+          "format": "date",
+          "description": "Date in YYYY-MM-DD format"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "pattern": "^\\+?[1-9]\\d{1,14}$"
+        },
+        "address": {
+          "type": "object",
+          "properties": {
+            "street": { "type": "string" },
+            "city": { "type": "string" },
+            "state": { "type": "string" },
+            "zipCode": { "type": "string", "pattern": "^\\d{5}(-\\d{4})?$" },
+            "country": { "type": "string", "minLength": 2, "maxLength": 2 }
+          },
+          "required": ["street", "city", "country"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["firstName", "lastName"],
+      "additionalProperties": false
+    },
+    "preferences": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark", "auto"]
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "es", "fr", "de", "ja", "zh"]
+        },
+        "notifications": {
+          "type": "object",
+          "properties": {
+            "email": { "type": "boolean" },
+            "sms": { "type": "boolean" },
+            "push": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "newsletter": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["user", "admin", "moderator", "premium"]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 10
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastLogin": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "isActive": { "type": "boolean" },
+        "loginCount": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["createdAt", "isActive"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["id", "username", "email", "profile", "roles", "metadata"],
+  "additionalProperties": false
+}
