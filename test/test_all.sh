@@ -64,6 +64,42 @@ print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
 
+# Function to detect CPU cores
+detect_cpu_cores() {
+    local cores=1  # Default fallback
+    
+    # Try multiple methods to detect CPU cores
+    if command -v nproc >/dev/null 2>&1; then
+        cores=$(nproc)
+        print_status "Detected $cores CPU cores using nproc"
+    elif command -v sysctl >/dev/null 2>&1 && sysctl -n hw.ncpu >/dev/null 2>&1; then
+        cores=$(sysctl -n hw.ncpu)
+        print_status "Detected $cores CPU cores using sysctl (macOS)"
+    elif command -v getconf >/dev/null 2>&1; then
+        cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo "1")
+        print_status "Detected $cores CPU cores using getconf"
+    elif [ -r /proc/cpuinfo ]; then
+        cores=$(grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "1")
+        print_status "Detected $cores CPU cores using /proc/cpuinfo"
+    else
+        print_warning "Could not detect CPU cores, using default of 1"
+    fi
+    
+    # Ensure we have a valid number
+    if ! [[ "$cores" =~ ^[0-9]+$ ]] || [ "$cores" -lt 1 ]; then
+        print_warning "Invalid core count detected ($cores), using fallback of 1"
+        cores=1
+    fi
+    
+    # For very high core counts, cap at 16 to avoid overwhelming the system
+    if [ "$cores" -gt 16 ]; then
+        print_status "Capping jobs at 16 (detected $cores cores)"
+        cores=16
+    fi
+    
+    CPU_CORES=$cores
+}
+
 # Function to find Criterion installation
 find_criterion() {
     if pkg-config --exists criterion 2>/dev/null; then
@@ -132,7 +168,7 @@ run_validator_tests() {
 
     # Run tests with detailed output
     set +e  # Disable strict error handling for test execution
-    VALIDATOR_TEST_OUTPUT=$(./"$VALIDATOR_TEST_BINARY" --verbose --tap 2>&1)
+    VALIDATOR_TEST_OUTPUT=$(./"$VALIDATOR_TEST_BINARY" --verbose --tap --jobs=$CPU_CORES 2>&1)
     VALIDATOR_TEST_EXIT_CODE=$?
     set -e  # Re-enable strict error handling
 
@@ -467,6 +503,9 @@ run_mir_tests() {
 # Main execution
 echo ""
 print_status "🚀 Starting comprehensive test suite..."
+
+# Detect CPU cores for parallel execution
+detect_cpu_cores
 
 # Find Criterion installation
 find_criterion
