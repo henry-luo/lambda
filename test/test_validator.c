@@ -451,6 +451,16 @@ Test(validator_tests, json_ecommerce_api_schema_features) {
                                expected_features, 7);
 }
 
+// YAML Schema features tests
+Test(validator_tests, yaml_blog_post_schema_features) {
+    const char* expected_features[] = {
+        "primitive types", "optional fields", "nested types",
+        "array types", "type definitions", "constraints"
+    };
+    test_schema_features_helper("test/lambda/validator/schema_yaml_blog_post.ls", 
+                               expected_features, 6);
+}
+
 // Comprehensive positive tests
 Test(validator_tests, html_comprehensive_validation) {
     test_cli_validation_helper("test/lambda/validator/test_comprehensive.html",
@@ -770,6 +780,32 @@ Test(validator_tests, invalid_json_ecommerce_create_validation) {
     test_cli_validation_helper("test/lambda/validator/test_json_ecommerce_create_invalid.json",
                               "test/lambda/validator/schema_json_ecommerce_api.ls", 
                               "json", false);
+}
+
+// YAML validation tests - positive cases
+Test(validator_tests, valid_yaml_blog_post_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_yaml_blog_post_valid.yaml",
+                              "test/lambda/validator/schema_yaml_blog_post.ls", 
+                              "yaml", true);
+}
+
+Test(validator_tests, minimal_yaml_blog_post_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_yaml_blog_post_minimal.yaml",
+                              "test/lambda/validator/schema_yaml_blog_post.ls", 
+                              "yaml", true);
+}
+
+// YAML validation tests - negative cases
+Test(validator_tests, invalid_yaml_blog_post_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_yaml_blog_post_invalid.yaml",
+                              "test/lambda/validator/schema_yaml_blog_post.ls", 
+                              "yaml", false);
+}
+
+Test(validator_tests, incomplete_yaml_blog_post_validation) {
+    test_cli_validation_helper("test/lambda/validator/test_yaml_blog_post_incomplete.yaml",
+                              "test/lambda/validator/schema_yaml_blog_post.ls", 
+                              "yaml", false);
 }
 
 // Cross-format compatibility tests

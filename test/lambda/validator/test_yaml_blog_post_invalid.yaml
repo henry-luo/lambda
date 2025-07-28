@@ -1,0 +1,2 @@
+This is not valid YAML content - it's just plain text
+that will cause the YAML parser to fail.

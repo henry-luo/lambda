@@ -220,12 +220,13 @@ make   # Builds lambda.exe with validator integration
 ### Test Suite and Quality Assurance
 
 #### Comprehensive Criterion Test Suite
-The Lambda Validator includes 49 comprehensive Criterion-based tests covering all validation scenarios:
+The Lambda Validator includes 108 comprehensive Criterion-based tests covering all validation scenarios:
 
 **🧪 Test Categories:**
-- **Schema Feature Tests (8 tests)** - Comprehensive/HTML/Markdown schema features
-- **Format Validation Tests (6 tests)** - HTML/Markdown validation with auto-detection  
-- **Negative Test Cases (10 tests)** - Invalid content, format mismatches, missing files
+- **Schema Feature Tests (15 tests)** - Comprehensive/HTML/Markdown/XML/JSON/YAML schema features
+- **Format Validation Tests (35 tests)** - XML/HTML/Markdown/JSON/YAML validation with auto-detection  
+- **Multi-format Tests (25 tests)** - Cross-format compatibility, XSD, RelaxNG, JSON Schema, OpenAPI conversion
+- **Negative Test Cases (15 tests)** - Invalid content, format mismatches, missing files, malformed data
 - **Core Lambda Type Tests (20 tests)** - All Lambda types (primitive, union, array, map, element, reference, function, complex, edge cases) with parsing & validation
 - **Error Handling Tests (8 tests)** - Schema parsing errors, memory management, concurrency
 
@@ -234,20 +235,105 @@ The Lambda Validator includes 49 comprehensive Criterion-based tests covering al
 - Optional fields (?), One-or-more (+), Zero-or-more (*)  
 - Union types (|), Array types ([...]), Element types (<...>)
 - Nested structures, type definitions, references, function signatures
+- Constraints validation (min/max length, patterns, enumerations)
 
-**🌐 Input Formats:** Lambda (.m), HTML (.html), Markdown (.md)
+**🌐 Input Formats:** 
+- **Lambda** (.m) - Native Lambda data files
+- **XML** (.xml) - Including XSD and RelaxNG schema support
+- **HTML** (.html) - Web document validation  
+- **Markdown** (.md) - Documentation validation
+- **JSON** (.json) - JSON Schema and OpenAPI/Swagger support
+- **YAML** (.yaml) - Yamale schema format support
+
+**📋 Schema Types Tested:**
+- **XML Schemas**: Basic, Configuration, RSS, SOAP, Comprehensive, Edge Cases, Minimal
+- **XSD Support**: Library management with complex nested structures
+- **RelaxNG Support**: Cookbook recipes with compact syntax
+- **JSON Schema**: User profiles with comprehensive type coverage
+- **OpenAPI/Swagger**: E-commerce API with realistic data models
+- **Yamale YAML**: Blog post management with recursive structures
 
 **Run Tests:**
 ```bash
 cd test && ./test_validator.sh
 ```
 
+### Schema Conversion Examples
+
+The Lambda Validator supports converting industry-standard schemas to Lambda format:
+
+**XML Schema (XSD) → Lambda:**
+```xml
+<!-- library.xsd -->
+<xs:complexType name="Book">
+  <xs:sequence>
+    <xs:element name="title" type="xs:string"/>
+    <xs:element name="author" type="xs:string"/>
+    <xs:element name="isbn" type="xs:string" minOccurs="0"/>
+  </xs:sequence>
+</xs:complexType>
+```
+
+Converts to:
+```lambda
+// schema_xml_library.ls
+type BookType = {
+    title: string,
+    author: string,
+    isbn: string?
+}
+```
+
+**JSON Schema → Lambda:**
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {"type": "integer", "minimum": 1},
+    "name": {"type": "string", "minLength": 1, "maxLength": 50},
+    "tags": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["id", "name"]
+}
+```
+
+Converts to:
+```lambda
+// schema_json_user_profile.ls
+type UserDocument = {
+    id: int,                    // minimum 1
+    name: string,               // 1-50 chars
+    tags: [string]*             // array of strings
+}
+```
+
+**Yamale YAML → Lambda:**
+```yaml
+# blog-post.yamale
+title: str(min=5, max=100)
+author: include('author')
+tags: list(str(), min=1, max=10)
+status: enum('draft', 'published')
+```
+
+Converts to:
+```lambda
+// schema_yaml_blog_post.ls
+type BlogPost = {
+    title: string,              // 5-100 chars
+    author: AuthorType,         // include reference
+    tags: [string]+,            // 1-10 string array
+    status: string              // enum: draft, published
+}
+```
+
 ### Current Status
 ✅ **Complete**: CLI integration, build system, memory pool integration  
 ✅ **Working**: Schema parsing, data validation, JIT compilation integration  
 ✅ **Enhanced**: Complete Tree-sitter symbol and field ID utilization  
-✅ **Comprehensive Testing**: 49 Criterion tests covering all validator components
-✅ **Format Support**: Lambda (.m), HTML, Markdown with format auto-detection
+✅ **Comprehensive Testing**: 108 Criterion tests covering all validator components
+✅ **Multi-Format Support**: Lambda (.m), XML, HTML, Markdown, JSON, YAML with format auto-detection
+✅ **Schema Conversion**: XSD, RelaxNG, JSON Schema, OpenAPI/Swagger to Lambda schema conversion
 ✅ **Production Ready**: All memory safety issues resolved, clean output
 
 ## 5. Implementation Status and Integration Details
@@ -258,8 +344,9 @@ cd test && ./test_validator.sh
 - **Build System**: Validator included in `build_lambda_config.json`
 - **Tree-sitter Integration**: Complete Lambda grammar integration (51+ symbols, 8 field IDs)
 - **Default Schema**: Uses `lambda/input/doc_schema.ls` with comprehensive document types
-- **Test Coverage**: 49 comprehensive Criterion tests covering all scenarios
-- **Format Support**: Auto-detection for .m (Lambda), .html, .md files
+- **Test Coverage**: 108 comprehensive Criterion tests covering all scenarios
+- **Multi-Format Support**: Auto-detection for .m (Lambda), .xml, .html, .md, .json, .yaml files
+- **Schema Standards**: Support for XSD, RelaxNG, JSON Schema, OpenAPI/Swagger, Yamale conversion
 - **Production Ready**: Memory-safe, clean output, proper error handling
 
 ### 🔧 **Technical Implementation Details**
@@ -302,12 +389,19 @@ The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand
 # Validation with custom schema  
 ./lambda.exe validate my_data.ls -s my_schema.ls
 
-# Format-specific validation (auto-detected)
+# Multi-format validation (auto-detected)
+./lambda.exe validate document.xml     # Uses XML schema
 ./lambda.exe validate document.html    # Uses HTML schema
 ./lambda.exe validate document.md      # Uses Markdown schema
+./lambda.exe validate data.json        # Uses JSON schema
+./lambda.exe validate config.yaml      # Uses YAML schema
 ./lambda.exe validate data.m           # Uses Lambda data schema
 
-# Run comprehensive test suite
+# Format-specific validation with explicit format
+./lambda.exe validate data.json -f json -s schema.ls
+./lambda.exe validate config.yaml -f yaml -s schema.ls
+
+# Run comprehensive test suite (108 tests)
 cd test && ./test_validator.sh
 ```
 

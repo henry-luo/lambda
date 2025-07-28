@@ -1,0 +1,41 @@
+title: "Quick Tips for Better Code"
+slug: "quick-code-tips"
+author:
+  id: 42
+  username: "quickdev"
+  displayName: "Alex Kim"
+  email: "alex@example.com"
+  verified: false
+  joinDate: "2023-11-20"
+
+content: |
+  Here are five quick tips to improve your code quality:
+  
+  1. Write meaningful variable names
+  2. Keep functions small and focused
+  3. Add comments for complex logic
+  4. Use consistent formatting
+  5. Test your code regularly
+
+published: true
+
+tags:
+  - "tips"
+  - "coding"
+
+categories:
+  - "technology"
+
+metadata:
+  wordCount: 85
+  readingTime: 1
+  language: "en"
+  difficulty: "beginner"
+  featured: false
+  sticky: false
+  allowComments: true
+  viewCount: 524
+  likeCount: 23
+  shareCount: 12
+
+status: "published"
