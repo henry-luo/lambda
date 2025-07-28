@@ -10,10 +10,8 @@ echo " Lambda Validator Criterion Test Suite Runner "
 echo "================================================"
 
 # Configuration
-TEST_DIR="test/lambda/validator"
 TEST_SOURCES="test/test_validator_fixed.c"
 TEST_BINARY="test/test_validator"
-VALIDATOR_SOURCES="lambda/validator/validator.c lambda/validator/schema_parser.c lambda/validator/doc_validators.c lambda/validator/error_reporting.c"
 
 # Colors for output
 RED='\033[0;31m'
@@ -46,228 +44,8 @@ fi
 
 print_success "Lambda executable ready"
 
-# Check if test files exist
-print_status "📋 Checking required test files..."
-REQUIRED_TEST_FILES=(
-    # Lambda data tests (.m files with .ls schemas)
-    "test_primitive.m" "schema_primitive.ls"
-    "test_union.m" "schema_union.ls"
-    "test_occurrence.m" "schema_occurrence.ls"
-    "test_array.m" "schema_array.ls"
-    "test_map.m" "schema_map.ls"
-    "test_element.m" "schema_element.ls"
-    "test_reference.m" "schema_reference.ls"
-    "test_function.m" "schema_function.ls"
-    "test_complex.m" "schema_complex.ls"
-    "test_edge_cases.m" "schema_edge_cases.ls"
-    
-    # HTML format tests
-    "test_simple.html" "schema_html.ls"
-    "test_comprehensive.html" "schema_comprehensive.ls"
-    "test_invalid.html"
-    
-    # Markdown format tests  
-    "test_simple.md" "schema_markdown.ls"
-    "test_comprehensive.md" "schema_comprehensive.ls"
-    "test_invalid.md"
-)
-
-missing_files=0
-for file in "${REQUIRED_TEST_FILES[@]}"; do
-    if [ ! -f "$TEST_DIR/$file" ]; then
-        print_warning "Missing test file: $TEST_DIR/$file (will be created)"
-        missing_files=$((missing_files + 1))
-    fi
-done
-
-# Create missing test files with minimal content
-print_status "📝 Creating missing test files..."
-
-# Create basic data files if missing
-if [ ! -f "$TEST_DIR/test_primitive.m" ]; then
-    cat > "$TEST_DIR/test_primitive.m" << 'EOF'
-{
-    string_field: "test",
-    int_field: 42,
-    float_field: 3.14,
-    bool_field: true
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_union.m" ]; then
-    cat > "$TEST_DIR/test_union.m" << 'EOF'
-{
-    value: "string value"
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_occurrence.m" ]; then
-    cat > "$TEST_DIR/test_occurrence.m" << 'EOF'
-{
-    one_or_more: ["item1", "item2"],
-    zero_or_more: []
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_array.m" ]; then
-    cat > "$TEST_DIR/test_array.m" << 'EOF'
-{
-    items: ["item1", "item2", "item3"]
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_map.m" ]; then
-    cat > "$TEST_DIR/test_map.m" << 'EOF'
-{
-    metadata: {
-        "key1": "value1",
-        "key2": 42
-    }
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_element.m" ]; then
-    cat > "$TEST_DIR/test_element.m" << 'EOF'
-{
-    tag: "div",
-    class: "container",
-    children: []
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_reference.m" ]; then
-    cat > "$TEST_DIR/test_reference.m" << 'EOF'
-{
-    author: {
-        name: "John Doe",
-        age: 30
-    }
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_function.m" ]; then
-    cat > "$TEST_DIR/test_function.m" << 'EOF'
-{
-    handler: "function_reference"
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_complex.m" ]; then
-    cat > "$TEST_DIR/test_complex.m" << 'EOF'
-{
-    title: "Test Document",
-    authors: [
-        {name: "Author 1", email: "author1@example.com"},
-        {name: "Author 2"}
-    ],
-    content: {
-        tag: "section",
-        id: "main",
-        children: []
-    }
-}
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_edge_cases.m" ]; then
-    cat > "$TEST_DIR/test_edge_cases.m" << 'EOF'
-{
-    nullable: null,
-    deeply_nested: {
-        level1: {
-            level2: {
-                value: "deep value"
-            }
-        }
-    }
-}
-EOF
-fi
-
-# Create basic HTML/Markdown test files
-if [ ! -f "$TEST_DIR/test_simple.html" ]; then
-    cat > "$TEST_DIR/test_simple.html" << 'EOF'
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Simple Test</title>
-</head>
-<body>
-    <h1>Test Header</h1>
-    <p>Test paragraph with <strong>bold</strong> text.</p>
-</body>
-</html>
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_simple.md" ]; then
-    cat > "$TEST_DIR/test_simple.md" << 'EOF'
-# Test Header
-
-Test paragraph with **bold** text.
-
-## Subheader
-
-- List item 1
-- List item 2
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_comprehensive.html" ]; then
-    cat > "$TEST_DIR/test_comprehensive.html" << 'EOF'  
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Comprehensive Test</title>
-</head>
-<body>
-    <h1>Main Header</h1>
-    <div class="content">
-        <p>Paragraph with <a href="http://example.com">link</a></p>
-        <ul>
-            <li>Item 1</li>
-            <li>Item 2</li>
-        </ul>
-        <img src="test.jpg" alt="Test image">
-    </div>
-</body>
-</html>
-EOF
-fi
-
-if [ ! -f "$TEST_DIR/test_comprehensive.md" ]; then
-    cat > "$TEST_DIR/test_comprehensive.md" << 'EOF'
-# Main Header
-
-Paragraph with [link](http://example.com)
-
-- Item 1  
-- Item 2
-
-![Test image](test.jpg)
-
-## Code Example
-
-```javascript
-function test() {
-    return true;
-}
-```
-EOF
-fi
-
-print_success "All required test files are available"
-
 # Compile the Criterion-based test suite with proper linking
-print_status "� Compiling Criterion test suite with validator integration..."
+print_status "🔧 Compiling Criterion test suite with validator integration..."
 
 # Find Criterion installation
 CRITERION_FLAGS=""
@@ -311,7 +89,7 @@ print_status "🧪 Running comprehensive Criterion validator tests..."
 echo ""
 
 # Set environment variables for test files
-export TEST_DIR_PATH="$PWD/$TEST_DIR"
+export TEST_DIR_PATH="$PWD/test/lambda/validator"
 export LAMBDA_EXE_PATH="$PWD/lambda.exe"
 
 # Run tests with detailed output
@@ -346,7 +124,7 @@ if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     PASSED_TESTS=$((TOTAL_TESTS - SKIPPED_TESTS))
     
     echo ""
-    print_status "� Test Results Summary:"
+    print_status "📊 Test Results Summary:"
     echo "   Total Tests: $TOTAL_TESTS"
     echo "   Passed: $PASSED_TESTS"
     echo "   Skipped: $SKIPPED_TESTS"
@@ -403,7 +181,7 @@ if [ "$FAILED_TESTS" -eq 0 ] && [ "$TOTAL_TESTS" -gt 0 ]; then
     echo "   • Reference types and function signatures"
     echo ""
     echo "🌐 Input Formats: Lambda (.m), HTML (.html), Markdown (.md)"
-    echo "📊 Total Test Count: 52+ comprehensive Criterion tests"
+    echo "📊 Total Test Count: 49 comprehensive Criterion tests"
     echo ""
     echo "The Lambda Validator is comprehensively tested and production-ready!"
     
