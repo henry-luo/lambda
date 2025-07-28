@@ -322,6 +322,24 @@ void run_validation(const char *data_file, const char *schema_file, const char *
                 input_format = "ini";
             } else if (strcasecmp(ext, ".toml") == 0) {
                 input_format = "toml";
+            } else if (strcasecmp(ext, ".eml") == 0) {
+                input_format = "eml";
+            } else if (strcasecmp(ext, ".ics") == 0) {
+                input_format = "ics";
+            } else if (strcasecmp(ext, ".vcf") == 0) {
+                input_format = "vcf";
+            } else if (strcasecmp(ext, ".rst") == 0) {
+                input_format = "rst";
+            } else if (strcasecmp(ext, ".wiki") == 0) {
+                input_format = "wiki";
+            } else if (strcasecmp(ext, ".adoc") == 0 || strcasecmp(ext, ".asciidoc") == 0) {
+                input_format = "asciidoc";
+            } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 || 
+                      strcasecmp(ext, ".3") == 0 || strcasecmp(ext, ".4") == 0 ||
+                      strcasecmp(ext, ".5") == 0 || strcasecmp(ext, ".6") == 0 ||
+                      strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
+                      strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
+                input_format = "man";
             }
             // If no recognized extension, keep as nullptr for Lambda format
         }
@@ -565,9 +583,22 @@ int main(int argc, char *argv[]) {
             printf("Lambda Validator v1.0\n\n");
             printf("Usage: %s validate [-s <schema>] [-f <format>] <file> [files...]\n", argv[0]);
             printf("\nOptions:\n");
-            printf("  -s <schema>    Schema file (default: doc_schema.ls, html5_schema.ls for HTML)\n");
+            printf("  -s <schema>    Schema file (required for some formats)\n");
             printf("  -f <format>    Input format (auto-detect, json, xml, html, md, yaml, csv, ini, toml, etc.)\n");
             printf("  -h, --help     Show this help message\n");
+            printf("\nDefault Schemas:\n");
+            printf("  html           - html5_schema.ls\n");
+            printf("  eml            - eml_schema.ls\n");
+            printf("  ics            - ics_schema.ls\n");
+            printf("  vcf            - vcf_schema.ls\n");
+            printf("  asciidoc       - doc_schema.ls\n");
+            printf("  man            - doc_schema.ls\n");
+            printf("  markdown       - doc_schema.ls\n");
+            printf("  rst            - doc_schema.ls\n");
+            printf("  wiki           - doc_schema.ls\n");
+            printf("  lambda         - doc_schema.ls\n");
+            printf("\nRequire Explicit Schema (-s option):\n");
+            printf("  json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text\n");
             printf("\nExamples:\n");
             printf("  %s validate document.ls\n", argv[0]);
             printf("  %s validate -s custom_schema.ls document.ls\n", argv[0]);
@@ -645,6 +676,18 @@ int main(int argc, char *argv[]) {
                     input_format = "ics";
                 } else if (strcasecmp(ext, ".vcf") == 0) {
                     input_format = "vcf";
+                } else if (strcasecmp(ext, ".rst") == 0) {
+                    input_format = "rst";
+                } else if (strcasecmp(ext, ".wiki") == 0) {
+                    input_format = "wiki";
+                } else if (strcasecmp(ext, ".adoc") == 0 || strcasecmp(ext, ".asciidoc") == 0) {
+                    input_format = "asciidoc";
+                } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 || 
+                          strcasecmp(ext, ".3") == 0 || strcasecmp(ext, ".4") == 0 ||
+                          strcasecmp(ext, ".5") == 0 || strcasecmp(ext, ".6") == 0 ||
+                          strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
+                          strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
+                    input_format = "man";
                 }
                 // If no recognized extension, keep as nullptr for Lambda format
             }
@@ -664,8 +707,20 @@ int main(int argc, char *argv[]) {
             } else if (input_format && strcmp(input_format, "vcf") == 0) {
                 schema_file = "lambda/input/vcf_schema.ls";
                 printf("Using VCF schema for vCard input\n");
+            } else if (input_format && (strcmp(input_format, "asciidoc") == 0 || 
+                                     strcmp(input_format, "man") == 0 ||
+                                     strcmp(input_format, "markdown") == 0 ||
+                                     strcmp(input_format, "rst") == 0 ||
+                                     strcmp(input_format, "wiki") == 0)) {
+                schema_file = "lambda/input/doc_schema.ls";
+                printf("Using document schema for %s input\n", input_format);
+            } else if (!input_format || strcmp(input_format, "lambda") == 0) {
+                schema_file = "lambda/input/doc_schema.ls";  // Default for Lambda format
             } else {
-                schema_file = "lambda/input/doc_schema.ls";  // Default schema
+                // For other formats (json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text), require explicit schema
+                printf("Error: Input format '%s' requires an explicit schema file. Use -s <schema_file> option.\n", input_format);
+                printf("Formats with default schemas: html, eml, ics, vcf, asciidoc, man, markdown, rst, wiki\n");
+                return 1;
             }
         }
         
