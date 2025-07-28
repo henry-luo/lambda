@@ -99,7 +99,20 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdalign.h>
+#include <stddef.h>
 #include "../lib/mem-pool/include/mem_pool.h"
+
+// For C99 compatibility, define max_align_t if not available
+#ifndef __STDC_VERSION__
+#define __STDC_VERSION__ 199901L
+#endif
+
+#if __STDC_VERSION__ < 201112L
+typedef union {
+    long long ll;
+    long double ld;
+} max_align_t;
+#endif
 
 // Test fixtures
 Test(variable_pool_init, basic_initialization) {

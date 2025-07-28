@@ -993,14 +993,14 @@ Test(validator_tests, mark_requires_explicit_schema) {
 Test(validator_tests, mark_sample_validation) {
     // Test Mark sample.m file validation with explicit schema
     test_cli_validation_helper("test/input/sample.m",
-                              "test/mark_schema.ls", 
+                              "test/lambda/validator/mark_schema.ls", 
                               "mark", true);
 }
 
 Test(validator_tests, mark_value_validation) {
     // Test Mark value.m file validation with explicit schema
     test_cli_validation_helper("test/input/value.m",
-                              "test/mark_schema.ls", 
+                              "test/lambda/validator/mark_schema.ls", 
                               "mark", true);
 }
 
