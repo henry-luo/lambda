@@ -111,6 +111,8 @@ void run_validation(const char *data_file, const char *schema_file, const char *
                       strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
                       strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
                 input_format = "man";
+            } else if (strcasecmp(ext, ".textile") == 0 || strcasecmp(ext, ".txtl") == 0) {
+                input_format = "textile";
             }
             // If no recognized extension, keep as NULL for Lambda format
         }

@@ -280,6 +280,7 @@ int main(int argc, char *argv[]) {
             printf("  man            - doc_schema.ls\n");
             printf("  markdown       - doc_schema.ls\n");
             printf("  rst            - doc_schema.ls\n");
+            printf("  textile        - doc_schema.ls\n");
             printf("  wiki           - doc_schema.ls\n");
             printf("  lambda         - doc_schema.ls\n");
             printf("\nRequire Explicit Schema (-s option):\n");
@@ -373,6 +374,8 @@ int main(int argc, char *argv[]) {
                           strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
                           strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
                     input_format = "man";
+                } else if (strcasecmp(ext, ".textile") == 0 || strcasecmp(ext, ".txtl") == 0) {
+                    input_format = "textile";
                 }
                 // If no recognized extension, keep as nullptr for Lambda format
             }
@@ -396,6 +399,7 @@ int main(int argc, char *argv[]) {
                                      strcmp(input_format, "man") == 0 ||
                                      strcmp(input_format, "markdown") == 0 ||
                                      strcmp(input_format, "rst") == 0 ||
+                                     strcmp(input_format, "textile") == 0 ||
                                      strcmp(input_format, "wiki") == 0)) {
                 schema_file = "lambda/input/doc_schema.ls";
                 printf("Using document schema for %s input\n", input_format);
@@ -404,7 +408,7 @@ int main(int argc, char *argv[]) {
             } else {
                 // For other formats (json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text), require explicit schema
                 printf("Error: Input format '%s' requires an explicit schema file. Use -s <schema_file> option.\n", input_format);
-                printf("Formats with default schemas: html, eml, ics, vcf, asciidoc, man, markdown, rst, wiki\n");
+                printf("Formats with default schemas: html, eml, ics, vcf, asciidoc, man, markdown, rst, textile, wiki\n");
                 return 1;
             }
         }

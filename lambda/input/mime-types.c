@@ -159,6 +159,8 @@ MimeGlob glob_patterns[] = {
     {"*.vcard", "text/vcard"},
     {"*.ics", "text/calendar"},
     {"*.ical", "text/calendar"},
+    {"*.textile", "text/textile"},
+    {"*.txtl", "text/textile"},
     
     // Programming languages
     {"*.c", "text/x-c"},
