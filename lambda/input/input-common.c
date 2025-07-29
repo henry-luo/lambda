@@ -60,14 +60,15 @@ const char* latex_commands[] = {
 const char* latex_environments[] = {
     "document", "abstract", "itemize", "enumerate", "description", "quote", "quotation",
     "verse", "center", "flushleft", "flushright", "verbatim", "tabular", "array",
-    "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "cases", "align", "equation",
-    "eqnarray", "figure", "table", "minipage", "theorem", "proof", "definition",
+    "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "cases", 
+    "align", "aligned", "equation", "eqnarray", "gather", "multline", "split",
+    "figure", "table", "minipage", "theorem", "proof", "definition",
     "example", "remark", "note", "warning", NULL
 };
 
 // Math environments
 const char* math_environments[] = {
-    "equation", "eqnarray", "align", "alignat", "gather", "multline", "split",
+    "equation", "eqnarray", "align", "alignat", "aligned", "gather", "multline", "split",
     "cases", "matrix", "pmatrix", "bmatrix", "vmatrix", "Vmatrix", "smallmatrix", NULL
 };
 

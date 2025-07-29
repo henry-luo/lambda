@@ -26,6 +26,45 @@ let advanced_functions = input('./test/input/math_advanced_functions.txt', {'typ
 "Advanced functions:"
 advanced_functions
 
+// === NEW ENHANCED LATEX MATH ENVIRONMENTS ===
+
+// Test cases environment for piecewise functions
+let cases_test = input('./test/input/math_cases.txt', {'type': 'math', 'flavor': 'latex'})
+"Cases environment (piecewise functions):"
+cases_test
+
+// Test equation environment for numbered equations
+let equation_test = input('./test/input/math_equation.txt', {'type': 'math', 'flavor': 'latex'})
+"Equation environment (numbered):"
+equation_test
+
+// Test align environment for aligned equations
+let align_test = input('./test/input/math_align.txt', {'type': 'math', 'flavor': 'latex'})
+"Align environment (aligned equations):"
+align_test
+
+// Test aligned environment (used within other environments)
+let aligned_test = input('./test/input/math_aligned.txt', {'type': 'math', 'flavor': 'latex'})
+"Aligned environment (inline aligned):"
+aligned_test
+
+// Test gather environment for centered equations
+let gather_test = input('./test/input/math_gather.txt', {'type': 'math', 'flavor': 'latex'})
+"Gather environment (centered equations):"
+gather_test
+
+// Test smallmatrix environment for inline matrices
+let smallmatrix_test = input('./test/input/math_smallmatrix.txt', {'type': 'math', 'flavor': 'latex'})
+"Smallmatrix environment (inline matrix):"
+smallmatrix_test
+
+// Test comprehensive advanced environments together
+let advanced_environments = input('./test/input/math_advanced_environments.txt', {'type': 'math', 'flavor': 'latex'})
+"Advanced environments combined:"
+advanced_environments
+
+// === END NEW ENHANCED FEATURES ===
+
 // Test flavor support (basic fallback for non-LaTeX flavors)
 let basic_flavor = input('./test/input/math_simple.txt', {'type': 'math', 'flavor': 'basic'})
 "Basic flavor:"
@@ -46,3 +85,4 @@ let error_test = input('./test/input/math_malformed_matrix.txt', {'type': 'math'
 error_test
 
 "✅ Comprehensive math parser test completed!"
+"✅ Enhanced LaTeX environments (cases, equation, align, aligned, gather, smallmatrix) tested!"

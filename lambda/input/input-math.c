@@ -298,6 +298,11 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
 static Item parse_latex_integral(Input *input, const char **math);
 static Item parse_latex_limit(Input *input, const char **math);
 static Item parse_latex_matrix(Input *input, const char **math, const char* matrix_type);
+static Item parse_latex_cases(Input *input, const char **math);
+static Item parse_latex_equation(Input *input, const char **math);
+static Item parse_latex_align(Input *input, const char **math);
+static Item parse_latex_aligned(Input *input, const char **math);
+static Item parse_latex_gather(Input *input, const char **math);
 
 // parse latex command starting with backslash
 static Item parse_latex_command(Input *input, const char **math) {
@@ -329,6 +334,18 @@ static Item parse_latex_command(Input *input, const char **math) {
                 return parse_latex_matrix(input, math, "vmatrix");
             } else if (env_len == 8 && strncmp(env_start, "Vmatrix", 8) == 0) {
                 return parse_latex_matrix(input, math, "Vmatrix");
+            } else if (env_len == 11 && strncmp(env_start, "smallmatrix", 11) == 0) {
+                return parse_latex_matrix(input, math, "smallmatrix");
+            } else if (env_len == 5 && strncmp(env_start, "cases", 5) == 0) {
+                return parse_latex_cases(input, math);
+            } else if (env_len == 8 && strncmp(env_start, "equation", 8) == 0) {
+                return parse_latex_equation(input, math);
+            } else if (env_len == 5 && strncmp(env_start, "align", 5) == 0) {
+                return parse_latex_align(input, math);
+            } else if (env_len == 7 && strncmp(env_start, "aligned", 7) == 0) {
+                return parse_latex_aligned(input, math);
+            } else if (env_len == 6 && strncmp(env_start, "gather", 6) == 0) {
+                return parse_latex_gather(input, math);
             }
             
             // For unknown environments, try to parse as generic environment
@@ -393,6 +410,12 @@ static Item parse_latex_command(Input *input, const char **math) {
     } else if (strcmp(cmd_string->chars, "Vmatrix") == 0) {
         strbuf_full_reset(sb);
         return parse_latex_matrix(input, math, "Vmatrix");
+    } else if (strcmp(cmd_string->chars, "smallmatrix") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_matrix(input, math, "smallmatrix");
+    } else if (strcmp(cmd_string->chars, "cases") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_cases(input, math);
     } else if (is_trig_function(cmd_string->chars) || is_log_function(cmd_string->chars)) {
         const char* func_name = cmd_string->chars;
         strbuf_full_reset(sb);
@@ -1213,6 +1236,461 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     ((TypeElmt*)matrix_element->type)->content_length = ((List*)matrix_element)->length;
     // Matrix environment parsing completed successfully
     return (Item)matrix_element;
+}
+
+// Parse LaTeX cases environment: \begin{cases} ... \end{cases}
+static Item parse_latex_cases(Input *input, const char **math) {
+    // Expected format: \begin{cases} expr1 & condition1 \\ expr2 & condition2 \\ ... \end{cases}
+    
+    skip_math_whitespace(math);
+    
+    // Check if this is a full environment: \begin{cases}
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        // Skip \begin{cases}
+        if (strncmp(*math, "\\begin{cases}", 13) != 0) {
+            printf("ERROR: Expected \\begin{cases} for cases environment\n");
+            return ITEM_ERROR;
+        }
+        *math += 13;
+    } else {
+        printf("ERROR: Expected \\begin{cases} for cases environment\n");
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Create the cases element
+    Element* cases_element = create_math_element(input, "expr");
+    if (!cases_element) {
+        printf("ERROR: Failed to create cases element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, cases_element, "op", "cases");
+    add_attribute_to_element(input, cases_element, "env", "true");
+    
+    // Parse case rows (each row has expression & condition)
+    int case_count = 0;
+    
+    while (**math) {
+        skip_math_whitespace(math);
+        
+        // Check for end of environment
+        if (strncmp(*math, "\\end{cases}", 11) == 0) {
+            *math += 11;
+            break;
+        }
+        
+        // Create a case row element
+        Element* case_row = create_math_element(input, "case");
+        if (!case_row) {
+            printf("ERROR: Failed to create case row element\n");
+            return ITEM_ERROR;
+        }
+        
+        // Parse the expression (left side of &)
+        Item expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (expr == ITEM_ERROR) {
+            printf("ERROR: Failed to parse case expression at case %d\n", case_count + 1);
+            return ITEM_ERROR;
+        }
+        
+        if (expr != ITEM_NULL) {
+            list_push((List*)case_row, expr);
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Expect & separator
+        if (**math == '&') {
+            (*math)++; // skip &
+            skip_math_whitespace(math);
+            
+            // Parse the condition (right side of &)
+            Item condition = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (condition == ITEM_ERROR) {
+                printf("ERROR: Failed to parse case condition at case %d\n", case_count + 1);
+                return ITEM_ERROR;
+            }
+            
+            if (condition != ITEM_NULL) {
+                list_push((List*)case_row, condition);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Check for row separator \\
+        if (strncmp(*math, "\\\\", 2) == 0) {
+            (*math) += 2; // skip \\
+        }
+        
+        // Add the case row to cases element
+        ((TypeElmt*)case_row->type)->content_length = ((List*)case_row)->length;
+        list_push((List*)cases_element, (Item)case_row);
+        case_count++;
+        
+        skip_math_whitespace(math);
+    }
+    
+    // Add case count as attribute
+    char case_str[16];
+    snprintf(case_str, sizeof(case_str), "%d", case_count);
+    add_attribute_to_element(input, cases_element, "cases", case_str);
+    
+    ((TypeElmt*)cases_element->type)->content_length = ((List*)cases_element)->length;
+    return (Item)cases_element;
+}
+
+// Parse LaTeX equation environment: \begin{equation} ... \end{equation}
+static Item parse_latex_equation(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // Check if this is a full environment: \begin{equation}
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        // Skip \begin{equation}
+        if (strncmp(*math, "\\begin{equation}", 16) != 0) {
+            printf("ERROR: Expected \\begin{equation} for equation environment\n");
+            return ITEM_ERROR;
+        }
+        *math += 16;
+    } else {
+        printf("ERROR: Expected \\begin{equation} for equation environment\n");
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Create the equation element
+    Element* eq_element = create_math_element(input, "expr");
+    if (!eq_element) {
+        printf("ERROR: Failed to create equation element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, eq_element, "op", "equation");
+    add_attribute_to_element(input, eq_element, "env", "true");
+    add_attribute_to_element(input, eq_element, "numbered", "true");
+    
+    // Parse the equation content
+    Item content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (content == ITEM_ERROR) {
+        printf("ERROR: Failed to parse equation content\n");
+        return ITEM_ERROR;
+    }
+    
+    if (content != ITEM_NULL) {
+        list_push((List*)eq_element, content);
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Parse \end{equation}
+    if (strncmp(*math, "\\end{equation}", 14) != 0) {
+        printf("ERROR: Expected \\end{equation} to close equation environment\n");
+        return ITEM_ERROR;
+    }
+    *math += 14;
+    
+    ((TypeElmt*)eq_element->type)->content_length = ((List*)eq_element)->length;
+    return (Item)eq_element;
+}
+
+// Parse LaTeX align environment: \begin{align} ... \end{align}
+static Item parse_latex_align(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // Check if this is a full environment: \begin{align}
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        // Skip \begin{align}
+        if (strncmp(*math, "\\begin{align}", 13) != 0) {
+            printf("ERROR: Expected \\begin{align} for align environment\n");
+            return ITEM_ERROR;
+        }
+        *math += 13;
+    } else {
+        printf("ERROR: Expected \\begin{align} for align environment\n");
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Create the align element
+    Element* align_element = create_math_element(input, "expr");
+    if (!align_element) {
+        printf("ERROR: Failed to create align element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, align_element, "op", "align");
+    add_attribute_to_element(input, align_element, "env", "true");
+    add_attribute_to_element(input, align_element, "numbered", "true");
+    
+    // Parse alignment rows (separated by \\)
+    int eq_count = 0;
+    
+    while (**math) {
+        skip_math_whitespace(math);
+        
+        // Check for end of environment
+        if (strncmp(*math, "\\end{align}", 11) == 0) {
+            *math += 11;
+            break;
+        }
+        
+        // Create an equation row element
+        Element* eq_row = create_math_element(input, "equation");
+        if (!eq_row) {
+            printf("ERROR: Failed to create align row element\n");
+            return ITEM_ERROR;
+        }
+        
+        // Parse left side of alignment
+        Item left_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (left_expr == ITEM_ERROR) {
+            printf("ERROR: Failed to parse left side of align equation %d\n", eq_count + 1);
+            return ITEM_ERROR;
+        }
+        
+        if (left_expr != ITEM_NULL) {
+            list_push((List*)eq_row, left_expr);
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Check for alignment point &
+        if (**math == '&') {
+            (*math)++; // skip &
+            skip_math_whitespace(math);
+            
+            // Parse right side of alignment
+            Item right_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (right_expr == ITEM_ERROR) {
+                printf("ERROR: Failed to parse right side of align equation %d\n", eq_count + 1);
+                return ITEM_ERROR;
+            }
+            
+            if (right_expr != ITEM_NULL) {
+                list_push((List*)eq_row, right_expr);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Check for row separator \\
+        if (strncmp(*math, "\\\\", 2) == 0) {
+            (*math) += 2; // skip \\
+        }
+        
+        // Add the equation row to align element
+        ((TypeElmt*)eq_row->type)->content_length = ((List*)eq_row)->length;
+        list_push((List*)align_element, (Item)eq_row);
+        eq_count++;
+        
+        skip_math_whitespace(math);
+    }
+    
+    // Add equation count as attribute
+    char eq_str[16];
+    snprintf(eq_str, sizeof(eq_str), "%d", eq_count);
+    add_attribute_to_element(input, align_element, "equations", eq_str);
+    
+    ((TypeElmt*)align_element->type)->content_length = ((List*)align_element)->length;
+    return (Item)align_element;
+}
+
+// Parse LaTeX aligned environment: \begin{aligned} ... \end{aligned}
+static Item parse_latex_aligned(Input *input, const char **math) {
+    // Expected format: \begin{aligned} expr1 &= expr2 \\ expr3 &= expr4 \\ ... \end{aligned}
+    // Similar to align but typically used inside other environments and not numbered
+    
+    skip_math_whitespace(math);
+    
+    // Check if this is a full environment: \begin{aligned}
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        // Skip \begin{aligned}
+        if (strncmp(*math, "\\begin{aligned}", 15) != 0) {
+            printf("ERROR: Expected \\begin{aligned} for aligned environment\n");
+            return ITEM_ERROR;
+        }
+        *math += 15;
+    } else {
+        printf("ERROR: Expected \\begin{aligned} for aligned environment\n");
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Create the aligned element
+    Element* aligned_element = create_math_element(input, "expr");
+    if (!aligned_element) {
+        printf("ERROR: Failed to create aligned element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, aligned_element, "op", "aligned");
+    add_attribute_to_element(input, aligned_element, "env", "true");
+    add_attribute_to_element(input, aligned_element, "numbered", "false");
+    
+    // Parse alignment rows (separated by \\)
+    int eq_count = 0;
+    
+    while (**math) {
+        skip_math_whitespace(math);
+        
+        // Check for end of environment
+        if (strncmp(*math, "\\end{aligned}", 13) == 0) {
+            *math += 13;
+            break;
+        }
+        
+        // Create an equation row element
+        Element* eq_row = create_math_element(input, "equation");
+        if (!eq_row) {
+            printf("ERROR: Failed to create aligned row element\n");
+            return ITEM_ERROR;
+        }
+        
+        // Parse left side of alignment
+        Item left_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (left_expr == ITEM_ERROR) {
+            printf("ERROR: Failed to parse left side of aligned equation %d\n", eq_count + 1);
+            return ITEM_ERROR;
+        }
+        
+        if (left_expr != ITEM_NULL) {
+            list_push((List*)eq_row, left_expr);
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Check for alignment point &
+        if (**math == '&') {
+            (*math)++; // skip &
+            skip_math_whitespace(math);
+            
+            // Parse right side of alignment
+            Item right_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (right_expr == ITEM_ERROR) {
+                printf("ERROR: Failed to parse right side of aligned equation %d\n", eq_count + 1);
+                return ITEM_ERROR;
+            }
+            
+            if (right_expr != ITEM_NULL) {
+                list_push((List*)eq_row, right_expr);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Check for row separator \\
+        if (strncmp(*math, "\\\\", 2) == 0) {
+            (*math) += 2; // skip \\
+        }
+        
+        // Add the equation row to aligned element
+        ((TypeElmt*)eq_row->type)->content_length = ((List*)eq_row)->length;
+        list_push((List*)aligned_element, (Item)eq_row);
+        eq_count++;
+        
+        skip_math_whitespace(math);
+    }
+    
+    // Add equation count as attribute
+    char eq_str[16];
+    snprintf(eq_str, sizeof(eq_str), "%d", eq_count);
+    add_attribute_to_element(input, aligned_element, "equations", eq_str);
+    
+    ((TypeElmt*)aligned_element->type)->content_length = ((List*)aligned_element)->length;
+    return (Item)aligned_element;
+}
+
+// Parse LaTeX gather environment: \begin{gather} ... \end{gather}
+static Item parse_latex_gather(Input *input, const char **math) {
+    // Expected format: \begin{gather} expr1 \\ expr2 \\ ... \end{gather}
+    // Center-aligned equations, each numbered
+    
+    skip_math_whitespace(math);
+    
+    // Check if this is a full environment: \begin{gather}
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        // Skip \begin{gather}
+        if (strncmp(*math, "\\begin{gather}", 14) != 0) {
+            printf("ERROR: Expected \\begin{gather} for gather environment\n");
+            return ITEM_ERROR;
+        }
+        *math += 14;
+    } else {
+        printf("ERROR: Expected \\begin{gather} for gather environment\n");
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Create the gather element
+    Element* gather_element = create_math_element(input, "expr");
+    if (!gather_element) {
+        printf("ERROR: Failed to create gather element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, gather_element, "op", "gather");
+    add_attribute_to_element(input, gather_element, "env", "true");
+    add_attribute_to_element(input, gather_element, "numbered", "true");
+    add_attribute_to_element(input, gather_element, "alignment", "center");
+    
+    // Parse equations (separated by \\)
+    int eq_count = 0;
+    
+    while (**math) {
+        skip_math_whitespace(math);
+        
+        // Check for end of environment
+        if (strncmp(*math, "\\end{gather}", 12) == 0) {
+            *math += 12;
+            break;
+        }
+        
+        // Create an equation element
+        Element* eq_element = create_math_element(input, "equation");
+        if (!eq_element) {
+            printf("ERROR: Failed to create gather equation element\n");
+            return ITEM_ERROR;
+        }
+        
+        // Parse the equation content
+        Item eq_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (eq_expr == ITEM_ERROR) {
+            printf("ERROR: Failed to parse gather equation %d\n", eq_count + 1);
+            return ITEM_ERROR;
+        }
+        
+        if (eq_expr != ITEM_NULL) {
+            list_push((List*)eq_element, eq_expr);
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Check for row separator \\
+        if (strncmp(*math, "\\\\", 2) == 0) {
+            (*math) += 2; // skip \\
+        }
+        
+        // Add the equation to gather element
+        ((TypeElmt*)eq_element->type)->content_length = ((List*)eq_element)->length;
+        list_push((List*)gather_element, (Item)eq_element);
+        eq_count++;
+        
+        skip_math_whitespace(math);
+    }
+    
+    // Add equation count as attribute
+    char eq_str[16];
+    snprintf(eq_str, sizeof(eq_str), "%d", eq_count);
+    add_attribute_to_element(input, gather_element, "equations", eq_str);
+    
+    ((TypeElmt*)gather_element->type)->content_length = ((List*)gather_element)->length;
+    return (Item)gather_element;
 }
 
 static MathFlavor get_math_flavor(const char* flavor_str) {
