@@ -11,11 +11,34 @@ RADIANT_CONFIG = build_radiant_config.json
 BUILD_DIR = build
 BUILD_DEBUG_DIR = build_debug
 BUILD_WINDOWS_DIR = build_windows
+TYPESET_DIR = typeset
 
 # Output executables
 LAMBDA_EXE = lambda.exe
 RADIANT_EXE = radiant.exe
 WINDOW_EXE = window.exe
+
+# Typesetting system sources
+TYPESET_SOURCES = \
+    $(TYPESET_DIR)/typeset.c \
+    $(TYPESET_DIR)/view/view_tree.c \
+    $(TYPESET_DIR)/document/document.c \
+    $(TYPESET_DIR)/document/page.c \
+    $(TYPESET_DIR)/style/font.c \
+    $(TYPESET_DIR)/style/style.c \
+    $(TYPESET_DIR)/layout/layout.c \
+    $(TYPESET_DIR)/math/math_layout.c \
+    $(TYPESET_DIR)/math/math_metrics.c \
+    $(TYPESET_DIR)/output/renderer.c \
+    $(TYPESET_DIR)/output/html_renderer.c \
+    $(TYPESET_DIR)/output/svg_renderer.c \
+    $(TYPESET_DIR)/output/pdf_renderer.c \
+    $(TYPESET_DIR)/output/tex_renderer.c \
+    $(TYPESET_DIR)/output/png_renderer.c \
+    $(TYPESET_DIR)/serialization/lambda_serializer.c \
+    $(TYPESET_DIR)/serialization/markdown_serializer.c \
+    $(TYPESET_DIR)/integration/lambda_bridge.c \
+    $(TYPESET_DIR)/integration/stylesheet.c
 
 # Auto-detect number of jobs for parallel compilation
 NPROCS := 1
@@ -233,6 +256,27 @@ test-integration:
 		echo "Integration test script not found at test/test_integration.sh"; \
 		exit 1; \
 	fi
+
+# Typesetting system testing
+test-typeset: build
+	@echo "Testing typesetting system..."
+	./$(LAMBDA_EXE) test/lambda/typeset/test_typesetting.ls
+
+test-typeset-math: build
+	@echo "Testing mathematical typesetting..."
+	./$(LAMBDA_EXE) -c "math_expr = input('test_simple_math.ls', 'math'); pages = typeset(math_expr); output('test_math_output.svg', pages[0].svg_content, 'svg'); print('Math typesetting complete')"
+
+test-typeset-markdown: build
+	@echo "Testing Markdown typesetting..."
+	./$(LAMBDA_EXE) -c "md_content = input('README.md', 'markdown'); pages = typeset(md_content); output('readme_typeset.svg', pages[0].svg_content, 'svg'); print('Markdown typesetting complete')"
+
+test-typeset-refined: build
+	@echo "Testing refined typesetting system (view tree architecture)..."
+	./$(LAMBDA_EXE) test/lambda/typeset/test_refined_typesetting.ls
+
+test-typeset-all: build
+	@echo "Running all typesetting tests..."
+	./$(LAMBDA_EXE) test/lambda/typeset/run_all_tests.ls
 
 test-all:
 	@echo "Running complete test suite (all test types)..."
