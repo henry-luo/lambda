@@ -554,6 +554,8 @@ static Item parse_css_color(Input *input, const char **css) {
             String* color_str = strbuf_to_string(sb);
             return color_str ? s2it(color_str) : ITEM_ERROR;
         }
+        // Clear buffer even on error path
+        strbuf_to_string(sb);
         return ITEM_ERROR;
     }
     
@@ -736,9 +738,9 @@ static Array* parse_css_value_list(Input *input, const char **css) {
     Array* values = array_pooled(input->pool);
     if (!values) return NULL;
     
-    while (**css) {
+    while (**css && **css != ';' && **css != '}' && **css != '!') {
         skip_css_comments(css);
-        if (!**css) break;
+        if (!**css || **css == ';' || **css == '}' || **css == '!') break;
         
         Item value = parse_css_value(input, css);
         if (value != ITEM_ERROR) {
