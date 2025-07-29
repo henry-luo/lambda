@@ -27,6 +27,7 @@ void parse_ics(Input* input, const char* ics_string);
 void parse_textile(Input* input, const char* textile_string);
 void parse_mark(Input* input, const char* mark_string);
 void parse_css(Input* input, const char* css_string);
+void parse_css(Input* input, const char* css_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
 
 
