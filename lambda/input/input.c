@@ -105,7 +105,7 @@ void map_put(Map* mp, String* key, LambdaItem value, Input *input) {
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
-    case LMD_TYPE_STRING:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = (String*)value.pointer;
         ((String*)value.pointer)->ref_cnt++;
         break;
@@ -181,7 +181,7 @@ void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* poo
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
-    case LMD_TYPE_STRING:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = (String*)value.pointer;
         ((String*)value.pointer)->ref_cnt++;
         break;
@@ -391,8 +391,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     // Create key string
     String* key = input_create_string(input, attr_name);
     if (!key) return;
-    LambdaItem lambda_value = (LambdaItem)attr_value;
-    elmt_put(element, key, lambda_value, input->pool);
+    elmt_put(element, key, (LambdaItem)attr_value, input->pool);
 }
 
 Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {

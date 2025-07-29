@@ -1,0 +1,1540 @@
+/* CSS Grammar Complete Coverage Test Stylesheet */
+
+/* Global values everywhere */
+.global-values {
+    display: initial;
+    width: inherit;
+    height: unset;
+    color: revert;
+}
+
+/* ----- Units Coverage ----- */
+.units-coverage {
+    /* Relative units */
+    width: 10em;
+    height: 5ex;
+    margin: 2cap 1ch 3ic 4rem;
+    padding: 1lh 2rlh 3vw 4vh;
+    font-size: 5vi;
+    line-height: 2vb;
+    border-width: 1vmin 2vmax;
+    
+    /* Absolute units */
+    top: 10cm;
+    right: 5mm;
+    bottom: 1Q;
+    left: 72pt;
+    margin-top: 6pc;
+    margin-right: 100px;
+    
+    /* Angles */
+    transform: rotate(45deg);
+    transform: rotate(0.5turn);
+    transform: rotate(1.57rad);
+    transform: rotate(50grad);
+    
+    /* Time */
+    transition-duration: 0.3s;
+    animation-delay: 500ms;
+    
+    /* Frequency */
+    /* Note: These are rarely used in CSS but part of spec */
+    
+    /* Resolution (for media queries mainly) */
+    /* Used in @media rules */
+}
+
+/* ----- Display Property Coverage ----- */
+.display-outside {
+    display: block;
+    display: inline;
+    display: run-in;
+}
+
+.display-inside {
+    display: flow;
+    display: flow-root;
+    display: table;
+    display: flex;
+    display: grid;
+    display: ruby;
+}
+
+.display-listitem {
+    display: list-item;
+    display: block list-item;
+    display: inline flow-root list-item;
+}
+
+.display-internal {
+    display: table-row-group;
+    display: table-header-group;
+    display: table-footer-group;
+    display: table-row;
+    display: table-cell;
+    display: table-column-group;
+    display: table-column;
+    display: table-caption;
+    display: ruby-base;
+    display: ruby-text;
+    display: ruby-base-container;
+    display: ruby-text-container;
+}
+
+.display-box {
+    display: contents;
+    display: none;
+}
+
+.display-legacy {
+    display: inline-block;
+    display: inline-table;
+    display: inline-flex;
+    display: inline-grid;
+}
+
+/* ----- Box Model Properties ----- */
+.box-model {
+    box-sizing: content-box;
+    box-sizing: border-box;
+    
+    /* Width and height */
+    width: auto;
+    width: 100px;
+    width: 50%;
+    width: min-content;
+    width: max-content;
+    
+    height: auto;
+    height: 200px;
+    height: 75%;
+    
+    min-width: auto;
+    min-width: 50px;
+    max-width: none;
+    max-width: 500px;
+    
+    min-height: auto;
+    min-height: 100px;
+    max-height: none;
+    max-height: 300px;
+    
+    /* Margins */
+    margin: 10px;
+    margin: 10px 20px;
+    margin: 10px 20px 30px;
+    margin: 10px 20px 30px 40px;
+    margin: auto;
+    margin-top: 5px;
+    margin-right: auto;
+    margin-bottom: 15px;
+    margin-left: 10%;
+    
+    /* Padding */
+    padding: 5px;
+    padding: 5px 10px;
+    padding: 5px 10px 15px;
+    padding: 5px 10px 15px 20px;
+    padding-top: 8px;
+    padding-right: 12px;
+    padding-bottom: 16px;
+    padding-left: 4px;
+}
+
+/* ----- Border Properties ----- */
+.borders {
+    /* Basic borders */
+    border: 1px solid black;
+    border: thin dotted red;
+    border: medium dashed blue;
+    border: thick double green;
+    
+    border-top: 2px solid #ff0000;
+    border-right: 1px dashed #00ff00;
+    border-bottom: 3px dotted #0000ff;
+    border-left: 2px groove #ffff00;
+    
+    /* Border styles */
+    border-style: none;
+    border-style: hidden;
+    border-style: dotted;
+    border-style: dashed;
+    border-style: solid;
+    border-style: double;
+    border-style: groove;
+    border-style: ridge;
+    border-style: inset;
+    border-style: outset;
+    
+    /* Border widths */
+    border-width: thin;
+    border-width: medium;
+    border-width: thick;
+    border-width: 5px;
+    
+    /* Border colors */
+    border-color: red;
+    border-top-color: #ff0000;
+    border-right-color: rgb(0, 255, 0);
+    border-bottom-color: hsl(240, 100%, 50%);
+    border-left-color: currentcolor;
+}
+
+/* ----- CSS3 Border Properties ----- */
+.border-radius {
+    border-radius: 10px;
+    border-radius: 10px 20px;
+    border-radius: 10px 20px 30px;
+    border-radius: 10px 20px 30px 40px;
+    border-radius: 50% / 25%;
+    
+    border-top-left-radius: 5px;
+    border-top-right-radius: 10px 15px;
+    border-bottom-right-radius: 8px;
+    border-bottom-left-radius: 12px 6px;
+}
+
+.border-image {
+    border-image-source: url("border.png");
+    border-image-source: none;
+    
+    border-image-slice: 30;
+    border-image-slice: 30 40;
+    border-image-slice: 30 40 50;
+    border-image-slice: 30 40 50 60;
+    border-image-slice: 30% fill;
+    
+    border-image-width: 1;
+    border-image-width: 10px;
+    border-image-width: 20%;
+    border-image-width: auto;
+    border-image-width: 1 2 3 4;
+    
+    border-image-outset: 0;
+    border-image-outset: 5px;
+    border-image-outset: 2;
+    border-image-outset: 1 2;
+    
+    border-image-repeat: stretch;
+    border-image-repeat: repeat;
+    border-image-repeat: round;
+    border-image-repeat: space;
+    border-image-repeat: stretch repeat;
+    
+    border-image: url("border.svg") 30 round;
+}
+
+/* ----- Colors ----- */
+.colors {
+    /* Named colors */
+    color: red;
+    color: blue;
+    color: transparent;
+    color: aliceblue;
+    color: antiquewhite;
+    color: rebeccapurple;
+    
+    /* Hex colors */
+    color: #f00;
+    color: #ff0000;
+    color: #ff000080;
+    
+    /* RGB/RGBA */
+    color: rgb(255, 0, 0);
+    color: rgb(100%, 0%, 0%);
+    color: rgba(255, 0, 0, 0.5);
+    color: rgba(100%, 0%, 0%, 50%);
+    color: rgb(255 0 0);
+    color: rgb(255 0 0 / 0.5);
+    color: rgb(none 0 0);
+    
+    /* HSL/HSLA */
+    color: hsl(0, 100%, 50%);
+    color: hsl(0deg, 100%, 50%);
+    color: hsl(0turn, 100%, 50%);
+    color: hsla(0, 100%, 50%, 0.5);
+    color: hsl(0 100% 50%);
+    color: hsl(0 100% 50% / 0.5);
+    color: hsl(none 100% 50%);
+    
+    /* HWB */
+    color: hwb(0 0% 0%);
+    color: hwb(0deg 20% 30%);
+    color: hwb(0 20% 30% / 0.5);
+    color: hwb(none 20% 30%);
+    
+    /* LAB/LCH */
+    color: lab(50% 0 0);
+    color: lab(50% 20 -30);
+    color: lab(50% 20 -30 / 0.8);
+    color: lab(none 20 -30);
+    
+    color: lch(50% 0 0);
+    color: lch(50% 50 180deg);
+    color: lch(50% 50 0.5turn / 0.8);
+    color: lch(none 50 180deg);
+    
+    /* OKLAB/OKLCH */
+    color: oklab(0.5 0 0);
+    color: oklab(0.7 0.2 -0.1);
+    color: oklab(0.7 0.2 -0.1 / 0.8);
+    color: oklab(none 0.2 -0.1);
+    
+    color: oklch(0.5 0 0);
+    color: oklch(0.7 0.2 180deg);
+    color: oklch(0.7 0.2 0.5turn / 0.8);
+    color: oklch(none 0.2 180deg);
+    
+    /* System colors */
+    color: Canvas;
+    color: CanvasText;
+    color: LinkText;
+    color: VisitedText;
+    color: ActiveText;
+    color: ButtonFace;
+    color: ButtonText;
+    color: AccentColor;
+    
+    /* Special values */
+    color: currentcolor;
+}
+
+/* ----- Background Properties ----- */
+.backgrounds {
+    background-color: red;
+    background-color: transparent;
+    
+    background-image: none;
+    background-image: url("image.jpg");
+    background-image: linear-gradient(to right, red, blue);
+    background-image: url("bg1.png"), url("bg2.jpg");
+    
+    background-size: auto;
+    background-size: cover;
+    background-size: contain;
+    background-size: 100px;
+    background-size: 100px 200px;
+    background-size: 50% 75%;
+    background-size: auto 100px;
+    
+    background-repeat: repeat;
+    background-repeat: repeat-x;
+    background-repeat: repeat-y;
+    background-repeat: no-repeat;
+    background-repeat: space;
+    background-repeat: round;
+    background-repeat: repeat no-repeat;
+    
+    background-attachment: scroll;
+    background-attachment: fixed;
+    background-attachment: local;
+    
+    background-origin: border-box;
+    background-origin: padding-box;
+    background-origin: content-box;
+    
+    background-clip: border-box;
+    background-clip: padding-box;
+    background-clip: content-box;
+    background-clip: text;
+    
+    background-position: left;
+    background-position: center;
+    background-position: right;
+    background-position: top;
+    background-position: bottom;
+    background-position: left top;
+    background-position: center center;
+    background-position: right bottom;
+    background-position: 50% 50%;
+    background-position: 10px 20px;
+    background-position: left 10px top 20px;
+}
+
+/* ----- Typography ----- */
+.typography {
+    /* Font family */
+    font-family: serif;
+    font-family: sans-serif;
+    font-family: "Verdana HAHA";
+    font-family: cursive;
+    font-family: Helvetica;
+    font-family: Arial, "Times New Roman", serif;
+    
+    /* Font weight */
+    font-weight: normal;
+    font-weight: bold;
+    font-weight: bolder;
+    font-weight: lighter;
+    font-weight: 100;
+    font-weight: 400;
+    font-weight: 700;
+    font-weight: 900;
+    
+    /* Font style */
+    font-style: normal;
+    font-style: italic;
+    font-style: oblique;
+    font-style: oblique 15deg;
+    font-style: oblique -15deg;
+    
+    /* Font size */
+    font-size: xx-small;
+    font-size: x-small;
+    font-size: small;
+    font-size: medium;
+    font-size: large;
+    font-size: x-large;
+    font-size: xx-large;
+    font-size: xxx-large;
+    font-size: larger;
+    font-size: smaller;
+    font-size: 16px;
+    font-size: 1.2em;
+    font-size: 120%;
+    font-size: math;
+    
+    /* Font stretch */
+    font-stretch: normal;
+    font-stretch: ultra-condensed;
+    font-stretch: extra-condensed;
+    font-stretch: condensed;
+    font-stretch: semi-condensed;
+    font-stretch: semi-expanded;
+    font-stretch: expanded;
+    font-stretch: extra-expanded;
+    font-stretch: ultra-expanded;
+    font-stretch: 50%;
+    font-stretch: 150%;
+    
+    /* Line height */
+    line-height: normal;
+    line-height: 1.5;
+    line-height: 24px;
+    line-height: 150%;
+    
+    /* Text properties */
+    text-align: start;
+    text-align: end;
+    text-align: left;
+    text-align: right;
+    text-align: center;
+    text-align: justify;
+    text-align: match-parent;
+    text-align: justify-all;
+    
+    text-align-all: start;
+    text-align-all: justify;
+    
+    text-align-last: auto;
+    text-align-last: start;
+    text-align-last: center;
+    text-align-last: justify;
+    
+    text-justify: auto;
+    text-justify: none;
+    text-justify: inter-word;
+    text-justify: inter-character;
+    
+    text-indent: 2em;
+    text-indent: 10px hanging;
+    text-indent: 5% each-line;
+    text-indent: 1em hanging each-line;
+    
+    text-transform: none;
+    text-transform: capitalize;
+    text-transform: uppercase;
+    text-transform: lowercase;
+    text-transform: full-width;
+    text-transform: full-size-kana;
+    text-transform: capitalize full-width;
+    
+    white-space: normal;
+    white-space: pre;
+    white-space: nowrap;
+    white-space: pre-wrap;
+    white-space: break-spaces;
+    white-space: pre-line;
+    
+    word-break: normal;
+    word-break: keep-all;
+    word-break: break-all;
+    word-break: break-word;
+    
+    word-spacing: normal;
+    word-spacing: 2px;
+    word-spacing: 0.5em;
+    
+    letter-spacing: normal;
+    letter-spacing: 1px;
+    letter-spacing: 0.1em;
+    
+    tab-size: 4;
+    tab-size: 8;
+    tab-size: 2em;
+    
+    line-break: auto;
+    line-break: loose;
+    line-break: normal;
+    line-break: strict;
+    line-break: anywhere;
+    
+    hyphens: none;
+    hyphens: manual;
+    hyphens: auto;
+    
+    overflow-wrap: normal;
+    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
+    
+    word-wrap: normal;
+    word-wrap: break-word;
+    
+    hanging-punctuation: none;
+    hanging-punctuation: first;
+    hanging-punctuation: force-end;
+    hanging-punctuation: allow-end;
+    hanging-punctuation: last;
+    hanging-punctuation: first force-end;
+    hanging-punctuation: first allow-end last;
+}
+
+/* ----- Positioning ----- */
+.positioning {
+    position: static;
+    position: relative;
+    position: absolute;
+    position: sticky;
+    position: fixed;
+    
+    top: auto;
+    top: 10px;
+    top: 5%;
+    
+    right: auto;
+    right: 20px;
+    right: 10%;
+    
+    bottom: auto;
+    bottom: 15px;
+    bottom: 8%;
+    
+    left: auto;
+    left: 25px;
+    left: 12%;
+    
+    inset-block-start: 5px;
+    inset-inline-start: 10px;
+    inset-block-end: 15px;
+    inset-inline-end: 20px;
+    
+    z-index: auto;
+    z-index: 1;
+    z-index: -1;
+    z-index: 9999;
+}
+
+/* ----- Visibility and Order ----- */
+.visibility-order {
+    visibility: visible;
+    visibility: hidden;
+    visibility: collapse;
+    
+    order: 0;
+    order: 1;
+    order: -1;
+    order: 99;
+}
+
+/* ----- Overflow ----- */
+.overflow {
+    overflow-x: visible;
+    overflow-x: hidden;
+    overflow-x: clip;
+    overflow-x: scroll;
+    overflow-x: auto;
+    
+    overflow-y: visible;
+    overflow-y: hidden;
+    overflow-y: scroll;
+    overflow-y: auto;
+    
+    overflow-block: visible;
+    overflow-block: hidden;
+    
+    overflow-inline: visible;
+    overflow-inline: scroll;
+    
+    text-overflow: clip;
+    text-overflow: ellipsis;
+    text-overflow: "...";
+    text-overflow: clip ellipsis;
+}
+
+/* ----- Float and Clear ----- */
+.float-clear {
+    float: left;
+    float: right;
+    float: none;
+    float: inline-start;
+    float: inline-end;
+    float: block-start;
+    float: block-end;
+    float: top;
+    float: bottom;
+    float: snap-block;
+    float: snap-inline;
+    
+    clear: none;
+    clear: left;
+    clear: right;
+    clear: both;
+    clear: inline-start;
+    clear: inline-end;
+    clear: block-start;
+    clear: block-end;
+    clear: top;
+    clear: bottom;
+    
+    float-defer: none;
+    float-defer: last;
+    float-defer: 2;
+    
+    float-offset: 10px;
+    float-offset: 5%;
+    
+    wrap-flow: auto;
+    wrap-flow: both;
+    wrap-flow: start;
+    wrap-flow: end;
+    wrap-flow: minimum;
+    wrap-flow: maximum;
+    wrap-flow: clear;
+    
+    wrap-through: wrap;
+    wrap-through: none;
+}
+
+/* ----- Flexbox Properties ----- */
+.flexbox-container {
+    display: flex;
+    
+    flex-direction: row;
+    flex-direction: row-reverse;
+    flex-direction: column;
+    flex-direction: column-reverse;
+    
+    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    flex-wrap: wrap-reverse;
+    
+    flex-flow: row nowrap;
+    flex-flow: column wrap;
+    flex-flow: row-reverse wrap-reverse;
+    
+    justify-content: flex-start;
+    justify-content: flex-end;
+    justify-content: center;
+    justify-content: space-between;
+    justify-content: space-around;
+    
+    align-items: flex-start;
+    align-items: flex-end;
+    align-items: center;
+    align-items: baseline;
+    align-items: stretch;
+    
+    align-content: flex-start;
+    align-content: flex-end;
+    align-content: center;
+    align-content: space-between;
+    align-content: space-around;
+    align-content: stretch;
+}
+
+.flexbox-item {
+    flex: none;
+    flex: 1;
+    flex: 2 1;
+    flex: 1 1 auto;
+    flex: 0 1 200px;
+    
+    flex-grow: 0;
+    flex-grow: 1;
+    flex-grow: 2.5;
+    
+    flex-shrink: 1;
+    flex-shrink: 0;
+    flex-shrink: 0.5;
+    
+    flex-basis: auto;
+    flex-basis: content;
+    flex-basis: 200px;
+    flex-basis: 20%;
+    
+    align-self: auto;
+    align-self: flex-start;
+    align-self: flex-end;
+    align-self: center;
+    align-self: baseline;
+    align-self: stretch;
+}
+
+/* ----- Vertical Alignment ----- */
+.vertical-align {
+    dominant-baseline: auto;
+    dominant-baseline: text-bottom;
+    dominant-baseline: alphabetic;
+    dominant-baseline: ideographic;
+    dominant-baseline: middle;
+    dominant-baseline: central;
+    dominant-baseline: mathematical;
+    dominant-baseline: hanging;
+    dominant-baseline: text-top;
+    
+    vertical-align: baseline;
+    vertical-align: sub;
+    vertical-align: super;
+    vertical-align: text-top;
+    vertical-align: text-bottom;
+    vertical-align: middle;
+    vertical-align: top;
+    vertical-align: bottom;
+    vertical-align: 10px;
+    vertical-align: 2em;
+    vertical-align: 20%;
+    vertical-align: first baseline;
+    vertical-align: last alphabetic;
+    
+    alignment-baseline: baseline;
+    alignment-baseline: text-bottom;
+    alignment-baseline: alphabetic;
+    alignment-baseline: ideographic;
+    alignment-baseline: middle;
+    alignment-baseline: central;
+    alignment-baseline: mathematical;
+    alignment-baseline: text-top;
+    
+    baseline-shift: baseline;
+    baseline-shift: sub;
+    baseline-shift: super;
+    baseline-shift: top;
+    baseline-shift: center;
+    baseline-shift: bottom;
+    baseline-shift: 2px;
+    baseline-shift: 10%;
+    
+    baseline-source: auto;
+    baseline-source: first;
+    baseline-source: last;
+}
+
+/* ----- Direction and Writing Mode ----- */
+.direction-writing {
+    direction: ltr;
+    direction: rtl;
+    
+    unicode-bidi: normal;
+    unicode-bidi: embed;
+    unicode-bidi: isolate;
+    unicode-bidi: bidi-override;
+    unicode-bidi: isolate-override;
+    unicode-bidi: plaintext;
+    
+    writing-mode: horizontal-tb;
+    writing-mode: vertical-rl;
+    writing-mode: vertical-lr;
+    writing-mode: sideways-rl;
+    writing-mode: sideways-lr;
+    
+    text-orientation: mixed;
+    text-orientation: upright;
+    text-orientation: sideways;
+    
+    text-combine-upright: none;
+    text-combine-upright: all;
+    text-combine-upright: digits;
+    text-combine-upright: digits 2;
+    text-combine-upright: digits 4;
+}
+
+/* ----- Text Decoration ----- */
+.text-decoration {
+    text-decoration-line: none;
+    text-decoration-line: underline;
+    text-decoration-line: overline;
+    text-decoration-line: line-through;
+    text-decoration-line: blink;
+    text-decoration-line: underline overline;
+    text-decoration-line: underline line-through;
+    
+    text-decoration-style: solid;
+    text-decoration-style: double;
+    text-decoration-style: dotted;
+    text-decoration-style: dashed;
+    text-decoration-style: wavy;
+    
+    text-decoration-color: red;
+    text-decoration-color: #ff0000;
+    text-decoration-color: currentcolor;
+    
+    text-decoration: underline;
+    text-decoration: overline wavy red;
+    text-decoration: line-through solid blue;
+    text-decoration: underline dotted;
+    
+    text-decoration-thickness: auto;
+    text-decoration-thickness: from-font;
+    text-decoration-thickness: 2px;
+    text-decoration-thickness: 0.1em;
+    text-decoration-thickness: 10%;
+}
+
+/* ----- Box Shadow ----- */
+.box-shadow {
+    box-shadow: none;
+    box-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    box-shadow: inset 0 1px 2px #ccc;
+    box-shadow: 0 0 10px red;
+    box-shadow: 2px 2px 4px red, -2px -2px 4px blue;
+    box-shadow: inset 2px 2px 4px rgba(0,0,0,0.1), 0 4px 8px rgba(0,0,0,0.2);
+}
+
+/* ----- Text Shadow ----- */
+.text-shadow {
+    text-shadow: none;
+    text-shadow: 1px 1px 2px black;
+    text-shadow: 0 0 5px red;
+    text-shadow: 2px 2px black;
+    text-shadow: 1px 1px 2px red, 0 0 5px blue;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5), -1px -1px 2px white;
+}
+
+/* ----- Text Emphasis ----- */
+.text-emphasis {
+    text-emphasis-style: none;
+    text-emphasis-style: filled;
+    text-emphasis-style: open;
+    text-emphasis-style: dot;
+    text-emphasis-style: circle;
+    text-emphasis-style: double-circle;
+    text-emphasis-style: triangle;
+    text-emphasis-style: sesame;
+    text-emphasis-style: filled dot;
+    text-emphasis-style: open circle;
+    text-emphasis-style: "★";
+    
+    text-emphasis-color: red;
+    text-emphasis-color: #ff0000;
+    text-emphasis-color: currentcolor;
+    
+    text-emphasis-position: over right;
+    text-emphasis-position: under left;
+    text-emphasis-position: over left;
+    text-emphasis-position: under right;
+    
+    text-emphasis: filled dot red;
+    text-emphasis: open circle;
+    text-emphasis: "★" blue;
+}
+
+/* ----- Multi-column Layout ----- */
+.multi-column {
+    column-width: auto;
+    column-width: 200px;
+    column-width: 15em;
+    
+    column-count: auto;
+    column-count: 2;
+    column-count: 3;
+    
+    columns: auto;
+    columns: 200px;
+    columns: 3;
+    columns: 200px 3;
+    columns: auto 2;
+    
+    column-gap: normal;
+    column-gap: 20px;
+    column-gap: 2em;
+    column-gap: 5%;
+    
+    column-rule-style: none;
+    column-rule-style: solid;
+    column-rule-style: dotted;
+    column-rule-style: dashed;
+    
+    column-rule-width: thin;
+    column-rule-width: medium;
+    column-rule-width: thick;
+    column-rule-width: 2px;
+    
+    column-rule-color: red;
+    column-rule-color: #ccc;
+    column-rule-color: currentcolor;
+    
+    column-rule: thin solid red;
+    column-rule: 2px dotted blue;
+    column-rule: thick dashed;
+    
+    column-span: none;
+    column-span: all;
+    
+    column-fill: auto;
+    column-fill: balance;
+    column-fill: balance-all;
+}
+
+/* ----- Transform Properties ----- */
+.transforms {
+    transform: none;
+    transform: translateX(50px);
+    transform: translateY(100px);
+    transform: translate(50px, 100px);
+    transform: translateZ(25px);
+    transform: translate3d(50px, 100px, 25px);
+    transform: scaleX(1.5);
+    transform: scaleY(0.8);
+    transform: scale(1.2);
+    transform: scaleZ(2);
+    transform: scale3d(1.2, 0.8, 2);
+    transform: rotate(45deg);
+    transform: rotateX(30deg);
+    transform: rotateY(60deg);
+    transform: rotateZ(90deg);
+    transform: rotate3d(1, 1, 1, 45deg);
+    transform: skew(30deg, 20deg);
+    transform: skewX(15deg);
+    transform: skewY(-10deg);
+    transform: matrix(1, 0, 0, 1, 50, 100);
+    transform: matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 50, 100, 0, 1);
+    transform: perspective(1000px);
+    transform: translate(50px, 50px) rotate(45deg) scale(1.2);
+    
+    transform-origin: center;
+    transform-origin: top;
+    transform-origin: bottom;
+    transform-origin: left;
+    transform-origin: right;
+    transform-origin: top left;
+    transform-origin: center center;
+    transform-origin: 50% 25%;
+    transform-origin: 10px 20px;
+    transform-origin: 50% 25% 100px;
+    transform-origin: left center 50px;
+    
+    transform-style: flat;
+    transform-style: preserve-3d;
+    
+    perspective: none;
+    perspective: 500px;
+    perspective: 1000px;
+    
+    perspective-origin: center;
+    perspective-origin: top;
+    perspective-origin: bottom;
+    perspective-origin: left;
+    perspective-origin: right;
+    perspective-origin: top left;
+    perspective-origin: 25% 75%;
+    perspective-origin: 50px 100px;
+}
+
+/* ----- Transitions ----- */
+.transitions {
+    transition-property: none;
+    transition-property: all;
+    transition-property: opacity;
+    transition-property: transform;
+    transition-property: opacity, transform;
+    transition-property: width, height, background-color;
+    
+    transition-duration: 0s;
+    transition-duration: 0.3s;
+    transition-duration: 500ms;
+    transition-duration: 0.3s, 0.5s;
+    transition-duration: 200ms, 300ms, 400ms;
+    
+    transition-timing-function: ease;
+    transition-timing-function: linear;
+    transition-timing-function: ease-in;
+    transition-timing-function: ease-out;
+    transition-timing-function: ease-in-out;
+    transition-timing-function: step-start;
+    transition-timing-function: step-end;
+    transition-timing-function: steps(4);
+    transition-timing-function: steps(10, start);
+    transition-timing-function: steps(6, end);
+    transition-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+    transition-timing-function: cubic-bezier(0.42, 0, 1, 1);
+    
+    transition-delay: 0s;
+    transition-delay: 0.1s;
+    transition-delay: 100ms;
+    transition-delay: 0.1s, 0.2s;
+    transition-delay: 50ms, 100ms, 150ms;
+    
+    transition: all 0.3s ease;
+    transition: opacity 0.5s linear;
+    transition: transform 0.2s ease-in-out 0.1s;
+    transition: width 1s cubic-bezier(0.25, 0.1, 0.25, 1);
+    transition: opacity 0.3s ease, transform 0.5s ease-in-out;
+    transition: all 0.3s, opacity 0.5s linear 0.2s;
+}
+
+/* ----- Animations ----- */
+.animations {
+    animation-name: none;
+    animation-name: fadeIn;
+    animation-name: slideUp;
+    animation-name: fadeIn, slideUp;
+    animation-name: bounce, rotate, scale;
+    
+    animation-duration: 0s;
+    animation-duration: 1s;
+    animation-duration: 500ms;
+    animation-duration: 1s, 2s;
+    animation-duration: 300ms, 500ms, 700ms;
+    
+    animation-timing-function: ease;
+    animation-timing-function: linear;
+    animation-timing-function: ease-in-out;
+    animation-timing-function: steps(4);
+    animation-timing-function: cubic-bezier(0.25, 0.1, 0.25, 1);
+    animation-timing-function: ease, linear, ease-in-out;
+    
+    animation-iteration-count: 1;
+    animation-iteration-count: 3;
+    animation-iteration-count: infinite;
+    animation-iteration-count: 2.5;
+    animation-iteration-count: 1, infinite;
+    animation-iteration-count: 2, 3, infinite;
+    
+    animation-direction: normal;
+    animation-direction: reverse;
+    animation-direction: alternate;
+    animation-direction: alternate-reverse;
+    
+    animation-play-state: running;
+    animation-play-state: paused;
+    
+    animation-delay: 0s;
+    animation-delay: 0.5s;
+    animation-delay: 200ms;
+    animation-delay: 0.1s, 0.3s;
+    animation-delay: 100ms, 200ms, 300ms;
+    
+    animation-fill-mode: none;
+    animation-fill-mode: forwards;
+    animation-fill-mode: backwards;
+    animation-fill-mode: both;
+    
+    animation: fadeIn 1s ease-in-out;
+    animation: slideUp 0.5s linear infinite;
+    animation: bounce 1.5s ease-in-out 3 alternate;
+    animation: rotate 2s linear infinite, fadeIn 1s ease-out forwards;
+    animation: spin 1s steps(8) infinite, fadeIn 0.5s ease-in-out both 0.2s;
+}
+
+/* ----- List Properties ----- */
+.lists {
+    list-style-type: disc;
+    list-style-type: circle;
+    list-style-type: square;
+    list-style-type: decimal;
+    list-style-type: decimal-leading-zero;
+    list-style-type: lower-roman;
+    list-style-type: upper-roman;
+    list-style-type: lower-greek;
+    list-style-type: lower-latin;
+    list-style-type: upper-latin;
+    list-style-type: armenian;
+    list-style-type: georgian;
+    list-style-type: none;
+    list-style-type: "→ ";
+    
+    list-style-position: inside;
+    list-style-position: outside;
+    
+    list-style-image: none;
+    list-style-image: url("bullet.png");
+    
+    list-style: disc;
+    list-style: circle inside;
+    list-style: square outside url("bullet.svg");
+    list-style: decimal inside;
+    list-style: none;
+}
+
+/* ----- Table Properties ----- */
+.table {
+    border-collapse: collapse;
+    border-collapse: separate;
+    
+    border-spacing: 5px;
+    border-spacing: 3px 8px;
+    border-spacing: 0;
+    
+    caption-side: top;
+    caption-side: bottom;
+    
+    empty-cells: show;
+    empty-cells: hide;
+    
+    table-layout: auto;
+    table-layout: fixed;
+}
+
+/* ----- User Interface Properties ----- */
+.user-interface {
+    resize: none;
+    resize: both;
+    resize: horizontal;
+    resize: vertical;
+    resize: block;
+    resize: inline;
+    
+    cursor: auto;
+    cursor: default;
+    cursor: none;
+    cursor: context-menu;
+    cursor: help;
+    cursor: pointer;
+    cursor: progress;
+    cursor: wait;
+    cursor: cell;
+    cursor: crosshair;
+    cursor: text;
+    cursor: vertical-text;
+    cursor: alias;
+    cursor: copy;
+    cursor: move;
+    cursor: no-drop;
+    cursor: not-allowed;
+    cursor: e-resize;
+    cursor: n-resize;
+    cursor: ne-resize;
+    cursor: nw-resize;
+    cursor: s-resize;
+    cursor: se-resize;
+    cursor: sw-resize;
+    cursor: w-resize;
+    cursor: ew-resize;
+    cursor: ns-resize;
+    cursor: nesw-resize;
+    cursor: nwse-resize;
+    cursor: col-resize;
+    cursor: row-resize;
+    cursor: all-scroll;
+    cursor: zoom-in;
+    cursor: zoom-out;
+    cursor: grab;
+    cursor: grabbing;
+    
+    caret-color: auto;
+    caret-color: red;
+    caret-color: transparent;
+    caret-color: currentcolor;
+    
+    nav-index: auto;
+    nav-index: 1;
+    nav-index: 10;
+    
+    nav-up: auto;
+    nav-up: #next current;
+    nav-up: #previous root;
+    
+    nav-right: auto;
+    nav-right: #sidebar;
+    
+    nav-down: auto;
+    nav-down: #footer current;
+    
+    nav-left: auto;
+    nav-left: #menu root;
+}
+
+/* ----- Paged Media Properties ----- */
+.paged-media {
+    page-break-before: auto;
+    page-break-before: always;
+    page-break-before: avoid;
+    page-break-before: left;
+    page-break-before: right;
+    
+    page-break-after: auto;
+    page-break-after: always;
+    page-break-after: avoid;
+    page-break-after: left;
+    page-break-after: right;
+    
+    page-break-inside: auto;
+    page-break-inside: avoid;
+    
+    orphans: 2;
+    orphans: 3;
+    orphans: 1;
+    
+    widows: 2;
+    widows: 3;
+    widows: 1;
+    
+    image-orientation: none;
+    image-orientation: from-image;
+    image-orientation: 90deg;
+    image-orientation: from-image 180deg;
+    image-orientation: 270deg;
+}
+
+/* ----- Generated Content ----- */
+.generated-content {
+    content: normal;
+    content: none;
+    content: "Hello";
+    content: url("icon.png");
+    content: counter(section);
+    content: attr(title);
+    content: open-quote;
+    content: close-quote;
+    content: no-open-quote;
+    content: no-close-quote;
+    content: "Chapter " counter(chapter) ": ";
+    content: attr(data-label) " - " counter(item);
+    content: open-quote attr(title) close-quote;
+    
+    quotes: none;
+    quotes: "«" "»";
+    quotes: "'" "'";
+    quotes: "«" "»" "‹" "›";
+    quotes: "\"" "\"" "'" "'";
+    
+    counter-reset: none;
+    counter-reset: chapter;
+    counter-reset: section 1;
+    counter-reset: chapter 0 section 1;
+    counter-reset: item -5;
+    
+    counter-increment: none;
+    counter-increment: chapter;
+    counter-increment: section 1;
+    counter-increment: chapter 1 section 1;
+    counter-increment: item -1;
+    
+    marker-offset: auto;
+    marker-offset: 5px;
+    marker-offset: 1em;
+}
+
+/* ----- Miscellaneous Properties ----- */
+.miscellaneous {
+    appearance: none;
+    appearance: auto;
+    appearance: button;
+    appearance: textfield;
+    
+    backface-visibility: visible;
+    backface-visibility: hidden;
+    
+    user-select: auto;
+    user-select: text;
+    user-select: none;
+    user-select: contain;
+    user-select: all;
+    
+    break-before: auto;
+    break-before: avoid;
+    break-before: avoid-page;
+    break-before: page;
+    break-before: left;
+    break-before: right;
+    break-before: recto;
+    break-before: verso;
+    break-before: avoid-column;
+    break-before: column;
+    break-before: avoid-region;
+    break-before: region;
+    
+    break-after: auto;
+    break-after: avoid;
+    break-after: page;
+    break-after: column;
+    break-after: region;
+    
+    break-inside: auto;
+    break-inside: avoid;
+    break-inside: avoid-page;
+    break-inside: avoid-column;
+    break-inside: avoid-region;
+    
+    isolation: auto;
+    isolation: isolate;
+    
+    mix-blend-mode: normal;
+    mix-blend-mode: multiply;
+    mix-blend-mode: screen;
+    mix-blend-mode: overlay;
+    mix-blend-mode: darken;
+    mix-blend-mode: lighten;
+    mix-blend-mode: color-dodge;
+    mix-blend-mode: color-burn;
+    mix-blend-mode: hard-light;
+    mix-blend-mode: soft-light;
+    mix-blend-mode: difference;
+    mix-blend-mode: exclusion;
+    mix-blend-mode: hue;
+    mix-blend-mode: saturation;
+    mix-blend-mode: color;
+    mix-blend-mode: luminosity;
+    
+    object-fit: fill;
+    object-fit: contain;
+    object-fit: cover;
+    object-fit: none;
+    object-fit: scale-down;
+    
+    object-position: center;
+    object-position: top;
+    object-position: left bottom;
+    object-position: 50% 75%;
+    object-position: 10px 20px;
+    
+    image-rendering: auto;
+    image-rendering: smooth;
+    image-rendering: high-quality;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+    
+    mask-type: luminance;
+    mask-type: alpha;
+}
+
+/* ----- Filter Effects ----- */
+.filters {
+    filter: none;
+    filter: blur(5px);
+    filter: brightness(0.8);
+    filter: brightness(150%);
+    filter: contrast(1.2);
+    filter: contrast(120%);
+    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
+    filter: drop-shadow(0 0 10px red);
+    filter: grayscale(100%);
+    filter: grayscale(0.5);
+    filter: hue-rotate(90deg);
+    filter: hue-rotate(0.25turn);
+    filter: invert(75%);
+    filter: invert(1);
+    filter: opacity(50%);
+    filter: opacity(0.3);
+    filter: saturate(200%);
+    filter: saturate(0.5);
+    filter: sepia(60%);
+    filter: sepia(1);
+    
+    /* Multiple filters */
+    filter: blur(2px) brightness(0.9);
+    filter: contrast(120%) saturate(150%);
+    filter: blur(1px) brightness(1.1) contrast(1.2) saturate(1.3);
+    filter: grayscale(50%) sepia(25%) hue-rotate(45deg);
+}
+
+/* ----- Overflow Properties ----- */
+.overflow-properties {
+    overflow-clip-margin: border-box;
+    overflow-clip-margin: padding-box;
+    overflow-clip-margin: content-box;
+    overflow-clip-margin: 10px;
+    
+    text-overflow: clip;
+    text-overflow: ellipsis;
+    text-overflow: "…";
+    text-overflow: clip ellipsis;
+    text-overflow: ">" "<";
+    
+    overflow-wrap: normal;
+    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
+}
+
+/* ----- Pointer Events ----- */
+.pointer-events {
+    pointer-events: auto;
+    pointer-events: none;
+    pointer-events: visiblePainted;
+    pointer-events: visibleFill;
+    pointer-events: visibleStroke;
+    pointer-events: visible;
+    pointer-events: painted;
+    pointer-events: fill;
+    pointer-events: stroke;
+    pointer-events: all;
+}
+
+/* ----- Scrolling Properties ----- */
+.scrolling {
+    scroll-behavior: auto;
+    scroll-behavior: smooth;
+    
+    overscroll-behavior: auto;
+    overscroll-behavior: contain;
+    overscroll-behavior: none;
+    overscroll-behavior: auto contain;
+    overscroll-behavior: none auto;
+    
+    scroll-snap-type: none;
+    scroll-snap-type: x mandatory;
+    scroll-snap-type: y proximity;
+    scroll-snap-type: block mandatory;
+    scroll-snap-type: inline proximity;
+    scroll-snap-type: both mandatory;
+    
+    scroll-snap-align: none;
+    scroll-snap-align: start;
+    scroll-snap-align: end;
+    scroll-snap-align: center;
+    scroll-snap-align: start end;
+    scroll-snap-align: center center;
+    
+    scroll-margin: 10px;
+    scroll-margin: 5px 10px;
+    scroll-margin: 5px 10px 15px;
+    scroll-margin: 5px 10px 15px 20px;
+    
+    scroll-padding: auto;
+    scroll-padding: 10px;
+    scroll-padding: 5px 10px;
+    scroll-padding: 5px auto 15px;
+    scroll-padding: 5px 10px auto 20px;
+}
+
+/* ----- Ruby Annotation ----- */
+.ruby {
+    ruby-align: start;
+    ruby-align: center;
+    ruby-align: space-between;
+    ruby-align: space-around;
+    
+    ruby-position: over;
+    ruby-position: under;
+    ruby-position: inter-character;
+}
+
+/* ----- Outline Properties ----- */
+.outline {
+    outline-style: none;
+    outline-style: hidden;
+    outline-style: dotted;
+    outline-style: dashed;
+    outline-style: solid;
+    outline-style: double;
+    outline-style: groove;
+    outline-style: ridge;
+    outline-style: inset;
+    outline-style: outset;
+    
+    outline-width: thin;
+    outline-width: medium;
+    outline-width: thick;
+    outline-width: 2px;
+    outline-width: 0.1em;
+    
+    outline-color: red;
+    outline-color: #ff0000;
+    outline-color: invert;
+    outline-color: currentcolor;
+    
+    outline: thin dotted red;
+    outline: 2px solid blue;
+    outline: thick dashed;
+    outline: medium double green;
+    
+    outline-offset: 0;
+    outline-offset: 2px;
+    outline-offset: -1px;
+    outline-offset: 0.5em;
+}
+
+/* At-rules coverage */
+@font-face {
+    font-family: "CustomFont";
+    src: url("font.woff2") format("woff2"),
+         url("font.woff") format("woff");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+@keyframes fadeIn {
+    0% { opacity: 0; transform: translateY(-20px); }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideRight {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+}
+
+@media screen and (max-width: 768px) {
+    .responsive {
+        font-size: 14px;
+        margin: 10px;
+    }
+}
+
+@media print {
+    .no-print {
+        display: none;
+    }
+}
+
+@media (orientation: landscape) and (min-width: 1024px) {
+    .landscape {
+        width: 100%;
+    }
+}
+
+@supports (display: grid) {
+    .grid-supported {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@supports (backdrop-filter: blur(10px)) {
+    .backdrop-blur {
+        backdrop-filter: blur(10px);
+    }
+}
+
+@supports not (display: flex) {
+    .no-flex {
+        display: table;
+    }
+}
+
+@supports (display: flex) and (backdrop-filter: blur(10px)) {
+    .modern-browser {
+        display: flex;
+        backdrop-filter: blur(5px);
+    }
+}
+
+/* Custom properties */
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --font-size-base: 1rem;
+    --border-radius: 4px;
+    --box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    --gradient: linear-gradient(45deg, red, blue);
+}
+
+.css-variables {
+    color: var(--primary-color);
+    background: var(--secondary-color, #ccc);
+    font-size: var(--font-size-base);
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    background-image: var(--gradient);
+}

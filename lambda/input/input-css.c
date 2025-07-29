@@ -19,6 +19,8 @@ static Item parse_css_url(Input *input, const char **css);
 static Item parse_css_number(Input *input, const char **css);
 static Item parse_css_identifier(Input *input, const char **css);
 static Array* parse_css_value_list(Input *input, const char **css);
+static Array* parse_css_function_params(Input *input, const char **css);
+static Item flatten_single_array(Array* arr);
 
 static void skip_css_whitespace(const char **css) {
     while (**css && (**css == ' ' || **css == '\n' || **css == '\r' || **css == '\t')) {
@@ -169,10 +171,64 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                 input_add_attribute_item_to_element(input, at_rule, "rules", (Item)nested_rules);
             }
         } else {
-            // Other at-rules contain declarations
-            Array* declarations = parse_css_declarations(input, css);
-            if (declarations) {
-                input_add_attribute_item_to_element(input, at_rule, "declarations", (Item)declarations);
+            // Other at-rules contain declarations - parse them directly as properties
+            while (**css && **css != '}') {
+                skip_css_comments(css);
+                if (**css == '}') break;
+                
+                // Parse property name
+                StrBuf* sb = input->sb;
+                strbuf_reset(sb);
+                
+                while (**css && **css != ':' && **css != ';' && **css != '}') {
+                    strbuf_append_char(sb, **css);
+                    (*css)++;
+                }
+                
+                String* property_str = strbuf_to_string(sb);
+                if (!property_str) {
+                    // Skip to next declaration
+                    while (**css && **css != ';' && **css != '}') (*css)++;
+                    if (**css == ';') (*css)++;
+                    continue;
+                }
+                
+                char* property_trimmed = input_trim_whitespace(property_str->chars);
+                if (!property_trimmed || strlen(property_trimmed) == 0) {
+                    if (property_trimmed) free(property_trimmed);
+                    // Skip to next declaration
+                    while (**css && **css != ';' && **css != '}') (*css)++;
+                    if (**css == ';') (*css)++;
+                    continue;
+                }
+                
+                skip_css_comments(css);
+                
+                if (**css == ':') {
+                    (*css)++; // Skip colon
+                    skip_css_comments(css);
+                    
+                // Parse value list
+                Array* values = parse_css_value_list(input, css);
+                if (values) {
+                    // Flatten single property value array
+                    Item values_item = flatten_single_array(values);
+                    input_add_attribute_item_to_element(input, at_rule, property_trimmed, values_item);
+                }                    // Check for !important
+                    skip_css_comments(css);
+                    if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
+                        *css += 10;
+                        // Could add importance as property_name + "_important" if needed
+                    }
+                }
+                
+                free(property_trimmed);
+                
+                skip_css_comments(css);
+                if (**css == ';') {
+                    (*css)++; // Skip semicolon
+                    skip_css_comments(css);
+                }
             }
         }
         
@@ -194,7 +250,9 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
     // Parse selectors
     Array* selectors = parse_css_selectors(input, css);
     if (selectors) {
-        input_add_attribute_item_to_element(input, rule, "selectors", (Item)selectors);
+        // Flatten single selector array
+        Item selectors_item = flatten_single_array(selectors);
+        input_add_attribute_item_to_element(input, rule, "selectors", selectors_item);
     }
     
     skip_css_comments(css);
@@ -202,10 +260,66 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
     if (**css == '{') {
         (*css)++; // Skip opening brace
         
-        // Parse declarations
-        Array* declarations = parse_css_declarations(input, css);
-        if (declarations) {
-            input_add_attribute_item_to_element(input, rule, "declarations", (Item)declarations);
+        // Parse declarations and add them directly as properties of the rule
+        while (**css && **css != '}') {
+            skip_css_comments(css);
+            if (**css == '}') break;
+            
+            // Parse property name
+            StrBuf* sb = input->sb;
+            strbuf_reset(sb);
+            
+            while (**css && **css != ':' && **css != ';' && **css != '}') {
+                strbuf_append_char(sb, **css);
+                (*css)++;
+            }
+            
+            String* property_str = strbuf_to_string(sb);
+            if (!property_str) {
+                // Skip to next declaration
+                while (**css && **css != ';' && **css != '}') (*css)++;
+                if (**css == ';') (*css)++;
+                continue;
+            }
+            
+            char* property_trimmed = input_trim_whitespace(property_str->chars);
+            if (!property_trimmed || strlen(property_trimmed) == 0) {
+                if (property_trimmed) free(property_trimmed);
+                // Skip to next declaration
+                while (**css && **css != ';' && **css != '}') (*css)++;
+                if (**css == ';') (*css)++;
+                continue;
+            }
+            
+            skip_css_comments(css);
+            
+            if (**css == ':') {
+                (*css)++; // Skip colon
+                skip_css_comments(css);
+                
+                // Parse value list
+                Array* values = parse_css_value_list(input, css);
+                if (values) {
+                    // Flatten single property value array
+                    Item values_item = flatten_single_array(values);
+                    input_add_attribute_item_to_element(input, rule, property_trimmed, values_item);
+                }
+                
+                // Check for !important (for now, we'll ignore it in the flattened structure)
+                skip_css_comments(css);
+                if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
+                    *css += 10;
+                    // Could add importance as property_name + "_important" if needed
+                }
+            }
+            
+            free(property_trimmed);
+            
+            skip_css_comments(css);
+            if (**css == ';') {
+                (*css)++; // Skip semicolon
+                skip_css_comments(css);
+            }
         }
         
         skip_css_comments(css);
@@ -544,6 +658,7 @@ static Item parse_css_identifier(Input *input, const char **css) {
     if (!is_css_identifier_start(**css)) return ITEM_ERROR;
     
     StrBuf* sb = input->sb;
+    strbuf_reset(sb); // Reset the string buffer before use
     
     while (is_css_identifier_char(**css)) {
         strbuf_append_char(sb, **css);
@@ -551,7 +666,13 @@ static Item parse_css_identifier(Input *input, const char **css) {
     }
     
     String* id_str = strbuf_to_string(sb);
-    return id_str ? s2it(id_str) : ITEM_ERROR;
+    if (!id_str) {
+        return ITEM_ERROR;
+    }
+    
+    // Convert CSS keyword values to Lambda symbols using y2it()
+    // CSS identifiers like 'flex', 'red', etc. should be symbols, not strings
+    return y2it(id_str);
 }
 
 static Array* parse_css_function_params(Input *input, const char **css) {
@@ -583,6 +704,22 @@ static Array* parse_css_function_params(Input *input, const char **css) {
     return params;
 }
 
+// Helper function to flatten single-element arrays
+static Item flatten_single_array(Array* arr) {
+    if (!arr) {
+        return ITEM_ERROR;
+    }
+    
+    if (arr->length != 1) {
+        // Return array as-is if not single element
+        return (Item)arr;
+    }
+    
+    // For single-element arrays, return the single item directly
+    // Use array_get to safely access the item
+    return list_get((List*)arr, 0);
+}
+
 static Item parse_css_function(Input *input, const char **css) {
     // Parse function name
     if (!is_css_identifier_start(**css)) return ITEM_ERROR;
@@ -595,9 +732,9 @@ static Item parse_css_function(Input *input, const char **css) {
     
     skip_css_comments(css);
     if (**css != '(') {
-        // Not a function, treat as identifier
+        // Not a function, treat as identifier (symbol)
         String* id_str = strbuf_to_string(sb);
-        return id_str ? s2it(id_str) : ITEM_ERROR;
+        return id_str ? y2it(id_str) : ITEM_ERROR;
     }
     
     String* func_name = strbuf_to_string(sb);

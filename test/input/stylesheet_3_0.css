@@ -1,0 +1,554 @@
+/* CSS Level 3 Comprehensive Test */
+
+/* CSS3 Selectors */
+/* Attribute selectors */
+input[type="text"] { border: 1px solid #ccc; }
+input[type^="text"] { background: #f9f9f9; }
+input[type$="box"] { padding: 5px; }
+input[type*="search"] { border-radius: 20px; }
+
+/* Pseudo-classes */
+:nth-child(odd) { background: #f0f0f0; }
+:nth-child(2n+1) { color: #333; }
+:nth-of-type(3) { font-weight: bold; }
+:first-of-type { margin-top: 0; }
+:last-of-type { margin-bottom: 0; }
+:only-child { text-align: center; }
+:not(.exclude) { display: block; }
+:target { background: yellow; }
+:enabled { cursor: pointer; }
+:disabled { opacity: 0.5; }
+:checked { background: green; }
+
+/* Pseudo-elements */
+::before { content: "→ "; }
+::after { content: " ←"; }
+::first-line { font-weight: bold; }
+::first-letter { font-size: 2em; float: left; }
+::selection { background: #007bff; color: white; }
+
+/* CSS3 Box Model */
+.box-sizing {
+    box-sizing: border-box;
+    box-sizing: content-box;
+    box-sizing: padding-box;
+}
+
+/* CSS3 Backgrounds */
+.backgrounds {
+    /* Multiple backgrounds */
+    background: url("bg1.png") no-repeat top left,
+                url("bg2.jpg") repeat-x bottom,
+                linear-gradient(to bottom, #fff, #eee);
+    
+    /* Background size */
+    background-size: cover, contain, 100% 50%;
+    background-size: auto, 200px 100px;
+    
+    /* Background origin and clip */
+    background-origin: padding-box, border-box, content-box;
+    background-clip: border-box, padding-box, content-box;
+    
+    /* Background attachment */
+    background-attachment: fixed, scroll, local;
+}
+
+/* CSS3 Borders */
+.borders {
+    /* Border radius */
+    border-radius: 10px;
+    border-radius: 10px 20px;
+    border-radius: 5px 10px 15px 20px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 12px;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 14px;
+    
+    /* Border images */
+    border-image: url("border.png") 30 round;
+    border-image-source: url("border.svg");
+    border-image-slice: 30 fill;
+    border-image-width: 1;
+    border-image-outset: 0;
+    border-image-repeat: stretch, repeat, round, space;
+    
+    /* Box shadow */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    box-shadow: inset 0 1px 2px #ccc, 0 4px 8px rgba(0,0,0,0.2);
+    box-shadow: 2px 2px 4px red, -2px -2px 4px blue;
+}
+
+/* CSS3 Colors */
+.colors {
+    /* RGBA */
+    color: rgba(255, 0, 0, 0.5);
+    background: rgba(0, 255, 0, 0.8);
+    
+    /* HSLA */
+    border-color: hsla(240, 100%, 50%, 0.7);
+    box-shadow: 0 0 10px hsla(120, 80%, 40%, 0.6);
+    
+    /* Opacity */
+    opacity: 0.75;
+}
+
+/* CSS3 Text Effects */
+.text-effects {
+    /* Text shadow */
+    text-shadow: 1px 1px 2px #000;
+    text-shadow: 0 0 5px red, 2px 2px 3px blue;
+    
+    /* Text overflow */
+    text-overflow: ellipsis;
+    text-overflow: clip;
+    
+    /* Word wrap */
+    word-wrap: break-word;
+    word-wrap: normal;
+    
+    /* White space */
+    white-space: nowrap;
+    white-space: pre-wrap;
+    white-space: pre-line;
+}
+
+/* CSS3 Fonts */
+@font-face {
+    font-family: "CustomFont";
+    src: url("font.woff2") format("woff2"),
+         url("font.woff") format("woff"),
+         url("font.ttf") format("truetype");
+    font-weight: normal;
+    font-style: normal;
+    font-display: swap;
+}
+
+.fonts {
+    font-family: "CustomFont", Arial, sans-serif;
+    font-size: 1.2rem;
+    font-weight: 300;
+    font-stretch: condensed;
+    font-variant: small-caps;
+}
+
+/* CSS3 Transforms */
+.transforms {
+    /* 2D Transforms */
+    transform: translate(50px, 100px);
+    transform: translateX(20px);
+    transform: translateY(-30px);
+    transform: scale(1.5);
+    transform: scaleX(2);
+    transform: scaleY(0.5);
+    transform: rotate(45deg);
+    transform: skew(30deg, 20deg);
+    transform: skewX(15deg);
+    transform: skewY(-10deg);
+    transform: matrix(1, 0, 0, 1, 50, 100);
+    
+    /* Combined transforms */
+    transform: translate(50px, 50px) rotate(45deg) scale(1.2);
+    
+    /* Transform origin */
+    transform-origin: center;
+    transform-origin: top left;
+    transform-origin: 50% 25%;
+    transform-origin: 10px 20px;
+    
+    /* 3D Transforms */
+    transform: translate3d(10px, 20px, 30px);
+    transform: translateZ(50px);
+    transform: scale3d(1.2, 1.5, 0.8);
+    transform: scaleZ(2);
+    transform: rotate3d(1, 1, 1, 45deg);
+    transform: rotateX(30deg);
+    transform: rotateY(60deg);
+    transform: rotateZ(90deg);
+    transform: perspective(1000px);
+    
+    /* Transform style */
+    transform-style: preserve-3d;
+    transform-style: flat;
+    
+    /* Perspective */
+    perspective: 500px;
+    perspective-origin: center;
+    perspective-origin: 25% 75%;
+    
+    /* Backface visibility */
+    backface-visibility: visible;
+    backface-visibility: hidden;
+}
+
+/* CSS3 Transitions */
+.transitions {
+    transition: all 0.3s ease;
+    transition: opacity 0.5s linear;
+    transition: transform 0.2s ease-in-out;
+    transition: width 1s cubic-bezier(0.25, 0.1, 0.25, 1);
+    
+    /* Multiple transitions */
+    transition: opacity 0.3s ease, transform 0.5s ease-in-out, color 0.2s linear;
+    
+    /* Individual properties */
+    transition-property: opacity, transform;
+    transition-duration: 0.3s, 0.5s;
+    transition-timing-function: ease, ease-in-out;
+    transition-delay: 0s, 0.1s;
+}
+
+/* CSS3 Animations */
+@keyframes fadeIn {
+    0% { opacity: 0; transform: translateY(-20px); }
+    50% { opacity: 0.5; transform: translateY(-10px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+    40% { transform: translateY(-30px); }
+    60% { transform: translateY(-15px); }
+}
+
+.animations {
+    animation: fadeIn 1s ease-in-out;
+    animation: spin 2s linear infinite;
+    animation: bounce 1.5s ease-in-out infinite alternate;
+    
+    /* Multiple animations */
+    animation: fadeIn 1s ease-in-out, spin 2s linear infinite;
+    
+    /* Individual properties */
+    animation-name: fadeIn;
+    animation-duration: 2s;
+    animation-timing-function: ease-in-out;
+    animation-delay: 0.5s;
+    animation-iteration-count: infinite;
+    animation-iteration-count: 3;
+    animation-direction: normal;
+    animation-direction: reverse;
+    animation-direction: alternate;
+    animation-direction: alternate-reverse;
+    animation-fill-mode: none;
+    animation-fill-mode: forwards;
+    animation-fill-mode: backwards;
+    animation-fill-mode: both;
+    animation-play-state: running;
+    animation-play-state: paused;
+}
+
+/* CSS3 Layout: Flexbox */
+.flexbox {
+    display: flex;
+    display: inline-flex;
+    
+    /* Flex direction */
+    flex-direction: row;
+    flex-direction: row-reverse;
+    flex-direction: column;
+    flex-direction: column-reverse;
+    
+    /* Flex wrap */
+    flex-wrap: nowrap;
+    flex-wrap: wrap;
+    flex-wrap: wrap-reverse;
+    
+    /* Flex flow (shorthand) */
+    flex-flow: row wrap;
+    flex-flow: column nowrap;
+    
+    /* Justify content */
+    justify-content: flex-start;
+    justify-content: flex-end;
+    justify-content: center;
+    justify-content: space-between;
+    justify-content: space-around;
+    justify-content: space-evenly;
+    
+    /* Align items */
+    align-items: stretch;
+    align-items: flex-start;
+    align-items: flex-end;
+    align-items: center;
+    align-items: baseline;
+    
+    /* Align content */
+    align-content: stretch;
+    align-content: flex-start;
+    align-content: flex-end;
+    align-content: center;
+    align-content: space-between;
+    align-content: space-around;
+}
+
+.flex-item {
+    /* Flex properties */
+    flex: 1;
+    flex: 0 1 auto;
+    flex: 2 0 200px;
+    
+    /* Individual flex properties */
+    flex-grow: 1;
+    flex-shrink: 0;
+    flex-basis: 200px;
+    flex-basis: auto;
+    flex-basis: content;
+    
+    /* Align self */
+    align-self: auto;
+    align-self: flex-start;
+    align-self: flex-end;
+    align-self: center;
+    align-self: baseline;
+    align-self: stretch;
+    
+    /* Order */
+    order: 0;
+    order: 1;
+    order: -1;
+}
+
+/* CSS3 Layout: Grid (CSS Grid Level 1, part of CSS3 era) */
+.grid {
+    display: grid;
+    display: inline-grid;
+    
+    /* Grid template */
+    grid-template-columns: 1fr 2fr 1fr;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 100px auto 50px;
+    grid-template-columns: minmax(100px, 1fr) 200px;
+    
+    grid-template-rows: 100px 1fr 50px;
+    grid-template-rows: repeat(auto-fit, minmax(100px, 1fr));
+    
+    /* Grid gap */
+    grid-gap: 10px;
+    grid-gap: 10px 20px;
+    grid-column-gap: 15px;
+    grid-row-gap: 25px;
+    
+    /* Grid areas */
+    grid-template-areas: 
+        "header header header"
+        "sidebar main main"
+        "footer footer footer";
+}
+
+.grid-item {
+    /* Grid placement */
+    grid-column: 1 / 3;
+    grid-column: span 2;
+    grid-row: 2 / 4;
+    grid-row: span 1;
+    
+    /* Grid area */
+    grid-area: header;
+    grid-area: 1 / 2 / 3 / 4;
+    
+    /* Individual placement */
+    grid-column-start: 1;
+    grid-column-end: 3;
+    grid-row-start: 2;
+    grid-row-end: span 2;
+}
+
+/* CSS3 Multi-column Layout */
+.columns {
+    column-count: 3;
+    column-width: 200px;
+    columns: 3 200px;
+    
+    column-gap: 30px;
+    column-rule: 2px solid #ccc;
+    column-rule-width: 1px;
+    column-rule-style: dotted;
+    column-rule-color: #999;
+    
+    column-fill: auto;
+    column-fill: balance;
+    
+    column-span: all;
+    column-span: none;
+}
+
+/* CSS3 Media Queries */
+@media screen and (max-width: 768px) {
+    .responsive { font-size: 14px; }
+}
+
+@media print and (min-resolution: 300dpi) {
+    .print-hq { color: black; }
+}
+
+@media (orientation: landscape) {
+    .landscape { width: 100%; }
+}
+
+@media (min-aspect-ratio: 16/9) {
+    .widescreen { background: #000; }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .hover-capable:hover { background: #f0f0f0; }
+}
+
+/* CSS3 Gradients */
+.gradients {
+    /* Linear gradients */
+    background: linear-gradient(to right, red, blue);
+    background: linear-gradient(45deg, #ff0000, #00ff00, #0000ff);
+    background: linear-gradient(to bottom right, rgba(255,0,0,0.5), transparent);
+    
+    /* Radial gradients */
+    background: radial-gradient(circle, red, blue);
+    background: radial-gradient(ellipse at center, #ff0000 0%, #00ff00 50%, #0000ff 100%);
+    background: radial-gradient(closest-side at 30% 40%, red, blue);
+    
+    /* Repeating gradients */
+    background: repeating-linear-gradient(45deg, red 0px, red 10px, blue 10px, blue 20px);
+    background: repeating-radial-gradient(circle, red 0px, red 10px, blue 10px, blue 20px);
+}
+
+/* CSS3 Filters */
+.filters {
+    filter: blur(5px);
+    filter: brightness(0.8);
+    filter: contrast(150%);
+    filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
+    filter: grayscale(100%);
+    filter: hue-rotate(90deg);
+    filter: invert(75%);
+    filter: opacity(50%);
+    filter: saturate(200%);
+    filter: sepia(60%);
+    
+    /* Multiple filters */
+    filter: blur(2px) brightness(0.9) contrast(120%);
+    
+    /* Backdrop filter */
+    backdrop-filter: blur(10px);
+    backdrop-filter: brightness(0.8) saturate(120%);
+}
+
+/* CSS3 Miscellaneous */
+.misc {
+    /* Resize */
+    resize: both;
+    resize: horizontal;
+    resize: vertical;
+    resize: none;
+    
+    /* Overflow */
+    overflow-x: hidden;
+    overflow-y: scroll;
+    overflow: auto;
+    
+    /* Outline */
+    outline: 2px solid red;
+    outline-offset: 4px;
+    
+    /* Cursor */
+    cursor: pointer;
+    cursor: grab;
+    cursor: grabbing;
+    cursor: zoom-in;
+    cursor: zoom-out;
+    
+    /* User select */
+    user-select: none;
+    user-select: text;
+    user-select: all;
+    
+    /* Pointer events */
+    pointer-events: none;
+    pointer-events: auto;
+    
+    /* Tab size */
+    tab-size: 4;
+    tab-size: 2;
+    
+    /* Hyphens */
+    hyphens: auto;
+    hyphens: manual;
+    hyphens: none;
+    
+    /* Text align last */
+    text-align-last: center;
+    text-align-last: justify;
+    
+    /* Writing mode */
+    writing-mode: horizontal-tb;
+    writing-mode: vertical-rl;
+    writing-mode: vertical-lr;
+    
+    /* Text orientation */
+    text-orientation: mixed;
+    text-orientation: upright;
+    text-orientation: sideways;
+}
+
+/* CSS3 Calc() function */
+.calc {
+    width: calc(100% - 20px);
+    height: calc(100vh - 50px);
+    margin: calc(1rem + 5px) auto;
+    font-size: calc(1rem + 2vw);
+    
+    /* Complex calc expressions */
+    padding: calc((100% - 960px) / 2);
+    top: calc(50% - 25px);
+}
+
+/* CSS3 Custom Properties (CSS Variables) */
+:root {
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --font-size-base: 1rem;
+    --border-radius: 4px;
+    --box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.variables {
+    color: var(--primary-color);
+    background: var(--secondary-color, #ccc);
+    font-size: var(--font-size-base);
+    border-radius: var(--border-radius);
+    box-shadow: var(--box-shadow);
+    
+    /* Nested variable usage */
+    border: 2px solid var(--primary-color);
+    padding: calc(var(--font-size-base) * 0.5);
+}
+
+/* CSS3 Feature Queries */
+@supports (display: grid) {
+    .grid-supported {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@supports (backdrop-filter: blur(10px)) {
+    .backdrop-blur {
+        backdrop-filter: blur(10px);
+    }
+}
+
+@supports not (display: flex) {
+    .no-flex {
+        display: table;
+    }
+}
+
+@supports (display: flex) and (backdrop-filter: blur(10px)) {
+    .modern-browser {
+        display: flex;
+        backdrop-filter: blur(5px);
+    }
+}

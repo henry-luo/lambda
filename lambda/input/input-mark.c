@@ -36,6 +36,7 @@ static void skip_comments(const char **mark) {
 static String* parse_string(Input *input, const char **mark) {
     if (**mark != '"') return NULL;
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);  // Reset buffer before use
     
     (*mark)++; // Skip opening quote
     while (**mark && **mark != '"') {
@@ -84,6 +85,7 @@ static String* parse_string(Input *input, const char **mark) {
 static String* parse_symbol(Input *input, const char **mark) {
     if (**mark != '\'') return NULL;
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);  // Reset buffer before use
     
     (*mark)++; // Skip opening quote
     while (**mark && **mark != '\'' && **mark != '\n') {
@@ -106,11 +108,13 @@ static String* parse_symbol(Input *input, const char **mark) {
     if (**mark == '\'') {
         (*mark)++; // skip closing quote
     }
+    
     return strbuf_to_string(sb);
 }
 
 static String* parse_unquoted_identifier(Input *input, const char **mark) {
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);  // Reset buffer before use
     
     // First character must be alpha or underscore
     if (!(**mark >= 'a' && **mark <= 'z') && 
@@ -137,6 +141,7 @@ static Item parse_binary(Input *input, const char **mark) {
     skip_whitespace(mark);
     
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);  // Reset buffer before use
     
     // Check for hex format
     if (**mark == '\\' && *(*mark + 1) == 'x') {
@@ -196,6 +201,7 @@ static Item parse_datetime(Input *input, const char **mark) {
     skip_whitespace(mark);
     
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);  // Reset buffer before use
     
     while (**mark && **mark != '\'') {
         strbuf_append_char(sb, **mark);
@@ -359,22 +365,32 @@ static Element* parse_element(Input *input, const char **mark) {
     skip_comments(mark);
     
     // Parse attributes
-    while (**mark && **mark != '>' && **mark != ';' && **mark != '\n') {
+    while (**mark && **mark != '>') {
         String* attr_name = NULL;
         
-        // Check for spread attribute (&)
-        if (**mark == '&') {
-            (*mark)++;
-            skip_comments(mark);
-            // Parse expression for spread - for now, just parse as value
-            Item spread_value = parse_value(input, mark);
-            // TODO: Handle spread attributes properly
-            skip_comments(mark);
-            if (**mark == ',') {
-                (*mark)++;
-                skip_comments(mark);
+        // Check if this might be content instead of an attribute
+        // If we see a quote, angle bracket, or brace that doesn't look like an attribute
+        if (**mark == '"' || **mark == '<' || **mark == '{' || **mark == '[') {
+            // Look ahead to see if this looks like an attribute or content
+            const char* lookahead = *mark;
+            if (**mark == '"') {
+                // Skip the string to see what comes after
+                lookahead++;
+                while (*lookahead && *lookahead != '"') {
+                    if (*lookahead == '\\') lookahead++; // skip escaped chars
+                    if (*lookahead) lookahead++;
+                }
+                if (*lookahead == '"') lookahead++;
+                skip_whitespace(&lookahead);
+                
+                // If we don't see a colon after the string, treat as content
+                if (*lookahead != ':') {
+                    break; // Start parsing content
+                }
+            } else {
+                // For other content markers, just break to content parsing
+                break;
             }
-            continue;
         }
         
         // Parse attribute name
@@ -404,23 +420,23 @@ static Element* parse_element(Input *input, const char **mark) {
         }
     }
     
-    // Check for content separator (semicolon or newline)
-    if (**mark == ';' || **mark == '\n') {
-        (*mark)++;
+    // Check for content separator (semicolon, newline, or just whitespace)
+    skip_comments(mark);
+    
+    // Parse content - content can be separated by semicolons, newlines, or just whitespace
+    while (**mark && **mark != '>') {
+        Item content_item = parse_content(input, mark);
+        if (content_item != ITEM_ERROR && content_item != ITEM_NULL) {
+            // Add content to element
+            list_push((List*)element, content_item);
+            ((TypeElmt*)element->type)->content_length++;
+        }
         skip_comments(mark);
         
-        // Parse content
-        while (**mark && **mark != '>') {
-            Item content_item = parse_content(input, mark);
-            if (content_item) {
-                // Add content to element - this would need proper implementation
-                // For now, we'll just parse and continue
-            }
+        // Skip optional separators
+        if (**mark == ';' || **mark == '\n') {
+            (*mark)++;
             skip_comments(mark);
-            if (**mark == ';') {
-                (*mark)++;
-                skip_comments(mark);
-            }
         }
     }
     
@@ -456,12 +472,15 @@ static Item parse_value(Input *input, const char **mark) {
         case '"':
             return s2it(parse_string(input, mark));
         case '\'':
-            return s2it(parse_symbol(input, mark));
+            {
+                String* sym = parse_symbol(input, mark);
+                return y2it(sym);
+            }
         case 'b':
             if (*(*mark + 1) == '\'') {
                 return parse_binary(input, mark);
             }
-            return ITEM_ERROR;
+            goto UNQUOTED_IDENTIFIER;
         case 't':
             if (*(*mark + 1) == '\'') {
                 return parse_datetime(input, mark);
@@ -469,13 +488,13 @@ static Item parse_value(Input *input, const char **mark) {
                 *mark += 4;
                 return b2it(true);
             }
-            return ITEM_ERROR;
+            goto UNQUOTED_IDENTIFIER;
         case 'f':
             if (strncmp(*mark, "false", 5) == 0) {
                 *mark += 5;
                 return b2it(false);
             }
-            return ITEM_ERROR;
+            goto UNQUOTED_IDENTIFIER;
         case 'n':
             if (strncmp(*mark, "null", 4) == 0) {
                 *mark += 4;
@@ -484,13 +503,13 @@ static Item parse_value(Input *input, const char **mark) {
                 *mark += 3;
                 return d2it(&(double){NAN});
             }
-            return ITEM_ERROR;
+            goto UNQUOTED_IDENTIFIER;
         case 'i':
             if (strncmp(*mark, "inf", 3) == 0) {
                 *mark += 3;
                 return d2it(&(double){INFINITY});
             }
-            return ITEM_ERROR;
+            goto UNQUOTED_IDENTIFIER;
         case '-':
             if (strncmp(*mark, "-inf", 4) == 0) {
                 *mark += 4;
@@ -503,19 +522,19 @@ static Item parse_value(Input *input, const char **mark) {
         default:
             if ((**mark >= '0' && **mark <= '9') || **mark == '-' || **mark == '+') {
                 return parse_number(input, mark);
-            } else if ((**mark >= 'a' && **mark <= 'z') || 
-                      (**mark >= 'A' && **mark <= 'Z') || 
-                      **mark == '_') {
+            } 
+            else if ((**mark >= 'a' && **mark <= 'z') || 
+                (**mark >= 'A' && **mark <= 'Z') || **mark == '_') {
+                UNQUOTED_IDENTIFIER:
                 // Parse as identifier/symbol
                 String* id = parse_unquoted_identifier(input, mark);
-                return id ? s2it(id) : ITEM_ERROR;
+                return id ? y2it(id) : ITEM_ERROR;
             }
             return ITEM_ERROR;
     }
 }
 
 void parse_mark(Input* input, const char* mark_string) {
-    printf("mark_parse\n");
     input->sb = strbuf_new_pooled(input->pool);
     
     const char* mark = mark_string;
