@@ -1,6 +1,4 @@
 #include "input.h"
-#include <string.h>
-#include <stdlib.h>
 #include <lexbor/url/url.h>
 #include "mime-detect.h"
 
@@ -27,32 +25,16 @@ void parse_ics(Input* input, const char* ics_string);
 void parse_textile(Input* input, const char* textile_string);
 void parse_mark(Input* input, const char* mark_string);
 void parse_css(Input* input, const char* css_string);
-void parse_css(Input* input, const char* css_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
 
-
 String* strbuf_to_string(StrBuf *sb) {
-    if (!sb || !sb->str || sb->length == 0) {
-        return &EMPTY_STRING;
+    String *string = (String*)sb->str;
+    if (string) {
+        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
+        strbuf_full_reset(sb);
+        return string;        
     }
-    
-    // Allocate memory for a new String with the chars array
-    String* string = (String*)pool_calloc(sb->pool, sizeof(String) + sb->length + 1);
-    if (!string) {
-        return &EMPTY_STRING;
-    }
-    
-    // Set up the String structure
-    string->len = sb->length;
-    string->ref_cnt = 0;
-    
-    // Copy the string data from the buffer directly (no offset needed)
-    memcpy(string->chars, sb->str, sb->length);
-    string->chars[sb->length] = '\0'; // Null terminate
-    
-    // Now it's safe to reset the buffer since we copied the data
-    strbuf_full_reset(sb);
-    return string;
+    return &EMPTY_STRING;
 }
 
 ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
@@ -445,6 +427,7 @@ Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd)
     } else {
         effective_type = type->chars;
     }
+    printf("Effective type for input: %s\n", effective_type);
     
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
@@ -454,7 +437,6 @@ Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd)
         str->len = strlen(source);  str->ref_cnt = 0;
         strcpy(str->chars, source);
         input->root = s2it(str);
-        printf("input text: %s\n", str->chars);
     }
     else {
         input = input_new(abs_url);
@@ -534,5 +516,7 @@ Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd)
 }
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
+    printf("input_data at: %s, type: %s, flavor: %s\n", url->chars, 
+        type ? type->chars : "null", flavor ? flavor->chars : "null");
     return input_from_url(url, type, flavor, (lxb_url_t*)ctx->cwd);
 }

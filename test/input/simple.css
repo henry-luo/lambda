@@ -10,7 +10,7 @@ body {
 
 .container {
     max-width: 1200px;
-    margin: 0 auto;
+    margin: 5 auto;
     background: white;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
@@ -22,6 +22,7 @@ body {
     border-radius: 8px;
 }
 
+
 /* Pseudo-classes and !important */
 .button:hover {
     background-color: #0056b3 !important;
@@ -29,17 +30,3 @@ body {
 }
 
 
-
-/* Multiple selectors */
-h1, h2, h3, h4, h5, h6 {
-    color: #333;
-    margin: 0 0 1rem 0;
-    font-weight: 600;
-}
-
-/* Complex CSS functions and values */
-.advanced {
-    background: url("pattern.png") repeat-x,
-                linear-gradient(45deg, rgba(255,0,0,0.5), #00ff00);
-    animation: slideIn 0.3s ease-in-out forwards;
-}
