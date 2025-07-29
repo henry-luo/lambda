@@ -12,13 +12,11 @@ len(stylesheet.rules)
 
 // Access first rule (body element)
 "First rule (body selector):"
-stylesheet.rules[0].selectors[0]
-"First rule declarations count:"
-len(stylesheet.rules[0].declarations)
-"First declaration property:"
-stylesheet.rules[0].declarations[0].property
-"First declaration values:"
-stylesheet.rules[0].declarations[0].values
+stylesheet.rules[0].selectors
+"First rule margin property:"
+stylesheet.rules[0].margin
+"First rule padding property:"
+stylesheet.rules[0].padding
 
 // Show @media at-rule parsing
 "@media rule (index 4):"
@@ -41,7 +39,9 @@ len(stylesheet.rules[5].rules)
 stylesheet.rules[6].selectors
 
 // Show CSS functions are parsed as elements
-"Complex background with functions:"
-stylesheet.rules[7].declarations[0].values
+"Complex background property:"
+stylesheet.rules[7].background
 
+"------------------------------\n"
+stylesheet
 "✅ CSS stylesheet parser test completed!"

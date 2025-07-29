@@ -1,4 +1,6 @@
 #include "input.h"
+#include <string.h>
+#include <stdlib.h>
 #include <lexbor/url/url.h>
 #include "mime-detect.h"
 
@@ -29,13 +31,27 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 
 
 String* strbuf_to_string(StrBuf *sb) {
-    String *string = (String*)sb->str;
-    if (string) {
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;        
+    if (!sb || !sb->str || sb->length == 0) {
+        return &EMPTY_STRING;
     }
-    return &EMPTY_STRING;
+    
+    // Allocate memory for a new String with the chars array
+    String* string = (String*)pool_calloc(sb->pool, sizeof(String) + sb->length + 1);
+    if (!string) {
+        return &EMPTY_STRING;
+    }
+    
+    // Set up the String structure
+    string->len = sb->length;
+    string->ref_cnt = 0;
+    
+    // Copy the string data from the buffer directly (no offset needed)
+    memcpy(string->chars, sb->str, sb->length);
+    string->chars[sb->length] = '\0'; // Null terminate
+    
+    // Now it's safe to reset the buffer since we copied the data
+    strbuf_full_reset(sb);
+    return string;
 }
 
 ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {

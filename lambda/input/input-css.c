@@ -462,6 +462,7 @@ static Item parse_css_string(Input *input, const char **css) {
     if (quote != '"' && quote != '\'') return ITEM_ERROR;
     
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);
     (*css)++; // Skip opening quote
     
     while (**css && **css != quote) {
@@ -531,6 +532,7 @@ static Item parse_css_url(Input *input, const char **css) {
     } else {
         // Unquoted URL
         StrBuf* sb = input->sb;
+        strbuf_reset(sb);
         while (**css && **css != ')' && !(**css == ' ' || **css == '\t' || **css == '\n' || **css == '\r')) {
             if (**css == '\\') {
                 (*css)++;
@@ -563,6 +565,7 @@ static Item parse_css_url(Input *input, const char **css) {
 
 static Item parse_css_color(Input *input, const char **css) {
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);
     
     if (**css == '#') {
         // Hex color
@@ -601,6 +604,7 @@ static Item parse_css_number(Input *input, const char **css) {
 
 static Item parse_css_measure(Input *input, const char **css) {
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);
     const char* start = *css;
     
     // Parse number part
@@ -725,6 +729,7 @@ static Item parse_css_function(Input *input, const char **css) {
     if (!is_css_identifier_start(**css)) return ITEM_ERROR;
     
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);
     while (is_css_identifier_char(**css)) {
         strbuf_append_char(sb, **css);
         (*css)++;
