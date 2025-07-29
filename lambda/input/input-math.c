@@ -1,5 +1,6 @@
 #include "input.h"
 #include "input-common.h"
+#include <string.h>
 
 // math parser for latex math, typst math, and ascii math
 // produces syntax tree of nested <expr op:...> elements
@@ -25,6 +26,8 @@ static Item parse_latex_command(Input *input, const char **math);
 static Item parse_latex_function(Input *input, const char **math, const char* func_name);
 static Item parse_typst_power(Input *input, const char **math, MathFlavor flavor, Item base);
 static Item parse_typst_fraction(Input *input, const char **math, MathFlavor flavor);
+// Forward declarations for function call parsing
+static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name);
 static Item parse_ascii_power(Input *input, const char **math, MathFlavor flavor, Item base);
 static Item parse_math_number(Input *input, const char **math);
 static Item parse_math_identifier(Input *input, const char **math);
@@ -80,7 +83,7 @@ static Item parse_math_number(Input *input, const char **math) {
     return (Item)s2it(num_string);
 }
 
-// parse identifier/variable name
+// parse identifier/variable name as symbol
 static Item parse_math_identifier(Input *input, const char **math) {
     StrBuf* sb = input->sb;
     strbuf_full_reset(sb);
@@ -91,6 +94,7 @@ static Item parse_math_identifier(Input *input, const char **math) {
         (*math)++;
     }
     
+    // Check if we have valid content (same pattern as command parsing)
     if (sb->length <= sizeof(uint32_t)) {
         strbuf_full_reset(sb);
         return ITEM_ERROR;
@@ -98,10 +102,13 @@ static Item parse_math_identifier(Input *input, const char **math) {
     
     String *id_string = (String*)sb->str;
     id_string->len = sb->length - sizeof(uint32_t);
-    id_string->ref_cnt = 0;
-    strbuf_full_reset(sb);
     
-    return (Item)s2it(id_string);
+    // Create symbol from string chars (same as command parsing)
+    Item symbol_item = y2it(id_string);
+    // NOTE: Don't reset sb here - let the calling code manage it
+    // The symbol points to memory in the buffer that shouldn't be freed yet
+    
+    return symbol_item;
 }
 
 // parse latex fraction \frac{numerator}{denominator}
@@ -147,15 +154,12 @@ static Item parse_latex_frac(Input *input, const char **math) {
     (*math)++; // skip }
     
     // create fraction expression element
-    Element* frac_element = create_math_element(input, "expr");
+    Element* frac_element = create_math_element(input, "frac");
     if (!frac_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, frac_element, "op", "frac");
-    
-    // add numerator and denominator as children
+    // add numerator and denominator as children (no op attribute needed)
     list_push((List*)frac_element, numerator);
     list_push((List*)frac_element, denominator);
     
@@ -188,15 +192,12 @@ static Item parse_latex_sqrt(Input *input, const char **math) {
     (*math)++; // skip }
     
     // create sqrt expression element
-    Element* sqrt_element = create_math_element(input, "expr");
+    Element* sqrt_element = create_math_element(input, "sqrt");
     if (!sqrt_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, sqrt_element, "op", "sqrt");
-    
-    // add inner expression as child
+    // add inner expression as child (no op attribute needed)
     list_push((List*)sqrt_element, inner_expr);
     
     // set content length
@@ -231,15 +232,12 @@ static Item parse_latex_superscript(Input *input, const char **math, Item base) 
     }
     
     // create power expression element
-    Element* pow_element = create_math_element(input, "expr");
+    Element* pow_element = create_math_element(input, "pow");
     if (!pow_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, pow_element, "op", "pow");
-    
-    // add base and exponent as children
+    // add base and exponent as children (no op attribute needed)
     list_push((List*)pow_element, base);
     list_push((List*)pow_element, exponent);
     
@@ -275,15 +273,12 @@ static Item parse_latex_subscript(Input *input, const char **math, Item base) {
     }
     
     // create subscript expression element
-    Element* sub_element = create_math_element(input, "expr");
+    Element* sub_element = create_math_element(input, "sub");
     if (!sub_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, sub_element, "op", "sub");
-    
-    // add base and subscript as children
+    // add base and subscript as children (no op attribute needed)
     list_push((List*)sub_element, base);
     list_push((List*)sub_element, subscript);
     
@@ -422,14 +417,16 @@ static Item parse_latex_command(Input *input, const char **math) {
         return parse_latex_function(input, math, func_name);
     } else if (is_greek_letter(cmd_string->chars) || is_math_operator(cmd_string->chars)) {
         // Greek letters and math operators are treated as symbols
+        Item symbol_item = y2it(cmd_string->chars);
         strbuf_full_reset(sb);
-        return (Item)s2it(cmd_string);
+        return symbol_item;
     }
     
-    // for other commands, return as identifier for now
+    // for other commands, return as symbol for now
     // Unknown LaTeX command
+    Item symbol_item = y2it(cmd_string->chars);
     strbuf_full_reset(sb);
-    return (Item)s2it(cmd_string);
+    return symbol_item;
 }
 
 // parse typst power expression with ^ operator  
@@ -443,15 +440,12 @@ static Item parse_typst_power(Input *input, const char **math, MathFlavor flavor
     }
     
     // create power expression element
-    Element* pow_element = create_math_element(input, "expr");
+    Element* pow_element = create_math_element(input, "pow");
     if (!pow_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, pow_element, "op", "pow");
-    
-    // add base and exponent as children
+    // add base and exponent as children (no op attribute needed)
     list_push((List*)pow_element, base);
     list_push((List*)pow_element, exponent);
     
@@ -461,11 +455,112 @@ static Item parse_typst_power(Input *input, const char **math, MathFlavor flavor
     return (Item)pow_element;
 }
 
-// parse typst fraction using / operator
+// parse typst fraction using / operator or frac() function
 static Item parse_typst_fraction(Input *input, const char **math, MathFlavor flavor) {
-    // In Typst, fractions are just division with / operator
-    // This function shouldn't be called directly, as fractions are handled by the division operator
-    return ITEM_ERROR;
+    // In Typst, fractions can be: frac(a, b) or just a/b (handled by division)
+    // This handles the frac(a, b) syntax
+    
+    // Expect "frac("
+    if (strncmp(*math, "frac(", 5) != 0) {
+        return ITEM_ERROR;
+    }
+    *math += 5; // skip "frac("
+    
+    skip_math_whitespace(math);
+    
+    // Parse numerator
+    Item numerator = parse_math_expression(input, math, flavor);
+    if (numerator == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Expect comma
+    if (**math != ',') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip comma
+    
+    skip_math_whitespace(math);
+    
+    // Parse denominator
+    Item denominator = parse_math_expression(input, math, flavor);
+    if (denominator == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Expect closing parenthesis
+    if (**math != ')') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip )
+    
+    // Create fraction element
+    Element* frac_element = create_math_element(input, "frac");
+    if (!frac_element) {
+        return ITEM_ERROR;
+    }
+    
+    list_push((List*)frac_element, numerator);
+    list_push((List*)frac_element, denominator);
+    
+    ((TypeElmt*)frac_element->type)->content_length = ((List*)frac_element)->length;
+    
+    return (Item)frac_element;
+}
+
+// parse function call notation: func(arg1, arg2, ...)
+static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name) {
+    // Expect opening parenthesis
+    if (**math != '(') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip (
+    
+    skip_math_whitespace(math);
+    
+    // Create function element
+    Element* func_element = create_math_element(input, func_name);
+    if (!func_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Parse arguments (comma-separated)
+    if (**math != ')') { // Not empty argument list
+        do {
+            skip_math_whitespace(math);
+            
+            Item arg = parse_math_expression(input, math, flavor);
+            if (arg == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            
+            if (arg != ITEM_NULL) {
+                list_push((List*)func_element, arg);
+            }
+            
+            skip_math_whitespace(math);
+            
+            if (**math == ',') {
+                (*math)++; // skip comma
+            } else {
+                break;
+            }
+        } while (**math && **math != ')');
+    }
+    
+    // Expect closing parenthesis
+    if (**math != ')') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip )
+    
+    ((TypeElmt*)func_element->type)->content_length = ((List*)func_element)->length;
+    
+    return (Item)func_element;
 }
 
 // parse ascii power expression with ^ or ** operators
@@ -487,15 +582,12 @@ static Item parse_ascii_power(Input *input, const char **math, MathFlavor flavor
     }
     
     // create power expression element
-    Element* pow_element = create_math_element(input, "expr");
+    Element* pow_element = create_math_element(input, "pow");
     if (!pow_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, pow_element, "op", "pow");
-    
-    // add base and exponent as children
+    // add base and exponent as children (no op attribute needed)
     list_push((List*)pow_element, base);
     list_push((List*)pow_element, exponent);
     
@@ -538,7 +630,73 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
             if (isdigit(**math) || (**math == '-' && isdigit(*(*math + 1)))) {
                 return parse_math_number(input, math);
             } else if (isalpha(**math)) {
-                return parse_math_identifier(input, math);
+                // Check if this is a function call by looking ahead for '('
+                const char* lookahead = *math;
+                while (*lookahead && (isalpha(*lookahead) || isdigit(*lookahead))) {
+                    lookahead++;
+                }
+                
+                if (*lookahead == '(') {
+                    // This is a function call, parse the function name first
+                    StrBuf* sb = input->sb;
+                    strbuf_full_reset(sb);
+                    
+                    while (**math && (isalpha(**math) || isdigit(**math))) {
+                        strbuf_append_char(sb, **math);
+                        (*math)++;
+                    }
+                    
+                    if (sb->length <= sizeof(uint32_t)) {
+                        strbuf_full_reset(sb);
+                        return ITEM_ERROR;
+                    }
+                    
+                    String *func_string = (String*)sb->str;
+                    func_string->len = sb->length - sizeof(uint32_t);
+                    func_string->ref_cnt = 0;
+                    
+                    // Handle special Typst functions
+                    if (flavor == MATH_FLAVOR_TYPST && strcmp(func_string->chars, "frac") == 0) {
+                        // Reset math pointer to before function name
+                        *math -= strlen("frac");
+                        strbuf_full_reset(sb);
+                        return parse_typst_fraction(input, math, flavor);
+                    }
+                    
+                    // Check if it's a known mathematical function
+                    const char* func_name = func_string->chars;
+                    bool is_known_func = is_trig_function(func_name) || is_log_function(func_name) ||
+                                        strcmp(func_name, "sqrt") == 0 || strcmp(func_name, "abs") == 0 ||
+                                        strcmp(func_name, "exp") == 0 || strcmp(func_name, "pow") == 0 ||
+                                        strcmp(func_name, "min") == 0 || strcmp(func_name, "max") == 0;
+                    
+                    // Make a copy of the function name before resetting the buffer
+                    char func_name_copy[64]; // reasonable limit for function names
+                    strncpy(func_name_copy, func_name, sizeof(func_name_copy) - 1);
+                    func_name_copy[sizeof(func_name_copy) - 1] = '\0';
+                    
+                    if (is_known_func) {
+                        strbuf_full_reset(sb);
+                        Item result = parse_function_call(input, math, flavor, func_name_copy);
+                        return result;
+                    } else {
+                        // For unknown functions, first try parsing as function call
+                        // Save the current position in case we need to backtrack
+                        const char* saved_pos = *math;
+                        strbuf_full_reset(sb);
+                        Item result = parse_function_call(input, math, flavor, func_name_copy);
+                        if (result != ITEM_ERROR) {
+                            return result;
+                        } else {
+                            // If function call parsing fails, restore position and treat as identifier
+                            *math = saved_pos - strlen(func_name_copy);
+                            return parse_math_identifier(input, math);
+                        }
+                    }
+                } else {
+                    // Regular identifier
+                    return parse_math_identifier(input, math);
+                }
             } else if (**math == '(') {
                 (*math)++; // skip (
                 Item expr = parse_math_expression(input, math, flavor);
@@ -553,17 +711,14 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
     return ITEM_ERROR;
 }
 
-// parse binary operation
+// parse binary operation - use operator name as element name
 static Item create_binary_expr(Input *input, const char* op_name, Item left, Item right) {
-    Element* expr_element = create_math_element(input, "expr");
+    Element* expr_element = create_math_element(input, op_name);
     if (!expr_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, expr_element, "op", op_name);
-    
-    // add operands as children
+    // add operands as children (no op attribute needed)
     list_push((List*)expr_element, left);
     list_push((List*)expr_element, right);
     
@@ -730,15 +885,12 @@ static Item parse_latex_function(Input *input, const char **math, const char* fu
     }
     
     // create function expression
-    Element* func_element = create_math_element(input, "expr");
+    Element* func_element = create_math_element(input, func_name);
     if (!func_element) {
         return ITEM_ERROR;
     }
     
-    // add op attribute
-    add_attribute_to_element(input, func_element, "op", func_name);
-    
-    // add argument as child
+    // add argument as child (no op attribute needed)
     list_push((List*)func_element, arg);
     
     return (Item)func_element;
@@ -749,12 +901,10 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
     skip_math_whitespace(math);
     
     // Create the sum/prod element
-    Element* op_element = create_math_element(input, "expr");
+    Element* op_element = create_math_element(input, op_name);
     if (!op_element) {
         return ITEM_ERROR;
     }
-    
-    add_attribute_to_element(input, op_element, "op", op_name);
     
     // Parse optional subscript (lower limit)
     if (**math == '_') {
@@ -832,12 +982,10 @@ static Item parse_latex_integral(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the integral element
-    Element* int_element = create_math_element(input, "expr");
+    Element* int_element = create_math_element(input, "int");
     if (!int_element) {
         return ITEM_ERROR;
     }
-    
-    add_attribute_to_element(input, int_element, "op", "int");
     
     // Parse optional subscript (lower limit)
     if (**math == '_') {
@@ -908,12 +1056,10 @@ static Item parse_latex_limit(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the limit element
-    Element* lim_element = create_math_element(input, "expr");
+    Element* lim_element = create_math_element(input, "lim");
     if (!lim_element) {
         return ITEM_ERROR;
     }
-    
-    add_attribute_to_element(input, lim_element, "op", "lim");
     
     // Parse subscript (limit expression like x \to 0)
     if (**math == '_') {
@@ -973,13 +1119,11 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
     (*math)++; // skip {
     
     // Create the matrix element
-    Element* matrix_element = create_math_element(input, "expr");
+    Element* matrix_element = create_math_element(input, matrix_type);
     if (!matrix_element) {
         printf("ERROR: Failed to create matrix element\n");
         return ITEM_ERROR;
     }
-    
-    add_attribute_to_element(input, matrix_element, "op", matrix_type);
     
     // Parse matrix rows (separated by \\)
     Element* current_row = create_math_element(input, "row");
@@ -1109,13 +1253,12 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     skip_math_whitespace(math);
     
     // Create the matrix element
-    Element* matrix_element = create_math_element(input, "expr");
+    Element* matrix_element = create_math_element(input, matrix_type);
     if (!matrix_element) {
         printf("ERROR: Failed to create matrix environment element\n");
         return ITEM_ERROR;
     }
     
-    add_attribute_to_element(input, matrix_element, "op", matrix_type);
     add_attribute_to_element(input, matrix_element, "env", "true");
     
     // Parse matrix content (same as simplified syntax but without outer braces)
@@ -1260,13 +1403,12 @@ static Item parse_latex_cases(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the cases element
-    Element* cases_element = create_math_element(input, "expr");
+    Element* cases_element = create_math_element(input, "cases");
     if (!cases_element) {
         printf("ERROR: Failed to create cases element\n");
         return ITEM_ERROR;
     }
     
-    add_attribute_to_element(input, cases_element, "op", "cases");
     add_attribute_to_element(input, cases_element, "env", "true");
     
     // Parse case rows (each row has expression & condition)
@@ -1362,13 +1504,12 @@ static Item parse_latex_equation(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the equation element
-    Element* eq_element = create_math_element(input, "expr");
+    Element* eq_element = create_math_element(input, "equation");
     if (!eq_element) {
         printf("ERROR: Failed to create equation element\n");
         return ITEM_ERROR;
     }
     
-    add_attribute_to_element(input, eq_element, "op", "equation");
     add_attribute_to_element(input, eq_element, "env", "true");
     add_attribute_to_element(input, eq_element, "numbered", "true");
     
@@ -1416,13 +1557,12 @@ static Item parse_latex_align(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the align element
-    Element* align_element = create_math_element(input, "expr");
+    Element* align_element = create_math_element(input, "align");
     if (!align_element) {
         printf("ERROR: Failed to create align element\n");
         return ITEM_ERROR;
     }
     
-    add_attribute_to_element(input, align_element, "op", "align");
     add_attribute_to_element(input, align_element, "env", "true");
     add_attribute_to_element(input, align_element, "numbered", "true");
     
@@ -1522,13 +1662,12 @@ static Item parse_latex_aligned(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the aligned element
-    Element* aligned_element = create_math_element(input, "expr");
+    Element* aligned_element = create_math_element(input, "aligned");
     if (!aligned_element) {
         printf("ERROR: Failed to create aligned element\n");
         return ITEM_ERROR;
     }
     
-    add_attribute_to_element(input, aligned_element, "op", "aligned");
     add_attribute_to_element(input, aligned_element, "env", "true");
     add_attribute_to_element(input, aligned_element, "numbered", "false");
     
@@ -1628,13 +1767,12 @@ static Item parse_latex_gather(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the gather element
-    Element* gather_element = create_math_element(input, "expr");
+    Element* gather_element = create_math_element(input, "gather");
     if (!gather_element) {
         printf("ERROR: Failed to create gather element\n");
         return ITEM_ERROR;
     }
     
-    add_attribute_to_element(input, gather_element, "op", "gather");
     add_attribute_to_element(input, gather_element, "env", "true");
     add_attribute_to_element(input, gather_element, "numbered", "true");
     add_attribute_to_element(input, gather_element, "alignment", "center");
