@@ -1,6 +1,7 @@
 #include "input.h"
 #include "input-common.h"
 #include <string.h>
+#include <stdlib.h>
 
 // math parser for latex math, typst math, and ascii math
 // produces syntax tree of nested <expr op:...> elements
@@ -16,6 +17,7 @@ typedef enum {
 static Item parse_math_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_addition_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_multiplication_expression(Input *input, const char **math, MathFlavor flavor);
+static Item parse_power_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_primary_with_postfix(Input *input, const char **math, MathFlavor flavor);
 static Item parse_math_primary(Input *input, const char **math, MathFlavor flavor);
 static Item parse_latex_frac(Input *input, const char **math);
@@ -49,8 +51,9 @@ static Item parse_math_number(Input *input, const char **math) {
     strbuf_full_reset(sb);
     
     // handle negative sign
+    bool is_negative = false;
     if (**math == '-') {
-        strbuf_append_char(sb, **math);
+        is_negative = true;
         (*math)++;
     }
     
@@ -60,8 +63,10 @@ static Item parse_math_number(Input *input, const char **math) {
         (*math)++;
     }
     
+    bool is_float = false;
     // parse decimal point and digits after
     if (**math == '.') {
+        is_float = true;
         strbuf_append_char(sb, **math);
         (*math)++;
         while (**math && isdigit(**math)) {
@@ -78,9 +83,29 @@ static Item parse_math_number(Input *input, const char **math) {
     String *num_string = (String*)sb->str;
     num_string->len = sb->length - sizeof(uint32_t);
     num_string->ref_cnt = 0;
-    strbuf_full_reset(sb);
     
-    return (Item)s2it(num_string);
+    // Convert to proper Lambda number
+    Item result;
+    if (is_float) {
+        // Parse as float
+        double value = strtod(num_string->chars, NULL);
+        if (is_negative) value = -value;
+        result = push_d(value);
+    } else {
+        // Parse as integer
+        long value = strtol(num_string->chars, NULL, 10);
+        if (is_negative) value = -value;
+        
+        // Use appropriate integer type based on size
+        if (value >= INT32_MIN && value <= INT32_MAX) {
+            result = i2it((int)value);
+        } else {
+            result = push_l(value);
+        }
+    }
+    
+    strbuf_full_reset(sb);
+    return result;
 }
 
 // parse identifier/variable name as symbol
@@ -767,7 +792,7 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
 
 // parse multiplication and division (higher precedence than + and -)
 static Item parse_multiplication_expression(Input *input, const char **math, MathFlavor flavor) {
-    Item left = parse_primary_with_postfix(input, math, flavor);
+    Item left = parse_power_expression(input, math, flavor);
     if (left == ITEM_ERROR || left == ITEM_NULL) {
         return left;
     }
@@ -781,7 +806,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         (*math)++; // skip operator
         skip_math_whitespace(math);
         
-        Item right = parse_primary_with_postfix(input, math, flavor);
+        Item right = parse_power_expression(input, math, flavor);
         if (right == ITEM_ERROR) {
             return ITEM_ERROR;
         }
@@ -792,6 +817,71 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         }
         
         skip_math_whitespace(math);
+    }
+    
+    return left;
+}
+
+// parse power expressions (^ and ** operators) - right associative
+static Item parse_power_expression(Input *input, const char **math, MathFlavor flavor) {
+    Item left = parse_primary_with_postfix(input, math, flavor);
+    if (left == ITEM_ERROR || left == ITEM_NULL) {
+        return left;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Handle power operations for ASCII flavor
+    if (flavor == MATH_FLAVOR_ASCII) {
+        if (**math == '^') {
+            (*math)++; // skip ^
+            skip_math_whitespace(math);
+            
+            // Power is right-associative, so we recursively call parse_power_expression
+            Item right = parse_power_expression(input, math, flavor);
+            if (right == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            
+            // create power expression element
+            Element* pow_element = create_math_element(input, "pow");
+            if (!pow_element) {
+                return ITEM_ERROR;
+            }
+            
+            // add base and exponent as children
+            list_push((List*)pow_element, left);
+            list_push((List*)pow_element, right);
+            
+            // set content length
+            ((TypeElmt*)pow_element->type)->content_length = ((List*)pow_element)->length;
+            
+            return (Item)pow_element;
+        } else if (**math == '*' && *(*math + 1) == '*') {
+            (*math) += 2; // skip **
+            skip_math_whitespace(math);
+            
+            // Power is right-associative, so we recursively call parse_power_expression
+            Item right = parse_power_expression(input, math, flavor);
+            if (right == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            
+            // create power expression element
+            Element* pow_element = create_math_element(input, "pow");
+            if (!pow_element) {
+                return ITEM_ERROR;
+            }
+            
+            // add base and exponent as children
+            list_push((List*)pow_element, left);
+            list_push((List*)pow_element, right);
+            
+            // set content length
+            ((TypeElmt*)pow_element->type)->content_length = ((List*)pow_element)->length;
+            
+            return (Item)pow_element;
+        }
     }
     
     return left;
@@ -834,23 +924,8 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             }
             skip_math_whitespace(math);
         }
-    } else if (flavor == MATH_FLAVOR_ASCII) {
-        if (**math == '^') {
-            (*math)++; // skip ^
-            left = parse_ascii_power(input, math, flavor, left);
-            if (left == ITEM_ERROR) {
-                return ITEM_ERROR;
-            }
-            skip_math_whitespace(math);
-        } else if (**math == '*' && *(*math + 1) == '*') {
-            // handle ** power operator
-            left = parse_ascii_power(input, math, flavor, left);
-            if (left == ITEM_ERROR) {
-                return ITEM_ERROR;
-            }
-            skip_math_whitespace(math);
-        }
     }
+    // Note: ASCII power operations are now handled in parse_power_expression
     
     return left;
 }

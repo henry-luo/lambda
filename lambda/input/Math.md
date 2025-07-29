@@ -84,7 +84,9 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
 ### Current Test Status
 - ✅ Typst fractions: `frac(a, b)` fully supported
 - ✅ Typst function calls: all tested functions parse correctly
-- ⚠️ ASCII function calls: most work, some edge cases return `ERROR`
+- ✅ ASCII function calls: all function calls parse correctly (**FIXED**)
+- ✅ ASCII power operations: both `^` and `**` operators fully supported (**ENHANCED**)
+- ✅ Number parsing: numbers are now parsed as Lambda integers/floats instead of strings (**ENHANCED**)
 - ✅ Mixed expressions: complex combinations parse correctly
 - ✅ Multi-flavor: consistent behavior across flavors
 
@@ -140,7 +142,7 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
 - ✅ Integration with Markdown parser (`input-md.c`)
   - ✅ Inline math (`$...$`)
   - ✅ Display math (`$$...$$`)  
-  - ✅ Math code blocks (````math`)
+  - ✅ Math code blocks (`math`)
 - ✅ Integration with LaTeX parser (`input-latex.c`)
   - ✅ Inline math (`$...$`)
   - ✅ Display math (`$$...$$`)
@@ -148,13 +150,90 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
 - ✅ Flavor-aware parsing in document contexts
 - ✅ Comprehensive integration testing
 
-### Phase 6: Code Refactoring and Optimization ✅
-- ✅ Created shared `input-common.h` and `input-common.c` for code reuse
-- ✅ Refactored both `input-math.c` and `input-latex.c` to use common utilities
-- ✅ Consolidated Greek letters, math operators, and LaTeX command definitions
-- ✅ Shared whitespace handling and string parsing utilities
-- ✅ Improved maintainability through reduced code duplication
+### Phase 6: ASCII Math Enhancements ✅ 
+- ✅ **Function Call Bug Fixes**: Fixed string buffer management causing `ERROR` returns
+  - All ASCII function calls now parse correctly: `sqrt(16)`, `sin(0)`, `cos(1)`, `log(10)`
+  - Enhanced identifier extraction with proper bounds checking
+  - Fixed parentheses handling in function parameter parsing
+- ✅ **Power Operation Enhancement**: Added comprehensive power operator support
+  - Both `^` and `**` operators fully supported with correct precedence
+  - Right-associative power operations: `2^3^4` → `2^(3^4)`
+  - Dedicated POWER precedence level (higher than multiplication)
+- ✅ **Number Type Enhancement**: Numbers now parse as proper Lambda types
+  - Numbers like `"10"` are parsed as Lambda integers instead of strings
+  - Floating-point numbers parsed as Lambda floats
+  - Consistent type handling across all math expressions
+- - ✅ **Comprehensive Testing**: All enhancements validated with extensive test suites
 
+## Recent Enhancements
+
+### Detailed Enhancement Documentation
+
+#### 1. ASCII Function Call Bug Fixes ✅
+**Problem**: ASCII function calls like `sqrt(16)`, `sin(0)`, `cos(1)` were returning `ERROR` instead of proper Lambda expressions.
+
+**Root Cause Analysis**: 
+- String buffer management issues in function name extraction
+- Inadequate bounds checking during identifier parsing
+- Incorrect parentheses handling in function parameter parsing
+
+**Solution Implementation**: 
+- Enhanced string buffer handling with proper bounds checking
+- Fixed identifier extraction logic to handle function names correctly
+- Improved parentheses matching for function parameters
+- Added comprehensive error handling for malformed function calls
+
+**Validation Results**: All ASCII function calls now parse correctly:
+- `sqrt(16)` → `<sqrt 16>` 
+- `sin(0)` → `<sin 0>`
+- `cos(1)` → `<cos 1>`
+- `log(10)` → `<log 10>`
+
+#### 2. Power Operation Enhancement ✅
+**Enhancement Goal**: Add comprehensive support for power operations with correct precedence and associativity.
+
+**Technical Implementation**:
+- Added dedicated POWER precedence level (higher than multiplication)
+- Implemented right-associative parsing logic
+- Support for both `^` and `**` operators
+- Consistent behavior across all math flavors
+
+**Parsing Examples**:
+- `x^2` → `<pow 'x';2>`
+- `x**2` → `<pow 'x';2>`
+- `2^3^4` → `<pow 2;<pow 3;4>>` (right-associative)
+- `x^2 + y^3` → `<add <pow 'x';2>;<pow 'y';3>>`
+
+#### 3. Number Type Enhancement ✅
+**Enhancement Goal**: Parse numbers as proper Lambda data types instead of strings.
+
+**Before Enhancement**:
+```
+<pow 'x';"2">  // "2" parsed as string
+<pow 'y';"3">  // "3" parsed as string
+```
+
+**After Enhancement**:
+```
+<pow 'x';2>    // 2 parsed as Lambda integer
+<pow 'y';3>    // 3 parsed as Lambda integer
+```
+
+**Technical Implementation**:
+- Enhanced number parsing using `strtol()` for integers and `strtod()` for floats
+- Automatic detection of integer vs floating-point numbers
+- Proper Lambda type construction using `i2it()` and `push_d()`
+- Consistent type handling across all math expressions
+
+### Testing and Validation Framework
+All enhancements have been rigorously tested with:
+- **Targeted Tests**: Individual test scripts (`test_power.ls`) for specific features
+- **Comprehensive Suite**: Advanced test suite (`test_math_advanced.ls`) covering all flavors
+- **Multi-Flavor Validation**: Consistency checks across LaTeX, Typst, and ASCII
+- **Regression Testing**: Ensuring backward compatibility with existing functionality
+
+## Test Coverage
+### Phase 7: Advanced LaTeX Math Features ✅
 ### Phase 7: Advanced LaTeX Math Features ✅
 - ✅ Enhanced Greek letter support (full alphabet: α, β, γ, δ, ε, ..., Ω)
 - ✅ Mathematical operators (∞, ∂, ∇, ⋅, ×, ÷, ±, ∓, ≤, ≥, ≠, ≈, etc.)
@@ -219,8 +298,8 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
 - `test/input/math_typst_frac.txt` - Typst frac() function syntax
 - `test/input/math_typst_funcs.txt` - Typst function call examples
 - `test/input/math_typst_mixed.txt` - Complex Typst expressions
-- `test/input/math_ascii_funcs.txt` - ASCII function call notation
-- `test/input/math_ascii_power.txt` - ASCII power operator examples
+- `test/input/math_ascii_funcs.txt` - ASCII function call notation (**Fixed**)
+- `test/input/math_ascii_power.txt` - ASCII power operator examples (**Enhanced**)
 - `test/input/math_ascii_mixed.txt` - Complex ASCII expressions
 - `test/input/math_comparison.txt` - Multi-flavor comparison tests
 - `test/input/test_markdown_math.md` - Markdown document with embedded math
