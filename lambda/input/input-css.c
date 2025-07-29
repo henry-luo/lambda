@@ -602,6 +602,8 @@ static Item parse_css_measure(Input *input, const char **css) {
     }
     
     if (!has_digits) {
+        // Clear buffer before returning error
+        strbuf_to_string(sb);
         *css = start; // Reset
         return ITEM_ERROR;
     }
@@ -659,18 +661,42 @@ static Array* parse_css_function_params(Input *input, const char **css) {
     }
     
     while (**css && **css != ')') {
+        skip_css_comments(css);
+        if (**css == ')') break;
+        
+        const char* start_pos = *css; // Track position to detect infinite loops
+        
         Item param = parse_css_value(input, css);
         if (param != ITEM_ERROR) {
             LambdaItem item = {.item = param};
             array_append(params, item, input->pool);
+        } else {
+            // If we can't parse a value and haven't advanced, skip one character to avoid infinite loop
+            if (*css == start_pos) {
+                (*css)++;
+            }
         }
         
         skip_css_comments(css);
+        
+        // Handle parameter separators
         if (**css == ',') {
-            (*css)++;
+            (*css)++; // Skip comma
             skip_css_comments(css);
+        } else if (**css == ')') {
+            // End of parameters
+            break;
         } else if (**css != ')') {
-            break; // Invalid syntax
+            // Skip any whitespace between parameters (space-separated values)
+            skip_css_whitespace(css);
+            
+            // If we're still not at a separator or end, this might be a parsing error
+            // Skip to next comma or closing paren to recover
+            if (**css && **css != ',' && **css != ')') {
+                while (**css && **css != ',' && **css != ')') {
+                    (*css)++;
+                }
+            }
         }
     }
     
@@ -713,24 +739,30 @@ static Item parse_css_function(Input *input, const char **css) {
     String* func_name = strbuf_to_string(sb);
     if (!func_name) return ITEM_ERROR;
     
-    (*css)++; // Skip opening parenthesis
+    printf("Parsing CSS function: %s\n", func_name->chars);
     
-    // Create function element
-    Element* func_element = input_create_element(input, func_name->chars);
-    if (!func_element) return ITEM_ERROR;
+    (*css)++; // Skip opening parenthesis
     
     // Parse function parameters
     Array* params = parse_css_function_params(input, css);
-    if (params) {
-        // Add parameters as content - store as attribute for now
-        LambdaItem params_item = {.item = (Item)params};
-        input_add_attribute_item_to_element(input, func_element, "params", (Item)params);
-    }
     
     if (**css == ')') {
         (*css)++; // Skip closing parenthesis
     }
     
+    // Create Lambda element with function name as element name
+    Element* func_element = input_create_element(input, func_name->chars);
+    if (!func_element) return ITEM_ERROR;
+    
+    // Add parameters as child content using list_push
+    if (params && params->length > 0) {
+        for (long i = 0; i < params->length; i++) {
+            Item param = list_get((List*)params, i);
+            list_push((List*)func_element, param);
+        }
+    }
+    
+    printf("Created function element '%s' with %ld parameters\n", func_name->chars, params ? params->length : 0);
     return (Item)func_element;
 }
 
@@ -742,10 +774,18 @@ static Array* parse_css_value_list(Input *input, const char **css) {
         skip_css_comments(css);
         if (!**css || **css == ';' || **css == '}' || **css == '!') break;
         
+        const char* start_pos = *css; // Track position to detect infinite loops
+        
         Item value = parse_css_value(input, css);
         if (value != ITEM_ERROR) {
             LambdaItem item = {.item = value};
             array_append(values, item, input->pool);
+        } else {
+            // If we can't parse a value and haven't advanced, skip one character to avoid infinite loop
+            if (*css == start_pos) {
+                (*css)++;
+                continue;
+            }
         }
         
         skip_css_comments(css);
@@ -770,13 +810,17 @@ static Item parse_css_value(Input *input, const char **css) {
     
     if (!**css) return ITEM_ERROR;
     
+    printf("Parsing CSS value starting with: %.10s\n", *css);
+    
     // Try to parse different CSS value types
     switch (**css) {
         case '"':
         case '\'':
+            printf("Parsing string value\n");
             return parse_css_string(input, css);
             
         case '#':
+            printf("Parsing color value\n");
             return parse_css_color(input, css);
             
         case '+':
@@ -784,10 +828,12 @@ static Item parse_css_value(Input *input, const char **css) {
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
         case '.':
+            printf("Parsing number/measure value\n");
             return parse_css_measure(input, css);
             
         default:
             if (**css == 'u' && strncmp(*css, "url(", 4) == 0) {
+                printf("Parsing URL value\n");
                 return parse_css_url(input, css);
             } else if (is_css_identifier_start(**css)) {
                 // Look ahead to see if this is a function
@@ -797,11 +843,14 @@ static Item parse_css_value(Input *input, const char **css) {
                 }
                 skip_css_whitespace(&lookahead);
                 if (*lookahead == '(') {
+                    printf("Parsing function value\n");
                     return parse_css_function(input, css);
                 } else {
+                    printf("Parsing identifier value\n");
                     return parse_css_identifier(input, css);
                 }
             }
+            printf("Unknown value type, returning error\n");
             return ITEM_ERROR;
     }
 }

@@ -1,0 +1,18 @@
+/* CSS Functions Test File */
+
+.test-functions {
+    background: linear-gradient(to right, #007bff, #0056b3);
+    transform: scale(1.05);
+    color: rgba(255, 0, 0, 0.5);
+    border-radius: calc(10px + 5px);
+    font-size: clamp(1rem, 2vw, 3rem);
+}
+
+.test-url {
+    background-image: url("test-image.png");
+}
+
+.test-var {
+    color: var(--primary-color);
+    margin: var(--spacing, 10px);
+}
