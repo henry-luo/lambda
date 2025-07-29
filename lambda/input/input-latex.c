@@ -1,5 +1,8 @@
 #include "input.h"
 
+// Forward declaration for math parser integration
+void parse_math(Input* input, const char* math_string, const char* flavor);
+
 static Item parse_latex_element(Input *input, const char **latex);
 
 // Use common utility functions from input.c
@@ -302,7 +305,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
             skip_whitespace(latex);
             
             if (is_math_env || is_raw_text_env) {
-                // For math and raw text environments, treat content as raw text
+                // For math and raw text environments, collect content as raw text
                 StrBuf* content_sb = input->sb;
                 strbuf_full_reset(content_sb);
                 
@@ -326,16 +329,51 @@ static Item parse_latex_command(Input *input, const char **latex) {
                     content_chars++;
                 }
                 
-                // Create the content string
+                // Process the content
                 if (content_sb->length > sizeof(uint32_t)) {
                     String *content_string = (String*)content_sb->str;
                     content_string->len = content_sb->length - sizeof(uint32_t);
                     content_string->ref_cnt = 0;
-                    strbuf_full_reset(content_sb);
                     
                     if (content_string->len > 0) {
-                        LambdaItem content_item = (LambdaItem)s2it(content_string);
-                        list_push((List*)element, content_item.item);
+                        if (is_math_env) {
+                            // Parse math content using our math parser
+                            Input* math_input = input_new(input->url);
+                            if (math_input) {
+                                parse_math(math_input, content_string->chars, "latex");
+                                
+                                if (math_input->root != ITEM_NULL) {
+                                    // Add the parsed math as child
+                                    list_push((List*)element, math_input->root);
+                                    
+                                    // Clean up temporary input (but preserve the parsed result)
+                                    if (math_input->type_list) {
+                                        arraylist_free(math_input->type_list);
+                                    }
+                                    pool_variable_destroy(math_input->pool);
+                                    free(math_input);
+                                } else {
+                                    // Fallback to raw text if math parsing fails
+                                    LambdaItem content_item = (LambdaItem)s2it(content_string);
+                                    list_push((List*)element, content_item.item);
+                                    
+                                    // Clean up temporary input
+                                    if (math_input->type_list) {
+                                        arraylist_free(math_input->type_list);
+                                    }
+                                    pool_variable_destroy(math_input->pool);
+                                    free(math_input);
+                                }
+                            } else {
+                                // Fallback to raw text if input creation fails
+                                LambdaItem content_item = (LambdaItem)s2it(content_string);
+                                list_push((List*)element, content_item.item);
+                            }
+                        } else {
+                            // For raw text environments, add as-is
+                            LambdaItem content_item = (LambdaItem)s2it(content_string);
+                            list_push((List*)element, content_item.item);
+                        }
                     }
                 } else {
                     strbuf_full_reset(content_sb);
@@ -502,15 +540,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             (*latex)++; // Skip second $
         }
         
-        // Create math element
-        const char* math_name = display_math ? "displaymath" : "math";
-        Element* element = create_latex_element(input, math_name);
-        if (!element) {
-            parse_depth--;
-            return ITEM_ERROR;
-        }
-        
-        // Parse math content
+        // Parse math content until closing delimiter
         StrBuf* math_sb = input->sb;
         strbuf_full_reset(math_sb);
         
@@ -534,25 +564,53 @@ static Item parse_latex_element(Input *input, const char **latex) {
             }
         }
         
+        // Create a temporary Input for math parsing
         if (math_sb->length > sizeof(uint32_t)) {
             String *math_string = (String*)math_sb->str;
             math_string->len = math_sb->length - sizeof(uint32_t);
             math_string->ref_cnt = 0;
-            strbuf_full_reset(math_sb);
             
             if (math_string->len > 0) {
-                LambdaItem math_item = (LambdaItem)s2it(math_string);
-                list_push((List*)element, math_item.item);
+                // Create temporary input for math parsing
+                Input* math_input = input_new(input->url);
+                if (math_input) {
+                    // Parse the math content using our math parser
+                    parse_math(math_input, math_string->chars, "latex");
+                    
+                    // Create wrapper element for the math
+                    const char* math_name = display_math ? "displaymath" : "math";
+                    Element* element = create_latex_element(input, math_name);
+                    if (element && math_input->root != ITEM_NULL) {
+                        // Add the parsed math as child
+                        list_push((List*)element, math_input->root);
+                        ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+                        
+                        // Clean up temporary input (but preserve the parsed result)
+                        // Note: We don't free math_input->root as it's now owned by element
+                        if (math_input->type_list) {
+                            arraylist_free(math_input->type_list);
+                        }
+                        pool_variable_destroy(math_input->pool);
+                        free(math_input);
+                        
+                        strbuf_full_reset(math_sb);
+                        parse_depth--;
+                        return (Item)element;
+                    }
+                    
+                    // Cleanup on failure
+                    if (math_input->type_list) {
+                        arraylist_free(math_input->type_list);
+                    }
+                    pool_variable_destroy(math_input->pool);
+                    free(math_input);
+                }
             }
-        } else {
-            strbuf_full_reset(math_sb);
         }
         
-        // Set content length based on element's list length
-        ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
-        
+        strbuf_full_reset(math_sb);
         parse_depth--;
-        return (Item)element;
+        return ITEM_ERROR;
     }
     
     // Parse regular text content with escape handling

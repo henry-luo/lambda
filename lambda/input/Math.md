@@ -80,7 +80,19 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 - [ ] Advanced Typst fraction syntax
 - [ ] ASCII function call notation (`sqrt(x)`, `sin(x)`)
 
-### Phase 5: Advanced Features
+### Phase 5: Document Parser Integration ✅
+- [x] Integration with Markdown parser (`input-md.c`)
+  - [x] Inline math (`$...$`)
+  - [x] Display math (`$$...$$`)  
+  - [x] Math code blocks (````math`)
+- [x] Integration with LaTeX parser (`input-latex.c`)
+  - [x] Inline math (`$...$`)
+  - [x] Display math (`$$...$$`)
+  - [x] Math environments (`\begin{equation}`, `\begin{align}`, etc.)
+- [x] Flavor-aware parsing in document contexts
+- [x] Comprehensive integration testing
+
+### Phase 6: Advanced Features
 - [ ] Complex expressions
 - [ ] Nested operations (advanced)
 - [ ] Error handling improvements
@@ -88,7 +100,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 
 ## Test Coverage
 
-### LaTeX Math ✅
+### Core Math Parser ✅
 - Basic arithmetic with correct precedence: ✅ (1+2*3 → 1+(2*3))
 - LaTeX fractions: ✅ (\frac{1}{2})
 - LaTeX superscripts: ✅ (x^{2})  
@@ -111,6 +123,26 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 - Power operations: ✅ (x^2, x**2)
 - Basic arithmetic: ✅ (+, -, *, /)
 - Parentheses: ✅
+
+### Document Parser Integration ✅
+- Markdown with math: ✅ (inline $...$, display $$...$$, code blocks ```math)
+- LaTeX document with math: ✅ (inline $...$, display $$...$$, environments)
+- Flavor-aware parsing: ✅ (defaults to LaTeX in document contexts)
+- Mixed content handling: ✅ (text and math together)
+
+## Test Files Structure
+
+### Essential Tests
+- `test/lambda/input/test_math_parser.ls` - Multi-flavor math parser testing
+- `test/lambda/input/test_integration.ls` - Document parser integration testing
+
+### Input Test Files
+- `test/input/test_math_simple.txt` - Basic LaTeX math expressions
+- `test/input/test_math_functions.txt` - LaTeX mathematical functions
+- `test/input/test_math_typst.txt` - Typst syntax examples
+- `test/input/test_math_ascii.txt` - ASCII math notation
+- `test/input/test_markdown_math.md` - Markdown document with embedded math
+- `test/input/test_latex_math.tex` - LaTeX document with math expressions
 
 ## Current Output Examples
 
@@ -150,13 +182,15 @@ Input: "x**2 + sqrt(y)"      → Power and function operations
 - ✅ **API Enhancement**: Map-based options with full backward compatibility
 - ✅ **Multi-Flavor**: Basic Typst and ASCII support with power operations
 - ✅ **Integration**: Fully integrated with Lambda input system and type system
-- ✅ **Testing**: Comprehensive test coverage for core functionality
+- ✅ **Document Integration**: Math parsing integrated into Markdown and LaTeX document parsers
+- ✅ **Testing**: Comprehensive test coverage for core functionality and integration
 
 ## Current Limitations
 - Typst and ASCII flavors have basic support (arithmetic + power operations only)
 - No error recovery for malformed expressions
 - Limited function support in non-LaTeX flavors
 - No support for complex mathematical constructs (matrices, integrals, etc.)
+- Some LaTeX math environments not yet fully supported
 
 ## Next Steps
 1. **Advanced Typst support**: Implement Typst-specific fraction and function syntax
@@ -164,10 +198,15 @@ Input: "x**2 + sqrt(y)"      → Power and function operations
 3. **Error handling**: Improve error reporting and recovery
 4. **Performance**: Optimize parsing for large expressions
 5. **Extended syntax**: Add support for matrices, integrals, limits, etc.
+6. **Enhanced LaTeX environments**: Complete support for all math environments
 
 ## Code Organization
 - `lambda/input/input-math.c` - Core math parser implementation
 - `lambda/input/input.c` - Input dispatch and file handling  
+- `lambda/input/input-md.c` - Markdown parser with math integration
+- `lambda/input/input-latex.c` - LaTeX parser with math integration
 - `lambda/lambda-eval.c` - Enhanced `fn_input` with map support
-- `test/lambda/input/input_math*.ls` - Test scripts
-- `test/input/test_math_*.txt` - Test input files
+- `test/lambda/input/test_math_parser.ls` - Core math parser tests
+- `test/lambda/input/test_integration.ls` - Document integration tests
+- `test/input/test_math_*.txt` - Math input test files
+- `test/input/test_*_math.*` - Document integration test files

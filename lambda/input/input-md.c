@@ -1,5 +1,8 @@
 #include "input.h"
 
+// Forward declaration for math parser integration
+void parse_math(Input* input, const char* math_string, const char* flavor);
+
 // Forward declarations
 static Item parse_markdown_content(Input *input, char** lines, int line_count);
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines);
@@ -8,6 +11,8 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
 static Item parse_strikethrough(Input *input, const char* text, int* pos);
 static Item parse_superscript(Input *input, const char* text, int* pos);
 static Item parse_subscript(Input *input, const char* text, int* pos);
+static Item parse_math_inline(Input *input, const char* text, int* pos);
+static Item parse_math_display(Input *input, const char* text, int* pos);
 static int parse_yaml_frontmatter(Input *input, char** lines, int line_count, Element* meta);
 static void parse_yaml_line(Input *input, const char* line, Element* meta);
 static bool is_table_row(const char* line);
@@ -660,6 +665,13 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     if (info_string && strlen(info_string) > 0) {
         add_attribute_to_element(input, code_block, "language", info_string);
     }
+    
+    // Check if this is a math code block
+    bool is_math_block = (info_string && 
+                         (strcmp(info_string, "math") == 0 || 
+                          strcmp(info_string, "latex") == 0 ||
+                          strcmp(info_string, "tex") == 0));
+    
     free(info_string);
     
     (*current_line)++;
@@ -705,8 +717,46 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     content_str->ref_cnt = 0;
     strbuf_full_reset(sb);
     
-    // Add content as text to code element
+    // Add content to element
     if (content_str->len > 0) {
+        if (is_math_block) {
+            // Parse as math content
+            Input* math_input = input_new(input->url);
+            if (math_input) {
+                parse_math(math_input, content_str->chars, "latex");
+                
+                if (math_input->root != ITEM_NULL) {
+                    // Change element type to displaymath for math blocks
+                    Element* math_elem = create_markdown_element(input, "displaymath");
+                    if (math_elem) {
+                        // Copy attributes from code_block
+                        add_attribute_to_element(input, math_elem, "language", "math");
+                        
+                        // Add parsed math content
+                        list_push((List*)math_elem, math_input->root);
+                        ((TypeElmt*)math_elem->type)->content_length = 1;
+                        
+                        // Clean up temporary input
+                        if (math_input->type_list) {
+                            arraylist_free(math_input->type_list);
+                        }
+                        pool_variable_destroy(math_input->pool);
+                        free(math_input);
+                        
+                        return (Item)math_elem;
+                    }
+                }
+                
+                // Clean up on failure, fall through to regular code block
+                if (math_input->type_list) {
+                    arraylist_free(math_input->type_list);
+                }
+                pool_variable_destroy(math_input->pool);
+                free(math_input);
+            }
+        }
+        
+        // Regular code block or math parsing failed
         list_push((List*)code_block, s2it(content_str));
         ((TypeElmt*)code_block->type)->content_length++;
     }
@@ -1291,6 +1341,167 @@ static Item parse_subscript(Input *input, const char* text, int* pos) {
     return (Item)sub_elem;
 }
 
+// Parse inline math expression: $math$
+static Item parse_math_inline(Input *input, const char* text, int* pos) {
+    int len = strlen(text);
+    int start = *pos;
+    
+    if (start >= len || text[start] != '$') {
+        return ITEM_NULL;
+    }
+    
+    // Skip opening $
+    int math_start = start + 1;
+    int math_end = math_start;
+    
+    // Find closing $
+    while (math_end < len && text[math_end] != '$') {
+        // Handle escaped $
+        if (text[math_end] == '\\' && math_end + 1 < len) {
+            math_end += 2;
+        } else {
+            math_end++;
+        }
+    }
+    
+    if (math_end >= len || text[math_end] != '$') {
+        return ITEM_NULL; // No closing $
+    }
+    
+    // Extract math content
+    int content_len = math_end - math_start;
+    if (content_len <= 0) {
+        return ITEM_NULL; // Empty math expression
+    }
+    
+    char* math_content = malloc(content_len + 1);
+    strncpy(math_content, text + math_start, content_len);
+    math_content[content_len] = '\0';
+    
+    // Create temporary input for math parsing
+    Input* math_input = input_new(input->url);
+    if (!math_input) {
+        free(math_content);
+        return ITEM_NULL;
+    }
+    
+    // Parse the math content using our math parser
+    parse_math(math_input, math_content, "latex");
+    
+    // Create wrapper element
+    Element* math_elem = create_markdown_element(input, "math");
+    if (math_elem && math_input->root != ITEM_NULL) {
+        // Add the parsed math as child
+        list_push((List*)math_elem, math_input->root);
+        ((TypeElmt*)math_elem->type)->content_length = 1;
+        
+        // Update position
+        *pos = math_end + 1;
+        
+        // Clean up
+        free(math_content);
+        if (math_input->type_list) {
+            arraylist_free(math_input->type_list);
+        }
+        pool_variable_destroy(math_input->pool);
+        free(math_input);
+        
+        return (Item)math_elem;
+    }
+    
+    // Cleanup on failure
+    free(math_content);
+    if (math_input->type_list) {
+        arraylist_free(math_input->type_list);
+    }
+    pool_variable_destroy(math_input->pool);
+    free(math_input);
+    
+    return ITEM_NULL;
+}
+
+// Parse display math expression: $$math$$
+static Item parse_math_display(Input *input, const char* text, int* pos) {
+    int len = strlen(text);
+    int start = *pos;
+    
+    if (start + 1 >= len || text[start] != '$' || text[start + 1] != '$') {
+        return ITEM_NULL;
+    }
+    
+    // Skip opening $$
+    int math_start = start + 2;
+    int math_end = math_start;
+    
+    // Find closing $$
+    while (math_end + 1 < len) {
+        if (text[math_end] == '$' && text[math_end + 1] == '$') {
+            break;
+        }
+        // Handle escaped $
+        if (text[math_end] == '\\' && math_end + 1 < len) {
+            math_end += 2;
+        } else {
+            math_end++;
+        }
+    }
+    
+    if (math_end + 1 >= len || text[math_end] != '$' || text[math_end + 1] != '$') {
+        return ITEM_NULL; // No closing $$
+    }
+    
+    // Extract math content
+    int content_len = math_end - math_start;
+    if (content_len <= 0) {
+        return ITEM_NULL; // Empty math expression
+    }
+    
+    char* math_content = malloc(content_len + 1);
+    strncpy(math_content, text + math_start, content_len);
+    math_content[content_len] = '\0';
+    
+    // Create temporary input for math parsing
+    Input* math_input = input_new(input->url);
+    if (!math_input) {
+        free(math_content);
+        return ITEM_NULL;
+    }
+    
+    // Parse the math content using our math parser
+    parse_math(math_input, math_content, "latex");
+    
+    // Create wrapper element
+    Element* math_elem = create_markdown_element(input, "displaymath");
+    if (math_elem && math_input->root != ITEM_NULL) {
+        // Add the parsed math as child
+        list_push((List*)math_elem, math_input->root);
+        ((TypeElmt*)math_elem->type)->content_length = 1;
+        
+        // Update position
+        *pos = math_end + 2;
+        
+        // Clean up
+        free(math_content);
+        if (math_input->type_list) {
+            arraylist_free(math_input->type_list);
+        }
+        pool_variable_destroy(math_input->pool);
+        free(math_input);
+        
+        return (Item)math_elem;
+    }
+    
+    // Cleanup on failure
+    free(math_content);
+    if (math_input->type_list) {
+        arraylist_free(math_input->type_list);
+    }
+    pool_variable_destroy(math_input->pool);
+    free(math_input);
+    
+    return ITEM_NULL;
+}
+
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
         return s2it(create_string(input, ""));
@@ -1407,6 +1618,35 @@ static Item parse_inline_content(Input *input, const char* text) {
                 list_push((List*)span, link);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
+            }
+        } else if (ch == '$') {
+            // Flush any accumulated text
+            if (text_buffer->length > 0) {
+                strbuf_append_char(text_buffer, '\0');
+                String* text_str = create_string(input, text_buffer->str);
+                if (text_str && text_str->len > 0) {
+                    list_push((List*)span, s2it(text_str));
+                    ((TypeElmt*)span->type)->content_length++;
+                }
+                strbuf_reset(text_buffer);
+            }
+            
+            // Check for display math ($$...$$) first
+            if (pos + 1 < len && text[pos + 1] == '$') {
+                Item display_math = parse_math_display(input, text, &pos);
+                if (display_math != ITEM_NULL) {
+                    list_push((List*)span, display_math);
+                    ((TypeElmt*)span->type)->content_length++;
+                    continue;
+                }
+            } else {
+                // Try inline math ($...$)
+                Item inline_math = parse_math_inline(input, text, &pos);
+                if (inline_math != ITEM_NULL) {
+                    list_push((List*)span, inline_math);
+                    ((TypeElmt*)span->type)->content_length++;
+                    continue;
+                }
             }
         }
         
