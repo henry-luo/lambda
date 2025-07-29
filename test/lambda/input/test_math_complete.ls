@@ -31,6 +31,15 @@ let basic_flavor = input('./test/input/math_simple.txt', {'type': 'math', 'flavo
 "Basic flavor:"
 basic_flavor
 
+// Test other flavor types with simple expressions
+let typst_flavor = input('./test/input/math_simple.txt', {'type': 'math', 'flavor': 'typst'})
+"Typst flavor:"
+typst_flavor
+
+let ascii_flavor = input('./test/input/math_simple.txt', {'type': 'math', 'flavor': 'ascii'})
+"ASCII flavor:"
+ascii_flavor
+
 // Test error handling with malformed input
 let error_test = input('./test/input/math_malformed_matrix.txt', {'type': 'math', 'flavor': 'latex'})
 "Error handling (malformed matrix):"

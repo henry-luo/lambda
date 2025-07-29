@@ -1,5 +1,5 @@
 // Test integration of math parser with document parsers
-let direct_math = input('./test/input/test_math_simple.txt', 'math')
+let direct_math = input('./test/input/math_simple.txt', 'math')
 "Direct math parsing:"
 direct_math
 

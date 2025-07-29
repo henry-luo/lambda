@@ -22,16 +22,16 @@ The math parser tests have been consolidated into two essential tests that cover
 ### 2. Comprehensive Test (`test_math_complete.ls`)
 **Purpose**: Tests advanced features, edge cases, and error handling
 **Coverage**:
-- All matrix environment types (matrix, pmatrix, bmatrix)
+- All matrix environment types (matrix_all_types.txt)
 - Complex mathematical expressions with multiple operators
 - Mixed syntax combining different LaTeX features
 - Greek letters and mathematical symbols
 - Advanced functions (limits, integrals, etc.)
-- Flavor fallback testing (basic vs latex)
+- Multiple flavor support (LaTeX, basic, Typst, ASCII)
 - Error handling with malformed input
 
 **Data Files**:
-- `matrix_all_types.txt` - All three matrix environment types
+- `matrix_all_types.txt` - All matrix environment types
 - `math_complex.txt` - Complex expressions with fractions, sums, integrals
 - `math_mixed_syntax.txt` - Mixed LaTeX command and environment syntax
 - `math_greek_symbols.txt` - Greek letters and mathematical symbols
@@ -41,15 +41,15 @@ The math parser tests have been consolidated into two essential tests that cover
 ## Removed Redundant Files
 
 ### Test Scripts (Removed)
-- `test_matrix_files.ls` - Replaced by basic test
-- `test_matrix_direct.ls` - Functionality merged into comprehensive test
-- `test_matrix_environments.ls` - Replaced by comprehensive test
-- `test_math_parser.ls` - Functionality distributed across both tests
+- `test_advanced_math_parser.ls` - Advanced features merged into comprehensive test
+- `test_simple_math.ls` - Basic functionality merged into basic test  
+- `test_comprehensive_math.ls` - Replaced by test_math_complete.ls
+- `input_math.ls` - Basic input testing merged into basic test
+- `input_math_enhanced.ls` - Enhanced features merged into comprehensive test
+- `final_math_test.ls` - Multi-flavor testing merged into comprehensive test
 
 ### Data Files (Removed)
-- `test_matrix_simple.txt`, `test_matrix_pmatrix.txt`, `test_matrix_bmatrix.txt` - Replaced by optimized versions
-- `test_math_*.txt` (multiple files) - Consolidated into focused test data
-- `test_direct_math.txt`, `test_latex_math.tex`, `test_markdown_math.md` - No longer needed
+All necessary data files are preserved in the consolidated structure. Redundant files were removed during the consolidation process.
 
 ## Test Execution
 
@@ -75,7 +75,7 @@ Run the comprehensive test:
 - All matrix types parsed correctly
 - Complex expressions handled appropriately (some may show ERROR for unsupported features)
 - Greek symbols and advanced functions processed
-- Flavor fallback working (basic flavor for simple expressions)
+- Multiple flavor support demonstrated (LaTeX, basic, Typst, ASCII)
 - Error handling demonstrated with malformed input
 - Success message: "✅ Comprehensive math parser test completed!"
 
