@@ -24,6 +24,7 @@ void parse_vcf(Input* input, const char* vcf_string);
 void parse_ics(Input* input, const char* ics_string);
 void parse_textile(Input* input, const char* textile_string);
 void parse_mark(Input* input, const char* mark_string);
+void parse_css(Input* input, const char* css_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
 
 
@@ -231,6 +232,8 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/textile") == 0) return "textile";
     if (strcmp(mime_type, "text/x-mark") == 0) return "mark";
     if (strcmp(mime_type, "application/x-mark") == 0) return "mark";
+    if (strcmp(mime_type, "text/css") == 0) return "css";
+    if (strcmp(mime_type, "application/css") == 0) return "css";
     
     // Check for XML-based formats
     if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
@@ -498,6 +501,9 @@ Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd)
         }
         else if (strcmp(effective_type, "mark") == 0) {
             parse_mark(input, source);
+        }
+        else if (strcmp(effective_type, "css") == 0) {
+            parse_css(input, source);
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";

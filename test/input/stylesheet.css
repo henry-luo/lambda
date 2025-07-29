@@ -1,0 +1,66 @@
+/* CSS Stylesheet Parser Test */
+
+/* Basic selectors and declarations */
+body {
+    margin: 0;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+    background-color: #f5f5f5;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+#header {
+    background: linear-gradient(to right, #007bff, #0056b3);
+    color: white;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+}
+
+/* Pseudo-classes and !important */
+.button:hover {
+    background-color: #0056b3 !important;
+    transform: scale(1.05);
+}
+
+/* At-rules: @media with nested rules */
+@media (max-width: 768px) {
+    body {
+        padding: 10px;
+    }
+    
+    .container {
+        margin: 1rem;
+    }
+}
+
+/* At-rules: @keyframes */
+@keyframes slideIn {
+    from {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Multiple selectors */
+h1, h2, h3, h4, h5, h6 {
+    color: #333;
+    margin: 0 0 1rem 0;
+    font-weight: 600;
+}
+
+/* Complex CSS functions and values */
+.advanced {
+    background: url("pattern.png") repeat-x,
+                linear-gradient(45deg, rgba(255,0,0,0.5), #00ff00);
+    animation: slideIn 0.3s ease-in-out forwards;
+}

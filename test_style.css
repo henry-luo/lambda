@@ -1,0 +1,7 @@
+body {
+    color: #ff0000;
+    font-size: 14px;
+    margin: 10px 5px;
+    background: url("bg.jpg");
+    border: 1px solid rgba(0, 0, 0, 0.5);
+}
