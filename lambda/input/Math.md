@@ -61,9 +61,15 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 - [x] Correct operator precedence (*, / before +, -)
 - [x] Parentheses grouping with `(expression)`
 - [x] Mathematical functions: `\sin{}`, `\cos{}`, `\tan{}`, `\log{}`, `\ln{}`
-- [ ] Greek letters (α, β, γ, etc.)
-- [ ] Matrix notation
-- [ ] Integrals and sums
+- [x] Greek letters (α, β, γ, etc.) - Enhanced with full Greek alphabet support
+- [x] Advanced mathematical functions: `\arcsin{}`, `\arccos{}`, `\sinh{}`, `\cosh{}`, etc.
+- [x] Mathematical operators: `\sum{}`, `\prod{}`, `\int{}`, `\lim{}`
+- [x] Sum and product with limits: `\sum_{i=1}^{n}`, `\prod_{k=0}^{\infty}`
+- [x] Integral with limits: `\int_{a}^{b}`
+- [x] Limit expressions: `\lim_{x \to 0}`
+- [x] Basic matrix support: `\matrix{}`, `\pmatrix{}`, `\bmatrix{}`
+- [ ] Advanced matrix environments (`\begin{matrix}...\end{matrix}`)
+- [ ] Integrals and sums with complex expressions
 
 ### Phase 3: Enhanced Input API ✅
 - [x] Support for map-based options in `fn_input`
@@ -92,11 +98,25 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
 - [x] Flavor-aware parsing in document contexts
 - [x] Comprehensive integration testing
 
-### Phase 6: Advanced Features
-- [ ] Complex expressions
-- [ ] Nested operations (advanced)
-- [ ] Error handling improvements
-- [ ] Performance optimization
+### Phase 6: Code Refactoring and Optimization ✅
+- [x] Created shared `input-common.h` and `input-common.c` for code reuse
+- [x] Refactored both `input-math.c` and `input-latex.c` to use common utilities
+- [x] Consolidated Greek letters, math operators, and LaTeX command definitions
+- [x] Shared whitespace handling and string parsing utilities
+- [x] Improved maintainability through reduced code duplication
+
+### Phase 7: Advanced LaTeX Math Features ✅
+- [x] Enhanced Greek letter support (full alphabet: α, β, γ, δ, ε, ..., Ω)
+- [x] Mathematical operators (∞, ∂, ∇, ⋅, ×, ÷, ±, ∓, ≤, ≥, ≠, ≈, etc.)
+- [x] Advanced trigonometric functions (arcsin, arccos, arctan, sinh, cosh, tanh)
+- [x] Hyperbolic and inverse functions (cot, sec, csc, etc.)
+- [x] Sum notation with limits: `\sum_{i=1}^{n} expression`
+- [x] Product notation with limits: `\prod_{k=0}^{\infty} expression` 
+- [x] Integral notation with limits: `\int_{a}^{b} f(x) dx`
+- [x] Limit expressions: `\lim_{x \to 0} f(x)`
+- [x] Basic matrix support: `\matrix{a & b \\ c & d}`
+- [x] Parenthesized matrices: `\pmatrix{1 & 2 \\ 3 & 4}`
+- [x] Bracketed matrices: `\bmatrix{x \\ y \\ z}`
 
 ## Test Coverage
 
@@ -155,6 +175,15 @@ Input: "\sin{x} + \cos{y}"   → <expr op:"add";<expr op:"sin";"x">;<expr op:"co
 Input: "(2 + 3) * 4"         → <expr op:"mul";<expr op:"add";"2";"3">;"4">
 ```
 
+### Enhanced LaTeX Math
+```
+Input: "\alpha + \beta"      → <expr op:"add";"alpha";"beta">
+Input: "\sum_{i=1}^{n} i"    → <expr op:"sum";"<expr op:"eq";"i";"1">";"n";"i">
+Input: "\int_{0}^{1} x dx"   → <expr op:"int";"0";"1";"x">
+Input: "\lim_{x \to 0} f(x)" → <expr op:"lim";"<expr op:"to";"x";"0">";"f(x)">
+Input: "\matrix{a & b \\ c & d}" → <expr op:"matrix";<row>"a";"b"</row>;<row>"c";"d"</row>>
+```
+
 ### Multi-Flavor Usage
 ```lambda
 // Legacy API (defaults to LaTeX)
@@ -179,32 +208,38 @@ Input: "x**2 + sqrt(y)"      → Power and function operations
 ## Current Status
 - ✅ **Core Infrastructure**: Complete recursive descent parser with flavor support
 - ✅ **LaTeX Support**: Full LaTeX math parsing with functions, fractions, powers, subscripts
+- ✅ **Advanced LaTeX**: Greek letters, mathematical operators, sums, integrals, limits, matrices
 - ✅ **API Enhancement**: Map-based options with full backward compatibility
 - ✅ **Multi-Flavor**: Basic Typst and ASCII support with power operations
 - ✅ **Integration**: Fully integrated with Lambda input system and type system
 - ✅ **Document Integration**: Math parsing integrated into Markdown and LaTeX document parsers
+- ✅ **Code Refactoring**: Shared utilities between input parsers for better maintainability
 - ✅ **Testing**: Comprehensive test coverage for core functionality and integration
 
 ## Current Limitations
 - Typst and ASCII flavors have basic support (arithmetic + power operations only)
+- Matrix parsing is simplified (doesn't support full `\begin{matrix}...\end{matrix}` environments)
 - No error recovery for malformed expressions
 - Limited function support in non-LaTeX flavors
-- No support for complex mathematical constructs (matrices, integrals, etc.)
-- Some LaTeX math environments not yet fully supported
+- No support for very complex mathematical constructs (advanced integrals, differential equations)
+- Some advanced LaTeX math environments not yet fully supported
 
 ## Next Steps
 1. **Advanced Typst support**: Implement Typst-specific fraction and function syntax
 2. **ASCII function parsing**: Add support for `sqrt(x)`, `sin(x)` function call notation
-3. **Error handling**: Improve error reporting and recovery
-4. **Performance**: Optimize parsing for large expressions
-5. **Extended syntax**: Add support for matrices, integrals, limits, etc.
-6. **Enhanced LaTeX environments**: Complete support for all math environments
+3. **Full matrix environments**: Support `\begin{matrix}...\end{matrix}` syntax
+4. **Error handling**: Improve error reporting and recovery for malformed expressions
+5. **Performance**: Optimize parsing for large mathematical expressions
+6. **Extended syntax**: Add support for advanced mathematical constructs
+7. **Enhanced LaTeX environments**: Complete support for complex math environments
 
 ## Code Organization
 - `lambda/input/input-math.c` - Core math parser implementation
+- `lambda/input/input-common.c` - Shared utilities between parsers
+- `lambda/input/input-common.h` - Common definitions and function declarations
 - `lambda/input/input.c` - Input dispatch and file handling  
 - `lambda/input/input-md.c` - Markdown parser with math integration
-- `lambda/input/input-latex.c` - LaTeX parser with math integration
+- `lambda/input/input-latex.c` - LaTeX parser with math integration (refactored)
 - `lambda/lambda-eval.c` - Enhanced `fn_input` with map support
 - `test/lambda/input/test_math_parser.ls` - Core math parser tests
 - `test/lambda/input/test_integration.ls` - Document integration tests

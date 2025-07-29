@@ -336,7 +336,7 @@ Map* map_fill(Map* map, ...) {
     return map;
 }
 
-Item _map_get(TypeMap* map_type,void* map_data, char *key, bool *is_found) {
+Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
     ShapeEntry *field = map_type->shape;
     while (field) {
         if (!field->name) { // nested map, skip
@@ -350,7 +350,8 @@ Item _map_get(TypeMap* map_type,void* map_data, char *key, bool *is_found) {
             field = field->next;
             continue;
         }
-        if (strncmp(field->name->str, key, field->name->length) == 0) {
+        if (strncmp(field->name->str, key, field->name->length) == 0 && 
+            strlen(key) == field->name->length) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
@@ -816,7 +817,6 @@ Item fn_input(Item url, Item type) {
     String* flavor_str = NULL;
     
     TypeId type_id = get_type_id(type_item);
-    
     if (type_id == LMD_TYPE_NULL) {
         // No type specified
         type_str = NULL;
@@ -827,30 +827,41 @@ Item fn_input(Item url, Item type) {
     }
     else if (type_id == LMD_TYPE_MAP) {
         // New behavior: type is a map with options
-        Map* options_map = (Map*)type_item.pointer;
+        Map* options_map = (Map*)type;
         
         // Extract 'type' from map
-        String* type_key_str = (String*)malloc(sizeof(String) + 5);
-        type_key_str->len = 4; type_key_str->ref_cnt = 0;
-        strcpy(type_key_str->chars, "type");
-        Item type_key = y2it(type_key_str);
-        Item type_value = map_get(options_map, type_key);
-        LambdaItem type_value_item = {.item = type_value};
-        TypeId type_value_type = get_type_id(type_value_item);
-        if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
-            type_str = (String*)type_value_item.pointer;
+        bool is_found;
+        Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "'type'", &is_found);
+        if (!is_found || !input_type || ((LambdaItem)input_type).type_id == LMD_TYPE_NULL) { // missing 'type' key
+            type_str = NULL;
+        } else {
+            LambdaItem type_value_item = {.item = input_type};
+            TypeId type_value_type = get_type_id(type_value_item);
+            if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+                type_str = (String*)type_value_item.pointer;
+            }
+            else {
+                printf("input type must be a string or symbol, got type %d\n", type_value_type);
+                // todo: push error
+                type_str = NULL;  // input type ignored
+            }
         }
-        
+
         // Extract 'flavor' from map
-        String* flavor_key_str = (String*)malloc(sizeof(String) + 7);
-        flavor_key_str->len = 6; flavor_key_str->ref_cnt = 0;
-        strcpy(flavor_key_str->chars, "flavor");
-        Item flavor_key = y2it(flavor_key_str);
-        Item flavor_value = map_get(options_map, flavor_key);
-        LambdaItem flavor_value_item = {.item = flavor_value};
-        TypeId flavor_value_type = get_type_id(flavor_value_item);
-        if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
-            flavor_str = (String*)flavor_value_item.pointer;
+        Item input_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "'flavor'", &is_found);
+        if (!is_found || !input_flavor || ((LambdaItem)input_flavor).type_id == LMD_TYPE_NULL) { // missing 'flavor' key
+            flavor_str = NULL;
+        } else {
+            LambdaItem flavor_value_item = {.item = input_flavor};
+            TypeId flavor_value_type = get_type_id(flavor_value_item);
+            if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+                flavor_str = (String*)flavor_value_item.pointer;
+            }
+            else {
+                printf("input flavor must be a string or symbol, got type %d\n", flavor_value_type);
+                // todo: push error
+                flavor_str = NULL;  // input flavor ignored
+            }
         }
     }
     else {

@@ -1,4 +1,5 @@
 #include "input.h"
+#include "input-common.h"
 
 // math parser for latex math, typst math, and ascii math
 // produces syntax tree of nested <expr op:...> elements
@@ -30,24 +31,13 @@ static Item parse_math_identifier(Input *input, const char **math);
 static Item create_binary_expr(Input *input, const char* op_name, Item left, Item right);
 static void skip_math_whitespace(const char **math);
 
-// use common utility functions from input.c
+// use common utility functions from input.c and input-common.c
 #define create_math_element input_create_element
 #define add_attribute_to_element input_add_attribute_to_element
 
 // skip whitespace helper
 static void skip_math_whitespace(const char **math) {
-    int whitespace_count = 0;
-    const int max_whitespace = 1000; // safety limit
-    
-    while (**math && (**math == ' ' || **math == '\n' || **math == '\r' || **math == '\t') && 
-           whitespace_count < max_whitespace) {
-        (*math)++;
-        whitespace_count++;
-    }
-    
-    if (whitespace_count >= max_whitespace) {
-        printf("WARNING: Hit whitespace limit, possible infinite loop in skip_math_whitespace\n");
-    }
+    skip_common_whitespace(math);
 }
 
 // parse a number (integer or float)
@@ -303,11 +293,51 @@ static Item parse_latex_subscript(Input *input, const char **math, Item base) {
     return (Item)sub_element;
 }
 
+// Forward declarations for advanced LaTeX features
+static Item parse_latex_sum_or_prod(Input *input, const char **math, const char* op_name);
+static Item parse_latex_integral(Input *input, const char **math);
+static Item parse_latex_limit(Input *input, const char **math);
+static Item parse_latex_matrix(Input *input, const char **math, const char* matrix_type);
+
 // parse latex command starting with backslash
 static Item parse_latex_command(Input *input, const char **math) {
     if (**math != '\\') {
         return ITEM_ERROR;
     }
+    
+    // Check for \begin{environment} syntax first
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        const char* env_start = *math + 7;
+        const char* env_end = env_start;
+        
+        // Find the environment name
+        while (*env_end && *env_end != '}') {
+            env_end++;
+        }
+        
+        if (*env_end == '}') {
+            size_t env_len = env_end - env_start;
+            
+            // Check for matrix environments
+            if (env_len == 6 && strncmp(env_start, "matrix", 6) == 0) {
+                return parse_latex_matrix(input, math, "matrix");
+            } else if (env_len == 7 && strncmp(env_start, "pmatrix", 7) == 0) {
+                return parse_latex_matrix(input, math, "pmatrix");
+            } else if (env_len == 7 && strncmp(env_start, "bmatrix", 7) == 0) {
+                return parse_latex_matrix(input, math, "bmatrix");
+            } else if (env_len == 7 && strncmp(env_start, "vmatrix", 7) == 0) {
+                return parse_latex_matrix(input, math, "vmatrix");
+            } else if (env_len == 8 && strncmp(env_start, "Vmatrix", 8) == 0) {
+                return parse_latex_matrix(input, math, "Vmatrix");
+            }
+            
+            // For unknown environments, try to parse as generic environment
+            printf("WARNING: Unknown LaTeX environment: ");
+            fwrite(env_start, 1, env_len, stdout);
+            printf("\n");
+        }
+    }
+    
     (*math)++; // skip backslash
     
     // parse command name
@@ -321,6 +351,7 @@ static Item parse_latex_command(Input *input, const char **math) {
     
     if (sb->length <= sizeof(uint32_t)) {
         strbuf_full_reset(sb);
+        printf("ERROR: Empty or invalid LaTeX command\n");
         return ITEM_ERROR;
     }
     
@@ -328,31 +359,52 @@ static Item parse_latex_command(Input *input, const char **math) {
     cmd_string->len = sb->length - sizeof(uint32_t);
     cmd_string->ref_cnt = 0;
     
-    // handle specific commands
+    // Handle specific commands
     if (strcmp(cmd_string->chars, "frac") == 0) {
         strbuf_full_reset(sb);
         return parse_latex_frac(input, math);
     } else if (strcmp(cmd_string->chars, "sqrt") == 0) {
         strbuf_full_reset(sb);
         return parse_latex_sqrt(input, math);
-    } else if (strcmp(cmd_string->chars, "sin") == 0) {
+    } else if (strcmp(cmd_string->chars, "sum") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_function(input, math, "sin");
-    } else if (strcmp(cmd_string->chars, "cos") == 0) {
+        return parse_latex_sum_or_prod(input, math, "sum");
+    } else if (strcmp(cmd_string->chars, "prod") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_function(input, math, "cos");
-    } else if (strcmp(cmd_string->chars, "tan") == 0) {
+        return parse_latex_sum_or_prod(input, math, "prod");
+    } else if (strcmp(cmd_string->chars, "int") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_function(input, math, "tan");
-    } else if (strcmp(cmd_string->chars, "log") == 0) {
+        return parse_latex_integral(input, math);
+    } else if (strcmp(cmd_string->chars, "lim") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_function(input, math, "log");
-    } else if (strcmp(cmd_string->chars, "ln") == 0) {
+        return parse_latex_limit(input, math);
+    } else if (strcmp(cmd_string->chars, "matrix") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_function(input, math, "ln");
+        return parse_latex_matrix(input, math, "matrix");
+    } else if (strcmp(cmd_string->chars, "pmatrix") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_matrix(input, math, "pmatrix");
+    } else if (strcmp(cmd_string->chars, "bmatrix") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_matrix(input, math, "bmatrix");
+    } else if (strcmp(cmd_string->chars, "vmatrix") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_matrix(input, math, "vmatrix");
+    } else if (strcmp(cmd_string->chars, "Vmatrix") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_matrix(input, math, "Vmatrix");
+    } else if (is_trig_function(cmd_string->chars) || is_log_function(cmd_string->chars)) {
+        const char* func_name = cmd_string->chars;
+        strbuf_full_reset(sb);
+        return parse_latex_function(input, math, func_name);
+    } else if (is_greek_letter(cmd_string->chars) || is_math_operator(cmd_string->chars)) {
+        // Greek letters and math operators are treated as symbols
+        strbuf_full_reset(sb);
+        return (Item)s2it(cmd_string);
     }
     
     // for other commands, return as identifier for now
+    // Unknown LaTeX command
     strbuf_full_reset(sb);
     return (Item)s2it(cmd_string);
 }
@@ -669,6 +721,500 @@ static Item parse_latex_function(Input *input, const char **math, const char* fu
     return (Item)func_element;
 }
 
+// Parse LaTeX sum or product with limits: \sum_{i=1}^{n} or \prod_{i=0}^{n}
+static Item parse_latex_sum_or_prod(Input *input, const char **math, const char* op_name) {
+    skip_math_whitespace(math);
+    
+    // Create the sum/prod element
+    Element* op_element = create_math_element(input, "expr");
+    if (!op_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, op_element, "op", op_name);
+    
+    // Parse optional subscript (lower limit)
+    if (**math == '_') {
+        (*math)++; // skip _
+        skip_math_whitespace(math);
+        
+        Item lower_limit;
+        if (**math == '{') {
+            (*math)++; // skip {
+            lower_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (lower_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            if (**math != '}') {
+                return ITEM_ERROR;
+            }
+            (*math)++; // skip }
+        } else {
+            lower_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            if (lower_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+        }
+        
+        // Add lower limit as first child
+        list_push((List*)op_element, lower_limit);
+        skip_math_whitespace(math);
+    }
+    
+    // Parse optional superscript (upper limit)
+    if (**math == '^') {
+        (*math)++; // skip ^
+        skip_math_whitespace(math);
+        
+        Item upper_limit;
+        if (**math == '{') {
+            (*math)++; // skip {
+            upper_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (upper_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            if (**math != '}') {
+                return ITEM_ERROR;
+            }
+            (*math)++; // skip }
+        } else {
+            upper_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            if (upper_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+        }
+        
+        // Add upper limit as second child
+        list_push((List*)op_element, upper_limit);
+        skip_math_whitespace(math);
+    }
+    
+    // Parse the expression being summed/multiplied
+    Item expr = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
+    if (expr == ITEM_ERROR) {
+        // If no expression follows, this is still valid (like \sum x)
+        expr = ITEM_NULL;
+    }
+    
+    if (expr != ITEM_NULL) {
+        list_push((List*)op_element, expr);
+    }
+    
+    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+    return (Item)op_element;
+}
+
+// Parse LaTeX integral with limits: \int_{a}^{b} f(x) dx
+static Item parse_latex_integral(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // Create the integral element
+    Element* int_element = create_math_element(input, "expr");
+    if (!int_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, int_element, "op", "int");
+    
+    // Parse optional subscript (lower limit)
+    if (**math == '_') {
+        (*math)++; // skip _
+        skip_math_whitespace(math);
+        
+        Item lower_limit;
+        if (**math == '{') {
+            (*math)++; // skip {
+            lower_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (lower_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            if (**math != '}') {
+                return ITEM_ERROR;
+            }
+            (*math)++; // skip }
+        } else {
+            lower_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            if (lower_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+        }
+        
+        list_push((List*)int_element, lower_limit);
+        skip_math_whitespace(math);
+    }
+    
+    // Parse optional superscript (upper limit)
+    if (**math == '^') {
+        (*math)++; // skip ^
+        skip_math_whitespace(math);
+        
+        Item upper_limit;
+        if (**math == '{') {
+            (*math)++; // skip {
+            upper_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (upper_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            if (**math != '}') {
+                return ITEM_ERROR;
+            }
+            (*math)++; // skip }
+        } else {
+            upper_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            if (upper_limit == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+        }
+        
+        list_push((List*)int_element, upper_limit);
+        skip_math_whitespace(math);
+    }
+    
+    // Parse the integrand expression
+    Item integrand = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
+    if (integrand != ITEM_ERROR && integrand != ITEM_NULL) {
+        list_push((List*)int_element, integrand);
+    }
+    
+    ((TypeElmt*)int_element->type)->content_length = ((List*)int_element)->length;
+    return (Item)int_element;
+}
+
+// Parse LaTeX limit: \lim_{x \to 0} f(x)
+static Item parse_latex_limit(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // Create the limit element
+    Element* lim_element = create_math_element(input, "expr");
+    if (!lim_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, lim_element, "op", "lim");
+    
+    // Parse subscript (limit expression like x \to 0)
+    if (**math == '_') {
+        (*math)++; // skip _
+        skip_math_whitespace(math);
+        
+        Item limit_expr;
+        if (**math == '{') {
+            (*math)++; // skip {
+            limit_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (limit_expr == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            if (**math != '}') {
+                return ITEM_ERROR;
+            }
+            (*math)++; // skip }
+        } else {
+            limit_expr = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            if (limit_expr == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+        }
+        
+        list_push((List*)lim_element, limit_expr);
+        skip_math_whitespace(math);
+    }
+    
+    // Parse the function expression
+    Item func_expr = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
+    if (func_expr != ITEM_ERROR && func_expr != ITEM_NULL) {
+        list_push((List*)lim_element, func_expr);
+    }
+    
+    ((TypeElmt*)lim_element->type)->content_length = ((List*)lim_element)->length;
+    return (Item)lim_element;
+}
+
+// Forward declaration for full matrix environment parsing
+static Item parse_latex_matrix_environment(Input *input, const char **math, const char* matrix_type);
+
+// Parse LaTeX matrix: \begin{matrix} ... \end{matrix} or \begin{pmatrix} ... \end{pmatrix}
+// Also supports simplified syntax \matrix{a & b \\ c & d}
+static Item parse_latex_matrix(Input *input, const char **math, const char* matrix_type) {
+    skip_math_whitespace(math);
+    
+    // Check if this is a full environment: \begin{matrix}
+    if (strncmp(*math, "\\begin{", 7) == 0) {
+        return parse_latex_matrix_environment(input, math, matrix_type);
+    }
+    
+    // Simplified matrix syntax: \matrix{content}
+    if (**math != '{') {
+        printf("ERROR: Expected '{' after matrix command\n");
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // Create the matrix element
+    Element* matrix_element = create_math_element(input, "expr");
+    if (!matrix_element) {
+        printf("ERROR: Failed to create matrix element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, matrix_element, "op", matrix_type);
+    
+    // Parse matrix rows (separated by \\)
+    Element* current_row = create_math_element(input, "row");
+    if (!current_row) {
+        printf("ERROR: Failed to create matrix row element\n");
+        return ITEM_ERROR;
+    }
+    
+    int row_count = 0;
+    int col_count = 0;
+    int current_col = 0;
+    
+    while (**math && **math != '}') {
+        skip_math_whitespace(math);
+        
+        if (strncmp(*math, "\\\\", 2) == 0) {
+            // End of row
+            (*math) += 2; // skip \\
+            
+            // Validate column count consistency
+            if (row_count == 0) {
+                col_count = current_col + (((List*)current_row)->length > 0 ? 1 : 0);
+            } else if (current_col + (((List*)current_row)->length > 0 ? 1 : 0) != col_count) {
+                printf("WARNING: Inconsistent column count in matrix row %d\n", row_count + 1);
+            }
+            
+            // Add current row to matrix
+            ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
+            list_push((List*)matrix_element, (Item)current_row);
+            row_count++;
+            current_col = 0;
+            
+            // Start new row
+            current_row = create_math_element(input, "row");
+            if (!current_row) {
+                printf("ERROR: Failed to create matrix row element\n");
+                return ITEM_ERROR;
+            }
+            skip_math_whitespace(math);
+            continue;
+        }
+        
+        if (**math == '&') {
+            // Column separator - parse as next cell in row
+            (*math)++; // skip &
+            current_col++;
+            skip_math_whitespace(math);
+            continue;
+        }
+        
+        // Parse matrix cell content
+        Item cell = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (cell == ITEM_ERROR) {
+            printf("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
+            return ITEM_ERROR;
+        }
+        
+        if (cell != ITEM_NULL) {
+            list_push((List*)current_row, cell);
+        }
+        
+        skip_math_whitespace(math);
+    }
+    
+    if (**math != '}') {
+        printf("ERROR: Expected '}' to close matrix\n");
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    // Add the last row if it has content
+    if (((List*)current_row)->length > 0) {
+        // Validate final row column count
+        if (row_count > 0 && current_col + 1 != col_count) {
+            printf("WARNING: Inconsistent column count in final matrix row\n");
+        }
+        ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
+        list_push((List*)matrix_element, (Item)current_row);
+        row_count++;
+    }
+    
+    // Add matrix dimensions as attributes
+    char row_str[16], col_str[16];
+    snprintf(row_str, sizeof(row_str), "%d", row_count);
+    snprintf(col_str, sizeof(col_str), "%d", col_count);
+    add_attribute_to_element(input, matrix_element, "rows", row_str);
+    add_attribute_to_element(input, matrix_element, "cols", col_str);
+    
+    ((TypeElmt*)matrix_element->type)->content_length = ((List*)matrix_element)->length;
+    // Matrix parsing completed successfully
+    return (Item)matrix_element;
+}
+
+// Parse full LaTeX matrix environment: \begin{matrix} ... \end{matrix}
+static Item parse_latex_matrix_environment(Input *input, const char **math, const char* matrix_type) {
+    // Expected format: \begin{matrix} content \end{matrix}
+    
+    // Skip \begin{
+    if (strncmp(*math, "\\begin{", 7) != 0) {
+        printf("ERROR: Expected \\begin{ for matrix environment\n");
+        return ITEM_ERROR;
+    }
+    *math += 7;
+    
+    // Find the environment name
+    const char* env_start = *math;
+    while (**math && **math != '}') {
+        (*math)++;
+    }
+    
+    if (**math != '}') {
+        printf("ERROR: Expected '}' after \\begin{environment\n");
+        return ITEM_ERROR;
+    }
+    
+    size_t env_len = *math - env_start;
+    (*math)++; // skip }
+    
+    // Validate environment name matches expected matrix type
+    if (strncmp(env_start, matrix_type, env_len) != 0 || strlen(matrix_type) != env_len) {
+        char env_name[32];
+        strncpy(env_name, env_start, env_len < 31 ? env_len : 31);
+        env_name[env_len < 31 ? env_len : 31] = '\0';
+        printf("WARNING: Environment name '%s' doesn't match expected '%s'\n", env_name, matrix_type);
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Create the matrix element
+    Element* matrix_element = create_math_element(input, "expr");
+    if (!matrix_element) {
+        printf("ERROR: Failed to create matrix environment element\n");
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, matrix_element, "op", matrix_type);
+    add_attribute_to_element(input, matrix_element, "env", "true");
+    
+    // Parse matrix content (same as simplified syntax but without outer braces)
+    Element* current_row = create_math_element(input, "row");
+    if (!current_row) {
+        printf("ERROR: Failed to create matrix row element\n");
+        return ITEM_ERROR;
+    }
+    
+    int row_count = 0;
+    int col_count = 0;
+    int current_col = 0;
+    
+    while (**math) {
+        skip_math_whitespace(math);
+        
+        // Check for end of environment
+        if (strncmp(*math, "\\end{", 5) == 0) {
+            break;
+        }
+        
+        if (strncmp(*math, "\\\\", 2) == 0) {
+            // End of row
+            (*math) += 2; // skip \\
+            
+            // Validate column count consistency
+            if (row_count == 0) {
+                col_count = current_col + (((List*)current_row)->length > 0 ? 1 : 0);
+            } else if (current_col + (((List*)current_row)->length > 0 ? 1 : 0) != col_count) {
+                printf("WARNING: Inconsistent column count in matrix row %d\n", row_count + 1);
+            }
+            
+            // Add current row to matrix
+            ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
+            list_push((List*)matrix_element, (Item)current_row);
+            row_count++;
+            current_col = 0;
+            
+            // Start new row
+            current_row = create_math_element(input, "row");
+            if (!current_row) {
+                printf("ERROR: Failed to create matrix row element\n");
+                return ITEM_ERROR;
+            }
+            skip_math_whitespace(math);
+            continue;
+        }
+        
+        if (**math == '&') {
+            // Column separator
+            (*math)++; // skip &
+            current_col++;
+            skip_math_whitespace(math);
+            continue;
+        }
+        
+        // Parse matrix cell content
+        Item cell = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (cell == ITEM_ERROR) {
+            printf("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
+            return ITEM_ERROR;
+        }
+        
+        if (cell != ITEM_NULL) {
+            list_push((List*)current_row, cell);
+        }
+        
+        skip_math_whitespace(math);
+    }
+    
+    // Parse \end{environment}
+    if (strncmp(*math, "\\end{", 5) != 0) {
+        printf("ERROR: Expected \\end{%s} to close matrix environment\n", matrix_type);
+        return ITEM_ERROR;
+    }
+    *math += 5;
+    
+    // Validate end environment name
+    const char* end_env_start = *math;
+    while (**math && **math != '}') {
+        (*math)++;
+    }
+    
+    if (**math != '}') {
+        printf("ERROR: Expected '}' after \\end{environment\n");
+        return ITEM_ERROR;
+    }
+    
+    size_t end_env_len = *math - end_env_start;
+    (*math)++; // skip }
+    
+    if (strncmp(end_env_start, matrix_type, end_env_len) != 0 || strlen(matrix_type) != end_env_len) {
+        char end_env_name[32];
+        strncpy(end_env_name, end_env_start, end_env_len < 31 ? end_env_len : 31);
+        end_env_name[end_env_len < 31 ? end_env_len : 31] = '\0';
+        printf("ERROR: Mismatched environment: \\begin{%s} but \\end{%s}\n", matrix_type, end_env_name);
+        return ITEM_ERROR;
+    }
+    
+    // Add the last row if it has content
+    if (((List*)current_row)->length > 0) {
+        // Validate final row column count
+        if (row_count > 0 && current_col + 1 != col_count) {
+            printf("WARNING: Inconsistent column count in final matrix row\n");
+        }
+        ((TypeElmt*)current_row->type)->content_length = ((List*)current_row)->length;
+        list_push((List*)matrix_element, (Item)current_row);
+        row_count++;
+    }
+    
+    // Add matrix dimensions as attributes
+    char row_str[16], col_str[16];
+    snprintf(row_str, sizeof(row_str), "%d", row_count);
+    snprintf(col_str, sizeof(col_str), "%d", col_count);
+    add_attribute_to_element(input, matrix_element, "rows", row_str);
+    add_attribute_to_element(input, matrix_element, "cols", col_str);
+    
+    ((TypeElmt*)matrix_element->type)->content_length = ((List*)matrix_element)->length;
+    // Matrix environment parsing completed successfully
+    return (Item)matrix_element;
+}
+
 static MathFlavor get_math_flavor(const char* flavor_str) {
     if (!flavor_str || strcmp(flavor_str, "latex") == 0) {
         return MATH_FLAVOR_LATEX;
@@ -682,8 +1228,6 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 
 // main parser function
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
-    printf("DEBUG: Starting math parsing with flavor: %s\n", flavor_str ? flavor_str : "latex");
-    
     input->sb = strbuf_new_pooled(input->pool);
     const char *math = math_string;
     
@@ -694,11 +1238,9 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     Item result = parse_math_expression(input, &math, flavor);
     
     if (result == ITEM_ERROR || result == ITEM_NULL) {
-        printf("DEBUG: Math parsing failed\n");
         input->root = ITEM_ERROR;
         return;
     }
     
     input->root = result;
-    printf("DEBUG: Math parsing completed successfully\n");
 }
