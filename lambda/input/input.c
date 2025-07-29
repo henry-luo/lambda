@@ -24,6 +24,7 @@ void parse_vcf(Input* input, const char* vcf_string);
 void parse_ics(Input* input, const char* ics_string);
 void parse_textile(Input* input, const char* textile_string);
 void parse_mark(Input* input, const char* mark_string);
+void parse_math(Input* input, const char* math_string, const char* flavor);
 
 
 String* strbuf_to_string(StrBuf *sb) {
@@ -391,7 +392,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, lambda_value, input->pool);
 }
 
-Input* input_from_url(String* url, String* type, lxb_url_t* cwd) {
+Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {
     printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
     lxb_url_t* abs_url = parse_url(cwd, url->chars);
     if (!abs_url) { printf("Failed to parse URL\n");  return NULL; }
@@ -498,6 +499,10 @@ Input* input_from_url(String* url, String* type, lxb_url_t* cwd) {
         else if (strcmp(effective_type, "mark") == 0) {
             parse_mark(input, source);
         }
+        else if (strcmp(effective_type, "math") == 0) {
+            const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
+            parse_math(input, source, math_flavor);
+        }
         else {
             printf("Unknown input type: %s\n", effective_type);
         }
@@ -506,6 +511,6 @@ Input* input_from_url(String* url, String* type, lxb_url_t* cwd) {
     return input;
 }
 
-Input* input_data(Context* ctx, String* url, String* type) {
-    return input_from_url(url, type, (lxb_url_t*)ctx->cwd);
+Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
+    return input_from_url(url, type, flavor, (lxb_url_t*)ctx->cwd);
 }

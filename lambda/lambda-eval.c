@@ -798,7 +798,7 @@ Type* fn_type(Item item) {
     return (Type*)type;
 }
 
-Input* input_data(Context* ctx, String* url, String* type);
+Input* input_data(Context* ctx, String* url, String* type, String* flavor);
 
 Item fn_input(Item url, Item type) {
     String* url_str;
@@ -810,16 +810,55 @@ Item fn_input(Item url, Item type) {
     else {
         url_str = (String*)url_item.pointer;
     }
+    
     LambdaItem type_item = {.item = type};
-    String* type_str;
-    if (type_item.type_id != LMD_TYPE_NULL && type_item.type_id != LMD_TYPE_STRING && type_item.type_id != LMD_TYPE_SYMBOL) {
-        printf("input type must be a string or symbol, got type %d\n", type_item.type_id);
-        return ITEM_NULL;  // todo: push error
+    String* type_str = NULL;
+    String* flavor_str = NULL;
+    
+    TypeId type_id = get_type_id(type_item);
+    
+    if (type_id == LMD_TYPE_NULL) {
+        // No type specified
+        type_str = NULL;
+    }
+    else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        // Legacy behavior: type is a simple string/symbol
+        type_str = (String*)type_item.pointer;
+    }
+    else if (type_id == LMD_TYPE_MAP) {
+        // New behavior: type is a map with options
+        Map* options_map = (Map*)type_item.pointer;
+        
+        // Extract 'type' from map
+        String* type_key_str = (String*)malloc(sizeof(String) + 5);
+        type_key_str->len = 4; type_key_str->ref_cnt = 0;
+        strcpy(type_key_str->chars, "type");
+        Item type_key = y2it(type_key_str);
+        Item type_value = map_get(options_map, type_key);
+        LambdaItem type_value_item = {.item = type_value};
+        TypeId type_value_type = get_type_id(type_value_item);
+        if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+            type_str = (String*)type_value_item.pointer;
+        }
+        
+        // Extract 'flavor' from map
+        String* flavor_key_str = (String*)malloc(sizeof(String) + 7);
+        flavor_key_str->len = 6; flavor_key_str->ref_cnt = 0;
+        strcpy(flavor_key_str->chars, "flavor");
+        Item flavor_key = y2it(flavor_key_str);
+        Item flavor_value = map_get(options_map, flavor_key);
+        LambdaItem flavor_value_item = {.item = flavor_value};
+        TypeId flavor_value_type = get_type_id(flavor_value_item);
+        if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+            flavor_str = (String*)flavor_value_item.pointer;
+        }
     }
     else {
-        type_str = (type_item.type_id == LMD_TYPE_NULL) ? NULL : (String*)type_item.pointer;
+        printf("input type must be a string, symbol, or map, got type %d\n", type_id);
+        return ITEM_NULL;  // todo: push error
     }
-    Input *input = input_data(context, url_str, type_str);
+    
+    Input *input = input_data(context, url_str, type_str, flavor_str);
     // todo: input should be cached in context
     return (input && input->root) ? input->root : ITEM_NULL;
 }

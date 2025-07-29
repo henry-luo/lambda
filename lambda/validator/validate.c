@@ -6,7 +6,7 @@
 char* read_text_file(const char *filename);
 
 // Forward declare input_from_url
-Input* input_from_url(String* url, String* type, lxb_url_t* cwd);
+Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
 
 void run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     printf("Lambda Validator v1.0\n");
@@ -113,7 +113,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         }
         
         // Use parse_url to create the URL (pass NULL for base to use absolute path)
-        Input* input = input_from_url(url_string, type_string, NULL);
+        Input* input = input_from_url(url_string, type_string, NULL, NULL);
         if (input && input->root != ITEM_ERROR) {
             data_item = input->root;
             printf("Successfully parsed input file with format '%s'\n", 

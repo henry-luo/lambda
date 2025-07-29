@@ -10,7 +10,7 @@ extern char* read_text_file(const char *filename);
 // External function declarations
 extern "C" {
     lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-    Input* input_from_url(String* url, String* type, lxb_url_t* cwd);
+    Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
     
     // For accessing the validator's internal structure
     typedef struct {
