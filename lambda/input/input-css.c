@@ -657,21 +657,21 @@ static Array* parse_css_function_params(Input *input, const char **css) {
     skip_css_comments(css);
     
     if (**css == ')') {
-        return params; // Empty parameter list
+        return params; // empty parameter list
     }
     
     while (**css && **css != ')') {
         skip_css_comments(css);
         if (**css == ')') break;
         
-        const char* start_pos = *css; // Track position to detect infinite loops
+        const char* start_pos = *css; // track position to detect infinite loops
         
         Item param = parse_css_value(input, css);
         if (param != ITEM_ERROR) {
             LambdaItem item = {.item = param};
             array_append(params, item, input->pool);
         } else {
-            // If we can't parse a value and haven't advanced, skip one character to avoid infinite loop
+            // if we can't parse a value and haven't advanced, skip one character to avoid infinite loop
             if (*css == start_pos) {
                 (*css)++;
             }
@@ -679,23 +679,21 @@ static Array* parse_css_function_params(Input *input, const char **css) {
         
         skip_css_comments(css);
         
-        // Handle parameter separators
+        // handle parameter separators
         if (**css == ',') {
-            (*css)++; // Skip comma
+            (*css)++; // skip comma
             skip_css_comments(css);
         } else if (**css == ')') {
-            // End of parameters
+            // end of parameters
             break;
         } else if (**css != ')') {
-            // Skip any whitespace between parameters (space-separated values)
+            // check for space-separated values within a function parameter
+            // some CSS functions use space separation (e.g., rgba(255 0 0 / 0.5))
             skip_css_whitespace(css);
             
-            // If we're still not at a separator or end, this might be a parsing error
-            // Skip to next comma or closing paren to recover
             if (**css && **css != ',' && **css != ')') {
-                while (**css && **css != ',' && **css != ')') {
-                    (*css)++;
-                }
+                // continue parsing more values in this parameter context
+                continue;
             }
         }
     }
@@ -763,6 +761,9 @@ static Item parse_css_function(Input *input, const char **css) {
     }
     
     printf("Created function element '%s' with %ld parameters\n", func_name->chars, params ? params->length : 0);
+    
+    // For container types like Element, return direct pointer (not tagged)
+    // The container's type_id field indicates it's an element
     return (Item)func_element;
 }
 
