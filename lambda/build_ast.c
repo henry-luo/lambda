@@ -675,14 +675,31 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     return (AstNode*)ast_node;
 }
 
+StrView build_key_string(Transpiler* tp, TSNode key_node) {
+    printf("build key string\n");
+    TSSymbol symbol = ts_node_symbol(key_node);
+    switch(symbol) {
+    // todo: handle string and symbol escape
+    case SYM_SYMBOL:  case SYM_STRING: {
+        int start_byte = ts_node_start_byte(key_node) + 1; // skip the first quote
+        int end_byte = ts_node_end_byte(key_node) - 1; // skip the last quote
+        return (StrView){.str = tp->source + start_byte, .length = end_byte - start_byte};
+    }
+    case SYM_IDENT: {
+        return (StrView)ts_node_source(tp, key_node);
+    }
+    default:
+        printf("unknown key type %d\n", symbol);
+        return (StrView){.str = NULL, .length = 0};
+    }
+}
+
 AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     printf("build key expr\n");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
-    int start_byte = ts_node_start_byte(name);
-    ast_node->name.str = tp->source + start_byte;
-    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+    ast_node->name = build_key_string(tp, name);
 
     TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
     printf("build key as\n");

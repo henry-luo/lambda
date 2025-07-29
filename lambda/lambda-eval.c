@@ -350,6 +350,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             field = field->next;
             continue;
         }
+        // printf("map_get compare field: %.*s\n", (int)field->name->length, field->name->str);
         if (strncmp(field->name->str, key, field->name->length) == 0 && 
             strlen(key) == field->name->length) {
             *is_found = true;
@@ -826,12 +827,13 @@ Item fn_input(Item url, Item type) {
         type_str = (String*)type_item.pointer;
     }
     else if (type_id == LMD_TYPE_MAP) {
+        printf("input type is a map\n");
         // New behavior: type is a map with options
         Map* options_map = (Map*)type;
         
         // Extract 'type' from map
         bool is_found;
-        Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "'type'", &is_found);
+        Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
         if (!is_found || !input_type || ((LambdaItem)input_type).type_id == LMD_TYPE_NULL) { // missing 'type' key
             type_str = NULL;
         } else {
@@ -848,7 +850,7 @@ Item fn_input(Item url, Item type) {
         }
 
         // Extract 'flavor' from map
-        Item input_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "'flavor'", &is_found);
+        Item input_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
         if (!is_found || !input_flavor || ((LambdaItem)input_flavor).type_id == LMD_TYPE_NULL) { // missing 'flavor' key
             flavor_str = NULL;
         } else {
