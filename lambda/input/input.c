@@ -184,8 +184,8 @@ void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* poo
         *(String**)field_ptr = (String*)value.pointer;
         ((String*)value.pointer)->ref_cnt++;
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:
-        *(Map**)field_ptr = (Map*)value.raw_pointer;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:  case LMD_TYPE_ELEMENT:
+        *(void**)field_ptr = value.raw_pointer;
         break;
     default:
         printf("unknown type %d\n", value.type_id);

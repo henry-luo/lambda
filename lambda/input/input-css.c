@@ -701,7 +701,7 @@ static Array* parse_css_function_params(Input *input, const char **css) {
     return params;
 }
 
-// Helper function to flatten single-element arrays
+// Helper function to flatten single-element arrays  
 static Item flatten_single_array(Array* arr) {
     if (!arr) {
         return ITEM_ERROR;
@@ -714,7 +714,24 @@ static Item flatten_single_array(Array* arr) {
     
     // For single-element arrays, return the single item directly
     // Use array_get to safely access the item
-    return list_get((List*)arr, 0);
+    Item single_item = list_get((List*)arr, 0);
+    
+    // Debug: check what type we're flattening
+    if (single_item != ITEM_ERROR) {
+        printf("Flattening single array item, type: %llu\n", single_item >> 56);
+        
+        // For container types (like Elements), the type is determined by the container's type_id field
+        // Check if this is a direct pointer to a container
+        if ((single_item >> 56) == 0) {
+            Container* container = (Container*)single_item;
+            if (container && container->type_id == LMD_TYPE_ELEMENT) {
+                printf("Single item is element container, keeping as-is\n");
+                return single_item;
+            }
+        }
+    }
+    
+    return single_item;
 }
 
 static Item parse_css_function(Input *input, const char **css) {
