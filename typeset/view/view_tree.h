@@ -94,7 +94,7 @@ typedef struct ViewMathElement {
     enum ViewMathElementType {
         VIEW_MATH_ATOM,
         VIEW_MATH_FRACTION,
-        VIEW_MATH_SCRIPT,
+        VIEW_MATH_SUPERSCRIPT,
         VIEW_MATH_RADICAL,
         VIEW_MATH_MATRIX,
         VIEW_MATH_DELIMITER
@@ -324,6 +324,11 @@ void view_tree_optimize(ViewTree* tree);
 ViewStats* view_tree_calculate_stats(ViewTree* tree);
 double view_tree_get_total_text_length(ViewTree* tree);
 ViewSize view_tree_get_total_size(ViewTree* tree);
+
+// Internal helper functions
+ViewNode* view_node_find_by_id_recursive(ViewNode* node, const char* id);
+ViewNode* view_node_find_by_role_recursive(ViewNode* node, const char* role);
+void view_node_calculate_stats_recursive(ViewNode* node, ViewStats* stats);
 
 // Utility functions
 ViewTransform view_transform_identity(void);

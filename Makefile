@@ -278,6 +278,59 @@ test-typeset-all: build
 	@echo "Running all typesetting tests..."
 	./$(LAMBDA_EXE) test/lambda/typeset/run_all_tests.ls
 
+test-typeset-end-to-end: build
+	@echo "Testing end-to-end typesetting workflow..."
+	./$(LAMBDA_EXE) test/lambda/typeset/test_end_to_end.ls
+
+# C-based end-to-end test using Lambda runtime directly (no MIR/JIT)
+test-typeset-c: build
+	@echo "Building C-based end-to-end test with Lambda runtime..."
+	gcc -I. -Iinclude -o test_end_to_end_direct test/lambda/typeset/test_end_to_end.c \
+		lambda/lambda-mem.c lambda/lambda-eval.c lambda/print.c \
+		typeset/typeset.c typeset/view/view_tree.c \
+		typeset/integration/lambda_bridge.c typeset/serialization/lambda_serializer.c \
+		typeset/output/svg_renderer.c \
+		lib/strbuf.c lib/arraylist.c lib/hashmap.c \
+		-lm
+	@echo "Running C-based end-to-end test..."
+	./test_end_to_end_direct
+	@echo "Cleaning up test executable..."
+	rm -f test_end_to_end_direct
+
+# Minimal typesetting test without Lambda dependencies
+test-typeset-minimal: 
+	@echo "Building minimal typesetting test..."
+	gcc -I. -Iinclude -o test_minimal test/lambda/typeset/test_minimal.c \
+		typeset/view/view_tree.c typeset/output/renderer.c typeset/output/svg_renderer.c \
+		lib/strbuf.c \
+		-lm
+	@echo "Running minimal typesetting test..."
+	./test_minimal
+	@echo "Cleaning up test executable..."
+	rm -f test_minimal
+
+# Simple proof-of-concept test
+test-typeset-simple: 
+	@echo "Building simple typesetting proof of concept..."
+	gcc -I. -Iinclude -o test_simple test/lambda/typeset/test_simple.c \
+		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
+		-lm
+	@echo "Running simple typesetting test..."
+	./test_simple
+	@echo "Cleaning up test executable..."
+	rm -f test_simple
+
+# Complete workflow demonstration
+test-typeset-workflow: 
+	@echo "Building Lambda typesetting workflow demonstration..."
+	gcc -I. -Iinclude -o test_workflow test/lambda/typeset/test_workflow.c \
+		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
+		-lm
+	@echo "Running typesetting workflow demonstration..."
+	./test_workflow
+	@echo "Cleaning up test executable..."
+	rm -f test_workflow
+
 test-all:
 	@echo "Running complete test suite (all test types)..."
 	@echo "1. Unit Tests..."
