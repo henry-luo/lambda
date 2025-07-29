@@ -65,6 +65,36 @@ advanced_environments
 
 // === END NEW ENHANCED FEATURES ===
 
+// === NEWLY ENHANCED MATH FEATURES ===
+"=== NEWLY ENHANCED MATH FEATURES ==="
+
+// Test enhanced absolute value functions
+let enhanced_abs = input('./test/input/math_abs_simple.txt', {'type': 'math', 'flavor': 'latex'})
+"Enhanced absolute value:"
+enhanced_abs
+
+// Test enhanced ceiling/floor functions  
+let enhanced_ceil_floor = input('./test/input/math_ceil_floor_latex.txt', {'type': 'math', 'flavor': 'latex'})
+"Enhanced ceiling/floor:"
+enhanced_ceil_floor
+
+// Test prime notation for derivatives
+let enhanced_prime = input('./test/input/math_prime.txt', {'type': 'math', 'flavor': 'ascii'})
+"Enhanced prime notation:"
+enhanced_prime
+
+// Test mathematical number sets
+let enhanced_sets = input('./test/input/math_sets.txt', {'type': 'math', 'flavor': 'latex'})
+"Enhanced number sets:"
+enhanced_sets
+
+// Test set theory and logic operators
+let enhanced_logic = input('./test/input/math_logic.txt', {'type': 'math', 'flavor': 'latex'})  
+"Enhanced logic operators:"
+enhanced_logic
+
+// === END NEWLY ENHANCED FEATURES ===
+
 // Test flavor support (basic fallback for non-LaTeX flavors)
 let basic_flavor = input('./test/input/math_simple.txt', {'type': 'math', 'flavor': 'basic'})
 "Basic flavor:"
@@ -86,3 +116,4 @@ error_test
 
 "✅ Comprehensive math parser test completed!"
 "✅ Enhanced LaTeX environments (cases, equation, align, aligned, gather, smallmatrix) tested!"
+"✅ Newly enhanced features (abs, ceil/floor, prime, sets, logic) tested!"

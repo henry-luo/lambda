@@ -36,6 +36,17 @@ static Item parse_math_identifier(Input *input, const char **math);
 static Item create_binary_expr(Input *input, const char* op_name, Item left, Item right);
 static void skip_math_whitespace(const char **math);
 
+// New enhanced function declarations
+static Item parse_latex_abs(Input *input, const char **math);
+static Item parse_latex_ceil_floor(Input *input, const char **math, const char* func_name);
+static Item parse_prime_notation(Input *input, const char **math, Item base);
+static Item parse_number_set(Input *input, const char **math, const char* set_name);
+static Item parse_set_operation(Input *input, const char **math, const char* op_name);
+static Item parse_logic_operator(Input *input, const char **math, const char* op_name);
+static bool is_number_set(const char* cmd);
+static bool is_set_operation(const char* cmd);
+static bool is_logic_operator(const char* cmd);
+
 // use common utility functions from input.c and input-common.c
 #define create_math_element input_create_element
 #define add_attribute_to_element input_add_attribute_to_element
@@ -128,10 +139,18 @@ static Item parse_math_identifier(Input *input, const char **math) {
     String *id_string = (String*)sb->str;
     id_string->len = sb->length - sizeof(uint32_t);
     
-    // Create symbol from string chars (same as command parsing)
-    Item symbol_item = y2it(id_string);
-    // NOTE: Don't reset sb here - let the calling code manage it
-    // The symbol points to memory in the buffer that shouldn't be freed yet
+    // Create a proper copy of the identifier string to avoid buffer corruption
+    String* id_copy = input_create_string(input, id_string->chars);
+    if (!id_copy) {
+        strbuf_full_reset(sb);
+        return ITEM_ERROR;
+    }
+    
+    // Create symbol from the copied string
+    Item symbol_item = y2it(id_copy);
+    
+    // Now we can safely reset the buffer since we have a copy
+    strbuf_full_reset(sb);
     
     return symbol_item;
 }
@@ -436,6 +455,36 @@ static Item parse_latex_command(Input *input, const char **math) {
     } else if (strcmp(cmd_string->chars, "cases") == 0) {
         strbuf_full_reset(sb);
         return parse_latex_cases(input, math);
+    } else if (strcmp(cmd_string->chars, "left") == 0) {
+        strbuf_full_reset(sb);
+        // Handle \left| for absolute value
+        skip_math_whitespace(math);
+        if (**math == '|') {
+            (*math)++; // skip |
+            return parse_latex_abs(input, math);
+        }
+        // For other \left delimiters, treat as symbol for now
+        return y2it("left");
+    } else if (strcmp(cmd_string->chars, "abs") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_abs(input, math);
+    } else if (strcmp(cmd_string->chars, "lceil") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_ceil_floor(input, math, "ceil");
+    } else if (strcmp(cmd_string->chars, "lfloor") == 0) {
+        strbuf_full_reset(sb);
+        return parse_latex_ceil_floor(input, math, "floor");
+    } else if (is_number_set(cmd_string->chars)) {
+        strbuf_full_reset(sb);
+        return parse_number_set(input, math, cmd_string->chars);
+    } else if (is_set_operation(cmd_string->chars)) {
+        const char* op_name = cmd_string->chars;
+        strbuf_full_reset(sb);
+        return parse_set_operation(input, math, op_name);
+    } else if (is_logic_operator(cmd_string->chars)) {
+        const char* op_name = cmd_string->chars;
+        strbuf_full_reset(sb);
+        return parse_logic_operator(input, math, op_name);
     } else if (is_trig_function(cmd_string->chars) || is_log_function(cmd_string->chars)) {
         const char* func_name = cmd_string->chars;
         strbuf_full_reset(sb);
@@ -692,6 +741,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     const char* func_name = func_string->chars;
                     bool is_known_func = is_trig_function(func_name) || is_log_function(func_name) ||
                                         strcmp(func_name, "sqrt") == 0 || strcmp(func_name, "abs") == 0 ||
+                                        strcmp(func_name, "ceil") == 0 || strcmp(func_name, "floor") == 0 ||
                                         strcmp(func_name, "exp") == 0 || strcmp(func_name, "pow") == 0 ||
                                         strcmp(func_name, "min") == 0 || strcmp(func_name, "max") == 0;
                     
@@ -896,34 +946,68 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
     
     skip_math_whitespace(math);
     
-    // handle postfix operators (superscript, subscript)
-    if (flavor == MATH_FLAVOR_LATEX) {
-        if (**math == '^') {
-            (*math)++; // skip ^
-            left = parse_latex_superscript(input, math, left);
-            if (left == ITEM_ERROR) {
-                return ITEM_ERROR;
+    // handle postfix operators (superscript, subscript, prime)
+    while (true) {
+        bool processed = false;
+        
+        if (flavor == MATH_FLAVOR_LATEX) {
+            if (**math == '^') {
+                (*math)++; // skip ^
+                left = parse_latex_superscript(input, math, left);
+                if (left == ITEM_ERROR) {
+                    return ITEM_ERROR;
+                }
+                processed = true;
+            } else if (**math == '_') {
+                (*math)++; // skip _
+                left = parse_latex_subscript(input, math, left);
+                if (left == ITEM_ERROR) {
+                    return ITEM_ERROR;
+                }
+                processed = true;
             }
-            skip_math_whitespace(math);
+            
+            // Handle prime notation for all flavors
+            if (**math == '\'') {
+                left = parse_prime_notation(input, math, left);
+                if (left == ITEM_ERROR) {
+                    return ITEM_ERROR;
+                }
+                processed = true;
+            }
+        } else if (flavor == MATH_FLAVOR_TYPST) {
+            if (**math == '^') {
+                (*math)++; // skip ^
+                left = parse_typst_power(input, math, flavor, left);
+                if (left == ITEM_ERROR) {
+                    return ITEM_ERROR;
+                }
+                processed = true;
+            }
+            
+            // Handle prime notation for all flavors
+            if (**math == '\'') {
+                left = parse_prime_notation(input, math, left);
+                if (left == ITEM_ERROR) {
+                    return ITEM_ERROR;
+                }
+                processed = true;
+            }
+        } else if (flavor == MATH_FLAVOR_ASCII) {
+            // Handle prime notation for all flavors
+            if (**math == '\'') {
+                left = parse_prime_notation(input, math, left);
+                if (left == ITEM_ERROR) {
+                    return ITEM_ERROR;
+                }
+                processed = true;
+            }
         }
         
-        if (**math == '_') {
-            (*math)++; // skip _
-            left = parse_latex_subscript(input, math, left);
-            if (left == ITEM_ERROR) {
-                return ITEM_ERROR;
-            }
-            skip_math_whitespace(math);
+        if (!processed) {
+            break;
         }
-    } else if (flavor == MATH_FLAVOR_TYPST) {
-        if (**math == '^') {
-            (*math)++; // skip ^
-            left = parse_typst_power(input, math, flavor, left);
-            if (left == ITEM_ERROR) {
-                return ITEM_ERROR;
-            }
-            skip_math_whitespace(math);
-        }
+        skip_math_whitespace(math);
     }
     // Note: ASCII power operations are now handled in parse_power_expression
     
@@ -1588,8 +1672,30 @@ static Item parse_latex_equation(Input *input, const char **math) {
     add_attribute_to_element(input, eq_element, "env", "true");
     add_attribute_to_element(input, eq_element, "numbered", "true");
     
-    // Parse the equation content
-    Item content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    // Parse equation content until \end{equation}
+    const char* content_start = *math;
+    const char* content_end = strstr(*math, "\\end{equation}");
+    
+    if (!content_end) {
+        printf("ERROR: Expected \\end{equation} to close equation environment\n");
+        return ITEM_ERROR;
+    }
+    
+    // Create a temporary null-terminated string for the content
+    size_t content_length = content_end - content_start;
+    char* temp_content = malloc(content_length + 1);
+    if (!temp_content) {
+        printf("ERROR: Failed to allocate memory for equation content\n");
+        return ITEM_ERROR;
+    }
+    strncpy(temp_content, content_start, content_length);
+    temp_content[content_length] = '\0';
+    
+    // Parse the content
+    const char* temp_ptr = temp_content;
+    Item content = parse_math_expression(input, &temp_ptr, MATH_FLAVOR_LATEX);
+    free(temp_content);
+    
     if (content == ITEM_ERROR) {
         printf("ERROR: Failed to parse equation content\n");
         return ITEM_ERROR;
@@ -1599,7 +1705,8 @@ static Item parse_latex_equation(Input *input, const char **math) {
         list_push((List*)eq_element, content);
     }
     
-    skip_math_whitespace(math);
+    // Move past the content to \end{equation}
+    *math = content_end;
     
     // Parse \end{equation}
     if (strncmp(*math, "\\end{equation}", 14) != 0) {
@@ -1904,6 +2011,214 @@ static Item parse_latex_gather(Input *input, const char **math) {
     
     ((TypeElmt*)gather_element->type)->content_length = ((List*)gather_element)->length;
     return (Item)gather_element;
+}
+
+// Enhanced helper functions for new mathematical constructs
+static bool is_number_set(const char* cmd) {
+    return strcmp(cmd, "mathbb") == 0;
+}
+
+static bool is_set_operation(const char* cmd) {
+    return strcmp(cmd, "in") == 0 || strcmp(cmd, "notin") == 0 ||
+           strcmp(cmd, "subset") == 0 || strcmp(cmd, "supset") == 0 ||
+           strcmp(cmd, "cup") == 0 || strcmp(cmd, "cap") == 0 ||
+           strcmp(cmd, "emptyset") == 0;
+}
+
+static bool is_logic_operator(const char* cmd) {
+    return strcmp(cmd, "forall") == 0 || strcmp(cmd, "exists") == 0 ||
+           strcmp(cmd, "land") == 0 || strcmp(cmd, "lor") == 0 ||
+           strcmp(cmd, "neg") == 0 || strcmp(cmd, "Rightarrow") == 0 ||
+           strcmp(cmd, "Leftrightarrow") == 0;
+}
+
+// Parse absolute value: \left| x \right| or \abs{x}
+static Item parse_latex_abs(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    Item inner;
+    
+    // Check if this is \abs{} format or \left| format
+    if (**math == '{') {
+        (*math)++; // skip opening brace
+        
+        // Parse the inner expression
+        inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (inner == ITEM_ERROR) {
+            return ITEM_ERROR;
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Expect closing brace
+        if (**math != '}') {
+            printf("ERROR: Expected } for absolute value, found: %.10s\n", *math);
+            return ITEM_ERROR;
+        }
+        (*math)++; // skip closing brace
+        
+    } else {
+        // This is \left| format, parse until \right|
+        inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (inner == ITEM_ERROR) {
+            return ITEM_ERROR;
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Expect \right|
+        if (strncmp(*math, "\\right|", 7) != 0) {
+            printf("ERROR: Expected \\right| for absolute value, found: %.10s\n", *math);
+            return ITEM_ERROR;
+        }
+        *math += 7;
+    }
+    
+    // Create abs element
+    Element* abs_element = create_math_element(input, "abs");
+    if (!abs_element) {
+        return ITEM_ERROR;
+    }
+    
+    list_push((List*)abs_element, inner);
+    ((TypeElmt*)abs_element->type)->content_length = ((List*)abs_element)->length;
+    
+    return (Item)abs_element;
+}
+
+// Parse ceiling/floor functions: \lceil x \rceil, \lfloor x \rfloor
+static Item parse_latex_ceil_floor(Input *input, const char **math, const char* func_name) {
+    skip_math_whitespace(math);
+    
+    // Parse the inner expression - no braces expected, just parse until the closing delimiter
+    Item inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (inner == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Expect appropriate closing delimiter
+    if (strcmp(func_name, "ceil") == 0 && strncmp(*math, "\\rceil", 6) == 0) {
+        *math += 6;
+    } else if (strcmp(func_name, "floor") == 0 && strncmp(*math, "\\rfloor", 7) == 0) {
+        *math += 7;
+    } else {
+        printf("ERROR: Expected closing delimiter for %s, found: %.10s\n", func_name, *math);
+        return ITEM_ERROR;
+    }
+    
+    // Create function element
+    Element* func_element = create_math_element(input, func_name);
+    if (!func_element) {
+        return ITEM_ERROR;
+    }
+    
+    list_push((List*)func_element, inner);
+    ((TypeElmt*)func_element->type)->content_length = ((List*)func_element)->length;
+    
+    return (Item)func_element;
+}
+
+// Parse prime notation: f'(x), f''(x), f'''(x)
+static Item parse_prime_notation(Input *input, const char **math, Item base) {
+    int prime_count = 0;
+    
+    // Count consecutive apostrophes
+    while (**math == '\'') {
+        prime_count++;
+        (*math)++;
+    }
+    
+    // Create prime element
+    Element* prime_element = create_math_element(input, "prime");
+    if (!prime_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add base expression
+    list_push((List*)prime_element, base);
+    
+    // Add prime count as attribute
+    char count_str[16];
+    snprintf(count_str, sizeof(count_str), "%d", prime_count);
+    add_attribute_to_element(input, prime_element, "count", count_str);
+    
+    ((TypeElmt*)prime_element->type)->content_length = ((List*)prime_element)->length;
+    
+    return (Item)prime_element;
+}
+
+// Parse number sets: \mathbb{R}, \mathbb{N}, etc.
+static Item parse_number_set(Input *input, const char **math, const char* set_name) {
+    // Expect opening brace
+    skip_math_whitespace(math);
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++;
+    
+    // Parse set identifier (single letter)
+    skip_math_whitespace(math);
+    if (!**math || !isalpha(**math)) {
+        return ITEM_ERROR;
+    }
+    
+    char set_char = **math;
+    (*math)++;
+    
+    // Expect closing brace
+    skip_math_whitespace(math);
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++;
+    
+    // Create set element with appropriate name
+    const char* set_symbol;
+    switch (set_char) {
+        case 'R': set_symbol = "reals"; break;
+        case 'N': set_symbol = "naturals"; break;
+        case 'Z': set_symbol = "integers"; break;
+        case 'Q': set_symbol = "rationals"; break;
+        case 'C': set_symbol = "complex"; break;
+        default: set_symbol = "set"; break;
+    }
+    
+    Element* set_element = create_math_element(input, set_symbol);
+    if (!set_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add set type as attribute
+    char set_str[2] = {set_char, '\0'};
+    add_attribute_to_element(input, set_element, "type", set_str);
+    
+    ((TypeElmt*)set_element->type)->content_length = ((List*)set_element)->length;
+    
+    return (Item)set_element;
+}
+
+// Parse set operations: \in, \subset, \cup, \cap, etc.
+static Item parse_set_operation(Input *input, const char **math, const char* op_name) {
+    Element* op_element = create_math_element(input, op_name);
+    if (!op_element) {
+        return ITEM_ERROR;
+    }
+    
+    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+    return (Item)op_element;
+}
+
+// Parse logic operators: \forall, \exists, \land, \lor, etc.
+static Item parse_logic_operator(Input *input, const char **math, const char* op_name) {
+    Element* op_element = create_math_element(input, op_name);
+    if (!op_element) {
+        return ITEM_ERROR;
+    }
+    
+    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+    return (Item)op_element;
 }
 
 static MathFlavor get_math_flavor(const char* flavor_str) {

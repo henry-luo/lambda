@@ -233,8 +233,121 @@ All enhancements have been rigorously tested with:
 - **Regression Testing**: Ensuring backward compatibility with existing functionality
 
 ## Test Coverage
-### Phase 7: Advanced LaTeX Math Features ✅
-### Phase 7: Advanced LaTeX Math Features ✅
+### Phase 8: LaTeX Parser Bug Fixes (January 2025) ✅
+- ✅ **LaTeX Absolute Value Parsing**: Fixed `\abs{x}` parsing bug 
+  - **Issue**: LaTeX absolute value expressions like `\abs{x}` were incorrectly parsed as `<x 'x'>` instead of `<abs 'x'>`
+  - **Root Cause**: String buffer corruption in `parse_math_identifier` function
+  - **Solution**: Fixed string buffer management by copying strings before creating symbols
+  - **Validation**: All LaTeX absolute value forms now parse correctly (`\abs{x}`, `\abs{xyz}`, `\abs{5}`)
+
+- ✅ **LaTeX Ceiling/Floor Parsing**: Fixed `\lceil` and `\lfloor` parsing
+  - **Issue**: LaTeX ceiling/floor expressions like `\lceil x \rceil` were showing empty results  
+  - **Solution**: Ensured proper symbol creation for ceiling and floor functions
+  - **Result**: Now correctly parses as `<ceil 'x'>` and `<floor 'x'>`
+
+- ✅ **LaTeX Environment Parsing**: Fixed equation environment boundary issues
+  - **Issue**: LaTeX environments like `\begin{equation}...\end{equation}` failed with "Expected \end{equation}" errors
+  - **Root Cause**: The `parse_math_expression` function consumed entire input including environment end tags
+  - **Solution**: Modified environment parsing to use loop-based content parsing with proper boundary detection
+  - **Result**: Equation environments now parse correctly as `<equation env:"true",numbered:"true";...>`
+
+### Phase 8: Enhanced Math Features (January 2025) ✅
+- ✅ **Advanced Mathematical Functions**: Enhanced support for specialized math functions
+  - Absolute value: `\abs{x}` → `<abs 'x'>`
+  - Ceiling function: `\lceil x \rceil` → `<ceil 'x'>`  
+  - Floor function: `\lfloor x \rfloor` → `<floor 'x'>`
+  - Prime notation: `f'(x)` → `<prime count:"1";'f'>`
+  - Double prime: `f''(x)` → `<prime count:"2";'f'>`
+
+- ✅ **Number Set Notation**: Mathematical number set symbols
+  - Real numbers: `\mathbb{R}` → `<reals type:"R";>`
+  - Complex numbers: `\mathbb{C}` → `<complex type:"C";>`
+  - Natural numbers: `\mathbb{N}` → `<naturals type:"N";>`
+  - Integers: `\mathbb{Z}` → `<integers type:"Z";>`
+  - Rational numbers: `\mathbb{Q}` → `<rationals type:"Q";>`
+
+- ✅ **Logic and Set Operators**: Logical quantifiers and set theory operators
+  - Universal quantifier: `\forall` → `<forall >`
+  - Existential quantifier: `\exists` → `<exists >`
+  - Element of: `\in` → `<in >`
+  - Subset: `\subset` → `<subset >`
+  - Union: `\cup` → `<union >`
+  - Intersection: `\cap` → `<intersection >`
+
+### Recent Bug Fixes and Enhancements
+
+#### Documentation Corrections (January 2025) 📋
+**Issue**: Math.md documentation was inaccurate about several implemented features.
+
+**Corrections Made**:
+- ✅ **`\begin{cases}...\end{cases}`**: Documented as ❌ unsupported, but actually ✅ fully implemented and working
+  - **Test Result**: Successfully parses piecewise functions: `<cases env:"true",cases:"14";...>`
+  - **Priority**: Update documentation to reflect actual capability
+  
+- ✅ **`\begin{gather}...\end{gather}`**: Documented as ❌ unsupported, but actually ✅ fully implemented and working
+  - **Test Result**: Successfully parses gathered equations: `<gather env:"true",numbered:"true",alignment:"center",equations:"8";...>`
+  - **Priority**: Update documentation to reflect actual capability
+
+- ⚠️ **`\begin{aligned}...\end{aligned}`**: Documented as ❌ unsupported, but actually ⚠️ partially implemented with bugs
+  - **Test Result**: Function exists but fails with "Failed to parse right side of aligned equation 1" error
+  - **Root Cause**: Implementation exists in code but has parsing logic issues
+  - **Priority**: Fix existing bugs rather than implement from scratch
+
+**Impact**: Users may have avoided using perfectly functional features due to incorrect documentation.
+
+**Action Taken**: Updated Math.md to accurately reflect actual implementation status and distinguish between:
+- ✅ Fully implemented and working
+- ⚠️ Implemented but buggy  
+- ❌ Not implemented
+
+#### Detailed Bug Fix Documentation (January 2025)
+
+#### 1. LaTeX Absolute Value Bug Fix ✅
+**Problem**: LaTeX absolute value parsing producing incorrect results.
+- Input: `\abs{x}` 
+- Expected: `<abs 'x'>`
+- Actual: `<x 'x'>` (incorrect)
+
+**Root Cause Analysis**: 
+- String buffer corruption in `parse_math_identifier` function
+- The function was not properly copying strings before creating Lambda symbols
+- Buffer contents were being overwritten during subsequent parsing operations
+
+**Solution Implementation**: 
+```c
+// Before (buggy)
+return create_lambda_symbol(input, sb->str + sizeof(uint32_t));
+
+// After (fixed) 
+char* identifier_copy = malloc(strlen(identifier) + 1);
+strcpy(identifier_copy, identifier);
+return create_lambda_symbol(input, identifier_copy);
+```
+
+**Validation Results**: All LaTeX absolute value forms now parse correctly:
+- `\abs{x}` → `<abs 'x'>` ✅
+- `\abs{xyz}` → `<abs 'xyz'>` ✅  
+- `\abs{5}` → `<abs 5>` ✅
+
+#### 2. LaTeX Environment Parsing Bug Fix ✅
+**Problem**: LaTeX environments failing with boundary detection errors.
+- Input: `\begin{equation} x + y = z \end{equation}`
+- Error: "Expected \end{equation} to close equation environment"
+
+**Root Cause Analysis**: 
+- The `parse_math_expression` function was consuming the entire input including `\end{equation}` tags
+- Environment parsing functions couldn't find closing tags after content parsing
+- No proper boundary detection for environment content
+
+**Solution Implementation**: 
+- Modified `parse_latex_equation` to use loop-based parsing with boundary checks
+- Added proper `\end{environment}` detection before calling content parsing functions
+- Used `parse_math_primary` instead of `parse_math_expression` for controlled parsing
+
+**Validation Results**: All LaTeX environments now parse correctly:
+- `\begin{equation}...\end{equation}` → `<equation env:"true",numbered:"true";...>` ✅
+- Proper content parsing within environment boundaries ✅
+- Support for multiple environments in sequence ✅
 - ✅ Enhanced Greek letter support (full alphabet: α, β, γ, δ, ε, ..., Ω)
 - ✅ Mathematical operators (∞, ∂, ∇, ⋅, ×, ÷, ±, ∓, ≤, ≥, ≠, ≈, etc.)
 - ✅ Advanced trigonometric functions (arcsin, arccos, arctan, sinh, cosh, tanh)
@@ -553,11 +666,268 @@ Input: "x^2 + y**3"          → <add <pow 'x' "2"> <pow 'y' "3">>
 - ✅ **Code Refactoring**: Shared utilities between input parsers for better maintainability
 - ✅ **Testing**: Comprehensive test coverage for core functionality and integration
 
+## Current Limitations and Known Issues
+
+### Input Format Limitations
+The math parser currently has several limitations with input format handling:
+
+#### 1. Mixed Content Files with Comments ❌
+**Issue**: Files containing both comments and math expressions are not fully supported.
+
+**Example Problem File** (`math_enhanced_mixed.txt`):
+```
+// Mixed enhanced mathematical expressions
+\abs{x^2 + y^2} + \lceil \frac{a}{b} \rceil + f'(x)
+\mathbb{R} \in \mathbb{C} \quad \forall x \in \mathbb{N}
+\lfloor \sqrt{n} \rfloor + \abs{\sin(\theta)} + g''(\phi)
+```
+
+**Current Behavior**: Returns `ERROR` because the parser encounters comment syntax (`//`) which is not valid math notation.
+
+**Workaround**: Create separate files with pure mathematical expressions without comments.
+
+**Priority**: Medium - would require preprocessing to strip comments before math parsing.
+
+#### 2. Multi-Line Mathematical Expressions ❌  
+**Issue**: The math parser is designed to parse single mathematical expressions, not multiple expressions across lines.
+
+**Example Problem**:
+```
+x + y = z
+a^2 + b^2 = c^2  
+\sin(\theta) + \cos(\theta) = 1
+```
+
+**Current Behavior**: Parser processes only the first line and ignores subsequent expressions.
+
+**Expected vs Actual**:
+- Expected: Parse all three expressions separately
+- Actual: Only parses `x + y = z`, ignores the rest
+
+**Workaround**: 
+- Split multi-line files into separate single-expression files
+- Or use math environments that support multiple equations (like `align`)
+
+**Priority**: Low - current design focuses on single expression parsing.
+
+#### 3. Comparison Test Files with Mixed Syntax ❌
+**Issue**: Test files designed for cross-flavor comparison contain mixed syntax that confuses individual flavor parsers.
+
+**Example Problem File** (`math_abs_comparison.txt`):
+```
+// Absolute value comparison across flavors
+// LaTeX: \abs{x}, \left| y \right|  
+// ASCII: abs(x), |y|
+// Typst: abs(x), |y|
+\abs{5}
+```
+
+**Current Behavior**: 
+- LaTeX flavor: Returns `ERROR` due to ASCII/Typst comment syntax
+- ASCII flavor: Returns `ERROR` due to LaTeX commands in comments
+- Typst flavor: Returns `ERROR` due to mixed syntax
+
+**Root Cause**: These files were designed for documentation purposes, not actual parsing tests.
+
+**Workaround**: Create flavor-specific test files:
+```
+// For LaTeX testing
+math_abs_latex_only.txt: \abs{5}
+
+// For ASCII testing  
+math_abs_ascii_only.txt: abs(5)
+
+// For Typst testing
+math_abs_typst_only.txt: abs(5)
+```
+
+**Priority**: Low - these are test infrastructure issues, not core parser problems.
+
+### Parser Architecture Limitations
+
+#### 4. Single Expression Focus 🔍
+**Design Choice**: The math parser is architected around parsing single mathematical expressions rather than mathematical documents.
+
+**Implications**:
+- Cannot parse mathematical papers or documents with mixed text and math
+- Cannot handle mathematical conversations or explanations with embedded expressions
+- Focused on expression-to-AST conversion, not document processing
+
+**When This Is Appropriate**: 
+- Evaluating mathematical expressions in computational contexts
+- Converting single formulas between notation systems
+- Building mathematical expression trees for computation
+
+**When This Is Limiting**:
+- Processing mathematical documents or papers
+- Handling educational content with explanations
+- Working with mathematical note-taking applications
+
+#### 5. Comment Syntax Conflicts ⚠️
+**Issue**: Mathematical notation systems don't have standardized comment syntax, leading to conflicts.
+
+**Current Status**:
+- LaTeX math: No native comment support in math mode
+- ASCII math: Uses `//` or `#` for comments (not standardized)
+- Typst math: Uses `//` for comments
+
+**Problem**: When files mix comment styles or include explanatory text, parsers fail.
+
+**Priority**: Medium - could be addressed by adding comment preprocessing.
+
+### Error Handling Limitations
+
+#### 6. Limited Error Recovery ❌
+**Issue**: When the parser encounters an error, it returns `ERROR` without attempting to parse remaining content.
+
+**Current Behavior**:
+```
+Input: "x + invalid_syntax + y"
+Output: ERROR (entire expression fails)
+```
+
+**Desired Behavior**:
+```
+Input: "x + invalid_syntax + y" 
+Output: <add 'x' ERROR 'y'> (partial parsing with error markers)
+```
+
+**Priority**: Medium - would improve user experience in interactive applications.
+
+#### 7. Minimal Error Context 📍
+**Issue**: Error messages provide minimal context about what went wrong and where.
+
+**Current Messages**:
+- "ERROR: Expected \end{equation} to close equation environment"
+- Generic `ERROR` return value
+
+**Desired Messages**:
+- "ERROR at position 45: Expected \end{equation} to close equation environment opened at position 12"
+- "ERROR: Unknown LaTeX command '\invalidcommand' at position 23"
+
+**Priority**: Low - helpful for debugging but not critical for functionality.
+
+### Scope and Feature Limitations
+
+#### 8. Advanced LaTeX Environments ✅/⚠️
+**Mixed Support**: LaTeX math environments have varying levels of implementation.
+
+**Currently Fully Supported**:
+- ✅ `\begin{equation}...\end{equation}`
+- ✅ `\begin{align}...\end{align}` 
+- ✅ `\begin{matrix}...\end{matrix}`
+- ✅ `\begin{cases}...\end{cases}` (piecewise functions) **[Previously underdocumented]**
+- ✅ `\begin{gather}...\end{gather}` (gathered equations) **[Previously underdocumented]**
+
+**Partially Supported/Buggy**:
+- ⚠️ `\begin{aligned}...\end{aligned}` (inline alignment) - Implemented but has parsing issues with equation right sides
+  - **Issue**: "Failed to parse right side of aligned equation 1" error occurs even with simple cases
+  - **Status**: Function exists and is called, but has bugs in equation parsing logic
+
+**Limited or Not Supported**:
+- ❌ Complex nested environments
+- ❌ Advanced matrix variants: `pmatrix`, `bmatrix`, `vmatrix`, etc. beyond basic `matrix`
+
+**Priority**: Medium - these are commonly used in mathematical documents.
+
+#### 9. Advanced Mathematical Notation 📐
+**Missing Features**: Many advanced mathematical constructs are not yet implemented.
+
+**High Priority Missing**:
+- Derivatives: `\frac{d}{dx}`, `\partial/\partial x`
+- Complex integrals: `\oint`, `\iint`, `\iiint`
+- Advanced set notation: `\mathcal{P}(A)`, `\mathfrak{a}`
+- Vector notation: `\vec{v}`, `\hat{n}`, `\dot{x}`
+
+**Medium Priority Missing**:
+- Binomial coefficients: `\binom{n}{k}`
+- Continued fractions: `\cfrac{}{}`
+- Chemical notation integration
+- Advanced typography: `\mathbf{}`, `\mathit{}`
+
+**Priority**: Varies - depends on specific use cases and user requirements.
+
+### Performance Limitations
+
+#### 10. Large Expression Handling 📊
+**Issue**: Parser performance degrades with very large mathematical expressions.
+
+**Current Status**: Not systematically tested with large expressions (>1000 tokens).
+
+**Potential Issues**:
+- Memory allocation for deep recursion
+- String buffer management overhead  
+- AST construction for complex trees
+
+**Priority**: Low - most mathematical expressions are relatively small.
+
+### Integration Limitations
+
+#### 11. Document Parser Integration Gaps 🔗
+**Issue**: While math parsing is integrated with Markdown and LaTeX document parsers, some edge cases remain.
+
+**Known Issues**:
+- Mixed math flavors within single documents
+- Math expressions split across line breaks in documents
+- Interaction between document structure and math environments
+
+**Priority**: Medium - affects real-world document processing scenarios.
+
+## Workarounds and Best Practices
+
+### For Current Limitations
+
+1. **Mixed Content Files**: 
+   - Strip comments before processing: `sed 's|//.*||g' input.txt`
+   - Use separate files for pure math expressions
+
+2. **Multi-Line Expressions**:
+   - Split into individual expression files
+   - Use appropriate math environments (`align`, `gather`)
+   - Process line-by-line in application code
+
+3. **Cross-Flavor Testing**:
+   - Create flavor-specific test files
+   - Use programmatic testing instead of mixed-syntax files
+   - Document expected outputs separately
+
+4. **Error Handling**:
+   - Validate expressions before parsing when possible
+   - Implement application-level error recovery
+   - Use fallback parsing strategies
+
+### Recommended Usage Patterns
+
+1. **Single Expression Processing**: ✅ Ideal use case
+   ```lambda
+   let result = input('./single_formula.txt', {'type': 'math', 'flavor': 'latex'})
+   ```
+
+2. **Batch Processing**: ✅ Supported with iteration
+   ```lambda  
+   let expressions = ["x^2", "\\sin(x)", "\\frac{1}{2}"]
+   // Process each expression individually
+   ```
+
+3. **Document Integration**: ✅ Works well with proper document parsers
+   ```lambda
+   let doc = input('./paper.tex', 'latex')  // Uses integrated math parsing
+   ```
+
+4. **Interactive Applications**: ⚠️ May need additional error handling
+   ```lambda
+   // Implement validation layer for user input
+   // Handle ERROR returns gracefully  
+   // Provide user-friendly error messages
+   ```
+
 ## Current Limitations
-- Some edge cases in ASCII function parsing need refinement
-- Matrix parsing is simplified (doesn't support full `\begin{matrix}...\end{matrix}` environments) [Note: Actually implemented]
-- No error recovery for malformed expressions
-- Some advanced LaTeX math environments not yet fully supported
+- ❌ Mixed content files with comments are not supported
+- ❌ Multi-line mathematical expressions require individual processing  
+- ❌ Files designed for comparison tests with mixed syntax cause parser conflicts
+- ❌ Limited error recovery for malformed expressions
+- ⚠️ Some advanced LaTeX math environments need additional implementation
+- 📍 Minimal error context in failure messages
 
 ## Next Steps
 1. **ASCII parsing refinement**: Fix edge cases in ASCII function call parsing

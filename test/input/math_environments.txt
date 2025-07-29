@@ -1,0 +1,18 @@
+\begin{equation}
+x + y = z
+\end{equation}
+
+\begin{align}
+a &= b + c \\
+d &= e + f
+\end{align}
+
+\begin{aligned}
+p &= q + r \\
+s &= t + u
+\end{aligned}
+
+\begin{gather}
+\alpha + \beta = \gamma \\
+\delta + \epsilon = \zeta
+\end{gather}

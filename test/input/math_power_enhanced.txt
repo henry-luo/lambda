@@ -1,0 +1,4 @@
+// Power operations with enhanced features
+sqrt(16)^2 + abs(-5)^3
+ceil(2.7)^floor(3.9) + (f')^2
+prime(n)^count + sets^power

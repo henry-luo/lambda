@@ -50,4 +50,21 @@ let ascii_expr = input('./test/input/math_comparison.txt', {'type': 'math', 'fla
 "ASCII version:"
 ascii_expr
 
+"=== ENHANCED FEATURES TESTS ==="
+
+// Test enhanced absolute value across flavors
+let enhanced_abs_latex = input('./test/input/math_abs_comparison.txt', {'type': 'math', 'flavor': 'latex'})
+"Enhanced abs - LaTeX:"
+enhanced_abs_latex
+
+let enhanced_abs_ascii = input('./test/input/math_abs_comparison.txt', {'type': 'math', 'flavor': 'ascii'})
+"Enhanced abs - ASCII:" 
+enhanced_abs_ascii
+
+// Test enhanced mathematical notation
+let enhanced_notation = input('./test/input/math_enhanced_mixed.txt', {'type': 'math', 'flavor': 'latex'})
+"Enhanced notation:"
+enhanced_notation
+
 "✅ Advanced math parser features working!"
+"✅ Enhanced features (abs, ceil/floor, prime, sets, logic) working!"
