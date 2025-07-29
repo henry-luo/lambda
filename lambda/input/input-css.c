@@ -806,14 +806,24 @@ static Array* parse_css_value_list(Input *input, const char **css) {
             }
         }
         
-        skip_css_comments(css);
-        
-        // Check for value separators
+        // Check for value separators BEFORE calling skip_css_comments
+        // because skip_css_comments would consume the space we want to detect
         if (**css == ',') {
             (*css)++;
             skip_css_comments(css);
-        } else if (**css == ' ' || **css == '\t') {
+        } else if (**css == ' ' || **css == '\t' || **css == '\n' || **css == '\r') {
             skip_css_whitespace(css);
+            // Skip any comments after whitespace
+            while (**css == '/' && *(*css + 1) == '*') {
+                *css += 2; // Skip /*
+                while (**css && !(**css == '*' && *(*css + 1) == '/')) {
+                    (*css)++;
+                }
+                if (**css == '*' && *(*css + 1) == '/') {
+                    *css += 2; // Skip */
+                }
+                skip_css_whitespace(css);
+            }
             // Space-separated values continue
         } else {
             break; // End of value list
@@ -828,17 +838,13 @@ static Item parse_css_value(Input *input, const char **css) {
     
     if (!**css) return ITEM_ERROR;
     
-    printf("Parsing CSS value starting with: %.10s\n", *css);
-    
     // Try to parse different CSS value types
     switch (**css) {
         case '"':
         case '\'':
-            printf("Parsing string value\n");
             return parse_css_string(input, css);
             
         case '#':
-            printf("Parsing color value\n");
             return parse_css_color(input, css);
             
         case '+':
@@ -846,12 +852,10 @@ static Item parse_css_value(Input *input, const char **css) {
         case '0': case '1': case '2': case '3': case '4':
         case '5': case '6': case '7': case '8': case '9':
         case '.':
-            printf("Parsing number/measure value\n");
             return parse_css_measure(input, css);
             
         default:
             if (**css == 'u' && strncmp(*css, "url(", 4) == 0) {
-                printf("Parsing URL value\n");
                 return parse_css_url(input, css);
             } else if (is_css_identifier_start(**css)) {
                 // Look ahead to see if this is a function
@@ -861,14 +865,11 @@ static Item parse_css_value(Input *input, const char **css) {
                 }
                 skip_css_whitespace(&lookahead);
                 if (*lookahead == '(') {
-                    printf("Parsing function value\n");
                     return parse_css_function(input, css);
                 } else {
-                    printf("Parsing identifier value\n");
                     return parse_css_identifier(input, css);
                 }
             }
-            printf("Unknown value type, returning error\n");
             return ITEM_ERROR;
     }
 }
