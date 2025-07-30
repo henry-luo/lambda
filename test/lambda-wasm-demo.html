@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lambda WASM Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .input-section, .output-section {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            resize: vertical;
+        }
+        
+        select, button {
+            padding: 8px 16px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        button {
+            background-color: #007acc;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        
+        button:hover {
+            background-color: #005999;
+        }
+        
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .module-info {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+            margin-top: 20px;
+        }
+        
+        .module-info h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        
+        .function-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        
+        .function-tag {
+            background-color: #e9ecef;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: #6c757d;
+        }
+        
+        pre {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            border: 1px solid #e9ecef;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007acc;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 Lambda WASM Demo</h1>
+    
+    <div class="container">
+        <div id="loadingSection" class="loading">
+            <div class="spinner"></div>
+            <p>Loading Lambda WASM module...</p>
+        </div>
+        
+        <div id="mainInterface" style="display: none;">
+            <div class="input-section">
+                <label for="inputText">Input Text:</label>
+                <textarea id="inputText" placeholder="Enter your text here to be processed by Lambda WASM...">
+# Welcome to Lambda WASM!
+
+This is a **sample** document to demonstrate the Lambda WASM processing capabilities.
+
+## Features
+- Parse various input formats
+- Process documents efficiently  
+- Generate formatted output
+- Run entirely in the browser
+
+## Code Example
+```javascript
+const lambda = new LambdaWASM();
+await lambda.loadModule('./lambda.wasm');
+const result = await lambda.parseInput(text, 'markdown');
+```
+
+> **Note**: This is running WebAssembly compiled from C code!
+</textarea>
+            </div>
+            
+            <div class="controls">
+                <label for="inputFormat">Input Format:</label>
+                <select id="inputFormat">
+                    <option value="markdown">Markdown</option>
+                    <option value="html">HTML</option>
+                    <option value="json">JSON</option>
+                    <option value="xml">XML</option>
+                    <option value="text">Plain Text</option>
+                </select>
+                
+                <label for="outputFormat">Output Format:</label>
+                <select id="outputFormat">
+                    <option value="html">HTML</option>
+                    <option value="json">JSON</option>
+                    <option value="xml">XML</option>
+                    <option value="markdown">Markdown</option>
+                    <option value="text">Plain Text</option>
+                </select>
+                
+                <button id="processBtn" onclick="processText()">🔄 Process Text</button>
+                <button id="clearBtn" onclick="clearOutput()">🗑️ Clear Output</button>
+            </div>
+            
+            <div id="statusDiv"></div>
+            
+            <div class="output-section">
+                <label for="outputText">Processed Output:</label>
+                <textarea id="outputText" readonly placeholder="Processed output will appear here..."></textarea>
+            </div>
+            
+            <div class="module-info">
+                <h3>📊 WASM Module Information</h3>
+                <div id="moduleInfoContent">
+                    <p>Module not loaded yet.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../lambda-wasm-example.js"></script>
+    <script>
+        let lambdaWasm = null;
+        
+        // Initialize the application
+        async function initApp() {
+            try {
+                showStatus('Loading Lambda WASM module...', 'info');
+                
+                lambdaWasm = new LambdaWASM();
+                await lambdaWasm.loadModule('./lambda.wasm');
+                
+                showStatus('✅ Lambda WASM module loaded successfully!', 'success');
+                
+                // Hide loading screen and show main interface
+                document.getElementById('loadingSection').style.display = 'none';
+                document.getElementById('mainInterface').style.display = 'block';
+                
+                // Update module info
+                updateModuleInfo();
+                
+            } catch (error) {
+                console.error('Failed to initialize:', error);
+                showStatus(`❌ Failed to load WASM module: ${error.message}`, 'error');
+                
+                // Show interface anyway for demo purposes
+                document.getElementById('loadingSection').style.display = 'none';
+                document.getElementById('mainInterface').style.display = 'block';
+                
+                // Show fallback info
+                document.getElementById('moduleInfoContent').innerHTML = `
+                    <p><strong>Status:</strong> Failed to load</p>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p><strong>Note:</strong> Make sure lambda.wasm is in the same directory as this HTML file.</p>
+                `;
+            }
+        }
+        
+        // Process text using the WASM module
+        async function processText() {
+            if (!lambdaWasm || !lambdaWasm.isInitialized) {
+                showStatus('❌ WASM module not initialized', 'error');
+                return;
+            }
+            
+            const inputText = document.getElementById('inputText').value;
+            const inputFormat = document.getElementById('inputFormat').value;
+            const outputFormat = document.getElementById('outputFormat').value;
+            
+            if (!inputText.trim()) {
+                showStatus('⚠️ Please enter some text to process', 'error');
+                return;
+            }
+            
+            const processBtn = document.getElementById('processBtn');
+            processBtn.disabled = true;
+            processBtn.textContent = '🔄 Processing...';
+            
+            try {
+                showStatus(`🔄 Processing ${inputFormat} to ${outputFormat}...`, 'info');
+                
+                // First parse the input
+                const parsed = await lambdaWasm.parseInput(inputText, inputFormat);
+                
+                // Then format the output
+                const formatted = await lambdaWasm.formatOutput(parsed, outputFormat);
+                
+                // Display the result
+                document.getElementById('outputText').value = formatted;
+                
+                showStatus(`✅ Successfully processed ${inputText.length} characters`, 'success');
+                
+            } catch (error) {
+                console.error('Processing error:', error);
+                showStatus(`❌ Processing failed: ${error.message}`, 'error');
+                
+                // Show mock output for demo purposes
+                document.getElementById('outputText').value = `Mock output (WASM functions not available):
+Input format: ${inputFormat}
+Output format: ${outputFormat}
+Processed text length: ${inputText.length} characters
+
+Note: This is a demonstration. The actual WASM functions would process the text according to the Lambda language specification.`;
+                
+            } finally {
+                processBtn.disabled = false;
+                processBtn.textContent = '🔄 Process Text';
+            }
+        }
+        
+        // Clear the output
+        function clearOutput() {
+            document.getElementById('outputText').value = '';
+            showStatus('🗑️ Output cleared', 'info');
+        }
+        
+        // Show status message
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('statusDiv');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            
+            // Auto-hide after 5 seconds for success/info messages
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    statusDiv.textContent = '';
+                    statusDiv.className = '';
+                }, 5000);
+            }
+        }
+        
+        // Update module information display
+        function updateModuleInfo() {
+            if (!lambdaWasm) return;
+            
+            const info = lambdaWasm.getModuleInfo();
+            const content = document.getElementById('moduleInfoContent');
+            
+            if (info.initialized) {
+                content.innerHTML = `
+                    <p><strong>Status:</strong> ✅ Loaded and Ready</p>
+                    <p><strong>Memory Pages:</strong> ${info.memoryPages}</p>
+                    <p><strong>Total Exports:</strong> ${info.exports.length}</p>
+                    <p><strong>Available Functions:</strong> ${info.availableFunctions.length}</p>
+                    <div class="function-list">
+                        ${info.availableFunctions.map(func => 
+                            `<span class="function-tag">${func}</span>`
+                        ).join('')}
+                    </div>
+                `;
+            } else {
+                content.innerHTML = '<p><strong>Status:</strong> ❌ Not Initialized</p>';
+            }
+        }
+        
+        // Add keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            if (event.ctrlKey || event.metaKey) {
+                switch(event.key) {
+                    case 'Enter':
+                        event.preventDefault();
+                        processText();
+                        break;
+                    case 'l':
+                        event.preventDefault();
+                        clearOutput();
+                        break;
+                }
+            }
+        });
+        
+        // Initialize when page loads
+        window.addEventListener('load', initApp);
+        
+        // Handle file drag and drop for WASM loading
+        document.addEventListener('dragover', function(event) {
+            event.preventDefault();
+        });
+        
+        document.addEventListener('drop', function(event) {
+            event.preventDefault();
+            
+            const files = event.dataTransfer.files;
+            if (files.length > 0 && files[0].name.endsWith('.wasm')) {
+                const file = files[0];
+                const reader = new FileReader();
+                
+                reader.onload = async function(e) {
+                    try {
+                        showStatus('🔄 Loading dropped WASM file...', 'info');
+                        
+                        lambdaWasm = new LambdaWASM();
+                        await lambdaWasm.loadModule(e.target.result);
+                        
+                        showStatus('✅ WASM file loaded successfully!', 'success');
+                        updateModuleInfo();
+                        
+                    } catch (error) {
+                        showStatus(`❌ Failed to load WASM file: ${error.message}`, 'error');
+                    }
+                };
+                
+                reader.readAsArrayBuffer(file);
+            }
+        });
+    </script>
+</body>
+</html>

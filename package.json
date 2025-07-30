@@ -1,0 +1,49 @@
+{
+  "name": "lambda-wasm-interface",
+  "version": "1.0.0",
+  "description": "JavaScript interface for Lambda WASM module - document parsing and formatting",
+  "main": "lambda-wasm-example.js",
+  "bin": {
+    "lambda-wasm": "./lambda-wasm-node.js"
+  },
+  "scripts": {
+    "demo": "node lambda-wasm-node.js interactive",
+    "info": "node lambda-wasm-node.js info",
+    "process": "node lambda-wasm-node.js process",
+    "serve": "python3 -m http.server 8080",
+    "serve-node": "node -e \"const http=require('http'),fs=require('fs'),path=require('path');http.createServer((req,res)=>{const file=path.join(__dirname,req.url==='/'?'test/lambda-wasm-demo.html':req.url);fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);res.end('Not found');return;}const ext=path.extname(file);const contentType={'html':'text/html','js':'text/javascript','wasm':'application/wasm'}[ext.slice(1)]||'text/plain';res.writeHead(200,{'Content-Type':contentType});res.end(data);});}).listen(8080,()=>console.log('Server at http://localhost:8080'));\""
+  },
+  "keywords": [
+    "wasm",
+    "webassembly",
+    "lambda",
+    "parser",
+    "formatter",
+    "document-processing",
+    "markdown",
+    "html",
+    "json",
+    "xml"
+  ],
+  "author": "Lambda Project",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "files": [
+    "lambda-wasm-example.js",
+    "lambda-wasm-node.js",
+    "test/lambda-wasm-demo.html",
+    "README-WASM-JS.md"
+  ],
+  "dependencies": {},
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/henry-luo/lambda"
+  },
+  "bugs": {
+    "url": "https://github.com/henry-luo/lambda/issues"
+  },
+  "homepage": "https://github.com/henry-luo/lambda#readme"
+}
