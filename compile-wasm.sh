@@ -126,7 +126,13 @@ get_json_value() {
     local file="$2"
     
     if command -v jq >/dev/null 2>&1; then
-        jq -r ".$key // empty" "$file" 2>/dev/null
+        # Handle boolean values properly - convert to string
+        local value=$(jq -r ".$key" "$file" 2>/dev/null)
+        if [ "$value" = "null" ] || [ "$value" = "" ]; then
+            echo ""
+        else
+            echo "$value"
+        fi
     else
         # Fallback to grep/sed for basic JSON parsing
         grep "\"$key\"" "$file" | head -1 | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*"([^"]*).*/\1/' | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*([^,}]*).*/\1/' | sed 's/[",]//g'
