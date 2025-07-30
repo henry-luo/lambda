@@ -41,6 +41,8 @@ output.png
 view_tree.txt
 log.txt
 _transpiled.c
+lambda.wasm
+test/lambda.wasm
 
 # Node.js
 node_modules/

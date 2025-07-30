@@ -3,20 +3,17 @@
 
 #ifdef WASM_BUILD
 
-// WASM-compatible stub implementations
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
+// Include Lambda types
+#include "lambda.h"
 
-// Simple stub for Runtime structure
-typedef struct {
-    void* parser;
-    void* scripts;
+// Forward declarations for Lambda types (from transpiler.h)
+typedef struct Runtime {
+    // Simple stub fields for WASM build
+    int initialized;
+    void* reserved;
 } Runtime;
-
-// Simple stub for Item type 
-typedef void* Item;
-#define ITEM_NULL ((Item)0)
+// Item is already defined in lambda.h as uint64_t
+// #define ITEM_NULL is already defined in lambda.h
 
 // WASM function exports
 const char* lambda_version();

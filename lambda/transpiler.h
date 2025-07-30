@@ -541,9 +541,15 @@ static inline TypeId get_type_id(LambdaItem value) {
 extern String EMPTY_STRING;
 String* strbuf_to_string(StrBuf *sb);
 
+#ifndef WASM_BUILD
 #include <mir.h>
 #include <mir-gen.h>
 #include <c2mir.h>
+#else
+#include "../wasm-deps/include/mir.h"
+#include "../wasm-deps/include/mir-gen.h"
+#include "../wasm-deps/include/c2mir.h"
+#endif
 
 typedef Item (*main_func_t)(Context*);
 typedef struct Runtime Runtime;

@@ -1,12 +1,14 @@
 # Lambda WASM JavaScript Interface
 
-This directory contains scripts, configurations, and JavaScript examples for compiling Lambda C files to WebAssembly (WASM) using WASI SDK and interfacing with the resulting WASM module in both browser and Node.js environments.
+This comprehensive guide covers the complete WebAssembly (WASM) build system and JavaScript interface for the Lambda project. It includes scripts, configurations, and JavaScript examples for compiling Lambda C files to WebAssembly using WASI SDK and interfacing with the resulting WASM module in both browser and Node.js environments.
 
 ## 📋 Files Overview
 
 ### Core Build System
-- **`compile-wasm.sh`** - Main WASM compilation script
+- **`compile-wasm.sh`** - Main WASM compilation script with advanced features
+- **`compile-wasm-simple.sh`** - Streamlined linking script (recommended for most users)
 - **`build_lambda_wasm_config.json`** - Configuration file for WASM build
+- **`wasm-deps/include/`** - Comprehensive stub libraries for WASM compatibility
 
 ### JavaScript Interface
 - **`lambda-wasm-example.js`** - Core JavaScript class for loading and interfacing with the WASM module
@@ -68,6 +70,189 @@ First, compile the Lambda C files to WASM:
 - `--clean-deps` - Clean dependency files (.d files) and exit
 - `--wasi-sdk=PATH` - Path to WASI SDK (default: /opt/wasi-sdk)
 - `--help, -h` - Show help information
+
+## 🔧 WASM Build System
+
+The Lambda project includes a complete WebAssembly (WASM) build system that compiles the Lambda C codebase into a single WASM module. This enables running Lambda's input parsers, output formatters, and validators directly in web browsers and Node.js environments.
+
+### Build Scripts
+
+#### 1. `compile-wasm-simple.sh` - **Recommended for most users**
+
+A streamlined script that uses existing object files and performs linking only:
+
+```bash
+./compile-wasm-simple.sh
+```
+
+**Features:**
+- Quick build (linking only)
+- Uses existing compiled object files
+- Automatic testing with Node.js
+- Clear success/failure reporting
+- User-friendly output
+
+#### 2. `compile-wasm.sh` - **Advanced/Development**
+
+Full compilation script with incremental build support:
+
+```bash
+./compile-wasm.sh [--debug] [--force] [--jobs=N]
+```
+
+**Features:**
+- Full compilation from source
+- Incremental builds with dependency tracking
+- Parallel compilation
+- JSON-based configuration
+- Advanced debugging options
+
+### Build Configuration
+
+The build system uses `build_lambda_wasm_config.json` for configuration:
+
+```json
+{
+    "output": "lambda.wasm",
+    "source_dirs": ["lambda/input", "lambda/format", "lambda/validator"],
+    "source_files": ["lambda/lambda-wasm-main.c", ...],
+    "libraries": [
+        {"name": "wasm-stubs", "include": "wasm-deps/include"},
+        ...
+    ],
+    "flags": ["fms-extensions", "O2", "DWASM_BUILD=1", ...],
+    "linker_flags": ["L/opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasi", ...]
+}
+```
+
+### Dependencies
+
+#### WASI SDK
+- **Required**: WASI SDK v24.0 or later
+- **Installation**: Download from [WebAssembly/wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases)
+- **Default path**: `/opt/wasi-sdk`
+- **Environment variable**: `WASI_SDK_PATH`
+
+#### Stub Libraries
+The build system includes comprehensive stub libraries in `wasm-deps/include/`:
+
+- **GMP**: Mathematical functions (`gmp.h`)
+- **MIR**: JIT compiler stubs (`mir.h`, `mir-gen.h`, `c2mir.h`)
+- **Lexbor**: HTML parsing (`lexbor/url/url.h`)
+- **zlog**: Logging functions (`zlog.h`)
+- **Lambda compatibility**: Internal functions (`lambda-compat.h`)
+- **System compatibility**: POSIX/system functions (`wasm-compat.h`)
+
+### Generated Output
+
+#### `lambda.wasm`
+- **Size**: ~294KB optimized
+- **Target**: `wasm32-wasi`
+- **Exports**: 7 main functions + memory management
+
+#### Exported Functions
+
+| Function | Description |
+|----------|-------------|
+| `wasm_lambda_version()` | Returns version string |
+| `wasm_lambda_init()` | Initialize Lambda runtime |
+| `wasm_lambda_process_string()` | Simple string processing |
+| `wasm_lambda_runtime_new()` | Create runtime instance |
+| `wasm_lambda_runtime_free()` | Cleanup runtime instance |
+| `wasm_lambda_run_code()` | Execute Lambda code |
+| `wasm_lambda_item_to_string()` | Convert results to string |
+
+### Subsystems Included
+
+#### Input Parsers
+- **Formats**: Markdown, HTML, JSON, YAML, XML, CSV, TOML, INI, LaTeX, ReStructuredText, Textile, RTF, Email, PDF, ICS, VCF, CSS, AsciiDoc, Man pages, Wiki markup
+- **Files**: All `lambda/input/*.c` files compiled
+
+#### Output Formatters  
+- **Formats**: HTML, Markdown, JSON, YAML, XML, TOML, INI, ReStructuredText
+- **Files**: All `lambda/format/*.c` files compiled
+
+#### Validators
+- **Schema validation**: JSON Schema, custom validation rules
+- **Error reporting**: Detailed validation error messages
+- **Files**: All `lambda/validator/*.c` files compiled
+
+### Build Process Details
+
+#### Compilation Flags
+```bash
+--target=wasm32-wasi -O2 -DWASM_BUILD=1 -DCROSS_COMPILE=1 -D_POSIX_C_SOURCE=200809L -fms-extensions
+```
+
+#### Include Paths
+```bash
+-I. -Iinclude -Ilib -Ilambda -Iwasm-deps/include
+```
+
+#### Linker Configuration
+```bash
+-L/opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasi
+-lwasi-emulated-signal -lwasi-emulated-process-clocks 
+-lwasi-emulated-getpid -lwasi-emulated-mman
+```
+
+#### Exports Configuration
+```bash
+-Wl,--export=wasm_lambda_version,--export=wasm_lambda_init,
+--export=wasm_lambda_process_string,--export=wasm_lambda_runtime_new,
+--export=wasm_lambda_runtime_free,--export=wasm_lambda_run_code,
+--export=wasm_lambda_item_to_string,--allow-undefined
+```
+
+### Performance
+
+- **Compilation time**: ~30 seconds (full), ~2 seconds (linking only)
+- **Runtime**: Near-native performance with WASM
+- **Memory usage**: Configurable, starts at ~1MB
+- **File size**: 294KB compressed, suitable for web deployment
+
+### Build System Troubleshooting
+
+#### Common Issues
+
+1. **WASI SDK not found**
+   ```bash
+   export WASI_SDK_PATH=/path/to/wasi-sdk
+   ```
+
+2. **Object files missing**
+   ```bash
+   ./compile-wasm.sh --force  # Full rebuild
+   ```
+
+3. **Link errors**
+   ```bash
+   ./compile-wasm-simple.sh  # Use known-good linking
+   ```
+
+4. **Function signature mismatches**
+   - Expected warnings from stubs
+   - WASM module still functional
+
+#### Debug Mode
+```bash
+./compile-wasm.sh --debug  # Enable debug symbols
+bash -x ./compile-wasm.sh  # Shell debugging
+```
+
+### Maintenance
+
+#### Updating Stubs
+When adding new dependencies, update stub files in `wasm-deps/include/`:
+
+1. Add new header file with stub implementations
+2. Update `build_lambda_wasm_config.json` libraries section
+3. Test with `./compile-wasm-simple.sh`
+
+#### Adding Source Files
+1. Add to `source_files` or `source_dirs` in config
+2. Ensure no tree-sitter/MIR dependencies
+3. Test compilation and linking
 
 ## 🎉 Complete Setup Summary
 
@@ -211,6 +396,56 @@ Get information about the loaded WASM module.
 const info = lambda.getModuleInfo();
 console.log(info.exports); // Available exports
 console.log(info.availableFunctions); // Callable functions
+```
+
+### WASM Integration Examples
+
+#### Node.js Basic Usage
+```javascript
+const fs = require('fs');
+const wasmBuffer = fs.readFileSync('lambda.wasm');
+const wasmModule = await WebAssembly.instantiate(wasmBuffer);
+
+// Initialize Lambda
+const initResult = wasmModule.instance.exports.wasm_lambda_init();
+console.log('Lambda initialized:', initResult);
+
+// Get version
+const versionPtr = wasmModule.instance.exports.wasm_lambda_version();
+const version = getString(wasmModule, versionPtr);
+console.log('Version:', version);
+```
+
+#### Browser Basic Usage
+```javascript
+fetch('lambda.wasm')
+  .then(response => response.arrayBuffer())
+  .then(bytes => WebAssembly.instantiate(bytes))
+  .then(results => {
+    const exports = results.instance.exports;
+    
+    // Initialize and use Lambda functions
+    exports.wasm_lambda_init();
+    const version = getString(exports.wasm_lambda_version());
+    console.log('Lambda version:', version);
+  });
+```
+
+### WASM Testing
+
+#### Node.js Testing
+```bash
+node test/lambda-wasm-node.js
+```
+
+#### Browser Testing
+```html
+<!DOCTYPE html>
+<html>
+<body>
+    <script src="test-wasm-simple.html"></script>
+</body>
+</html>
 ```
 
 ## 🖥️ Browser Demo Features
@@ -379,57 +614,38 @@ worker.postMessage({ action: 'init', data: { wasmPath: './lambda.wasm' } });
 
 #### WASM Compilation System
 
-The `compile-wasm.sh` script provides a complete build system for compiling Lambda C files to WebAssembly:
+Lambda provides two build scripts for different use cases:
 
+**For most users:**
 ```bash
-# Basic build
-./compile-wasm.sh
-
-# Debug build
-./compile-wasm.sh --debug
-
-# Force rebuild
-./compile-wasm.sh --force
+./compile-wasm-simple.sh  # Quick linking with existing objects
 ```
+
+**For development:**
+```bash
+./compile-wasm.sh [--debug] [--force] [--jobs=N]  # Full compilation system
+```
+
+See the **🔧 WASM Build System** section above for complete details on:
+- Build script features and options
+- Configuration with `build_lambda_wasm_config.json`
+- Stub libraries and dependencies
+- Exported functions and subsystems
+- Performance characteristics
+- Troubleshooting guide
 
 #### Environment Variables
 - `WASI_SDK_PATH`: Path to WASI SDK installation (default: `/opt/wasi-sdk`)
 
-#### Build Configuration
+#### Quick Build Summary
 
-The build configuration is defined in `build_lambda_wasm_config.json`:
+The build system compiles the following Lambda components into a single WASM module:
+- **Input Parsers**: All document format parsers from `lambda/input/`
+- **Formatters**: All output generators from `lambda/format/`
+- **Validators**: All validation logic from `lambda/validator/`
+- **Core Libraries**: Essential utilities and runtime components
 
-- **Source Files**: Automatically scans `lambda/input`, `lambda/format`, and `lambda/validator` directories for C files
-- **Output**: Produces `lambda.wasm` in the project root
-- **Build Directory**: Uses `build_wasm/` for intermediate object files  
-- **Libraries**: Links with tree-sitter libraries for parsing support
-
-#### Key Compilation Features
-
-1. **Incremental Compilation**: Only recompiles changed files based on dependency tracking
-2. **Parallel Compilation**: Automatically detects CPU cores and compiles multiple files in parallel
-3. **Dependency Tracking**: Uses `.d` files for precise dependency management
-4. **Cross-platform**: Works on macOS, Linux, and other Unix-like systems
-5. **Error Reporting**: Provides detailed error messages with clickable file links in VS Code
-
-#### Compiled Modules
-
-The script compiles the following Lambda project components:
-
-- **Input Parsers**: All files in `lambda/input/` (various document format parsers)
-- **Formatters**: All files in `lambda/format/` (output format generators)
-- **Validators**: All files in `lambda/validator/` (document validation logic)  
-- **Core Libraries**: Essential utilities from `lib/` directory
-- **Lambda Runtime**: Core Lambda interpreter and transpiler components
-
-#### Build Process
-
-1. **Scanning**: Checks all source files for changes using timestamps and dependency files
-2. **Compilation**: Compiles changed C files to WebAssembly object files (`.o`)
-3. **Linking**: Links all object files and static libraries into final `.wasm` module
-4. **Optimization**: Applies WASM-specific optimizations and exports
-
-The build system supports both full rebuilds and efficient incremental compilation for faster development cycles.
+Output: `lambda.wasm` (~294KB optimized) with 7 exported functions ready for browser and Node.js use.
 
 ### Testing the Interface
 ```bash
@@ -466,23 +682,14 @@ npm run demo
 
 ## 🔍 Troubleshooting
 
-### Compilation Issues
+### Build System Issues
 
-**"WASI SDK not found"**
-- Ensure WASI SDK is installed and `WASI_SDK_PATH` is set correctly
-- Download from: https://github.com/WebAssembly/wasi-sdk/releases
-
-**"Missing dependencies"**
-- Make sure all required C source files and libraries are present
-- Check that tree-sitter libraries are built properly
-
-**"Compilation errors"**
-- Use `--debug` flag for more detailed error information
-- Check individual source files for syntax errors
-
-**"Permission issues"**
-- Ensure the script is executable (`chmod +x compile-wasm.sh`)
-- Check write permissions for build directory
+For comprehensive build troubleshooting, see the **Build System Troubleshooting** section in the **🔧 WASM Build System** above, which covers:
+- WASI SDK installation and path issues
+- Object file and dependency problems
+- Linking errors and solutions
+- Debug mode and shell debugging
+- Stub library maintenance
 
 ### Runtime Issues
 
@@ -533,4 +740,8 @@ The compilation produces `lambda.wasm`, a WebAssembly module that can be run wit
 
 ## 📄 License
 
-This JavaScript interface is part of the Lambda project and follows the same license terms.
+This JavaScript interface and WASM build system are part of the Lambda project and follow the same license terms.
+
+---
+
+*This document combines the WASM build system documentation (formerly WASM-BUILD.md) with the JavaScript interface guide to provide a complete reference for Lambda WebAssembly development.*

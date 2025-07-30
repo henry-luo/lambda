@@ -11,7 +11,31 @@
 
 /* strcasecmp declaration for WASM */
 #include <string.h>
-int strcasecmp(const char *s1, const char *s2);
+#include <ctype.h>
+
+static inline int strcasecmp(const char *s1, const char *s2) {
+    while (*s1 && *s2) {
+        int c1 = tolower((unsigned char)*s1);
+        int c2 = tolower((unsigned char)*s2);
+        if (c1 != c2) return c1 - c2;
+        s1++;
+        s2++;
+    }
+    return tolower((unsigned char)*s1) - tolower((unsigned char)*s2);
+}
+
+static inline int strncasecmp(const char *s1, const char *s2, size_t n) {
+    while (n > 0 && *s1 && *s2) {
+        int c1 = tolower((unsigned char)*s1);
+        int c2 = tolower((unsigned char)*s2);
+        if (c1 != c2) return c1 - c2;
+        s1++;
+        s2++;
+        n--;
+    }
+    if (n == 0) return 0;
+    return tolower((unsigned char)*s1) - tolower((unsigned char)*s2);
+}
 
 /* Stub zlog.h for WASM builds */
 #define zlog_init() 0

@@ -1,4 +1,4 @@
-/* Minimal MIR-GEN stub for WASM builds */
+/* Minimal MIR-gen stub for WASM builds */
 #ifndef MIR_GEN_H_WASM_STUB
 #define MIR_GEN_H_WASM_STUB
 
@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-/* MIR-GEN stub functions */
+/* Stub declarations for MIR generator functions */
 static inline void MIR_gen_init(MIR_context_t ctx) { (void)ctx; }
 static inline void MIR_gen_finish(MIR_context_t ctx) { (void)ctx; }
 

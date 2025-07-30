@@ -2,6 +2,10 @@
 #include <lexbor/url/url.h>
 #include "../lib/strbuf.h"
 
+#ifdef WASM_BUILD
+#include "wasm-compat.h"
+#endif
+
 #ifdef _WIN32
     #include <direct.h>
     #define GETCWD _getcwd

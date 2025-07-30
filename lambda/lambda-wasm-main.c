@@ -5,10 +5,6 @@
 
 #ifdef WASM_BUILD
 
-// Forward declarations for the core Lambda functions we want to expose
-extern char* read_text_file(const char *filename);
-extern int string_buffer_append(char* dest, const char* src, size_t max_len);
-
 // Global runtime instance for WASM
 static Runtime* global_runtime = NULL;
 
@@ -43,14 +39,14 @@ Runtime* lambda_runtime_new() {
     Runtime* runtime = (Runtime*)malloc(sizeof(Runtime));
     if (!runtime) return NULL;
     
+    // Initialize with stub values for now
     memset(runtime, 0, sizeof(Runtime));
-    // In a full implementation, we would initialize parser and scripts here
     return runtime;
 }
 
 void lambda_runtime_free(Runtime* runtime) {
     if (runtime) {
-        // In a full implementation, we would cleanup parser and scripts here
+        // Simple cleanup
         free(runtime);
     }
     if (global_runtime == runtime) {
@@ -59,23 +55,21 @@ void lambda_runtime_free(Runtime* runtime) {
 }
 
 Item lambda_run_code(Runtime* runtime, const char* source_code) {
-    if (!runtime || !source_code) return ITEM_NULL;
+    if (!runtime || !source_code) return 0; // ITEM_NULL equivalent
     
-    // Placeholder implementation - in a full version this would:
-    // 1. Parse the source code using Tree-sitter
-    // 2. Build AST
-    // 3. Transpile to C
-    // 4. JIT compile and execute
-    // For now, just return a dummy result
-    
-    return (Item)"result";
+    // For now, just return a dummy value
+    // In a full implementation, this would use the actual Lambda runtime
+    return (Item)42; // dummy result
 }
 
 const char* lambda_item_to_string(Item item) {
     if (!item) return "null";
     
-    // Placeholder - in a full version this would serialize the item
-    return (const char*)item;
+    // For now, just return a simple string representation
+    // In a full implementation, this would properly serialize the Lambda item
+    static char buffer[256];
+    snprintf(buffer, sizeof(buffer), "%llu", (unsigned long long)item);
+    return buffer;
 }
 
 // WASI compatible main function
