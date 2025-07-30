@@ -22,6 +22,44 @@ The math parser produces a syntax tree composed of nested Lambda elements using 
 1. **LaTeX Math** (default) - Traditional LaTeX math syntax
 2. **Typst Math** - Modern Typst math syntax with `^` power operator
 3. **ASCII Math** - Simplified ASCII-based math notation with `^` and `**` power operators
+4. **MathML** - W3C standard XML markup for mathematical expressions
+
+### MathML Integration
+**Mathematical Markup Language (MathML)** is the W3C standard for representing mathematical notation in web pages and applications. The Lambda math parser documentation includes MathML equivalents for all supported expressions to facilitate:
+
+#### Benefits of MathML Support
+- **Web Accessibility**: Screen readers can interpret mathematical expressions
+- **Semantic Preservation**: Mathematical meaning is preserved in markup
+- **Universal Compatibility**: Browser-native rendering without external libraries
+- **Integration Ready**: Easy conversion between Lambda expressions and web formats
+
+#### MathML Elements Used
+- `<mi>` - Mathematical identifiers (variables, function names)
+- `<mn>` - Numbers  
+- `<mo>` - Operators (+, -, ×, ÷, etc.)
+- `<mrow>` - Horizontal grouping of expressions
+- `<mfrac>` - Fractions with numerator and denominator
+- `<msup>` - Superscripts (exponents)
+- `<msub>` - Subscripts
+- `<msqrt>` - Square roots
+- `<mover>` - Over-scripts (hats, arrows, etc.)
+- `<munder>` - Under-scripts (limits)
+- `<munderover>` - Combined under and over scripts (summations, integrals)
+- `<mtable>`, `<mtr>`, `<mtd>` - Tables and matrices
+
+#### Usage Example
+```xml
+<!-- LaTeX: \frac{x^2 + y^2}{2} -->
+<!-- Lambda: <frac (<add (<pow 'x' 2>) (<pow 'y' 2>)>) 2> -->
+<mfrac>
+  <mrow>
+    <msup><mi>x</mi><mn>2</mn></msup>
+    <mo>+</mo>
+    <msup><mi>y</mi><mn>2</mn></msup>
+  </mrow>
+  <mn>2</mn>
+</mfrac>
+```
 
 ### Enhanced Input API
 The `input()` function now supports two calling conventions:
@@ -422,178 +460,178 @@ return create_lambda_symbol(input, identifier_copy);
 
 The following table lists all math expressions supported by Lambda's math parser and their mappings across different notation systems:
 
-| Lambda Expression                    | LaTeX                                     | Typst                         | ASCII                  | Description          |
-| ------------------------------------ | ----------------------------------------- | ----------------------------- | ---------------------- | -------------------- |
-| `<add 'a' 'b'>`                      | `a + b`                                   | `a + b`                       | `a + b`                | Addition             |
-| `<sub 'a' 'b'>`                      | `a - b`                                   | `a - b`                       | `a - b`                | Subtraction          |
-| `<mul 'a' 'b'>`                      | `a * b`                                   | `a * b`                       | `a * b`                | Multiplication       |
-| `<div 'a' 'b'>`                      | `a / b`                                   | `a / b`                       | `a / b`                | Division             |
-| `<frac 'a' 'b'>`                     | `\frac{a}{b}`                             | `frac(a, b)` or `a/b`         | `a/b`                  | Fraction             |
-| `<pow 'x' 'n'>`                      | `x^{n}`                                   | `x^n`                         | `x^n` or `x**n`        | Exponentiation       |
-| `<sqrt 'x'>`                         | `\sqrt{x}`                                | `sqrt(x)`                     | `sqrt(x)`              | Square root          |
-| `<sin 'x'>`                          | `\sin{x}`                                 | `sin(x)`                      | `sin(x)`               | Sine function        |
-| `<cos 'x'>`                          | `\cos{x}`                                 | `cos(x)`                      | `cos(x)`               | Cosine function      |
-| `<tan 'x'>`                          | `\tan{x}`                                 | `tan(x)`                      | `tan(x)`               | Tangent function     |
-| `<arcsin 'x'>`                       | `\arcsin{x}`                              | `arcsin(x)`                   | `arcsin(x)`            | Arcsine function     |
-| `<arccos 'x'>`                       | `\arccos{x}`                              | `arccos(x)`                   | `arccos(x)`            | Arccosine function   |
-| `<arctan 'x'>`                       | `\arctan{x}`                              | `arctan(x)`                   | `arctan(x)`            | Arctangent function  |
-| `<sinh 'x'>`                         | `\sinh{x}`                                | `sinh(x)`                     | `sinh(x)`              | Hyperbolic sine      |
-| `<cosh 'x'>`                         | `\cosh{x}`                                | `cosh(x)`                     | `cosh(x)`              | Hyperbolic cosine    |
-| `<tanh 'x'>`                         | `\tanh{x}`                                | `tanh(x)`                     | `tanh(x)`              | Hyperbolic tangent   |
-| `<cot 'x'>`                          | `\cot{x}`                                 | `cot(x)`                      | `cot(x)`               | Cotangent function   |
-| `<sec 'x'>`                          | `\sec{x}`                                 | `sec(x)`                      | `sec(x)`               | Secant function      |
-| `<csc 'x'>`                          | `\csc{x}`                                 | `csc(x)`                      | `csc(x)`               | Cosecant function    |
-| `<log 'x'>`                          | `\log{x}`                                 | `log(x)`                      | `log(x)`               | Logarithm (base 10)  |
-| `<ln 'x'>`                           | `\ln{x}`                                  | `ln(x)`                       | `ln(x)`                | Natural logarithm    |
-| `<sum 'start' 'end' 'expr'>`         | `\sum_{start}^{end} expr`                 | `sum_(start)^(end) expr`      | `sum(start,end,expr)`  | Summation            |
-| `<prod 'start' 'end' 'expr'>`        | `\prod_{start}^{end} expr`                | `product_(start)^(end) expr`  | `prod(start,end,expr)` | Product              |
-| `<int 'start' 'end' 'expr'>`         | `\int_{start}^{end} expr`                 | `integral_(start)^(end) expr` | `int(start,end,expr)`  | Definite integral    |
-| `<lim 'approach' 'expr'>`            | `\lim_{approach} expr`                    | `lim_(approach) expr`         | `lim(approach,expr)`   | Limit                |
-| `<matrix 'rows'>`                    | `\matrix{...}`                            | `mat(...)`                    | `matrix(...)`          | Matrix               |
-| `<pmatrix 'rows'>`                   | `\pmatrix{...}`                           | `mat(...)`                    | `pmatrix(...)`         | Parenthesized matrix |
-| `<bmatrix 'rows'>`                   | `\bmatrix{...}`                           | `mat(...)`                    | `bmatrix(...)`         | Bracketed matrix     |
-| `<cases 'conditions'>`               | `\begin{cases}...\end{cases}`             | `cases(...)`                  | `cases(...)`           | Piecewise function   |
-| `<align 'equations'>`                | `\begin{align}...\end{align}`             | `align(...)`                  | `align(...)`           | Aligned equations    |
-| `<equation 'expr'>`                  | `\begin{equation}...\end{equation}`       | `equation(...)`               | `equation(...)`        | Numbered equation    |
-| `<gather 'equations'>`               | `\begin{gather}...\end{gather}`           | `gather(...)`                 | `gather(...)`          | Gathered equations   |
-| `<smallmatrix 'rows'>`               | `\begin{smallmatrix}...\end{smallmatrix}` | `smallmat(...)`               | `smallmatrix(...)`     | Small matrix         |
+| Lambda Expression                    | LaTeX                                     | Typst                         | ASCII                  | MathML                                          | Description          |
+| ------------------------------------ | ----------------------------------------- | ----------------------------- | ---------------------- | ----------------------------------------------- | -------------------- |
+| `<add 'a' 'b'>`                      | `a + b`                                   | `a + b`                       | `a + b`                | `<mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow>`   | Addition             |
+| `<sub 'a' 'b'>`                      | `a - b`                                   | `a - b`                       | `a - b`                | `<mrow><mi>a</mi><mo>-</mo><mi>b</mi></mrow>`   | Subtraction          |
+| `<mul 'a' 'b'>`                      | `a * b`                                   | `a * b`                       | `a * b`                | `<mrow><mi>a</mi><mo>⋅</mo><mi>b</mi></mrow>`   | Multiplication       |
+| `<div 'a' 'b'>`                      | `a / b`                                   | `a / b`                       | `a / b`                | `<mrow><mi>a</mi><mo>/</mo><mi>b</mi></mrow>`   | Division             |
+| `<frac 'a' 'b'>`                     | `\frac{a}{b}`                             | `frac(a, b)` or `a/b`         | `a/b`                  | `<mfrac><mi>a</mi><mi>b</mi></mfrac>`           | Fraction             |
+| `<pow 'x' 'n'>`                      | `x^{n}`                                   | `x^n`                         | `x^n` or `x**n`        | `<msup><mi>x</mi><mi>n</mi></msup>`             | Exponentiation       |
+| `<sqrt 'x'>`                         | `\sqrt{x}`                                | `sqrt(x)`                     | `sqrt(x)`              | `<msqrt><mi>x</mi></msqrt>`                     | Square root          |
+| `<sin 'x'>`                          | `\sin{x}`                                 | `sin(x)`                      | `sin(x)`               | `<mrow><mi>sin</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Sine function        |
+| `<cos 'x'>`                          | `\cos{x}`                                 | `cos(x)`                      | `cos(x)`               | `<mrow><mi>cos</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Cosine function      |
+| `<tan 'x'>`                          | `\tan{x}`                                 | `tan(x)`                      | `tan(x)`               | `<mrow><mi>tan</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Tangent function     |
+| `<arcsin 'x'>`                       | `\arcsin{x}`                              | `arcsin(x)`                   | `arcsin(x)`            | `<mrow><mi>arcsin</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Arcsine function     |
+| `<arccos 'x'>`                       | `\arccos{x}`                              | `arccos(x)`                   | `arccos(x)`            | `<mrow><mi>arccos</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Arccosine function   |
+| `<arctan 'x'>`                       | `\arctan{x}`                              | `arctan(x)`                   | `arctan(x)`            | `<mrow><mi>arctan</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Arctangent function  |
+| `<sinh 'x'>`                         | `\sinh{x}`                                | `sinh(x)`                     | `sinh(x)`              | `<mrow><mi>sinh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Hyperbolic sine      |
+| `<cosh 'x'>`                         | `\cosh{x}`                                | `cosh(x)`                     | `cosh(x)`              | `<mrow><mi>cosh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Hyperbolic cosine    |
+| `<tanh 'x'>`                         | `\tanh{x}`                                | `tanh(x)`                     | `tanh(x)`              | `<mrow><mi>tanh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Hyperbolic tangent   |
+| `<cot 'x'>`                          | `\cot{x}`                                 | `cot(x)`                      | `cot(x)`               | `<mrow><mi>cot</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Cotangent function   |
+| `<sec 'x'>`                          | `\sec{x}`                                 | `sec(x)`                      | `sec(x)`               | `<mrow><mi>sec</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Secant function      |
+| `<csc 'x'>`                          | `\csc{x}`                                 | `csc(x)`                      | `csc(x)`               | `<mrow><mi>csc</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Cosecant function    |
+| `<log 'x'>`                          | `\log{x}`                                 | `log(x)`                      | `log(x)`               | `<mrow><mi>log</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Logarithm (base 10)  |
+| `<ln 'x'>`                           | `\ln{x}`                                  | `ln(x)`                       | `ln(x)`                | `<mrow><mi>ln</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Natural logarithm    |
+| `<sum 'start' 'end' 'expr'>`         | `\sum_{start}^{end} expr`                 | `sum_(start)^(end) expr`      | `sum(start,end,expr)`  | `<mrow><munderover><mo>∑</mo><mi>start</mi><mi>end</mi></munderover><mi>expr</mi></mrow>` | Summation            |
+| `<prod 'start' 'end' 'expr'>`        | `\prod_{start}^{end} expr`                | `product_(start)^(end) expr`  | `prod(start,end,expr)` | `<mrow><munderover><mo>∏</mo><mi>start</mi><mi>end</mi></munderover><mi>expr</mi></mrow>` | Product              |
+| `<int 'start' 'end' 'expr'>`         | `\int_{start}^{end} expr`                 | `integral_(start)^(end) expr` | `int(start,end,expr)`  | `<mrow><msubsup><mo>∫</mo><mi>start</mi><mi>end</mi></msubsup><mi>expr</mi></mrow>` | Definite integral    |
+| `<lim 'approach' 'expr'>`            | `\lim_{approach} expr`                    | `lim_(approach) expr`         | `lim(approach,expr)`   | `<mrow><munder><mi>lim</mi><mi>approach</mi></munder><mi>expr</mi></mrow>` | Limit                |
+| `<matrix 'rows'>`                    | `\matrix{...}`                            | `mat(...)`                    | `matrix(...)`          | `<mtable><mtr>...</mtr></mtable>`               | Matrix               |
+| `<pmatrix 'rows'>`                   | `\pmatrix{...}`                           | `mat(...)`                    | `pmatrix(...)`         | `<mrow><mo>(</mo><mtable><mtr>...</mtr></mtable><mo>)</mo></mrow>` | Parenthesized matrix |
+| `<bmatrix 'rows'>`                   | `\bmatrix{...}`                           | `mat(...)`                    | `bmatrix(...)`         | `<mrow><mo>[</mo><mtable><mtr>...</mtr></mtable><mo>]</mo></mrow>` | Bracketed matrix     |
+| `<cases 'conditions'>`               | `\begin{cases}...\end{cases}`             | `cases(...)`                  | `cases(...)`           | `<mrow><mo>{</mo><mtable columnalign="left"><mtr>...</mtr></mtable></mrow>` | Piecewise function   |
+| `<align 'equations'>`                | `\begin{align}...\end{align}`             | `align(...)`                  | `align(...)`           | `<mtable columnalign="right left"><mtr>...</mtr></mtable>` | Aligned equations    |
+| `<equation 'expr'>`                  | `\begin{equation}...\end{equation}`       | `equation(...)`               | `equation(...)`        | `<mrow><mi>expr</mi></mrow>`                    | Numbered equation    |
+| `<gather 'equations'>`               | `\begin{gather}...\end{gather}`           | `gather(...)`                 | `gather(...)`          | `<mtable><mtr>...</mtr></mtable>`               | Gathered equations   |
+| `<smallmatrix 'rows'>`               | `\begin{smallmatrix}...\end{smallmatrix}` | `smallmat(...)`               | `smallmatrix(...)`     | `<mtable displaystyle="false"><mtr>...</mtr></mtable>` | Small matrix         |
 
 ### Greek Letters
-| Lambda Symbol | LaTeX | Typst | ASCII | Description |
-|---------------|--------|-------|-------|-------------|
-| `'alpha'` | `\alpha` | `alpha` | `alpha` | Greek letter α |
-| `'beta'` | `\beta` | `beta` | `beta` | Greek letter β |
-| `'gamma'` | `\gamma` | `gamma` | `gamma` | Greek letter γ |
-| `'delta'` | `\delta` | `delta` | `delta` | Greek letter δ |
-| `'epsilon'` | `\epsilon` | `epsilon` | `epsilon` | Greek letter ε |
-| `'zeta'` | `\zeta` | `zeta` | `zeta` | Greek letter ζ |
-| `'eta'` | `\eta` | `eta` | `eta` | Greek letter η |
-| `'theta'` | `\theta` | `theta` | `theta` | Greek letter θ |
-| `'iota'` | `\iota` | `iota` | `iota` | Greek letter ι |
-| `'kappa'` | `\kappa` | `kappa` | `kappa` | Greek letter κ |
-| `'lambda'` | `\lambda` | `lambda` | `lambda` | Greek letter λ |
-| `'mu'` | `\mu` | `mu` | `mu` | Greek letter μ |
-| `'nu'` | `\nu` | `nu` | `nu` | Greek letter ν |
-| `'xi'` | `\xi` | `xi` | `xi` | Greek letter ξ |
-| `'omicron'` | `\omicron` | `omicron` | `omicron` | Greek letter ο |
-| `'pi'` | `\pi` | `pi` | `pi` | Greek letter π |
-| `'rho'` | `\rho` | `rho` | `rho` | Greek letter ρ |
-| `'sigma'` | `\sigma` | `sigma` | `sigma` | Greek letter σ |
-| `'tau'` | `\tau` | `tau` | `tau` | Greek letter τ |
-| `'upsilon'` | `\upsilon` | `upsilon` | `upsilon` | Greek letter υ |
-| `'phi'` | `\phi` | `phi` | `phi` | Greek letter φ |
-| `'chi'` | `\chi` | `chi` | `chi` | Greek letter χ |
-| `'psi'` | `\psi` | `psi` | `psi` | Greek letter ψ |
-| `'omega'` | `\omega` | `omega` | `omega` | Greek letter ω |
-| `'Gamma'` | `\Gamma` | `Gamma` | `Gamma` | Greek letter Γ |
-| `'Delta'` | `\Delta` | `Delta` | `Delta` | Greek letter Δ |
-| `'Theta'` | `\Theta` | `Theta` | `Theta` | Greek letter Θ |
-| `'Lambda'` | `\Lambda` | `Lambda` | `Lambda` | Greek letter Λ |
-| `'Xi'` | `\Xi` | `Xi` | `Xi` | Greek letter Ξ |
-| `'Pi'` | `\Pi` | `Pi` | `Pi` | Greek letter Π |
-| `'Sigma'` | `\Sigma` | `Sigma` | `Sigma` | Greek letter Σ |
-| `'Upsilon'` | `\Upsilon` | `Upsilon` | `Upsilon` | Greek letter Υ |
-| `'Phi'` | `\Phi` | `Phi` | `Phi` | Greek letter Φ |
-| `'Psi'` | `\Psi` | `Psi` | `Psi` | Greek letter Ψ |
-| `'Omega'` | `\Omega` | `Omega` | `Omega` | Greek letter Ω |
+| Lambda Symbol | LaTeX | Typst | ASCII | MathML | Description |
+|---------------|--------|-------|-------|--------|-------------|
+| `'alpha'` | `\alpha` | `alpha` | `alpha` | `<mi>α</mi>` | Greek letter α |
+| `'beta'` | `\beta` | `beta` | `beta` | `<mi>β</mi>` | Greek letter β |
+| `'gamma'` | `\gamma` | `gamma` | `gamma` | `<mi>γ</mi>` | Greek letter γ |
+| `'delta'` | `\delta` | `delta` | `delta` | `<mi>δ</mi>` | Greek letter δ |
+| `'epsilon'` | `\epsilon` | `epsilon` | `epsilon` | `<mi>ε</mi>` | Greek letter ε |
+| `'zeta'` | `\zeta` | `zeta` | `zeta` | `<mi>ζ</mi>` | Greek letter ζ |
+| `'eta'` | `\eta` | `eta` | `eta` | `<mi>η</mi>` | Greek letter η |
+| `'theta'` | `\theta` | `theta` | `theta` | `<mi>θ</mi>` | Greek letter θ |
+| `'iota'` | `\iota` | `iota` | `iota` | `<mi>ι</mi>` | Greek letter ι |
+| `'kappa'` | `\kappa` | `kappa` | `kappa` | `<mi>κ</mi>` | Greek letter κ |
+| `'lambda'` | `\lambda` | `lambda` | `lambda` | `<mi>λ</mi>` | Greek letter λ |
+| `'mu'` | `\mu` | `mu` | `mu` | `<mi>μ</mi>` | Greek letter μ |
+| `'nu'` | `\nu` | `nu` | `nu` | `<mi>ν</mi>` | Greek letter ν |
+| `'xi'` | `\xi` | `xi` | `xi` | `<mi>ξ</mi>` | Greek letter ξ |
+| `'omicron'` | `\omicron` | `omicron` | `omicron` | `<mi>ο</mi>` | Greek letter ο |
+| `'pi'` | `\pi` | `pi` | `pi` | `<mi>π</mi>` | Greek letter π |
+| `'rho'` | `\rho` | `rho` | `rho` | `<mi>ρ</mi>` | Greek letter ρ |
+| `'sigma'` | `\sigma` | `sigma` | `sigma` | `<mi>σ</mi>` | Greek letter σ |
+| `'tau'` | `\tau` | `tau` | `tau` | `<mi>τ</mi>` | Greek letter τ |
+| `'upsilon'` | `\upsilon` | `upsilon` | `upsilon` | `<mi>υ</mi>` | Greek letter υ |
+| `'phi'` | `\phi` | `phi` | `phi` | `<mi>φ</mi>` | Greek letter φ |
+| `'chi'` | `\chi` | `chi` | `chi` | `<mi>χ</mi>` | Greek letter χ |
+| `'psi'` | `\psi` | `psi` | `psi` | `<mi>ψ</mi>` | Greek letter ψ |
+| `'omega'` | `\omega` | `omega` | `omega` | `<mi>ω</mi>` | Greek letter ω |
+| `'Gamma'` | `\Gamma` | `Gamma` | `Gamma` | `<mi>Γ</mi>` | Greek letter Γ |
+| `'Delta'` | `\Delta` | `Delta` | `Delta` | `<mi>Δ</mi>` | Greek letter Δ |
+| `'Theta'` | `\Theta` | `Theta` | `Theta` | `<mi>Θ</mi>` | Greek letter Θ |
+| `'Lambda'` | `\Lambda` | `Lambda` | `Lambda` | `<mi>Λ</mi>` | Greek letter Λ |
+| `'Xi'` | `\Xi` | `Xi` | `Xi` | `<mi>Ξ</mi>` | Greek letter Ξ |
+| `'Pi'` | `\Pi` | `Pi` | `Pi` | `<mi>Π</mi>` | Greek letter Π |
+| `'Sigma'` | `\Sigma` | `Sigma` | `Sigma` | `<mi>Σ</mi>` | Greek letter Σ |
+| `'Upsilon'` | `\Upsilon` | `Upsilon` | `Upsilon` | `<mi>Υ</mi>` | Greek letter Υ |
+| `'Phi'` | `\Phi` | `Phi` | `Phi` | `<mi>Φ</mi>` | Greek letter Φ |
+| `'Psi'` | `\Psi` | `Psi` | `Psi` | `<mi>Ψ</mi>` | Greek letter Ψ |
+| `'Omega'` | `\Omega` | `Omega` | `Omega` | `<mi>Ω</mi>` | Greek letter Ω |
 
 ### Mathematical Operators
-| Lambda Symbol | LaTeX | Typst | ASCII | Description |
-|---------------|--------|-------|-------|-------------|
-| `'infty'` | `\infty` | `infinity` | `inf` | Infinity symbol ∞ |
-| `'partial'` | `\partial` | `diff` | `d` | Partial derivative ∂ |
-| `'nabla'` | `\nabla` | `nabla` | `nabla` | Nabla operator ∇ |
-| `'cdot'` | `\cdot` | `dot` | `*` | Center dot ⋅ |
-| `'times'` | `\times` | `times` | `x` | Times symbol × |
-| `'div'` | `\div` | `div` | `/` | Division symbol ÷ |
-| `'pm'` | `\pm` | `+-` | `+-` | Plus-minus ± |
-| `'mp'` | `\mp` | `-+` | `-+` | Minus-plus ∓ |
-| `'leq'` | `\leq` | `<=` | `<=` | Less than or equal ≤ |
-| `'geq'` | `\geq` | `>=` | `>=` | Greater than or equal ≥ |
-| `'neq'` | `\neq` | `!=` | `!=` | Not equal ≠ |
-| `'approx'` | `\approx` | `~~` | `~` | Approximately equal ≈ |
+| Lambda Symbol | LaTeX | Typst | ASCII | MathML | Description |
+|---------------|--------|-------|-------|--------|-------------|
+| `'infty'` | `\infty` | `infinity` | `inf` | `<mi>∞</mi>` | Infinity symbol ∞ |
+| `'partial'` | `\partial` | `diff` | `d` | `<mo>∂</mo>` | Partial derivative ∂ |
+| `'nabla'` | `\nabla` | `nabla` | `nabla` | `<mo>∇</mo>` | Nabla operator ∇ |
+| `'cdot'` | `\cdot` | `dot` | `*` | `<mo>⋅</mo>` | Center dot ⋅ |
+| `'times'` | `\times` | `times` | `x` | `<mo>×</mo>` | Times symbol × |
+| `'div'` | `\div` | `div` | `/` | `<mo>÷</mo>` | Division symbol ÷ |
+| `'pm'` | `\pm` | `+-` | `+-` | `<mo>±</mo>` | Plus-minus ± |
+| `'mp'` | `\mp` | `-+` | `-+` | `<mo>∓</mo>` | Minus-plus ∓ |
+| `'leq'` | `\leq` | `<=` | `<=` | `<mo>≤</mo>` | Less than or equal ≤ |
+| `'geq'` | `\geq` | `>=` | `>=` | `<mo>≥</mo>` | Greater than or equal ≥ |
+| `'neq'` | `\neq` | `!=` | `!=` | `<mo>≠</mo>` | Not equal ≠ |
+| `'approx'` | `\approx` | `~~` | `~` | `<mo>≈</mo>` | Approximately equal ≈ |
 
 ### Math Expressions Not Yet Supported in Lambda
 
 The following table lists mathematical expressions that are available in other notation systems but are not yet implemented in Lambda's math parser:
 
-| LaTeX | Typst | ASCII | Description | Priority |
-|--------|-------|-------|-------------|----------|
-| `\frac{d}{dx}` | `diff(f,x)` | `d/dx` | Derivative notation | High |
-| `\int f(x) dx` | `integral f(x) dif x` | `integral(f,x)` | Indefinite integral | High |
-| `\oint` | `integral.cont` | `contour_int` | Contour integral | Medium |
-| `\sum_{i=1}^{\infty}` | `sum_(i=1)^infinity` | `sum(i=1,inf)` | Infinite series | High |
-| `\lim_{x \to \infty}` | `lim_(x -> infinity)` | `lim(x->inf)` | Limit to infinity | High |
-| `\binom{n}{k}` | `binom(n,k)` | `C(n,k)` | Binomial coefficient | Medium |
-| `\choose` | `choose` | `choose` | Alternative binomial | Low |
-| `\overline{x}` | `overline(x)` | `mean(x)` | Mean/average notation | Medium |
-| `\hat{x}` | `hat(x)` | `x_hat` | Estimator notation | Medium |
-| `\tilde{x}` | `tilde(x)` | `x~` | Approximation notation | Low |
-| `\vec{v}` | `arrow(v)` | `vec(v)` | Vector notation | Medium |
-| `\dot{x}` | `dot(x)` | `x_dot` | Time derivative | Medium |
-| `\ddot{x}` | `dot.double(x)` | `x_ddot` | Second derivative | Medium |
-| `\bar{x}` | `macron(x)` | `x_bar` | Complex conjugate | Low |
-| `\mathbb{R}` | `RR` | `R` | Real numbers | High |
-| `\mathbb{N}` | `NN` | `N` | Natural numbers | High |
-| `\mathbb{Z}` | `ZZ` | `Z` | Integers | High |
-| `\mathbb{Q}` | `QQ` | `Q` | Rational numbers | High |
-| `\mathbb{C}` | `CC` | `C` | Complex numbers | High |
-| `\in` | `in` | `in` | Element of | High |
-| `\notin` | `in.not` | `not_in` | Not element of | Medium |
-| `\subset` | `subset` | `subset` | Subset | Medium |
-| `\supset` | `supset` | `superset` | Superset | Medium |
-| `\cup` | `union` | `union` | Set union | Medium |
-| `\cap` | `sect` | `intersect` | Set intersection | Medium |
-| `\emptyset` | `nothing` | `empty_set` | Empty set | Medium |
-| `\forall` | `forall` | `forall` | For all quantifier | Medium |
-| `\exists` | `exists` | `exists` | Exists quantifier | Medium |
-| `\land` | `and` | `and` | Logical AND | Medium |
-| `\lor` | `or` | `or` | Logical OR | Medium |
-| `\neg` | `not` | `not` | Logical NOT | Medium |
-| `\Rightarrow` | `=>` | `=>` | Implies | Medium |
-| `\Leftrightarrow` | `<=>` | `<=>` | If and only if | Medium |
-| `\leftarrow` | `<-` | `<-` | Left arrow | Low |
-| `\rightarrow` | `->` | `->` | Right arrow | Low |
-| `\uparrow` | `arrow.t` | `up` | Up arrow | Low |
-| `\downarrow` | `arrow.b` | `down` | Down arrow | Low |
-| `\parallel` | `parallel` | `parallel` | Parallel | Low |
-| `\perp` | `perp` | `perp` | Perpendicular | Low |
-| `\angle` | `angle` | `angle` | Angle | Low |
-| `\triangle` | `triangle` | `triangle` | Triangle | Low |
-| `\square` | `square` | `square` | Square | Low |
-| `\diamond` | `diamond` | `diamond` | Diamond | Low |
-| `\circ` | `circle` | `compose` | Function composition | Medium |
-| `\bullet` | `dot.op` | `bullet` | Bullet operator | Low |
-| `\star` | `star` | `star` | Star operator | Low |
-| `\ast` | `*` | `*` | Asterisk operator | Low |
-| `\oplus` | `plus.circle` | `xor` | Exclusive or | Low |
-| `\otimes` | `times.circle` | `tensor` | Tensor product | Low |
-| `\odot` | `dot.circle` | `dot_prod` | Dot product | Low |
-| `\oslash` | `slash.circle` | `oslash` | Circled slash | Low |
-| `\boxplus` | `plus.square` | `boxplus` | Boxed plus | Low |
-| `\boxtimes` | `times.square` | `boxtimes` | Boxed times | Low |
-| `\equiv` | `equiv` | `equiv` | Equivalent | Medium |
-| `\cong` | `tilde.equiv` | `congruent` | Congruent | Low |
-| `\sim` | `~` | `similar` | Similar | Low |
-| `\simeq` | `tilde.eq` | `simeq` | Similar equal | Low |
-| `\propto` | `prop` | `proportional` | Proportional | Low |
-| `\models` | `tack.r` | `models` | Models | Low |
-| `\vdash` | `tack.r` | `proves` | Proves | Low |
-| `\dashv` | `tack.l` | `dashv` | Dashv | Low |
-| `\top` | `top` | `true` | True/top | Low |
-| `\bot` | `bot` | `false` | False/bottom | Low |
-| `\lceil x \rceil` | `ceil(x)` | `ceil(x)` | Ceiling function | Medium |
-| `\lfloor x \rfloor` | `floor(x)` | `floor(x)` | Floor function | Medium |
-| `\left\| x \right\|` | `abs(x)` | `abs(x)` | Absolute value | High |
-| `\left\langle x,y \right\rangle` | `angle.l x,y angle.r` | `<x,y>` | Inner product | Medium |
-| `f'(x)` | `f'(x)` | `f_prime(x)` | Prime notation | High |
-| `f''(x)` | `f''(x)` | `f_double_prime(x)` | Double prime | High |
-| `f^{(n)}(x)` | `f^((n))(x)` | `f_n(x)` | nth derivative | Medium |
-| `\partial f/\partial x` | `diff(f,x)` | `df_dx` | Partial derivative | High |
-| `\nabla f` | `grad f` | `grad(f)` | Gradient | Medium |
-| `\nabla \cdot \vec{F}` | `div arrow(F)` | `div(F)` | Divergence | Medium |
-| `\nabla \times \vec{F}` | `curl arrow(F)` | `curl(F)` | Curl | Medium |
-| `\Delta` | `laplace` | `laplacian` | Laplacian | Low |
+| LaTeX | Typst | ASCII | MathML | Description | Priority |
+|--------|-------|-------|--------|-------------|----------|
+| `\frac{d}{dx}` | `diff(f,x)` | `d/dx` | `<mfrac><mi>d</mi><mrow><mi>d</mi><mi>x</mi></mrow></mfrac>` | Derivative notation | High |
+| `\int f(x) dx` | `integral f(x) dif x` | `integral(f,x)` | `<mrow><mo>∫</mo><mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo><mi>d</mi><mi>x</mi></mrow>` | Indefinite integral | High |
+| `\oint` | `integral.cont` | `contour_int` | `<mo>∮</mo>` | Contour integral | Medium |
+| `\sum_{i=1}^{\infty}` | `sum_(i=1)^infinity` | `sum(i=1,inf)` | `<mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>∞</mi></munderover></mrow>` | Infinite series | High |
+| `\lim_{x \to \infty}` | `lim_(x -> infinity)` | `lim(x->inf)` | `<mrow><munder><mi>lim</mi><mrow><mi>x</mi><mo>→</mo><mi>∞</mi></mrow></munder></mrow>` | Limit to infinity | High |
+| `\binom{n}{k}` | `binom(n,k)` | `C(n,k)` | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Binomial coefficient | Medium |
+| `\choose` | `choose` | `choose` | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Alternative binomial | Low |
+| `\overline{x}` | `overline(x)` | `mean(x)` | `<mover><mi>x</mi><mo>¯</mo></mover>` | Mean/average notation | Medium |
+| `\hat{x}` | `hat(x)` | `x_hat` | `<mover><mi>x</mi><mo>^</mo></mover>` | Estimator notation | Medium |
+| `\tilde{x}` | `tilde(x)` | `x~` | `<mover><mi>x</mi><mo>~</mo></mover>` | Approximation notation | Low |
+| `\vec{v}` | `arrow(v)` | `vec(v)` | `<mover><mi>v</mi><mo>→</mo></mover>` | Vector notation | Medium |
+| `\dot{x}` | `dot(x)` | `x_dot` | `<mover><mi>x</mi><mo>˙</mo></mover>` | Time derivative | Medium |
+| `\ddot{x}` | `dot.double(x)` | `x_ddot` | `<mover><mi>x</mi><mo>¨</mo></mover>` | Second derivative | Medium |
+| `\bar{x}` | `macron(x)` | `x_bar` | `<mover><mi>x</mi><mo>¯</mo></mover>` | Complex conjugate | Low |
+| `\mathbb{R}` | `RR` | `R` | `<mi mathvariant="double-struck">ℝ</mi>` | Real numbers | High |
+| `\mathbb{N}` | `NN` | `N` | `<mi mathvariant="double-struck">ℕ</mi>` | Natural numbers | High |
+| `\mathbb{Z}` | `ZZ` | `Z` | `<mi mathvariant="double-struck">ℤ</mi>` | Integers | High |
+| `\mathbb{Q}` | `QQ` | `Q` | `<mi mathvariant="double-struck">ℚ</mi>` | Rational numbers | High |
+| `\mathbb{C}` | `CC` | `C` | `<mi mathvariant="double-struck">ℂ</mi>` | Complex numbers | High |
+| `\in` | `in` | `in` | `<mo>∈</mo>` | Element of | High |
+| `\notin` | `in.not` | `not_in` | `<mo>∉</mo>` | Not element of | Medium |
+| `\subset` | `subset` | `subset` | `<mo>⊂</mo>` | Subset | Medium |
+| `\supset` | `supset` | `superset` | `<mo>⊃</mo>` | Superset | Medium |
+| `\cup` | `union` | `union` | `<mo>∪</mo>` | Set union | Medium |
+| `\cap` | `sect` | `intersect` | `<mo>∩</mo>` | Set intersection | Medium |
+| `\emptyset` | `nothing` | `empty_set` | `<mo>∅</mo>` | Empty set | Medium |
+| `\forall` | `forall` | `forall` | `<mo>∀</mo>` | For all quantifier | Medium |
+| `\exists` | `exists` | `exists` | `<mo>∃</mo>` | Exists quantifier | Medium |
+| `\land` | `and` | `and` | `<mo>∧</mo>` | Logical AND | Medium |
+| `\lor` | `or` | `or` | `<mo>∨</mo>` | Logical OR | Medium |
+| `\neg` | `not` | `not` | `<mo>¬</mo>` | Logical NOT | Medium |
+| `\Rightarrow` | `=>` | `=>` | `<mo>⇒</mo>` | Implies | Medium |
+| `\Leftrightarrow` | `<=>` | `<=>` | `<mo>⇔</mo>` | If and only if | Medium |
+| `\leftarrow` | `<-` | `<-` | `<mo>←</mo>` | Left arrow | Low |
+| `\rightarrow` | `->` | `->` | `<mo>→</mo>` | Right arrow | Low |
+| `\uparrow` | `arrow.t` | `up` | `<mo>↑</mo>` | Up arrow | Low |
+| `\downarrow` | `arrow.b` | `down` | `<mo>↓</mo>` | Down arrow | Low |
+| `\parallel` | `parallel` | `parallel` | `<mo>∥</mo>` | Parallel | Low |
+| `\perp` | `perp` | `perp` | `<mo>⊥</mo>` | Perpendicular | Low |
+| `\angle` | `angle` | `angle` | `<mo>∠</mo>` | Angle | Low |
+| `\triangle` | `triangle` | `triangle` | `<mo>△</mo>` | Triangle | Low |
+| `\square` | `square` | `square` | `<mo>□</mo>` | Square | Low |
+| `\diamond` | `diamond` | `diamond` | `<mo>◊</mo>` | Diamond | Low |
+| `\circ` | `circle` | `compose` | `<mo>∘</mo>` | Function composition | Medium |
+| `\bullet` | `dot.op` | `bullet` | `<mo>∙</mo>` | Bullet operator | Low |
+| `\star` | `star` | `star` | `<mo>⋆</mo>` | Star operator | Low |
+| `\ast` | `*` | `*` | `<mo>∗</mo>` | Asterisk operator | Low |
+| `\oplus` | `plus.circle` | `xor` | `<mo>⊕</mo>` | Exclusive or | Low |
+| `\otimes` | `times.circle` | `tensor` | `<mo>⊗</mo>` | Tensor product | Low |
+| `\odot` | `dot.circle` | `dot_prod` | `<mo>⊙</mo>` | Dot product | Low |
+| `\oslash` | `slash.circle` | `oslash` | `<mo>⊘</mo>` | Circled slash | Low |
+| `\boxplus` | `plus.square` | `boxplus` | `<mo>⊞</mo>` | Boxed plus | Low |
+| `\boxtimes` | `times.square` | `boxtimes` | `<mo>⊠</mo>` | Boxed times | Low |
+| `\equiv` | `equiv` | `equiv` | `<mo>≡</mo>` | Equivalent | Medium |
+| `\cong` | `tilde.equiv` | `congruent` | `<mo>≅</mo>` | Congruent | Low |
+| `\sim` | `~` | `similar` | `<mo>∼</mo>` | Similar | Low |
+| `\simeq` | `tilde.eq` | `simeq` | `<mo>≃</mo>` | Similar equal | Low |
+| `\propto` | `prop` | `proportional` | `<mo>∝</mo>` | Proportional | Low |
+| `\models` | `tack.r` | `models` | `<mo>⊨</mo>` | Models | Low |
+| `\vdash` | `tack.r` | `proves` | `<mo>⊢</mo>` | Proves | Low |
+| `\dashv` | `tack.l` | `dashv` | `<mo>⊣</mo>` | Dashv | Low |
+| `\top` | `top` | `true` | `<mo>⊤</mo>` | True/top | Low |
+| `\bot` | `bot` | `false` | `<mo>⊥</mo>` | False/bottom | Low |
+| `\lceil x \rceil` | `ceil(x)` | `ceil(x)` | `<mrow><mo>⌈</mo><mi>x</mi><mo>⌉</mo></mrow>` | Ceiling function | Medium |
+| `\lfloor x \rfloor` | `floor(x)` | `floor(x)` | `<mrow><mo>⌊</mo><mi>x</mi><mo>⌋</mo></mrow>` | Floor function | Medium |
+| `\left\| x \right\|` | `abs(x)` | `abs(x)` | `<mrow><mo>|</mo><mi>x</mi><mo>|</mo></mrow>` | Absolute value | High |
+| `\left\langle x,y \right\rangle` | `angle.l x,y angle.r` | `<x,y>` | `<mrow><mo>⟨</mo><mi>x</mi><mo>,</mo><mi>y</mi><mo>⟩</mo></mrow>` | Inner product | Medium |
+| `f'(x)` | `f'(x)` | `f_prime(x)` | `<mrow><msup><mi>f</mi><mo>′</mo></msup><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Prime notation | High |
+| `f''(x)` | `f''(x)` | `f_double_prime(x)` | `<mrow><msup><mi>f</mi><mo>″</mo></msup><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Double prime | High |
+| `f^{(n)}(x)` | `f^((n))(x)` | `f_n(x)` | `<mrow><msup><mi>f</mi><mrow><mo>(</mo><mi>n</mi><mo>)</mo></mrow></msup><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | nth derivative | Medium |
+| `\partial f/\partial x` | `diff(f,x)` | `df_dx` | `<mfrac><mrow><mo>∂</mo><mi>f</mi></mrow><mrow><mo>∂</mo><mi>x</mi></mrow></mfrac>` | Partial derivative | High |
+| `\nabla f` | `grad f` | `grad(f)` | `<mrow><mo>∇</mo><mi>f</mi></mrow>` | Gradient | Medium |
+| `\nabla \cdot \vec{F}` | `div arrow(F)` | `div(F)` | `<mrow><mo>∇</mo><mo>⋅</mo><mover><mi>F</mi><mo>→</mo></mover></mrow>` | Divergence | Medium |
+| `\nabla \times \vec{F}` | `curl arrow(F)` | `curl(F)` | `<mrow><mo>∇</mo><mo>×</mo><mover><mi>F</mi><mo>→</mo></mover></mrow>` | Curl | Medium |
+| `\Delta` | `laplace` | `laplacian` | `<mo>Δ</mo>` | Laplacian | Low |
 
 **Priority Legend:**
 - **High**: Commonly used in mathematical expressions, should be implemented soon
