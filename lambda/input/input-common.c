@@ -16,16 +16,26 @@ const char* math_operators[] = {
     "sum", "prod", "int", "lim", "inf", "infty", "partial", "nabla",
     "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx",
     "equiv", "propto", "subset", "supset", "in", "notin", "forall", "exists", 
-    "to", "mapsto", "rightarrow", "leftarrow", "leftrightarrow", NULL
+    "to", "mapsto", "rightarrow", "leftarrow", "leftrightarrow",
+    // Additional operators
+    "circ", "ast", "star", "bullet", "oplus", "otimes", "odot", "oslash",
+    "wedge", "vee", "cap", "cup", "sqcap", "sqcup", "triangleleft", "triangleright",
+    "wr", "bigcirc", "diamond", "bigtriangleup", "bigtriangledown",
+    "boxplus", "boxminus", "boxtimes", "boxdot", "square", "blacksquare",
+    "parallel", "perp", "angle", "triangle", "cong", "sim", "simeq",
+    "prec", "succ", "preceq", "succeq", "ll", "gg", "asymp", "bowtie",
+    "models", "vdash", "dashv", "top", "bot", "neg", "lnot", NULL
 };
 
 const char* trig_functions[] = {
     "sin", "cos", "tan", "cot", "sec", "csc", 
-    "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", NULL
+    "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh", 
+    "arsinh", "arcosh", "artanh", "sech", "csch", "coth", NULL
 };
 
 const char* log_functions[] = {
-    "log", "ln", "lg", "exp", NULL
+    "log", "ln", "lg", "exp", "max", "min", "arg", "det", "gcd", "lcm", 
+    "deg", "dim", "ker", "hom", "lim", "limsup", "liminf", "sup", "inf", NULL
 };
 
 // LaTeX document commands - from input-latex.c

@@ -1,0 +1,1 @@
+\ell + \hbar + \imath + \jmath + \bigcup A + \bigcap B + \bigoplus C + \bigotimes D + \bigwedge E + \bigvee F + \dfrac{a}{b} + \tfrac{c}{d} + \cfrac{e}{f+\cfrac{g}{h}} + \cbrt{8} + \sqrt{16}
