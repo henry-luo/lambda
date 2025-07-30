@@ -5,8 +5,7 @@ This comprehensive guide covers the complete WebAssembly (WASM) build system and
 ## 📋 Files Overview
 
 ### Core Build System
-- **`compile-wasm.sh`** - Main WASM compilation script with advanced features
-- **`compile-wasm-simple.sh`** - Streamlined linking script (recommended for most users)
+- **`compile-wasm.sh`** - Complete WASM compilation script with JSON configuration
 - **`build_lambda_wasm_config.json`** - Configuration file for WASM build
 - **`wasm-deps/include/`** - Comprehensive stub libraries for WASM compatibility
 
@@ -47,7 +46,10 @@ This comprehensive guide covers the complete WebAssembly (WASM) build system and
 First, compile the Lambda C files to WASM:
 
 ```bash
-# Basic compilation
+# Basic compilation (linking only - recommended)
+./compile-wasm.sh --linking-only
+
+# Full compilation from source
 ./compile-wasm.sh
 
 # Debug build with symbols
@@ -56,19 +58,20 @@ First, compile the Lambda C files to WASM:
 # Force full rebuild
 ./compile-wasm.sh --force
 
-# Use custom WASI SDK path
-./compile-wasm.sh --wasi-sdk=/usr/local/wasi-sdk
+# Use custom configuration
+./compile-wasm.sh custom_config.json
 
 # Parallel build with 4 jobs
 ./compile-wasm.sh --jobs=4
 ```
 
 **Available compilation options:**
+- `config_file` - JSON configuration file (default: build_lambda_wasm_config.json)
 - `--debug, -d` - Build debug version with debug symbols
 - `--force, -f` - Force rebuild all files (disable incremental compilation)
 - `--jobs=N, -j N` - Number of parallel compilation jobs (default: auto-detect)
+- `--linking-only, -l` - Only perform linking step (requires existing object files)
 - `--clean-deps` - Clean dependency files (.d files) and exit
-- `--wasi-sdk=PATH` - Path to WASI SDK (default: /opt/wasi-sdk)
 - `--help, -h` - Show help information
 
 ## 🔧 WASM Build System
@@ -77,35 +80,22 @@ The Lambda project includes a complete WebAssembly (WASM) build system that comp
 
 ### Build Scripts
 
-#### 1. `compile-wasm-simple.sh` - **Recommended for most users**
+#### 1. `compile-wasm.sh` - **Complete WASM Build System**
 
-A streamlined script that uses existing object files and performs linking only:
+A comprehensive compilation script with JSON configuration support:
 
 ```bash
-./compile-wasm-simple.sh
+./compile-wasm.sh [config_file] [--debug] [--force] [--jobs=N] [--linking-only]
 ```
 
 **Features:**
-- Quick build (linking only)
-- Uses existing compiled object files
+- JSON-based configuration with `build_lambda_wasm_config.json`
+- Full compilation from source or linking-only mode
+- Incremental builds with dependency tracking
+- Parallel compilation support
 - Automatic testing with Node.js
 - Clear success/failure reporting
-- User-friendly output
-
-#### 2. `compile-wasm.sh` - **Advanced/Development**
-
-Full compilation script with incremental build support:
-
-```bash
-./compile-wasm.sh [--debug] [--force] [--jobs=N]
-```
-
-**Features:**
-- Full compilation from source
-- Incremental builds with dependency tracking
-- Parallel compilation
-- JSON-based configuration
-- Advanced debugging options
+- Comprehensive command-line options
 
 ### Build Configuration
 
@@ -616,14 +606,14 @@ worker.postMessage({ action: 'init', data: { wasmPath: './lambda.wasm' } });
 
 Lambda provides two build scripts for different use cases:
 
-**For most users:**
+**For most users (linking only):**
 ```bash
-./compile-wasm-simple.sh  # Quick linking with existing objects
+./compile-wasm.sh --linking-only  # Quick linking with existing objects
 ```
 
-**For development:**
+**For development (full build):**
 ```bash
-./compile-wasm.sh [--debug] [--force] [--jobs=N]  # Full compilation system
+./compile-wasm.sh [config_file] [--debug] [--force] [--jobs=N]  # Full compilation system
 ```
 
 See the **🔧 WASM Build System** section above for complete details on:

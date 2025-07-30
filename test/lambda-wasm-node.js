@@ -1,201 +1,329 @@
 #!/usr/bin/env node
 
+/**
+ * Node.js Example for Lambda WASM Module
+ * 
+ * This script demonstrates how to use the Lambda WASM module in a Node.js environment.
+ * It can be used as a command-line tool or imported as a module.
+ */
+
 const fs = require('fs');
 const path = require('path');
+const { LambdaWASM } = require('./lambda-wasm-example.js');
 
-async function testLambdaWasm() {
-    console.log('🚀 Testing Lambda WASM in Node.js...\n');
-    
-    try {
-        // Read the WASM file
-        const wasmPath = path.join(__dirname, 'lambda.wasm');
-        const wasmBuffer = fs.readFileSync(wasmPath);
-        
-        console.log(`📁 WASM file size: ${wasmBuffer.length} bytes`);
-        
-        // Create WASI imports
-        const wasiImports = {
-            wasi_snapshot_preview1: {
-                args_get: (argv, argv_buf) => 0,
-                args_sizes_get: (argc, argv_buf_size) => 0,
-                environ_get: (environ, environ_buf) => 0,
-                environ_sizes_get: (environc, environ_buf_size) => 0,
-                clock_res_get: (id, resolution) => 0,
-                clock_time_get: (id, precision, time) => 0,
-                fd_advise: (fd, offset, len, advice) => 0,
-                fd_allocate: (fd, offset, len) => 0,
-                fd_close: (fd) => 0,
-                fd_datasync: (fd) => 0,
-                fd_fdstat_get: (fd, stat) => 0,
-                fd_fdstat_set_flags: (fd, flags) => 0,
-                fd_fdstat_set_rights: (fd, fs_rights_base, fs_rights_inheriting) => 0,
-                fd_filestat_get: (fd, filestat) => 0,
-                fd_filestat_set_size: (fd, size) => 0,
-                fd_filestat_set_times: (fd, atim, mtim, fst_flags) => 0,
-                fd_pread: (fd, iovs, iovs_len, offset, nread) => 0,
-                fd_prestat_get: (fd, prestat) => 0,
-                fd_prestat_dir_name: (fd, path, path_len) => 0,
-                fd_pwrite: (fd, iovs, iovs_len, offset, nwritten) => 0,
-                fd_read: (fd, iovs, iovs_len, nread) => 0,
-                fd_readdir: (fd, buf, buf_len, cookie, bufused) => 0,
-                fd_renumber: (fd, to) => 0,
-                fd_seek: (fd, offset, whence, newoffset) => 0,
-                fd_sync: (fd) => 0,
-                fd_tell: (fd, offset) => 0,
-                fd_write: (fd, iovs, iovs_len, nwritten) => {
-                    console.log('WASI fd_write called');
-                    return 0;
-                },
-                path_create_directory: (fd, path, path_len) => 0,
-                path_filestat_get: (fd, flags, path, path_len, filestat) => 0,
-                path_filestat_set_times: (fd, flags, path, path_len, atim, mtim, fst_flags) => 0,
-                path_link: (old_fd, old_flags, old_path, old_path_len, new_fd, new_path, new_path_len) => 0,
-                path_open: (fd, dirflags, path, path_len, oflags, fs_rights_base, fs_rights_inheriting, fdflags, opened_fd) => 0,
-                path_readlink: (fd, path, path_len, buf, buf_len, bufused) => 0,
-                path_remove_directory: (fd, path, path_len) => 0,
-                path_rename: (fd, old_path, old_path_len, new_fd, new_path, new_path_len) => 0,
-                path_symlink: (old_path, old_path_len, fd, new_path, new_path_len) => 0,
-                path_unlink_file: (fd, path, path_len) => 0,
-                poll_oneoff: (in_, out, nsubscriptions, nevents) => 0,
-                proc_exit: (code) => {
-                    console.log(`WASI proc_exit called with code: ${code}`);
-                },
-                proc_raise: (sig) => 0,
-                sched_yield: () => 0,
-                random_get: (buf, buf_len) => 0,
-                sock_recv: (fd, ri_data, ri_data_len, ri_flags, ro_datalen, ro_flags) => 0,
-                sock_send: (fd, si_data, si_data_len, si_flags, so_datalen) => 0,
-                sock_shutdown: (fd, how) => 0
-            },
-            env: {
-                // Stub functions that our WASM needs
-                pool_get_str: () => 0,
-                pool_get_int: () => 0,
-                pool_get_double: () => 0,
-                pool_add_size: () => 0,
-                pool_ensure_capacity: () => 0,
-                pool_add_ptr: () => 0
+class LambdaWASMCLI {
+    constructor() {
+        this.lambda = new LambdaWASM();
+    }
+
+    /**
+     * Initialize the WASM module
+     */
+    async init(wasmPath = './lambda.wasm') {
+        try {
+            console.log(`🔄 Loading Lambda WASM module from: ${wasmPath}`);
+            await this.lambda.loadModule(wasmPath);
+            console.log('✅ Lambda WASM module loaded successfully!');
+            
+            const info = this.lambda.getModuleInfo();
+            console.log(`📊 Module Info: ${info.exports.length} exports, ${info.availableFunctions.length} functions`);
+            
+            return true;
+        } catch (error) {
+            console.error('❌ Failed to load WASM module:', error.message);
+            return false;
+        }
+    }
+
+    /**
+     * Process a file through the Lambda WASM module
+     */
+    async processFile(inputPath, outputPath, inputFormat = 'auto', outputFormat = 'html') {
+        try {
+            // Read input file
+            const inputText = fs.readFileSync(inputPath, 'utf8');
+            console.log(`📖 Read ${inputText.length} characters from ${inputPath}`);
+
+            // Auto-detect format if needed
+            if (inputFormat === 'auto') {
+                inputFormat = this.detectFormat(inputPath);
+                console.log(`🔍 Auto-detected format: ${inputFormat}`);
             }
+
+            // Process the text
+            console.log(`🔄 Processing ${inputFormat} → ${outputFormat}...`);
+            
+            const parsed = await this.lambda.parseInput(inputText, inputFormat);
+            const formatted = await this.lambda.formatOutput(parsed, outputFormat);
+
+            // Write output file
+            if (outputPath) {
+                fs.writeFileSync(outputPath, formatted, 'utf8');
+                console.log(`✅ Output written to ${outputPath}`);
+            } else {
+                console.log('\n📄 Processed Output:');
+                console.log('─'.repeat(50));
+                console.log(formatted);
+                console.log('─'.repeat(50));
+            }
+
+            return formatted;
+
+        } catch (error) {
+            console.error('❌ Processing failed:', error.message);
+            
+            // Show mock processing for demo
+            console.log('\n🎭 Mock Processing (WASM functions not available):');
+            console.log(`Input: ${inputPath} (${inputFormat})`);
+            console.log(`Output: ${outputPath || 'stdout'} (${outputFormat})`);
+            
+            return null;
+        }
+    }
+
+    /**
+     * Detect file format based on extension
+     */
+    detectFormat(filePath) {
+        const ext = path.extname(filePath).toLowerCase();
+        const formatMap = {
+            '.md': 'markdown',
+            '.markdown': 'markdown',
+            '.html': 'html',
+            '.htm': 'html',
+            '.json': 'json',
+            '.xml': 'xml',
+            '.txt': 'text',
+            '.rst': 'rst',
+            '.tex': 'latex',
+            '.csv': 'csv',
+            '.toml': 'toml',
+            '.yaml': 'yaml',
+            '.yml': 'yaml',
+            '.ini': 'ini'
         };
         
-        // Instantiate the WASM module
-        const wasmModule = await WebAssembly.instantiate(wasmBuffer, wasiImports);
-        const { exports } = wasmModule.instance;
-        
-        console.log('✅ WASM module instantiated successfully');
-        console.log(`📋 Available exports: ${Object.keys(exports).slice(0, 15).join(', ')}${Object.keys(exports).length > 15 ? '...' : ''}\n`);
-        
-        // Helper functions for memory management
-        function writeStringToMemory(str) {
-            const ptr = exports.malloc(str.length + 1);
-            const memoryView = new Uint8Array(exports.memory.buffer);
-            for (let i = 0; i < str.length; i++) {
-                memoryView[ptr + i] = str.charCodeAt(i);
-            }
-            memoryView[ptr + str.length] = 0; // null terminator
-            return ptr;
-        }
-        
-        function readStringFromMemory(ptr) {
-            if (!ptr) return '';
-            const memoryView = new Uint8Array(exports.memory.buffer);
-            let str = '';
-            let i = ptr;
-            while (memoryView[i] !== 0) {
-                str += String.fromCharCode(memoryView[i]);
-                i++;
-            }
-            return str;
-        }
-        
-        // Test 1: Get version
-        console.log('🔍 Testing wasm_lambda_version...');
+        return formatMap[ext] || 'text';
+    }
+
+    /**
+     * Interactive mode
+     */
+    async interactive() {
+        const readline = require('readline');
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        console.log('\n🎮 Interactive Lambda WASM Mode');
+        console.log('Type "exit" to quit, "help" for commands\n');
+
+        const question = (prompt) => new Promise(resolve => rl.question(prompt, resolve));
+
         try {
-            const versionPtr = exports.wasm_lambda_version();
-            const version = readStringFromMemory(versionPtr);
-            console.log(`✅ Version: ${version}\n`);
-        } catch (error) {
-            console.log(`❌ Failed to get version: ${error.message}\n`);
-        }
-        
-        // Test 2: Initialize runtime
-        console.log('🔍 Testing wasm_lambda_init...');
-        try {
-            const initResult = exports.wasm_lambda_init();
-            if (initResult) {
-                console.log('✅ Runtime initialized successfully\n');
-            } else {
-                console.log('❌ Runtime initialization failed\n');
-            }
-        } catch (error) {
-            console.log(`❌ Runtime init error: ${error.message}\n`);
-        }
-        
-        // Test 3: Create runtime instance
-        console.log('🔍 Testing wasm_lambda_runtime_new...');
-        try {
-            const runtimePtr = exports.wasm_lambda_runtime_new();
-            if (runtimePtr) {
-                console.log('✅ Created new runtime instance');
+            while (true) {
+                const input = await question('λ> ');
                 
-                // Test 4: Process string
-                console.log('🔍 Testing wasm_lambda_process_string...');
-                try {
-                    const testInput = "Hello from Node.js!";
-                    const inputPtr = writeStringToMemory(testInput);
-                    const outputPtr = exports.malloc(256);
-                    
-                    const resultLen = exports.wasm_lambda_process_string(inputPtr, outputPtr, 256);
-                    if (resultLen > 0) {
-                        const outputStr = readStringFromMemory(outputPtr);
-                        console.log(`✅ String processing: "${outputStr}"`);
-                    } else {
-                        console.log('❌ String processing failed');
-                    }
-                    
-                    exports.free(inputPtr);
-                    exports.free(outputPtr);
-                } catch (error) {
-                    console.log(`❌ String processing error: ${error.message}`);
+                if (input.trim() === 'exit') {
+                    console.log('👋 Goodbye!');
+                    break;
                 }
                 
-                // Test 5: Run code
-                console.log('🔍 Testing wasm_lambda_run_code...');
-                try {
-                    const sourceCode = "1 + 2 * 3";
-                    const sourcePtr = writeStringToMemory(sourceCode);
-                    const resultPtr = exports.wasm_lambda_run_code(runtimePtr, sourcePtr);
-                    
-                    if (resultPtr) {
-                        const resultStrPtr = exports.wasm_lambda_item_to_string(resultPtr);
-                        const resultValue = readStringFromMemory(resultStrPtr);
-                        console.log(`✅ Code execution: "${sourceCode}" → "${resultValue}"`);
-                    } else {
-                        console.log(`❌ Code execution failed for: "${sourceCode}"`);
-                    }
-                    
-                    exports.free(sourcePtr);
-                } catch (error) {
-                    console.log(`❌ Code execution error: ${error.message}`);
+                if (input.trim() === 'help') {
+                    console.log(`
+Available commands:
+- parse <format> <text>     Parse text in given format
+- format <format> <text>    Format text to given format  
+- info                      Show module information
+- exit                      Exit interactive mode
+- help                      Show this help
+
+Example: parse markdown "# Hello World"
+`);
+                    continue;
                 }
-                
-                // Cleanup
-                exports.wasm_lambda_runtime_free(runtimePtr);
-                console.log('✅ Runtime cleanup completed');
-            } else {
-                console.log('❌ Failed to create runtime instance');
+
+                if (input.trim() === 'info') {
+                    const info = this.lambda.getModuleInfo();
+                    console.log('📊 Module Information:');
+                    console.log(`   Initialized: ${info.initialized}`);
+                    console.log(`   Memory Pages: ${info.memoryPages}`);
+                    console.log(`   Exports: ${info.exports.length}`);
+                    console.log(`   Functions: ${info.availableFunctions.join(', ')}`);
+                    continue;
+                }
+
+                // Parse commands
+                const parts = input.trim().split(' ');
+                const command = parts[0];
+                const format = parts[1];
+                const text = parts.slice(2).join(' ');
+
+                try {
+                    if (command === 'parse' && format && text) {
+                        const result = await this.lambda.parseInput(text, format);
+                        console.log('📄 Result:', result);
+                    } else if (command === 'format' && format && text) {
+                        const result = await this.lambda.formatOutput(text, format);
+                        console.log('📄 Result:', result);
+                    } else {
+                        console.log('❓ Unknown command. Type "help" for available commands.');
+                    }
+                } catch (error) {
+                    console.log('❌ Error:', error.message);
+                }
             }
-        } catch (error) {
-            console.log(`❌ Runtime creation error: ${error.message}`);
+        } finally {
+            rl.close();
         }
-        
-        console.log('\n🎉 All tests completed!');
-        
-    } catch (error) {
-        console.error('❌ Test failed:', error.message);
-        console.error(error.stack);
+    }
+
+    /**
+     * Show usage information
+     */
+    showUsage() {
+        console.log(`
+🚀 Lambda WASM CLI Tool
+
+Usage:
+  node lambda-wasm-node.js [options] <command>
+  
+Commands:
+  process <input> [output]     Process a file
+  interactive                  Start interactive mode
+  info                        Show module information
+  
+Options:
+  --wasm <path>               Path to WASM file (default: ./lambda.wasm)
+  --input-format <format>     Input format (auto, markdown, html, json, etc.)
+  --output-format <format>    Output format (html, json, xml, etc.)
+  --help                      Show this help
+  
+Examples:
+  node lambda-wasm-node.js process input.md output.html
+  node lambda-wasm-node.js --input-format markdown process doc.txt
+  node lambda-wasm-node.js interactive
+  
+Supported Formats:
+  Input:  markdown, html, json, xml, text, rst, latex, csv, toml, yaml, ini
+  Output: html, json, xml, markdown, text
+`);
     }
 }
 
-// Run the tests
-testLambdaWasm().catch(console.error);
+// Main execution
+async function main() {
+    const args = process.argv.slice(2);
+    const cli = new LambdaWASMCLI();
+    
+    // Parse arguments
+    let wasmPath = './lambda.wasm';
+    let inputFormat = 'auto';
+    let outputFormat = 'html';
+    let command = '';
+    let inputFile = '';
+    let outputFile = '';
+    
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        
+        switch (arg) {
+            case '--wasm':
+                wasmPath = args[++i];
+                break;
+            case '--input-format':
+                inputFormat = args[++i];
+                break;
+            case '--output-format':
+                outputFormat = args[++i];
+                break;
+            case '--help':
+                cli.showUsage();
+                return;
+            case 'process':
+                command = 'process';
+                inputFile = args[++i];
+                outputFile = args[i + 1]; // Optional
+                if (outputFile && !outputFile.startsWith('--')) {
+                    i++; // Consume output file argument  
+                } else {
+                    outputFile = ''; // No output file specified
+                }
+                break;
+            case 'interactive':
+                command = 'interactive';
+                break;
+            case 'info':
+                command = 'info';
+                break;
+            default:
+                if (!command) {
+                    console.error(`❌ Unknown argument: ${arg}`);
+                    cli.showUsage();
+                    return;
+                }
+        }
+    }
+    
+    // Check if WASM file exists
+    if (!fs.existsSync(wasmPath)) {
+        console.error(`❌ WASM file not found: ${wasmPath}`);
+        console.log('💡 Compile the Lambda project to WASM first using: ./compile-wasm.sh');
+        return;
+    }
+    
+    // Initialize WASM module
+    const initialized = await cli.init(wasmPath);
+    
+    // Execute command
+    switch (command) {
+        case 'process':
+            if (!inputFile) {
+                console.error('❌ Input file required for process command');
+                cli.showUsage();
+                return;
+            }
+            
+            if (!fs.existsSync(inputFile)) {
+                console.error(`❌ Input file not found: ${inputFile}`);
+                return;
+            }
+            
+            await cli.processFile(inputFile, outputFile, inputFormat, outputFormat);
+            break;
+            
+        case 'interactive':
+            if (initialized) {
+                await cli.interactive();
+            }
+            break;
+            
+        case 'info':
+            if (initialized) {
+                const info = cli.lambda.getModuleInfo();
+                console.log('\n📊 Detailed Module Information:');
+                console.log(JSON.stringify(info, null, 2));
+            }
+            break;
+            
+        default:
+            if (args.length === 0) {
+                cli.showUsage();
+            } else {
+                console.error('❌ No command specified');
+                cli.showUsage();
+            }
+    }
+}
+
+// Run if executed directly
+if (require.main === module) {
+    main().catch(error => {
+        console.error('💥 Fatal error:', error);
+        process.exit(1);
+    });
+}
+
+// Export for use as module
+module.exports = { LambdaWASMCLI };

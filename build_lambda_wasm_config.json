@@ -1,0 +1,83 @@
+{
+    "output": "lambda.wasm",
+    "source_dirs": [
+        "lambda/input",
+        "lambda/format",
+        "lambda/validator"
+    ],
+    "source_files": [
+        "lambda/lambda-wasm-main.c",
+        "lambda/parse.c",
+        "lib/strbuf.c",
+        "lib/strview.c",
+        "lib/arraylist.c",
+        "lib/file.c",
+        "lib/hashmap.c",
+        "lib/mem-pool/src/variable.c",
+        "lib/mem-pool/src/buffer.c",
+        "lib/mem-pool/src/utils.c",
+        "lib/url.c",
+        "lib/utf.c",
+        "lib/num_stack.c",
+        "lambda/runner.c",
+        "lambda/transpile.c",
+        "lambda/transpile-mir.c",
+        "lambda/build_ast.c",
+        "lambda/mir.c",
+        "lambda/pack.c",
+        "lambda/print.c",
+        "lambda/lambda-eval.c",
+        "lambda/lambda-mem.c"
+    ],
+    "libraries": [
+        {
+            "name": "wasm-stubs",
+            "include": "wasm-deps/include"
+        },
+        {
+            "name": "system-includes",
+            "include": "."
+        },
+        {
+            "name": "lib-includes",
+            "include": "include"
+        },
+        {
+            "name": "lib-sources",
+            "include": "lib"
+        },
+        {
+            "name": "lambda-includes",
+            "include": "lambda"
+        }
+    ],
+    "warnings": [
+        "format"
+    ],
+    "flags": [
+        "fms-extensions",
+        "O2",
+        "DWASM_BUILD=1",
+        "DCROSS_COMPILE=1",
+        "D_POSIX_C_SOURCE=200809L"
+    ],
+    "linker_flags": [
+        "L/opt/wasi-sdk/share/wasi-sysroot/lib/wasm32-wasi",
+        "lwasi-emulated-signal",
+        "lwasi-emulated-process-clocks", 
+        "lwasi-emulated-getpid",
+        "lwasi-emulated-mman",
+        "Wl,--export=wasm_lambda_version",
+        "Wl,--export=wasm_lambda_init",
+        "Wl,--export=wasm_lambda_process_string",
+        "Wl,--export=wasm_lambda_runtime_new",
+        "Wl,--export=wasm_lambda_runtime_free",
+        "Wl,--export=wasm_lambda_run_code",
+        "Wl,--export=wasm_lambda_item_to_string",
+        "Wl,--allow-undefined"
+    ],
+    "debug": false,
+    "build_dir": "build_wasm",
+    "cross_compile": true,
+    "target_triplet": "wasm32-wasi"
+}
