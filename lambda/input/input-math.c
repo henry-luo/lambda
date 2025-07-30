@@ -13,65 +13,612 @@ typedef enum {
     MATH_FLAVOR_ASCII
 } MathFlavor;
 
-// forward declarations
+// Mathematical Expression Syntax Groups
+typedef enum {
+    MATH_GROUP_BASIC_OPERATORS,      // +, -, *, /, ^, etc.
+    MATH_GROUP_FUNCTIONS,            // sin, cos, log, exp, etc.
+    MATH_GROUP_SPECIAL_SYMBOLS,      // Greek letters, special constants
+    MATH_GROUP_FRACTIONS,            // frac, dfrac, tfrac, cfrac
+    MATH_GROUP_ROOTS,                // sqrt, cbrt, nth roots
+    MATH_GROUP_ACCENTS,              // hat, tilde, bar, dot, etc.
+    MATH_GROUP_ARROWS,               // to, leftarrow, Rightarrow, etc.
+    MATH_GROUP_BIG_OPERATORS,        // sum, prod, int, bigcup, etc.
+    MATH_GROUP_DELIMITERS,           // abs, ceil, floor, norm, etc.
+    MATH_GROUP_RELATIONS,            // =, <, >, leq, geq, etc.
+    MATH_GROUP_SET_THEORY,           // in, subset, cup, cap, etc.
+    MATH_GROUP_LOGIC,                // land, lor, neg, forall, exists
+    MATH_GROUP_NUMBER_SETS,          // mathbb{R}, mathbb{N}, etc.
+    MATH_GROUP_GEOMETRY,             // angle, triangle, parallel, etc.
+    MATH_GROUP_CALCULUS,             // partial, nabla, differential
+    MATH_GROUP_ALGEBRA,              // binomial, vector, matrix
+    MATH_GROUP_TYPOGRAPHY,           // overline, underline, phantom
+    MATH_GROUP_ENVIRONMENTS,         // cases, align, matrix environments
+    MATH_GROUP_SPACING,              // quad, qquad, thinspace, etc.
+    MATH_GROUP_MODULAR,              // mod, pmod, bmod
+    MATH_GROUP_CIRCLED_OPERATORS,    // oplus, otimes, odot, oslash
+    MATH_GROUP_BOXED_OPERATORS,      // boxplus, boxtimes, etc.
+    MATH_GROUP_EXTENDED_ARROWS,      // bidirectional arrows, mapsto
+    MATH_GROUP_EXTENDED_RELATIONS,   // simeq, models, vdash, etc.
+    MATH_GROUP_DERIVATIVES,          // prime notation, higher derivatives
+    MATH_GROUP_COUNT                 // Total number of groups
+} MathExprGroup;
+
+// Expression definition structure
+typedef struct {
+    const char* latex_cmd;           // LaTeX command name (without backslash)
+    const char* typst_syntax;        // Typst equivalent syntax
+    const char* ascii_syntax;        // ASCII math equivalent
+    const char* element_name;        // Lambda element name to create
+    const char* unicode_symbol;      // Unicode representation
+    const char* description;         // Human-readable description
+    bool has_arguments;              // Whether it takes arguments
+    int argument_count;              // Number of arguments (-1 for variable)
+    const char* special_parser;      // Name of special parser function if needed
+} MathExprDef;
+
+// Definition tables for each mathematical expression group
+static const MathExprDef basic_operators[] = {
+    {"+", "+", "+", "add", "+", "Addition", false, 0, NULL},
+    {"-", "-", "-", "sub", "−", "Subtraction", false, 0, NULL},
+    {"*", "*", "*", "mul", "×", "Multiplication", false, 0, NULL},
+    {"/", "/", "/", "div", "÷", "Division", false, 0, NULL},
+    {"^", "^", "^", "pow", "^", "Power/Exponentiation", false, 0, NULL},
+    {"=", "=", "=", "eq", "=", "Equals", false, 0, NULL},
+    {"pm", "+-", "+-", "pm", "±", "Plus or minus", false, 0, NULL},
+    {"mp", "-+", "-+", "mp", "∓", "Minus or plus", false, 0, NULL},
+    {"times", "*", "*", "times", "×", "Times", false, 0, NULL},
+    {"div", "/", "/", "div", "÷", "Division", false, 0, NULL},
+    {"cdot", ".", ".", "cdot", "⋅", "Centered dot", false, 0, NULL},
+    {"ast", "*", "*", "ast", "∗", "Asterisk", false, 0, NULL},
+    {"star", "*", "*", "star", "⋆", "Star", false, 0, NULL},
+    {"circ", "compose", "o", "circ", "∘", "Composition", false, 0, NULL},
+    {"bullet", ".", ".", "bullet", "∙", "Bullet", false, 0, NULL},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef functions[] = {
+    // Trigonometric functions
+    {"sin", "sin", "sin", "sin", "sin", "Sine", true, 1, NULL},
+    {"cos", "cos", "cos", "cos", "cos", "Cosine", true, 1, NULL},
+    {"tan", "tan", "tan", "tan", "tan", "Tangent", true, 1, NULL},
+    {"cot", "cot", "cot", "cot", "cot", "Cotangent", true, 1, NULL},
+    {"sec", "sec", "sec", "sec", "sec", "Secant", true, 1, NULL},
+    {"csc", "csc", "csc", "csc", "csc", "Cosecant", true, 1, NULL},
+    
+    // Inverse trigonometric functions
+    {"arcsin", "arcsin", "arcsin", "arcsin", "arcsin", "Inverse sine", true, 1, NULL},
+    {"arccos", "arccos", "arccos", "arccos", "arccos", "Inverse cosine", true, 1, NULL},
+    {"arctan", "arctan", "arctan", "arctan", "arctan", "Inverse tangent", true, 1, NULL},
+    {"arccot", "arccot", "arccot", "arccot", "arccot", "Inverse cotangent", true, 1, NULL},
+    {"arcsec", "arcsec", "arcsec", "arcsec", "arcsec", "Inverse secant", true, 1, NULL},
+    {"arccsc", "arccsc", "arccsc", "arccsc", "arccsc", "Inverse cosecant", true, 1, NULL},
+    
+    // Hyperbolic functions
+    {"sinh", "sinh", "sinh", "sinh", "sinh", "Hyperbolic sine", true, 1, NULL},
+    {"cosh", "cosh", "cosh", "cosh", "cosh", "Hyperbolic cosine", true, 1, NULL},
+    {"tanh", "tanh", "tanh", "tanh", "tanh", "Hyperbolic tangent", true, 1, NULL},
+    {"coth", "coth", "coth", "coth", "coth", "Hyperbolic cotangent", true, 1, NULL},
+    {"sech", "sech", "sech", "sech", "sech", "Hyperbolic secant", true, 1, NULL},
+    {"csch", "csch", "csch", "csch", "csch", "Hyperbolic cosecant", true, 1, NULL},
+    
+    // Logarithmic and exponential functions
+    {"log", "log", "log", "log", "log", "Logarithm", true, 1, NULL},
+    {"ln", "ln", "ln", "ln", "ln", "Natural logarithm", true, 1, NULL},
+    {"lg", "lg", "lg", "lg", "lg", "Common logarithm", true, 1, NULL},
+    {"exp", "exp", "exp", "exp", "exp", "Exponential", true, 1, NULL},
+    
+    // Other mathematical functions
+    {"abs", "abs", "abs", "abs", "|·|", "Absolute value", true, 1, "parse_abs"},
+    {"min", "min", "min", "min", "min", "Minimum", true, -1, NULL},
+    {"max", "max", "max", "max", "max", "Maximum", true, -1, NULL},
+    {"gcd", "gcd", "gcd", "gcd", "gcd", "Greatest common divisor", true, -1, NULL},
+    {"lcm", "lcm", "lcm", "lcm", "lcm", "Least common multiple", true, -1, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef special_symbols[] = {
+    // Greek lowercase letters
+    {"alpha", "alpha", "alpha", "alpha", "α", "Greek letter alpha", false, 0, NULL},
+    {"beta", "beta", "beta", "beta", "β", "Greek letter beta", false, 0, NULL},
+    {"gamma", "gamma", "gamma", "gamma", "γ", "Greek letter gamma", false, 0, NULL},
+    {"delta", "delta", "delta", "delta", "δ", "Greek letter delta", false, 0, NULL},
+    {"epsilon", "epsilon", "epsilon", "epsilon", "ε", "Greek letter epsilon", false, 0, NULL},
+    {"varepsilon", "epsilon.alt", "epsilon", "varepsilon", "ε", "Variant epsilon", false, 0, NULL},
+    {"zeta", "zeta", "zeta", "zeta", "ζ", "Greek letter zeta", false, 0, NULL},
+    {"eta", "eta", "eta", "eta", "η", "Greek letter eta", false, 0, NULL},
+    {"theta", "theta", "theta", "theta", "θ", "Greek letter theta", false, 0, NULL},
+    {"vartheta", "theta.alt", "theta", "vartheta", "ϑ", "Variant theta", false, 0, NULL},
+    {"iota", "iota", "iota", "iota", "ι", "Greek letter iota", false, 0, NULL},
+    {"kappa", "kappa", "kappa", "kappa", "κ", "Greek letter kappa", false, 0, NULL},
+    {"lambda", "lambda", "lambda", "lambda", "λ", "Greek letter lambda", false, 0, NULL},
+    {"mu", "mu", "mu", "mu", "μ", "Greek letter mu", false, 0, NULL},
+    {"nu", "nu", "nu", "nu", "ν", "Greek letter nu", false, 0, NULL},
+    {"xi", "xi", "xi", "xi", "ξ", "Greek letter xi", false, 0, NULL},
+    {"omicron", "omicron", "omicron", "omicron", "ο", "Greek letter omicron", false, 0, NULL},
+    {"pi", "pi", "pi", "pi", "π", "Greek letter pi", false, 0, NULL},
+    {"varpi", "pi.alt", "pi", "varpi", "ϖ", "Variant pi", false, 0, NULL},
+    {"rho", "rho", "rho", "rho", "ρ", "Greek letter rho", false, 0, NULL},
+    {"varrho", "rho.alt", "rho", "varrho", "ϱ", "Variant rho", false, 0, NULL},
+    {"sigma", "sigma", "sigma", "sigma", "σ", "Greek letter sigma", false, 0, NULL},
+    {"varsigma", "sigma.alt", "sigma", "varsigma", "ς", "Variant sigma", false, 0, NULL},
+    {"tau", "tau", "tau", "tau", "τ", "Greek letter tau", false, 0, NULL},
+    {"upsilon", "upsilon", "upsilon", "upsilon", "υ", "Greek letter upsilon", false, 0, NULL},
+    {"phi", "phi", "phi", "phi", "φ", "Greek letter phi", false, 0, NULL},
+    {"varphi", "phi.alt", "phi", "varphi", "ϕ", "Variant phi", false, 0, NULL},
+    {"chi", "chi", "chi", "chi", "χ", "Greek letter chi", false, 0, NULL},
+    {"psi", "psi", "psi", "psi", "ψ", "Greek letter psi", false, 0, NULL},
+    {"omega", "omega", "omega", "omega", "ω", "Greek letter omega", false, 0, NULL},
+    
+    // Greek uppercase letters
+    {"Gamma", "Gamma", "Gamma", "Gamma", "Γ", "Greek letter Gamma", false, 0, NULL},
+    {"Delta", "Delta", "Delta", "Delta", "Δ", "Greek letter Delta", false, 0, NULL},
+    {"Theta", "Theta", "Theta", "Theta", "Θ", "Greek letter Theta", false, 0, NULL},
+    {"Lambda", "Lambda", "Lambda", "Lambda", "Λ", "Greek letter Lambda", false, 0, NULL},
+    {"Xi", "Xi", "Xi", "Xi", "Ξ", "Greek letter Xi", false, 0, NULL},
+    {"Pi", "Pi", "Pi", "Pi", "Π", "Greek letter Pi", false, 0, NULL},
+    {"Sigma", "Sigma", "Sigma", "Sigma", "Σ", "Greek letter Sigma", false, 0, NULL},
+    {"Upsilon", "Upsilon", "Upsilon", "Upsilon", "Υ", "Greek letter Upsilon", false, 0, NULL},
+    {"Phi", "Phi", "Phi", "Phi", "Φ", "Greek letter Phi", false, 0, NULL},
+    {"Chi", "Chi", "Chi", "Chi", "Χ", "Greek letter Chi", false, 0, NULL},
+    {"Psi", "Psi", "Psi", "Psi", "Ψ", "Greek letter Psi", false, 0, NULL},
+    {"Omega", "Omega", "Omega", "Omega", "Ω", "Greek letter Omega", false, 0, NULL},
+    
+    // Special mathematical symbols
+    {"ell", "ell", "ell", "ell", "ℓ", "Script lowercase l", false, 0, NULL},
+    {"hbar", "hbar", "hbar", "hbar", "ℏ", "Planck constant", false, 0, NULL},
+    {"imath", "imath", "imath", "imath", "ı", "Dotless i", false, 0, NULL},
+    {"jmath", "jmath", "jmath", "jmath", "ȷ", "Dotless j", false, 0, NULL},
+    {"aleph", "aleph", "aleph", "aleph", "ℵ", "Aleph", false, 0, NULL},
+    {"beth", "beth", "beth", "beth", "ℶ", "Beth", false, 0, NULL},
+    {"gimel", "gimel", "gimel", "gimel", "ℷ", "Gimel", false, 0, NULL},
+    {"daleth", "daleth", "daleth", "daleth", "ℸ", "Daleth", false, 0, NULL},
+    {"infty", "infinity", "inf", "infty", "∞", "Infinity", false, 0, NULL},
+    {"partial", "diff", "partial", "partial", "∂", "Partial derivative", false, 0, NULL},
+    {"nabla", "nabla", "nabla", "nabla", "∇", "Nabla", false, 0, NULL},
+    {"emptyset", "nothing", "emptyset", "emptyset", "∅", "Empty set", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef fractions[] = {
+    {"frac", "frac", "frac", "frac", "fraction", "Basic fraction", true, 2, "parse_frac"},
+    {"dfrac", "display(frac)", "frac", "frac", "fraction", "Display-style fraction", true, 2, "parse_frac_style"},
+    {"tfrac", "inline(frac)", "frac", "frac", "fraction", "Text-style fraction", true, 2, "parse_frac_style"},
+    {"cfrac", "cfrac", "cfrac", "frac", "fraction", "Continued fraction", true, 2, "parse_frac_style"},
+    {"binom", "binom", "binom", "binom", "binomial", "Binomial coefficient", true, 2, "parse_binomial"},
+    {"choose", "choose", "choose", "choose", "binomial", "Choose notation", true, 2, "parse_choose"},
+    {"partial_frac", "partial", "d/dx", "partial_derivative", "∂/∂", "Partial derivative fraction", true, -1, "parse_partial_derivative"},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef roots[] = {
+    {"sqrt", "sqrt", "sqrt", "sqrt", "√", "Square root", true, 1, "parse_sqrt"},
+    {"cbrt", "root(3)", "cbrt", "root", "∛", "Cube root", true, 1, "parse_root"},
+    {"root", "root", "root", "root", "ⁿ√", "n-th root", true, 2, "parse_root_with_index"},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef accents[] = {
+    {"hat", "hat", "hat", "hat", "̂", "Hat accent", true, 1, "parse_accent"},
+    {"tilde", "tilde", "tilde", "tilde", "̃", "Tilde accent", true, 1, "parse_accent"},
+    {"bar", "overline", "bar", "bar", "̄", "Bar accent", true, 1, "parse_accent"},
+    {"vec", "arrow", "vec", "vec", "⃗", "Vector arrow", true, 1, "parse_accent"},
+    {"dot", "dot", "dot", "dot", "̇", "Dot accent", true, 1, "parse_accent"},
+    {"ddot", "dot.double", "ddot", "ddot", "̈", "Double dot accent", true, 1, "parse_accent"},
+    {"acute", "acute", "acute", "acute", "́", "Acute accent", true, 1, "parse_accent"},
+    {"grave", "grave", "grave", "grave", "̀", "Grave accent", true, 1, "parse_accent"},
+    {"breve", "breve", "breve", "breve", "̆", "Breve accent", true, 1, "parse_accent"},
+    {"check", "caron", "check", "check", "̌", "Check accent", true, 1, "parse_accent"},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef arrows[] = {
+    {"to", "->", "->", "to", "→", "Right arrow", false, 0, NULL},
+    {"rightarrow", "->", "->", "rightarrow", "→", "Right arrow", false, 0, NULL},
+    {"leftarrow", "<-", "<-", "leftarrow", "←", "Left arrow", false, 0, NULL},
+    {"leftrightarrow", "<->", "<->", "leftrightarrow", "↔", "Left-right arrow", false, 0, NULL},
+    {"Rightarrow", "=>", "=>", "Rightarrow", "⇒", "Right double arrow", false, 0, NULL},
+    {"Leftarrow", "<=", "<=", "Leftarrow", "⇐", "Left double arrow", false, 0, NULL},
+    {"Leftrightarrow", "<=>", "<=>", "Leftrightarrow", "⇔", "Left-right double arrow", false, 0, NULL},
+    {"mapsto", "|->", "|->", "mapsto", "↦", "Maps to", false, 0, NULL},
+    {"longmapsto", "|-->", "|-->", "longmapsto", "⟼", "Long maps to", false, 0, NULL},
+    {"uparrow", "up", "up", "uparrow", "↑", "Up arrow", false, 0, NULL},
+    {"downarrow", "down", "down", "downarrow", "↓", "Down arrow", false, 0, NULL},
+    {"updownarrow", "updown", "updown", "updownarrow", "↕", "Up-down arrow", false, 0, NULL},
+    {"Uparrow", "Up", "Up", "Uparrow", "⇑", "Up double arrow", false, 0, NULL},
+    {"Downarrow", "Down", "Down", "Downarrow", "⇓", "Down double arrow", false, 0, NULL},
+    {"Updownarrow", "UpDown", "UpDown", "Updownarrow", "⇕", "Up-down double arrow", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef big_operators[] = {
+    {"sum", "sum", "sum", "sum", "∑", "Summation", true, -1, "parse_big_operator"},
+    {"prod", "product", "prod", "prod", "∏", "Product", true, -1, "parse_big_operator"},
+    {"coprod", "coproduct", "coprod", "coprod", "∐", "Coproduct", true, -1, "parse_big_operator"},
+    {"int", "integral", "int", "int", "∫", "Integral", true, -1, "parse_big_operator"},
+    {"iint", "integral.double", "iint", "iint", "∬", "Double integral", true, -1, "parse_big_operator"},
+    {"iiint", "integral.triple", "iiint", "iiint", "∭", "Triple integral", true, -1, "parse_big_operator"},
+    {"oint", "integral.cont", "oint", "oint", "∮", "Contour integral", true, -1, "parse_big_operator"},
+    {"oiint", "integral.surf", "oiint", "oiint", "∯", "Surface integral", true, -1, "parse_big_operator"},
+    {"oiiint", "integral.vol", "oiiint", "oiiint", "∰", "Volume integral", true, -1, "parse_big_operator"},
+    {"bigcup", "union.big", "bigcup", "bigcup", "⋃", "Big union", true, -1, "parse_big_operator"},
+    {"bigcap", "sect.big", "bigcap", "bigcap", "⋂", "Big intersection", true, -1, "parse_big_operator"},
+    {"bigoplus", "plus.big", "bigoplus", "bigoplus", "⊕", "Big circled plus", true, -1, "parse_big_operator"},
+    {"bigotimes", "times.big", "bigotimes", "bigotimes", "⊗", "Big circled times", true, -1, "parse_big_operator"},
+    {"bigwedge", "and.big", "bigwedge", "bigwedge", "⋀", "Big logical and", true, -1, "parse_big_operator"},
+    {"bigvee", "or.big", "bigvee", "bigvee", "⋁", "Big logical or", true, -1, "parse_big_operator"},
+    {"lim", "lim", "lim", "lim", "lim", "Limit", true, -1, "parse_limit"},
+    {"limsup", "limsup", "limsup", "limsup", "lim sup", "Limit superior", true, -1, "parse_limit"},
+    {"liminf", "liminf", "liminf", "liminf", "lim inf", "Limit inferior", true, -1, "parse_limit"},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef delimiters[] = {
+    {"abs", "abs", "abs", "abs", "|·|", "Absolute value", true, 1, "parse_abs"},
+    {"norm", "norm", "norm", "norm", "‖·‖", "Norm", true, 1, "parse_norm"},
+    {"ceil", "ceil", "ceil", "ceil", "⌈·⌉", "Ceiling", true, 1, "parse_ceil_floor"},
+    {"lceil", "ceil", "ceil", "lceil", "⌈", "Left ceiling", false, 0, NULL},
+    {"rceil", "ceil", "ceil", "rceil", "⌉", "Right ceiling", false, 0, NULL},
+    {"floor", "floor", "floor", "floor", "⌊·⌋", "Floor", true, 1, "parse_ceil_floor"},
+    {"lfloor", "floor", "floor", "lfloor", "⌊", "Left floor", false, 0, NULL},
+    {"rfloor", "floor", "floor", "rfloor", "⌋", "Right floor", false, 0, NULL},
+    {"langle", "<", "<", "langle", "⟨", "Left angle bracket", false, 0, NULL},
+    {"rangle", ">", ">", "rangle", "⟩", "Right angle bracket", false, 0, NULL},
+    {"<", "<", "<", "inner_product", "⟨·,·⟩", "Inner product", true, -1, "parse_inner_product"},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef relations[] = {
+    {"=", "=", "=", "eq", "=", "Equals", false, 0, NULL},
+    {"neq", "!=", "!=", "neq", "≠", "Not equal", false, 0, NULL},
+    {"ne", "!=", "!=", "ne", "≠", "Not equal", false, 0, NULL},
+    {"<", "<", "<", "lt", "<", "Less than", false, 0, NULL},
+    {">", ">", ">", "gt", ">", "Greater than", false, 0, NULL},
+    {"leq", "<=", "<=", "leq", "≤", "Less than or equal", false, 0, NULL},
+    {"le", "<=", "<=", "le", "≤", "Less than or equal", false, 0, NULL},
+    {"geq", ">=", ">=", "geq", "≥", "Greater than or equal", false, 0, NULL},
+    {"ge", ">=", ">=", "ge", "≥", "Greater than or equal", false, 0, NULL},
+    {"ll", "<<", "<<", "ll", "≪", "Much less than", false, 0, NULL},
+    {"gg", ">>", ">>", "gg", "≫", "Much greater than", false, 0, NULL},
+    {"equiv", "===", "===", "equiv", "≡", "Equivalent", false, 0, NULL},
+    {"approx", "~~", "~~", "approx", "≈", "Approximately equal", false, 0, NULL},
+    {"sim", "~", "~", "sim", "∼", "Similar", false, 0, NULL},
+    {"simeq", "~=", "~=", "simeq", "≃", "Similar or equal", false, 0, NULL},
+    {"cong", "~=", "~=", "cong", "≅", "Congruent", false, 0, NULL},
+    {"propto", "prop", "prop", "propto", "∝", "Proportional to", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef set_theory[] = {
+    {"in", "in", "in", "in", "∈", "Element of", false, 0, NULL},
+    {"notin", "in.not", "notin", "notin", "∉", "Not element of", false, 0, NULL},
+    {"ni", "ni", "ni", "ni", "∋", "Contains as member", false, 0, NULL},
+    {"notni", "ni.not", "notni", "notni", "∌", "Does not contain", false, 0, NULL},
+    {"subset", "subset", "subset", "subset", "⊂", "Subset", false, 0, NULL},
+    {"supset", "supset", "supset", "supset", "⊃", "Superset", false, 0, NULL},
+    {"subseteq", "subset.eq", "subseteq", "subseteq", "⊆", "Subset or equal", false, 0, NULL},
+    {"supseteq", "supset.eq", "supseteq", "supseteq", "⊇", "Superset or equal", false, 0, NULL},
+    {"subsetneq", "subset.neq", "subsetneq", "subsetneq", "⊊", "Subset not equal", false, 0, NULL},
+    {"supsetneq", "supset.neq", "supsetneq", "supsetneq", "⊋", "Superset not equal", false, 0, NULL},
+    {"cup", "union", "cup", "cup", "∪", "Union", false, 0, NULL},
+    {"cap", "sect", "cap", "cap", "∩", "Intersection", false, 0, NULL},
+    {"setminus", "without", "setminus", "setminus", "∖", "Set minus", false, 0, NULL},
+    {"triangle", "triangle", "triangle", "triangle", "△", "Triangle", false, 0, NULL},
+    {"triangleq", "triangle.eq", "triangleq", "triangleq", "≜", "Triangle equal", false, 0, NULL},
+    {"sqcup", "sqcup", "sqcup", "sqcup", "⊔", "Square cup", false, 0, NULL},
+    {"sqcap", "sqcap", "sqcap", "sqcap", "⊓", "Square cap", false, 0, NULL},
+    {"uplus", "uplus", "uplus", "uplus", "⊎", "Multiset union", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef logic[] = {
+    {"land", "and", "and", "land", "∧", "Logical and", false, 0, NULL},
+    {"lor", "or", "or", "lor", "∨", "Logical or", false, 0, NULL},
+    {"lnot", "not", "not", "lnot", "¬", "Logical not", false, 0, NULL},
+    {"neg", "not", "not", "neg", "¬", "Logical negation", false, 0, NULL},
+    {"forall", "forall", "forall", "forall", "∀", "For all", false, 0, NULL},
+    {"exists", "exists", "exists", "exists", "∃", "There exists", false, 0, NULL},
+    {"nexists", "exists.not", "nexists", "nexists", "∄", "There does not exist", false, 0, NULL},
+    {"vdash", "|-", "|-", "vdash", "⊢", "Proves", false, 0, NULL},
+    {"dashv", "-|", "-|", "dashv", "⊣", "Does not prove", false, 0, NULL},
+    {"models", "|=", "|=", "models", "⊨", "Models", false, 0, NULL},
+    {"top", "top", "top", "top", "⊤", "Top", false, 0, NULL},
+    {"bot", "bot", "bot", "bot", "⊥", "Bottom", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+static const MathExprDef number_sets[] = {
+    {"mathbb{N}", "NN", "N", "naturals", "ℕ", "Natural numbers", false, 0, NULL},
+    {"mathbb{Z}", "ZZ", "Z", "integers", "ℤ", "Integers", false, 0, NULL},
+    {"mathbb{Q}", "QQ", "Q", "rationals", "ℚ", "Rational numbers", false, 0, NULL},
+    {"mathbb{R}", "RR", "R", "reals", "ℝ", "Real numbers", false, 0, NULL},
+    {"mathbb{C}", "CC", "C", "complex", "ℂ", "Complex numbers", false, 0, NULL},
+    {"mathbb{H}", "HH", "H", "quaternions", "ℍ", "Quaternions", false, 0, NULL},
+    {"mathbb{P}", "PP", "P", "primes", "ℙ", "Prime numbers", false, 0, NULL},
+    {"mathbb{F}", "FF", "F", "field", "𝔽", "Field", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Geometry expressions
+static const MathExprDef geometry[] = {
+    {"angle", "angle", "angle", "angle", "∠", "Angle symbol", false, 0, NULL},
+    {"triangle", "triangle", "triangle", "triangle", "△", "Triangle symbol", false, 0, NULL},
+    {"square", "square", "square", "square", "□", "Square symbol", false, 0, NULL},
+    {"diamond", "diamond", "diamond", "diamond", "◊", "Diamond symbol", false, 0, NULL},
+    {"parallel", "parallel", "parallel", "parallel", "∥", "Parallel symbol", false, 0, NULL},
+    {"perp", "perp", "perp", "perpendicular", "⊥", "Perpendicular symbol", false, 0, NULL},
+    {"cong", "cong", "cong", "congruent", "≅", "Congruent symbol", false, 0, NULL},
+    {"sim", "sim", "sim", "similar", "∼", "Similar symbol", false, 0, NULL},
+    {"sphericalangle", "sphericalangle", "sphericalangle", "sphericalangle", "∢", "Spherical angle", false, 0, NULL},
+    {"measuredangle", "measuredangle", "measuredangle", "measuredangle", "∡", "Measured angle", false, 0, NULL},
+    {"bigcirc", "circle.big", "bigcircle", "big_circle", "○", "Big circle", false, 0, NULL},
+    {"blacksquare", "square.filled", "blacksquare", "black_square", "■", "Black square", false, 0, NULL},
+    {"blacktriangle", "triangle.filled", "blacktriangle", "black_triangle", "▲", "Black triangle", false, 0, NULL},
+    {"blacklozenge", "diamond.filled", "blackdiamond", "black_diamond", "♦", "Black diamond", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Calculus expressions
+static const MathExprDef calculus[] = {
+    {"partial", "diff", "partial", "partial", "∂", "Partial derivative", false, 0, NULL},
+    {"nabla", "nabla", "nabla", "nabla", "∇", "Nabla operator", false, 0, NULL},
+    {"grad", "grad", "grad", "gradient", "∇", "Gradient operator", false, 0, NULL},
+    {"div", "div", "div", "divergence", "∇·", "Divergence operator", false, 0, NULL},
+    {"curl", "curl", "curl", "curl", "∇×", "Curl operator", false, 0, NULL},
+    {"laplacian", "laplacian", "laplacian", "laplacian", "∇²", "Laplacian operator", false, 0, NULL},
+    {"dd", "dd", "d", "differential", "d", "Differential operator", true, 1, NULL},
+    {"mathrm{d}", "dd", "d", "differential", "d", "Differential operator", true, 1, NULL},
+    {"prime", "'", "'", "derivative", "′", "Prime derivative", false, 0, NULL},
+    {"pprime", "''", "''", "second_derivative", "″", "Double prime derivative", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Algebra expressions
+static const MathExprDef algebra[] = {
+    {"binom", "binom", "C", "binomial", "⁽ⁿ_ₖ⁾", "Binomial coefficient", true, 2, NULL},
+    {"choose", "binom", "C", "binomial", "⁽ⁿ_ₖ⁾", "Binomial coefficient", true, 2, NULL},
+    {"det", "det", "det", "determinant", "det", "Determinant", true, 1, NULL},
+    {"tr", "tr", "tr", "trace", "tr", "Trace", true, 1, NULL},
+    {"rank", "rank", "rank", "rank", "rank", "Matrix rank", true, 1, NULL},
+    {"ker", "ker", "ker", "kernel", "ker", "Kernel", true, 1, NULL},
+    {"im", "im", "im", "image", "im", "Image", true, 1, NULL},
+    {"span", "span", "span", "span", "span", "Span", true, 1, NULL},
+    {"dim", "dim", "dim", "dimension", "dim", "Dimension", true, 1, NULL},
+    {"null", "null", "null", "null", "null", "Null space", true, 1, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Typography expressions
+static const MathExprDef typography[] = {
+    {"mathbf", "bold", "bf", "bold", "𝐛𝐨𝐥𝐝", "Bold text", true, 1, NULL},
+    {"mathit", "italic", "it", "italic", "𝑖𝑡𝑎𝑙𝑖𝑐", "Italic text", true, 1, NULL},
+    {"mathcal", "cal", "cal", "calligraphic", "𝒸𝒶𝓁", "Calligraphic text", true, 1, NULL},
+    {"mathfrak", "frak", "frak", "fraktur", "𝔣𝔯𝔞𝔨", "Fraktur text", true, 1, NULL},
+    {"mathrm", "upright", "rm", "roman", "roman", "Roman text", true, 1, NULL},
+    {"mathsf", "sans", "sf", "sans_serif", "sans", "Sans-serif text", true, 1, NULL},
+    {"mathtt", "mono", "tt", "monospace", "mono", "Monospace text", true, 1, NULL},
+    {"text", "text", "text", "text", "text", "Regular text", true, 1, NULL},
+    {"textbf", "text.bold", "textbf", "text_bold", "bold", "Bold text", true, 1, NULL},
+    {"textit", "text.italic", "textit", "text_italic", "italic", "Italic text", true, 1, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Environment expressions (special handling needed)
+static const MathExprDef environments[] = {
+    {"cases", "cases", "cases", "cases", "{", "Cases environment", true, -1, NULL},
+    {"aligned", "aligned", "aligned", "aligned", "⎧", "Aligned environment", true, -1, NULL},
+    {"array", "array", "array", "array", "[]", "Array environment", true, -1, NULL},
+    {"matrix", "mat", "matrix", "matrix", "[]", "Matrix environment", true, -1, NULL},
+    {"pmatrix", "pmat", "pmatrix", "pmatrix", "()", "Parentheses matrix", true, -1, NULL},
+    {"bmatrix", "bmat", "bmatrix", "bmatrix", "[]", "Brackets matrix", true, -1, NULL},
+    {"vmatrix", "vmat", "vmatrix", "vmatrix", "||", "Vertical bars matrix", true, -1, NULL},
+    {"Vmatrix", "Vmat", "Vmatrix", "Vmatrix", "‖‖", "Double vertical bars matrix", true, -1, NULL},
+    {"split", "split", "split", "split", "⎧", "Split environment", true, -1, NULL},
+    {"gather", "gather", "gather", "gather", "⎧", "Gather environment", true, -1, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Spacing expressions
+static const MathExprDef spacing[] = {
+    {"quad", "quad", "quad", "quad", "  ", "Quad space", false, 0, NULL},
+    {"qquad", "wide", "qquad", "qquad", "    ", "Double quad space", false, 0, NULL},
+    {"!", "thin", "!", "thin_space", "", "Thin negative space", false, 0, NULL},
+    {",", "thinspace", ",", "thin_space", " ", "Thin space", false, 0, NULL},
+    {":", "med", ":", "med_space", " ", "Medium space", false, 0, NULL},
+    {";", "thick", ";", "thick_space", "  ", "Thick space", false, 0, NULL},
+    {"enspace", "enspace", "enspace", "en_space", " ", "En space", false, 0, NULL},
+    {"thinspace", "thin", "thinspace", "thin_space", " ", "Thin space", false, 0, NULL},
+    {"medspace", "med", "medspace", "med_space", " ", "Medium space", false, 0, NULL},
+    {"thickspace", "thick", "thickspace", "thick_space", "  ", "Thick space", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Modular arithmetic expressions
+static const MathExprDef modular[] = {
+    {"bmod", "mod", "mod", "binary_mod", "mod", "Binary modulo", true, 1, NULL},
+    {"pmod", "pmod", "pmod", "parentheses_mod", "(mod", "Parentheses modulo", true, 1, NULL},
+    {"mod", "mod", "mod", "modulo", "mod", "Modulo operator", true, 1, NULL},
+    {"pod", "pod", "pod", "pod", "(", "Parentheses operator", true, 1, NULL},
+    {"gcd", "gcd", "gcd", "gcd", "gcd", "Greatest common divisor", true, 2, NULL},
+    {"lcm", "lcm", "lcm", "lcm", "lcm", "Least common multiple", true, 2, NULL},
+    {"equiv", "equiv", "equiv", "equivalent", "≡", "Equivalent modulo", false, 0, NULL},
+    {"not\\equiv", "not equiv", "not equiv", "not_equivalent", "≢", "Not equivalent modulo", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Circled operators
+static const MathExprDef circled_operators[] = {
+    {"oplus", "plus.circle", "xor", "circled_plus", "⊕", "Circled plus", false, 0, NULL},
+    {"otimes", "times.circle", "tensor", "circled_times", "⊗", "Circled times", false, 0, NULL},
+    {"odot", "dot.circle", "dot_prod", "circled_dot", "⊙", "Circled dot", false, 0, NULL},
+    {"oslash", "slash.circle", "oslash", "circled_slash", "⊘", "Circled slash", false, 0, NULL},
+    {"ominus", "minus.circle", "ominus", "circled_minus", "⊖", "Circled minus", false, 0, NULL},
+    {"ocirc", "compose.circle", "ocirc", "circled_compose", "∘", "Circled compose", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Boxed operators
+static const MathExprDef boxed_operators[] = {
+    {"boxplus", "plus.square", "boxplus", "boxed_plus", "⊞", "Boxed plus", false, 0, NULL},
+    {"boxtimes", "times.square", "boxtimes", "boxed_times", "⊠", "Boxed times", false, 0, NULL},
+    {"boxminus", "minus.square", "boxminus", "boxed_minus", "⊟", "Boxed minus", false, 0, NULL},
+    {"boxdot", "dot.square", "boxdot", "boxed_dot", "⊡", "Boxed dot", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Extended arrows (bidirectional, mapping)
+static const MathExprDef extended_arrows[] = {
+    {"leftrightarrow", "<->", "<->", "leftrightarrow", "↔", "Left-right arrow", false, 0, NULL},
+    {"Leftrightarrow", "<=>", "<=>", "Leftrightarrow", "⇔", "Left-right double arrow", false, 0, NULL},
+    {"mapsto", "|->", "|->", "mapsto", "↦", "Maps to", false, 0, NULL},
+    {"longmapsto", "|-->", "|-->", "longmapsto", "⟼", "Long maps to", false, 0, NULL},
+    {"hookleftarrow", "hook<-", "hook<-", "hookleftarrow", "↩", "Hook left arrow", false, 0, NULL},
+    {"hookrightarrow", "hook->", "hook->", "hookrightarrow", "↪", "Hook right arrow", false, 0, NULL},
+    {"uparrow", "arrow.t", "up", "uparrow", "↑", "Up arrow", false, 0, NULL},
+    {"downarrow", "arrow.b", "down", "downarrow", "↓", "Down arrow", false, 0, NULL},
+    {"updownarrow", "updown", "updown", "updownarrow", "↕", "Up-down arrow", false, 0, NULL},
+    {"Uparrow", "Up", "Up", "Uparrow", "⇑", "Up double arrow", false, 0, NULL},
+    {"Downarrow", "Down", "Down", "Downarrow", "⇓", "Down double arrow", false, 0, NULL},
+    {"Updownarrow", "UpDown", "UpDown", "Updownarrow", "⇕", "Up-down double arrow", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Extended relations (semantic relations, models, proofs)
+static const MathExprDef extended_relations[] = {
+    {"simeq", "tilde.eq", "simeq", "similar_equal", "≃", "Similar or equal", false, 0, NULL},
+    {"models", "models", "models", "models", "⊨", "Models", false, 0, NULL},
+    {"vdash", "proves", "|-", "proves", "⊢", "Proves", false, 0, NULL},
+    {"dashv", "dashv", "-|", "dashv", "⊣", "Does not prove", false, 0, NULL},
+    {"top", "top", "true", "top", "⊤", "True/top", false, 0, NULL},
+    {"bot", "bot", "false", "bot", "⊥", "False/bottom", false, 0, NULL},
+    {"vDash", "entails", "||=", "entails", "⊩", "Entails", false, 0, NULL},
+    {"Vdash", "forces", "||-", "forces", "⊪", "Forces", false, 0, NULL},
+    {"Vvdash", "triple_bar", "|||", "triple_bar", "⊫", "Triple bar", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Derivatives and special notation
+static const MathExprDef derivatives[] = {
+    {"prime", "'", "'", "prime", "′", "Prime derivative", false, 0, "parse_prime"},
+    {"dprime", "''", "''", "double_prime", "″", "Double prime derivative", false, 0, "parse_double_prime"},
+    {"trprime", "'''", "'''", "triple_prime", "‴", "Triple prime derivative", false, 0, "parse_triple_prime"},
+    {"backprime", "`", "`", "backprime", "‵", "Back prime", false, 0, NULL},
+    
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
+};
+
+// Forward declarations for group parsers
+static Item parse_basic_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_function(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_special_symbol(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_fraction(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_root(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_accent(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_arrow(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_big_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_delimiter(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_relation(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_set_theory(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_logic(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_number_set(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_geometry(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_calculus(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_algebra(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_typography(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_environment(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_spacing(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_modular(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_circled_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_boxed_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_extended_arrow(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_extended_relation(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_derivative(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_inner_product(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_partial_derivative(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+static Item parse_partial_derivative_frac(Input *input, const char **math);
+static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, const MathExprDef *def);
+static Item parse_latex_integral_enhanced(Input *input, const char **math, const MathExprDef *def);
+
+// Forward declarations for utility functions
+static Item parse_latex_frac_style(Input *input, const char **math, const char* style);
+static Item parse_latex_root(Input *input, const char **math, const char* index);
+static Item parse_latex_root_with_index(Input *input, const char **math);
+static Item parse_latex_abs(Input *input, const char **math);
+static Item parse_prime_notation(Input *input, const char **math, Item base);
+
+// Group definition table
+static const struct {
+    MathExprGroup group;
+    const MathExprDef *definitions;
+    Item (*parser)(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def);
+    const char* group_name;
+} math_groups[] = {
+    {MATH_GROUP_BASIC_OPERATORS, basic_operators, parse_basic_operator, "Basic Operators"},
+    {MATH_GROUP_FUNCTIONS, functions, parse_function, "Functions"},
+    {MATH_GROUP_SPECIAL_SYMBOLS, special_symbols, parse_special_symbol, "Special Symbols"},
+    {MATH_GROUP_FRACTIONS, fractions, parse_fraction, "Fractions"},
+    {MATH_GROUP_ROOTS, roots, parse_root, "Roots"},
+    {MATH_GROUP_ACCENTS, accents, parse_accent, "Accents"},
+    {MATH_GROUP_ARROWS, arrows, parse_arrow, "Arrows"},
+    {MATH_GROUP_BIG_OPERATORS, big_operators, parse_big_operator, "Big Operators"},
+    {MATH_GROUP_DELIMITERS, delimiters, parse_delimiter, "Delimiters"},
+    {MATH_GROUP_RELATIONS, relations, parse_relation, "Relations"},
+    {MATH_GROUP_SET_THEORY, set_theory, parse_set_theory, "Set Theory"},
+    {MATH_GROUP_LOGIC, logic, parse_logic, "Logic"},
+    {MATH_GROUP_NUMBER_SETS, number_sets, parse_number_set, "Number Sets"},
+    {MATH_GROUP_GEOMETRY, geometry, parse_geometry, "Geometry"},
+    {MATH_GROUP_CALCULUS, calculus, parse_calculus, "Calculus"},
+    {MATH_GROUP_ALGEBRA, algebra, parse_algebra, "Algebra"},
+    {MATH_GROUP_TYPOGRAPHY, typography, parse_typography, "Typography"},
+    {MATH_GROUP_ENVIRONMENTS, environments, parse_environment, "Environments"},
+    {MATH_GROUP_SPACING, spacing, parse_spacing, "Spacing"},
+    {MATH_GROUP_MODULAR, modular, parse_modular, "Modular"},
+    {MATH_GROUP_CIRCLED_OPERATORS, circled_operators, parse_circled_operator, "Circled Operators"},
+    {MATH_GROUP_BOXED_OPERATORS, boxed_operators, parse_boxed_operator, "Boxed Operators"},
+    {MATH_GROUP_EXTENDED_ARROWS, extended_arrows, parse_extended_arrow, "Extended Arrows"},
+    {MATH_GROUP_EXTENDED_RELATIONS, extended_relations, parse_extended_relation, "Extended Relations"},
+    {MATH_GROUP_DERIVATIVES, derivatives, parse_derivative, "Derivatives"}
+};
+
+// Core parsing functions
 static Item parse_math_expression(Input *input, const char **math, MathFlavor flavor);
+static Item parse_relational_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_addition_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_multiplication_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_power_expression(Input *input, const char **math, MathFlavor flavor);
 static Item parse_primary_with_postfix(Input *input, const char **math, MathFlavor flavor);
 static Item parse_math_primary(Input *input, const char **math, MathFlavor flavor);
-static Item parse_latex_frac(Input *input, const char **math);
-static Item parse_latex_sqrt(Input *input, const char **math);
-static Item parse_latex_superscript(Input *input, const char **math, Item base);
-static Item parse_latex_subscript(Input *input, const char **math, Item base);
-static Item parse_latex_command(Input *input, const char **math);
-static Item parse_latex_function(Input *input, const char **math, const char* func_name);
-static Item parse_typst_power(Input *input, const char **math, MathFlavor flavor, Item base);
-static Item parse_typst_fraction(Input *input, const char **math, MathFlavor flavor);
-// Forward declarations for function call parsing
-static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name);
-static Item parse_ascii_power(Input *input, const char **math, MathFlavor flavor, Item base);
 static Item parse_math_number(Input *input, const char **math);
 static Item parse_math_identifier(Input *input, const char **math);
 static Item create_binary_expr(Input *input, const char* op_name, Item left, Item right);
 static void skip_math_whitespace(const char **math);
 
-// New enhanced function declarations
-static Item parse_latex_abs(Input *input, const char **math);
-static Item parse_latex_ceil_floor(Input *input, const char **math, const char* func_name);
-static Item parse_prime_notation(Input *input, const char **math, Item base);
-static Item parse_number_set(Input *input, const char **math, const char* set_name);
-static Item parse_set_operation(Input *input, const char **math, const char* op_name);
-static Item parse_logic_operator(Input *input, const char **math, const char* op_name);
-
-// NEW: Additional mathematical constructs
-static Item parse_latex_binomial(Input *input, const char **math);
-static Item parse_latex_derivative(Input *input, const char **math);
-static Item parse_latex_vector(Input *input, const char **math);
-static Item parse_latex_accent(Input *input, const char **math, const char* accent_type);
-static Item parse_latex_arrow(Input *input, const char **math, const char* arrow_type);
-static Item parse_latex_overunder(Input *input, const char **math, const char* construct_type);
-static Item parse_relation_operator(Input *input, const char **math, const char* op_name);
-static Item parse_special_symbol(Input *input, const char **math, const char* symbol_name);
-
-// Additional advanced mathematical constructs
-static Item parse_latex_frac_style(Input *input, const char **math, const char* style);
-static Item parse_latex_root(Input *input, const char **math, const char* index);
-static Item parse_latex_root_with_index(Input *input, const char **math);
-static Item parse_latex_tensor(Input *input, const char **math);
-static Item parse_latex_modular(Input *input, const char **math, const char* mod_type);
-static Item parse_latex_phantom(Input *input, const char **math, const char* phantom_type);
-
-static bool is_number_set(const char* cmd);
-static bool is_set_operation(const char* cmd);
-static bool is_logic_operator(const char* cmd);
-static bool is_binomial_cmd(const char* cmd);
-static bool is_derivative_cmd(const char* cmd);
-static bool is_vector_cmd(const char* cmd);
-static bool is_accent_cmd(const char* cmd);
-static bool is_arrow_cmd(const char* cmd);
-static bool is_relation_operator(const char* cmd);
-static bool is_special_symbol(const char* cmd);
+// Helper functions
+static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavor);
+static Item create_math_element_with_attributes(Input *input, const char* element_name, const char* symbol, const char* description);
+static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name);
 
 // use common utility functions from input.c and input-common.c
 #define create_math_element input_create_element
@@ -145,7 +692,7 @@ static Item parse_math_number(Input *input, const char **math) {
     return result;
 }
 
-// parse identifier/variable name as symbol
+// parse identifier/variable name as symbol with optional prime notation
 static Item parse_math_identifier(Input *input, const char **math) {
     StrBuf* sb = input->sb;
     strbuf_full_reset(sb);
@@ -177,6 +724,73 @@ static Item parse_math_identifier(Input *input, const char **math) {
     
     // Now we can safely reset the buffer since we have a copy
     strbuf_full_reset(sb);
+    
+    // Check for prime notation after the identifier
+    skip_math_whitespace(math);
+    
+    // Count consecutive single quotes for prime notation
+    int prime_count = 0;
+    const char* prime_start = *math;
+    while (**math == '\'') {
+        prime_count++;
+        (*math)++;
+    }
+    
+    if (prime_count > 0) {
+        // Create derivative element based on prime count
+        const char* element_name;
+        const char* unicode_symbol;
+        const char* description;
+        
+        switch (prime_count) {
+            case 1:
+                element_name = "prime";
+                unicode_symbol = "′";
+                description = "Prime derivative";
+                break;
+            case 2:
+                element_name = "double_prime";
+                unicode_symbol = "″";
+                description = "Double prime derivative";
+                break;
+            case 3:
+                element_name = "triple_prime";
+                unicode_symbol = "‴";
+                description = "Triple prime derivative";
+                break;
+            default:
+                // For more than 3 primes, create a generic multi-prime
+                element_name = "multi_prime";
+                unicode_symbol = "′";
+                description = "Multiple prime derivative";
+                break;
+        }
+        
+        // Create derivative element
+        Element* derivative_element = create_math_element(input, element_name);
+        if (!derivative_element) {
+            return ITEM_ERROR;
+        }
+        
+        // Add the base identifier as the first child
+        list_push((List*)derivative_element, symbol_item);
+        
+        // Add attributes for symbol and description
+        add_attribute_to_element(input, derivative_element, "symbol", unicode_symbol);
+        add_attribute_to_element(input, derivative_element, "description", description);
+        
+        // For multi-prime, also add the count
+        if (prime_count > 3) {
+            char count_str[16];
+            snprintf(count_str, sizeof(count_str), "%d", prime_count);
+            add_attribute_to_element(input, derivative_element, "count", count_str);
+        }
+        
+        // Set content length
+        ((TypeElmt*)derivative_element->type)->content_length = ((List*)derivative_element)->length;
+        
+        return (Item)derivative_element;
+    }
     
     return symbol_item;
 }
@@ -537,241 +1151,40 @@ static Item parse_latex_command(Input *input, const char **math) {
         // For other \left delimiters, treat as symbol for now
         String* left_symbol = input_create_string(input, "left");
         return left_symbol ? y2it(left_symbol) : ITEM_ERROR;
-    } else if (strcmp(cmd_string->chars, "abs") == 0) {
-        strbuf_full_reset(sb);
-        return parse_latex_abs(input, math);
-    } else if (strcmp(cmd_string->chars, "lceil") == 0) {
-        strbuf_full_reset(sb);
-        return parse_latex_ceil_floor(input, math, "ceil");
-    } else if (strcmp(cmd_string->chars, "lfloor") == 0) {
-        strbuf_full_reset(sb);
-        return parse_latex_ceil_floor(input, math, "floor");
-    } else if (is_number_set(cmd_string->chars)) {
-        strbuf_full_reset(sb);
-        return parse_number_set(input, math, cmd_string->chars);
-    } else if (is_set_operation(cmd_string->chars)) {
-        const char* op_name = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_set_operation(input, math, op_name);
-    } else if (is_logic_operator(cmd_string->chars)) {
-        const char* op_name = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_logic_operator(input, math, op_name);
-    } else if (is_binomial_cmd(cmd_string->chars)) {
-        strbuf_full_reset(sb);
-        return parse_latex_binomial(input, math);
-    } else if (is_derivative_cmd(cmd_string->chars)) {
-        strbuf_full_reset(sb);
-        return parse_latex_derivative(input, math);
-    } else if (is_vector_cmd(cmd_string->chars)) {
-        strbuf_full_reset(sb);
-        return parse_latex_vector(input, math);
-    } else if (is_accent_cmd(cmd_string->chars)) {
-        const char* accent_type = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_latex_accent(input, math, accent_type);
-    } else if (is_arrow_cmd(cmd_string->chars)) {
-        const char* arrow_type = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_latex_arrow(input, math, arrow_type);
-    } else if (is_relation_operator(cmd_string->chars)) {
-        const char* op_name = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_relation_operator(input, math, op_name);
-    } else if (is_special_symbol(cmd_string->chars)) {
-        const char* symbol_name = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_special_symbol(input, math, symbol_name);
-    } else if (strcmp(cmd_string->chars, "overline") == 0 || strcmp(cmd_string->chars, "underline") == 0 ||
-               strcmp(cmd_string->chars, "overbrace") == 0 || strcmp(cmd_string->chars, "underbrace") == 0) {
-        const char* construct_type = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_latex_overunder(input, math, construct_type);
-    } else if (strcmp(cmd_string->chars, "infty") == 0) {
-        strbuf_full_reset(sb);
-        Element* infty_element = create_math_element(input, "infty");
-        if (!infty_element) {
-            return ITEM_ERROR;
+    } else {
+        // Use new group-based parsing system
+        const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
+        if (def) {
+            strbuf_full_reset(sb);
+            
+            // Find the appropriate group parser
+            for (int group_idx = 0; group_idx < sizeof(math_groups) / sizeof(math_groups[0]); group_idx++) {
+                const MathExprDef* group_defs = math_groups[group_idx].definitions;
+                
+                // Check if this definition belongs to this group
+                bool found_in_group = false;
+                for (int def_idx = 0; group_defs[def_idx].latex_cmd; def_idx++) {
+                    if (&group_defs[def_idx] == def) {
+                        found_in_group = true;
+                        break;
+                    }
+                }
+                
+                if (found_in_group) {
+                    return math_groups[group_idx].parser(input, math, MATH_FLAVOR_LATEX, def);
+                }
+            }
         }
-        add_attribute_to_element(input, infty_element, "symbol", "∞");
-        ((TypeElmt*)infty_element->type)->content_length = ((List*)infty_element)->length;
-        return (Item)infty_element;
-    } else if (strcmp(cmd_string->chars, "partial") == 0) {
+        
+        // Fallback for unrecognized commands - treat as symbol
         strbuf_full_reset(sb);
-        Element* partial_element = create_math_element(input, "partial");
-        if (!partial_element) {
-            return ITEM_ERROR;
-        }
-        // Use simplified format: <partial '∂'>
-        String* partial_symbol = input_create_string(input, "∂");
-        if (partial_symbol) {
-            list_push((List*)partial_element, y2it(partial_symbol));
-        }
-        ((TypeElmt*)partial_element->type)->content_length = ((List*)partial_element)->length;
-        return (Item)partial_element;
-    } else if (strcmp(cmd_string->chars, "nabla") == 0) {
-        strbuf_full_reset(sb);
-        Element* nabla_element = create_math_element(input, "nabla");
-        if (!nabla_element) {
-            return ITEM_ERROR;
-        }
-        String* nabla_symbol = input_create_string(input, "∇");
-        if (nabla_symbol) {
-            list_push((List*)nabla_element, y2it(nabla_symbol));
-        }
-        ((TypeElmt*)nabla_element->type)->content_length = ((List*)nabla_element)->length;
-        return (Item)nabla_element;
-    } else if (strcmp(cmd_string->chars, "aleph") == 0) {
-        strbuf_full_reset(sb);
-        Element* aleph_element = create_math_element(input, "aleph");
-        if (!aleph_element) {
-            return ITEM_ERROR;
-        }
-        String* aleph_symbol = input_create_string(input, "ℵ");
-        if (aleph_symbol) {
-            list_push((List*)aleph_element, y2it(aleph_symbol));
-        }
-        ((TypeElmt*)aleph_element->type)->content_length = ((List*)aleph_element)->length;
-        return (Item)aleph_element;
-    } else if (strcmp(cmd_string->chars, "beth") == 0) {
-        strbuf_full_reset(sb);
-        Element* beth_element = create_math_element(input, "beth");
-        if (!beth_element) {
-            return ITEM_ERROR;
-        }
-        String* beth_symbol = input_create_string(input, "ℶ");
-        if (beth_symbol) {
-            list_push((List*)beth_element, y2it(beth_symbol));
-        }
-        ((TypeElmt*)beth_element->type)->content_length = ((List*)beth_element)->length;
-        return (Item)beth_element;
-    } else if (strcmp(cmd_string->chars, "ell") == 0) {
-        strbuf_full_reset(sb);
-        Element* ell_element = create_math_element(input, "ell");
-        if (!ell_element) {
-            return ITEM_ERROR;
-        }
-        String* ell_symbol = input_create_string(input, "ℓ");
-        if (ell_symbol) {
-            list_push((List*)ell_element, y2it(ell_symbol));
-        }
-        ((TypeElmt*)ell_element->type)->content_length = ((List*)ell_element)->length;
-        return (Item)ell_element;
-    } else if (strcmp(cmd_string->chars, "hbar") == 0) {
-        strbuf_full_reset(sb);
-        Element* hbar_element = create_math_element(input, "hbar");
-        if (!hbar_element) {
-            return ITEM_ERROR;
-        }
-        String* hbar_symbol = input_create_string(input, "ℏ");
-        if (hbar_symbol) {
-            list_push((List*)hbar_element, y2it(hbar_symbol));
-        }
-        ((TypeElmt*)hbar_element->type)->content_length = ((List*)hbar_element)->length;
-        return (Item)hbar_element;
-    } else if (strcmp(cmd_string->chars, "imath") == 0) {
-        strbuf_full_reset(sb);
-        Element* imath_element = create_math_element(input, "imath");
-        if (!imath_element) {
-            return ITEM_ERROR;
-        }
-        String* imath_symbol = input_create_string(input, "ı");
-        if (imath_symbol) {
-            list_push((List*)imath_element, y2it(imath_symbol));
-        }
-        ((TypeElmt*)imath_element->type)->content_length = ((List*)imath_element)->length;
-        return (Item)imath_element;
-    } else if (strcmp(cmd_string->chars, "jmath") == 0) {
-        strbuf_full_reset(sb);
-        Element* jmath_element = create_math_element(input, "jmath");
-        if (!jmath_element) {
-            return ITEM_ERROR;
-        }
-        String* jmath_symbol = input_create_string(input, "ȷ");
-        if (jmath_symbol) {
-            list_push((List*)jmath_element, y2it(jmath_symbol));
-        }
-        ((TypeElmt*)jmath_element->type)->content_length = ((List*)jmath_element)->length;
-        return (Item)jmath_element;
-    } else if (strcmp(cmd_string->chars, "phantom") == 0) {
-        strbuf_full_reset(sb);
-        return parse_latex_phantom(input, math, "phantom");
-    } else if (strcmp(cmd_string->chars, "vphantom") == 0) {
-        strbuf_full_reset(sb);
-        return parse_latex_phantom(input, math, "vphantom");
-    } else if (strcmp(cmd_string->chars, "hphantom") == 0) {
-        strbuf_full_reset(sb);
-        return parse_latex_phantom(input, math, "hphantom");
-    } else if (strcmp(cmd_string->chars, "quad") == 0) {
-        strbuf_full_reset(sb);
-        Element* quad_element = create_math_element(input, "space");
-        if (!quad_element) {
-            return ITEM_ERROR;
-        }
-        add_attribute_to_element(input, quad_element, "size", "quad");
-        ((TypeElmt*)quad_element->type)->content_length = ((List*)quad_element)->length;
-        return (Item)quad_element;
-    } else if (strcmp(cmd_string->chars, "qquad") == 0) {
-        strbuf_full_reset(sb);
-        Element* qquad_element = create_math_element(input, "space");
-        if (!qquad_element) {
-            return ITEM_ERROR;
-        }
-        add_attribute_to_element(input, qquad_element, "size", "qquad");
-        ((TypeElmt*)qquad_element->type)->content_length = ((List*)qquad_element)->length;
-        return (Item)qquad_element;
-    } else if (strcmp(cmd_string->chars, "thinspace") == 0 || strcmp(cmd_string->chars, ",") == 0) {
-        strbuf_full_reset(sb);
-        Element* thin_element = create_math_element(input, "space");
-        if (!thin_element) {
-            return ITEM_ERROR;
-        }
-        add_attribute_to_element(input, thin_element, "size", "thin");
-        ((TypeElmt*)thin_element->type)->content_length = ((List*)thin_element)->length;
-        return (Item)thin_element;
-    } else if (strcmp(cmd_string->chars, "medspace") == 0 || strcmp(cmd_string->chars, ":") == 0) {
-        strbuf_full_reset(sb);
-        Element* med_element = create_math_element(input, "space");
-        if (!med_element) {
-            return ITEM_ERROR;
-        }
-        add_attribute_to_element(input, med_element, "size", "medium");
-        ((TypeElmt*)med_element->type)->content_length = ((List*)med_element)->length;
-        return (Item)med_element;
-    } else if (strcmp(cmd_string->chars, "thickspace") == 0 || strcmp(cmd_string->chars, ";") == 0) {
-        strbuf_full_reset(sb);
-        Element* thick_element = create_math_element(input, "space");
-        if (!thick_element) {
-            return ITEM_ERROR;
-        }
-        add_attribute_to_element(input, thick_element, "size", "thick");
-        ((TypeElmt*)thick_element->type)->content_length = ((List*)thick_element)->length;
-        return (Item)thick_element;
-    } else if (strcmp(cmd_string->chars, "negspace") == 0 || strcmp(cmd_string->chars, "!") == 0) {
-        strbuf_full_reset(sb);
-        Element* neg_element = create_math_element(input, "space");
-        if (!neg_element) {
-            return ITEM_ERROR;
-        }
-        add_attribute_to_element(input, neg_element, "size", "negative");
-        ((TypeElmt*)neg_element->type)->content_length = ((List*)neg_element)->length;
-        return (Item)neg_element;
-    } else if (is_trig_function(cmd_string->chars) || is_log_function(cmd_string->chars)) {
-        const char* func_name = cmd_string->chars;
-        strbuf_full_reset(sb);
-        return parse_latex_function(input, math, func_name);
-    } else if (is_greek_letter(cmd_string->chars) || is_math_operator(cmd_string->chars)) {
-        // Greek letters and math operators are treated as symbols
-        Item symbol_item = y2it(cmd_string->chars);
-        strbuf_full_reset(sb);
-        return symbol_item;
+        String* symbol_string = input_create_string(input, cmd_string->chars);
+        return symbol_string ? y2it(symbol_string) : ITEM_ERROR;
     }
     
-    // for other commands, return as symbol for now
-    // Unknown LaTeX command
-    Item symbol_item = y2it(cmd_string->chars);
+    // Should never reach here
     strbuf_full_reset(sb);
-    return symbol_item;
+    return ITEM_ERROR;
 }
 
 // parse typst power expression with ^ operator  
@@ -966,6 +1379,51 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     (*math)++; // skip )
                 }
                 return expr;
+            } else if (**math == '<') {
+                // Handle inner product notation <u, v>
+                (*math)++; // skip <
+                
+                // Create inner product element
+                Element* inner_product_element = create_math_element(input, "inner_product");
+                if (!inner_product_element) {
+                    return ITEM_ERROR;
+                }
+                
+                // Parse expressions inside the angle brackets
+                do {
+                    skip_math_whitespace(math);
+                    
+                    Item arg = parse_math_expression(input, math, flavor);
+                    if (arg == ITEM_ERROR) {
+                        return ITEM_ERROR;
+                    }
+                    
+                    if (arg != ITEM_NULL) {
+                        list_push((List*)inner_product_element, arg);
+                    }
+                    
+                    skip_math_whitespace(math);
+                    
+                    if (**math == ',') {
+                        (*math)++; // skip comma
+                    } else {
+                        break;
+                    }
+                } while (**math && **math != '>');
+                
+                // Expect closing angle bracket
+                if (**math != '>') {
+                    return ITEM_ERROR;
+                }
+                (*math)++; // skip >
+                
+                // Add attributes
+                add_attribute_to_element(input, inner_product_element, "symbol", "⟨⟩");
+                add_attribute_to_element(input, inner_product_element, "description", "Inner product");
+                
+                ((TypeElmt*)inner_product_element->type)->content_length = ((List*)inner_product_element)->length;
+                
+                return (Item)inner_product_element;
             }
             break;
             
@@ -1083,7 +1541,60 @@ static Item create_binary_expr(Input *input, const char* op_name, Item left, Ite
 
 // parse math expression with operator precedence (handles * and / before + and -)
 static Item parse_math_expression(Input *input, const char **math, MathFlavor flavor) {
-    return parse_addition_expression(input, math, flavor);
+    return parse_relational_expression(input, math, flavor);
+}
+
+// parse relational expressions (=, <, >, leq, geq, etc.)
+static Item parse_relational_expression(Input *input, const char **math, MathFlavor flavor) {
+    Item left = parse_addition_expression(input, math, flavor);
+    if (left == ITEM_ERROR || left == ITEM_NULL) {
+        return left;
+    }
+    
+    skip_math_whitespace(math);
+    
+    while (**math && **math != '}') {
+        const char* op_name = NULL;
+        int op_len = 0;
+        
+        // Check for relational operators
+        if (**math == '=') {
+            op_name = "eq";
+            op_len = 1;
+        } else if (**math == '<' && *(*math + 1) == '=') {
+            op_name = "leq";
+            op_len = 2;
+        } else if (**math == '>' && *(*math + 1) == '=') {
+            op_name = "geq";
+            op_len = 2;
+        } else if (**math == '<') {
+            op_name = "lt";
+            op_len = 1;
+        } else if (**math == '>') {
+            op_name = "gt";
+            op_len = 1;
+        } else {
+            // No relational operation detected
+            break;
+        }
+        
+        *math += op_len; // skip operator
+        skip_math_whitespace(math);
+        
+        Item right = parse_addition_expression(input, math, flavor);
+        if (right == ITEM_ERROR) {
+            return ITEM_ERROR;
+        }
+        
+        left = create_binary_expr(input, op_name, left, right);
+        if (left == ITEM_ERROR) {
+            return ITEM_ERROR;
+        }
+        
+        skip_math_whitespace(math);
+    }
+    
+    return left;
 }
 
 // parse addition and subtraction (lowest precedence)
@@ -1095,7 +1606,7 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
     
     skip_math_whitespace(math);
     
-    while (**math && (**math == '+' || **math == '-')) {
+    while (**math && **math != '}' && (**math == '+' || **math == '-')) {
         char op = **math;
         const char* op_name = (op == '+') ? "add" : "sub";
         
@@ -1127,7 +1638,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
     
     skip_math_whitespace(math);
     
-    while (**math) {
+    while (**math && **math != '}') {
         bool explicit_op = false;
         const char* op_name = "mul";
         
@@ -1141,7 +1652,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         }
         // Check for implicit multiplication (consecutive terms)
         else if ((**math == '\\' && flavor == MATH_FLAVOR_LATEX) ||  // LaTeX commands
-                 (isalpha(**math) && (flavor == MATH_FLAVOR_TYPST || flavor == MATH_FLAVOR_ASCII)) ||  // identifiers
+                 isalpha(**math) ||  // identifiers (for all flavors)
                  **math == '(' ||  // parentheses
                  isdigit(**math)) {  // numbers
             // This is implicit multiplication - don't advance the pointer yet
@@ -2540,77 +3051,7 @@ static Item parse_prime_notation(Input *input, const char **math, Item base) {
     return (Item)prime_element;
 }
 
-// Parse number sets: \mathbb{R}, \mathbb{N}, etc.
-static Item parse_number_set(Input *input, const char **math, const char* set_name) {
-    // Expect opening brace
-    skip_math_whitespace(math);
-    if (**math != '{') {
-        return ITEM_ERROR;
-    }
-    (*math)++;
-    
-    // Parse set identifier (single letter)
-    skip_math_whitespace(math);
-    if (!**math || !isalpha(**math)) {
-        return ITEM_ERROR;
-    }
-    
-    char set_char = **math;
-    (*math)++;
-    
-    // Expect closing brace
-    skip_math_whitespace(math);
-    if (**math != '}') {
-        return ITEM_ERROR;
-    }
-    (*math)++;
-    
-    // Create set element with appropriate name
-    const char* set_symbol;
-    switch (set_char) {
-        case 'R': set_symbol = "reals"; break;
-        case 'N': set_symbol = "naturals"; break;
-        case 'Z': set_symbol = "integers"; break;
-        case 'Q': set_symbol = "rationals"; break;
-        case 'C': set_symbol = "complex"; break;
-        default: set_symbol = "set"; break;
-    }
-    
-    Element* set_element = create_math_element(input, set_symbol);
-    if (!set_element) {
-        return ITEM_ERROR;
-    }
-    
-    // Add set type as attribute
-    char set_str[2] = {set_char, '\0'};
-    add_attribute_to_element(input, set_element, "type", set_str);
-    
-    ((TypeElmt*)set_element->type)->content_length = ((List*)set_element)->length;
-    
-    return (Item)set_element;
-}
-
-// Parse set operations: \in, \subset, \cup, \cap, etc.
-static Item parse_set_operation(Input *input, const char **math, const char* op_name) {
-    Element* op_element = create_math_element(input, op_name);
-    if (!op_element) {
-        return ITEM_ERROR;
-    }
-    
-    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
-    return (Item)op_element;
-}
-
-// Parse logic operators: \forall, \exists, \land, \lor, etc.
-static Item parse_logic_operator(Input *input, const char **math, const char* op_name) {
-    Element* op_element = create_math_element(input, op_name);
-    if (!op_element) {
-        return ITEM_ERROR;
-    }
-    
-    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
-    return (Item)op_element;
-}
+// Group-based parser implementations
 
 // Parse binomial coefficients: \binom{n}{k} or \choose{n}{k}
 static Item parse_latex_binomial(Input *input, const char **math) {
@@ -2826,40 +3267,93 @@ static Item parse_relation_operator(Input *input, const char **math, const char*
     return (Item)op_element;
 }
 
-// Parse special symbols: \angle, \triangle, \square, \diamond, etc.
-static Item parse_special_symbol(Input *input, const char **math, const char* symbol_name) {
-    Element* symbol_element = create_math_element(input, symbol_name);
+// Group-based parser implementations
+
+// Find math expression definition by command/syntax
+static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavor) {
+    if (!cmd) return NULL;
+    
+    // Check each group for matching expression
+    for (int group_idx = 0; group_idx < sizeof(math_groups) / sizeof(math_groups[0]); group_idx++) {
+        const MathExprDef* defs = math_groups[group_idx].definitions;
+        
+        for (int def_idx = 0; defs[def_idx].latex_cmd; def_idx++) {
+            const MathExprDef* def = &defs[def_idx];
+            
+            // Match based on flavor
+            const char* target_cmd = NULL;
+            switch (flavor) {
+                case MATH_FLAVOR_LATEX:
+                    target_cmd = def->latex_cmd;
+                    break;
+                case MATH_FLAVOR_TYPST:
+                    target_cmd = def->typst_syntax;
+                    break;
+                case MATH_FLAVOR_ASCII:
+                    target_cmd = def->ascii_syntax;
+                    break;
+            }
+            
+            if (target_cmd && strcmp(cmd, target_cmd) == 0) {
+                return def;
+            }
+        }
+    }
+    
+    return NULL;
+}
+
+// Create math element with attributes
+static Item create_math_element_with_attributes(Input *input, const char* element_name, const char* symbol, const char* description) {
+    Element* element = create_math_element(input, element_name);
+    if (!element) {
+        return ITEM_ERROR;
+    }
+    
+    if (symbol) {
+        add_attribute_to_element(input, element, "symbol", symbol);
+    }
+    
+    if (description) {
+        add_attribute_to_element(input, element, "description", description);
+    }
+    
+    return (Item)element;
+}
+
+// Group parser: Basic operators
+static Item parse_basic_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+}
+
+// Group parser: Functions
+static Item parse_function(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    if (def->has_arguments) {
+        return parse_function_call(input, math, flavor, def->element_name);
+    } else {
+        return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+    }
+}
+
+// Group parser: Special symbols
+static Item parse_special_symbol(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* symbol_element = create_math_element(input, def->element_name);
     if (!symbol_element) {
         return ITEM_ERROR;
     }
     
-    // Add appropriate Unicode symbol based on the symbol name
-    const char* unicode_symbol = "";
-    if (strcmp(symbol_name, "angle") == 0) unicode_symbol = "∠";
-    else if (strcmp(symbol_name, "triangle") == 0) unicode_symbol = "△";
-    else if (strcmp(symbol_name, "square") == 0) unicode_symbol = "□";
-    else if (strcmp(symbol_name, "diamond") == 0) unicode_symbol = "◊";
-    else if (strcmp(symbol_name, "star") == 0) unicode_symbol = "⋆";
-    else if (strcmp(symbol_name, "ast") == 0) unicode_symbol = "∗";
-    else if (strcmp(symbol_name, "bullet") == 0) unicode_symbol = "∙";
-    else if (strcmp(symbol_name, "circ") == 0) unicode_symbol = "∘";
-    else if (strcmp(symbol_name, "oplus") == 0) unicode_symbol = "⊕";
-    else if (strcmp(symbol_name, "ominus") == 0) unicode_symbol = "⊖";
-    else if (strcmp(symbol_name, "otimes") == 0) unicode_symbol = "⊗";
-    else if (strcmp(symbol_name, "oslash") == 0) unicode_symbol = "⊘";
-    else if (strcmp(symbol_name, "odot") == 0) unicode_symbol = "⊙";
-    else if (strcmp(symbol_name, "boxplus") == 0) unicode_symbol = "⊞";
-    else if (strcmp(symbol_name, "boxminus") == 0) unicode_symbol = "⊟";
-    else if (strcmp(symbol_name, "boxtimes") == 0) unicode_symbol = "⊠";
-    else if (strcmp(symbol_name, "boxdot") == 0) unicode_symbol = "⊡";
-    else if (strcmp(symbol_name, "top") == 0) unicode_symbol = "⊤";
-    else if (strcmp(symbol_name, "bot") == 0) unicode_symbol = "⊥";
-    else if (strcmp(symbol_name, "models") == 0) unicode_symbol = "⊨";
-    else if (strcmp(symbol_name, "vdash") == 0) unicode_symbol = "⊢";
-    else if (strcmp(symbol_name, "dashv") == 0) unicode_symbol = "⊣";
+    // Add symbol attributes
+    if (def->unicode_symbol) {
+        add_attribute_to_element(input, symbol_element, "symbol", def->unicode_symbol);
+    }
     
-    if (strlen(unicode_symbol) > 0) {
-        String* unicode_string = input_create_string(input, unicode_symbol);
+    if (def->description) {
+        add_attribute_to_element(input, symbol_element, "description", def->description);
+    }
+    
+    // Add the Unicode symbol as content if available
+    if (def->unicode_symbol && strlen(def->unicode_symbol) > 0) {
+        String* unicode_string = input_create_string(input, def->unicode_symbol);
         if (unicode_string) {
             list_push((List*)symbol_element, y2it(unicode_string));
         }
@@ -2867,6 +3361,352 @@ static Item parse_special_symbol(Input *input, const char **math, const char* sy
     
     ((TypeElmt*)symbol_element->type)->content_length = ((List*)symbol_element)->length;
     return (Item)symbol_element;
+}
+
+// Group parser: Fractions
+static Item parse_fraction(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    if (def->special_parser) {
+        if (strcmp(def->special_parser, "parse_frac") == 0) {
+            // Check if this might be a partial derivative fraction
+            const char *lookahead = *math;
+            skip_math_whitespace(&lookahead);
+            if (*lookahead == '{') {
+                lookahead++; // skip {
+                skip_math_whitespace(&lookahead);
+                // Check if numerator starts with \partial
+                if (strncmp(lookahead, "\\partial", 8) == 0) {
+                    return parse_partial_derivative_frac(input, math);
+                }
+            }
+            return parse_latex_frac(input, math);
+        } else if (strcmp(def->special_parser, "parse_frac_style") == 0) {
+            return parse_latex_frac_style(input, math, def->latex_cmd);
+        } else if (strcmp(def->special_parser, "parse_binomial") == 0) {
+            return parse_latex_binomial(input, math);
+        } else if (strcmp(def->special_parser, "parse_choose") == 0) {
+            return parse_latex_binomial(input, math); // Similar parsing
+        } else if (strcmp(def->special_parser, "parse_partial_derivative") == 0) {
+            return parse_partial_derivative(input, math, flavor, def);
+        }
+    }
+    
+    return parse_latex_frac(input, math); // Default fallback
+}
+
+// Group parser: Roots
+static Item parse_root(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    if (def->special_parser) {
+        if (strcmp(def->special_parser, "parse_sqrt") == 0) {
+            return parse_latex_sqrt(input, math);
+        } else if (strcmp(def->special_parser, "parse_root") == 0) {
+            return parse_latex_root(input, math, "3"); // Cube root
+        } else if (strcmp(def->special_parser, "parse_root_with_index") == 0) {
+            return parse_latex_root_with_index(input, math);
+        }
+    }
+    
+    return parse_latex_sqrt(input, math); // Default fallback
+}
+
+// Group parser: Accents
+static Item parse_accent(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    if (def->special_parser && strcmp(def->special_parser, "parse_accent") == 0) {
+        return parse_latex_accent(input, math, def->element_name);
+    }
+    
+    return parse_latex_accent(input, math, def->element_name);
+}
+
+// Group parser: Arrows
+static Item parse_arrow(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    return parse_latex_arrow(input, math, def->element_name);
+}
+
+// Group parser: Big operators
+static Item parse_big_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    if (def->special_parser) {
+        if (strcmp(def->special_parser, "parse_big_operator") == 0) {
+            // Handle summation, product, integral with limits using enhanced parsing
+            const char* op_name = def->element_name;
+            
+            // Use the enhanced bounds parsing for these operators
+            if (strcmp(op_name, "sum") == 0 || strcmp(op_name, "prod") == 0 ||
+                strcmp(op_name, "bigcup") == 0 || strcmp(op_name, "bigcap") == 0 ||
+                strcmp(op_name, "bigoplus") == 0 || strcmp(op_name, "bigotimes") == 0 ||
+                strcmp(op_name, "bigwedge") == 0 || strcmp(op_name, "bigvee") == 0) {
+                return parse_latex_sum_or_prod_enhanced(input, math, def);
+            } else if (strcmp(op_name, "int") == 0 || strcmp(op_name, "iint") == 0 ||
+                       strcmp(op_name, "iiint") == 0 || strcmp(op_name, "oint") == 0 ||
+                       strcmp(op_name, "oiint") == 0 || strcmp(op_name, "oiiint") == 0) {
+                return parse_latex_integral_enhanced(input, math, def);
+            }
+            
+            // Fallback to basic parsing for other operators
+            return parse_function_call(input, math, flavor, def->element_name);
+        } else if (strcmp(def->special_parser, "parse_limit") == 0) {
+            return parse_function_call(input, math, flavor, def->element_name);
+        }
+    }
+    
+    return parse_function_call(input, math, flavor, def->element_name);
+}
+
+// Group parser: Delimiters  
+static Item parse_delimiter(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    if (def->special_parser) {
+        if (strcmp(def->special_parser, "parse_abs") == 0) {
+            return parse_latex_abs(input, math);
+        } else if (strcmp(def->special_parser, "parse_norm") == 0) {
+            return parse_latex_abs(input, math); // Similar parsing
+        } else if (strcmp(def->special_parser, "parse_ceil_floor") == 0) {
+            return parse_latex_ceil_floor(input, math, def->element_name);
+        } else if (strcmp(def->special_parser, "parse_inner_product") == 0) {
+            return parse_inner_product(input, math, flavor, def);
+        }
+    }
+    
+    if (def->has_arguments) {
+        return parse_function_call(input, math, flavor, def->element_name);
+    } else {
+        return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+    }
+}
+
+// Group parser: Relations
+static Item parse_relation(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+}
+
+// Group parser: Set theory
+static Item parse_set_theory(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+}
+
+// Group parser: Logic
+static Item parse_logic(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+}
+
+// Group parser: Number sets
+static Item parse_number_set(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* set_element = create_math_element(input, def->element_name);
+    if (!set_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add set attributes
+    add_attribute_to_element(input, set_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, set_element, "description", def->description);
+    
+    // For LaTeX \mathbb{} syntax, parse the braces
+    if (flavor == MATH_FLAVOR_LATEX && strncmp(def->latex_cmd, "mathbb{", 7) == 0) {
+        // Skip the opening brace if not already consumed
+        skip_math_whitespace(math);
+        if (**math == '{') {
+            (*math)++;
+            
+            // Parse set identifier
+            skip_math_whitespace(math);
+            if (**math && isalpha(**math)) {
+                char set_char[2] = {**math, '\0'};
+                add_attribute_to_element(input, set_element, "type", set_char);
+                (*math)++;
+            }
+            
+            // Skip closing brace
+            skip_math_whitespace(math);
+            if (**math == '}') {
+                (*math)++;
+            }
+        }
+    }
+    
+    ((TypeElmt*)set_element->type)->content_length = ((List*)set_element)->length;
+    return (Item)set_element;
+}
+
+// Group parser: Geometry
+static Item parse_geometry(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+}
+
+// Group parser: Calculus
+static Item parse_calculus(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* calc_element = create_math_element(input, def->element_name);
+    if (!calc_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, calc_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, calc_element, "description", def->description);
+    
+    // Handle differential operators with arguments
+    if (def->has_arguments && def->argument_count == 1) {
+        skip_math_whitespace(math);
+        Item arg = parse_math_primary(input, math, flavor);
+        if (arg != ITEM_ERROR) {
+            list_push((List*)calc_element, arg);
+        }
+    }
+    
+    ((TypeElmt*)calc_element->type)->content_length = ((List*)calc_element)->length;
+    return (Item)calc_element;
+}
+
+// Group parser: Algebra
+static Item parse_algebra(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* alg_element = create_math_element(input, def->element_name);
+    if (!alg_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, alg_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, alg_element, "description", def->description);
+    
+    // Handle expressions with arguments (like binomial coefficients)
+    if (def->has_arguments && def->argument_count > 0) {
+        for (int i = 0; i < def->argument_count; i++) {
+            skip_math_whitespace(math);
+            Item arg = parse_math_primary(input, math, flavor);
+            if (arg != ITEM_ERROR) {
+                list_push((List*)alg_element, arg);
+            }
+        }
+    }
+    
+    ((TypeElmt*)alg_element->type)->content_length = ((List*)alg_element)->length;
+    return (Item)alg_element;
+}
+
+// Group parser: Typography
+static Item parse_typography(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* typo_element = create_math_element(input, def->element_name);
+    if (!typo_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, typo_element, "style", def->element_name);
+    add_attribute_to_element(input, typo_element, "description", def->description);
+    
+    // Typography commands always take one argument
+    if (def->has_arguments) {
+        skip_math_whitespace(math);
+        Item content = parse_math_primary(input, math, flavor);
+        if (content != ITEM_ERROR) {
+            list_push((List*)typo_element, content);
+        }
+    }
+    
+    ((TypeElmt*)typo_element->type)->content_length = ((List*)typo_element)->length;
+    return (Item)typo_element;
+}
+
+// Group parser: Environment (special handling needed)
+static Item parse_environment(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    // Environment parsing is complex and handled separately in existing code
+    // This is a placeholder for the group-based system
+    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+}
+
+// Group parser: Spacing
+static Item parse_spacing(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* space_element = create_math_element(input, def->element_name);
+    if (!space_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, space_element, "type", def->element_name);
+    add_attribute_to_element(input, space_element, "width", def->unicode_symbol);
+    add_attribute_to_element(input, space_element, "description", def->description);
+    
+    ((TypeElmt*)space_element->type)->content_length = ((List*)space_element)->length;
+    return (Item)space_element;
+}
+
+// Group parser: Modular arithmetic
+static Item parse_modular(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* mod_element = create_math_element(input, def->element_name);
+    if (!mod_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, mod_element, "operator", def->element_name);
+    add_attribute_to_element(input, mod_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, mod_element, "description", def->description);
+    
+    // Handle modular operations with arguments
+    if (def->has_arguments && def->argument_count > 0) {
+        for (int i = 0; i < def->argument_count; i++) {
+            skip_math_whitespace(math);
+            Item arg = parse_math_primary(input, math, flavor);
+            if (arg != ITEM_ERROR) {
+                list_push((List*)mod_element, arg);
+            }
+        }
+    }
+    
+    ((TypeElmt*)mod_element->type)->content_length = ((List*)mod_element)->length;
+    return (Item)mod_element;
+}
+
+static Item parse_circled_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* op_element = create_math_element(input, def->element_name);
+    if (!op_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, op_element, "operator", def->element_name);
+    add_attribute_to_element(input, op_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, op_element, "description", def->description);
+    add_attribute_to_element(input, op_element, "type", "circled");
+    
+    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+    return (Item)op_element;
+}
+
+static Item parse_boxed_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* op_element = create_math_element(input, def->element_name);
+    if (!op_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, op_element, "operator", def->element_name);
+    add_attribute_to_element(input, op_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, op_element, "description", def->description);
+    add_attribute_to_element(input, op_element, "type", "boxed");
+    
+    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+    return (Item)op_element;
+}
+
+static Item parse_extended_arrow(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* arrow_element = create_math_element(input, def->element_name);
+    if (!arrow_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, arrow_element, "arrow", def->element_name);
+    add_attribute_to_element(input, arrow_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, arrow_element, "description", def->description);
+    add_attribute_to_element(input, arrow_element, "direction", "bidirectional");
+    
+    ((TypeElmt*)arrow_element->type)->content_length = ((List*)arrow_element)->length;
+    return (Item)arrow_element;
+}
+
+static Item parse_extended_relation(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    Element* rel_element = create_math_element(input, def->element_name);
+    if (!rel_element) {
+        return ITEM_ERROR;
+    }
+    
+    add_attribute_to_element(input, rel_element, "relation", def->element_name);
+    add_attribute_to_element(input, rel_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, rel_element, "description", def->description);
+    add_attribute_to_element(input, rel_element, "type", "semantic");
+    
+    ((TypeElmt*)rel_element->type)->content_length = ((List*)rel_element)->length;
+    return (Item)rel_element;
 }
 
 static MathFlavor get_math_flavor(const char* flavor_str) {
@@ -2882,20 +3722,26 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 
 // main parser function
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
+    printf("parse_math called with: '%s', flavor: '%s'\n", math_string, flavor_str ? flavor_str : "null");
     input->sb = strbuf_new_pooled(input->pool);
     const char *math = math_string;
     
     MathFlavor flavor = get_math_flavor(flavor_str);
+    printf("Math flavor resolved to: %d\n", flavor);
     
     // parse the math expression
     skip_math_whitespace(&math);
+    printf("After skipping whitespace, parsing: '%s'\n", math);
     Item result = parse_math_expression(input, &math, flavor);
+    printf("parse_math_expression returned: %llu (0x%llx)\n", result, result);
     
     if (result == ITEM_ERROR || result == ITEM_NULL) {
+        printf("Result is error or null, setting input->root to ITEM_ERROR\n");
         input->root = ITEM_ERROR;
         return;
     }
     
+    printf("Setting input->root to result: %llu (0x%llx)\n", result, result);
     input->root = result;
 }
 
@@ -3102,4 +3948,332 @@ static Item parse_latex_phantom(Input *input, const char **math, const char* pha
     ((TypeElmt*)phantom_element->type)->content_length = ((List*)phantom_element)->length;
     
     return (Item)phantom_element;
+}
+
+// Implementation for derivative notation (primes)
+static Item parse_derivative(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    const char *pattern = def->latex_cmd; // Use latex_cmd field
+    size_t pattern_length = strlen(pattern);
+    
+    // Check if the pattern matches
+    if (strncmp(*math, pattern, pattern_length) != 0) {
+        return ITEM_ERROR;
+    }
+    
+    *math += pattern_length; // consume the pattern
+    
+    // Create derivative element
+    Element* derivative_element = create_math_element(input, "derivative");
+    if (!derivative_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add type attribute based on prime count
+    const char* derivative_type;
+    if (strcmp(pattern, "'") == 0) {
+        derivative_type = "prime";
+    } else if (strcmp(pattern, "''") == 0) {
+        derivative_type = "double-prime";
+    } else if (strcmp(pattern, "'''") == 0) {
+        derivative_type = "triple-prime";
+    } else {
+        derivative_type = "prime"; // default
+    }
+    
+    add_attribute_to_element(input, derivative_element, "type", derivative_type);
+    
+    // Set content length
+    ((TypeElmt*)derivative_element->type)->content_length = ((List*)derivative_element)->length;
+    
+    return (Item)derivative_element;
+}
+
+// Implementation for inner product notation
+static Item parse_inner_product(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    // Check for opening angle bracket
+    if (**math != '<') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip <
+    
+    skip_math_whitespace(math);
+    
+    // Parse the first operand
+    Item left_operand = parse_math_expression(input, math, flavor);
+    if (left_operand == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Check for comma separator
+    if (**math != ',') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip comma
+    
+    skip_math_whitespace(math);
+    
+    // Parse the second operand
+    Item right_operand = parse_math_expression(input, math, flavor);
+    if (right_operand == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Check for closing angle bracket
+    if (**math != '>') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip >
+    
+    // Create inner product element
+    Element* inner_product_element = create_math_element(input, "inner-product");
+    if (!inner_product_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add operands as children
+    list_push((List*)inner_product_element, left_operand);
+    list_push((List*)inner_product_element, right_operand);
+    
+    // Set content length
+    ((TypeElmt*)inner_product_element->type)->content_length = ((List*)inner_product_element)->length;
+    
+    return (Item)inner_product_element;
+}
+
+// Implementation for partial derivative fraction notation
+static Item parse_partial_derivative_frac(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // expect opening brace for numerator
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse numerator (should contain \partial expressions)
+    Item numerator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (numerator == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    skip_math_whitespace(math);
+    
+    // expect opening brace for denominator
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse denominator (should contain \partial expressions)
+    Item denominator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (denominator == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    // create partial derivative fraction element
+    Element* partial_frac_element = create_math_element(input, "partial_derivative");
+    if (!partial_frac_element) {
+        return ITEM_ERROR;
+    }
+    
+    // add type attribute
+    add_attribute_to_element(input, partial_frac_element, "type", "fraction");
+    
+    // add numerator and denominator as children
+    list_push((List*)partial_frac_element, numerator);
+    list_push((List*)partial_frac_element, denominator);
+    
+    // set content length
+    ((TypeElmt*)partial_frac_element->type)->content_length = ((List*)partial_frac_element)->length;
+    
+    return (Item)partial_frac_element;
+}
+
+// Implementation for general partial derivative notation
+static Item parse_partial_derivative(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    const char *pattern = def->latex_cmd;
+    size_t pattern_length = strlen(pattern);
+    
+    // Check if the pattern matches
+    if (strncmp(*math, pattern, pattern_length) != 0) {
+        return ITEM_ERROR;
+    }
+    
+    *math += pattern_length; // consume the pattern
+    
+    // Create partial derivative element
+    Element* partial_element = create_math_element(input, "partial_derivative");
+    if (!partial_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add type attribute
+    add_attribute_to_element(input, partial_element, "type", "symbol");
+    
+    // Set content length
+    ((TypeElmt*)partial_element->type)->content_length = ((List*)partial_element)->length;
+    
+    return (Item)partial_element;
+}
+
+// Implementation for LaTeX sum/product with bounds (enhanced version)
+static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, const MathExprDef *def) {
+    const char *pattern = def->latex_cmd;
+    size_t pattern_length = strlen(pattern);
+    
+    // Check if the pattern matches
+    if (strncmp(*math, pattern, pattern_length) != 0) {
+        return ITEM_ERROR;
+    }
+    
+    *math += pattern_length; // consume the pattern
+    skip_math_whitespace(math);
+    
+    // Create operator element
+    Element* op_element = create_math_element(input, def->element_name);
+    if (!op_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add type attribute
+    add_attribute_to_element(input, op_element, "type", "big_operator");
+    
+    // Parse optional bounds (subscript and superscript)
+    if (**math == '_') {
+        (*math)++; // skip _
+        skip_math_whitespace(math);
+        
+        Item lower_bound = ITEM_ERROR;
+        if (**math == '{') {
+            (*math)++; // skip {
+            lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (**math == '}') {
+                (*math)++; // skip }
+            }
+        } else {
+            // single character bound
+            lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        }
+        
+        if (lower_bound != ITEM_ERROR) {
+            list_push((List*)op_element, lower_bound);
+        }
+    }
+    
+    skip_math_whitespace(math);
+    
+    if (**math == '^') {
+        (*math)++; // skip ^
+        skip_math_whitespace(math);
+        
+        Item upper_bound = ITEM_ERROR;
+        if (**math == '{') {
+            (*math)++; // skip {
+            upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (**math == '}') {
+                (*math)++; // skip }
+            }
+        } else {
+            // single character bound
+            upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        }
+        
+        if (upper_bound != ITEM_ERROR) {
+            list_push((List*)op_element, upper_bound);
+        }
+    }
+    
+    // Set content length
+    ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+    
+    return (Item)op_element;
+}
+
+// Implementation for LaTeX integral with bounds (enhanced version)
+static Item parse_latex_integral_enhanced(Input *input, const char **math, const MathExprDef *def) {
+    const char *pattern = def->latex_cmd;
+    size_t pattern_length = strlen(pattern);
+    
+    // Check if the pattern matches
+    if (strncmp(*math, pattern, pattern_length) != 0) {
+        return ITEM_ERROR;
+    }
+    
+    *math += pattern_length; // consume the pattern
+    skip_math_whitespace(math);
+    
+    // Create integral element
+    Element* integral_element = create_math_element(input, def->element_name);
+    if (!integral_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add type attribute
+    add_attribute_to_element(input, integral_element, "type", "integral");
+    
+    // Parse optional bounds (subscript and superscript)
+    if (**math == '_') {
+        (*math)++; // skip _
+        skip_math_whitespace(math);
+        
+        Item lower_bound = ITEM_ERROR;
+        if (**math == '{') {
+            (*math)++; // skip {
+            lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (**math == '}') {
+                (*math)++; // skip }
+            }
+        } else {
+            // single character bound
+            lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        }
+        
+        if (lower_bound != ITEM_ERROR) {
+            list_push((List*)integral_element, lower_bound);
+        }
+    }
+    
+    skip_math_whitespace(math);
+    
+    if (**math == '^') {
+        (*math)++; // skip ^
+        skip_math_whitespace(math);
+        
+        Item upper_bound = ITEM_ERROR;
+        if (**math == '{') {
+            (*math)++; // skip {
+            upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (**math == '}') {
+                (*math)++; // skip }
+            }
+        } else {
+            // single character bound
+            upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        }
+        
+        if (upper_bound != ITEM_ERROR) {
+            list_push((List*)integral_element, upper_bound);
+        }
+    }
+    
+    // Set content length
+    ((TypeElmt*)integral_element->type)->content_length = ((List*)integral_element)->length;
+    
+    return (Item)integral_element;
 }
