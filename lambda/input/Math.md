@@ -208,42 +208,102 @@ void parse_math(Input* input, const char* math_string, const char* flavor);
   - Multiple symbol terms: `xy\sin z` → `<mul <mul 'x';'y'>;<sin 'z'>>`
   - Integrates with existing multiplication logic
 
-### Enhanced Testing Coverage (January 2025)
-All new mathematical constructs include comprehensive test coverage:
+### Phase 10: Latest Mathematical Constructs (July 2025) ✅
 
-#### Consolidated Test Suite ✅
-- **Consolidated Input File**: `test/input/math_enhanced_constructs.txt`
-  - Contains all new mathematical constructs in a single comprehensive file
-  - Tests binomial, vector, accent, derivative, arrow, and over/under constructs
-  - Includes both simple and complex expressions for thorough validation
-  - Serves as the primary test input for all enhanced mathematical features
+#### Special Mathematical Symbols ✅
+- ✅ **Advanced Unicode Symbols**: Extended support for specialized mathematical symbols
+  - Script lowercase l: `\ell` → `<ell 'ℓ'>` (symbol:"ℓ")
+  - Planck constant: `\hbar` → `<hbar 'ℏ'>` (symbol:"ℏ")  
+  - Dotless i: `\imath` → `<imath 'ı'>` (symbol:"ı")
+  - Dotless j: `\jmath` → `<jmath 'ȷ'>` (symbol:"ȷ")
+  - Hebrew aleph: `\aleph_0` → `<aleph_0 'ℵ₀'>` (cardinal numbers)
+  - Hebrew beth: `\beth_1` → `<beth_1 'ב₁'>` (beth numbers)
 
-- **Consolidated Test Script**: `test/lambda/input/test_math_enhanced_consolidated.ls`
-  - Comprehensive test script covering all enhanced mathematical constructs
-  - Tests individual constructs for targeted debugging
-  - Validates parsing output for each enhancement category
-  - Provides detailed success/failure reporting with specific examples
-  - Single comprehensive test vs. multiple individual tests for efficiency
+#### Big Mathematical Operators ✅  
+- ✅ **Set Theory Operations**: Advanced set-theoretic operators
+  - Big union: `\bigcup A` → `<bigcup 'A'>` (symbol:"⋃")
+  - Big intersection: `\bigcap B` → `<bigcap 'B'>` (symbol:"⋂")
+- ✅ **Abstract Algebra Operations**: Algebraic structure operators
+  - Big circled plus: `\bigoplus C` → `<bigoplus 'C'>` (symbol:"⊕")
+  - Big circled times: `\bigotimes D` → `<bigotimes 'D'>` (symbol:"⊗")
+- ✅ **Logic Operations**: Large logical operators
+  - Big logical and: `\bigwedge E` → `<bigwedge 'E'>` (symbol:"⋀")
+  - Big logical or: `\bigvee F` → `<bigvee 'F'>` (symbol:"⋁")
 
-#### Individual Test Files for Debug (Maintained) ✅
-- **Core Individual Files**: Retained for targeted debugging and validation
-  - `test/input/math_binomial.txt`: `\binom{n}{k}`, `n \choose k`
-  - `test/input/math_vector.txt`: `\vec{v}`, `\vec{AB}`
-  - `test/input/math_accents.txt`: `\hat{x}`, `\tilde{y}`, `\bar{z}`, `\dot{a}`, `\ddot{b}`
-  - `test/input/math_derivatives.txt`: `\frac{d}{dx}`, `\partial`
-  - `test/input/math_arrows.txt`: `x \to \infty`, `\leftarrow`, `\Rightarrow`
-  - `test/input/math_overunder.txt`: `\overline{x + y}`, `\underline{a + b}`
+#### Advanced Fraction Constructs ✅
+- ✅ **Fraction Styling**: Multiple LaTeX fraction display styles
+  - Display fractions: `\dfrac{a}{b}` → `<frac style:"dfrac";'a';'b'>`
+  - Text fractions: `\tfrac{c}{d}` → `<frac style:"tfrac";'c';'d'>`
+  - Continued fractions: `\cfrac{e}{f+\cfrac{g}{h}}` → `<frac style:"cfrac";'e';<add 'f';<frac style:"cfrac";'g';'h'>>>`
+- ✅ **Nested Fraction Support**: Complex fraction hierarchies
+  - Arbitrary nesting depth supported
+  - Proper syntax tree generation for complex continued fractions
+  - Style preservation through nesting levels
 
-- **Purpose**: Individual files allow for focused testing when debugging specific construct parsing issues
+#### Enhanced Root Functions ✅
+- ✅ **Cube Roots**: Dedicated cube root parsing
+  - Cube root: `\cbrt{8}` → `<root index:"3";8>`
+  - Uses `parse_latex_root()` with index="3"
+- ✅ **Advanced Root Indexing**: Variable index root support
+  - Indexed roots: `\sqrt[4]{16}` → `<root index:"4";16>`
+  - Variable index: `\sqrt[n]{x}` → `<root index:"n";'x'>`
+  - Expression index: `\sqrt[k+1]{y}` → `<root index:<add 'k';1>;'y'>`
 
-#### Running the Enhanced Tests
-```bash
-# Run consolidated comprehensive test
-./lambda.exe test/lambda/input/test_math_enhanced_consolidated.ls
+#### Format and Architecture Improvements ✅
+- ✅ **Element Format Changes**: Updated syntax tree structure
+  - **Before**: Elements used position attributes (`pos:"numerator"`, `pos:"denominator"`)
+  - **After**: Elements use child structure for better nesting and parsing
+  - Child-based parsing allows for more complex nested expressions
+  - Improved memory safety with proper element allocation
+- ✅ **Memory Safety Enhancements**: Fixed unsafe symbol creation patterns
+  - All symbol creation now uses safe `create_math_symbol_safe()` functions
+  - Proper string buffer management prevents memory errors
+  - Enhanced error handling for malformed expressions
 
-# Run individual construct tests for debugging (if needed)
-./lambda.exe test/lambda/input/test_individual_construct.ls
+#### Comprehensive Testing Framework ✅
+- ✅ **Consolidated Test Suite**: Streamlined validation approach
+  - **Primary Test File**: `test/input/math_comprehensive.txt`
+    - Contains all latest mathematical constructs in one file
+    - Validates complex mixed expressions with multiple constructs
+    - Tests: `\ell + \hbar + \imath + \jmath + \bigcup A + \bigcap B + \bigoplus C + \bigotimes D + \bigwedge E + \bigvee F + \dfrac{a}{b} + \tfrac{c}{d} + \cfrac{e}{f+\cfrac{g}{h}} + \cbrt{8} + \sqrt{16}`
+  - **Primary Test Script**: `test/lambda/input/test_math_comprehensive.ls`
+    - Unified testing approach for all latest enhancements
+    - Comprehensive syntax tree validation
+- ✅ **Individual Debug Tests**: Maintained for targeted debugging
+  - `test/input/math_simple.txt`: Single expression testing
+  - Individual construct test files for isolated validation
+  - Facilitates debugging of specific parsing issues
+
+#### Parser Enhancement Benefits ✅
+- **Extended Mathematical Coverage**: Supports advanced mathematical notation used in:
+  - Quantum mechanics (ℏ, ℓ quantum numbers)
+  - Set theory (big unions, intersections)
+  - Abstract algebra (big circled operations)
+  - Mathematical logic (big logical operations)
+  - Advanced calculus (continued fractions, indexed roots)
+- **Improved Parsing Architecture**: 
+  - Command dispatch system for extensible LaTeX command recognition
+  - Modular parsing functions for different construct types
+  - Enhanced memory management and error handling
+- **Better Integration**: Seamless integration with existing mathematical constructs and document parsers
+
+#### Working Complex Expression Example ✅
+The parser successfully handles this comprehensive mathematical expression:
+```latex
+\ell + \hbar + \imath + \jmath + \bigcup A + \bigcap B + \bigoplus C + \bigotimes D + \bigwedge E + \bigvee F + \dfrac{a}{b} + \tfrac{c}{d} + \cfrac{e}{f+\cfrac{g}{h}} + \cbrt{8} + \sqrt{16}
 ```
+
+**Generated Syntax Tree** (abbreviated):
+```
+<add <add <add ... <ell 'ℓ'>;<hbar 'ℏ'>>;<imath 'ı'>>;<jmath 'ȷ'>>;<bigcup 'A'>;<bigcap 'B'>;<bigoplus 'C'>;<bigotimes 'D'>;<bigwedge 'E'>;<bigvee 'F'>;<frac style:"dfrac";'a';'b'>;<frac style:"tfrac";'c';'d'>;<frac style:"cfrac";'e';<add 'f';<frac style:"cfrac";'g';'h'>>>;<root index:"3";8>;<sqrt 16>>
+```
+
+This demonstrates the parser's capability to handle:
+- Multiple mathematical symbol types in one expression
+- Complex nested structures (continued fractions)
+- Mixed construct types (symbols, operators, functions, fractions, roots)
+- Proper precedence and associativity
+
 ## Recent Enhancements
 
 #### Major Mathematical Constructs Added ✅
@@ -427,66 +487,45 @@ All enhancements have been rigorously tested with:
 - Flavor-aware parsing: ✅ (defaults to LaTeX in document contexts)
 - Mixed content handling: ✅ (text and math together)
 
-## Test Files Structure
-
-### Essential Tests
-- `test/lambda/input/test_math_basic.ls` - Basic LaTeX math parser testing
-- `test/lambda/input/test_math_complete.ls` - Comprehensive LaTeX feature testing
-- `test/lambda/input/test_math_advanced.ls` - Enhanced Typst and ASCII feature testing
-- `test/lambda/input/test_integration.ls` - Document parser integration testing
-
-### Input Test Files
-- `test/input/math_simple.txt` - Basic LaTeX math expressions
-- `test/input/math_latex_basic.txt` - LaTeX mathematical functions
-- `test/input/math_typst_frac.txt` - Typst frac() function syntax
-- `test/input/math_typst_funcs.txt` - Typst function call examples
-- `test/input/math_typst_mixed.txt` - Complex Typst expressions
-- `test/input/math_ascii_funcs.txt` - ASCII function call notation (**Fixed**)
-- `test/input/math_ascii_power.txt` - ASCII power operator examples (**Enhanced**)
-- `test/input/math_ascii_mixed.txt` - Complex ASCII expressions
-- `test/input/math_comparison.txt` - Multi-flavor comparison tests
-- `test/input/test_markdown_math.md` - Markdown document with embedded math
-- `test/input/test_latex_math.tex` - LaTeX document with math expressions
-
 ## Supported Math Expression Mappings
 
 The following table lists all math expressions supported by Lambda's math parser and their mappings across different notation systems:
 
-| Lambda Expression                    | LaTeX                                     | Typst                         | ASCII                  | MathML                                          | Description          |
-| ------------------------------------ | ----------------------------------------- | ----------------------------- | ---------------------- | ----------------------------------------------- | -------------------- |
-| `<add 'a' 'b'>`                      | `a + b`                                   | `a + b`                       | `a + b`                | `<mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow>`   | Addition             |
-| `<sub 'a' 'b'>`                      | `a - b`                                   | `a - b`                       | `a - b`                | `<mrow><mi>a</mi><mo>-</mo><mi>b</mi></mrow>`   | Subtraction          |
-| `<mul 'a' 'b'>`                      | `a * b`                                   | `a * b`                       | `a * b`                | `<mrow><mi>a</mi><mo>⋅</mo><mi>b</mi></mrow>`   | Multiplication       |
-| `<div 'a' 'b'>`                      | `a / b`                                   | `a / b`                       | `a / b`                | `<mrow><mi>a</mi><mo>/</mo><mi>b</mi></mrow>`   | Division             |
-| `<frac 'a' 'b'>`                     | `\frac{a}{b}`                             | `frac(a, b)` or `a/b`         | `a/b`                  | `<mfrac><mi>a</mi><mi>b</mi></mfrac>`           | Fraction             |
-| `<pow 'x' 'n'>`                      | `x^{n}`                                   | `x^n`                         | `x^n` or `x**n`        | `<msup><mi>x</mi><mi>n</mi></msup>`             | Exponentiation       |
-| `<sqrt 'x'>`                         | `\sqrt{x}`                                | `sqrt(x)`                     | `sqrt(x)`              | `<msqrt><mi>x</mi></msqrt>`                     | Square root          |
-| `<sin 'x'>`                          | `\sin{x}`                                 | `sin(x)`                      | `sin(x)`               | `<mrow><mi>sin</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Sine function        |
-| `<cos 'x'>`                          | `\cos{x}`                                 | `cos(x)`                      | `cos(x)`               | `<mrow><mi>cos</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Cosine function      |
-| `<tan 'x'>`                          | `\tan{x}`                                 | `tan(x)`                      | `tan(x)`               | `<mrow><mi>tan</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Tangent function     |
-| `<arcsin 'x'>`                       | `\arcsin{x}`                              | `arcsin(x)`                   | `arcsin(x)`            | `<mrow><mi>arcsin</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Arcsine function     |
-| `<arccos 'x'>`                       | `\arccos{x}`                              | `arccos(x)`                   | `arccos(x)`            | `<mrow><mi>arccos</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Arccosine function   |
-| `<arctan 'x'>`                       | `\arctan{x}`                              | `arctan(x)`                   | `arctan(x)`            | `<mrow><mi>arctan</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Arctangent function  |
-| `<sinh 'x'>`                         | `\sinh{x}`                                | `sinh(x)`                     | `sinh(x)`              | `<mrow><mi>sinh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Hyperbolic sine      |
-| `<cosh 'x'>`                         | `\cosh{x}`                                | `cosh(x)`                     | `cosh(x)`              | `<mrow><mi>cosh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Hyperbolic cosine    |
-| `<tanh 'x'>`                         | `\tanh{x}`                                | `tanh(x)`                     | `tanh(x)`              | `<mrow><mi>tanh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Hyperbolic tangent   |
-| `<cot 'x'>`                          | `\cot{x}`                                 | `cot(x)`                      | `cot(x)`               | `<mrow><mi>cot</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Cotangent function   |
-| `<sec 'x'>`                          | `\sec{x}`                                 | `sec(x)`                      | `sec(x)`               | `<mrow><mi>sec</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Secant function      |
-| `<csc 'x'>`                          | `\csc{x}`                                 | `csc(x)`                      | `csc(x)`               | `<mrow><mi>csc</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Cosecant function    |
-| `<log 'x'>`                          | `\log{x}`                                 | `log(x)`                      | `log(x)`               | `<mrow><mi>log</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Logarithm (base 10)  |
-| `<ln 'x'>`                           | `\ln{x}`                                  | `ln(x)`                       | `ln(x)`                | `<mrow><mi>ln</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>` | Natural logarithm    |
-| `<sum 'start' 'end' 'expr'>`         | `\sum_{start}^{end} expr`                 | `sum_(start)^(end) expr`      | `sum(start,end,expr)`  | `<mrow><munderover><mo>∑</mo><mi>start</mi><mi>end</mi></munderover><mi>expr</mi></mrow>` | Summation            |
-| `<prod 'start' 'end' 'expr'>`        | `\prod_{start}^{end} expr`                | `product_(start)^(end) expr`  | `prod(start,end,expr)` | `<mrow><munderover><mo>∏</mo><mi>start</mi><mi>end</mi></munderover><mi>expr</mi></mrow>` | Product              |
-| `<int 'start' 'end' 'expr'>`         | `\int_{start}^{end} expr`                 | `integral_(start)^(end) expr` | `int(start,end,expr)`  | `<mrow><msubsup><mo>∫</mo><mi>start</mi><mi>end</mi></msubsup><mi>expr</mi></mrow>` | Definite integral    |
-| `<lim 'approach' 'expr'>`            | `\lim_{approach} expr`                    | `lim_(approach) expr`         | `lim(approach,expr)`   | `<mrow><munder><mi>lim</mi><mi>approach</mi></munder><mi>expr</mi></mrow>` | Limit                |
-| `<matrix 'rows'>`                    | `\matrix{...}`                            | `mat(...)`                    | `matrix(...)`          | `<mtable><mtr>...</mtr></mtable>`               | Matrix               |
-| `<pmatrix 'rows'>`                   | `\pmatrix{...}`                           | `mat(...)`                    | `pmatrix(...)`         | `<mrow><mo>(</mo><mtable><mtr>...</mtr></mtable><mo>)</mo></mrow>` | Parenthesized matrix |
-| `<bmatrix 'rows'>`                   | `\bmatrix{...}`                           | `mat(...)`                    | `bmatrix(...)`         | `<mrow><mo>[</mo><mtable><mtr>...</mtr></mtable><mo>]</mo></mrow>` | Bracketed matrix     |
-| `<cases 'conditions'>`               | `\begin{cases}...\end{cases}`             | `cases(...)`                  | `cases(...)`           | `<mrow><mo>{</mo><mtable columnalign="left"><mtr>...</mtr></mtable></mrow>` | Piecewise function   |
-| `<align 'equations'>`                | `\begin{align}...\end{align}`             | `align(...)`                  | `align(...)`           | `<mtable columnalign="right left"><mtr>...</mtr></mtable>` | Aligned equations    |
-| `<equation 'expr'>`                  | `\begin{equation}...\end{equation}`       | `equation(...)`               | `equation(...)`        | `<mrow><mi>expr</mi></mrow>`                    | Numbered equation    |
-| `<gather 'equations'>`               | `\begin{gather}...\end{gather}`           | `gather(...)`                 | `gather(...)`          | `<mtable><mtr>...</mtr></mtable>`               | Gathered equations   |
-| `<smallmatrix 'rows'>`               | `\begin{smallmatrix}...\end{smallmatrix}` | `smallmat(...)`               | `smallmatrix(...)`     | `<mtable displaystyle="false"><mtr>...</mtr></mtable>` | Small matrix         |
+| Lambda Expression             | LaTeX                                     | Typst                         | ASCII                  | MathML                                                                                    | Description          |
+| ----------------------------- | ----------------------------------------- | ----------------------------- | ---------------------- | ----------------------------------------------------------------------------------------- | -------------------- |
+| `<add 'a' 'b'>`               | `a + b`                                   | `a + b`                       | `a + b`                | `<mrow><mi>a</mi><mo>+</mo><mi>b</mi></mrow>`                                             | Addition             |
+| `<sub 'a' 'b'>`               | `a - b`                                   | `a - b`                       | `a - b`                | `<mrow><mi>a</mi><mo>-</mo><mi>b</mi></mrow>`                                             | Subtraction          |
+| `<mul 'a' 'b'>`               | `a * b`                                   | `a * b`                       | `a * b`                | `<mrow><mi>a</mi><mo>⋅</mo><mi>b</mi></mrow>`                                             | Multiplication       |
+| `<div 'a' 'b'>`               | `a / b`                                   | `a / b`                       | `a / b`                | `<mrow><mi>a</mi><mo>/</mo><mi>b</mi></mrow>`                                             | Division             |
+| `<frac 'a' 'b'>`              | `\frac{a}{b}`                             | `frac(a, b)` or `a/b`         | `a/b`                  | `<mfrac><mi>a</mi><mi>b</mi></mfrac>`                                                     | Fraction             |
+| `<pow 'x' 'n'>`               | `x^{n}`                                   | `x^n`                         | `x^n` or `x**n`        | `<msup><mi>x</mi><mi>n</mi></msup>`                                                       | Exponentiation       |
+| `<sqrt 'x'>`                  | `\sqrt{x}`                                | `sqrt(x)`                     | `sqrt(x)`              | `<msqrt><mi>x</mi></msqrt>`                                                               | Square root          |
+| `<sin 'x'>`                   | `\sin{x}`                                 | `sin(x)`                      | `sin(x)`               | `<mrow><mi>sin</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Sine function        |
+| `<cos 'x'>`                   | `\cos{x}`                                 | `cos(x)`                      | `cos(x)`               | `<mrow><mi>cos</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Cosine function      |
+| `<tan 'x'>`                   | `\tan{x}`                                 | `tan(x)`                      | `tan(x)`               | `<mrow><mi>tan</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Tangent function     |
+| `<arcsin 'x'>`                | `\arcsin{x}`                              | `arcsin(x)`                   | `arcsin(x)`            | `<mrow><mi>arcsin</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                              | Arcsine function     |
+| `<arccos 'x'>`                | `\arccos{x}`                              | `arccos(x)`                   | `arccos(x)`            | `<mrow><mi>arccos</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                              | Arccosine function   |
+| `<arctan 'x'>`                | `\arctan{x}`                              | `arctan(x)`                   | `arctan(x)`            | `<mrow><mi>arctan</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                              | Arctangent function  |
+| `<sinh 'x'>`                  | `\sinh{x}`                                | `sinh(x)`                     | `sinh(x)`              | `<mrow><mi>sinh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                | Hyperbolic sine      |
+| `<cosh 'x'>`                  | `\cosh{x}`                                | `cosh(x)`                     | `cosh(x)`              | `<mrow><mi>cosh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                | Hyperbolic cosine    |
+| `<tanh 'x'>`                  | `\tanh{x}`                                | `tanh(x)`                     | `tanh(x)`              | `<mrow><mi>tanh</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                | Hyperbolic tangent   |
+| `<cot 'x'>`                   | `\cot{x}`                                 | `cot(x)`                      | `cot(x)`               | `<mrow><mi>cot</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Cotangent function   |
+| `<sec 'x'>`                   | `\sec{x}`                                 | `sec(x)`                      | `sec(x)`               | `<mrow><mi>sec</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Secant function      |
+| `<csc 'x'>`                   | `\csc{x}`                                 | `csc(x)`                      | `csc(x)`               | `<mrow><mi>csc</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Cosecant function    |
+| `<log 'x'>`                   | `\log{x}`                                 | `log(x)`                      | `log(x)`               | `<mrow><mi>log</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                 | Logarithm (base 10)  |
+| `<ln 'x'>`                    | `\ln{x}`                                  | `ln(x)`                       | `ln(x)`                | `<mrow><mi>ln</mi><mo>(</mo><mi>x</mi><mo>)</mo></mrow>`                                  | Natural logarithm    |
+| `<sum 'start' 'end' 'expr'>`  | `\sum_{start}^{end} expr`                 | `sum_(start)^(end) expr`      | `sum(start,end,expr)`  | `<mrow><munderover><mo>∑</mo><mi>start</mi><mi>end</mi></munderover><mi>expr</mi></mrow>` | Summation            |
+| `<prod 'start' 'end' 'expr'>` | `\prod_{start}^{end} expr`                | `product_(start)^(end) expr`  | `prod(start,end,expr)` | `<mrow><munderover><mo>∏</mo><mi>start</mi><mi>end</mi></munderover><mi>expr</mi></mrow>` | Product              |
+| `<int 'start' 'end' 'expr'>`  | `\int_{start}^{end} expr`                 | `integral_(start)^(end) expr` | `int(start,end,expr)`  | `<mrow><msubsup><mo>∫</mo><mi>start</mi><mi>end</mi></msubsup><mi>expr</mi></mrow>`       | Definite integral    |
+| `<lim 'approach' 'expr'>`     | `\lim_{approach} expr`                    | `lim_(approach) expr`         | `lim(approach,expr)`   | `<mrow><munder><mi>lim</mi><mi>approach</mi></munder><mi>expr</mi></mrow>`                | Limit                |
+| `<matrix 'rows'>`             | `\matrix{...}`                            | `mat(...)`                    | `matrix(...)`          | `<mtable><mtr>...</mtr></mtable>`                                                         | Matrix               |
+| `<pmatrix 'rows'>`            | `\pmatrix{...}`                           | `mat(...)`                    | `pmatrix(...)`         | `<mrow><mo>(</mo><mtable><mtr>...</mtr></mtable><mo>)</mo></mrow>`                        | Parenthesized matrix |
+| `<bmatrix 'rows'>`            | `\bmatrix{...}`                           | `mat(...)`                    | `bmatrix(...)`         | `<mrow><mo>[</mo><mtable><mtr>...</mtr></mtable><mo>]</mo></mrow>`                        | Bracketed matrix     |
+| `<cases 'conditions'>`        | `\begin{cases}...\end{cases}`             | `cases(...)`                  | `cases(...)`           | `<mrow><mo>{</mo><mtable columnalign="left"><mtr>...</mtr></mtable></mrow>`               | Piecewise function   |
+| `<align 'equations'>`         | `\begin{align}...\end{align}`             | `align(...)`                  | `align(...)`           | `<mtable columnalign="right left"><mtr>...</mtr></mtable>`                                | Aligned equations    |
+| `<equation 'expr'>`           | `\begin{equation}...\end{equation}`       | `equation(...)`               | `equation(...)`        | `<mrow><mi>expr</mi></mrow>`                                                              | Numbered equation    |
+| `<gather 'equations'>`        | `\begin{gather}...\end{gather}`           | `gather(...)`                 | `gather(...)`          | `<mtable><mtr>...</mtr></mtable>`                                                         | Gathered equations   |
+| `<smallmatrix 'rows'>`        | `\begin{smallmatrix}...\end{smallmatrix}` | `smallmat(...)`               | `smallmatrix(...)`     | `<mtable displaystyle="false"><mtr>...</mtr></mtable>`                                    | Small matrix         |
 
 ### Enhanced Mathematical Constructs
 
@@ -568,6 +607,40 @@ The following table lists all math expressions supported by Lambda's math parser
 | `'geq'` | `\geq` | `>=` | `>=` | `<mo>≥</mo>` | Greater than or equal ≥ |
 | `'neq'` | `\neq` | `!=` | `!=` | `<mo>≠</mo>` | Not equal ≠ |
 | `'approx'` | `\approx` | `~~` | `~` | `<mo>≈</mo>` | Approximately equal ≈ |
+
+### Latest Mathematical Constructs (Phase 10 - July 2025) ✅
+
+The following constructs were added in the most recent enhancement phase:
+
+| Lambda Expression | LaTeX | MathML | Unicode | Description |
+|------------------|-------|--------|---------|-------------|
+| `<ell 'ℓ'>` | `\ell` | `<mi>ℓ</mi>` | ℓ | Script lowercase l |
+| `<hbar 'ℏ'>` | `\hbar` | `<mi>ℏ</mi>` | ℏ | Planck constant |
+| `<imath 'ı'>` | `\imath` | `<mi>ı</mi>` | ı | Dotless i |
+| `<jmath 'ȷ'>` | `\jmath` | `<mi>ȷ</mi>` | ȷ | Dotless j |
+| `<aleph_0 'ℵ₀'>` | `\aleph_0` | `<mi>ℵ₀</mi>` | ℵ₀ | Aleph null (cardinal) |
+| `<beth_1 'ב₁'>` | `\beth_1` | `<mi>ב₁</mi>` | ב₁ | Beth one (cardinal) |
+| `<bigcup 'A'>` | `\bigcup A` | `<mo>⋃</mo><mi>A</mi>` | ⋃ | Big union |
+| `<bigcap 'B'>` | `\bigcap B` | `<mo>⋂</mo><mi>B</mi>` | ⋂ | Big intersection |
+| `<bigoplus 'C'>` | `\bigoplus C` | `<mo>⊕</mo><mi>C</mi>` | ⊕ | Big circled plus |
+| `<bigotimes 'D'>` | `\bigotimes D` | `<mo>⊗</mo><mi>D</mi>` | ⊗ | Big circled times |
+| `<bigwedge 'E'>` | `\bigwedge E` | `<mo>⋀</mo><mi>E</mi>` | ⋀ | Big logical and |
+| `<bigvee 'F'>` | `\bigvee F` | `<mo>⋁</mo><mi>F</mi>` | ⋁ | Big logical or |
+| `<frac style:"dfrac";'a';'b'>` | `\dfrac{a}{b}` | `<mfrac displaystyle="true"><mi>a</mi><mi>b</mi></mfrac>` | — | Display-style fraction |
+| `<frac style:"tfrac";'c';'d'>` | `\tfrac{c}{d}` | `<mfrac displaystyle="false"><mi>c</mi><mi>d</mi></mfrac>` | — | Text-style fraction |
+| `<frac style:"cfrac";'e';'f'>` | `\cfrac{e}{f}` | `<mfrac><mi>e</mi><mi>f</mi></mfrac>` | — | Continued fraction |
+| `<root index:"3";8>` | `\cbrt{8}` | `<mroot><mn>8</mn><mn>3</mn></mroot>` | ∛ | Cube root |
+| `<root index:"n";'x'>` | `\sqrt[n]{x}` | `<mroot><mi>x</mi><mi>n</mi></mroot>` | — | n-th root |
+| `<sqrt 16>` | `\sqrt{16}` | `<msqrt><mn>16</mn></msqrt>` | √ | Square root |
+
+**Complex Expression Example**:
+```latex
+\ell + \hbar + \imath + \jmath + \bigcup A + \dfrac{a}{b} + \cbrt{8}
+```
+**Parses to**:
+```
+<add <add <add <add <add <add <ell 'ℓ'>;<hbar 'ℏ'>>;<imath 'ı'>>;<jmath 'ȷ'>>;<bigcup 'A'>>;<frac style:"dfrac";'a';'b'>>;<root index:"3";8>>
+```
 
 ### Math Expressions Not Yet Supported in Lambda
 
@@ -730,12 +803,20 @@ Input: "x^2 + y**3"          → <add <pow 'x' "2"> <pow 'y' "3">>
 - ✅ **LaTeX Support**: Full LaTeX math parsing with functions, fractions, powers, subscripts
 - ✅ **Advanced LaTeX**: Greek letters, mathematical operators, sums, integrals, limits, matrices
 - ✅ **Enhanced Mathematical Constructs**: Comprehensive support for binomial coefficients, vector notation, accent marks, derivative notation, arrow symbols, and over/under line constructs
+- ✅ **Latest Mathematical Extensions (July 2025)**: Advanced symbol support, big operators, enhanced fractions, root functions
+  - **Special Symbols**: `\ell`, `\hbar`, `\imath`, `\jmath`, `\aleph_0`, `\beth_1` with Unicode mapping
+  - **Big Operators**: `\bigcup`, `\bigcap`, `\bigoplus`, `\bigotimes`, `\bigwedge`, `\bigvee` for set theory and algebra
+  - **Advanced Fractions**: `\dfrac`, `\tfrac`, `\cfrac` with nested continued fraction support
+  - **Enhanced Roots**: `\cbrt{8}` (cube roots), `\sqrt[n]{x}` (indexed roots) with proper syntax trees
+- ✅ **Format Improvements**: Updated element structure using child elements instead of position attributes
+- ✅ **Memory Safety**: Fixed unsafe symbol creation patterns throughout parser
 - ✅ **API Enhancement**: Map-based options with full backward compatibility
 - ✅ **Multi-Flavor**: Advanced Typst and ASCII support with function call notation
 - ✅ **Integration**: Fully integrated with Lambda input system and type system
 - ✅ **Document Integration**: Math parsing integrated into Markdown and LaTeX document parsers
 - ✅ **Code Refactoring**: Shared utilities between input parsers for better maintainability
-- ✅ **Enhanced Testing**: Consolidated comprehensive test suite with 25+ obsolete files removed
+- ✅ **Enhanced Testing**: Consolidated comprehensive test suite with streamlined validation
+- ✅ **Comprehensive Expression Parsing**: Successfully handles complex multi-construct expressions
 - ✅ **Implicit Multiplication**: Enhanced parsing of consecutive mathematical terms
 - ✅ **Documentation**: Comprehensive documentation with examples and implementation details
 ## Current Limitations and Known Issues
@@ -1002,9 +1083,29 @@ Output: <add 'x' ERROR 'y'> (partial parsing with error markers)
 - 📍 Minimal error context in failure messages
 
 ## Next Steps
-1. **ASCII parsing refinement**: Fix edge cases in ASCII function call parsing
-2. **Error handling**: Improve error reporting and recovery for malformed expressions
-3. **Performance**: Optimize parsing for large mathematical expressions
-4. **Extended syntax**: Add support for advanced mathematical constructs
-5. **Enhanced LaTeX environments**: Complete support for complex math environments
+1. ✅ **Extended mathematical constructs**: ~~Add support for advanced mathematical constructs~~ → **COMPLETED** (July 2025)
+   - Added special symbols (ell, hbar, imath, jmath, aleph, beth)
+   - Added big operators (bigcup, bigcap, bigoplus, bigotimes, bigwedge, bigvee)  
+   - Added advanced fractions (dfrac, tfrac, cfrac with nesting)
+   - Added enhanced root functions (cbrt, indexed roots)
+2. **Mathematical environments**: Add support for advanced LaTeX math environments
+   - `\begin{cases}...\end{cases}` for piecewise functions
+   - `\begin{align}...\end{align}` for multi-line equations
+   - `\begin{gather}...\end{gather}` for grouped equations
+3. **Function notation**: Enhance function parsing and notation
+   - Function composition operators
+   - Function domain/range notation
+   - Advanced function transformations
+4. **Set theory**: Expand set notation support
+   - Set builder notation: `\{x \mid P(x)\}`
+   - Interval notation: `[a,b)`, `(a,b]`
+   - Cardinality notation: `|S|`, `\#S`
+5. **Error handling**: Improve error reporting and recovery for malformed expressions
+   - Better error context in failure messages
+   - Graceful handling of incomplete expressions
+   - Suggestions for common syntax errors
+6. **Performance**: Optimize parsing for large mathematical expressions
+   - Reduce memory allocation overhead
+   - Optimize string buffer management
+   - Cache frequently used symbols
 
