@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="612" height="792" xmlns="http://www.w3.org/2000/svg">
-  <title>Lambda Typesetting Test</title>
-  <text x="50.0" y="100.0" font-family="Arial" font-size="12.0" fill="black">
-    Hello, Lambda Typesetting System!
-  </text>
-  <rect x="50.0" y="120.0" width="200.0" height="20.0" fill="none" stroke="black" stroke-width="1"/>
-</svg>
