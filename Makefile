@@ -160,6 +160,10 @@ build-debug:
 	@echo "Building with debug configuration..."
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --debug --jobs=$(JOBS)
 
+build-wasm:
+	@echo "Building WebAssembly version..."
+	./compile-wasm.sh --linking-only
+
 # Clean targets
 clean:
 	@echo "Cleaning build artifacts..."
