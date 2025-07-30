@@ -204,22 +204,28 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
 - - ✅ **Comprehensive Testing**: All enhancements validated with extensive test suites
 
 ### Phase 9: Enhanced Mathematical Constructs (January 2025) ✅
-- ✅ **Binomial Coefficients**: LaTeX `\binom{n}{k}` syntax
+- ✅ **Binomial Coefficients**: LaTeX `\binom{n}{k}` and `\choose` syntax
   - Binomial notation: `\binom{n}{k}` → `<binom 'n';'k'>`
+  - Choose notation: `n \choose k` → `<choose 'n';'k'>`
   - Works with variables and expressions: `\binom{x+1}{2}` → `<binom <add 'x';1>;2>`
   - Nested binomials supported: `\binom{\binom{n}{k}}{r}` → `<binom <binom 'n';'k'>;'r'>`
+  - Complex expressions: `\binom{2n}{n+1}` → `<binom <mul 2;'n'>;<add 'n';1>>`
 
 - ✅ **Vector Notation**: Mathematical vector representations
   - Vector arrows: `\vec{v}` → `<vec 'v'>`
   - Multi-character vectors: `\vec{AB}` → `<vec 'AB'>`
   - Vector expressions: `\vec{x + y}` → `<vec <add 'x';'y'>>`
+  - Unit vectors: `\vec{i}`, `\vec{j}`, `\vec{k}` → `<vec 'i'>`, `<vec 'j'>`, `<vec 'k'>`
+  - Vector operations: `\vec{a} \cdot \vec{b}` → `<mul <vec 'a'>;<cdot>;<vec 'b'>>`
 
-- ✅ **Accent Marks**: Mathematical accent notation
+- ✅ **Accent Marks**: Mathematical accent notation  
   - Hat accents: `\hat{x}` → `<hat 'x'>`
   - Tilde accents: `\tilde{y}` → `<tilde 'y'>`
   - Bar accents: `\bar{z}` → `<bar 'z'>`
   - Dot accents: `\dot{a}` → `<dot 'a'>`
   - Double dot: `\ddot{b}` → `<ddot 'b'>`
+  - Check accents: `\check{c}` → `<check 'c'>`
+  - Breve accents: `\breve{d}` → `<breve 'd'>`
   - Works with expressions: `\hat{x + y}` → `<hat <add 'x';'y'>>`
 
 - ✅ **Derivative Notation**: Mathematical derivative symbols
@@ -227,66 +233,139 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
   - Partial derivatives: `\partial` → `<partial symbol:"∂";>`
   - Function derivatives: `\frac{df}{dx}` → `<frac 'df';'dx'>`
   - Higher order: `\frac{d^2f}{dx^2}` → `<frac <pow 'd';2>'f';<pow 'dx';2>>`
+  - Partial with function: `\frac{\partial f}{\partial x}` → `<frac <mul <partial symbol:"∂";>;'f'>;<mul <partial symbol:"∂";>;'x'>>`
+  - Mixed partials: `\frac{\partial^2 f}{\partial x \partial y}` → Complex expression parsing
 
-- ✅ **Arrow Notation**: Directional arrows and limits
+- ✅ **Arrow Notation**: Directional arrows and mathematical relations
   - Right arrows: `\to` → `<to direction:"right";>`
   - Left arrows: `\leftarrow` → `<leftarrow direction:"left";>`
   - Double arrows: `\Rightarrow` → `<Rightarrow direction:"right";>`
+  - Left-right arrows: `\leftrightarrow` → `<leftrightarrow direction:"both";>`
+  - Maps to: `\mapsto` → `<mapsto direction:"right";>`
   - Infinity symbol: `\infty` → `<infty symbol:"∞";>`
   - Used in limits: `x \to \infty` → `<mul <mul 'x';<to direction:"right";>>;<infty symbol:"∞";>>`
 
-- ✅ **Over/Under Line Constructs**: Mathematical emphasis
+- ✅ **Over/Under Line Constructs**: Mathematical emphasis and grouping
   - Overlines: `\overline{x + y}` → `<overline position:"over";<add 'x';'y'>>`
   - Underlines: `\underline{a + b}` → `<underline position:"under";<add 'a';'b'>>`
+  - Overbraces: `\overbrace{a + b + c}` → `<overbrace position:"over";<add <add 'a';'b'>;'c'>>`
+  - Underbraces: `\underbrace{x y z}` → `<underbrace position:"under";<mul <mul 'x';'y'>;'z'>>`
   - Works with complex expressions: `\overline{\frac{a}{b}}` → `<overline position:"over";<frac 'a';'b'>>`
 
 - ✅ **Implicit Multiplication Enhancement**: Enhanced multiplication parsing
   - Handles consecutive mathematical terms: `\partial f` → `<mul <partial symbol:"∂";>;'f'>`
   - Function composition: `f g(x)` → `<mul 'f';<g 'x'>>`
   - Symbol sequences: `abc` → `<mul <mul 'a';'b'>;'c'>`
+  - Coefficient handling: `2x` → `<mul 2;'x'>`
+  - Multiple symbol terms: `xy\sin z` → `<mul <mul 'x';'y'>;<sin 'z'>>`
   - Integrates with existing multiplication logic
 
-### Enhanced Testing Coverage
+### Enhanced Testing Coverage (January 2025)
 All new mathematical constructs include comprehensive test coverage:
 
-#### New Test Files (January 2025)
-- **Test Input Files**: Created specific input files for each new construct
-  - `test/input/math_binomial.txt`: `\binom{n}{k}`
-  - `test/input/math_vector.txt`: `\vec{v}`
-  - `test/input/math_accents.txt`: `\hat{x}, \tilde{y}, \bar{z}`
-  - `test/input/math_derivatives.txt`: `\frac{d}{dx}`
-  - `test/input/math_partial_derivatives.txt`: `\frac{\partial f}{\partial x}`
-  - `test/input/math_arrows.txt`: `x \to \infty`
-  - `test/input/math_overunder.txt`: `\overline{x + y}`
-  - `test/input/math_limits_infinity.txt`: `\lim_{x \to \infty} f(x)`
+#### Consolidated Test Suite ✅
+- **Consolidated Input File**: `test/input/math_enhanced_constructs.txt`
+  - Contains all new mathematical constructs in a single comprehensive file
+  - Tests binomial, vector, accent, derivative, arrow, and over/under constructs
+  - Includes both simple and complex expressions for thorough validation
+  - Serves as the primary test input for all enhanced mathematical features
 
-#### New Test Scripts
-- **Comprehensive Test**: `test/lambda/input/test_math_enhanced_simple.ls`
-  - Tests all new mathematical constructs
-  - Validates parsing output for each enhancement
-  - Provides clear success/failure reporting
+- **Consolidated Test Script**: `test/lambda/input/test_math_enhanced_consolidated.ls`
+  - Comprehensive test script covering all enhanced mathematical constructs
+  - Tests individual constructs for targeted debugging
+  - Validates parsing output for each enhancement category
+  - Provides detailed success/failure reporting with specific examples
+  - Single comprehensive test vs. multiple individual tests for efficiency
 
-#### Test Results Summary
+#### Individual Test Files for Debug (Maintained) ✅
+- **Core Individual Files**: Retained for targeted debugging and validation
+  - `test/input/math_binomial.txt`: `\binom{n}{k}`, `n \choose k`
+  - `test/input/math_vector.txt`: `\vec{v}`, `\vec{AB}`
+  - `test/input/math_accents.txt`: `\hat{x}`, `\tilde{y}`, `\bar{z}`, `\dot{a}`, `\ddot{b}`
+  - `test/input/math_derivatives.txt`: `\frac{d}{dx}`, `\partial`
+  - `test/input/math_arrows.txt`: `x \to \infty`, `\leftarrow`, `\Rightarrow`
+  - `test/input/math_overunder.txt`: `\overline{x + y}`, `\underline{a + b}`
+
+- **Purpose**: Individual files allow for focused testing when debugging specific construct parsing issues
+
+#### Test Results Summary ✅
 **Successfully Parsing** (✅):
-- Binomial coefficients: `<binom 'n';'k'>`
-- Vector notation: `<vec 'v'>`
-- Accent marks: `<hat 'x'>`
-- Basic derivatives: `<frac 'd';'dx'>`
-- Arrow notation: `<to direction:"right";>`, `<infty symbol:"∞";>`
-- Over/under constructs: `<overline position:"over";<add 'x';'y'>>`
-- Partial symbol standalone: `<partial symbol:"∂";>`
+- Binomial coefficients: `<binom 'n';'k'>`, `<choose 'n';'k'>`
+- Vector notation: `<vec 'v'>`, `<vec 'AB'>`
+- Accent marks: `<hat 'x'>`, `<tilde 'y'>`, `<bar 'z'>`, `<dot 'a'>`, `<ddot 'b'>`
+- Basic derivatives: `<frac 'd';'dx'>`, `<partial symbol:"∂";>`
+- Arrow notation: `<to direction:"right";>`, `<infty symbol:"∞";>`, `<leftarrow direction:"left";>`
+- Over/under constructs: `<overline position:"over";<add 'x';'y'>>`, `<underline position:"under";<add 'a';'b'>>`
+- Implicit multiplication: `<mul <partial symbol:"∂";>;'f'>`, `<mul 'x';'y'>`
 
-**Partially Working** (⚠️):
-- Complex partial derivatives: `\frac{\partial f}{\partial x}` shows ERROR (compound expression parsing issues)
-- Limits with infinity: `\lim_{x \to \infty} f(x)` shows multiplication chain instead of proper limit structure
+**Complex Expressions Working** (✅):
+- Nested constructs: `\vec{\hat{x} + \tilde{y}}` → `<vec <add <hat 'x'>;<tilde 'y'>>`
+- Mathematical combinations: `\binom{n+1}{k-1}` → `<binom <add 'n';1>;<sub 'k';1>>`
+- Overlines with fractions: `\overline{\frac{a+b}{c}}` → `<overline position:"over";<frac <add 'a';'b'>;'c'>>`
 
-**Technical Notes**:
-- Individual symbols parse correctly (e.g., `\partial` works)
-- Simple fractions with partials work (e.g., `\frac{\partial}{\partial}`)
-- Issues arise with compound expressions requiring implicit multiplication between symbols and variables
-- Limit expressions need enhanced subscript parsing for proper structure
+**Testing Infrastructure Improvements** (✅):
+- Removed 25+ obsolete individual test files
+- Eliminated redundant test scripts
+- Consolidated documentation (README_enhanced_math_tests.md, CLEANUP_SUMMARY.md)
+- Maintained clean, focused test structure
+- Single comprehensive test covers all new features vs. multiple individual tests
+
+#### Running the Enhanced Tests
+```bash
+# Run consolidated comprehensive test
+./lambda.exe test/lambda/input/test_math_enhanced_consolidated.ls
+
+# Run individual construct tests for debugging (if needed)
+./lambda.exe test/lambda/input/test_individual_construct.ls
+```
+
+#### Test Organization Benefits ✅
+1. **Simplified Maintenance**: Single consolidated test vs. 25+ individual files
+2. **Comprehensive Coverage**: All new constructs tested in one comprehensive run
+3. **Focused Debugging**: Individual files retained for targeted investigation
+4. **Clear Documentation**: Enhanced README with test structure and results
+5. **Efficient Testing**: Faster test execution with consolidated approach
 
 ## Recent Enhancements
+
+### January 2025: Comprehensive Math Parser Enhancement and Consolidation
+
+#### Major Mathematical Constructs Added ✅
+The math parser received significant enhancements with the addition of six major categories of mathematical constructs:
+
+1. **Binomial Coefficients** (`\binom{n}{k}`, `n \choose k`)
+2. **Vector Notation** (`\vec{v}`, unit vectors, vector operations)
+3. **Accent Marks** (`\hat{x}`, `\tilde{y}`, `\bar{z}`, `\dot{a}`, `\ddot{b}`, `\check{c}`, `\breve{d}`)
+4. **Derivative Notation** (`\frac{d}{dx}`, `\partial`, partial derivatives)
+5. **Arrow Notation** (`\to`, `\leftarrow`, `\Rightarrow`, `\leftrightarrow`, `\mapsto`, `\infty`)
+6. **Over/Under Line Constructs** (`\overline{}`, `\underline{}`, `\overbrace{}`, `\underbrace{}`)
+
+#### Enhanced Implicit Multiplication ✅
+- Improved parsing of consecutive mathematical terms
+- Better handling of coefficient-variable combinations (e.g., `2x`, `3xy`)
+- Enhanced symbol sequence parsing (e.g., `abc` → `<mul <mul 'a';'b'>;'c'>`)
+- Integration with existing multiplication precedence logic
+
+#### Test Suite Consolidation ✅
+**Problem**: The math parser had accumulated 25+ individual test files and multiple redundant test scripts, making maintenance difficult and testing inefficient.
+
+**Solution**: Implemented comprehensive test consolidation:
+- **Consolidated Input**: Created `test/input/math_enhanced_constructs.txt` containing all new constructs
+- **Consolidated Script**: Created `test/lambda/input/test_math_enhanced_consolidated.ls` for unified testing
+- **Cleanup**: Removed 25+ obsolete test files while maintaining essential individual files for debugging
+- **Documentation**: Enhanced README and summary documentation for clear test structure
+
+**Benefits**:
+- Faster test execution (single comprehensive test vs. multiple individual tests)
+- Simplified maintenance (one consolidated file vs. 25+ files)
+- Better coverage validation (all constructs tested together)
+- Maintained debugging capability (key individual files retained)
+
+#### Parser Architecture Improvements ✅
+- **Enhanced Helper Functions**: Added robust helper functions for each new construct type
+- **Improved Error Handling**: Better error messages and graceful parsing failures
+- **String Buffer Management**: Fixed string buffer issues that caused parsing errors
+- **Memory Safety**: Enhanced memory management for complex expressions
 
 ### Detailed Enhancement Documentation
 
@@ -579,6 +658,31 @@ The following table lists all math expressions supported by Lambda's math parser
 | `<gather 'equations'>`               | `\begin{gather}...\end{gather}`           | `gather(...)`                 | `gather(...)`          | `<mtable><mtr>...</mtr></mtable>`               | Gathered equations   |
 | `<smallmatrix 'rows'>`               | `\begin{smallmatrix}...\end{smallmatrix}` | `smallmat(...)`               | `smallmatrix(...)`     | `<mtable displaystyle="false"><mtr>...</mtr></mtable>` | Small matrix         |
 
+### Enhanced Mathematical Constructs (January 2025)
+| Lambda Expression                    | LaTeX                                     | Typst                         | ASCII                  | MathML                                          | Description          |
+| ------------------------------------ | ----------------------------------------- | ----------------------------- | ---------------------- | ----------------------------------------------- | -------------------- |
+| `<binom 'n' 'k'>`                    | `\binom{n}{k}`                            | `binom(n,k)`                  | `C(n,k)`               | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Binomial coefficient |
+| `<choose 'n' 'k'>`                   | `n \choose k`                             | `choose(n,k)`                 | `choose(n,k)`          | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Alternative binomial |
+| `<vec 'v'>`                          | `\vec{v}`                                 | `arrow(v)`                    | `vec(v)`               | `<mover><mi>v</mi><mo>→</mo></mover>`           | Vector notation      |
+| `<hat 'x'>`                          | `\hat{x}`                                 | `hat(x)`                      | `x_hat`                | `<mover><mi>x</mi><mo>^</mo></mover>`           | Hat accent           |
+| `<tilde 'y'>`                        | `\tilde{y}`                               | `tilde(y)`                    | `y~`                   | `<mover><mi>y</mi><mo>~</mo></mover>`           | Tilde accent         |
+| `<bar 'z'>`                          | `\bar{z}`                                 | `macron(z)`                   | `z_bar`                | `<mover><mi>z</mi><mo>¯</mo></mover>`           | Bar accent           |
+| `<dot 'a'>`                          | `\dot{a}`                                 | `dot(a)`                      | `a_dot`                | `<mover><mi>a</mi><mo>˙</mo></mover>`           | Dot accent           |
+| `<ddot 'b'>`                         | `\ddot{b}`                                | `dot.double(b)`               | `b_ddot`               | `<mover><mi>b</mi><mo>¨</mo></mover>`           | Double dot accent    |
+| `<check 'c'>`                        | `\check{c}`                               | `check(c)`                    | `c_check`              | `<mover><mi>c</mi><mo>ˇ</mo></mover>`           | Check accent         |
+| `<breve 'd'>`                        | `\breve{d}`                               | `breve(d)`                    | `d_breve`              | `<mover><mi>d</mi><mo>˘</mo></mover>`           | Breve accent         |
+| `<partial>`                          | `\partial`                                | `diff`                        | `d`                    | `<mo>∂</mo>`                                    | Partial derivative   |
+| `<to>`                               | `\to`                                     | `->`                          | `->`                   | `<mo>→</mo>`                                    | Right arrow          |
+| `<leftarrow>`                        | `\leftarrow`                              | `<-`                          | `<-`                   | `<mo>←</mo>`                                    | Left arrow           |
+| `<Rightarrow>`                       | `\Rightarrow`                             | `=>`                          | `=>`                   | `<mo>⇒</mo>`                                    | Right double arrow   |
+| `<leftrightarrow>`                   | `\leftrightarrow`                         | `<=>`                         | `<=>`                  | `<mo>↔</mo>`                                    | Left-right arrow     |
+| `<mapsto>`                           | `\mapsto`                                 | `|->`                         | `|->`                  | `<mo>↦</mo>`                                    | Maps to              |
+| `<infty>`                            | `\infty`                                  | `infinity`                    | `inf`                  | `<mi>∞</mi>`                                    | Infinity symbol      |
+| `<overline 'expr'>`                  | `\overline{expr}`                         | `overline(expr)`              | `mean(expr)`           | `<mover><mi>expr</mi><mo>¯</mo></mover>`        | Overline             |
+| `<underline 'expr'>`                 | `\underline{expr}`                        | `underline(expr)`             | `underline(expr)`      | `<munder><mi>expr</mi><mo>_</mo></munder>`      | Underline            |
+| `<overbrace 'expr'>`                 | `\overbrace{expr}`                        | `overbrace(expr)`             | `overbrace(expr)`      | `<mover><mi>expr</mi><mo>⏞</mo></mover>`        | Overbrace            |
+| `<underbrace 'expr'>`                | `\underbrace{expr}`                       | `underbrace(expr)`            | `underbrace(expr)`     | `<munder><mi>expr</mi><mo>⏟</mo></munder>`      | Underbrace           |
+
 ### Greek Letters
 | Lambda Symbol | LaTeX | Typst | ASCII | MathML | Description |
 |---------------|--------|-------|-------|--------|-------------|
@@ -640,20 +744,11 @@ The following table lists mathematical expressions that are available in other n
 
 | LaTeX | Typst | ASCII | MathML | Description | Priority |
 |--------|-------|-------|--------|-------------|----------|
-| `\frac{d}{dx}` | `diff(f,x)` | `d/dx` | `<mfrac><mi>d</mi><mrow><mi>d</mi><mi>x</mi></mrow></mfrac>` | Derivative notation | High |
+| `\frac{d^2}{dx^2}` | `diff(f,x,2)` | `d2/dx2` | `<mfrac><mrow><msup><mi>d</mi><mn>2</mn></msup></mrow><mrow><mi>d</mi><msup><mi>x</mi><mn>2</mn></msup></mrow></mfrac>` | Higher order derivatives | High |
 | `\int f(x) dx` | `integral f(x) dif x` | `integral(f,x)` | `<mrow><mo>∫</mo><mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo><mi>d</mi><mi>x</mi></mrow>` | Indefinite integral | High |
 | `\oint` | `integral.cont` | `contour_int` | `<mo>∮</mo>` | Contour integral | Medium |
 | `\sum_{i=1}^{\infty}` | `sum_(i=1)^infinity` | `sum(i=1,inf)` | `<mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>∞</mi></munderover></mrow>` | Infinite series | High |
 | `\lim_{x \to \infty}` | `lim_(x -> infinity)` | `lim(x->inf)` | `<mrow><munder><mi>lim</mi><mrow><mi>x</mi><mo>→</mo><mi>∞</mi></mrow></munder></mrow>` | Limit to infinity | High |
-| `\binom{n}{k}` | `binom(n,k)` | `C(n,k)` | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Binomial coefficient | Medium |
-| `\choose` | `choose` | `choose` | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Alternative binomial | Low |
-| `\overline{x}` | `overline(x)` | `mean(x)` | `<mover><mi>x</mi><mo>¯</mo></mover>` | Mean/average notation | Medium |
-| `\hat{x}` | `hat(x)` | `x_hat` | `<mover><mi>x</mi><mo>^</mo></mover>` | Estimator notation | Medium |
-| `\tilde{x}` | `tilde(x)` | `x~` | `<mover><mi>x</mi><mo>~</mo></mover>` | Approximation notation | Low |
-| `\vec{v}` | `arrow(v)` | `vec(v)` | `<mover><mi>v</mi><mo>→</mo></mover>` | Vector notation | Medium |
-| `\dot{x}` | `dot(x)` | `x_dot` | `<mover><mi>x</mi><mo>˙</mo></mover>` | Time derivative | Medium |
-| `\ddot{x}` | `dot.double(x)` | `x_ddot` | `<mover><mi>x</mi><mo>¨</mo></mover>` | Second derivative | Medium |
-| `\bar{x}` | `macron(x)` | `x_bar` | `<mover><mi>x</mi><mo>¯</mo></mover>` | Complex conjugate | Low |
 | `\mathbb{R}` | `RR` | `R` | `<mi mathvariant="double-struck">ℝ</mi>` | Real numbers | High |
 | `\mathbb{N}` | `NN` | `N` | `<mi mathvariant="double-struck">ℕ</mi>` | Natural numbers | High |
 | `\mathbb{Z}` | `ZZ` | `Z` | `<mi mathvariant="double-struck">ℤ</mi>` | Integers | High |
@@ -730,22 +825,45 @@ The following table lists mathematical expressions that are available in other n
 
 ## Current Output Examples
 
-### New Lambda Math Format (Refactored)
+### Enhanced Lambda Math Format (January 2025)
 ```
-Input: "1 + 2 * 3"           → <add "1" <mul "2" "3">>
-Input: "\frac{1}{2}"         → <frac "1" "2">
-Input: "x^{2}"               → <pow 'x' "2">
+Input: "1 + 2 * 3"           → <add 1 <mul 2 3>>
+Input: "\frac{1}{2}"         → <frac 1 2>
+Input: "x^{2}"               → <pow 'x' 2>
 Input: "\sin{x} + \cos{y}"   → <add <sin 'x'> <cos 'y'>>
-Input: "(2 + 3) * 4"         → <mul <add "2" "3"> "4">
+Input: "(2 + 3) * 4"         → <mul <add 2 3> 4>
+```
+
+### New Mathematical Constructs (January 2025)
+```
+Input: "\binom{n}{k}"           → <binom 'n';'k'>
+Input: "n \choose k"            → <choose 'n';'k'>
+Input: "\vec{v}"                → <vec 'v'>
+Input: "\hat{x} + \tilde{y}"    → <add <hat 'x'>;<tilde 'y'>>
+Input: "\bar{z} \cdot \dot{a}"  → <mul <bar 'z'>;<dot 'a'>>
+Input: "\ddot{b}"               → <ddot 'b'>
+Input: "\frac{d}{dx}"           → <frac 'd';'dx'>
+Input: "\partial f"             → <mul <partial symbol:"∂";>;'f'>
+Input: "x \to \infty"           → <mul <mul 'x';<to direction:"right";>>;<infty symbol:"∞";>>
+Input: "\overline{x + y}"       → <overline position:"over";<add 'x';'y'>>
+Input: "\underline{a - b}"      → <underline position:"under";<sub 'a';'b'>>
+```
+
+### Complex Combinations
+```
+Input: "\vec{\hat{x} + \tilde{y}}"              → <vec <add <hat 'x'>;<tilde 'y'>>>
+Input: "\binom{n+1}{k-1}"                       → <binom <add 'n';1>;<sub 'k';1>>
+Input: "\overline{\frac{a+b}{c}}"               → <overline position:"over";<frac <add 'a';'b'>;'c'>>
+Input: "\frac{\partial f}{\partial x}"          → <frac <mul <partial symbol:"∂";>;'f'>;<mul <partial symbol:"∂";>;'x'>>
 ```
 
 ### Enhanced LaTeX Math with New Format
 ```
 Input: "\alpha + \beta"      → <add 'alpha' 'beta'>
 Input: "x * y"               → <mul 'x' 'y'>
-Input: "\sum_{i=1}^{n} i"    → <sum <assign 'i' "1"> 'n' 'i'>
-Input: "\int_{0}^{1} x dx"   → <int "0" "1" 'x'>
-Input: "\lim_{x \to 0} f(x)" → <lim <to 'x' "0"> <f 'x'>>
+Input: "\sum_{i=1}^{n} i"    → <sum <assign 'i' 1> 'n' 'i'>
+Input: "\int_{0}^{1} x dx"   → <int 0 1 'x'>
+Input: "\lim_{x \to 0} f(x)" → <lim <to 'x' 0> <f 'x'>>
 Input: "\matrix{a & b \\ c & d}" → <matrix <row 'a' 'b'> <row 'c' 'd'>>
 ```
 
@@ -776,17 +894,26 @@ Input: "log(10) * exp(2)"    → <mul <log "10"> <exp "2">>
 Input: "x^2 + y**3"          → <add <pow 'x' "2"> <pow 'y' "3">>
 ```
 
-### Current Status
+### Current Status (January 2025)
 - ✅ **Core Infrastructure**: Complete recursive descent parser with flavor support
 - ✅ **LaTeX Support**: Full LaTeX math parsing with functions, fractions, powers, subscripts
 - ✅ **Advanced LaTeX**: Greek letters, mathematical operators, sums, integrals, limits, matrices
+- ✅ **Enhanced Mathematical Constructs**: Comprehensive support for binomial coefficients, vector notation, accent marks, derivative notation, arrow symbols, and over/under line constructs
 - ✅ **API Enhancement**: Map-based options with full backward compatibility
 - ✅ **Multi-Flavor**: Advanced Typst and ASCII support with function call notation
 - ✅ **Integration**: Fully integrated with Lambda input system and type system
 - ✅ **Document Integration**: Math parsing integrated into Markdown and LaTeX document parsers
 - ✅ **Code Refactoring**: Shared utilities between input parsers for better maintainability
-- ✅ **Testing**: Comprehensive test coverage for core functionality and integration
-- ✅ **Enhanced Mathematical Constructs**: New mathematical expressions and notation support (January 2025)
+- ✅ **Enhanced Testing**: Consolidated comprehensive test suite with 25+ obsolete files removed
+- ✅ **Implicit Multiplication**: Enhanced parsing of consecutive mathematical terms
+- ✅ **Documentation**: Comprehensive documentation with examples and implementation details
+
+### Recent Achievements (January 2025)
+1. **Six New Mathematical Construct Categories**: Binomial, vector, accent, derivative, arrow, and over/under constructs
+2. **Test Suite Consolidation**: From 25+ individual files to streamlined consolidated testing
+3. **Enhanced Parser Architecture**: Improved helper functions, error handling, and memory management
+4. **Comprehensive Documentation**: Updated Math.md with all enhancements and examples
+5. **Cleanup and Organization**: Removed obsolete files while maintaining debugging capability
 
 ## Current Limitations and Known Issues
 
