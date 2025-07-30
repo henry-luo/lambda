@@ -4,7 +4,7 @@ This document provides a unified schema (in Mark Notation) for representing docu
 
 ## Mark Schema
 
-Below is the complete Mark schema sample, illustrating all Pandoc AST block and inline elements, including code, citations, math, and figures.
+Below is the complete Mark schema sample, illustrating all Pandoc AST block and inline elements, including code, citations, math, figures, and emoji shortcodes.
 
 ```mark
 // Mark Schema for Pandoc AST with HTML elements, illustrating all block and inline elements
@@ -234,6 +234,8 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       "\\[ E = mc^2 \\]"
     >
     <p "Inline math: " <math type:inline, id:math2 "\\( x^2 + y^2 = z^2 \\)"> ".">
+    // GitHub Emoji Shortcodes
+    <p "GitHub emoji support: " <emoji "😄"> " " <emoji "❤️"> " " <emoji "🚀"> " " <emoji "🐱"> " " <emoji "👍"> " " <emoji "🔥"> " " <emoji "💻"> " " <emoji "🐛"> " " <emoji "🐙"> ".">
   >
 >
 ```
@@ -579,6 +581,23 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
     - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Hyperlink.
   - **Content**: Inline elements.
+- **`<emoji>`**
+  - **Attributes**:
+    - `id`, `class`, `'data-*'` (same as `<p>`).
+  - **Purpose**: Emoji shortcode converted to Unicode emoji character.
+  - **Content**: Unicode emoji character (e.g., "😄", "❤️", "🚀").
+  - **GitHub Shortcodes**: Supports 200+ GitHub emoji shortcodes including:
+    - **Smileys & Emotion**: `:smile:` (😄), `:heart_eyes:` (😍), `:wink:` (😉), `:joy:` (😂), `:cry:` (😢), `:angry:` (😠), `:sunglasses:` (😎)
+    - **People & Body**: `:thumbsup:` (👍), `:thumbsdown:` (👎), `:clap:` (👏), `:wave:` (👋), `:pray:` (🙏), `:muscle:` (💪)
+    - **Animals & Nature**: `:cat:` (🐱), `:dog:` (🐶), `:bear:` (🐻), `:pig:` (🐷), `:frog:` (🐸), `:bee:` (🐝), `:fish:` (🐟)
+    - **Food & Drink**: `:pizza:` (🍕), `:hamburger:` (🍔), `:coffee:` (☕), `:beer:` (🍺), `:cake:` (🍰), `:apple:` (🍎)
+    - **Activities**: `:soccer:` (⚽), `:basketball:` (🏀), `:guitar:` (🎸), `:video_game:` (🎮), `:art:` (🎨)
+    - **Travel & Places**: `:car:` (🚗), `:airplane:` (✈️), `:rocket:` (🚀), `:house:` (🏠), `:office:` (🏢)
+    - **Objects**: `:computer:` (💻), `:phone:` (📱), `:camera:` (📷), `:bulb:` (💡), `:lock:` (🔒), `:key:` (🔑)
+    - **Symbols**: `:heart:` (❤️), `:star:` (⭐), `:fire:` (🔥), `:zap:` (⚡), `:100:` (💯), `:heavy_check_mark:` (✔️)
+    - **Flags**: `:us:` (🇺🇸), `:uk:` (🇬🇧), `:fr:` (🇫🇷), `:de:` (🇩🇪), `:jp:` (🇯🇵), `:cn:` (🇨🇳)
+    - **GitHub Specific**: `:octocat:` (🐙), `:shipit:` (🚀), `:bowtie:` (👔)
+    - **Programming**: `:bug:` (🐛), `:gear:` (⚙️), `:wrench:` (🔧), `:hammer:` (🔨), `:electric_plug:` (🔌)
 - **`<br>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Line break.
@@ -605,10 +624,37 @@ The Mark schema is designed to represent document structures from Markdown, wiki
   - `hash`: Unique identifier for citation instances.
 - **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage with references stored as objects in the metadata.
 
+### GitHub Emoji Shortcodes System
+- **Structure**: Emoji shortcodes use the format `:shortcode:` and are converted to Unicode emoji wrapped in `<emoji>` elements.
+- **Parsing Rules**:
+  - Must be surrounded by colons (`:`)
+  - Shortcode can contain only letters, numbers, underscores, and hyphens
+  - Case-sensitive matching against GitHub's emoji database
+  - Invalid or unknown shortcodes are left as-is (not converted)
+- **Output Format**: `<emoji "Unicode_Emoji">`
+- **Supported Categories**:
+  - **Smileys & Emotion** (30+ emojis): `:smile:`, `:heart_eyes:`, `:wink:`, `:joy:`, `:cry:`, `:angry:`, `:sunglasses:`
+  - **People & Body** (20+ emojis): `:thumbsup:`, `:thumbsdown:`, `:clap:`, `:wave:`, `:pray:`, `:muscle:`
+  - **Animals & Nature** (25+ emojis): `:cat:`, `:dog:`, `:bear:`, `:pig:`, `:frog:`, `:bee:`, `:fish:`
+  - **Food & Drink** (30+ emojis): `:pizza:`, `:hamburger:`, `:coffee:`, `:beer:`, `:cake:`, `:apple:`
+  - **Activities** (20+ emojis): `:soccer:`, `:basketball:`, `:guitar:`, `:video_game:`, `:art:`
+  - **Travel & Places** (30+ emojis): `:car:`, `:airplane:`, `:rocket:`, `:house:`, `:office:`
+  - **Objects** (25+ emojis): `:computer:`, `:phone:`, `:camera:`, `:bulb:`, `:lock:`, `:key:`
+  - **Symbols** (40+ emojis): `:heart:`, `:star:`, `:fire:`, `:zap:`, `:100:`, `:heavy_check_mark:`
+  - **Flags** (15+ country flags): `:us:`, `:uk:`, `:fr:`, `:de:`, `:jp:`, `:cn:`
+  - **GitHub Specific** (3 emojis): `:octocat:`, `:shipit:`, `:bowtie:`
+  - **Programming/Tech** (15+ emojis): `:bug:`, `:gear:`, `:wrench:`, `:hammer:`, `:electric_plug:`
+- **Usage Examples**:
+  - Input: `Great work! :thumbsup: :fire:`
+  - Output: `<p>"Great work! "<emoji "👍">" "<emoji "🔥"></p>`
+- **Compatibility**: Full compatibility with GitHub Flavored Markdown emoji shortcodes
+
+### Implementation Notes
+
 ### Usage
 - **Transformation**: Facilitates conversion between formats (e.g., Markdown to LaTeX) by preserving semantic structure.
 - **Validation**: Ensures documents conform to Pandoc’s AST with valid element nesting and attributes.
-- **Compatibility**: Supports Markdown (e.g., `#`, `*`, `[@ref]`), wiki (headings, links), and HTML structures.
+- **Compatibility**: Supports Markdown (e.g., `#`, `*`, `[@ref]`, `:emoji:`), wiki (headings, links), and HTML structures.
 - **Element Completeness**: The schema illustrates all Pandoc AST elements, including inline (`Str`, `Emph`, `Strong`, etc.) and block elements (`Para`, `CodeBlock`, etc.), with code examples.
 
 ### References

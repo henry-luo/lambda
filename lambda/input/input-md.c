@@ -13,6 +13,7 @@ static Item parse_superscript(Input *input, const char* text, int* pos);
 static Item parse_subscript(Input *input, const char* text, int* pos);
 static Item parse_math_inline(Input *input, const char* text, int* pos);
 static Item parse_math_display(Input *input, const char* text, int* pos);
+static Item parse_emoji_shortcode(Input *input, const char* text, int* pos);
 static int parse_yaml_frontmatter(Input *input, char** lines, int line_count, Element* meta);
 static void parse_yaml_line(Input *input, const char* line, Element* meta);
 static bool is_table_row(const char* line);
@@ -1502,6 +1503,506 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     return ITEM_NULL;
 }
 
+// GitHub Emoji Shortcode Mapping
+typedef struct {
+    const char* shortcode;
+    const char* unicode;
+} EmojiMapping;
+
+static const EmojiMapping emoji_mappings[] = {
+    // Smileys & Emotion
+    {":smile:", "😄"},
+    {":smiley:", "😃"},
+    {":grinning:", "😀"},
+    {":blush:", "😊"},
+    {":relaxed:", "☺️"},
+    {":wink:", "😉"},
+    {":heart_eyes:", "😍"},
+    {":kissing_heart:", "😘"},
+    {":kissing_closed_eyes:", "😚"},
+    {":stuck_out_tongue:", "😛"},
+    {":stuck_out_tongue_winking_eye:", "😜"},
+    {":stuck_out_tongue_closed_eyes:", "😝"},
+    {":disappointed:", "😞"},
+    {":worried:", "😟"},
+    {":angry:", "😠"},
+    {":rage:", "😡"},
+    {":cry:", "😢"},
+    {":persevere:", "😣"},
+    {":triumph:", "😤"},
+    {":disappointed_relieved:", "😥"},
+    {":frowning:", "😦"},
+    {":anguished:", "😧"},
+    {":fearful:", "😨"},
+    {":weary:", "😩"},
+    {":sleepy:", "😪"},
+    {":tired_face:", "😫"},
+    {":grimacing:", "😬"},
+    {":sob:", "😭"},
+    {":open_mouth:", "😮"},
+    {":hushed:", "😯"},
+    {":cold_sweat:", "😰"},
+    {":scream:", "😱"},
+    {":astonished:", "😲"},
+    {":flushed:", "😳"},
+    {":sleeping:", "😴"},
+    {":dizzy_face:", "😵"},
+    {":no_mouth:", "😶"},
+    {":mask:", "😷"},
+    {":sunglasses:", "😎"},
+    {":confused:", "😕"},
+    {":neutral_face:", "😐"},
+    {":expressionless:", "😑"},
+    {":unamused:", "😒"},
+    {":sweat_smile:", "😅"},
+    {":sweat:", "😓"},
+    {":joy:", "😂"},
+    {":laughing:", "😆"},
+    {":innocent:", "😇"},
+    {":smiling_imp:", "😈"},
+    {":imp:", "👿"},
+    {":skull:", "💀"},
+    
+    // People & Body
+    {":wave:", "👋"},
+    {":raised_hand:", "✋"},
+    {":open_hands:", "👐"},
+    {":point_up:", "☝️"},
+    {":point_down:", "👇"},
+    {":point_left:", "👈"},
+    {":point_right:", "👉"},
+    {":thumbsup:", "👍"},
+    {":thumbsdown:", "👎"},
+    {":fist:", "✊"},
+    {":punch:", "👊"},
+    {":clap:", "👏"},
+    {":ok_hand:", "👌"},
+    {":v:", "✌️"},
+    {":pray:", "🙏"},
+    {":muscle:", "💪"},
+    {":eyes:", "👀"},
+    {":ear:", "👂"},
+    {":nose:", "👃"},
+    {":lips:", "👄"},
+    {":tongue:", "👅"},
+    
+    // Animals & Nature
+    {":dog:", "🐶"},
+    {":cat:", "🐱"},
+    {":mouse:", "🐭"},
+    {":hamster:", "🐹"},
+    {":rabbit:", "🐰"},
+    {":fox_face:", "🦊"},
+    {":bear:", "🐻"},
+    {":panda_face:", "🐼"},
+    {":pig:", "🐷"},
+    {":frog:", "🐸"},
+    {":monkey_face:", "🐵"},
+    {":chicken:", "🐔"},
+    {":penguin:", "🐧"},
+    {":bird:", "🐦"},
+    {":bee:", "🐝"},
+    {":bug:", "🐛"},
+    {":fish:", "🐟"},
+    {":octopus:", "🐙"},
+    {":whale:", "🐳"},
+    {":dolphin:", "🐬"},
+    {":snake:", "🐍"},
+    {":turtle:", "🐢"},
+    {":cow:", "🐄"},
+    {":horse:", "🐴"},
+    {":elephant:", "🐘"},
+    {":sheep:", "🐑"},
+    {":goat:", "🐐"},
+    
+    // Food & Drink
+    {":apple:", "🍎"},
+    {":orange:", "🍊"},
+    {":banana:", "🍌"},
+    {":grapes:", "🍇"},
+    {":strawberry:", "🍓"},
+    {":peach:", "🍑"},
+    {":cherries:", "🍒"},
+    {":pineapple:", "🍍"},
+    {":tomato:", "🍅"},
+    {":eggplant:", "🍆"},
+    {":corn:", "🌽"},
+    {":pizza:", "🍕"},
+    {":hamburger:", "🍔"},
+    {":fries:", "🍟"},
+    {":hotdog:", "🌭"},
+    {":taco:", "🌮"},
+    {":burrito:", "🌯"},
+    {":popcorn:", "🍿"},
+    {":doughnut:", "🍩"},
+    {":cookie:", "🍪"},
+    {":chocolate_bar:", "🍫"},
+    {":candy:", "🍬"},
+    {":icecream:", "🍦"},
+    {":cake:", "🍰"},
+    {":birthday:", "🎂"},
+    {":coffee:", "☕"},
+    {":tea:", "🍵"},
+    {":beer:", "🍺"},
+    {":wine_glass:", "🍷"},
+    
+    // Activities
+    {":soccer:", "⚽"},
+    {":basketball:", "🏀"},
+    {":football:", "🏈"},
+    {":baseball:", "⚾"},
+    {":tennis:", "🎾"},
+    {":8ball:", "🎱"},
+    {":golf:", "⛳"},
+    {":fishing_pole_and_fish:", "🎣"},
+    {":swimmer:", "🏊"},
+    {":surfer:", "🏄"},
+    {":ski:", "🎿"},
+    {":video_game:", "🎮"},
+    {":dart:", "🎯"},
+    {":guitar:", "🎸"},
+    {":musical_note:", "🎵"},
+    {":headphones:", "🎧"},
+    {":microphone:", "🎤"},
+    {":art:", "🎨"},
+    {":game_die:", "🎲"},
+    
+    // Travel & Places
+    {":car:", "🚗"},
+    {":taxi:", "🚕"},
+    {":bus:", "🚌"},
+    {":fire_engine:", "🚒"},
+    {":police_car:", "🚓"},
+    {":ambulance:", "🚑"},
+    {":truck:", "🚚"},
+    {":ship:", "🚢"},
+    {":airplane:", "✈️"},
+    {":rocket:", "🚀"},
+    {":helicopter:", "🚁"},
+    {":train:", "🚂"},
+    {":mountain:", "⛰️"},
+    {":volcano:", "🌋"},
+    {":mount_fuji:", "🗻"},
+    {":camping:", "🏕️"},
+    {":beach_umbrella:", "🏖️"},
+    {":desert:", "🏜️"},
+    {":national_park:", "🏞️"},
+    {":stadium:", "🏟️"},
+    {":house:", "🏠"},
+    {":house_with_garden:", "🏡"},
+    {":office:", "🏢"},
+    {":hospital:", "🏥"},
+    {":bank:", "🏦"},
+    {":hotel:", "🏨"},
+    {":school:", "🏫"},
+    {":factory:", "🏭"},
+    {":castle:", "🏰"},
+    
+    // Objects
+    {":watch:", "⌚"},
+    {":iphone:", "📱"},
+    {":calling:", "📲"},
+    {":computer:", "💻"},
+    {":keyboard:", "⌨️"},
+    {":desktop_computer:", "🖥️"},
+    {":printer:", "🖨️"},
+    {":mouse:", "🖱️"},
+    {":trackball:", "🖲️"},
+    {":camera:", "📷"},
+    {":camera_flash:", "📸"},
+    {":video_camera:", "📹"},
+    {":tv:", "📺"},
+    {":radio:", "📻"},
+    {":vhs:", "📼"},
+    {":cd:", "💿"},
+    {":dvd:", "📀"},
+    {":minidisc:", "💽"},
+    {":floppy_disk:", "💾"},
+    {":electric_plug:", "🔌"},
+    {":battery:", "🔋"},
+    {":bulb:", "💡"},
+    {":flashlight:", "🔦"},
+    {":candle:", "🕯️"},
+    {":fire:", "🔥"},
+    {":zap:", "⚡"},
+    {":star:", "⭐"},
+    {":sparkles:", "✨"},
+    {":boom:", "💥"},
+    {":bomb:", "💣"},
+    {":knife:", "🔪"},
+    {":hammer:", "🔨"},
+    {":wrench:", "🔧"},
+    {":nut_and_bolt:", "🔩"},
+    {":gear:", "⚙️"},
+    {":gun:", "🔫"},
+    {":bow_and_arrow:", "🏹"},
+    {":shield:", "🛡️"},
+    {":lock:", "🔒"},
+    {":unlock:", "🔓"},
+    {":key:", "🔑"},
+    {":bell:", "🔔"},
+    {":bookmark:", "🔖"},
+    {":toilet:", "🚽"},
+    {":shower:", "🚿"},
+    {":bathtub:", "🛁"},
+    {":money_with_wings:", "💸"},
+    {":dollar:", "💵"},
+    {":yen:", "💴"},
+    {":euro:", "💶"},
+    {":pound:", "💷"},
+    {":moneybag:", "💰"},
+    {":credit_card:", "💳"},
+    {":gem:", "💎"},
+    {":scales:", "⚖️"},
+    
+    // Symbols
+    {":heart:", "❤️"},
+    {":yellow_heart:", "💛"},
+    {":green_heart:", "💚"},
+    {":blue_heart:", "💙"},
+    {":purple_heart:", "💜"},
+    {":black_heart:", "🖤"},
+    {":broken_heart:", "💔"},
+    {":two_hearts:", "💕"},
+    {":revolving_hearts:", "💞"},
+    {":heartbeat:", "💓"},
+    {":heartpulse:", "💗"},
+    {":sparkling_heart:", "💖"},
+    {":cupid:", "💘"},
+    {":gift_heart:", "💝"},
+    {":heart_decoration:", "💟"},
+    {":peace_symbol:", "☮️"},
+    {":latin_cross:", "✝️"},
+    {":star_and_crescent:", "☪️"},
+    {":om:", "🕉️"},
+    {":wheel_of_dharma:", "☸️"},
+    {":star_of_david:", "✡️"},
+    {":six_pointed_star:", "🔯"},
+    {":menorah:", "🕎"},
+    {":yin_yang:", "☯️"},
+    {":orthodox_cross:", "☦️"},
+    {":place_of_worship:", "🛐"},
+    {":ophiuchus:", "⛎"},
+    {":aries:", "♈"},
+    {":taurus:", "♉"},
+    {":gemini:", "♊"},
+    {":cancer:", "♋"},
+    {":leo:", "♌"},
+    {":virgo:", "♍"},
+    {":libra:", "♎"},
+    {":scorpius:", "♏"},
+    {":sagittarius:", "♐"},
+    {":capricorn:", "♑"},
+    {":aquarius:", "♒"},
+    {":pisces:", "♓"},
+    {":x:", "❌"},
+    {":heavy_check_mark:", "✔️"},
+    {":white_check_mark:", "✅"},
+    {":heavy_multiplication_x:", "✖️"},
+    {":heavy_plus_sign:", "➕"},
+    {":heavy_minus_sign:", "➖"},
+    {":heavy_division_sign:", "➗"},
+    {":question:", "❓"},
+    {":grey_question:", "❔"},
+    {":grey_exclamation:", "❕"},
+    {":exclamation:", "❗"},
+    {":wavy_dash:", "〰️"},
+    {":copyright:", "©️"},
+    {":registered:", "®️"},
+    {":tm:", "™️"},
+    {":hash:", "#️⃣"},
+    {":asterisk:", "*️⃣"},
+    {":zero:", "0️⃣"},
+    {":one:", "1️⃣"},
+    {":two:", "2️⃣"},
+    {":three:", "3️⃣"},
+    {":four:", "4️⃣"},
+    {":five:", "5️⃣"},
+    {":six:", "6️⃣"},
+    {":seven:", "7️⃣"},
+    {":eight:", "8️⃣"},
+    {":nine:", "9️⃣"},
+    {":keycap_ten:", "🔟"},
+    {":100:", "💯"},
+    {":1234:", "🔢"},
+    {":abc:", "🔤"},
+    {":abcd:", "🔡"},
+    {":capital_abcd:", "🔠"},
+    {":symbols:", "🔣"},
+    {":musical_score:", "🎼"},
+    {":musical_keyboard:", "🎹"},
+    {":notes:", "🎶"},
+    {":studio_microphone:", "🎙️"},
+    {":level_slider:", "🎚️"},
+    {":control_knobs:", "🎛️"},
+    {":radio_button:", "🔘"},
+    {":record_button:", "⏺️"},
+    {":play_or_pause_button:", "⏯️"},
+    {":stop_button:", "⏹️"},
+    {":fast_forward:", "⏩"},
+    {":rewind:", "⏪"},
+    {":arrow_double_up:", "⏫"},
+    {":arrow_double_down:", "⏬"},
+    {":arrow_forward:", "▶️"},
+    {":arrow_backward:", "◀️"},
+    {":arrow_up_small:", "🔼"},
+    {":arrow_down_small:", "🔽"},
+    {":arrow_right:", "➡️"},
+    {":arrow_left:", "⬅️"},
+    {":arrow_up:", "⬆️"},
+    {":arrow_down:", "⬇️"},
+    {":arrow_upper_right:", "↗️"},
+    {":arrow_lower_right:", "↘️"},
+    {":arrow_lower_left:", "↙️"},
+    {":arrow_upper_left:", "↖️"},
+    {":arrow_up_down:", "↕️"},
+    {":left_right_arrow:", "↔️"},
+    {":arrows_counterclockwise:", "🔄"},
+    {":arrow_right_hook:", "↪️"},
+    {":leftwards_arrow_with_hook:", "↩️"},
+    {":twisted_rightwards_arrows:", "🔀"},
+    {":repeat:", "🔁"},
+    {":repeat_one:", "🔂"},
+    {":information_source:", "ℹ️"},
+    {":abc:", "🔤"},
+    {":abcd:", "🔡"},
+    {":capital_abcd:", "🔠"},
+    {":ng:", "🆖"},
+    {":ok:", "🆗"},
+    {":up:", "🆙"},
+    {":cool:", "🆒"},
+    {":new:", "🆕"},
+    {":free:", "🆓"},
+    {":zero:", "0️⃣"},
+    {":one:", "1️⃣"},
+    {":two:", "2️⃣"},
+    {":three:", "3️⃣"},
+    {":four:", "4️⃣"},
+    {":five:", "5️⃣"},
+    {":six:", "6️⃣"},
+    {":seven:", "7️⃣"},
+    {":eight:", "8️⃣"},
+    {":nine:", "9️⃣"},
+    {":keycap_ten:", "🔟"},
+    {":1234:", "🔢"},
+    {":hash:", "#️⃣"},
+    {":asterisk:", "*️⃣"},
+    
+    // Flags (popular ones)
+    {":us:", "🇺🇸"},
+    {":uk:", "🇬🇧"},
+    {":fr:", "🇫🇷"},
+    {":de:", "🇩🇪"},
+    {":it:", "🇮🇹"},
+    {":es:", "🇪🇸"},
+    {":ru:", "🇷🇺"},
+    {":jp:", "🇯🇵"},
+    {":kr:", "🇰🇷"},
+    {":cn:", "🇨🇳"},
+    {":ca:", "🇨🇦"},
+    {":au:", "🇦🇺"},
+    {":in:", "🇮🇳"},
+    {":br:", "🇧🇷"},
+    {":mx:", "🇲🇽"},
+    
+    // GitHub specific
+    {":octocat:", "🐙"},
+    {":shipit:", "🚀"},
+    {":bowtie:", "👔"},
+    
+    // Common programming/tech
+    {":computer:", "💻"},
+    {":keyboard:", "⌨️"},
+    {":bug:", "🐛"},
+    {":gear:", "⚙️"},
+    {":wrench:", "🔧"},
+    {":hammer:", "🔨"},
+    {":electric_plug:", "🔌"},
+    {":battery:", "🔋"},
+    {":bulb:", "💡"},
+    {":mag:", "🔍"},
+    {":mag_right:", "🔎"},
+    {":lock:", "🔒"},
+    {":unlock:", "🔓"},
+    {":key:", "🔑"},
+    {":link:", "🔗"},
+    {":paperclip:", "📎"},
+    
+    // End marker
+    {NULL, NULL}
+};
+
+static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
+    if (text[*pos] != ':') return ITEM_NULL;
+    
+    int start_pos = *pos;
+    (*pos)++; // Skip opening :
+    
+    // Find the closing :
+    int shortcode_start = *pos;
+    while (text[*pos] != '\0' && text[*pos] != ':') {
+        // Only allow letters, numbers, underscores, and hyphens in shortcodes
+        if (!isalnum(text[*pos]) && text[*pos] != '_' && text[*pos] != '-') {
+            *pos = start_pos;
+            return ITEM_NULL;
+        }
+        (*pos)++;
+    }
+    
+    if (text[*pos] != ':') {
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    // Extract shortcode
+    int shortcode_len = *pos - shortcode_start;
+    if (shortcode_len == 0) {
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    char* shortcode = malloc(shortcode_len + 3); // +3 for : : \0
+    shortcode[0] = ':';
+    strncpy(shortcode + 1, text + shortcode_start, shortcode_len);
+    shortcode[shortcode_len + 1] = ':';
+    shortcode[shortcode_len + 2] = '\0';
+    
+    (*pos)++; // Skip closing :
+    
+    // Look up the emoji
+    const char* emoji_unicode = NULL;
+    for (int i = 0; emoji_mappings[i].shortcode != NULL; i++) {
+        if (strcmp(shortcode, emoji_mappings[i].shortcode) == 0) {
+            emoji_unicode = emoji_mappings[i].unicode;
+            break;
+        }
+    }
+    
+    free(shortcode);
+    
+    if (emoji_unicode == NULL) {
+        // If not found, reset position and return null
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    // Create an emoji element for the unicode emoji
+    Element* emoji_elem = create_markdown_element(input, "emoji");
+    if (!emoji_elem) {
+        *pos = start_pos;
+        return ITEM_NULL;
+    }
+    
+    // Add the unicode emoji as text content
+    String* emoji_str = create_string(input, emoji_unicode);
+    if (emoji_str) {
+        list_push((List*)emoji_elem, s2it(emoji_str));
+        ((TypeElmt*)emoji_elem->type)->content_length++;
+    }
+    
+    return (Item)emoji_elem;
+}
+
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
         return s2it(create_string(input, ""));
@@ -1647,6 +2148,25 @@ static Item parse_inline_content(Input *input, const char* text) {
                     ((TypeElmt*)span->type)->content_length++;
                     continue;
                 }
+            }
+        } else if (ch == ':') {
+            // Flush any accumulated text
+            if (text_buffer->length > 0) {
+                strbuf_append_char(text_buffer, '\0');
+                String* text_str = create_string(input, text_buffer->str);
+                if (text_str && text_str->len > 0) {
+                    list_push((List*)span, s2it(text_str));
+                    ((TypeElmt*)span->type)->content_length++;
+                }
+                strbuf_reset(text_buffer);
+            }
+            
+            // Try emoji shortcode
+            Item emoji = parse_emoji_shortcode(input, text, &pos);
+            if (emoji != ITEM_NULL) {
+                list_push((List*)span, emoji);
+                ((TypeElmt*)span->type)->content_length++;
+                continue;
             }
         }
         
