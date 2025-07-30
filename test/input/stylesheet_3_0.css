@@ -30,7 +30,13 @@ input[type*="search"] { border-radius: 20px; }
 /* CSS3 Box Model */
 .box-sizing {
     box-sizing: border-box;
+}
+
+.box-sizing.content-box {
     box-sizing: content-box;
+}
+
+.box-sizing.padding-box {
     box-sizing: padding-box;
 }
 
@@ -43,7 +49,6 @@ input[type*="search"] { border-radius: 20px; }
     
     /* Background size */
     background-size: cover, contain, 100% 50%;
-    background-size: auto, 200px 100px;
     
     /* Background origin and clip */
     background-origin: padding-box, border-box, content-box;
@@ -53,12 +58,14 @@ input[type*="search"] { border-radius: 20px; }
     background-attachment: fixed, scroll, local;
 }
 
+.backgrounds.alt-size {
+    background-size: auto, 200px 100px;
+}
+
 /* CSS3 Borders */
 .borders {
     /* Border radius */
     border-radius: 10px;
-    border-radius: 10px 20px;
-    border-radius: 5px 10px 15px 20px;
     border-top-left-radius: 8px;
     border-top-right-radius: 12px;
     border-bottom-left-radius: 6px;
@@ -74,7 +81,21 @@ input[type*="search"] { border-radius: 20px; }
     
     /* Box shadow */
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.borders.two-values {
+    border-radius: 10px 20px;
+}
+
+.borders.four-values {
+    border-radius: 5px 10px 15px 20px;
+}
+
+.borders.multiple-shadows {
     box-shadow: inset 0 1px 2px #ccc, 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.borders.colored-shadows {
     box-shadow: 2px 2px 4px red, -2px -2px 4px blue;
 }
 
@@ -96,19 +117,34 @@ input[type*="search"] { border-radius: 20px; }
 .text-effects {
     /* Text shadow */
     text-shadow: 1px 1px 2px #000;
-    text-shadow: 0 0 5px red, 2px 2px 3px blue;
     
     /* Text overflow */
     text-overflow: ellipsis;
-    text-overflow: clip;
     
     /* Word wrap */
     word-wrap: break-word;
-    word-wrap: normal;
     
     /* White space */
     white-space: nowrap;
+}
+
+.text-effects.multiple-shadows {
+    text-shadow: 0 0 5px red, 2px 2px 3px blue;
+}
+
+.text-effects.clip {
+    text-overflow: clip;
+}
+
+.text-effects.normal-wrap {
+    word-wrap: normal;
+}
+
+.text-effects.pre-wrap {
     white-space: pre-wrap;
+}
+
+.text-effects.pre-line {
     white-space: pre-line;
 }
 
@@ -135,66 +171,150 @@ input[type*="search"] { border-radius: 20px; }
 .transforms {
     /* 2D Transforms */
     transform: translate(50px, 100px);
-    transform: translateX(20px);
-    transform: translateY(-30px);
-    transform: scale(1.5);
-    transform: scaleX(2);
-    transform: scaleY(0.5);
-    transform: rotate(45deg);
-    transform: skew(30deg, 20deg);
-    transform: skewX(15deg);
-    transform: skewY(-10deg);
-    transform: matrix(1, 0, 0, 1, 50, 100);
-    
-    /* Combined transforms */
-    transform: translate(50px, 50px) rotate(45deg) scale(1.2);
     
     /* Transform origin */
     transform-origin: center;
-    transform-origin: top left;
-    transform-origin: 50% 25%;
-    transform-origin: 10px 20px;
-    
-    /* 3D Transforms */
-    transform: translate3d(10px, 20px, 30px);
-    transform: translateZ(50px);
-    transform: scale3d(1.2, 1.5, 0.8);
-    transform: scaleZ(2);
-    transform: rotate3d(1, 1, 1, 45deg);
-    transform: rotateX(30deg);
-    transform: rotateY(60deg);
-    transform: rotateZ(90deg);
-    transform: perspective(1000px);
     
     /* Transform style */
     transform-style: preserve-3d;
-    transform-style: flat;
     
     /* Perspective */
     perspective: 500px;
     perspective-origin: center;
-    perspective-origin: 25% 75%;
     
     /* Backface visibility */
     backface-visibility: visible;
+}
+
+.transforms.translate-x {
+    transform: translateX(20px);
+}
+
+.transforms.translate-y {
+    transform: translateY(-30px);
+}
+
+.transforms.scale {
+    transform: scale(1.5);
+}
+
+.transforms.scale-x {
+    transform: scaleX(2);
+}
+
+.transforms.scale-y {
+    transform: scaleY(0.5);
+}
+
+.transforms.rotate {
+    transform: rotate(45deg);
+}
+
+.transforms.skew {
+    transform: skew(30deg, 20deg);
+}
+
+.transforms.skew-x {
+    transform: skewX(15deg);
+}
+
+.transforms.skew-y {
+    transform: skewY(-10deg);
+}
+
+.transforms.matrix {
+    transform: matrix(1, 0, 0, 1, 50, 100);
+}
+
+.transforms.combined {
+    transform: translate(50px, 50px) rotate(45deg) scale(1.2);
+}
+
+.transforms.origin-top-left {
+    transform-origin: top left;
+}
+
+.transforms.origin-percent {
+    transform-origin: 50% 25%;
+}
+
+.transforms.origin-pixels {
+    transform-origin: 10px 20px;
+}
+
+.transforms.translate-3d {
+    transform: translate3d(10px, 20px, 30px);
+}
+
+.transforms.translate-z {
+    transform: translateZ(50px);
+}
+
+.transforms.scale-3d {
+    transform: scale3d(1.2, 1.5, 0.8);
+}
+
+.transforms.scale-z {
+    transform: scaleZ(2);
+}
+
+.transforms.rotate-3d {
+    transform: rotate3d(1, 1, 1, 45deg);
+}
+
+.transforms.rotate-x {
+    transform: rotateX(30deg);
+}
+
+.transforms.rotate-y {
+    transform: rotateY(60deg);
+}
+
+.transforms.rotate-z {
+    transform: rotateZ(90deg);
+}
+
+.transforms.perspective-transform {
+    transform: perspective(1000px);
+}
+
+.transforms.flat {
+    transform-style: flat;
+}
+
+.transforms.perspective-percent {
+    perspective-origin: 25% 75%;
+}
+
+.transforms.backface-hidden {
     backface-visibility: hidden;
 }
 
 /* CSS3 Transitions */
 .transitions {
     transition: all 0.3s ease;
-    transition: opacity 0.5s linear;
-    transition: transform 0.2s ease-in-out;
-    transition: width 1s cubic-bezier(0.25, 0.1, 0.25, 1);
-    
-    /* Multiple transitions */
-    transition: opacity 0.3s ease, transform 0.5s ease-in-out, color 0.2s linear;
     
     /* Individual properties */
     transition-property: opacity, transform;
     transition-duration: 0.3s, 0.5s;
     transition-timing-function: ease, ease-in-out;
     transition-delay: 0s, 0.1s;
+}
+
+.transitions.opacity {
+    transition: opacity 0.5s linear;
+}
+
+.transitions.transform {
+    transition: transform 0.2s ease-in-out;
+}
+
+.transitions.width {
+    transition: width 1s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+.transitions.multiple {
+    transition: opacity 0.3s ease, transform 0.5s ease-in-out, color 0.2s linear;
 }
 
 /* CSS3 Animations */
@@ -217,11 +337,6 @@ input[type*="search"] { border-radius: 20px; }
 
 .animations {
     animation: fadeIn 1s ease-in-out;
-    animation: spin 2s linear infinite;
-    animation: bounce 1.5s ease-in-out infinite alternate;
-    
-    /* Multiple animations */
-    animation: fadeIn 1s ease-in-out, spin 2s linear infinite;
     
     /* Individual properties */
     animation-name: fadeIn;
@@ -229,107 +344,232 @@ input[type*="search"] { border-radius: 20px; }
     animation-timing-function: ease-in-out;
     animation-delay: 0.5s;
     animation-iteration-count: infinite;
-    animation-iteration-count: 3;
     animation-direction: normal;
-    animation-direction: reverse;
-    animation-direction: alternate;
-    animation-direction: alternate-reverse;
     animation-fill-mode: none;
-    animation-fill-mode: forwards;
-    animation-fill-mode: backwards;
-    animation-fill-mode: both;
     animation-play-state: running;
+}
+
+.animations.spin {
+    animation: spin 2s linear infinite;
+}
+
+.animations.bounce {
+    animation: bounce 1.5s ease-in-out infinite alternate;
+}
+
+.animations.multiple {
+    animation: fadeIn 1s ease-in-out, spin 2s linear infinite;
+}
+
+.animations.three-iterations {
+    animation-iteration-count: 3;
+}
+
+.animations.reverse {
+    animation-direction: reverse;
+}
+
+.animations.alternate {
+    animation-direction: alternate;
+}
+
+.animations.alternate-reverse {
+    animation-direction: alternate-reverse;
+}
+
+.animations.forwards {
+    animation-fill-mode: forwards;
+}
+
+.animations.backwards {
+    animation-fill-mode: backwards;
+}
+
+.animations.both {
+    animation-fill-mode: both;
+}
+
+.animations.paused {
     animation-play-state: paused;
 }
 
 /* CSS3 Layout: Flexbox */
 .flexbox {
     display: flex;
-    display: inline-flex;
     
     /* Flex direction */
     flex-direction: row;
-    flex-direction: row-reverse;
-    flex-direction: column;
-    flex-direction: column-reverse;
     
     /* Flex wrap */
     flex-wrap: nowrap;
-    flex-wrap: wrap;
-    flex-wrap: wrap-reverse;
     
     /* Flex flow (shorthand) */
     flex-flow: row wrap;
-    flex-flow: column nowrap;
     
     /* Justify content */
     justify-content: flex-start;
-    justify-content: flex-end;
-    justify-content: center;
-    justify-content: space-between;
-    justify-content: space-around;
-    justify-content: space-evenly;
     
     /* Align items */
     align-items: stretch;
-    align-items: flex-start;
-    align-items: flex-end;
-    align-items: center;
-    align-items: baseline;
     
     /* Align content */
     align-content: stretch;
+}
+
+.flexbox.inline {
+    display: inline-flex;
+}
+
+.flexbox.row-reverse {
+    flex-direction: row-reverse;
+}
+
+.flexbox.column {
+    flex-direction: column;
+}
+
+.flexbox.column-reverse {
+    flex-direction: column-reverse;
+}
+
+.flexbox.wrap {
+    flex-wrap: wrap;
+}
+
+.flexbox.wrap-reverse {
+    flex-wrap: wrap-reverse;
+}
+
+.flexbox.column-nowrap {
+    flex-flow: column nowrap;
+}
+
+.flexbox.flex-end {
+    justify-content: flex-end;
+}
+
+.flexbox.center {
+    justify-content: center;
+}
+
+.flexbox.space-between {
+    justify-content: space-between;
+}
+
+.flexbox.space-around {
+    justify-content: space-around;
+}
+
+.flexbox.space-evenly {
+    justify-content: space-evenly;
+}
+
+.flexbox.align-flex-start {
+    align-items: flex-start;
+}
+
+.flexbox.align-flex-end {
+    align-items: flex-end;
+}
+
+.flexbox.align-center {
+    align-items: center;
+}
+
+.flexbox.align-baseline {
+    align-items: baseline;
+}
+
+.flexbox.content-flex-start {
     align-content: flex-start;
+}
+
+.flexbox.content-flex-end {
     align-content: flex-end;
+}
+
+.flexbox.content-center {
     align-content: center;
+}
+
+.flexbox.content-space-between {
     align-content: space-between;
+}
+
+.flexbox.content-space-around {
     align-content: space-around;
 }
 
 .flex-item {
     /* Flex properties */
     flex: 1;
-    flex: 0 1 auto;
-    flex: 2 0 200px;
     
     /* Individual flex properties */
     flex-grow: 1;
     flex-shrink: 0;
     flex-basis: 200px;
-    flex-basis: auto;
-    flex-basis: content;
     
     /* Align self */
     align-self: auto;
-    align-self: flex-start;
-    align-self: flex-end;
-    align-self: center;
-    align-self: baseline;
-    align-self: stretch;
     
     /* Order */
     order: 0;
+}
+
+.flex-item.shorthand-0-1-auto {
+    flex: 0 1 auto;
+}
+
+.flex-item.shorthand-2-0-200px {
+    flex: 2 0 200px;
+}
+
+.flex-item.basis-auto {
+    flex-basis: auto;
+}
+
+.flex-item.basis-content {
+    flex-basis: content;
+}
+
+.flex-item.self-flex-start {
+    align-self: flex-start;
+}
+
+.flex-item.self-flex-end {
+    align-self: flex-end;
+}
+
+.flex-item.self-center {
+    align-self: center;
+}
+
+.flex-item.self-baseline {
+    align-self: baseline;
+}
+
+.flex-item.self-stretch {
+    align-self: stretch;
+}
+
+.flex-item.order-1 {
     order: 1;
+}
+
+.flex-item.order-negative {
     order: -1;
 }
 
 /* CSS3 Layout: Grid (CSS Grid Level 1, part of CSS3 era) */
 .grid {
     display: grid;
-    display: inline-grid;
     
     /* Grid template */
     grid-template-columns: 1fr 2fr 1fr;
-    grid-template-columns: repeat(3, 1fr);
-    grid-template-columns: 100px auto 50px;
-    grid-template-columns: minmax(100px, 1fr) 200px;
-    
     grid-template-rows: 100px 1fr 50px;
-    grid-template-rows: repeat(auto-fit, minmax(100px, 1fr));
     
     /* Grid gap */
     grid-gap: 10px;
-    grid-gap: 10px 20px;
     grid-column-gap: 15px;
     grid-row-gap: 25px;
     
@@ -340,22 +580,55 @@ input[type*="search"] { border-radius: 20px; }
         "footer footer footer";
 }
 
+.grid.inline {
+    display: inline-grid;
+}
+
+.grid.repeat-columns {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.grid.mixed-columns {
+    grid-template-columns: 100px auto 50px;
+}
+
+.grid.minmax-columns {
+    grid-template-columns: minmax(100px, 1fr) 200px;
+}
+
+.grid.auto-fit-rows {
+    grid-template-rows: repeat(auto-fit, minmax(100px, 1fr));
+}
+
+.grid.gap-two-values {
+    grid-gap: 10px 20px;
+}
+
 .grid-item {
     /* Grid placement */
     grid-column: 1 / 3;
-    grid-column: span 2;
     grid-row: 2 / 4;
-    grid-row: span 1;
     
     /* Grid area */
     grid-area: header;
-    grid-area: 1 / 2 / 3 / 4;
     
     /* Individual placement */
     grid-column-start: 1;
     grid-column-end: 3;
     grid-row-start: 2;
     grid-row-end: span 2;
+}
+
+.grid-item.span-column {
+    grid-column: span 2;
+}
+
+.grid-item.span-row {
+    grid-row: span 1;
+}
+
+.grid-item.area-coordinates {
+    grid-area: 1 / 2 / 3 / 4;
 }
 
 /* CSS3 Multi-column Layout */
@@ -371,9 +644,15 @@ input[type*="search"] { border-radius: 20px; }
     column-rule-color: #999;
     
     column-fill: auto;
-    column-fill: balance;
     
     column-span: all;
+}
+
+.columns.balance {
+    column-fill: balance;
+}
+
+.columns.span-none {
     column-span: none;
 }
 
@@ -402,37 +681,86 @@ input[type*="search"] { border-radius: 20px; }
 .gradients {
     /* Linear gradients */
     background: linear-gradient(to right, red, blue);
+}
+
+.gradients.linear-45deg {
     background: linear-gradient(45deg, #ff0000, #00ff00, #0000ff);
+}
+
+.gradients.linear-transparent {
     background: linear-gradient(to bottom right, rgba(255,0,0,0.5), transparent);
-    
-    /* Radial gradients */
+}
+
+.gradients.radial-circle {
     background: radial-gradient(circle, red, blue);
+}
+
+.gradients.radial-ellipse {
     background: radial-gradient(ellipse at center, #ff0000 0%, #00ff00 50%, #0000ff 100%);
+}
+
+.gradients.radial-closest-side {
     background: radial-gradient(closest-side at 30% 40%, red, blue);
-    
-    /* Repeating gradients */
+}
+
+.gradients.repeating-linear {
     background: repeating-linear-gradient(45deg, red 0px, red 10px, blue 10px, blue 20px);
+}
+
+.gradients.repeating-radial {
     background: repeating-radial-gradient(circle, red 0px, red 10px, blue 10px, blue 20px);
 }
 
 /* CSS3 Filters */
 .filters {
     filter: blur(5px);
+}
+
+.filters.brightness {
     filter: brightness(0.8);
+}
+
+.filters.contrast {
     filter: contrast(150%);
+}
+
+.filters.drop-shadow {
     filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
+}
+
+.filters.grayscale {
     filter: grayscale(100%);
+}
+
+.filters.hue-rotate {
     filter: hue-rotate(90deg);
+}
+
+.filters.invert {
     filter: invert(75%);
+}
+
+.filters.opacity {
     filter: opacity(50%);
+}
+
+.filters.saturate {
     filter: saturate(200%);
+}
+
+.filters.sepia {
     filter: sepia(60%);
-    
-    /* Multiple filters */
+}
+
+.filters.multiple {
     filter: blur(2px) brightness(0.9) contrast(120%);
-    
-    /* Backdrop filter */
+}
+
+.filters.backdrop-blur {
     backdrop-filter: blur(10px);
+}
+
+.filters.backdrop-mixed {
     backdrop-filter: brightness(0.8) saturate(120%);
 }
 
@@ -440,9 +768,6 @@ input[type*="search"] { border-radius: 20px; }
 .misc {
     /* Resize */
     resize: both;
-    resize: horizontal;
-    resize: vertical;
-    resize: none;
     
     /* Overflow */
     overflow-x: hidden;
@@ -455,41 +780,98 @@ input[type*="search"] { border-radius: 20px; }
     
     /* Cursor */
     cursor: pointer;
-    cursor: grab;
-    cursor: grabbing;
-    cursor: zoom-in;
-    cursor: zoom-out;
     
     /* User select */
     user-select: none;
-    user-select: text;
-    user-select: all;
     
     /* Pointer events */
     pointer-events: none;
-    pointer-events: auto;
     
     /* Tab size */
     tab-size: 4;
-    tab-size: 2;
     
     /* Hyphens */
     hyphens: auto;
-    hyphens: manual;
-    hyphens: none;
     
     /* Text align last */
     text-align-last: center;
-    text-align-last: justify;
     
     /* Writing mode */
     writing-mode: horizontal-tb;
-    writing-mode: vertical-rl;
-    writing-mode: vertical-lr;
     
     /* Text orientation */
     text-orientation: mixed;
+}
+
+.misc.resize-horizontal {
+    resize: horizontal;
+}
+
+.misc.resize-vertical {
+    resize: vertical;
+}
+
+.misc.resize-none {
+    resize: none;
+}
+
+.misc.cursor-grab {
+    cursor: grab;
+}
+
+.misc.cursor-grabbing {
+    cursor: grabbing;
+}
+
+.misc.cursor-zoom-in {
+    cursor: zoom-in;
+}
+
+.misc.cursor-zoom-out {
+    cursor: zoom-out;
+}
+
+.misc.user-select-text {
+    user-select: text;
+}
+
+.misc.user-select-all {
+    user-select: all;
+}
+
+.misc.pointer-events-auto {
+    pointer-events: auto;
+}
+
+.misc.tab-size-2 {
+    tab-size: 2;
+}
+
+.misc.hyphens-manual {
+    hyphens: manual;
+}
+
+.misc.hyphens-none {
+    hyphens: none;
+}
+
+.misc.text-align-last-justify {
+    text-align-last: justify;
+}
+
+.misc.writing-mode-vertical-rl {
+    writing-mode: vertical-rl;
+}
+
+.misc.writing-mode-vertical-lr {
+    writing-mode: vertical-lr;
+}
+
+.misc.text-orientation-upright {
     text-orientation: upright;
+}
+
+.misc.text-orientation-sideways {
     text-orientation: sideways;
 }
 

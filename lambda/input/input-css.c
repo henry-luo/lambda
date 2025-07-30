@@ -22,6 +22,9 @@ static Array* parse_css_value_list(Input *input, const char **css);
 static Array* parse_css_function_params(Input *input, const char **css);
 static Item flatten_single_array(Array* arr);
 
+// Global array to collect all rules including nested ones
+static Array* g_all_rules = NULL;
+
 static void skip_css_whitespace(const char **css) {
     while (**css && (**css == ' ' || **css == '\n' || **css == '\r' || **css == '\t')) {
         (*css)++;
@@ -65,9 +68,107 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
     
     skip_css_comments(css);
     
-    Array* rules = parse_css_rules(input, css);
-    if (rules) {
-        input_add_attribute_item_to_element(input, stylesheet, "rules", (Item)rules);
+    // Create separate collections for different rule types
+    Array* rules = array_pooled(input->pool);          // Regular CSS rules
+    Array* keyframes = array_pooled(input->pool);      // @keyframes rules
+    Array* media_queries = array_pooled(input->pool);  // @media rules
+    Array* supports_queries = array_pooled(input->pool); // @supports rules
+    Array* font_faces = array_pooled(input->pool);     // @font-face rules
+    Array* other_at_rules = array_pooled(input->pool); // Other at-rules
+    
+    // Initialize global array to collect ALL rules including nested ones
+    g_all_rules = rules;
+    
+    if (!rules || !keyframes || !media_queries || !supports_queries || !font_faces || !other_at_rules) {
+        return ITEM_ERROR;
+    }
+    
+    // Parse all rules and categorize them
+    while (**css) {
+        skip_css_comments(css);
+        if (!**css) break;
+        
+        printf("Parsing CSS rule\n");
+        
+        // Check if this is an at-rule before parsing
+        const char* rule_start = *css;
+        bool is_at_rule = (**css == '@');
+        const char* at_rule_name = NULL;
+        
+        if (is_at_rule) {
+            // Extract at-rule name for categorization
+            const char* name_start = *css + 1; // Skip @
+            const char* name_end = name_start;
+            while (*name_end && is_css_identifier_char(*name_end)) {
+                name_end++;
+            }
+            
+            if (name_end > name_start) {
+                size_t name_len = name_end - name_start;
+                char* name_buf = malloc(name_len + 1);
+                if (name_buf) {
+                    strncpy(name_buf, name_start, name_len);
+                    name_buf[name_len] = '\0';
+                    at_rule_name = name_buf;
+                }
+            }
+        }
+        
+        Item rule = parse_css_rule(input, css);
+        if (rule != ITEM_ERROR) {
+            LambdaItem lambda_item = {.item = rule};
+            
+            if (is_at_rule && at_rule_name) {
+                // Categorize at-rules
+                if (strcmp(at_rule_name, "keyframes") == 0) {
+                    array_append(keyframes, lambda_item, input->pool);
+                } else if (strcmp(at_rule_name, "media") == 0) {
+                    array_append(media_queries, lambda_item, input->pool);
+                } else if (strcmp(at_rule_name, "supports") == 0) {
+                    array_append(supports_queries, lambda_item, input->pool);
+                } else if (strcmp(at_rule_name, "font-face") == 0) {
+                    array_append(font_faces, lambda_item, input->pool);
+                } else {
+                    array_append(other_at_rules, lambda_item, input->pool);
+                }
+                free((void*)at_rule_name); // Free the allocated name buffer
+            } else {
+                // Regular CSS rule
+                array_append(rules, lambda_item, input->pool);
+            }
+        } else {
+            // Skip invalid rule content until next rule or end
+            while (**css && **css != '}' && **css != '@') {
+                (*css)++;
+            }
+            if (**css == '}') {
+                (*css)++;
+            }
+            
+            if (at_rule_name) {
+                free((void*)at_rule_name);
+            }
+        }
+        
+        skip_css_comments(css);
+    }
+    
+    // Add all collections to the stylesheet
+    input_add_attribute_item_to_element(input, stylesheet, "rules", (Item)rules);
+    if (keyframes->length > 0) {
+        input_add_attribute_item_to_element(input, stylesheet, "keyframes", (Item)keyframes);
+    }
+    if (media_queries->length > 0) {
+        input_add_attribute_item_to_element(input, stylesheet, "media", (Item)media_queries);
+    }
+    if (supports_queries->length > 0) {
+        input_add_attribute_item_to_element(input, stylesheet, "supports", (Item)supports_queries);
+    }
+    if (font_faces->length > 0) {
+        input_add_attribute_item_to_element(input, stylesheet, "font_faces", (Item)font_faces);
+    }
+    if (other_at_rules->length > 0) {
+        input_add_attribute_item_to_element(input, stylesheet, "at_rules", (Item)other_at_rules);
     }
     
     return (Item)stylesheet;
@@ -135,17 +236,28 @@ static Item parse_css_at_rule(Input *input, const char **css) {
     skip_css_comments(css);
     
     // Parse at-rule prelude (everything before { or ;)
-    int brace_depth = 0;
+    StrBuf* prelude_sb = strbuf_new_pooled(input->pool);
+    int paren_depth = 0;
     
     while (**css && (**css != '{' && **css != ';')) {
-        if (**css == '(') brace_depth++;
-        else if (**css == ')') brace_depth--;
+        char c = **css;
+        if (c == '(') paren_depth++;
+        else if (c == ')') paren_depth--;
         
-        strbuf_append_char(sb, **css);
+        // Don't break on braces inside parentheses
+        if (c == '{' && paren_depth > 0) {
+            strbuf_append_char(prelude_sb, c);
+            (*css)++;
+            continue;
+        }
+        
+        if (c == '{' || c == ';') break;
+        
+        strbuf_append_char(prelude_sb, c);
         (*css)++;
     }
     
-    String* prelude_str = strbuf_to_string(sb);
+    String* prelude_str = strbuf_to_string(prelude_sb);
     if (prelude_str && prelude_str->len > 0) {
         char* trimmed = input_trim_whitespace(prelude_str->chars);
         if (trimmed && strlen(trimmed) > 0) {
@@ -162,11 +274,133 @@ static Item parse_css_at_rule(Input *input, const char **css) {
         // Parse nested rules or declarations
         if (strcmp(at_rule_name->chars, "media") == 0 || 
             strcmp(at_rule_name->chars, "supports") == 0 ||
-            strcmp(at_rule_name->chars, "document") == 0) {
+            strcmp(at_rule_name->chars, "document") == 0 ||
+            strcmp(at_rule_name->chars, "container") == 0) {
             // These at-rules contain nested rules
-            Array* nested_rules = parse_css_rules(input, css);
+            Array* nested_rules = array_pooled(input->pool);
             if (nested_rules) {
+                // Parse nested CSS rules until we hit the closing brace
+                while (**css && **css != '}') {
+                    skip_css_comments(css);
+                    if (**css == '}') break;
+                    
+                    Item nested_rule = parse_css_rule(input, css);
+                    if (nested_rule != ITEM_ERROR) {
+                        LambdaItem item = {.item = nested_rule};
+                        array_append(nested_rules, item, input->pool);
+                        
+                        // Also add nested rule to global rules array
+                        if (g_all_rules) {
+                            array_append(g_all_rules, item, input->pool);
+                            printf("DEBUG: Added nested rule to global rules array\n");
+                        }
+                    } else {
+                        // Skip malformed rule
+                        while (**css && **css != '}' && **css != '{') {
+                            (*css)++;
+                        }
+                        if (**css == '{') {
+                            // Skip entire block
+                            int brace_count = 1;
+                            (*css)++;
+                            while (**css && brace_count > 0) {
+                                if (**css == '{') brace_count++;
+                                else if (**css == '}') brace_count--;
+                                (*css)++;
+                            }
+                        }
+                    }
+                    skip_css_comments(css);
+                }
+                
                 input_add_attribute_item_to_element(input, at_rule, "rules", (Item)nested_rules);
+            }
+        } else if (strcmp(at_rule_name->chars, "keyframes") == 0) {
+            // @keyframes contains keyframe rules
+            Array* keyframe_rules = array_pooled(input->pool);
+            if (keyframe_rules) {
+                while (**css && **css != '}') {
+                    skip_css_comments(css);
+                    if (**css == '}') break;
+                    
+                    // Parse keyframe selector (0%, 50%, from, to, etc.)
+                    StrBuf* keyframe_sb = strbuf_new_pooled(input->pool);
+                    while (**css && **css != '{' && **css != '}') {
+                        strbuf_append_char(keyframe_sb, **css);
+                        (*css)++;
+                    }
+                    String* keyframe_selector = strbuf_to_string(keyframe_sb);
+                    
+                    if (keyframe_selector && **css == '{') {
+                        (*css)++; // Skip opening brace
+                        
+                        Element* keyframe_rule = input_create_element(input, "keyframe");
+                        if (keyframe_rule) {
+                            char* trimmed = input_trim_whitespace(keyframe_selector->chars);
+                            if (trimmed) {
+                                input_add_attribute_to_element(input, keyframe_rule, "selector", trimmed);
+                                free(trimmed);
+                            }
+                            
+                            // Parse declarations within keyframe
+                            while (**css && **css != '}') {
+                                skip_css_comments(css);
+                                if (**css == '}') break;
+                                
+                                // Parse property name
+                                StrBuf* prop_sb = strbuf_new_pooled(input->pool);
+                                while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
+                                    strbuf_append_char(prop_sb, **css);
+                                    (*css)++;
+                                }
+                                String* property_str = strbuf_to_string(prop_sb);
+                                if (!property_str) {
+                                    // Skip to next declaration
+                                    while (**css && **css != ';' && **css != '}') (*css)++;
+                                    if (**css == ';') (*css)++;
+                                    continue;
+                                }
+                                
+                                skip_css_comments(css);
+                                
+                                if (**css == ':') {
+                                    (*css)++; // Skip colon
+                                    skip_css_comments(css);
+                                    
+                                    // Parse value list
+                                    Array* values = parse_css_value_list(input, css);
+                                    if (values) {
+                                        Item values_item = flatten_single_array(values);
+                                        input_add_attribute_item_to_element(input, keyframe_rule, property_str->chars, values_item);
+                                    }
+                                    
+                                    // Check for !important
+                                    skip_css_comments(css);
+                                    if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
+                                        *css += 10;
+                                    }
+                                }
+                                
+                                skip_css_comments(css);
+                                if (**css == ';') {
+                                    (*css)++; // Skip semicolon
+                                    skip_css_comments(css);
+                                }
+                            }
+                            
+                            if (**css == '}') {
+                                (*css)++; // Skip closing brace
+                            }
+                            
+                            LambdaItem keyframe_item = {.item = (Item)keyframe_rule};
+                            array_append(keyframe_rules, keyframe_item, input->pool);
+                        }
+                    }
+                    
+                    skip_css_comments(css);
+                }
+                
+                input_add_attribute_item_to_element(input, at_rule, "keyframes", (Item)keyframe_rules);
             }
         } else {
             // Other at-rules contain declarations - parse them directly as properties
@@ -175,12 +409,12 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                 if (**css == '}') break;
                 
                 // Parse property name
-                StrBuf* sb = input->sb;
+                StrBuf* prop_sb = strbuf_new_pooled(input->pool);
                 while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
-                    strbuf_append_char(sb, **css);
+                    strbuf_append_char(prop_sb, **css);
                     (*css)++;
                 }
-                String* property_str = strbuf_to_string(sb);
+                String* property_str = strbuf_to_string(prop_sb);
                 if (!property_str) {
                     // Skip to next declaration
                     while (**css && **css != ';' && **css != '}') (*css)++;
@@ -334,8 +568,45 @@ static Item parse_css_selector(Input *input, const char **css) {
     StrBuf* sb = input->sb;
     
     // Parse selector text until comma or opening brace
+    // Handle complex selectors including attribute selectors, pseudo-classes, pseudo-elements
+    int bracket_depth = 0;
+    int paren_depth = 0;
+    
     while (**css && **css != ',' && **css != '{') {
-        strbuf_append_char(sb, **css);
+        char c = **css;
+        
+        // Track bracket and parenthesis depth for complex selectors
+        if (c == '[') {
+            bracket_depth++;
+        } else if (c == ']') {
+            bracket_depth--;
+        } else if (c == '(') {
+            paren_depth++;
+        } else if (c == ')') {
+            paren_depth--;
+        }
+        
+        // Handle escaped characters in selectors
+        if (c == '\\' && *(*css + 1)) {
+            strbuf_append_char(sb, c);
+            (*css)++;
+            strbuf_append_char(sb, **css);
+            (*css)++;
+            continue;
+        }
+        
+        // Don't break on comma or brace inside brackets or parentheses
+        if ((c == ',' || c == '{') && (bracket_depth > 0 || paren_depth > 0)) {
+            strbuf_append_char(sb, c);
+            (*css)++;
+            continue;
+        }
+        
+        if (c == ',' || c == '{') {
+            break;
+        }
+        
+        strbuf_append_char(sb, c);
         (*css)++;
     }
     
@@ -559,6 +830,42 @@ static Item parse_css_color(Input *input, const char **css) {
         return ITEM_ERROR;
     }
     
+    // Check for CSS3 color functions (rgba, hsla, etc.)
+    if (is_css_identifier_start(**css)) {
+        const char* start = *css;
+        
+        // Check for color function names
+        if (strncmp(*css, "rgba(", 5) == 0 ||
+            strncmp(*css, "hsla(", 5) == 0 ||
+            strncmp(*css, "rgb(", 4) == 0 ||
+            strncmp(*css, "hsl(", 4) == 0) {
+            // Parse as function
+            return parse_css_function(input, css);
+        }
+        
+        // Check for named colors
+        while (is_css_identifier_char(**css)) {
+            strbuf_append_char(sb, **css);
+            (*css)++;
+        }
+        
+        String* color_name = strbuf_to_string(sb);
+        if (color_name) {
+            // Common CSS color names - return as symbol
+            const char* name = color_name->chars;
+            if (strcmp(name, "red") == 0 || strcmp(name, "blue") == 0 || 
+                strcmp(name, "green") == 0 || strcmp(name, "white") == 0 ||
+                strcmp(name, "black") == 0 || strcmp(name, "yellow") == 0 ||
+                strcmp(name, "transparent") == 0 || strcmp(name, "currentColor") == 0) {
+                return y2it(color_name);
+            }
+        }
+        
+        // Reset if not a color
+        *css = start;
+        strbuf_to_string(sb); // Clear buffer
+    }
+    
     return ITEM_ERROR;
 }
 
@@ -614,6 +921,7 @@ static Item parse_css_measure(Input *input, const char **css) {
         strbuf_append_char(sb, **css);
         (*css)++;
     } else if (is_css_identifier_start(**css)) {
+        // Handle CSS3 units
         while (is_css_identifier_char(**css)) {
             strbuf_append_char(sb, **css);
             (*css)++;
@@ -623,7 +931,36 @@ static Item parse_css_measure(Input *input, const char **css) {
     // If we have a unit, treat as symbol (measure), otherwise as number
     String* measure_str = strbuf_to_string(sb);
     if (*css > unit_start) {
-        return measure_str ? s2it(measure_str) : ITEM_ERROR;
+        // Validate common CSS3 units
+        const char* unit = unit_start;
+        size_t unit_len = *css - unit_start;
+        
+        // CSS3 length units
+        if ((unit_len == 2 && (strncmp(unit, "px", 2) == 0 || strncmp(unit, "em", 2) == 0 ||
+                              strncmp(unit, "ex", 2) == 0 || strncmp(unit, "ch", 2) == 0 ||
+                              strncmp(unit, "rem", 3) == 0 || strncmp(unit, "vw", 2) == 0 ||
+                              strncmp(unit, "vh", 2) == 0 || strncmp(unit, "cm", 2) == 0 ||
+                              strncmp(unit, "mm", 2) == 0 || strncmp(unit, "in", 2) == 0 ||
+                              strncmp(unit, "pt", 2) == 0 || strncmp(unit, "pc", 2) == 0)) ||
+            (unit_len == 3 && (strncmp(unit, "rem", 3) == 0)) ||
+            (unit_len == 4 && (strncmp(unit, "vmin", 4) == 0 || strncmp(unit, "vmax", 4) == 0)) ||
+            // CSS3 angle units
+            (unit_len == 3 && (strncmp(unit, "deg", 3) == 0 || strncmp(unit, "rad", 3) == 0)) ||
+            (unit_len == 4 && (strncmp(unit, "grad", 4) == 0 || strncmp(unit, "turn", 4) == 0)) ||
+            // CSS3 time units
+            (unit_len == 1 && strncmp(unit, "s", 1) == 0) ||
+            (unit_len == 2 && strncmp(unit, "ms", 2) == 0) ||
+            // CSS3 frequency units
+            (unit_len == 2 && (strncmp(unit, "Hz", 2) == 0)) ||
+            (unit_len == 3 && (strncmp(unit, "kHz", 3) == 0)) ||
+            // CSS3 resolution units
+            (unit_len == 3 && (strncmp(unit, "dpi", 3) == 0 || strncmp(unit, "dpcm", 4) == 0)) ||
+            (unit_len == 4 && (strncmp(unit, "dpcm", 4) == 0 || strncmp(unit, "dppx", 4) == 0))) {
+            return measure_str ? s2it(measure_str) : ITEM_ERROR;
+        } else {
+            // Unknown unit, but still return as measure
+            return measure_str ? s2it(measure_str) : ITEM_ERROR;
+        }
     } else {
         // Reset and parse as number only
         *css = start;
@@ -635,9 +972,37 @@ static Item parse_css_identifier(Input *input, const char **css) {
     if (!is_css_identifier_start(**css)) return ITEM_ERROR;
     
     StrBuf* sb = input->sb;
-    while (is_css_identifier_char(**css)) {
+    
+    // Handle CSS pseudo-elements (::) and pseudo-classes (:)
+    if (**css == ':') {
         strbuf_append_char(sb, **css);
         (*css)++;
+        
+        // Check for double colon (pseudo-elements)
+        if (**css == ':') {
+            strbuf_append_char(sb, **css);
+            (*css)++;
+        }
+    }
+    
+    while (is_css_identifier_char(**css) || **css == '-') {
+        strbuf_append_char(sb, **css);
+        (*css)++;
+    }
+    
+    // Handle CSS3 pseudo-class functions like :nth-child(2n+1)
+    if (**css == '(') {
+        strbuf_append_char(sb, **css);
+        (*css)++;
+        
+        int paren_depth = 1;
+        while (**css && paren_depth > 0) {
+            if (**css == '(') paren_depth++;
+            else if (**css == ')') paren_depth--;
+            
+            strbuf_append_char(sb, **css);
+            (*css)++;
+        }
     }
     
     String* id_str = strbuf_to_string(sb);
@@ -683,6 +1048,10 @@ static Array* parse_css_function_params(Input *input, const char **css) {
         if (**css == ',') {
             (*css)++; // skip comma
             skip_css_comments(css);
+        } else if (**css == '/') {
+            // Handle slash separator (e.g., rgba(255 0 0 / 0.5))
+            (*css)++; // skip slash
+            skip_css_comments(css);
         } else if (**css == ')') {
             // end of parameters
             break;
@@ -691,7 +1060,7 @@ static Array* parse_css_function_params(Input *input, const char **css) {
             // some CSS functions use space separation (e.g., rgba(255 0 0 / 0.5))
             skip_css_whitespace(css);
             
-            if (**css && **css != ',' && **css != ')') {
+            if (**css && **css != ',' && **css != ')' && **css != '/') {
                 // continue parsing more values in this parameter context
                 continue;
             }
@@ -788,9 +1157,9 @@ static Array* parse_css_value_list(Input *input, const char **css) {
     Array* values = array_pooled(input->pool);
     if (!values) return NULL;
     
-    while (**css && **css != ';' && **css != '}' && **css != '!') {
+    while (**css && **css != ';' && **css != '}' && **css != '!' && **css != ')') {
         skip_css_comments(css);
-        if (!**css || **css == ';' || **css == '}' || **css == '!') break;
+        if (!**css || **css == ';' || **css == '}' || **css == '!' || **css == ')') break;
         
         const char* start_pos = *css; // Track position to detect infinite loops
         
@@ -809,6 +1178,10 @@ static Array* parse_css_value_list(Input *input, const char **css) {
         // Check for value separators BEFORE calling skip_css_comments
         // because skip_css_comments would consume the space we want to detect
         if (**css == ',') {
+            (*css)++;
+            skip_css_comments(css);
+        } else if (**css == '/') {
+            // Handle slash separator (e.g., rgba(255 0 0 / 0.5))
             (*css)++;
             skip_css_comments(css);
         } else if (**css == ' ' || **css == '\t' || **css == '\n' || **css == '\r') {
@@ -865,8 +1238,65 @@ static Item parse_css_value(Input *input, const char **css) {
                 }
                 skip_css_whitespace(&lookahead);
                 if (*lookahead == '(') {
-                    return parse_css_function(input, css);
+                    // Check for CSS3 functions
+                    const char* start = *css;
+                    if (strncmp(start, "calc(", 5) == 0 ||
+                        strncmp(start, "var(", 4) == 0 ||
+                        strncmp(start, "linear-gradient(", 16) == 0 ||
+                        strncmp(start, "radial-gradient(", 16) == 0 ||
+                        strncmp(start, "repeating-linear-gradient(", 26) == 0 ||
+                        strncmp(start, "repeating-radial-gradient(", 26) == 0 ||
+                        strncmp(start, "rgba(", 5) == 0 ||
+                        strncmp(start, "hsla(", 5) == 0 ||
+                        strncmp(start, "rgb(", 4) == 0 ||
+                        strncmp(start, "hsl(", 4) == 0 ||
+                        strncmp(start, "cubic-bezier(", 13) == 0 ||
+                        strncmp(start, "steps(", 6) == 0 ||
+                        strncmp(start, "rotate(", 7) == 0 ||
+                        strncmp(start, "rotateX(", 8) == 0 ||
+                        strncmp(start, "rotateY(", 8) == 0 ||
+                        strncmp(start, "rotateZ(", 8) == 0 ||
+                        strncmp(start, "rotate3d(", 9) == 0 ||
+                        strncmp(start, "scale(", 6) == 0 ||
+                        strncmp(start, "scaleX(", 7) == 0 ||
+                        strncmp(start, "scaleY(", 7) == 0 ||
+                        strncmp(start, "scaleZ(", 7) == 0 ||
+                        strncmp(start, "scale3d(", 8) == 0 ||
+                        strncmp(start, "translate(", 10) == 0 ||
+                        strncmp(start, "translateX(", 11) == 0 ||
+                        strncmp(start, "translateY(", 11) == 0 ||
+                        strncmp(start, "translateZ(", 11) == 0 ||
+                        strncmp(start, "translate3d(", 12) == 0 ||
+                        strncmp(start, "skew(", 5) == 0 ||
+                        strncmp(start, "skewX(", 6) == 0 ||
+                        strncmp(start, "skewY(", 6) == 0 ||
+                        strncmp(start, "matrix(", 7) == 0 ||
+                        strncmp(start, "matrix3d(", 9) == 0 ||
+                        strncmp(start, "perspective(", 12) == 0 ||
+                        strncmp(start, "blur(", 5) == 0 ||
+                        strncmp(start, "brightness(", 11) == 0 ||
+                        strncmp(start, "contrast(", 9) == 0 ||
+                        strncmp(start, "drop-shadow(", 12) == 0 ||
+                        strncmp(start, "grayscale(", 10) == 0 ||
+                        strncmp(start, "hue-rotate(", 11) == 0 ||
+                        strncmp(start, "invert(", 7) == 0 ||
+                        strncmp(start, "opacity(", 8) == 0 ||
+                        strncmp(start, "saturate(", 9) == 0 ||
+                        strncmp(start, "sepia(", 6) == 0 ||
+                        strncmp(start, "minmax(", 7) == 0 ||
+                        strncmp(start, "repeat(", 7) == 0 ||
+                        strncmp(start, "fit-content(", 12) == 0) {
+                        return parse_css_function(input, css);
+                    } else {
+                        return parse_css_function(input, css);
+                    }
                 } else {
+                    // Check if it's a color first
+                    Item color_result = parse_css_color(input, css);
+                    if (color_result != ITEM_ERROR) {
+                        return color_result;
+                    }
+                    // Otherwise parse as identifier
                     return parse_css_identifier(input, css);
                 }
             }
