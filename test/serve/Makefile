@@ -1,10 +1,21 @@
 # Makefile for HTTP/HTTPS server library and tests
+# Uses libssl (part of OpenSSL) for SSL/TLS functionality, not the full OpenSSL package
 
 # project configuration
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -g -O2
-INCLUDES = -I/opt/homebrew/include
-LIBS = -L/opt/homebrew/lib -levent -levent_openssl -lssl -lcrypto
+
+# detect platform and set appropriate paths
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    # macOS with homebrew - use specific library paths
+    INCLUDES = -I/opt/homebrew/include
+    LIBS = -L/opt/homebrew/lib -levent -levent_openssl -lssl -lcrypto
+else
+    # Linux/Ubuntu - use system libraries
+    INCLUDES = 
+    LIBS = -levent -levent_openssl -lssl -lcrypto
+endif
 
 # source directories
 LIB_SERVE_DIR = ../../lib/serve
@@ -63,9 +74,9 @@ example: example_server
 
 # install dependencies (macos with homebrew)
 install-deps-mac:
-	brew install libevent openssl
+	brew install libevent openssl@3
 
-# install dependencies (ubuntu/debian)
+# install dependencies (ubuntu/debian) - using libssl-dev instead of full openssl
 install-deps-ubuntu:
 	sudo apt-get update
 	sudo apt-get install libevent-dev libssl-dev

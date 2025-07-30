@@ -56,19 +56,21 @@ This document describes the design and implementation of a simple HTTP and HTTPS
 ## Dependencies
 
 - **libevent**: event-driven networking library (2.1.12+)
-- **OpenSSL**: SSL/TLS implementation (3.x)
+- **libssl**: SSL/TLS implementation (part of OpenSSL 3.x)
 - **Standard C libraries**: for basic functionality
 
 ### Installing Dependencies
 
 **macOS (homebrew):**
 ```bash
-brew install libevent openssl
+brew install libevent openssl@3
+# Note: libssl is included in the openssl@3 package
 ```
 
 **ubuntu/debian:**
 ```bash
 sudo apt-get install libevent-dev libssl-dev
+# Note: libssl-dev provides the SSL/TLS library separately
 ```
 
 ## Building
