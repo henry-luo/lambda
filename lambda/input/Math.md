@@ -81,58 +81,6 @@ input('./path/to/file.txt', {'type': 'math', 'flavor': 'ascii'})
 void parse_math(Input* input, const char* math_string, const char* flavor);
 ```
 
-## Test Coverage
-
-The math parser has comprehensive test coverage including:
-
-### Basic Test Suite (`test_math.ls`)
-- Operators: `+`, `-`, `*`, `/`, `^`, `%`
-- Parentheses and precedence
-- Variable references and symbols
-- Error handling for malformed expressions
-
-### Advanced Test Suite (`test_math_advanced.ls`)
-
-#### Typst Flavor Tests
-- **Typst Fractions**: `frac(a, b)` syntax
-  - Basic fractions: `frac(x, y)` → `<frac 'x' 'y'>`
-  - Nested fractions: `frac(a, frac(b, c))` → `<frac 'a' (<frac 'b' 'c'>)>`
-  - Complex expressions: `frac(x + 1, y - 2)` → `<frac (<+ 'x' '1'>) (<- 'y' '2'>)>`
-
-- **Typst Function Calls**: `sqrt(x)`, `sin(y)`, etc.
-  - Square root: `sqrt(x)` → `<sqrt 'x'>`
-  - Trigonometric: `sin(theta)`, `cos(phi)`, `tan(alpha)`
-  - Logarithmic: `log(n)`, `ln(x)`
-
-#### ASCII Flavor Tests  
-- **ASCII Function Calls**: Standard math notation
-  - Square root: `sqrt(x)` → `<sqrt 'x'>`
-  - Trigonometry: `sin(theta)`, `cos(phi)`, `tan(alpha)`
-  - Logarithms: `log(n)`, `ln(x)`
-  - Power notation: `pow(x, 2)` → `<pow 'x' '2'>`
-
-#### Mixed Expression Tests
-Complex expressions combining multiple features:
-- `frac(sin(x), cos(y))` → `<frac (<sin 'x'>) (<cos 'y'>)>`
-- `sqrt(x^2 + y^2)` → `<sqrt (<+ (<pow 'x' '2'>) (<pow 'y' '2'>))>`
-
-#### Multi-Flavor Comparison
-Tests ensuring consistent parsing across flavors where syntax overlaps.
-
-### Current Test Status
-- ✅ Typst fractions: `frac(a, b)` fully supported
-- ✅ Typst function calls: all tested functions parse correctly
-- ✅ ASCII function calls: all function calls parse correctly (**FIXED**)
-- ✅ ASCII power operations: both `^` and `**` operators fully supported (**ENHANCED**)
-- ✅ Number parsing: numbers are now parsed as Lambda integers/floats instead of strings (**ENHANCED**)
-- ✅ Mixed expressions: complex combinations parse correctly
-- ✅ Multi-flavor: consistent behavior across flavors
-
-### Test Files
-- Input files located in `test/input/`
-- Test scripts in `test/lambda/input/`
-- Run with: `./lambda.exe test/lambda/input/test_math_advanced.ls`
-
 ## Implementation Details
 
 ### Phase 1: Basic Infrastructure ✅
@@ -203,7 +151,7 @@ Tests ensuring consistent parsing across flavors where syntax overlaps.
   - Consistent type handling across all math expressions
 - - ✅ **Comprehensive Testing**: All enhancements validated with extensive test suites
 
-### Phase 9: Enhanced Mathematical Constructs (January 2025) ✅
+### Phase 9: Enhanced Mathematical Constructs  ✅
 - ✅ **Binomial Coefficients**: LaTeX `\binom{n}{k}` and `\choose` syntax
   - Binomial notation: `\binom{n}{k}` → `<binom 'n';'k'>`
   - Choose notation: `n \choose k` → `<choose 'n';'k'>`
@@ -288,28 +236,6 @@ All new mathematical constructs include comprehensive test coverage:
 
 - **Purpose**: Individual files allow for focused testing when debugging specific construct parsing issues
 
-#### Test Results Summary ✅
-**Successfully Parsing** (✅):
-- Binomial coefficients: `<binom 'n';'k'>`, `<choose 'n';'k'>`
-- Vector notation: `<vec 'v'>`, `<vec 'AB'>`
-- Accent marks: `<hat 'x'>`, `<tilde 'y'>`, `<bar 'z'>`, `<dot 'a'>`, `<ddot 'b'>`
-- Basic derivatives: `<frac 'd';'dx'>`, `<partial symbol:"∂";>`
-- Arrow notation: `<to direction:"right";>`, `<infty symbol:"∞";>`, `<leftarrow direction:"left";>`
-- Over/under constructs: `<overline position:"over";<add 'x';'y'>>`, `<underline position:"under";<add 'a';'b'>>`
-- Implicit multiplication: `<mul <partial symbol:"∂";>;'f'>`, `<mul 'x';'y'>`
-
-**Complex Expressions Working** (✅):
-- Nested constructs: `\vec{\hat{x} + \tilde{y}}` → `<vec <add <hat 'x'>;<tilde 'y'>>`
-- Mathematical combinations: `\binom{n+1}{k-1}` → `<binom <add 'n';1>;<sub 'k';1>>`
-- Overlines with fractions: `\overline{\frac{a+b}{c}}` → `<overline position:"over";<frac <add 'a';'b'>;'c'>>`
-
-**Testing Infrastructure Improvements** (✅):
-- Removed 25+ obsolete individual test files
-- Eliminated redundant test scripts
-- Consolidated documentation (README_enhanced_math_tests.md, CLEANUP_SUMMARY.md)
-- Maintained clean, focused test structure
-- Single comprehensive test covers all new features vs. multiple individual tests
-
 #### Running the Enhanced Tests
 ```bash
 # Run consolidated comprehensive test
@@ -318,17 +244,7 @@ All new mathematical constructs include comprehensive test coverage:
 # Run individual construct tests for debugging (if needed)
 ./lambda.exe test/lambda/input/test_individual_construct.ls
 ```
-
-#### Test Organization Benefits ✅
-1. **Simplified Maintenance**: Single consolidated test vs. 25+ individual files
-2. **Comprehensive Coverage**: All new constructs tested in one comprehensive run
-3. **Focused Debugging**: Individual files retained for targeted investigation
-4. **Clear Documentation**: Enhanced README with test structure and results
-5. **Efficient Testing**: Faster test execution with consolidated approach
-
 ## Recent Enhancements
-
-### January 2025: Comprehensive Math Parser Enhancement and Consolidation
 
 #### Major Mathematical Constructs Added ✅
 The math parser received significant enhancements with the addition of six major categories of mathematical constructs:
@@ -433,7 +349,7 @@ All enhancements have been rigorously tested with:
 - **Regression Testing**: Ensuring backward compatibility with existing functionality
 
 ## Test Coverage
-### Phase 8: LaTeX Parser Bug Fixes (January 2025) ✅
+### Phase 8: LaTeX Parser Bug Fixes ✅
 - ✅ **LaTeX Absolute Value Parsing**: Fixed `\abs{x}` parsing bug 
   - **Issue**: LaTeX absolute value expressions like `\abs{x}` were incorrectly parsed as `<x 'x'>` instead of `<abs 'x'>`
   - **Root Cause**: String buffer corruption in `parse_math_identifier` function
@@ -451,7 +367,7 @@ All enhancements have been rigorously tested with:
   - **Solution**: Modified environment parsing to use loop-based content parsing with proper boundary detection
   - **Result**: Equation environments now parse correctly as `<equation env:"true",numbered:"true";...>`
 
-### Phase 8: Enhanced Math Features (January 2025) ✅
+### Phase 8: Enhanced Math Features  ✅
 - ✅ **Advanced Mathematical Functions**: Enhanced support for specialized math functions
   - Absolute value: `\abs{x}` → `<abs 'x'>`
   - Ceiling function: `\lceil x \rceil` → `<ceil 'x'>`  
@@ -473,92 +389,6 @@ All enhancements have been rigorously tested with:
   - Subset: `\subset` → `<subset >`
   - Union: `\cup` → `<union >`
   - Intersection: `\cap` → `<intersection >`
-
-### Recent Bug Fixes and Enhancements
-
-#### Documentation Corrections (January 2025) 📋
-**Issue**: Math.md documentation was inaccurate about several implemented features.
-
-**Corrections Made**:
-- ✅ **`\begin{cases}...\end{cases}`**: Documented as ❌ unsupported, but actually ✅ fully implemented and working
-  - **Test Result**: Successfully parses piecewise functions: `<cases env:"true",cases:"14";...>`
-  - **Priority**: Update documentation to reflect actual capability
-  
-- ✅ **`\begin{gather}...\end{gather}`**: Documented as ❌ unsupported, but actually ✅ fully implemented and working
-  - **Test Result**: Successfully parses gathered equations: `<gather env:"true",numbered:"true",alignment:"center",equations:"8";...>`
-  - **Priority**: Update documentation to reflect actual capability
-
-- ⚠️ **`\begin{aligned}...\end{aligned}`**: Documented as ❌ unsupported, but actually ⚠️ partially implemented with bugs
-  - **Test Result**: Function exists but fails with "Failed to parse right side of aligned equation 1" error
-  - **Root Cause**: Implementation exists in code but has parsing logic issues
-  - **Priority**: Fix existing bugs rather than implement from scratch
-
-**Impact**: Users may have avoided using perfectly functional features due to incorrect documentation.
-
-**Action Taken**: Updated Math.md to accurately reflect actual implementation status and distinguish between:
-- ✅ Fully implemented and working
-- ⚠️ Implemented but buggy  
-- ❌ Not implemented
-
-#### Detailed Bug Fix Documentation (January 2025)
-
-#### 1. LaTeX Absolute Value Bug Fix ✅
-**Problem**: LaTeX absolute value parsing producing incorrect results.
-- Input: `\abs{x}` 
-- Expected: `<abs 'x'>`
-- Actual: `<x 'x'>` (incorrect)
-
-**Root Cause Analysis**: 
-- String buffer corruption in `parse_math_identifier` function
-- The function was not properly copying strings before creating Lambda symbols
-- Buffer contents were being overwritten during subsequent parsing operations
-
-**Solution Implementation**: 
-```c
-// Before (buggy)
-return create_lambda_symbol(input, sb->str + sizeof(uint32_t));
-
-// After (fixed) 
-char* identifier_copy = malloc(strlen(identifier) + 1);
-strcpy(identifier_copy, identifier);
-return create_lambda_symbol(input, identifier_copy);
-```
-
-**Validation Results**: All LaTeX absolute value forms now parse correctly:
-- `\abs{x}` → `<abs 'x'>` ✅
-- `\abs{xyz}` → `<abs 'xyz'>` ✅  
-- `\abs{5}` → `<abs 5>` ✅
-
-#### 2. LaTeX Environment Parsing Bug Fix ✅
-**Problem**: LaTeX environments failing with boundary detection errors.
-- Input: `\begin{equation} x + y = z \end{equation}`
-- Error: "Expected \end{equation} to close equation environment"
-
-**Root Cause Analysis**: 
-- The `parse_math_expression` function was consuming the entire input including `\end{equation}` tags
-- Environment parsing functions couldn't find closing tags after content parsing
-- No proper boundary detection for environment content
-
-**Solution Implementation**: 
-- Modified `parse_latex_equation` to use loop-based parsing with boundary checks
-- Added proper `\end{environment}` detection before calling content parsing functions
-- Used `parse_math_primary` instead of `parse_math_expression` for controlled parsing
-
-**Validation Results**: All LaTeX environments now parse correctly:
-- `\begin{equation}...\end{equation}` → `<equation env:"true",numbered:"true";...>` ✅
-- Proper content parsing within environment boundaries ✅
-- Support for multiple environments in sequence ✅
-- ✅ Enhanced Greek letter support (full alphabet: α, β, γ, δ, ε, ..., Ω)
-- ✅ Mathematical operators (∞, ∂, ∇, ⋅, ×, ÷, ±, ∓, ≤, ≥, ≠, ≈, etc.)
-- ✅ Advanced trigonometric functions (arcsin, arccos, arctan, sinh, cosh, tanh)
-- ✅ Hyperbolic and inverse functions (cot, sec, csc, etc.)
-- ✅ Sum notation with limits: `\sum_{i=1}^{n} expression`
-- ✅ Product notation with limits: `\prod_{k=0}^{\infty} expression` 
-- ✅ Integral notation with limits: `\int_{a}^{b} f(x) dx`
-- ✅ Limit expressions: `\lim_{x \to 0} f(x)`
-- ✅ Basic matrix support: `\matrix{a & b \\ c & d}`
-- ✅ Parenthesized matrices: `\pmatrix{1 & 2 \\ 3 & 4}`
-- ✅ Bracketed matrices: `\bmatrix{x \\ y \\ z}`
 
 ## Test Coverage
 
@@ -658,7 +488,8 @@ The following table lists all math expressions supported by Lambda's math parser
 | `<gather 'equations'>`               | `\begin{gather}...\end{gather}`           | `gather(...)`                 | `gather(...)`          | `<mtable><mtr>...</mtr></mtable>`               | Gathered equations   |
 | `<smallmatrix 'rows'>`               | `\begin{smallmatrix}...\end{smallmatrix}` | `smallmat(...)`               | `smallmatrix(...)`     | `<mtable displaystyle="false"><mtr>...</mtr></mtable>` | Small matrix         |
 
-### Enhanced Mathematical Constructs (January 2025)
+### Enhanced Mathematical Constructs
+
 | Lambda Expression                    | LaTeX                                     | Typst                         | ASCII                  | MathML                                          | Description          |
 | ------------------------------------ | ----------------------------------------- | ----------------------------- | ---------------------- | ----------------------------------------------- | -------------------- |
 | `<binom 'n' 'k'>`                    | `\binom{n}{k}`                            | `binom(n,k)`                  | `C(n,k)`               | `<mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow>` | Binomial coefficient |
@@ -825,7 +656,7 @@ The following table lists mathematical expressions that are available in other n
 
 ## Current Output Examples
 
-### Enhanced Lambda Math Format (January 2025)
+### Enhanced Lambda Math Format
 ```
 Input: "1 + 2 * 3"           → <add 1 <mul 2 3>>
 Input: "\frac{1}{2}"         → <frac 1 2>
@@ -834,7 +665,7 @@ Input: "\sin{x} + \cos{y}"   → <add <sin 'x'> <cos 'y'>>
 Input: "(2 + 3) * 4"         → <mul <add 2 3> 4>
 ```
 
-### New Mathematical Constructs (January 2025)
+### New Mathematical Constructs
 ```
 Input: "\binom{n}{k}"           → <binom 'n';'k'>
 Input: "n \choose k"            → <choose 'n';'k'>
@@ -894,7 +725,7 @@ Input: "log(10) * exp(2)"    → <mul <log "10"> <exp "2">>
 Input: "x^2 + y**3"          → <add <pow 'x' "2"> <pow 'y' "3">>
 ```
 
-### Current Status (January 2025)
+### Current Status
 - ✅ **Core Infrastructure**: Complete recursive descent parser with flavor support
 - ✅ **LaTeX Support**: Full LaTeX math parsing with functions, fractions, powers, subscripts
 - ✅ **Advanced LaTeX**: Greek letters, mathematical operators, sums, integrals, limits, matrices
@@ -907,14 +738,6 @@ Input: "x^2 + y**3"          → <add <pow 'x' "2"> <pow 'y' "3">>
 - ✅ **Enhanced Testing**: Consolidated comprehensive test suite with 25+ obsolete files removed
 - ✅ **Implicit Multiplication**: Enhanced parsing of consecutive mathematical terms
 - ✅ **Documentation**: Comprehensive documentation with examples and implementation details
-
-### Recent Achievements (January 2025)
-1. **Six New Mathematical Construct Categories**: Binomial, vector, accent, derivative, arrow, and over/under constructs
-2. **Test Suite Consolidation**: From 25+ individual files to streamlined consolidated testing
-3. **Enhanced Parser Architecture**: Improved helper functions, error handling, and memory management
-4. **Comprehensive Documentation**: Updated Math.md with all enhancements and examples
-5. **Cleanup and Organization**: Removed obsolete files while maintaining debugging capability
-
 ## Current Limitations and Known Issues
 
 ### Input Format Limitations
@@ -1065,8 +888,8 @@ Output: <add 'x' ERROR 'y'> (partial parsing with error markers)
 - ✅ `\begin{equation}...\end{equation}`
 - ✅ `\begin{align}...\end{align}` 
 - ✅ `\begin{matrix}...\end{matrix}`
-- ✅ `\begin{cases}...\end{cases}` (piecewise functions) **[Previously underdocumented]**
-- ✅ `\begin{gather}...\end{gather}` (gathered equations) **[Previously underdocumented]**
+- ✅ `\begin{cases}...\end{cases}` (piecewise functions) 
+- ✅ `\begin{gather}...\end{gather}` (gathered equations) 
 
 **Partially Supported/Buggy**:
 - ⚠️ `\begin{aligned}...\end{aligned}` (inline alignment) - Implemented but has parsing issues with equation right sides
@@ -1083,13 +906,13 @@ Output: <add 'x' ERROR 'y'> (partial parsing with error markers)
 **Missing Features**: Many advanced mathematical constructs are not yet implemented.
 
 **High Priority Missing**:
-- ✅ Derivatives: `\frac{d}{dx}`, `\partial/\partial x` **[IMPLEMENTED January 2025]**
+- ✅ Derivatives: `\frac{d}{dx}`, `\partial/\partial x` 
 - Complex integrals: `\oint`, `\iint`, `\iiint`
 - Advanced set notation: `\mathcal{P}(A)`, `\mathfrak{a}`
-- ✅ Vector notation: `\vec{v}`, `\hat{n}`, `\dot{x}` **[IMPLEMENTED January 2025]**
+- ✅ Vector notation: `\vec{v}`, `\hat{n}`, `\dot{x}` 
 
 **Medium Priority Missing**:
-- ✅ Binomial coefficients: `\binom{n}{k}` **[IMPLEMENTED January 2025]**
+- ✅ Binomial coefficients: `\binom{n}{k}` 
 - Continued fractions: `\cfrac{}{}`
 - Chemical notation integration
 - Advanced typography: `\mathbf{}`, `\mathit{}`
@@ -1185,24 +1008,3 @@ Output: <add 'x' ERROR 'y'> (partial parsing with error markers)
 4. **Extended syntax**: Add support for advanced mathematical constructs
 5. **Enhanced LaTeX environments**: Complete support for complex math environments
 
-## Test Coverage
-
-### Enhanced Multi-Flavor Tests ✅
-- **Typst Advanced Features**: ✅ (`frac(a, b)` syntax, function calls)
-- **ASCII Function Calls**: ✅ (`sqrt(x)`, `sin(x)`, `cos(x)`, `log(x)`)
-- **Multi-flavor Comparison**: ✅ (same expression in all three flavors)
-- **Power Operations**: ✅ (both `^` and `**` in ASCII)
-- **Mixed Expressions**: ✅ (complex expressions combining multiple features)
-
-## Code Organization
-- `lambda/input/input-math.c` - Core math parser implementation
-- `lambda/input/input-common.c` - Shared utilities between parsers
-- `lambda/input/input-common.h` - Common definitions and function declarations
-- `lambda/input/input.c` - Input dispatch and file handling  
-- `lambda/input/input-md.c` - Markdown parser with math integration
-- `lambda/input/input-latex.c` - LaTeX parser with math integration (refactored)
-- `lambda/lambda-eval.c` - Enhanced `fn_input` with map support
-- `test/lambda/input/test_math_parser.ls` - Core math parser tests
-- `test/lambda/input/test_integration.ls` - Document integration tests
-- `test/input/test_math_*.txt` - Math input test files
-- `test/input/test_*_math.*` - Document integration test files
