@@ -43,9 +43,23 @@ static Item parse_prime_notation(Input *input, const char **math, Item base);
 static Item parse_number_set(Input *input, const char **math, const char* set_name);
 static Item parse_set_operation(Input *input, const char **math, const char* op_name);
 static Item parse_logic_operator(Input *input, const char **math, const char* op_name);
+
+// NEW: Additional mathematical constructs
+static Item parse_latex_binomial(Input *input, const char **math);
+static Item parse_latex_derivative(Input *input, const char **math);
+static Item parse_latex_vector(Input *input, const char **math);
+static Item parse_latex_accent(Input *input, const char **math, const char* accent_type);
+static Item parse_latex_arrow(Input *input, const char **math, const char* arrow_type);
+static Item parse_latex_overunder(Input *input, const char **math, const char* construct_type);
+
 static bool is_number_set(const char* cmd);
 static bool is_set_operation(const char* cmd);
 static bool is_logic_operator(const char* cmd);
+static bool is_binomial_cmd(const char* cmd);
+static bool is_derivative_cmd(const char* cmd);
+static bool is_vector_cmd(const char* cmd);
+static bool is_accent_cmd(const char* cmd);
+static bool is_arrow_cmd(const char* cmd);
 
 // use common utility functions from input.c and input-common.c
 #define create_math_element input_create_element
@@ -485,6 +499,46 @@ static Item parse_latex_command(Input *input, const char **math) {
         const char* op_name = cmd_string->chars;
         strbuf_full_reset(sb);
         return parse_logic_operator(input, math, op_name);
+    } else if (is_binomial_cmd(cmd_string->chars)) {
+        strbuf_full_reset(sb);
+        return parse_latex_binomial(input, math);
+    } else if (is_derivative_cmd(cmd_string->chars)) {
+        strbuf_full_reset(sb);
+        return parse_latex_derivative(input, math);
+    } else if (is_vector_cmd(cmd_string->chars)) {
+        strbuf_full_reset(sb);
+        return parse_latex_vector(input, math);
+    } else if (is_accent_cmd(cmd_string->chars)) {
+        const char* accent_type = cmd_string->chars;
+        strbuf_full_reset(sb);
+        return parse_latex_accent(input, math, accent_type);
+    } else if (is_arrow_cmd(cmd_string->chars)) {
+        const char* arrow_type = cmd_string->chars;
+        strbuf_full_reset(sb);
+        return parse_latex_arrow(input, math, arrow_type);
+    } else if (strcmp(cmd_string->chars, "overline") == 0 || strcmp(cmd_string->chars, "underline") == 0 ||
+               strcmp(cmd_string->chars, "overbrace") == 0 || strcmp(cmd_string->chars, "underbrace") == 0) {
+        const char* construct_type = cmd_string->chars;
+        strbuf_full_reset(sb);
+        return parse_latex_overunder(input, math, construct_type);
+    } else if (strcmp(cmd_string->chars, "infty") == 0) {
+        strbuf_full_reset(sb);
+        Element* infty_element = create_math_element(input, "infty");
+        if (!infty_element) {
+            return ITEM_ERROR;
+        }
+        add_attribute_to_element(input, infty_element, "symbol", "∞");
+        ((TypeElmt*)infty_element->type)->content_length = ((List*)infty_element)->length;
+        return (Item)infty_element;
+    } else if (strcmp(cmd_string->chars, "partial") == 0) {
+        strbuf_full_reset(sb);
+        Element* partial_element = create_math_element(input, "partial");
+        if (!partial_element) {
+            return ITEM_ERROR;
+        }
+        add_attribute_to_element(input, partial_element, "symbol", "∂");
+        ((TypeElmt*)partial_element->type)->content_length = ((List*)partial_element)->length;
+        return (Item)partial_element;
     } else if (is_trig_function(cmd_string->chars) || is_log_function(cmd_string->chars)) {
         const char* func_name = cmd_string->chars;
         strbuf_full_reset(sb);
@@ -849,16 +903,50 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
     
     skip_math_whitespace(math);
     
-    while (**math && (**math == '*' || **math == '/')) {
-        char op = **math;
-        const char* op_name = (op == '*') ? "mul" : "div";
+    while (**math) {
+        bool explicit_op = false;
+        const char* op_name = "mul";
         
-        (*math)++; // skip operator
-        skip_math_whitespace(math);
+        // Check for explicit multiplication or division operators
+        if (**math == '*' || **math == '/') {
+            explicit_op = true;
+            char op = **math;
+            op_name = (op == '*') ? "mul" : "div";
+            (*math)++; // skip operator
+            skip_math_whitespace(math);
+        }
+        // Check for implicit multiplication (consecutive terms)
+        else if ((**math == '\\' && flavor == MATH_FLAVOR_LATEX) ||  // LaTeX commands
+                 (isalpha(**math) && (flavor == MATH_FLAVOR_TYPST || flavor == MATH_FLAVOR_ASCII)) ||  // identifiers
+                 **math == '(' ||  // parentheses
+                 isdigit(**math)) {  // numbers
+            // This is implicit multiplication - don't advance the pointer yet
+            explicit_op = false;
+            op_name = "mul";
+        } else {
+            // No multiplication operation detected
+            break;
+        }
         
         Item right = parse_power_expression(input, math, flavor);
         if (right == ITEM_ERROR) {
-            return ITEM_ERROR;
+            if (explicit_op) {
+                // If we found an explicit operator, this is a real error
+                return ITEM_ERROR;
+            } else {
+                // If it was implicit multiplication and failed, just stop parsing more terms
+                break;
+            }
+        }
+        
+        if (right == ITEM_NULL) {
+            if (explicit_op) {
+                // Explicit operator requires a right operand
+                return ITEM_ERROR;
+            } else {
+                // No more terms for implicit multiplication
+                break;
+            }
         }
         
         left = create_binary_expr(input, op_name, left, right);
@@ -2032,6 +2120,36 @@ static bool is_logic_operator(const char* cmd) {
            strcmp(cmd, "Leftrightarrow") == 0;
 }
 
+static bool is_binomial_cmd(const char* cmd) {
+    return strcmp(cmd, "binom") == 0 || strcmp(cmd, "choose") == 0 ||
+           strcmp(cmd, "tbinom") == 0 || strcmp(cmd, "dbinom") == 0;
+}
+
+static bool is_derivative_cmd(const char* cmd) {
+    return strcmp(cmd, "frac") == 0 && strstr(cmd, "d") != NULL; // This will be handled specially in frac parsing
+}
+
+static bool is_vector_cmd(const char* cmd) {
+    return strcmp(cmd, "vec") == 0 || strcmp(cmd, "overrightarrow") == 0 ||
+           strcmp(cmd, "overleftarrow") == 0;
+}
+
+static bool is_accent_cmd(const char* cmd) {
+    return strcmp(cmd, "hat") == 0 || strcmp(cmd, "widehat") == 0 ||
+           strcmp(cmd, "dot") == 0 || strcmp(cmd, "ddot") == 0 ||
+           strcmp(cmd, "bar") == 0 || strcmp(cmd, "tilde") == 0 ||
+           strcmp(cmd, "widetilde") == 0 || strcmp(cmd, "acute") == 0 ||
+           strcmp(cmd, "grave") == 0 || strcmp(cmd, "check") == 0 ||
+           strcmp(cmd, "breve") == 0;
+}
+
+static bool is_arrow_cmd(const char* cmd) {
+    return strcmp(cmd, "rightarrow") == 0 || strcmp(cmd, "leftarrow") == 0 ||
+           strcmp(cmd, "to") == 0 || strcmp(cmd, "gets") == 0 ||
+           strcmp(cmd, "uparrow") == 0 || strcmp(cmd, "downarrow") == 0 ||
+           strcmp(cmd, "updownarrow") == 0 || strcmp(cmd, "leftrightarrow") == 0;
+}
+
 // Parse absolute value: \left| x \right| or \abs{x}
 static Item parse_latex_abs(Input *input, const char **math) {
     skip_math_whitespace(math);
@@ -2219,6 +2337,214 @@ static Item parse_logic_operator(Input *input, const char **math, const char* op
     
     ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
     return (Item)op_element;
+}
+
+// Parse binomial coefficients: \binom{n}{k} or \choose{n}{k}
+static Item parse_latex_binomial(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // expect opening brace for first argument
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse first argument (n)
+    Item n = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (n == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    skip_math_whitespace(math);
+    
+    // expect opening brace for second argument
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse second argument (k)
+    Item k = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (k == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    // create binomial expression element
+    Element* binom_element = create_math_element(input, "binom");
+    if (!binom_element) {
+        return ITEM_ERROR;
+    }
+    
+    // add n and k as children
+    list_push((List*)binom_element, n);
+    list_push((List*)binom_element, k);
+    
+    // set content length
+    ((TypeElmt*)binom_element->type)->content_length = ((List*)binom_element)->length;
+    
+    return (Item)binom_element;
+}
+
+// Parse derivative notation: \frac{d}{dx} or \frac{\partial}{\partial x}
+static Item parse_latex_derivative(Input *input, const char **math) {
+    // This function is called when we detect derivative patterns in \frac commands
+    // For now, we'll handle this in the regular frac parser by detecting 'd' patterns
+    return parse_latex_frac(input, math);
+}
+
+// Parse vector notation: \vec{v}, \overrightarrow{AB}, etc.
+static Item parse_latex_vector(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // expect opening brace
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse vector content
+    Item vector_content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (vector_content == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    // create vector expression element
+    Element* vec_element = create_math_element(input, "vec");
+    if (!vec_element) {
+        return ITEM_ERROR;
+    }
+    
+    // add vector content as child
+    list_push((List*)vec_element, vector_content);
+    
+    // set content length
+    ((TypeElmt*)vec_element->type)->content_length = ((List*)vec_element)->length;
+    
+    return (Item)vec_element;
+}
+
+// Parse accent marks: \hat{x}, \dot{x}, \bar{x}, etc.
+static Item parse_latex_accent(Input *input, const char **math, const char* accent_type) {
+    skip_math_whitespace(math);
+    
+    // expect opening brace
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse accented content
+    Item accented_content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (accented_content == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    // create accent expression element
+    Element* accent_element = create_math_element(input, accent_type);
+    if (!accent_element) {
+        return ITEM_ERROR;
+    }
+    
+    // add accented content as child
+    list_push((List*)accent_element, accented_content);
+    
+    // set content length
+    ((TypeElmt*)accent_element->type)->content_length = ((List*)accent_element)->length;
+    
+    return (Item)accent_element;
+}
+
+// Parse arrow notation: \to, \rightarrow, \leftarrow, etc.
+static Item parse_latex_arrow(Input *input, const char **math, const char* arrow_type) {
+    // Most arrow commands don't take arguments, they're just symbols
+    Element* arrow_element = create_math_element(input, arrow_type);
+    if (!arrow_element) {
+        return ITEM_ERROR;
+    }
+    
+    // Add arrow direction as attribute
+    if (strcmp(arrow_type, "rightarrow") == 0 || strcmp(arrow_type, "to") == 0) {
+        add_attribute_to_element(input, arrow_element, "direction", "right");
+    } else if (strcmp(arrow_type, "leftarrow") == 0 || strcmp(arrow_type, "gets") == 0) {
+        add_attribute_to_element(input, arrow_element, "direction", "left");
+    } else if (strcmp(arrow_type, "uparrow") == 0) {
+        add_attribute_to_element(input, arrow_element, "direction", "up");
+    } else if (strcmp(arrow_type, "downarrow") == 0) {
+        add_attribute_to_element(input, arrow_element, "direction", "down");
+    } else if (strcmp(arrow_type, "leftrightarrow") == 0) {
+        add_attribute_to_element(input, arrow_element, "direction", "both");
+    }
+    
+    ((TypeElmt*)arrow_element->type)->content_length = ((List*)arrow_element)->length;
+    return (Item)arrow_element;
+}
+
+// Parse over/under constructs: \overline{x}, \underline{x}, \overbrace{x}, \underbrace{x}
+static Item parse_latex_overunder(Input *input, const char **math, const char* construct_type) {
+    skip_math_whitespace(math);
+    
+    // expect opening brace
+    if (**math != '{') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip {
+    
+    // parse content
+    Item content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (content == ITEM_ERROR) {
+        return ITEM_ERROR;
+    }
+    
+    // expect closing brace
+    if (**math != '}') {
+        return ITEM_ERROR;
+    }
+    (*math)++; // skip }
+    
+    // create over/under expression element
+    Element* construct_element = create_math_element(input, construct_type);
+    if (!construct_element) {
+        return ITEM_ERROR;
+    }
+    
+    // add content as child
+    list_push((List*)construct_element, content);
+    
+    // Add position attribute
+    if (strstr(construct_type, "over") != NULL) {
+        add_attribute_to_element(input, construct_element, "position", "over");
+    } else if (strstr(construct_type, "under") != NULL) {
+        add_attribute_to_element(input, construct_element, "position", "under");
+    }
+    
+    // set content length
+    ((TypeElmt*)construct_element->type)->content_length = ((List*)construct_element)->length;
+    
+    return (Item)construct_element;
 }
 
 static MathFlavor get_math_flavor(const char* flavor_str) {

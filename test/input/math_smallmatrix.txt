@@ -1,4 +1,0 @@
-A = \begin{smallmatrix}
-a & b \\
-c & d
-\end{smallmatrix}

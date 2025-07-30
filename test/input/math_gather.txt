@@ -1,5 +1,0 @@
-\begin{gather}
-a + b = c \\
-x^2 + y^2 = z^2 \\
-\int_{0}^{1} f(x) dx = F(1) - F(0)
-\end{gather}

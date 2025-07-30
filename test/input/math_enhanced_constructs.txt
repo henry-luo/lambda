@@ -1,0 +1,7 @@
+\binom{n}{k}
+\vec{v}  
+\hat{x}
+\frac{d}{dx}
+\partial
+x \to \infty
+\overline{x + y}
