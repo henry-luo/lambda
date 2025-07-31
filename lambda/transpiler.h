@@ -1,203 +1,15 @@
 #pragma once
 
-// Enhanced GMP configuration for cross-compilation
-#ifdef CROSS_COMPILE
-    // For cross-compilation, we may have either full or stub GMP
-    #include <gmp.h>
-    
-    // Declare weak symbols for GMP I/O functions to detect availability at runtime
-    extern int gmp_sprintf(char *, const char *, ...) __attribute__((weak));
-    extern double mpf_get_d(const mpf_t) __attribute__((weak));
-    
-    // Helper macro to check if full GMP I/O is available
-    #define HAS_GMP_IO() (gmp_sprintf != NULL)
-#else
-    // Native compilation should have full GMP
-    #include <gmp.h>
-    #define HAS_GMP_IO() 1
-#endif
+#include "lambda-data.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <ctype.h>
-#include <stdint.h>
-#include <inttypes.h>  // for cross-platform integer formatting
-#include <math.h>
-#include <tree_sitter/api.h>
-#include "../lib/strbuf.h"
-#include "../lib/hashmap.h"
-#include "../lib/mem-pool/include/mem_pool.h"
-#include "../lib/arraylist.h"
-#include "../lib/strview.h"
-#include "../lib/num_stack.h"
-
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#define min(a, b) ((a) < (b) ? (a) : (b))
-
-# include "ast.h"
+#include "ast.h"
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
-
-/*
-# Lambda Runtime Data Structures
-
-Lambda runtime uses the following to represent its runtime data:
-- for simple scalar types: LMD_TYPE_NULL, LMD_TYPE_BOOL, LMD_TYPE_INT
-	- they are packed into Item, with high bits set to TypeId;
-- for compound scalar types: LMD_TYPE_INT64, LMD_TYPE_FLOAT, LMD_TYPE_DECIMAL, LMD_TYPE_DTIME, LMD_TYPE_SYMBOL, LMD_TYPE_STRING, LMD_TYPE_BINARY
-	- they are packed into item as a tagged pointer. It's a pointer to the actual data, with high bits set to TypeId.
-- for container types: LMD_TYPE_LIST, LMD_TYPE_RANGE, LMD_TYPE_ARRAY_INT, LMD_TYPE_ARRAY, LMD_TYPE_MAP, LMD_TYPE_ELEMENT
-	- they are direct/raw pointers to the container data.
-	- all containers extends struct Container, that starts with field TypeId;
-- can use get_type_id() function to get the TypeId of an Item in a general manner;
-- Lambda map/LMD_TYPE_MAP, uses a packed struct:
-	- its list of fields are defined as a linked list of ShapeEntry;
-	- and the actual data are stored as a packed struct;
-- Lambda element/LMD_TYPE_ELEMENT, extends Lambda list/LMD_TYPE_LIST, and it's also a map/LMD_TYPE_MAP at the same time;
-	- note that it can be casted as List directly, but not as Map directly;
-*/
-
-#include "lambda.h"
-
-typedef struct TypeInfo {
-    int byte_size;  // byte size of the type
-    char* name;  // name of the type
-    Type *type;  // literal type
-    Type *lit_type;  // literal type_type
-    // char* c_type;  // C type of the type
-} TypeInfo;
-
-extern TypeInfo type_info[];
-
-// const_index, type_index - 32-bit, there should not be more than 4G types and consts in a single Lambda runtime
-// list item count, map size - 64-bit, to support large data files
-
-// mapping from data to its owner
-typedef struct DataOwner {
-    void *data;
-    void *owner;  // element/map/list/array that contains/owns the data
-} DataOwner;
-
-struct Map {
-    Container;  // extends Container
-    void* type;  // map type/shape
-    void* data;  // packed data struct of the map
-    int data_cap;  // capacity of the data struct
-};
-
-struct Element {
-    List;  // extends List for content
-    // attributes map
-    void* type;  // attr type/shape
-    void* data;  // packed data struct of the attrs
-    int data_cap;  // capacity of the data struct
-};
-
-typedef struct Script Script;
-
-typedef struct {
-    Type;  // extends Type
-    int const_index;
-} TypeConst;
-
-typedef struct {
-    TypeConst;  // extends TypeConst
-    double double_val;
-} TypeFloat;
-
-typedef struct {
-    TypeConst;  // extends TypeConst
-    mpf_t dec_val;
-} TypeDecimal;
-
-typedef struct {
-    TypeConst;  // extends TypeConst
-    String *string;
-} TypeString;
-
-typedef TypeString TypeSymbol;
-
-typedef struct {
-    Type;  // extends Type
-    Type* nested;  // nested item type for the array
-    long length;  // no. of items in the array/map
-    int type_index;  // index of the type in the type list
-} TypeArray;
-
-typedef TypeArray TypeList;
-
-typedef struct ShapeEntry {
-    StrView* name;
-    Type* type;  // type of the field
-    long byte_offset;  // byte offset of the map field
-    struct ShapeEntry* next;
-} ShapeEntry;
-
-typedef struct {
-    Type;  // extends Type
-    long length;  // no. of items in the map
-    long byte_size;  // byte size of the struct that the map is transpiled to
-    int type_index;  // index of the type in the type list
-    ShapeEntry* shape;  // first shape entry of the map
-    ShapeEntry* last;  // last shape entry of the map
-} TypeMap;
-
-typedef struct {
-    TypeMap; // extends TypeMap
-    StrView name;  // name of the element
-    long content_length;  // no. of content items, needed for element type
-} TypeElmt;
-
-typedef struct {
-    Type;  // extends Type
-    Type* left;
-    Type* right;
-    Operator op;  // operator
-    int type_index;  // index of the type in the type list
-} TypeBinary;
-
-typedef struct TypeParam {
-    Type;  // extends Type
-    struct TypeParam *next;
-} TypeParam;
-
-typedef struct {
-    Type;  // extends Type
-    TypeParam *param;
-    Type *returned;
-    int param_count;
-    int type_index;
-    bool is_anonymous;
-    bool is_public;
-} TypeFunc;
-
-typedef struct {
-    Type;
-    SysFunc *fn;
-} TypeSysFunc;
-
-typedef struct {
-    Type;  // extends Type
-    Type *type;  // full type defintion
-} TypeType;
-
-struct Pack {
-    size_t size;           // Current used size of the pack
-    size_t capacity;       // Total capacity of the pack
-    size_t committed_size; // Currently committed memory size - non-zero indicates virtual memory mode
-    void* data;            // Pointer to the allocated memory
-};
-Pack* pack_init(size_t initial_size);
-void* pack_alloc(Pack* pack, size_t size);
-void* pack_calloc(Pack* pack, size_t size);
-void pack_free(Pack* pack);
 
 typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
@@ -389,36 +201,6 @@ void frame_start();
 void frame_end();
 void free_item(Item item, bool clear_entry);
 
-// uses the high byte to tag the pointer, defined for little-endian
-typedef union LambdaItem {
-    struct {
-        union {
-            struct {
-                uint64_t long_val: 56;
-                uint64_t _8: 8;
-            };
-            struct {
-                uint64_t bool_val: 8;
-                uint64_t _56: 56;
-            };
-            struct {
-                uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
-                uint64_t type_id : 8;        
-            };           
-        };
-    };
-    uint64_t item;
-    void* raw_pointer;
-} LambdaItem;
-
-// get type_id from an Item
-static inline TypeId get_type_id(LambdaItem value) {
-    return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
-}
-
-extern String EMPTY_STRING;
-String* strbuf_to_string(StrBuf *sb);
-
 #ifndef WASM_BUILD
 #include <mir.h>
 #include <mir-gen.h>
@@ -431,15 +213,6 @@ String* strbuf_to_string(StrBuf *sb);
 
 typedef Item (*main_func_t)(Context*);
 typedef struct Runtime Runtime;
-
-typedef struct Input {
-    void* url;
-    void* path;
-    VariableMemPool* pool; // memory pool
-    ArrayList* type_list;  // list of types
-    Item root;
-    StrBuf* sb;
-} Input;
 
 struct Script {
     const char* reference;  // path (relative to the main script) and name of the script
@@ -481,14 +254,7 @@ struct Runtime {
 #define ts_node_source(transpiler, node)  {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
 
-Array* array_pooled(VariableMemPool *pool);
-void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
-Map* map_pooled(VariableMemPool *pool);
-Element* elmt_pooled(VariableMemPool *pool);
-void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool);
-
 void* alloc_const(Transpiler* tp, size_t size);
-Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_elmt(Transpiler* tp, TSNode element_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);

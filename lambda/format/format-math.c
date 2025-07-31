@@ -1,7 +1,7 @@
 #include "format.h"
 #include <stdio.h>
 
-#define DEBUG_MATH_FORMAT
+//#define DEBUG_MATH_FORMAT
 #include <string.h>
 #include <math.h>
 
@@ -260,14 +260,59 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
 
 // Format math string (escape special characters if needed)
 static void format_math_string(StrBuf* sb, String* str) {
-    if (!str || !str->chars) return;
+    if (!str || !str->chars) {
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG format_math_string: NULL string or chars\n");
+        #endif
+        return;
+    }
     
     const char* s = str->chars;
     size_t len = str->len;
     
-    for (size_t i = 0; i < len; i++) {
-        strbuf_append_char(sb, s[i]);
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_string: input string='%s', len=%zu\n", s, len);
+    fprintf(stderr, "DEBUG format_math_string: sb before - length=%zu, str='%s'\n", 
+            sb->length, sb->str ? sb->str : "(null)");
+    #endif
+    
+    // Safety check: if len is suspiciously large, it's likely memory corruption
+    if (len > 1000000) {  // 1MB is a reasonable upper bound for a math string
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG format_math_string: WARNING - length %zu is suspiciously large, possible memory corruption\n", len);
+        #endif
+        // Fallback: use strlen to compute actual length
+        len = strlen(s);
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG format_math_string: Using strlen fallback, computed len=%zu\n", len);
+        #endif
+        if (len > 1000000) {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_string: Even strlen gives huge length, truncating to 1000\n");
+            #endif
+            len = 1000;  // Hard limit to prevent infinite loops
+        }
     }
+    
+    for (size_t i = 0; i < len; i++) {
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG format_math_string: appending char '%c' (pos %zu)\n", s[i], i);
+        #endif
+        strbuf_append_char(sb, s[i]);
+        
+        // Additional safety check: if we hit a null terminator, stop
+        if (s[i] == '\0') {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_string: Hit null terminator at pos %zu, stopping\n", i);
+            #endif
+            break;
+        }
+    }
+    
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_string: sb after - length=%zu, str='%s'\n", 
+            sb->length, sb->str ? sb->str : "(null)");
+    #endif
 }
 
 // Format children elements based on format string
@@ -427,68 +472,147 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
 static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
     TypeId type = get_type_id((LambdaItem)item);
     
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=%p\n", depth, (int)type, (void*)item);
+    fprintf(stderr, "DEBUG format_math_item: sb before - length=%zu, str='%s'\n", 
+            sb->length, sb->str ? sb->str : "(null)");
+    #endif
+    
     switch (type) {
         case LMD_TYPE_ELEMENT: {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing ELEMENT\n");
+            #endif
             Element* elem = (Element*)get_pointer(item);
             format_math_element(sb, elem, flavor, depth);
             break;
         }
         case LMD_TYPE_SYMBOL: {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing SYMBOL\n");
+            #endif
             String* str = (String*)get_pointer(item);
             if (str) {
+                #ifdef DEBUG_MATH_FORMAT
+                fprintf(stderr, "DEBUG format_math_item: SYMBOL string='%s', len=%d\n", str->chars, str->len);
+                #endif
                 format_math_string(sb, str);
             }
             break;
         }
         case LMD_TYPE_STRING: {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing STRING\n");
+            #endif
             String* str = (String*)get_pointer(item);
-            format_math_string(sb, str);
+            if (str) {
+                #ifdef DEBUG_MATH_FORMAT
+                fprintf(stderr, "DEBUG format_math_item: STRING string='%s', len=%d\n", str->chars, str->len);
+                #endif
+                format_math_string(sb, str);
+            }
             break;
         }
         case LMD_TYPE_INT: {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing INT\n");
+            #endif
             int val = (int)get_int_value(item);
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%d", val);
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: INT value=%d, formatted='%s'\n", val, num_buf);
+            #endif
             strbuf_append_str(sb, num_buf);
             break;
         }
         case LMD_TYPE_INT64: {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing INT64\n");
+            #endif
             long* val_ptr = (long*)get_pointer(item);
             if (val_ptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%ld", *val_ptr);
+                #ifdef DEBUG_MATH_FORMAT
+                fprintf(stderr, "DEBUG format_math_item: INT64 value=%ld, formatted='%s'\n", *val_ptr, num_buf);
+                #endif
                 strbuf_append_str(sb, num_buf);
             }
             break;
         }
         case LMD_TYPE_FLOAT: {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing FLOAT\n");
+            #endif
             double* val_ptr = (double*)get_pointer(item);
             if (val_ptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%g", *val_ptr);
+                #ifdef DEBUG_MATH_FORMAT
+                fprintf(stderr, "DEBUG format_math_item: FLOAT value=%g, formatted='%s'\n", *val_ptr, num_buf);
+                #endif
                 strbuf_append_str(sb, num_buf);
             }
             break;
         }
         default:
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG format_math_item: Processing UNKNOWN type %d\n", (int)type);
+            #endif
             // Unknown item type, try to format as string representation
             char unknown_buf[64];
             snprintf(unknown_buf, sizeof(unknown_buf), "[unknown_type_%d]", (int)type);
             strbuf_append_str(sb, unknown_buf);
             break;
     }
+    
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_item: sb after - length=%zu, str='%s'\n", 
+            sb->length, sb->str ? sb->str : "(null)");
+    #endif
 }
 
 // Main format functions for different flavors
 
 // Format math expression to LaTeX
 String* format_math_latex(VariableMemPool* pool, Item root_item) {
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_latex: Starting with pool=%p, root_item=%p\n", 
+            (void*)pool, (void*)root_item);
+    #endif
+    
     StrBuf* sb = strbuf_new_pooled(pool);
-    if (!sb) return NULL;
+    if (!sb) {
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG format_math_latex: Failed to create string buffer\n");
+        #endif
+        return NULL;
+    }
+    
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_latex: Created string buffer at %p\n", (void*)sb);
+    fprintf(stderr, "DEBUG format_math_latex: Initial sb - length=%zu, capacity=%zu, str=%p\n", 
+            sb->length, sb->capacity, (void*)sb->str);
+    #endif
     
     format_math_item(sb, root_item, MATH_OUTPUT_LATEX, 0);
     
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_latex: After formatting - sb length=%zu, str='%s'\n", 
+            sb->length, sb->str ? sb->str : "(null)");
+    #endif
+    
     String* result = strbuf_to_string(sb);
+    
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_latex: strbuf_to_string returned %p\n", (void*)result);
+    if (result) {
+        fprintf(stderr, "DEBUG format_math_latex: Result string='%s', len=%d\n", 
+                result->chars, result->len);
+    }
+    #endif
+    
     return result;
 }
 

@@ -79,7 +79,7 @@ void format_number(StrBuf* sb, Item item) {
     }
 }
 
-String* format_data(Context* ctx, Item item, String* type, String* flavor) {
+String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool) {
     String* result = NULL;
     
     // If type is null, try to auto-detect from item type
@@ -100,78 +100,75 @@ String* format_data(Context* ctx, Item item, String* type, String* flavor) {
     printf("Formatting with type: %s\n", format_type_with_flavor);
     
     if (strcmp(type->chars, "json") == 0) {
-        result = format_json(ctx->heap->pool, item);
+        result = format_json(pool, item);
     }
     else if (strcmp(type->chars, "markdown") == 0) {
-        StrBuf* sb = strbuf_new_pooled(ctx->heap->pool);
+        StrBuf* sb = strbuf_new_pooled(pool);
         format_markdown(sb, item);
         result = strbuf_to_string(sb);
         strbuf_free(sb);
     }
     else if (strcmp(type->chars, "rst") == 0) {
-        StrBuf* sb = strbuf_new_pooled(ctx->heap->pool);
+        StrBuf* sb = strbuf_new_pooled(pool);
         format_rst(sb, item);
         result = strbuf_to_string(sb);
         strbuf_free(sb);
     }
     else if (strcmp(type->chars, "xml") == 0) {
-        result = format_xml(ctx->heap->pool, item);
+        result = format_xml(pool, item);
     }
     else if (strcmp(type->chars, "html") == 0) {
-        result = format_html(ctx->heap->pool, item);
+        result = format_html(pool, item);
     }
     else if (strcmp(type->chars, "yaml") == 0) {
-        result = format_yaml(ctx->heap->pool, item);
+        result = format_yaml(pool, item);
     }
     else if (strcmp(type->chars, "toml") == 0) {
-        result = format_toml(ctx->heap->pool, item);
+        result = format_toml(pool, item);
     }
     else if (strcmp(type->chars, "ini") == 0) {
-        result = format_ini(ctx->heap->pool, item);
+        result = format_ini(pool, item);
     }
     else if (strcmp(type->chars, "math") == 0) {
         // Math type with flavor support
         if (!flavor || strcmp(flavor->chars, "latex") == 0) {
-            result = format_math_latex(ctx->heap->pool, item);
+            result = format_math_latex(pool, item);
         }
         else if (strcmp(flavor->chars, "typst") == 0) {
-            result = format_math_typst(ctx->heap->pool, item);
+            result = format_math_typst(pool, item);
         }
         else if (strcmp(flavor->chars, "ascii") == 0) {
-            result = format_math_ascii(ctx->heap->pool, item);
+            result = format_math_ascii(pool, item);
         }
         else if (strcmp(flavor->chars, "mathml") == 0) {
-            result = format_math_mathml(ctx->heap->pool, item);
+            result = format_math_mathml(pool, item);
         }
         else if (strcmp(flavor->chars, "unicode") == 0) {
-            result = format_math_unicode(ctx->heap->pool, item);
+            result = format_math_unicode(pool, item);
         }
         else {
             printf("Unsupported math flavor: %s, defaulting to latex\n", flavor->chars);
-            result = format_math_latex(ctx->heap->pool, item);
+            result = format_math_latex(pool, item);
         }
     }
     // Legacy format type strings (for backwards compatibility)
     else if (strcmp(format_type_with_flavor, "math-latex") == 0) {
-        result = format_math_latex(ctx->heap->pool, item);
+        result = format_math_latex(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-typst") == 0) {
-        result = format_math_typst(ctx->heap->pool, item);
+        result = format_math_typst(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-ascii") == 0) {
-        result = format_math_ascii(ctx->heap->pool, item);
+        result = format_math_ascii(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-mathml") == 0) {
-        result = format_math_mathml(ctx->heap->pool, item);
+        result = format_math_mathml(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-unicode") == 0) {
-        result = format_math_unicode(ctx->heap->pool, item);
+        result = format_math_unicode(pool, item);
     }
     else {
         printf("Unsupported format type: %s\n", format_type_with_flavor);
-    }
-    if (result) {
-        arraylist_append(ctx->heap->entries, (void*)s2it(result));
     }
     return result;
 }

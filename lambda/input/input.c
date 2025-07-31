@@ -393,17 +393,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, (LambdaItem)attr_value, input->pool);
 }
 
-Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {
-    printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
-    lxb_url_t* abs_url = parse_url(cwd, url->chars);
-    if (!abs_url) { printf("Failed to parse URL\n");  return NULL; }
-    char* source = read_text_doc(abs_url);
-    if (!source) {
-        printf("Failed to read document at URL: %s\n", url->chars);
-        lxb_url_destroy(abs_url);
-        return NULL;
-    }
-
+Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor) {
     const char* effective_type = NULL;
     
     // Determine the effective type to use
@@ -411,7 +401,7 @@ Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd)
         // Auto-detect MIME type
         MimeDetector* detector = mime_detector_init();
         if (detector) {
-            const char* detected_mime = detect_mime_type(detector, url->chars, source, strlen(source));
+            const char* detected_mime = detect_mime_type(detector, abs_url->path.str.data, source, strlen(source));
             if (detected_mime) {
                 effective_type = mime_to_parser_type(detected_mime);
                 printf("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
@@ -513,6 +503,19 @@ Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd)
     }
     free(source);
     return input;
+}
+
+Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {
+    printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
+    lxb_url_t* abs_url = parse_url(cwd, url->chars);
+    if (!abs_url) { printf("Failed to parse URL\n");  return NULL; }
+    char* source = read_text_doc(abs_url);
+    if (!source) {
+        printf("Failed to read document at URL: %s\n", url->chars);
+        lxb_url_destroy(abs_url);
+        return NULL;
+    }
+    return input_from_source(source, abs_url, type, flavor);
 }
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {

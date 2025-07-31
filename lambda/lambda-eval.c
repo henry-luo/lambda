@@ -883,7 +883,7 @@ void fn_print(Item item) {
     }
 }
 
-String* format_data(Context* ctx, Item item, String* type, String* flavor);
+String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
 
 String* fn_format(Item item, Item type) {
     LambdaItem type_item = {.item = type};
@@ -944,7 +944,11 @@ String* fn_format(Item item, Item type) {
     }
     
     // printf("format item type: %s, flavor: %s\n", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    return format_data(context, item, type_str, flavor_str);
+    String* result = format_data(item, type_str, flavor_str, context->heap->pool);
+    if (result) {
+        arraylist_append(context->heap->entries, (void*)s2it(result));
+    }
+    return result;
 }
 
 int utf8_char_count(const char* utf8_string);

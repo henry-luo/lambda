@@ -5,9 +5,70 @@
 
 set -e  # Exit on any error
 
+# Parse command line arguments
+TARGET_TEST=""
+SHOW_HELP=false
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --target=*)
+            TARGET_TEST="${arg#*=}"
+            shift
+            ;;
+        --help|-h)
+            SHOW_HELP=true
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $arg"
+            SHOW_HELP=true
+            ;;
+    esac
+done
+
+# Show help if requested
+if [ "$SHOW_HELP" = true ]; then
+    echo "Lambda Comprehensive Test Suite Runner"
+    echo ""
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --target=TEST     Run a specific test suite"
+    echo "  --help, -h        Show this help message"
+    echo ""
+    echo "Available test targets:"
+    echo "  all               Run all test suites (default)"
+    echo "  library           Run only library tests"
+    echo "  validator         Run only validator tests"
+    echo "  mir               Run only MIR JIT tests"
+    echo "  strbuf            Run only string buffer tests"
+    echo "  strview           Run only string view tests"
+    echo "  variable_pool     Run only variable pool tests"
+    echo "  num_stack         Run only number stack tests"
+    echo "  mime_detect       Run only MIME detection tests"
+    echo "  math              Run only math roundtrip tests"
+    echo ""
+    echo "Examples:"
+    echo "  $0                      # Run all tests"
+    echo "  $0 --target=math        # Run only math tests"
+    echo "  $0 --target=library     # Run all library tests"
+    echo ""
+    exit 0
+fi
+
 echo "================================================"
 echo "     Lambda Comprehensive Test Suite Runner    "
 echo "================================================"
+
+# Display target information
+if [ -n "$TARGET_TEST" ]; then
+    echo "🎯 Target: Running '$TARGET_TEST' tests only"
+else
+    echo "🎯 Target: Running all test suites"
+    TARGET_TEST="all"
+fi
+echo ""
 
 # Configuration
 VALIDATOR_TEST_SOURCES="test/test_validator.c"
@@ -19,6 +80,7 @@ LIB_TEST_SOURCES=(
     "test_variable_pool.c"
     "test_num_stack.c"
     "test_mime_detect.c"
+    #"test_math.c"
 )
 
 LIB_TEST_DEPENDENCIES=(
@@ -27,6 +89,7 @@ LIB_TEST_DEPENDENCIES=(
     "lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
     "lib/num_stack.c"
     "lambda/input/mime-detect.c lambda/input/mime-types.c"
+    "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
 )
 
 LIB_TEST_BINARIES=(
@@ -35,6 +98,7 @@ LIB_TEST_BINARIES=(
     "test_variable_pool.exe"
     "test_num_stack.exe"
     "test_mime_detect.exe"
+    #"test_math.exe"
 )
 
 # MIR Test Configuration
@@ -500,6 +564,164 @@ run_mir_tests() {
     return $MIR_FAILED_TESTS
 }
 
+# Function to run individual library test
+run_individual_library_test() {
+    local test_name="$1"
+    local test_index=-1
+    
+    # Find the test index
+    for i in "${!LIB_TEST_SOURCES[@]}"; do
+        if [[ "${LIB_TEST_SOURCES[$i]}" == "test_${test_name}.c" ]]; then
+            test_index=$i
+            break
+        fi
+    done
+    
+    if [ $test_index -eq -1 ]; then
+        print_error "Test '$test_name' not found in library tests"
+        print_status "Available library tests:"
+        for source in "${LIB_TEST_SOURCES[@]}"; do
+            test_basename=$(basename "$source" .c)
+            echo "  - ${test_basename#test_}"
+        done
+        return 1
+    fi
+    
+    print_status "🧪 Running individual test: $test_name"
+    
+    local source="${LIB_TEST_SOURCES[$test_index]}"
+    local deps="${LIB_TEST_DEPENDENCIES[$test_index]}"
+    local binary="${LIB_TEST_BINARIES[$test_index]}"
+    
+    print_status "Compiling test/test_$test_name.c..."
+    
+    # Build compile command
+    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps"
+    
+    if $compile_cmd 2>/dev/null; then
+        print_success "Compiled test/$source successfully"
+    else
+        print_error "Failed to compile test/$source"
+        print_error "Attempting compilation with detailed error output..."
+        $compile_cmd
+        return 1
+    fi
+    
+    print_status "🧪 Running $test_name tests..."
+    echo ""
+    
+    # Run the test with timeout - try different output formats
+    set +e
+    if command -v timeout >/dev/null 2>&1; then
+        # First try with just basic output
+        test_output=$(timeout 30 ./test/$binary 2>&1)
+        test_exit_code=$?
+        if [ $test_exit_code -eq 124 ]; then
+            print_error "Test $test_name timed out after 30 seconds"
+            test_output="Test timed out"
+            test_exit_code=1
+        fi
+    else
+        test_output=$(./test/$binary 2>&1)
+        test_exit_code=$?
+    fi
+    set -e
+    
+    echo "$test_output"
+    echo ""
+    
+    # Parse results from Criterion's standard output format
+    local total_tests=0
+    local failed_tests=0
+    local passing_tests=0
+    local crashing_tests=0
+    
+    # Parse Criterion synthesis line: "[====] Synthesis: Tested: X | Passing: Y | Failing: Z | Crashing: W"
+    if echo "$test_output" | grep -q "Synthesis:"; then
+        synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
+        total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        passing_tests=$(echo "$synthesis_line" | grep -o "Passing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        
+        # Total failures include both failing and crashing tests
+        failed_tests=$((failed_tests + crashing_tests))
+    else
+        # Fallback: assume success if no clear failure indicators and exit code is 0
+        if [ $test_exit_code -eq 0 ]; then
+            total_tests=1
+            failed_tests=0
+        else
+            total_tests=1
+            failed_tests=1
+        fi
+    fi
+    
+    # Clean up binary
+    if [ -f "test/$binary" ]; then
+        rm "test/$binary"
+    fi
+    
+    # Clean numeric values
+    total_tests=$(echo "$total_tests" | tr -cd '0-9')
+    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
+    total_tests=${total_tests:-0}
+    failed_tests=${failed_tests:-0}
+    
+    # Print summary
+    local passed_tests=$((total_tests - failed_tests))
+    echo "================================================"
+    print_status "📊 $test_name Test Results:"
+    print_status "   Total: $total_tests, Passed: $passed_tests, Failed: $failed_tests"
+    
+    if [ $failed_tests -eq 0 ] && [ $total_tests -gt 0 ]; then
+        print_success "All $test_name tests passed! ✨"
+    elif [ $total_tests -eq 0 ]; then
+        print_warning "No tests were detected for $test_name"
+    else
+        print_error "$failed_tests $test_name test(s) failed"
+    fi
+    echo "================================================"
+    
+    return $failed_tests
+}
+
+# Function to run individual test suites
+run_target_test() {
+    local target="$1"
+    
+    case "$target" in
+        "all")
+            # Run all tests (existing behavior)
+            return 0
+            ;;
+        "library")
+            print_status "🚀 Running Library Tests Suite"
+            run_library_tests
+            return $?
+            ;;
+        "validator")
+            print_status "🚀 Running Validator Tests Suite"
+            run_validator_tests
+            return $?
+            ;;
+        "mir")
+            print_status "🚀 Running MIR JIT Tests Suite"
+            run_mir_tests
+            return $?
+            ;;
+        "strbuf"|"strview"|"variable_pool"|"num_stack"|"mime_detect"|"math")
+            run_individual_library_test "$target"
+            return $?
+            ;;
+        *)
+            print_error "Unknown target: $target"
+            print_status "Available targets: all, library, validator, mir, strbuf, strview, variable_pool, num_stack, mime_detect, math"
+            return 1
+            ;;
+    esac
+}
+
 # Main execution
 echo ""
 print_status "🚀 Starting comprehensive test suite..."
@@ -509,6 +731,24 @@ detect_cpu_cores
 
 # Find Criterion installation
 find_criterion
+
+# Check if we should run individual test or all tests
+if [ "$TARGET_TEST" != "all" ]; then
+    print_status "🎯 Running target: $TARGET_TEST"
+    echo ""
+    
+    # Run the specific target test
+    if run_target_test "$TARGET_TEST"; then
+        print_success "Target test '$TARGET_TEST' completed successfully! ✨"
+        exit 0
+    else
+        print_error "Target test '$TARGET_TEST' failed!"
+        exit 1
+    fi
+fi
+
+# Continue with original parallel execution for "all" target
+print_status "🚀 Running all test suites..."
 
 # Initialize counters and tracking arrays
 total_failed_tests=0

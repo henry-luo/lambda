@@ -47,6 +47,8 @@
         "new": "c",
         "optional": "c",
         "unistd.h": "c",
-        "lambda.h": "c"
+        "lambda.h": "c",
+        "api.h": "c",
+        "lambda-data.h": "c"
     }
 }

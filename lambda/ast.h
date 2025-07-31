@@ -1,3 +1,4 @@
+#include <tree_sitter/api.h>
 #include "ts-enum.h"
 
 #define SYM_NULL sym_null
@@ -76,67 +77,3 @@
 #define FIELD_MODULE field_module
 #define FIELD_PUB field_pub
 
-typedef enum {
-    // unary
-    OPERATOR_NOT,
-    OPERATOR_NEG,
-    OPERATOR_POS,
-
-    // binary
-    OPERATOR_ADD,
-    OPERATOR_SUB,
-    OPERATOR_MUL,
-    OPERATOR_POW,
-    OPERATOR_DIV,
-    OPERATOR_IDIV,
-    OPERATOR_MOD,
-
-    OPERATOR_AND,
-    OPERATOR_OR,
-
-    OPERATOR_EQ,
-    OPERATOR_NE,
-    OPERATOR_LT,
-    OPERATOR_LE,
-    OPERATOR_GT,
-    OPERATOR_GE,
-
-    OPERATOR_TO,
-    OPERATOR_UNION,
-    OPERATOR_INTERSECT,
-    OPERATOR_EXCLUDE,
-    OPERATOR_IS,
-    OPERATOR_IN,
-} Operator ;
-
-typedef enum {
-    SYSFUNC_LEN,
-    SYSFUNC_TYPE,
-    SYSFUNC_INT,
-    SYSFUNC_FLOAT,
-    SYSFUNC_NUMBER,
-    SYSFUNC_STRING,
-    SYSFUNC_CHAR,
-    SYSFUNC_SYMBOL,
-    SYSFUNC_DATETIME,
-    SYSFUNC_DATE,
-    SYSFUNC_TIME,
-    SYSFUNC_TODAY,
-    SYSFUNC_JUSTNOW,
-    SYSFUNC_SET,
-    SYSFUNC_SLICE,    
-    SYSFUNC_ALL,
-    SYSFUNC_ANY,
-    SYSFUNC_MIN,
-    SYSFUNC_MAX,
-    SYSFUNC_SUM,
-    SYSFUNC_AVG,
-    SYSFUNC_ABS,
-    SYSFUNC_ROUND,
-    SYSFUNC_FLOOR,
-    SYSFUNC_CEIL,
-    SYSFUNC_INPUT,
-    SYSFUNC_PRINT,
-    SYSFUNC_FORMAT,
-    SYSFUNC_ERROR,
-} SysFunc;
