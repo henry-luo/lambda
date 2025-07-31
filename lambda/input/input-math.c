@@ -695,7 +695,6 @@ static Item parse_math_number(Input *input, const char **math) {
 // parse identifier/variable name as symbol with optional prime notation
 static Item parse_math_identifier(Input *input, const char **math) {
     StrBuf* sb = input->sb;
-    strbuf_full_reset(sb);
     
     // parse letters and digits
     while (**math && (isalpha(**math) || isdigit(**math))) {
@@ -704,27 +703,11 @@ static Item parse_math_identifier(Input *input, const char **math) {
     }
     
     // Check if we have valid content (same pattern as command parsing)
-    if (sb->length <= sizeof(uint32_t)) {
-        strbuf_full_reset(sb);
-        return ITEM_ERROR;
-    }
-    
-    String *id_string = (String*)sb->str;
-    id_string->len = sb->length - sizeof(uint32_t);
-    
-    // Create a proper copy of the identifier string to avoid buffer corruption
-    String* id_copy = input_create_string(input, id_string->chars);
-    if (!id_copy) {
-        strbuf_full_reset(sb);
-        return ITEM_ERROR;
-    }
-    
-    // Create symbol from the copied string
-    Item symbol_item = y2it(id_copy);
-    
-    // Now we can safely reset the buffer since we have a copy
-    strbuf_full_reset(sb);
-    
+    if (sb->length <= sizeof(uint32_t)) { strbuf_full_reset(sb);  return ITEM_ERROR; }
+
+    String *id_string = strbuf_to_string(sb);
+    Item symbol_item = y2it(id_string);
+
     // Check for prime notation after the identifier
     skip_math_whitespace(math);
     

@@ -57,7 +57,7 @@ Test(math_roundtrip_tests, inline_math_roundtrip) {
 }
 
 // Test roundtrip for block math expressions  
-Test(math_roundtrip_tests, block_math_roundtrip, .disabled = true) {
+Test(math_roundtrip_tests, block_math_roundtrip) {
     printf("=== Starting block_math_roundtrip test ===\n");
     // Test cases: block math expressions
     const char* test_cases[] = {
@@ -169,7 +169,7 @@ Test(math_roundtrip_tests, pure_math_roundtrip) {
     printf("Created type string: '%s', flavor string: '%s'\n", 
            type_str->chars, flavor_str->chars);
     
-    for (int i = 0; i < 1; i++) {
+    for (int i = 0; i < 2; i++) {
         printf("--- Testing pure math case %d: %s ---\n", i, test_cases[i]);
         
         // Create a virtual URL for this test case

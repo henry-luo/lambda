@@ -319,12 +319,14 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
         }
         else if (type_id == LMD_TYPE_STRING) {
             String *string = (String*)ld_item.pointer;
+            assert(strlen(string->chars) == string->len && "asserting tring length");
             // todo: escape the string
             if (string && string->chars) strbuf_append_format(strbuf, "\"%s\"", string->chars);
             else strbuf_append_str(strbuf, "\"\"");
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
             String *string = (String*)ld_item.pointer;
+            assert(strlen(string->chars) == string->len && "asserting symbol length");
             // todo: escape the symbol chars
             if (string && string->chars) strbuf_append_format(strbuf, "'%s'", string->chars);
             else strbuf_append_str(strbuf, "''");
