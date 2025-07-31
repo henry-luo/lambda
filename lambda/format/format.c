@@ -79,8 +79,26 @@ void format_number(StrBuf* sb, Item item) {
     }
 }
 
-String* format_data(Context* ctx, Item item, String* type) {
+String* format_data(Context* ctx, Item item, String* type, String* flavor) {
     String* result = NULL;
+    
+    // If type is null, try to auto-detect from item type
+    if (!type) {
+        printf("Format type is null, using default\n");
+        return NULL;
+    }
+    
+    // Helper function to build format type with flavor
+    char format_type_with_flavor[256];
+    if (flavor && flavor->chars && strlen(flavor->chars) > 0) {
+        snprintf(format_type_with_flavor, sizeof(format_type_with_flavor), "%s-%s", type->chars, flavor->chars);
+    } else {
+        strncpy(format_type_with_flavor, type->chars, sizeof(format_type_with_flavor) - 1);
+        format_type_with_flavor[sizeof(format_type_with_flavor) - 1] = '\0';
+    }
+    
+    printf("Formatting with type: %s\n", format_type_with_flavor);
+    
     if (strcmp(type->chars, "json") == 0) {
         result = format_json(ctx->heap->pool, item);
     }
@@ -111,8 +129,46 @@ String* format_data(Context* ctx, Item item, String* type) {
     else if (strcmp(type->chars, "ini") == 0) {
         result = format_ini(ctx->heap->pool, item);
     }
+    else if (strcmp(type->chars, "math") == 0) {
+        // Math type with flavor support
+        if (!flavor || strcmp(flavor->chars, "latex") == 0) {
+            result = format_math_latex(ctx->heap->pool, item);
+        }
+        else if (strcmp(flavor->chars, "typst") == 0) {
+            result = format_math_typst(ctx->heap->pool, item);
+        }
+        else if (strcmp(flavor->chars, "ascii") == 0) {
+            result = format_math_ascii(ctx->heap->pool, item);
+        }
+        else if (strcmp(flavor->chars, "mathml") == 0) {
+            result = format_math_mathml(ctx->heap->pool, item);
+        }
+        else if (strcmp(flavor->chars, "unicode") == 0) {
+            result = format_math_unicode(ctx->heap->pool, item);
+        }
+        else {
+            printf("Unsupported math flavor: %s, defaulting to latex\n", flavor->chars);
+            result = format_math_latex(ctx->heap->pool, item);
+        }
+    }
+    // Legacy format type strings (for backwards compatibility)
+    else if (strcmp(format_type_with_flavor, "math-latex") == 0) {
+        result = format_math_latex(ctx->heap->pool, item);
+    }
+    else if (strcmp(format_type_with_flavor, "math-typst") == 0) {
+        result = format_math_typst(ctx->heap->pool, item);
+    }
+    else if (strcmp(format_type_with_flavor, "math-ascii") == 0) {
+        result = format_math_ascii(ctx->heap->pool, item);
+    }
+    else if (strcmp(format_type_with_flavor, "math-mathml") == 0) {
+        result = format_math_mathml(ctx->heap->pool, item);
+    }
+    else if (strcmp(format_type_with_flavor, "math-unicode") == 0) {
+        result = format_math_unicode(ctx->heap->pool, item);
+    }
     else {
-        printf("Unsupported format type: %s\n", type->chars);
+        printf("Unsupported format type: %s\n", format_type_with_flavor);
     }
     if (result) {
         arraylist_append(ctx->heap->entries, (void*)s2it(result));

@@ -883,20 +883,68 @@ void fn_print(Item item) {
     }
 }
 
-String* format_data(Context* ctx, Item item, String* type);
+String* format_data(Context* ctx, Item item, String* type, String* flavor);
 
 String* fn_format(Item item, Item type) {
     LambdaItem type_item = {.item = type};
-    String* type_str;
-    if (type_item.type_id != LMD_TYPE_NULL && type_item.type_id != LMD_TYPE_STRING && type_item.type_id != LMD_TYPE_SYMBOL) {
-        printf("format type must be a string or symbol, got type %d\n", type_item.type_id);
-        return NULL;  // todo: push error
+    TypeId type_id = get_type_id(type_item);
+    String* type_str = NULL;
+    String* flavor_str = NULL;
+
+    if (type_id == LMD_TYPE_NULL) {
+        type_str = NULL;  // use default
+    }
+    else if (type_id == LMD_TYPE_STRING || type_id == LMD_TYPE_SYMBOL) {
+        // Legacy behavior: type is a simple string or symbol
+        type_str = (String*)type_item.pointer;
+    }
+    else if (type_id == LMD_TYPE_MAP) {
+        printf("format type is a map\n");
+        // New behavior: type is a map with options
+        Map* options_map = (Map*)type_item.pointer;
+        
+        // Extract 'type' from map
+        bool is_found;
+        Item format_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
+        if (!is_found || !format_type || ((LambdaItem)format_type).type_id == LMD_TYPE_NULL) { // missing 'type' key
+            type_str = NULL;
+        } else {
+            LambdaItem type_value_item = {.item = format_type};
+            TypeId type_value_type = get_type_id(type_value_item);
+            if (type_value_type == LMD_TYPE_STRING || type_value_type == LMD_TYPE_SYMBOL) {
+                type_str = (String*)type_value_item.pointer;
+            }
+            else {
+                printf("format type must be a string or symbol, got type %d\n", type_value_type);
+                // todo: push error
+                type_str = NULL;  // format type ignored
+            }
+        }
+
+        // Extract 'flavor' from map
+        Item format_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
+        if (!is_found || !format_flavor || ((LambdaItem)format_flavor).type_id == LMD_TYPE_NULL) { // missing 'flavor' key
+            flavor_str = NULL;
+        } else {
+            LambdaItem flavor_value_item = {.item = format_flavor};
+            TypeId flavor_value_type = get_type_id(flavor_value_item);
+            if (flavor_value_type == LMD_TYPE_STRING || flavor_value_type == LMD_TYPE_SYMBOL) {
+                flavor_str = (String*)flavor_value_item.pointer;
+            }
+            else {
+                printf("format flavor must be a string or symbol, got type %d\n", flavor_value_type);
+                // todo: push error
+                flavor_str = NULL;  // format flavor ignored
+            }
+        }
     }
     else {
-        type_str = (type_item.type_id == LMD_TYPE_NULL) ? NULL : (String*)type_item.pointer;
+        printf("format type must be a string, symbol, or map, got type %d\n", type_id);
+        return NULL;  // todo: push error
     }
-    // printf("format item type: %s\n", type_str ? type_str->chars : "null");
-    return format_data(context, item, type_str);
+    
+    // printf("format item type: %s, flavor: %s\n", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
+    return format_data(context, item, type_str, flavor_str);
 }
 
 int utf8_char_count(const char* utf8_string);
