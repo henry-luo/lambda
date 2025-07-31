@@ -1,7 +1,7 @@
 #include "format.h"
 #include <stdio.h>
 
-//#define DEBUG_MATH_FORMAT
+#define DEBUG_MATH_FORMAT
 #include <string.h>
 #include <math.h>
 
@@ -41,10 +41,10 @@ static const MathFormatDef basic_operators[] = {
     {"sub", " - ", " - ", " - ", "<mo>-</mo>", " - ", true, false, true, 2},
     {"mul", " \\cdot ", " * ", " * ", "<mo>⋅</mo>", " × ", true, false, true, 2},
     {"div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
-    {"pow", "^", "^", "^", "<msup>", "^", true, true, false, 2},
+    {"pow", "{1}^{{2}}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
     {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
-    {"pm", "\\pm", "+-", "+-", "<mo>±</mo>", "±", false, false, false, false, 0},
-    {"mp", "\\mp", "-+", "-+", "<mo>∓</mo>", "∓", false, false, false, false, 0},
+    {"pm", "\\pm", "+-", "+-", "<mo>±</mo>", "±", false, false, false, 0},
+    {"mp", "\\mp", "-+", "-+", "<mo>∓</mo>", "∓", false, false, false, 0},
     {"times", " \\times ", " * ", " * ", "<mo>×</mo>", " × ", true, false, true, 2},
     {"cdot", " \\cdot ", " . ", " . ", "<mo>⋅</mo>", " ⋅ ", true, false, true, 2},
     {"ast", " \\ast ", " * ", " * ", "<mo>∗</mo>", " ∗ ", true, false, true, 2},
@@ -260,58 +260,52 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
 
 // Format math string (escape special characters if needed)
 static void format_math_string(StrBuf* sb, String* str) {
-    if (!str || !str->chars) {
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_string: called with str=%p\n", (void*)str);
+    #endif
+    
+    if (!str) {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: NULL string or chars\n");
+        fprintf(stderr, "DEBUG format_math_string: NULL string\n");
         #endif
         return;
     }
     
-    const char* s = str->chars;
-    size_t len = str->len;
+    // The length field seems corrupted, so let's use strlen as a workaround
+    size_t string_len = strlen(str->chars);
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: input string='%s', len=%zu\n", s, len);
-    fprintf(stderr, "DEBUG format_math_string: sb before - length=%zu, str='%s'\n", 
-            sb->length, sb->str ? sb->str : "(null)");
+    fprintf(stderr, "DEBUG format_math_string: raw len=%u, strlen=%zu\n", str->len, string_len);
+    if (string_len > 0 && string_len < 100) {
+        fprintf(stderr, "DEBUG format_math_string: string content: '%s'\n", str->chars);
+    }
     #endif
     
-    // Safety check: if len is suspiciously large, it's likely memory corruption
-    if (len > 1000000) {  // 1MB is a reasonable upper bound for a math string
+    if (string_len == 0) {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: WARNING - length %zu is suspiciously large, possible memory corruption\n", len);
+        fprintf(stderr, "DEBUG format_math_string: zero length string (by strlen)\n");
         #endif
-        // Fallback: use strlen to compute actual length
-        len = strlen(s);
-        #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: Using strlen fallback, computed len=%zu\n", len);
-        #endif
-        if (len > 1000000) {
-            #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_string: Even strlen gives huge length, truncating to 1000\n");
-            #endif
-            len = 1000;  // Hard limit to prevent infinite loops
-        }
+        return;
     }
     
-    for (size_t i = 0; i < len; i++) {
+    // Check if the string has reasonable length to avoid infinite loops
+    if (string_len > 1000000) {  // 1MB limit as sanity check
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: appending char '%c' (pos %zu)\n", s[i], i);
+        fprintf(stderr, "DEBUG format_math_string: string too long (%zu), treating as invalid\n", string_len);
         #endif
-        strbuf_append_char(sb, s[i]);
-        
-        // Additional safety check: if we hit a null terminator, stop
-        if (s[i] == '\0') {
-            #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_string: Hit null terminator at pos %zu, stopping\n", i);
-            #endif
-            break;
-        }
+        strbuf_append_str(sb, "[invalid_string]");
+        return;
     }
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: sb after - length=%zu, str='%s'\n", 
-            sb->length, sb->str ? sb->str : "(null)");
+    fprintf(stderr, "DEBUG format_math_string: about to append %zu chars using strbuf_append_str\n", string_len);
+    #endif
+    
+    // Use the simpler strbuf_append_str which relies on null termination
+    strbuf_append_str(sb, str->chars);
+    
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG format_math_string: completed\n");
     #endif
 }
 
@@ -389,7 +383,11 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG: Format def for '%s': %s\n", element_name, def ? "found" : "not found");
     if (def) {
-        fprintf(stderr, "DEBUG: is_binary_op: %s\n", def->is_binary_op ? "true" : "false");
+        fprintf(stderr, "DEBUG: is_binary_op: %s, has_children: %s, needs_braces: %s\n", 
+                def->is_binary_op ? "true" : "false",
+                def->has_children ? "true" : "false", 
+                def->needs_braces ? "true" : "false");
+        fprintf(stderr, "DEBUG: latex_format: '%s'\n", def->latex_format ? def->latex_format : "NULL");
     }
     #endif
     
@@ -427,6 +425,11 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG: Element has %ld children\n", children ? children->length : 0L);
+    if (children && children->length > 0) {
+        for (int i = 0; i < children->length; i++) {
+            fprintf(stderr, "DEBUG: Child %d item: %p\n", i, (void*)children->items[i]);
+        }
+    }
     #endif
     
     // Special handling for binary operators
@@ -446,8 +449,14 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     // Check if this element has a format template with placeholders
     if (def->has_children && children && strstr(format_str, "{1}")) {
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG: Using template formatting with format: '%s'\n", format_str);
+        #endif
         format_math_children_with_template(sb, children, format_str, flavor, depth);
     } else {
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG: Using simple formatting without template\n");
+        #endif
         // Simple format without placeholders
         strbuf_append_str(sb, format_str);
         

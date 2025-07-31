@@ -80,7 +80,7 @@ LIB_TEST_SOURCES=(
     "test_variable_pool.c"
     "test_num_stack.c"
     "test_mime_detect.c"
-    #"test_math.c"
+    "test_math.c"
 )
 
 LIB_TEST_DEPENDENCIES=(
@@ -98,7 +98,7 @@ LIB_TEST_BINARIES=(
     "test_variable_pool.exe"
     "test_num_stack.exe"
     "test_mime_detect.exe"
-    #"test_math.exe"
+    "test_math.exe"
 )
 
 # MIR Test Configuration

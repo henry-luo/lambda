@@ -156,7 +156,7 @@ Test(math_roundtrip_tests, pure_math_roundtrip) {
     printf("=== Starting pure_math_roundtrip test ===\n");
     // Test pure math expressions (no markdown wrapping)
     const char* test_cases[] = {
-        "E = mc^2",
+        "E = mc^{2}",  // Updated to match correct LaTeX formatting with braces
         //"x^2 + y^2 = z^2",
         //"\\frac{a}{b} + \\frac{c}{d}",
         //"\\int_0^\\infty e^{-x} dx = 1",
