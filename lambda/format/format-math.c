@@ -1,4 +1,7 @@
 #include "format.h"
+#include <stdio.h>
+
+#define DEBUG_MATH_FORMAT
 #include <string.h>
 #include <math.h>
 
@@ -320,6 +323,11 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         strncpy(name_buf, elmt_type->name.str, name_len);
         name_buf[name_len] = '\0';
         element_name = name_buf;
+        
+        // Debug output to stderr
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG: Math element name: '%s'\n", element_name);
+        #endif
     }
     
     if (!element_name) {
@@ -333,6 +341,13 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     // Find format definition
     const MathFormatDef* def = find_format_def(element_name);
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG: Format def for '%s': %s\n", element_name, def ? "found" : "not found");
+    if (def) {
+        fprintf(stderr, "DEBUG: is_binary_op: %s\n", def->is_binary_op ? "true" : "false");
+    }
+    #endif
+    
     if (!def) {
         // Unknown element, try to format as generic expression
         if (flavor == MATH_OUTPUT_LATEX) {
@@ -365,8 +380,15 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         children = (List*)elem;
     }
     
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG: Element has %ld children\n", children ? children->length : 0L);
+    #endif
+    
     // Special handling for binary operators
     if (def->is_binary_op && children && children->length >= 2) {
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG: Formatting as binary operator\n");
+        #endif
         // Format as: child1 operator child2 operator child3 ...
         for (int i = 0; i < children->length; i++) {
             if (i > 0) {

@@ -51,31 +51,6 @@ Formatters convert Lambda data structures (Items) into specific output formats. 
 2. Post-process to convert to target format
 3. Note: Only use when the target format closely matches JSON structure
 
-## Implementation Requirements
-
-### 1. File Structure
-- Create `lambda/format/format-<name>.c`
-- Include `../transpiler.h`
-- Reference existing formatters for patterns
-
-### 2. Core Functions
-- **Main function**: Handle root-level maps, arrays, and scalar types
-- **Central item formatter**: Process all Lambda data types using `get_type_id()`
-- **Map formatter**: Traverse `ShapeEntry` linked list safely with field count validation
-- **Helper functions**: Format-specific utilities for strings, numbers, containers
-
-### 3. Registration
-- Add to `format_data()` function in `format.c`
-
-### 4. Modular Design Patterns
-
-**Success Pattern**: Central `format_item()` function with format-specific helper functions:
-- Single entry point for all data type formatting
-- Consistent error handling and depth limiting
-- Modular helper functions for complex types
-
-Reference `format-toml.c` for complete modular design implementation.
-
 ### Memory Management
 - Use `strbuf_new_pooled(pool)` for all allocations
 - Free temporary StrBuf objects with `strbuf_free()`

@@ -1,5 +1,10 @@
 #include "format.h"
 
+// Forward declarations for math formatting support
+String* format_math_latex(VariableMemPool* pool, Item root_item);
+static void format_math_inline(StrBuf* sb, Element* elem);
+static void format_math_display(StrBuf* sb, Element* elem);
+
 static void format_item(StrBuf* sb, Item item);
 static void format_element(StrBuf* sb, Element* elem);
 static void format_element_children(StrBuf* sb, Element* elem);
@@ -34,7 +39,7 @@ static String* get_attribute(Element* elem, const char* attr_name) {
 
 // Format plain text (escape markdown special characters)
 static void format_text(StrBuf* sb, String* str) {
-    if (!sb || !str || !str->chars) return;
+    if (!sb || !str || str->len == 0) return;
 
     const char* s = str->chars;
     size_t len = str->len;
@@ -117,7 +122,14 @@ static void format_code(StrBuf* sb, Element* elem) {
     
     String* lang_attr = get_attribute(elem, "language");
     if (lang_attr && lang_attr->len > 0) {
-        // Code block
+        // Check if this is a math code block
+        if (strcmp(lang_attr->chars, "math") == 0) {
+            // Use display math formatter instead
+            format_math_display(sb, elem);
+            return;
+        }
+        
+        // Regular code block
         strbuf_append_str(sb, "```");
         strbuf_append_str(sb, lang_attr->chars);
         strbuf_append_char(sb, '\n');
@@ -314,6 +326,70 @@ static void format_thematic_break(StrBuf* sb) {
     strbuf_append_str(sb, "---\n\n");
 }
 
+// Format inline math elements ($math$)
+// Format inline math
+static void format_math_inline(StrBuf* sb, Element* elem) {
+    if (!elem) return;
+    
+    List* element_list = (List*)elem;
+    
+    // Get the math content from the first child
+    // The parsed math AST should be the first child of the math element
+    if (element_list->length > 0) {
+        Item math_item = element_list->items[0];
+        
+        // Use heap-allocated memory pool for formatting
+        VariableMemPool* pool = NULL;
+        if (pool_variable_init(&pool, 8192, 50) == MEM_POOL_ERR_OK) {
+            String* latex_output = format_math_latex(pool, math_item);
+            
+            if (latex_output && latex_output->len > 0) {
+                strbuf_append_str(sb, "$");
+                strbuf_append_str(sb, latex_output->chars);
+                strbuf_append_str(sb, "$");
+            } else {
+                // Fallback if math formatting fails
+                strbuf_append_str(sb, "$");
+                strbuf_append_str(sb, "math");
+                strbuf_append_str(sb, "$");
+            }
+            
+            pool_variable_destroy(pool);
+        }
+    }
+}
+
+// Format display math
+static void format_math_display(StrBuf* sb, Element* elem) {
+    if (!elem) return;
+    
+    List* element_list = (List*)elem;
+    
+    // Get the math content from the first child
+    // The parsed math AST should be the first child of the displaymath element
+    if (element_list->length > 0) {
+        Item math_item = element_list->items[0];
+        
+        // Use heap-allocated memory pool for formatting
+        VariableMemPool* pool = NULL;
+        if (pool_variable_init(&pool, 8192, 50) == MEM_POOL_ERR_OK) {
+            String* latex_output = format_math_latex(pool, math_item);
+            
+            if (latex_output && latex_output->len > 0) {
+                strbuf_append_str(sb, "$$");
+                strbuf_append_str(sb, latex_output->chars);
+                strbuf_append_str(sb, "$$");
+            } else {
+                // Fallback if math formatting fails
+                strbuf_append_str(sb, "$$");
+                strbuf_append_str(sb, "math");
+                strbuf_append_str(sb, "$$");
+            }
+            
+            pool_variable_destroy(pool);
+        }
+    }
+}
 static void format_element_children(StrBuf* sb, Element* elem) {
     // Element extends List, so access content through List interface
     List* list = (List*)elem;
@@ -352,6 +428,13 @@ static void format_element(StrBuf* sb, Element* elem) {
         format_thematic_break(sb);
     } else if (strcmp(tag_name, "table") == 0) {
         format_table(sb, elem);
+        strbuf_append_char(sb, '\n');
+    } else if (strcmp(tag_name, "math") == 0) {
+        // Inline math element
+        format_math_inline(sb, elem);
+    } else if (strcmp(tag_name, "displaymath") == 0) {
+        // Display math element or math code block
+        format_math_display(sb, elem);
         strbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
                strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
