@@ -34,31 +34,7 @@ struct bucket {
 };
 
 // hashmap is an open addressed hash map using robinhood hashing.
-struct hashmap {
-    void *(*malloc)(size_t);
-    void *(*realloc)(void *, size_t);
-    void (*free)(void *);
-    size_t elsize;
-    size_t cap;
-    uint64_t seed0;
-    uint64_t seed1;
-    uint64_t (*hash)(const void *item, uint64_t seed0, uint64_t seed1);
-    int (*compare)(const void *a, const void *b, void *udata);
-    void (*elfree)(void *item);
-    void *udata;
-    size_t bucketsz;
-    size_t nbuckets;
-    size_t count;
-    size_t mask;
-    size_t growat;
-    size_t shrinkat;
-    uint8_t loadfactor;
-    uint8_t growpower;
-    bool oom;
-    void *buckets;
-    void *spare;
-    void *edata;
-};
+// struct definition moved to hashmap.h
 
 void hashmap_set_grow_by_power(struct hashmap *map, size_t power) {
     map->growpower = power < 1 ? 1 : power > 16 ? 16 : power;
