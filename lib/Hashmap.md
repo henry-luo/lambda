@@ -156,10 +156,8 @@ make -f Makefile.hashmap_cpp clean
 # Compile the C hashmap
 gcc -std=c99 -Wall -O2 -c lib/hashmap.c -o hashmap.o
 
-```bash
 # Compile and link your C++ program (C++23 required for std::expected)
 g++ -std=c++23 -Wall -O2 -I./lib your_program.cpp hashmap.o -o your_program
-```
 ```
 
 ## Performance Characteristics
