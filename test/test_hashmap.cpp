@@ -166,13 +166,13 @@ void test_insert_or_assign() {
     hashmap_cpp::HashMap<std::string, int> map;
     
     // Insert new key
-    bool inserted = map.insert_or_assign("new_key", 42);
-    assert(inserted == true);
+    auto result = map.insert_or_assign("new_key", 42);
+    assert(result.second == true);  // true means inserted
     assert(map["new_key"] == 42);
     
     // Assign to existing key
-    inserted = map.insert_or_assign("new_key", 100);
-    assert(inserted == false); // Should be false because key existed
+    result = map.insert_or_assign("new_key", 100);
+    assert(result.second == false); // false means assigned (key existed)
     assert(map["new_key"] == 100);
     
     std::cout << "insert_or_assign test completed.\n\n";

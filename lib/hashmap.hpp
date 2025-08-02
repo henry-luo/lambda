@@ -11,6 +11,7 @@
 #include <random>
 #include <cstdint>
 #include <cstddef>
+#include <vector>
 
 // Forward declare the C struct to avoid including the header here
 struct hashmap;
@@ -94,15 +95,25 @@ private:
         const Entry* entry = static_cast<const Entry*>(item);
         Hash hash_fn;
         
-        // Use the key for hashing
+        // Use the key for hashing with improved type handling
         if constexpr (std::is_arithmetic_v<Key>) {
             return hashmap_xxhash3(&entry->key, sizeof(Key), seed0, seed1);
         } else if constexpr (std::is_same_v<Key, std::string>) {
             return hashmap_xxhash3(entry->key.c_str(), entry->key.length(), seed0, seed1);
+        } else if constexpr (std::is_same_v<Key, const char*>) {
+            size_t len = std::strlen(entry->key);
+            return hashmap_xxhash3(entry->key, len, seed0, seed1);
+        } else if constexpr (std::is_pointer_v<Key>) {
+            // Hash pointer value
+            uintptr_t ptr_val = reinterpret_cast<uintptr_t>(entry->key);
+            return hashmap_xxhash3(&ptr_val, sizeof(ptr_val), seed0, seed1);
         } else {
             // For other types, use std::hash and combine with seeds
             auto h = hash_fn(entry->key);
-            return hashmap_xxhash3(&h, sizeof(h), seed0, seed1);
+            // Mix the hash with seeds for better distribution
+            h ^= seed0 + 0x9e3779b9 + (h << 6) + (h >> 2);
+            h ^= seed1 + 0x9e3779b9 + (h << 6) + (h >> 2);
+            return h;
         }
     }
     
@@ -131,20 +142,27 @@ private:
     }
 
 public:
-    // Iterator class for STL compatibility (simplified implementation)
-    class iterator {
+    // Forward declarations for proper iterator types
+    class iterator;
+    class const_iterator;
+    
+    // Proper const_iterator implementation
+    class const_iterator {
+        friend class HashMap;
     private:
-        HashMap* map_;
+        const HashMap* map_;
         size_t index_;
-        Entry* current_entry_;
-        mutable value_type current_pair_;  // Mutable to allow const methods to modify it
+        const Entry* current_entry_;
+        mutable std::pair<Key, Value> current_pair_;
         
         void advance_to_next() {
             void* item = nullptr;
-            if (hashmap_iter(map_->map_, &index_, &item)) {
-                current_entry_ = static_cast<Entry*>(item);
-                current_pair_.first = current_entry_->key;
-                current_pair_.second = current_entry_->value;
+            if (map_ && hashmap_iter(const_cast<struct hashmap*>(map_->map_), &index_, &item)) {
+                current_entry_ = static_cast<const Entry*>(item);
+                if (current_entry_) {
+                    current_pair_.first = current_entry_->key;
+                    current_pair_.second = current_entry_->value;
+                }
             } else {
                 current_entry_ = nullptr;
             }
@@ -152,23 +170,112 @@ public:
         
     public:
         using iterator_category = std::forward_iterator_tag;
-        using value_type = HashMap::value_type;
-        using difference_type = HashMap::difference_type;
-        using pointer = value_type*;
-        using reference = value_type&;
+        using value_type = std::pair<const Key, const Value>;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const value_type*;
+        using reference = const value_type&;
         
-        iterator(HashMap* map, size_t idx = 0) : map_(map), index_(idx), current_entry_(nullptr) {
+        const_iterator() : map_(nullptr), index_(0), current_entry_(nullptr) {}
+        
+        const_iterator(const HashMap* map, size_t idx = 0) 
+            : map_(map), index_(idx), current_entry_(nullptr) {
             if (map_ && map_->map_) {
                 advance_to_next();
             }
         }
         
+        reference operator*() const {
+            if (!current_entry_) {
+                throw std::runtime_error("Dereferencing end iterator");
+            }
+            return current_pair_;
+        }
+        
+        pointer operator->() const {
+            return &(operator*());
+        }
+        
+        const_iterator& operator++() {
+            if (current_entry_) {
+                advance_to_next();
+            }
+            return *this;
+        }
+        
+        const_iterator operator++(int) {
+            const_iterator temp = *this;
+            ++(*this);
+            return temp;
+        }
+        
+        bool operator==(const const_iterator& other) const {
+            return current_entry_ == other.current_entry_;
+        }
+        
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+        
+        const Key& key() const {
+            if (!current_entry_) {
+                throw std::runtime_error("Accessing key of end iterator");
+            }
+            return current_entry_->key;
+        }
+        
+        const Value& value() const {
+            if (!current_entry_) {
+                throw std::runtime_error("Accessing value of end iterator");
+            }
+            return current_entry_->value;
+        }
+    };
+
+    // Iterator class for STL compatibility with proper mutable access
+    class iterator {
+        friend class HashMap;
+    private:
+        HashMap* map_;
+        size_t index_;
+        Entry* current_entry_;
+        mutable std::pair<Key, Value> current_pair_;
+        
+        void advance_to_next() {
+            void* item = nullptr;
+            if (map_ && hashmap_iter(map_->map_, &index_, &item)) {
+                current_entry_ = static_cast<Entry*>(item);
+                if (current_entry_) {
+                    current_pair_.first = current_entry_->key;
+                    current_pair_.second = current_entry_->value;
+                }
+            } else {
+                current_entry_ = nullptr;
+            }
+        }
+        
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = std::pair<const Key, Value>;
+        using difference_type = std::ptrdiff_t;
+        using pointer = value_type*;
+        using reference = value_type&;
+        
         iterator() : map_(nullptr), index_(0), current_entry_(nullptr) {}
+        
+        iterator(HashMap* map, size_t idx = 0) 
+            : map_(map), index_(idx), current_entry_(nullptr) {
+            if (map_ && map_->map_) {
+                advance_to_next();
+            }
+        }
         
         reference operator*() const {
             if (!current_entry_) {
                 throw std::runtime_error("Dereferencing end iterator");
             }
+            // Update current_pair_ with latest values
+            current_pair_.first = current_entry_->key;
+            current_pair_.second = current_entry_->value;
             return current_pair_;
         }
         
@@ -197,6 +304,23 @@ public:
             return !(*this == other);
         }
         
+        // Allow comparison between iterator and const_iterator
+        bool operator==(const const_iterator& other) const {
+            return current_entry_ == other.current_entry_;
+        }
+        
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+        
+        // Conversion to const_iterator (friend-based approach would be better)
+        operator const_iterator() const {
+            if (current_entry_) {
+                return const_iterator(map_, index_);
+            }
+            return const_iterator();
+        }
+        
         const Key& key() const {
             if (!current_entry_) {
                 throw std::runtime_error("Accessing key of end iterator");
@@ -211,8 +335,6 @@ public:
             return current_entry_->value;
         }
     };
-    
-    using const_iterator = const iterator;
 
     // Constructors
     explicit HashMap(size_type bucket_count = 16, 
@@ -298,6 +420,20 @@ public:
         return *this;
     }
     
+    // Hash function and equality access
+    hasher hash_function() const {
+        return hasher_;
+    }
+    
+    key_equal key_eq() const {
+        return key_equal_;
+    }
+    
+    // Get hash value for a key
+    size_type hash_value(const Key& key) const {
+        return static_cast<size_type>(hasher_(key));
+    }
+    
     // Element access
     Value& operator[](const Key& key) {
         Entry search_entry(key, Value{});
@@ -369,7 +505,7 @@ public:
     }
     
     const_iterator begin() const {
-        return const_iterator(const_cast<HashMap*>(this), 0);
+        return const_iterator(this, 0);
     }
     
     const_iterator cbegin() const {
@@ -402,26 +538,114 @@ public:
         hashmap_clear(map_, false);
     }
     
+    // Exception-safe insert operation
     std::pair<iterator, bool> insert(const value_type& value) {
-        Entry new_entry(value.first, value.second);
-        const Entry* existing = static_cast<const Entry*>(hashmap_set(map_, &new_entry));
-        
-        if (hashmap_oom(map_)) {
+        Entry* entry = nullptr;
+        try {
+            entry = new Entry(value.first, value.second);
+        } catch (...) {
             throw std::bad_alloc();
         }
         
-        bool inserted = (existing == nullptr);
+        const void* existing = hashmap_set(map_, entry);
         
-        // Create iterator pointing to the element (simplified)
-        iterator it;
+        if (hashmap_oom(map_)) {
+            delete entry;
+            throw std::bad_alloc();
+        }
         
-        return std::make_pair(it, inserted);
+        if (existing && existing != entry) {
+            // Key already exists, clean up our new entry
+            delete entry;
+            // Return iterator to existing element
+            for (auto it = begin(); it != end(); ++it) {
+                if (it.current_entry_ == existing) {
+                    return std::make_pair(it, false);
+                }
+            }
+            return std::make_pair(end(), false);
+        }
+        
+        // Successfully inserted, find the iterator
+        for (auto it = begin(); it != end(); ++it) {
+            if (it.current_entry_ == entry) {
+                return std::make_pair(it, true);
+            }
+        }
+        
+        // Should not reach here
+        return std::make_pair(end(), true);
     }
     
+    // Exception-safe insert with move semantics
+    std::pair<iterator, bool> insert(value_type&& value) {
+        Entry* entry = nullptr;
+        try {
+            entry = new Entry(std::move(const_cast<Key&>(value.first)), std::move(value.second));
+        } catch (...) {
+            throw std::bad_alloc();
+        }
+        
+        const void* existing = hashmap_set(map_, entry);
+        
+        if (hashmap_oom(map_)) {
+            delete entry;
+            throw std::bad_alloc();
+        }
+        
+        if (existing && existing != entry) {
+            delete entry;
+            for (auto it = begin(); it != end(); ++it) {
+                if (it.current_entry_ == existing) {
+                    return std::make_pair(it, false);
+                }
+            }
+            return std::make_pair(end(), false);
+        }
+        
+        for (auto it = begin(); it != end(); ++it) {
+            if (it.current_entry_ == entry) {
+                return std::make_pair(it, true);
+            }
+        }
+        
+        return std::make_pair(end(), true);
+    }
+    
+    // Exception-safe emplace operation
     template<typename... Args>
     std::pair<iterator, bool> emplace(Args&&... args) {
-        value_type value(std::forward<Args>(args)...);
-        return insert(value);
+        Entry* entry = nullptr;
+        try {
+            entry = new Entry(std::forward<Args>(args)...);
+        } catch (...) {
+            throw std::bad_alloc();
+        }
+        
+        const void* existing = hashmap_set(map_, entry);
+        
+        if (hashmap_oom(map_)) {
+            delete entry;
+            throw std::bad_alloc();
+        }
+        
+        if (existing && existing != entry) {
+            delete entry;
+            for (auto it = begin(); it != end(); ++it) {
+                if (it.current_entry_ == existing) {
+                    return std::make_pair(it, false);
+                }
+            }
+            return std::make_pair(end(), false);
+        }
+        
+        for (auto it = begin(); it != end(); ++it) {
+            if (it.current_entry_ == entry) {
+                return std::make_pair(it, true);
+            }
+        }
+        
+        return std::make_pair(end(), true);
     }
     
     size_type erase(const Key& key) {
@@ -449,17 +673,29 @@ public:
         const Entry* found = static_cast<const Entry*>(hashmap_get(map_, &search_entry));
         
         if (found) {
-            // Create iterator pointing to found element
-            iterator it;
-            // Note: Simplified iterator creation
-            return it;
-        } else {
-            return end();
+            // Find iterator pointing to found element
+            for (auto it = begin(); it != end(); ++it) {
+                if (it.current_entry_ == found) {
+                    return it;
+                }
+            }
         }
+        return end();
     }
     
     const_iterator find(const Key& key) const {
-        return const_cast<HashMap*>(this)->find(key);
+        Entry search_entry(key, Value{});
+        const Entry* found = static_cast<const Entry*>(hashmap_get(map_, &search_entry));
+        
+        if (found) {
+            // Find iterator pointing to found element
+            for (auto it = begin(); it != end(); ++it) {
+                if (it.current_entry_ == found) {
+                    return it;
+                }
+            }
+        }
+        return end();
     }
     
     bool contains(const Key& key) const {
@@ -479,40 +715,87 @@ public:
         return size() > 0 ? size() * 2 : 16;
     }
     
-    hasher hash_function() const {
-        return hasher_;
+    // Additional STL compatibility methods
+    std::pair<iterator, iterator> equal_range(const Key& key) {
+        iterator it = find(key);
+        if (it != end()) {
+            iterator next = it;
+            ++next;
+            return std::make_pair(it, next);
+        }
+        return std::make_pair(end(), end());
     }
     
-    key_equal key_eq() const {
-        return key_equal_;
+    std::pair<const_iterator, const_iterator> equal_range(const Key& key) const {
+        const_iterator it = find(key);
+        if (it != end()) {
+            const_iterator next = it;
+            ++next;
+            return std::make_pair(it, next);
+        }
+        return std::make_pair(end(), end());
     }
     
-    // Additional convenience methods
-    bool insert_or_assign(const Key& key, const Value& value) {
-        Entry new_entry(key, value);
-        const Entry* existing = static_cast<const Entry*>(hashmap_set(map_, &new_entry));
-        
-        if (hashmap_oom(map_)) {
-            throw std::bad_alloc();
+    // Insert or assign (C++17 compatibility)
+    template<typename M>
+    std::pair<iterator, bool> insert_or_assign(const Key& key, M&& obj) {
+        auto it = find(key);
+        if (it != end()) {
+            it.value() = std::forward<M>(obj);
+            return std::make_pair(it, false);
+        }
+        return insert(std::make_pair(key, std::forward<M>(obj)));
+    }
+    
+    iterator erase(const_iterator pos) {
+        if (pos != end()) {
+            Key key = pos.key();
+            auto it = find(key);
+            if (it != end()) {
+                ++it; // Get next iterator
+                erase(key);
+                return it;
+            }
+        }
+        return end();
+    }
+    
+    iterator erase(const_iterator first, const_iterator last) {
+        std::vector<Key> keys_to_erase;
+        for (auto it = first; it != last; ++it) {
+            keys_to_erase.push_back(it.key());
         }
         
-        return existing == nullptr; // true if inserted, false if assigned
+        iterator result = end();
+        for (const auto& key : keys_to_erase) {
+            auto it = find(key);
+            if (it != end()) {
+                result = it;
+                ++result;
+                erase(key);
+            }
+        }
+        return result;
     }
     
-    template<typename... Args>
-    bool try_emplace(const Key& key, Args&&... args) {
-        if (contains(key)) {
+    // Comparison operators
+    bool operator==(const HashMap& rhs) const {
+        if (size() != rhs.size()) {
             return false;
         }
         
-        Entry new_entry(key, Value(std::forward<Args>(args)...));
-        hashmap_set(map_, &new_entry);
-        
-        if (hashmap_oom(map_)) {
-            throw std::bad_alloc();
+        for (const auto& pair : *this) {
+            auto it = rhs.find(pair.first);
+            if (it == rhs.end() || it->second != pair.second) {
+                return false;
+            }
         }
         
         return true;
+    }
+    
+    bool operator!=(const HashMap& rhs) const {
+        return !(*this == rhs);
     }
 };
 
