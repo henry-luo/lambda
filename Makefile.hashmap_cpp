@@ -1,6 +1,6 @@
 # Makefile for C++ HashMap wrapper
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -I./lib
+CXXFLAGS = -std=c++23 -Wall -Wextra -O2 -I./lib
 CC = gcc
 CFLAGS = -std=c99 -Wall -Wextra -O2
 

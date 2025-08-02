@@ -49,6 +49,7 @@
         "unistd.h": "c",
         "lambda.h": "c",
         "api.h": "c",
-        "lambda-data.h": "c"
+        "lambda-data.h": "c",
+        "stdexcept": "cpp"
     }
 }
