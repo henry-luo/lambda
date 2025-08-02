@@ -118,11 +118,11 @@ int main() {
     
     std::vector<std::string> items = {"apple", "grape", "banana", "mango"};
     for (const std::string& item : items) {
-        try {
-            double price = prices.at(item);
-            std::cout << item << ": $" << price << "\n";
-        } catch (const std::out_of_range&) {
-            std::cout << item << ": Not available\n";
+        auto price_result = prices.at(item);
+        if (price_result) {
+            std::cout << item << ": $" << *price_result.value() << "\n";
+        } else {
+            std::cout << item << ": $0\n";
         }
     }
     std::cout << "\n";

@@ -508,8 +508,8 @@ public:
         return map_ != nullptr;
     }
     
-    // Safe element access that returns std::expected
-    std::expected<Value*, HashMapError> try_at(const Key& key) {
+    // Element access that returns std::expected
+    std::expected<Value*, HashMapError> at(const Key& key) {
         if (!map_) {
             return std::unexpected(HashMapError::InvalidOperation);
         }
@@ -524,7 +524,7 @@ public:
         return &const_cast<Entry*>(found)->value;
     }
     
-    std::expected<const Value*, HashMapError> try_at(const Key& key) const {
+    std::expected<const Value*, HashMapError> at(const Key& key) const {
         if (!map_) {
             return std::unexpected(HashMapError::InvalidOperation);
         }
@@ -595,18 +595,6 @@ public:
         }
     }
     
-    Value& at(const Key& key) {
-        static Value default_value{};
-        auto result = try_at(key);
-        return result ? *result.value() : default_value;
-    }
-    
-    const Value& at(const Key& key) const {
-        static const Value default_value{};
-        auto result = try_at(key);
-        return result ? *result.value() : default_value;
-    }
-    
     // Iterators
     iterator begin() {
         if (!map_) {
@@ -657,8 +645,8 @@ public:
         }
     }
     
-    // Safe insert operation that returns std::expected
-    std::expected<std::pair<iterator, bool>, HashMapError> try_insert(const value_type& value) {
+    // Insert operation that returns std::expected
+    std::expected<std::pair<iterator, bool>, HashMapError> insert(const value_type& value) {
         if (!map_) {
             return std::unexpected(HashMapError::InvalidOperation);
         }
@@ -701,18 +689,8 @@ public:
         return std::make_pair(end(), true);
     }
     
-    // Exception-safe insert operation (backward compatibility)
-    std::pair<iterator, bool> insert(const value_type& value) {
-        auto result = try_insert(value);
-        if (result) {
-            return result.value();
-        }
-        // Return end iterator for failure
-        return std::make_pair(end(), false);
-    }
-    
-    // Safe insert with move semantics
-    std::expected<std::pair<iterator, bool>, HashMapError> try_insert(value_type&& value) {
+    // Insert with move semantics
+    std::expected<std::pair<iterator, bool>, HashMapError> insert(value_type&& value) {
         if (!map_) {
             return std::unexpected(HashMapError::InvalidOperation);
         }
@@ -754,18 +732,9 @@ public:
         return std::make_pair(end(), true);
     }
     
-    // Exception-safe insert with move semantics
-    std::pair<iterator, bool> insert(value_type&& value) {
-        auto result = try_insert(std::move(value));
-        if (result) {
-            return result.value();
-        }
-        return std::make_pair(end(), false);
-    }
-    
-    // Safe emplace operation
+    // Emplace operation
     template<typename... Args>
-    std::expected<std::pair<iterator, bool>, HashMapError> try_emplace(Args&&... args) {
+    std::expected<std::pair<iterator, bool>, HashMapError> emplace(Args&&... args) {
         if (!map_) {
             return std::unexpected(HashMapError::InvalidOperation);
         }
@@ -806,16 +775,6 @@ public:
         }
         
         return std::make_pair(end(), true);
-    }
-    
-    // Exception-safe emplace operation
-    template<typename... Args>
-    std::pair<iterator, bool> emplace(Args&&... args) {
-        auto result = try_emplace(std::forward<Args>(args)...);
-        if (result) {
-            return result.value();
-        }
-        return std::make_pair(end(), false);
     }
     
     size_type erase(const Key& key) {
@@ -924,26 +883,31 @@ public:
     
     // Insert or assign (C++17 compatibility)
     template<typename M>
-    std::pair<iterator, bool> insert_or_assign(const Key& key, M&& obj) {
+    std::expected<std::pair<iterator, bool>, HashMapError> insert_or_assign(const Key& key, M&& obj) {
         auto it = find(key);
         if (it != end()) {
             auto value_result = it.value();
             if (value_result) {
                 *value_result.value() = std::forward<M>(obj);
+                return std::make_pair(it, false);
+            } else {
+                return std::unexpected(value_result.error());
             }
-            return std::make_pair(it, false);
         }
         return insert(std::make_pair(key, std::forward<M>(obj)));
     }
     
     iterator erase(const_iterator pos) {
         if (pos != end()) {
-            Key key = pos.key();
-            auto it = find(key);
-            if (it != end()) {
-                ++it; // Get next iterator
-                erase(key);
-                return it;
+            auto key_result = pos.key();
+            if (key_result) {
+                Key key = *key_result.value();
+                auto it = find(key);
+                if (it != end()) {
+                    ++it; // Get next iterator
+                    erase(key);
+                    return it;
+                }
             }
         }
         return end();
@@ -952,7 +916,10 @@ public:
     iterator erase(const_iterator first, const_iterator last) {
         std::vector<Key> keys_to_erase;
         for (auto it = first; it != last; ++it) {
-            keys_to_erase.push_back(it.key());
+            auto key_result = it.key();
+            if (key_result) {
+                keys_to_erase.push_back(*key_result.value());
+            }
         }
         
         iterator result = end();

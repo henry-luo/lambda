@@ -9,7 +9,7 @@ A modern C++ STL-compatible wrapper around the high-performance C hashmap implem
 - **Flexibility**: Works with any hashable key type and any value type
 - **Memory Safety**: Automatic cleanup, no manual memory management needed
 - **High Performance**: Built on top of the fast C hashmap using Robin Hood hashing
-- **Exception Safety**: Proper exception handling for out-of-memory and invalid access
+- **Error Handling**: Explicit error handling using `std::expected` (C++23)
 - **Move Semantics**: Full C++11+ move semantics support
 - **Custom Hash Functions**: Support for custom hash functions and key equality comparisons
 - **Easy Integration**: Simple header-only interface (plus C library linking)
@@ -38,11 +38,12 @@ if (scores.contains("david")) {
     std::cout << "David found!" << std::endl;
 }
 
-// Safe access with exception handling
-try {
-    int score = scores.at("eve");  // throws if key doesn't exist
-} catch (const std::out_of_range& e) {
-    std::cout << "Key not found: " << e.what() << std::endl;
+// Safe access with error handling using std::expected
+auto result = scores.at("eve");
+if (!result) {
+    std::cout << "Key not found: " << hashmap_cpp::error_message(result.error()) << std::endl;
+} else {
+    std::cout << "Eve's score: " << *result << std::endl;
 }
 
 // Iterate through all elements
@@ -97,9 +98,9 @@ class HashMap;
 | Method | Description |
 |--------|-------------|
 | `operator[](key)` | Access or insert element |
-| `at(key)` | Safe access (throws if key missing) |
-| `insert(pair)` | Insert key-value pair |
-| `emplace(args...)` | Construct element in-place |
+| `at(key)` | Safe access (returns `std::expected`) |
+| `insert(pair)` | Insert key-value pair (returns `std::expected`) |
+| `emplace(args...)` | Construct element in-place (returns `std::expected`) |
 | `erase(key)` | Remove element by key |
 | `clear()` | Remove all elements |
 | `size()` | Get number of elements |
@@ -112,8 +113,7 @@ class HashMap;
 
 | Method | Description |
 |--------|-------------|
-| `insert_or_assign(key, value)` | Insert new or update existing |
-| `try_emplace(key, args...)` | Insert only if key doesn't exist |
+| `insert_or_assign(key, value)` | Insert new or update existing (returns `std::expected`) |
 | `swap(other)` | Swap contents with another HashMap |
 | `load_factor()` | Get current load factor |
 | `bucket_count()` | Get number of buckets |
@@ -156,8 +156,10 @@ make -f Makefile.hashmap_cpp clean
 # Compile the C hashmap
 gcc -std=c99 -Wall -O2 -c lib/hashmap.c -o hashmap.o
 
-# Compile and link your C++ program
-g++ -std=c++17 -Wall -O2 -I./lib your_program.cpp hashmap.o -o your_program
+```bash
+# Compile and link your C++ program (C++23 required for std::expected)
+g++ -std=c++23 -Wall -O2 -I./lib your_program.cpp hashmap.o -o your_program
+```
 ```
 
 ## Performance Characteristics
@@ -178,6 +180,36 @@ The wrapper automatically handles all memory management:
 - Destructors clean up all resources
 - Copy operations perform deep copies
 - Move operations transfer ownership efficiently
+
+## Error Handling
+
+This HashMap uses `std::expected` (C++23) for explicit error handling instead of exceptions:
+
+```cpp
+// Safe element access
+auto result = map.at("key");
+if (result) {
+    std::cout << "Value: " << *result << std::endl;
+} else {
+    std::cout << "Error: " << hashmap_cpp::error_message(result.error()) << std::endl;
+}
+
+// Insert with error checking
+auto insert_result = map.insert({"key", "value"});
+if (insert_result) {
+    auto [iter, inserted] = *insert_result;
+    std::cout << "Inserted: " << inserted << std::endl;
+} else {
+    std::cout << "Insert failed: " << hashmap_cpp::error_message(insert_result.error()) << std::endl;
+}
+```
+
+### Error Types
+
+- `HashMapError::OutOfMemory` - Memory allocation failed
+- `HashMapError::KeyNotFound` - Key not found in map
+- `HashMapError::InvalidIterator` - Iterator is invalid
+- `HashMapError::InvalidOperation` - Operation on invalid map
 
 ## Comparison with std::unordered_map
 
@@ -224,12 +256,11 @@ class HashMap;
 - Support for arithmetic types, strings, and custom types
 - Proper const-correctness in value_type
 
-### 5. Exception Safety
+### 5. Error Handling with std::expected
 - RAII wrappers around C memory management
-- Proper exception propagation from C errors
-- No memory leaks even when exceptions are thrown
-- `std::bad_alloc` for memory allocation failures
-- `std::out_of_range` for invalid key access with `at()`
+- Explicit error handling using `std::expected` (no exceptions)
+- No memory leaks even when errors occur
+- `HashMapError` enum for different error types
 - No undefined behavior for common operations
 
 

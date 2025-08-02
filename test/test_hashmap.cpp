@@ -33,28 +33,28 @@ void test_basic_operations() {
     assert(map["banana"] == 3);
     assert(map["cherry"] == 8);
     
-    // Test at() method
-    try {
-        assert(map.at("apple") == 5);
+    // Test at() method with std::expected
+    auto at_result = map.at("apple");
+    if (at_result && *at_result.value() == 5) {
         std::cout << "✓ at() method works correctly\n";
-    } catch (const std::exception& e) {
-        std::cout << "✗ at() method failed: " << e.what() << "\n";
+    } else {
+        std::cout << "✗ at() method failed\n";
     }
     
-    // Test safe access with try_at()
-    auto result = map.try_at("apple");
+    // Test safe access with at()
+    auto result = map.at("apple");
     if (result && *result.value() == 5) {
-        std::cout << "✓ try_at() works correctly for existing key\n";
+        std::cout << "✓ at() works correctly for existing key\n";
     } else {
-        std::cout << "✗ try_at() failed for existing key\n";
+        std::cout << "✗ at() failed for existing key\n";
     }
     
-    // Test try_at() for non-existent key
-    auto missing_result = map.try_at("nonexistent");
+    // Test at() for non-existent key
+    auto missing_result = map.at("nonexistent");
     if (!missing_result && missing_result.error() == hashmap_cpp::HashMapError::KeyNotFound) {
-        std::cout << "✓ try_at() correctly returns error for missing key\n";
+        std::cout << "✓ at() correctly returns error for missing key\n";
     } else {
-        std::cout << "✗ try_at() should have returned KeyNotFound error\n";
+        std::cout << "✗ at() should have returned KeyNotFound error\n";
     }
     
     std::cout << "Basic operations test completed.\n\n";
@@ -175,48 +175,50 @@ void test_insert_or_assign() {
     
     // Insert new key
     auto result = map.insert_or_assign("new_key", 42);
-    assert(result.second == true);  // true means inserted
+    assert(result.has_value());
+    assert(result.value().second == true);  // true means inserted
     assert(map["new_key"] == 42);
     
     // Assign to existing key
     result = map.insert_or_assign("new_key", 100);
-    assert(result.second == false); // false means assigned (key existed)
+    assert(result.has_value());
+    assert(result.value().second == false); // false means assigned (key existed)
     assert(map["new_key"] == 100);
     
     std::cout << "insert_or_assign test completed.\n\n";
 }
 
-void test_expected_methods() {
-    std::cout << "Testing std::expected methods...\n";
+void test_new_api() {
+    std::cout << "Testing new std::expected API...\n";
     
     // Test factory method
     auto map_result = hashmap_cpp::HashMap<std::string, int>::create(16);
     assert(map_result.has_value());
     auto map = std::move(map_result.value());
     
-    // Test try_insert
-    auto insert_result = map.try_insert(std::make_pair("key1", 10));
+    // Test insert
+    auto insert_result = map.insert(std::make_pair("key1", 10));
     assert(insert_result.has_value());
     assert(insert_result.value().second == true); // Successfully inserted
     
-    // Test try_insert with existing key
-    auto insert_existing = map.try_insert(std::make_pair("key1", 20));
+    // Test insert with existing key
+    auto insert_existing = map.insert(std::make_pair("key1", 20));
     assert(insert_existing.has_value());
     assert(insert_existing.value().second == false); // Key already existed
     
-    // Test try_at
-    auto value_result = map.try_at("key1");
+    // Test at
+    auto value_result = map.at("key1");
     assert(value_result.has_value());
     std::cout << "Value for key1: " << *value_result.value() << " (expected: 10)\n";
     assert(*value_result.value() == 10);
     
-    // Test try_at with missing key
-    auto missing_result = map.try_at("missing");
+    // Test at with missing key
+    auto missing_result = map.at("missing");
     assert(!missing_result.has_value());
     assert(missing_result.error() == hashmap_cpp::HashMapError::KeyNotFound);
     
-    // Test try_emplace
-    auto emplace_result = map.try_emplace("key2", 42);
+    // Test emplace
+    auto emplace_result = map.emplace("key2", 42);
     assert(emplace_result.has_value());
     assert(emplace_result.value().second == true);
     
@@ -238,7 +240,7 @@ void test_expected_methods() {
     assert(!end_val.has_value());
     assert(!end_it.valid());
     
-    std::cout << "std::expected methods test completed.\n\n";
+    std::cout << "New API test completed.\n\n";
 }
 
 void demonstrate_usage() {
@@ -288,7 +290,7 @@ int main() {
         test_clear();
         test_copy_and_move();
         test_insert_or_assign();
-        test_expected_methods();
+        test_new_api();
         
         std::cout << "🎉 All tests passed! The C++ HashMap wrapper is working correctly.\n";
         
