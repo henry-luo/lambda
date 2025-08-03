@@ -108,13 +108,16 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
         printf("Formatted result: '%s'\n", formatted->chars);
         
         // Verify roundtrip - formatted should equal original
-        if (strcmp(formatted->chars, test_cases[i]) == 0) {
-            printf("✅ Roundtrip successful for case %d\n", i);
-        } else {
-            printf("❌ Roundtrip failed for case %d\n", i);
-            printf("Expected: '%s'\n", test_cases[i]);
-            printf("Got: '%s'\n", formatted->chars);
-        }
+        cr_assert_str_eq(formatted->chars, test_cases[i], 
+            "Block math roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
+            i, test_cases[i], formatted->chars);        
+        // if (strcmp(formatted->chars, test_cases[i]) == 0) {
+        //     printf("✅ Roundtrip successful for case %d\n", i);
+        // } else {
+        //     printf("❌ Roundtrip failed for case %d\n", i);
+        //     printf("Expected: '%s'\n", test_cases[i]);
+        //     printf("Got: '%s'\n", formatted->chars);
+        // }
     }
     
     printf("=== Completed block_math_roundtrip test ===\n");
