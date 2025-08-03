@@ -940,7 +940,7 @@ static Item parse_latex_subscript(Input *input, const char **math, Item base) {
     }
     
     // create subscript expression element
-    Element* sub_element = create_math_element(input, "sub");
+    Element* sub_element = create_math_element(input, "subscript");
     if (!sub_element) {
         return ITEM_ERROR;
     }
@@ -1068,7 +1068,9 @@ static Item parse_latex_command(Input *input, const char **math) {
         return parse_latex_sum_or_prod(input, math, "prod");
     } else if (strcmp(cmd_string->chars, "int") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_integral(input, math);
+        // Create a MathExprDef for the integral
+        MathExprDef int_def = {"int", "integral", "int", "int", "∫", "Integral", true, -1, "parse_big_operator"};
+        return parse_latex_integral_enhanced(input, math, &int_def);
     } else if (strcmp(cmd_string->chars, "oint") == 0) {
         strbuf_full_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
@@ -1605,6 +1607,55 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
 
 // parse addition and subtraction (lowest precedence)
 static Item parse_addition_expression(Input *input, const char **math, MathFlavor flavor) {
+    skip_math_whitespace(math);
+    
+    // Handle unary minus at the start of expression
+    if (**math == '-') {
+        (*math)++; // skip -
+        skip_math_whitespace(math);
+        
+        Item operand = parse_multiplication_expression(input, math, flavor);
+        if (operand == ITEM_ERROR || operand == ITEM_NULL) {
+            return ITEM_ERROR;
+        }
+        
+        // Create a unary minus element
+        Element* neg_element = create_math_element(input, "neg");
+        if (!neg_element) {
+            return ITEM_ERROR;
+        }
+        
+        list_push((List*)neg_element, operand);
+        ((TypeElmt*)neg_element->type)->content_length = ((List*)neg_element)->length;
+        
+        Item left = (Item)neg_element;
+        
+        skip_math_whitespace(math);
+        
+        // Continue with normal addition/subtraction parsing
+        while (**math && **math != '}' && (**math == '+' || **math == '-')) {
+            char op = **math;
+            const char* op_name = (op == '+') ? "add" : "sub";
+            
+            (*math)++; // skip operator
+            skip_math_whitespace(math);
+            
+            Item right = parse_multiplication_expression(input, math, flavor);
+            if (right == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            
+            left = create_binary_expr(input, op_name, left, right);
+            if (left == ITEM_ERROR) {
+                return ITEM_ERROR;
+            }
+            
+            skip_math_whitespace(math);
+        }
+        
+        return left;
+    }
+    
     Item left = parse_multiplication_expression(input, math, flavor);
     if (left == ITEM_ERROR || left == ITEM_NULL) {
         return left;
@@ -4214,15 +4265,7 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
 
 // Implementation for LaTeX integral with bounds (enhanced version)
 static Item parse_latex_integral_enhanced(Input *input, const char **math, const MathExprDef *def) {
-    const char *pattern = def->latex_cmd;
-    size_t pattern_length = strlen(pattern);
-    
-    // Check if the pattern matches
-    if (strncmp(*math, pattern, pattern_length) != 0) {
-        return ITEM_ERROR;
-    }
-    
-    *math += pattern_length; // consume the pattern
+    // Skip whitespace (the command has already been consumed)
     skip_math_whitespace(math);
     
     // Create integral element
@@ -4234,7 +4277,12 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
     // Add type attribute
     add_attribute_to_element(input, integral_element, "type", "integral");
     
-    // Parse optional bounds (subscript and superscript)
+    // Set content length for the base integral symbol
+    ((TypeElmt*)integral_element->type)->content_length = 0;
+    
+    Item result = (Item)integral_element;
+    
+    // Parse optional bounds (subscript and superscript) and create proper structures
     if (**math == '_') {
         (*math)++; // skip _
         skip_math_whitespace(math);
@@ -4248,11 +4296,18 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
             }
         } else {
             // single character bound
-            lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         }
         
         if (lower_bound != ITEM_ERROR) {
-            list_push((List*)integral_element, lower_bound);
+            // Create subscript element
+            Element* subscript_element = create_math_element(input, "subscript");
+            if (subscript_element) {
+                list_push((List*)subscript_element, result);
+                list_push((List*)subscript_element, lower_bound);
+                ((TypeElmt*)subscript_element->type)->content_length = 2;
+                result = (Item)subscript_element;
+            }
         }
     }
     
@@ -4271,16 +4326,20 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
             }
         } else {
             // single character bound
-            upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         }
         
         if (upper_bound != ITEM_ERROR) {
-            list_push((List*)integral_element, upper_bound);
+            // Create superscript element
+            Element* superscript_element = create_math_element(input, "pow");
+            if (superscript_element) {
+                list_push((List*)superscript_element, result);
+                list_push((List*)superscript_element, upper_bound);
+                ((TypeElmt*)superscript_element->type)->content_length = 2;
+                result = (Item)superscript_element;
+            }
         }
     }
     
-    // Set content length
-    ((TypeElmt*)integral_element->type)->content_length = ((List*)integral_element)->length;
-    
-    return (Item)integral_element;
+    return result;
 }

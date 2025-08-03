@@ -96,6 +96,15 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
         
         printf("Successfully parsed input\n");
         
+        // Debug: Print AST structure
+        if (input->root) {
+            StrBuf* debug_buf = strbuf_new();
+            printf("AST: ");
+            print_item(debug_buf, input->root);
+            printf("%s\n", debug_buf->str);
+            strbuf_free(debug_buf);
+        }
+        
         // Format it back
         printf("Formatting back with pool at %p\n", (void*)input->pool);
         String* formatted = format_data(input->root, type_str, flavor_str, input->pool);

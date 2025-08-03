@@ -1,4 +1,5 @@
 #include "format.h"
+//#define DEBUG_MATH_FORMAT 1
 #include <stdio.h>
 
 //#define DEBUG_FORMAT_MATH 1
@@ -21,6 +22,8 @@ static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor fl
 static void format_math_children_with_template(StrBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth);
 static void format_math_string(StrBuf* sb, String* str);
 static bool is_single_character_item(Item item);
+static bool item_contains_integral(Item item);
+static bool item_contains_integral(Item item);
 
 // Math formatting tables for different output flavors
 typedef struct {
@@ -40,10 +43,12 @@ typedef struct {
 static const MathFormatDef basic_operators[] = {
     {"add", " + ", " + ", " + ", "<mo>+</mo>", " + ", true, false, true, 2},
     {"sub", " - ", " - ", " - ", "<mo>-</mo>", " - ", true, false, true, 2},
+    {"neg", "-{1}", "-{1}", "-{1}", "<mo>-</mo>{1}", "-{1}", true, false, false, 1},
     {"mul", " \\cdot ", " * ", " * ", "<mo>⋅</mo>", " × ", true, false, true, 2},
     {"implicit_mul", "", "", "", "", "", true, false, true, 2},
     {"div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
     {"pow", "{1}^{{2}}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
+    {"subscript", "{1}_{{2}}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
     {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
     {"pm", "\\pm", "+-", "+-", "<mo>±</mo>", "±", false, false, false, 0},
     {"mp", "\\mp", "-+", "-+", "<mo>∓</mo>", "∓", false, false, false, 0},
@@ -247,6 +252,51 @@ static bool is_single_character_item(Item item) {
     return false;
 }
 
+// Check if item contains an integral
+// Global flag to detect integral case (temporary solution)
+bool formatting_integral_case = false;
+static int implicit_mul_depth = 0;  // Track nesting depth of implicit_mul
+
+static bool item_contains_integral(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    
+    if (type == LMD_TYPE_SYMBOL) {
+        String* str = (String*)get_pointer(item);
+        if (str && str->chars) {
+            if (strcmp(str->chars, "integral") == 0) {
+                fprintf(stderr, "DEBUG: item_contains_integral - found integral symbol\n");
+                return true;
+            }
+        }
+    } else if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item;  // item is already the raw pointer for elements
+        
+        // Check if this element is an integral
+        TypeElmt* elmt_type = (TypeElmt*)elem->type;
+        if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+            // Check if element name is "int" (which represents integral)
+            if (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "int", 3) == 0) {
+                fprintf(stderr, "DEBUG: item_contains_integral - found int element (integral)\n");
+                return true;
+            }
+        }
+        
+        // Recursively check children
+        List* children = (List*)elem;    // children are accessed by casting element to List*
+        if (children && children->items) {
+            for (int i = 0; i < children->length; i++) {
+                if (item_contains_integral(children->items[i])) {
+                    fprintf(stderr, "DEBUG: item_contains_integral - found integral in child %d\n", i);
+                    return true;
+                }
+            }
+        }
+    }
+    
+    fprintf(stderr, "DEBUG: item_contains_integral - no integral found\n");
+    return false;
+}
+
 // Find format definition for element
 static const MathFormatDef* find_format_def(const char* element_name) {
     // Search through all format tables
@@ -377,6 +427,7 @@ static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor fl
 
 // Format a math element
 static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flavor, int depth) {
+    fprintf(stderr, "HENRY DEBUG: format_math_element called\n");  // Always visible
     if (!elem) return;
     
     TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -397,6 +448,11 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: Math element name: '%s'\n", element_name);
         #endif
+        
+        if (strcmp(element_name, "implicit_mul") == 0) {
+            fprintf(stderr, "HENRY DEBUG: Processing implicit_mul element (depth=%d)\n", implicit_mul_depth);
+            implicit_mul_depth++;  // Increment depth when entering implicit_mul
+        }
     }
     
     if (!element_name) {
@@ -410,6 +466,13 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     // Find format definition
     const MathFormatDef* def = find_format_def(element_name);
+    if (strcmp(element_name, "implicit_mul") == 0) {
+        fprintf(stderr, "HENRY DEBUG: implicit_mul def=%p\n", def);
+        if (def) {
+            fprintf(stderr, "HENRY DEBUG: implicit_mul - is_binary_op=%s, has_children=%s\n", 
+                    def->is_binary_op ? "true" : "false", def->has_children ? "true" : "false");
+        }
+    }
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG: Format def for '%s': %s\n", element_name, def ? "found" : "not found");
     if (def) {
@@ -454,26 +517,50 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     }
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG: Element has %ld children\n", children ? children->length : 0L);
-    if (children && children->length > 0) {
+    fprintf(stderr, "DEBUG: Formatting element: %s (def=%p, is_binary=%s, children=%p, children_length=%ld)\n", 
+            element_name, def, def ? (def->is_binary_op ? "true" : "false") : "NULL", 
+            children, children ? children->length : 0L);
+    fprintf(stderr, "DEBUG: format_str='%s'\n", format_str);
+    #endif
+
+    // Special handling for binary operators
+    fprintf(stderr, "HENRY DEBUG: About to check binary op for %s: is_binary=%s, has_children=%s, children_len=%ld\n", 
+            element_name, def->is_binary_op ? "true" : "false", 
+            children ? "true" : "false", children ? children->length : -1L);
+            
+    // Special case for implicit_mul: check if we need space for integrals
+    const char* final_format_str = format_str;
+    if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
+        bool has_integral = false;
         for (int i = 0; i < children->length; i++) {
-            fprintf(stderr, "DEBUG: Child %d item: %p\n", i, (void*)children->items[i]);
+            if (item_contains_integral(children->items[i])) {
+                has_integral = true;
+                break;
+            }
+        }
+        if (has_integral) {
+            final_format_str = " ";  // Use space for integrals
+            fprintf(stderr, "HENRY DEBUG: implicit_mul with integral detected, using space\n");
+        } else {
+            fprintf(stderr, "HENRY DEBUG: implicit_mul without integral, using empty string\n");
         }
     }
-    #endif
     
-    // Special handling for binary operators
     if (def->is_binary_op && children && children->length >= 2) {
+        fprintf(stderr, "HENRY DEBUG: Binary operator check passed for %s\n", element_name);
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: Formatting as binary operator\n");
+        fprintf(stderr, "DEBUG: Formatting as binary operator: %s\n", element_name);
         #endif
         // Format as: child1 operator child2 operator child3 ...
         for (int i = 0; i < children->length; i++) {
+            fprintf(stderr, "HENRY DEBUG: Binary op loop iteration i=%d for %s\n", i, element_name);
             if (i > 0) {
-                strbuf_append_str(sb, format_str);
+                // Use the final format string (which may have been modified for implicit_mul)
+                strbuf_append_str(sb, final_format_str);
             }
             format_math_item(sb, children->items[i], flavor, depth + 1);
         }
+        fprintf(stderr, "HENRY DEBUG: Binary op loop completed for %s\n", element_name);
         return;
     }
     
@@ -647,22 +734,37 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
         #endif
         return NULL;
     }
-    
+
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: Created string buffer at %p\n", (void*)sb);
     fprintf(stderr, "DEBUG format_math_latex: Initial sb - length=%zu, capacity=%zu, str=%p\n", 
             sb->length, sb->capacity, (void*)sb->str);
     #endif
     
+    // Check if this might be an integral case by doing a quick format check
+    StrBuf* temp_sb = strbuf_new_pooled(pool);
+    if (temp_sb) {
+        format_math_item(temp_sb, root_item, MATH_OUTPUT_LATEX, 0);
+        if (temp_sb->str && strstr(temp_sb->str, "\\int") != NULL) {
+            formatting_integral_case = true;
+            fprintf(stderr, "DEBUG: Detected integral in format_math_latex, setting flag\n");
+        } else {
+            formatting_integral_case = false;
+        }
+    }
+    
     format_math_item(sb, root_item, MATH_OUTPUT_LATEX, 0);
     
+    // Reset the flag after formatting
+    formatting_integral_case = false;
+
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: After formatting - sb length=%zu, str='%s'\n", 
             sb->length, sb->str ? sb->str : "(null)");
     #endif
-    
+
     String* result = strbuf_to_string(sb);
-    
+
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: strbuf_to_string returned %p\n", (void*)result);
     if (result) {
@@ -670,11 +772,9 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
                 result->chars, result->len);
     }
     #endif
-    
-    return result;
-}
 
-// Format math expression to Typst
+    return result;
+}// Format math expression to Typst
 String* format_math_typst(VariableMemPool* pool, Item root_item) {
     StrBuf* sb = strbuf_new_pooled(pool);
     if (!sb) return NULL;
