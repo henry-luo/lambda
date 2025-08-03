@@ -1,18 +1,18 @@
 # C++ HashMap Wrapper
 
-A modern C++ STL-compatible wrapper around the high-performance C hashmap implementation. This wrapper provides type safety, RAII memory management, and an STL-like interface while leveraging the speed of the underlying C implementation.
+A modern C++ STL-compatible wrapper that inherits from the high-performance C hashmap implementation. This class provides type safety, RAII memory management, and an STL-like interface while leveraging the speed of the underlying C implementation through direct inheritance.
 
 ## Features
 
 - **STL-Compatible Interface**: Works like `std::unordered_map` with familiar methods
 - **Type Safety**: Template-based design ensures compile-time type checking
-- **Flexibility**: Works with any hashable key type and any value type
+- **Direct Inheritance**: Inherits from C struct for maximum performance and minimal overhead
 - **Memory Safety**: Automatic cleanup, no manual memory management needed
-- **High Performance**: Built on top of the fast C hashmap using Robin Hood hashing
-- **Error Handling**: Explicit error handling using `std::expected` (C++23)
+- **High Performance**: Built on Robin Hood hashing with direct struct access
+- **Modern Error Handling**: Uses `std::expected` (C++23) for explicit error handling
 - **Move Semantics**: Full C++11+ move semantics support
 - **Custom Hash Functions**: Support for custom hash functions and key equality comparisons
-- **Easy Integration**: Simple header-only interface (plus C library linking)
+- **Zero-Cost Abstraction**: Direct inheritance eliminates pointer indirection overhead
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ A modern C++ STL-compatible wrapper around the high-performance C hashmap implem
 #include "../lib/hashmap.hpp"
 using namespace hashmap_cpp;
 
-// Create a HashMap with string keys and int values
+// Create a HashMap (inherits from C struct)
 HashMap<std::string, int> scores;
 
 // Insert elements
@@ -38,7 +38,7 @@ if (scores.contains("david")) {
     std::cout << "David found!" << std::endl;
 }
 
-// Safe access with error handling using std::expected
+// Safe access with std::expected error handling
 auto result = scores.at("eve");
 if (!result) {
     std::cout << "Key not found: " << hashmap_cpp::error_message(result.error()) << std::endl;
@@ -163,9 +163,10 @@ g++ -std=c++23 -Wall -O2 -I./lib your_program.cpp hashmap.o -o your_program
 ## Performance Characteristics
 
 - **Time Complexity**: O(1) average for insert, lookup, delete
-- **Space Complexity**: O(n) with low overhead
+- **Space Complexity**: O(n) with minimal overhead from direct inheritance
 - **Load Factor**: Automatically maintained around 60%
 - **Hash Functions**: Multiple high-quality options (xxHash3, SipHash, Murmur)
+- **Memory Access**: Direct struct inheritance eliminates pointer indirection
 
 ### Thread Safety
 
@@ -173,11 +174,12 @@ This HashMap is **not thread-safe**. For concurrent access, use external synchro
 
 ### Memory Management
 
-The wrapper automatically handles all memory management:
-- Constructors allocate internal storage
-- Destructors clean up all resources
+The wrapper automatically handles all memory management through inheritance:
+- Constructors initialize the base C struct directly
+- Destructors clean up all resources via RAII
 - Copy operations perform deep copies
 - Move operations transfer ownership efficiently
+- Direct inheritance eliminates allocation overhead
 
 ## Error Handling
 
@@ -213,12 +215,13 @@ if (insert_result) {
 
 | Feature | HashMap (ours) | std::unordered_map |
 |---------|----------------|-------------------|
-| **Performance** | Very High (C backend) | High |
-| **Memory Usage** | Lower overhead | Higher overhead |
+| **Performance** | Very High (direct inheritance) | High |
+| **Memory Usage** | Minimal overhead | Higher overhead |
 | **API Compatibility** | High (STL-like) | Native STL |
 | **Thread Safety** | None (external sync needed) | None |
 | **Custom Allocators** | Limited | Full Support |
 | **Hash Functions** | Fast (xxHash3, SipHash, Murmur) | Standard library |
+| **Architecture** | Direct C struct inheritance | Separate implementation |
 
 ### Performance Results
 From our test run:
@@ -228,7 +231,7 @@ From our test run:
 
 ## Architecture Highlights
 
-### 1. Template Design
+### 1. Direct Inheritance Design
 ```cpp
 template<
     typename Key,                           // Key type
@@ -236,30 +239,28 @@ template<
     typename Hash = std::hash<Key>,         // Hash function
     typename KeyEqual = std::equal_to<Key>  // Key equality function
 >
-class HashMap;
+class HashMap : public hashmap {  // Direct inheritance from C struct
+    // Implementation details...
+};
 ```
 
-### 2. C Interface Bridge
+### 2. C Interface Integration
 - Hash function wrapper that delegates to C implementation
 - Compare function wrapper for key equality
 - Proper memory management callbacks
+- Direct struct access eliminates pointer overhead
 
-### 3. Iterator Support (Basic)
-- Forward iterator implementation
-- STL-compatible iterator interface
-- Range-based for loop support (basic)
-
-### 4. Template Type Handling
-- Automatic hash function selection based on key type
-- Support for arithmetic types, strings, and custom types
-- Proper const-correctness in value_type
-
-### 5. Error Handling with std::expected
-- RAII wrappers around C memory management
-- Explicit error handling using `std::expected` (no exceptions)
-- No memory leaks even when errors occur
-- `HashMapError` enum for different error types
+### 3. Modern Error Handling
+- Uses `std::expected` (C++23) instead of exceptions
+- Explicit error types for different failure modes
 - No undefined behavior for common operations
+- Memory-safe even during error conditions
+
+### 4. STL Compatibility
+- Forward iterator implementation
+- Range-based for loop support
+- Standard container interface methods
+- Template specialization for different key types
 
 
 

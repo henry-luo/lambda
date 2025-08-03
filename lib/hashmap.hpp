@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 #include <utility>
-#include <optional>
+#include <expected>
 #include <iterator>
 #include <type_traits>
 #include <cstring>
@@ -21,77 +21,7 @@ extern "C" {
 
 namespace hashmap_cpp {
 
-// Simple Result type to replace std::expected (which is C++23)
-template<typename T, typename E>
-class Result {
-private:
-    bool has_value_;
-    union {
-        T value_;
-        E error_;
-    };
-
-public:
-    Result(const T& value) : has_value_(true), value_(value) {}
-    Result(T&& value) : has_value_(true), value_(std::move(value)) {}
-    Result(const E& error) : has_value_(false), error_(error) {}
-    Result(E&& error) : has_value_(false), error_(std::move(error)) {}
-    
-    ~Result() {
-        if (has_value_) {
-            value_.~T();
-        } else {
-            error_.~E();
-        }
-    }
-    
-    // Copy constructor
-    Result(const Result& other) : has_value_(other.has_value_) {
-        if (has_value_) {
-            new(&value_) T(other.value_);
-        } else {
-            new(&error_) E(other.error_);
-        }
-    }
-    
-    // Move constructor
-    Result(Result&& other) : has_value_(other.has_value_) {
-        if (has_value_) {
-            new(&value_) T(std::move(other.value_));
-        } else {
-            new(&error_) E(std::move(other.error_));
-        }
-    }
-    
-    bool has_value() const { return has_value_; }
-    operator bool() const { return has_value_; }
-    
-    T& value() { return value_; }
-    const T& value() const { return value_; }
-    
-    E& error() { return error_; }
-    const E& error() const { return error_; }
-    
-    T& operator*() { return value_; }
-    const T& operator*() const { return value_; }
-    
-    T* operator->() { return &value_; }
-    const T* operator->() const { return &value_; }
-};
-
-template<typename E>
-struct Unexpected {
-    E error;
-    explicit Unexpected(const E& e) : error(e) {}
-    explicit Unexpected(E&& e) : error(std::move(e)) {}
-};
-
-template<typename E>
-Unexpected<E> unexpected(E&& e) {
-    return Unexpected<E>(std::forward<E>(e));
-}
-
-// Error types for Result-based error handling
+// Error types for std::expected-based error handling
 enum class HashMapError {
     OutOfMemory,
     KeyNotFound,
@@ -291,24 +221,24 @@ public:
             return !(*this == other);
         }
         
-        // Safe methods that return Result
-        Result<const Key*, HashMapError> key() const {
+        // Safe methods that return std::expected
+        std::expected<const Key*, HashMapError> key() const {
             if (!current_entry_) {
-                return unexpected(HashMapError::InvalidIterator);
+                return std::unexpected(HashMapError::InvalidIterator);
             }
             return &current_entry_->key;
         }
         
-        Result<const Value*, HashMapError> value() const {
+        std::expected<const Value*, HashMapError> value() const {
             if (!current_entry_) {
-                return unexpected(HashMapError::InvalidIterator);
+                return std::unexpected(HashMapError::InvalidIterator);
             }
             return &current_entry_->value;
         }
         
-        Result<const std::pair<const Key, const Value>*, HashMapError> get() const {
+        std::expected<const std::pair<const Key, const Value>*, HashMapError> get() const {
             if (!current_entry_) {
-                return unexpected(HashMapError::InvalidIterator);
+                return std::unexpected(HashMapError::InvalidIterator);
             }
             current_pair_.first = current_entry_->key;
             current_pair_.second = current_entry_->value;
@@ -409,24 +339,24 @@ public:
             return const_iterator();
         }
         
-        // Safe methods that return Result
-        Result<const Key*, HashMapError> key() const {
+        // Safe methods that return std::expected
+        std::expected<const Key*, HashMapError> key() const {
             if (!current_entry_) {
-                return unexpected(HashMapError::InvalidIterator);
+                return std::unexpected(HashMapError::InvalidIterator);
             }
             return &current_entry_->key;
         }
         
-        Result<Value*, HashMapError> value() const {
+        std::expected<Value*, HashMapError> value() const {
             if (!current_entry_) {
-                return unexpected(HashMapError::InvalidIterator);
+                return std::unexpected(HashMapError::InvalidIterator);
             }
             return &current_entry_->value;
         }
         
-        Result<std::pair<const Key, Value>*, HashMapError> get() const {
+        std::expected<std::pair<const Key, Value>*, HashMapError> get() const {
             if (!current_entry_) {
-                return unexpected(HashMapError::InvalidIterator);
+                return std::unexpected(HashMapError::InvalidIterator);
             }
             current_pair_.first = current_entry_->key;
             current_pair_.second = current_entry_->value;
@@ -465,15 +395,15 @@ public:
         }
     }
     
-    // Factory method that returns Result for safe construction
-    static Result<HashMap, HashMapError> create(
+    // Factory method that returns std::expected for safe construction
+    static std::expected<HashMap, HashMapError> create(
         size_type bucket_count = 16, 
         const Hash& hash = Hash{}, 
         const KeyEqual& equal = KeyEqual{}
     ) {
         HashMap map(bucket_count, hash, equal);
         if (!map.initialized_) {
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         return std::move(map);
     }
@@ -587,32 +517,32 @@ public:
         return initialized_;
     }
     
-    // Element access that returns Result
-    Result<Value*, HashMapError> at(const Key& key) {
+    // Element access that returns std::expected
+    std::expected<Value*, HashMapError> at(const Key& key) {
         if (!initialized_) {
-            return unexpected(HashMapError::InvalidOperation);
+            return std::unexpected(HashMapError::InvalidOperation);
         }
         
         Entry search_entry(key, Value{});
         const Entry* found = static_cast<const Entry*>(hashmap_get(this, &search_entry));
         
         if (!found) {
-            return unexpected(HashMapError::KeyNotFound);
+            return std::unexpected(HashMapError::KeyNotFound);
         }
         
         return &const_cast<Entry*>(found)->value;
     }
     
-    Result<const Value*, HashMapError> at(const Key& key) const {
+    std::expected<const Value*, HashMapError> at(const Key& key) const {
         if (!initialized_) {
-            return unexpected(HashMapError::InvalidOperation);
+            return std::unexpected(HashMapError::InvalidOperation);
         }
         
         Entry search_entry(key, Value{});
         const Entry* found = static_cast<const Entry*>(hashmap_get(const_cast<HashMap*>(this), &search_entry));
         
         if (!found) {
-            return unexpected(HashMapError::KeyNotFound);
+            return std::unexpected(HashMapError::KeyNotFound);
         }
         
         return &found->value;
@@ -724,10 +654,10 @@ public:
         }
     }
     
-    // Insert operation that returns Result
-    Result<std::pair<iterator, bool>, HashMapError> insert(const value_type& value) {
+    // Insert operation that returns std::expected
+    std::expected<std::pair<iterator, bool>, HashMapError> insert(const value_type& value) {
         if (!initialized_) {
-            return unexpected(HashMapError::InvalidOperation);
+            return std::unexpected(HashMapError::InvalidOperation);
         }
         
         // Check if key already exists
@@ -747,14 +677,14 @@ public:
         // Key doesn't exist, insert new entry
         Entry* entry = new(std::nothrow) Entry(value.first, value.second);
         if (!entry) {
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         
         hashmap_set(this, entry);
         
         if (hashmap_oom(this)) {
             delete entry;
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         
         // Successfully inserted, find the iterator
@@ -769,9 +699,9 @@ public:
     }
     
     // Insert with move semantics
-    Result<std::pair<iterator, bool>, HashMapError> insert(value_type&& value) {
+    std::expected<std::pair<iterator, bool>, HashMapError> insert(value_type&& value) {
         if (!initialized_) {
-            return unexpected(HashMapError::InvalidOperation);
+            return std::unexpected(HashMapError::InvalidOperation);
         }
         
         // Check if key already exists
@@ -791,14 +721,14 @@ public:
         // Key doesn't exist, insert new entry
         Entry* entry = new(std::nothrow) Entry(std::move(const_cast<Key&>(value.first)), std::move(value.second));
         if (!entry) {
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         
         hashmap_set(this, entry);
         
         if (hashmap_oom(this)) {
             delete entry;
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         
         // Successfully inserted, find the iterator
@@ -813,9 +743,9 @@ public:
     
     // Emplace operation
     template<typename... Args>
-    Result<std::pair<iterator, bool>, HashMapError> emplace(Args&&... args) {
+    std::expected<std::pair<iterator, bool>, HashMapError> emplace(Args&&... args) {
         if (!initialized_) {
-            return unexpected(HashMapError::InvalidOperation);
+            return std::unexpected(HashMapError::InvalidOperation);
         }
         
         // Create temporary entry to check if key exists
@@ -836,14 +766,14 @@ public:
         // Key doesn't exist, create and insert new entry
         Entry* entry = new(std::nothrow) Entry(std::move(temp_entry));
         if (!entry) {
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         
         hashmap_set(this, entry);
         
         if (hashmap_oom(this)) {
             delete entry;
-            return unexpected(HashMapError::OutOfMemory);
+            return std::unexpected(HashMapError::OutOfMemory);
         }
         
         // Successfully inserted, find the iterator
@@ -968,7 +898,7 @@ public:
     
     // Insert or assign (C++17 compatibility)
     template<typename M>
-    Result<std::pair<iterator, bool>, HashMapError> insert_or_assign(const Key& key, M&& obj) {
+    std::expected<std::pair<iterator, bool>, HashMapError> insert_or_assign(const Key& key, M&& obj) {
         auto it = find(key);
         if (it != end()) {
             auto value_result = it.value();
@@ -976,7 +906,7 @@ public:
                 *value_result.value() = std::forward<M>(obj);
                 return std::make_pair(it, false);
             } else {
-                return unexpected(value_result.error());
+                return std::unexpected(value_result.error());
             }
         }
         return insert(std::make_pair(key, std::forward<M>(obj)));
