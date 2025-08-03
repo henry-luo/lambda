@@ -1407,6 +1407,29 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 ((TypeElmt*)inner_product_element->type)->content_length = ((List*)inner_product_element)->length;
                 
                 return (Item)inner_product_element;
+            } else if (**math == '[') {
+                // Handle square brackets as a special bracket group (preserves notation)
+                (*math)++; // skip [
+                
+                // Create a bracket group element to preserve square bracket notation
+                Element* bracket_element = create_math_element(input, "bracket_group");
+                if (!bracket_element) {
+                    return ITEM_ERROR;
+                }
+                
+                Item expr = parse_math_expression(input, math, flavor);
+                if (expr != ITEM_ERROR && expr != ITEM_NULL) {
+                    list_push((List*)bracket_element, expr);
+                }
+                
+                if (**math == ']') {
+                    (*math)++; // skip ]
+                }
+                
+                // Set content length
+                ((TypeElmt*)bracket_element->type)->content_length = ((List*)bracket_element)->length;
+                
+                return (Item)bracket_element;
             }
             break;
             
@@ -1637,10 +1660,11 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         else if ((**math == '\\' && flavor == MATH_FLAVOR_LATEX) ||  // LaTeX commands
                  isalpha(**math) ||  // identifiers (for all flavors)
                  **math == '(' ||  // parentheses
+                 **math == '[' ||  // square brackets
                  isdigit(**math)) {  // numbers
             // This is implicit multiplication - don't advance the pointer yet
             explicit_op = false;
-            op_name = "mul";
+            op_name = "implicit_mul";
         } else {
             // No multiplication operation detected
             break;

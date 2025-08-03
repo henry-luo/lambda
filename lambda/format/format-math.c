@@ -41,6 +41,7 @@ static const MathFormatDef basic_operators[] = {
     {"add", " + ", " + ", " + ", "<mo>+</mo>", " + ", true, false, true, 2},
     {"sub", " - ", " - ", " - ", "<mo>-</mo>", " - ", true, false, true, 2},
     {"mul", " \\cdot ", " * ", " * ", "<mo>⋅</mo>", " × ", true, false, true, 2},
+    {"implicit_mul", "", "", "", "", "", true, false, true, 2},
     {"div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
     {"pow", "{1}^{{2}}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
     {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
@@ -157,6 +158,12 @@ static const MathFormatDef roots[] = {
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
+// Grouping and brackets
+static const MathFormatDef grouping[] = {
+    {"bracket_group", "[{1}]", "[{1}]", "[{1}]", "<mo>[</mo>{1}<mo>]</mo>", "[{1}]", true, false, false, 1},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
+};
+
 // Accents
 static const MathFormatDef accents[] = {
     {"hat", "\\hat{{1}}", "hat({1})", "hat({1})", "<mover>{1}<mo>^</mo></mover>", "̂", true, false, false, 1},
@@ -245,7 +252,7 @@ static const MathFormatDef* find_format_def(const char* element_name) {
     // Search through all format tables
     const MathFormatDef* tables[] = {
         basic_operators, functions, special_symbols, fractions, 
-        roots, accents, relations, big_operators, arrows
+        roots, grouping, accents, relations, big_operators, arrows
     };
     
     int table_count = sizeof(tables) / sizeof(tables[0]);

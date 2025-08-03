@@ -62,7 +62,7 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
     // Test cases: block math expressions
     const char* test_cases[] = {
         "$$E = mc^2$$",
-        "$$\\frac{d}{dx}[x^n] = nx^{n-1}$$",
+        "$$\\frac{d}{dx}[x^n] = nx^{n - 1}$$",
         "$$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$"
     };
     
