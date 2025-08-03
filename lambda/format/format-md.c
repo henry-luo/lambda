@@ -1,4 +1,5 @@
 #include "format.h"
+#include <ctype.h>
 
 // Forward declarations for math formatting support
 String* format_math_latex(VariableMemPool* pool, Item root_item);
@@ -317,8 +318,52 @@ static void format_table_separator(StrBuf* sb, Element* header_row) {
 
 // Format paragraph elements
 static void format_paragraph(StrBuf* sb, Element* elem) {
+    // Check if this paragraph contains only displaymath elements
+    List* list = (List*)elem;
+    bool only_displaymath = true;
+    
+    if (list->length > 0) {
+        for (long i = 0; i < list->length; i++) {
+            Item child_item = list->items[i];
+            TypeId type = get_type_id((LambdaItem)child_item);
+            
+            if (type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child_item;
+                TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
+                if (child_elem_type && child_elem_type->name.str) {
+                    if (strcmp(child_elem_type->name.str, "displaymath") != 0) {
+                        only_displaymath = false;
+                        break;
+                    }
+                } else {
+                    only_displaymath = false;
+                    break;
+                }
+            } else if (type == LMD_TYPE_STRING) {
+                // Check if it's just whitespace
+                String* str = (String*)get_pointer(child_item);
+                if (str && str->chars) {
+                    for (int j = 0; j < str->len; j++) {
+                        if (!isspace(str->chars[j])) {
+                            only_displaymath = false;
+                            break;
+                        }
+                    }
+                }
+                if (!only_displaymath) break;
+            } else {
+                only_displaymath = false;
+                break;
+            }
+        }
+    }
+    
     format_element_children(sb, elem);
-    strbuf_append_str(sb, "\n\n");
+    
+    // Only add newlines if the paragraph contains more than just displaymath
+    if (!only_displaymath) {
+        strbuf_append_str(sb, "\n\n");
+    }
 }
 
 // Format thematic break (hr)
@@ -435,7 +480,7 @@ static void format_element(StrBuf* sb, Element* elem) {
     } else if (strcmp(tag_name, "displaymath") == 0) {
         // Display math element or math code block
         format_math_display(sb, elem);
-        strbuf_append_char(sb, '\n');
+        // Note: No newline appended after displaymath to avoid extra whitespace
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
                strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
         // Just format children for document root, body, and span containers
