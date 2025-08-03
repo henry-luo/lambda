@@ -44,10 +44,9 @@ void format_number(StrBuf* sb, Item item) {
     TypeId type = get_type_id((LambdaItem)item);
     
     if (type == LMD_TYPE_INT) {
-        // 56-bit signed integer stored directly in the item
-        int64_t val = get_int_value(item);
+        int val = get_int_value(item);
         char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%" PRId64, val);
+        snprintf(num_buf, sizeof(num_buf), "%d", val);
         strbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_FLOAT) {
         // Double stored as pointer

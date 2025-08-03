@@ -1,7 +1,7 @@
 #include "format.h"
 #include <stdio.h>
 
-#define DEBUG_MATH_FORMAT
+//#define DEBUG_FORMAT_MATH 1
 #include <string.h>
 #include <math.h>
 
@@ -20,6 +20,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
 static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor flavor, int depth);
 static void format_math_children_with_template(StrBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth);
 static void format_math_string(StrBuf* sb, String* str);
+static bool is_single_character_item(Item item);
 
 // Math formatting tables for different output flavors
 typedef struct {
@@ -51,7 +52,7 @@ static const MathFormatDef basic_operators[] = {
     {"star", " \\star ", " * ", " * ", "<mo>⋆</mo>", " ⋆ ", true, false, true, 2},
     {"circ", " \\circ ", " compose ", " o ", "<mo>∘</mo>", " ∘ ", true, false, true, 2},
     {"bullet", " \\bullet ", " . ", " . ", "<mo>∙</mo>", " ∙ ", true, false, true, 2},
-    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, false, 0}
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
 // Functions
@@ -77,68 +78,68 @@ static const MathFormatDef functions[] = {
     {"max", "\\max", "max", "max", "<mi>max</mi>", "max", true, false, false, -1},
     {"gcd", "\\gcd", "gcd", "gcd", "<mi>gcd</mi>", "gcd", true, false, false, -1},
     {"lcm", "\\text{lcm}", "lcm", "lcm", "<mi>lcm</mi>", "lcm", true, false, false, -1},
-    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, false, 0}
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
 // Special symbols (Greek letters, constants)
 static const MathFormatDef special_symbols[] = {
-    {"alpha", "\\alpha", "alpha", "alpha", "<mi>α</mi>", "α", false, false, false, false, 0},
-    {"beta", "\\beta", "beta", "beta", "<mi>β</mi>", "β", false, false, false, false, 0},
-    {"gamma", "\\gamma", "gamma", "gamma", "<mi>γ</mi>", "γ", false, false, false, false, 0},
-    {"delta", "\\delta", "delta", "delta", "<mi>δ</mi>", "δ", false, false, false, false, 0},
-    {"epsilon", "\\epsilon", "epsilon", "epsilon", "<mi>ε</mi>", "ε", false, false, false, false, 0},
-    {"varepsilon", "\\varepsilon", "epsilon.alt", "epsilon", "<mi>ε</mi>", "ε", false, false, false, false, 0},
-    {"zeta", "\\zeta", "zeta", "zeta", "<mi>ζ</mi>", "ζ", false, false, false, false, 0},
-    {"eta", "\\eta", "eta", "eta", "<mi>η</mi>", "η", false, false, false, false, 0},
-    {"theta", "\\theta", "theta", "theta", "<mi>θ</mi>", "θ", false, false, false, false, 0},
-    {"vartheta", "\\vartheta", "theta.alt", "theta", "<mi>ϑ</mi>", "ϑ", false, false, false, false, 0},
-    {"iota", "\\iota", "iota", "iota", "<mi>ι</mi>", "ι", false, false, false, false, 0},
-    {"kappa", "\\kappa", "kappa", "kappa", "<mi>κ</mi>", "κ", false, false, false, false, 0},
-    {"lambda", "\\lambda", "lambda", "lambda", "<mi>λ</mi>", "λ", false, false, false, false, 0},
-    {"mu", "\\mu", "mu", "mu", "<mi>μ</mi>", "μ", false, false, false, false, 0},
-    {"nu", "\\nu", "nu", "nu", "<mi>ν</mi>", "ν", false, false, false, false, 0},
-    {"xi", "\\xi", "xi", "xi", "<mi>ξ</mi>", "ξ", false, false, false, false, 0},
-    {"omicron", "\\omicron", "omicron", "omicron", "<mi>ο</mi>", "ο", false, false, false, false, 0},
-    {"pi", "\\pi", "pi", "pi", "<mi>π</mi>", "π", false, false, false, false, 0},
-    {"varpi", "\\varpi", "pi.alt", "pi", "<mi>ϖ</mi>", "ϖ", false, false, false, false, 0},
-    {"rho", "\\rho", "rho", "rho", "<mi>ρ</mi>", "ρ", false, false, false, false, 0},
-    {"varrho", "\\varrho", "rho.alt", "rho", "<mi>ϱ</mi>", "ϱ", false, false, false, false, 0},
-    {"sigma", "\\sigma", "sigma", "sigma", "<mi>σ</mi>", "σ", false, false, false, false, 0},
-    {"varsigma", "\\varsigma", "sigma.alt", "sigma", "<mi>ς</mi>", "ς", false, false, false, false, 0},
-    {"tau", "\\tau", "tau", "tau", "<mi>τ</mi>", "τ", false, false, false, false, 0},
-    {"upsilon", "\\upsilon", "upsilon", "upsilon", "<mi>υ</mi>", "υ", false, false, false, false, 0},
-    {"phi", "\\phi", "phi", "phi", "<mi>φ</mi>", "φ", false, false, false, false, 0},
-    {"varphi", "\\varphi", "phi.alt", "phi", "<mi>ϕ</mi>", "ϕ", false, false, false, false, 0},
-    {"chi", "\\chi", "chi", "chi", "<mi>χ</mi>", "χ", false, false, false, false, 0},
-    {"psi", "\\psi", "psi", "psi", "<mi>ψ</mi>", "ψ", false, false, false, false, 0},
-    {"omega", "\\omega", "omega", "omega", "<mi>ω</mi>", "ω", false, false, false, false, 0},
+    {"alpha", "\\alpha", "alpha", "alpha", "<mi>α</mi>", "α", false, false, false, 0},
+    {"beta", "\\beta", "beta", "beta", "<mi>β</mi>", "β", false, false, false, 0},
+    {"gamma", "\\gamma", "gamma", "gamma", "<mi>γ</mi>", "γ", false, false, false, 0},
+    {"delta", "\\delta", "delta", "delta", "<mi>δ</mi>", "δ", false, false, false, 0},
+    {"epsilon", "\\epsilon", "epsilon", "epsilon", "<mi>ε</mi>", "ε", false, false, false, 0},
+    {"varepsilon", "\\varepsilon", "epsilon.alt", "epsilon", "<mi>ε</mi>", "ε", false, false, false, 0},
+    {"zeta", "\\zeta", "zeta", "zeta", "<mi>ζ</mi>", "ζ", false, false, false, 0},
+    {"eta", "\\eta", "eta", "eta", "<mi>η</mi>", "η", false, false, false, 0},
+    {"theta", "\\theta", "theta", "theta", "<mi>θ</mi>", "θ", false, false, false, 0},
+    {"vartheta", "\\vartheta", "theta.alt", "theta", "<mi>ϑ</mi>", "ϑ", false, false, false, 0},
+    {"iota", "\\iota", "iota", "iota", "<mi>ι</mi>", "ι", false, false, false, 0},
+    {"kappa", "\\kappa", "kappa", "kappa", "<mi>κ</mi>", "κ", false, false, false, 0},
+    {"lambda", "\\lambda", "lambda", "lambda", "<mi>λ</mi>", "λ", false, false, false, 0},
+    {"mu", "\\mu", "mu", "mu", "<mi>μ</mi>", "μ", false, false, false, 0},
+    {"nu", "\\nu", "nu", "nu", "<mi>ν</mi>", "ν", false, false, false, 0},
+    {"xi", "\\xi", "xi", "xi", "<mi>ξ</mi>", "ξ", false, false, false, 0},
+    {"omicron", "\\omicron", "omicron", "omicron", "<mi>ο</mi>", "ο", false, false, false, 0},
+    {"pi", "\\pi", "pi", "pi", "<mi>π</mi>", "π", false, false, false, 0},
+    {"varpi", "\\varpi", "pi.alt", "pi", "<mi>ϖ</mi>", "ϖ", false, false, false, 0},
+    {"rho", "\\rho", "rho", "rho", "<mi>ρ</mi>", "ρ", false, false, false, 0},
+    {"varrho", "\\varrho", "rho.alt", "rho", "<mi>ϱ</mi>", "ϱ", false, false, false, 0},
+    {"sigma", "\\sigma", "sigma", "sigma", "<mi>σ</mi>", "σ", false, false, false, 0},
+    {"varsigma", "\\varsigma", "sigma.alt", "sigma", "<mi>ς</mi>", "ς", false, false, false, 0},
+    {"tau", "\\tau", "tau", "tau", "<mi>τ</mi>", "τ", false, false, false, 0},
+    {"upsilon", "\\upsilon", "upsilon", "upsilon", "<mi>υ</mi>", "υ", false, false, false, 0},
+    {"phi", "\\phi", "phi", "phi", "<mi>φ</mi>", "φ", false, false, false, 0},
+    {"varphi", "\\varphi", "phi.alt", "phi", "<mi>ϕ</mi>", "ϕ", false, false, false, 0},
+    {"chi", "\\chi", "chi", "chi", "<mi>χ</mi>", "χ", false, false, false, 0},
+    {"psi", "\\psi", "psi", "psi", "<mi>ψ</mi>", "ψ", false, false, false, 0},
+    {"omega", "\\omega", "omega", "omega", "<mi>ω</mi>", "ω", false, false, false, 0},
     // Uppercase Greek letters
-    {"Gamma", "\\Gamma", "Gamma", "Gamma", "<mi>Γ</mi>", "Γ", false, false, false, false, 0},
-    {"Delta", "\\Delta", "Delta", "Delta", "<mi>Δ</mi>", "Δ", false, false, false, false, 0},
-    {"Theta", "\\Theta", "Theta", "Theta", "<mi>Θ</mi>", "Θ", false, false, false, false, 0},
-    {"Lambda", "\\Lambda", "Lambda", "Lambda", "<mi>Λ</mi>", "Λ", false, false, false, false, 0},
-    {"Xi", "\\Xi", "Xi", "Xi", "<mi>Ξ</mi>", "Ξ", false, false, false, false, 0},
-    {"Pi", "\\Pi", "Pi", "Pi", "<mi>Π</mi>", "Π", false, false, false, false, 0},
-    {"Sigma", "\\Sigma", "Sigma", "Sigma", "<mi>Σ</mi>", "Σ", false, false, false, false, 0},
-    {"Upsilon", "\\Upsilon", "Upsilon", "Upsilon", "<mi>Υ</mi>", "Υ", false, false, false, false, 0},
-    {"Phi", "\\Phi", "Phi", "Phi", "<mi>Φ</mi>", "Φ", false, false, false, false, 0},
-    {"Chi", "\\Chi", "Chi", "Chi", "<mi>Χ</mi>", "Χ", false, false, false, false, 0},
-    {"Psi", "\\Psi", "Psi", "Psi", "<mi>Ψ</mi>", "Ψ", false, false, false, false, 0},
-    {"Omega", "\\Omega", "Omega", "Omega", "<mi>Ω</mi>", "Ω", false, false, false, false, 0},
+    {"Gamma", "\\Gamma", "Gamma", "Gamma", "<mi>Γ</mi>", "Γ", false, false, false, 0},
+    {"Delta", "\\Delta", "Delta", "Delta", "<mi>Δ</mi>", "Δ", false, false, false, 0},
+    {"Theta", "\\Theta", "Theta", "Theta", "<mi>Θ</mi>", "Θ", false, false, false, 0},
+    {"Lambda", "\\Lambda", "Lambda", "Lambda", "<mi>Λ</mi>", "Λ", false, false, false, 0},
+    {"Xi", "\\Xi", "Xi", "Xi", "<mi>Ξ</mi>", "Ξ", false, false, false, 0},
+    {"Pi", "\\Pi", "Pi", "Pi", "<mi>Π</mi>", "Π", false, false, false, 0},
+    {"Sigma", "\\Sigma", "Sigma", "Sigma", "<mi>Σ</mi>", "Σ", false, false, false, 0},
+    {"Upsilon", "\\Upsilon", "Upsilon", "Upsilon", "<mi>Υ</mi>", "Υ", false, false, false, 0},
+    {"Phi", "\\Phi", "Phi", "Phi", "<mi>Φ</mi>", "Φ", false, false, false, 0},
+    {"Chi", "\\Chi", "Chi", "Chi", "<mi>Χ</mi>", "Χ", false, false, false, 0},
+    {"Psi", "\\Psi", "Psi", "Psi", "<mi>Ψ</mi>", "Ψ", false, false, false, 0},
+    {"Omega", "\\Omega", "Omega", "Omega", "<mi>Ω</mi>", "Ω", false, false, false, 0},
     // Special mathematical symbols
-    {"ell", "\\ell", "ell", "ell", "<mi>ℓ</mi>", "ℓ", false, false, false, false, 0},
-    {"hbar", "\\hbar", "hbar", "hbar", "<mi>ℏ</mi>", "ℏ", false, false, false, false, 0},
-    {"imath", "\\imath", "imath", "imath", "<mi>ı</mi>", "ı", false, false, false, false, 0},
-    {"jmath", "\\jmath", "jmath", "jmath", "<mi>ȷ</mi>", "ȷ", false, false, false, false, 0},
-    {"aleph", "\\aleph", "aleph", "aleph", "<mi>ℵ</mi>", "ℵ", false, false, false, false, 0},
-    {"beth", "\\beth", "beth", "beth", "<mi>ℶ</mi>", "ℶ", false, false, false, false, 0},
-    {"gimel", "\\gimel", "gimel", "gimel", "<mi>ℷ</mi>", "ℷ", false, false, false, false, 0},
-    {"daleth", "\\daleth", "daleth", "daleth", "<mi>ℸ</mi>", "ℸ", false, false, false, false, 0},
-    {"infty", "\\infty", "infinity", "inf", "<mi>∞</mi>", "∞", false, false, false, false, 0},
-    {"partial", "\\partial", "diff", "partial", "<mo>∂</mo>", "∂", false, false, false, false, 0},
-    {"nabla", "\\nabla", "nabla", "nabla", "<mo>∇</mo>", "∇", false, false, false, false, 0},
-    {"emptyset", "\\emptyset", "nothing", "emptyset", "<mi>∅</mi>", "∅", false, false, false, false, 0},
-    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, false, 0}
+    {"ell", "\\ell", "ell", "ell", "<mi>ℓ</mi>", "ℓ", false, false, false, 0},
+    {"hbar", "\\hbar", "hbar", "hbar", "<mi>ℏ</mi>", "ℏ", false, false, false, 0},
+    {"imath", "\\imath", "imath", "imath", "<mi>ı</mi>", "ı", false, false, false, 0},
+    {"jmath", "\\jmath", "jmath", "jmath", "<mi>ȷ</mi>", "ȷ", false, false, false, 0},
+    {"aleph", "\\aleph", "aleph", "aleph", "<mi>ℵ</mi>", "ℵ", false, false, false, 0},
+    {"beth", "\\beth", "beth", "beth", "<mi>ℶ</mi>", "ℶ", false, false, false, 0},
+    {"gimel", "\\gimel", "gimel", "gimel", "<mi>ℷ</mi>", "ℷ", false, false, false, 0},
+    {"daleth", "\\daleth", "daleth", "daleth", "<mi>ℸ</mi>", "ℸ", false, false, false, 0},
+    {"infty", "\\infty", "infinity", "inf", "<mi>∞</mi>", "∞", false, false, false, 0},
+    {"partial", "\\partial", "diff", "partial", "<mo>∂</mo>", "∂", false, false, false, 0},
+    {"nabla", "\\nabla", "nabla", "nabla", "<mo>∇</mo>", "∇", false, false, false, 0},
+    {"emptyset", "\\emptyset", "nothing", "emptyset", "<mi>∅</mi>", "∅", false, false, false, 0},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
 // Fractions and binomials
@@ -146,14 +147,14 @@ static const MathFormatDef fractions[] = {
     {"frac", "\\frac{{1}}{{2}}", "frac({1}, {2})", "{1}/{2}", "<mfrac>{1}{2}</mfrac>", "fraction", true, false, false, 2},
     {"binom", "\\binom{{1}}{{2}}", "binom({1}, {2})", "({1} choose {2})", "<mrow><mo>(</mo><mfrac linethickness=\"0\">{1}{2}</mfrac><mo>)</mo></mrow>", "binomial", true, false, false, 2},
     {"choose", "\\binom{{1}}{{2}}", "choose({1}, {2})", "({1} choose {2})", "<mrow><mo>(</mo><mfrac linethickness=\"0\">{1}{2}</mfrac><mo>)</mo></mrow>", "binomial", true, false, false, 2},
-    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, false, 0}
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
 // Roots
 static const MathFormatDef roots[] = {
     {"sqrt", "\\sqrt{{1}}", "sqrt({1})", "sqrt({1})", "<msqrt>{1}</msqrt>", "√", true, false, false, 1},
     {"root", "\\sqrt[{1}]{{2}}", "root({1}, {2})", "root({1}, {2})", "<mroot>{2}{1}</mroot>", "ⁿ√", true, false, false, 2},
-    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, false, 0}
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
 // Accents
@@ -216,6 +217,28 @@ static const MathFormatDef arrows[] = {
     {"updownarrow", "\\updownarrow", "arrow.t.b", "^v", "<mo>↕</mo>", "↕", false, false, false, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
+
+// Helper function to check if an item represents a single character/digit
+static bool is_single_character_item(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);    
+    if (type == LMD_TYPE_INT) {
+        int val = get_int_value(item);
+        return val >= 0 && val <= 9;
+    } else if (type == LMD_TYPE_SYMBOL || type == LMD_TYPE_STRING) {
+        // Use the existing get_pointer macro to extract the pointer
+        String* str = (String*)get_pointer(item);
+        bool result = str && str->len == 1;
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG: is_single_character_item - STRING/SYMBOL len=%d, result=%s\n", str ? str->len : -1, result ? "true" : "false");
+        #endif
+        return result;
+    }
+    
+    #ifdef DEBUG_MATH_FORMAT
+    fprintf(stderr, "DEBUG: is_single_character_item - unknown type, result=false\n");
+    #endif
+    return false;
+}
 
 // Find format definition for element
 static const MathFormatDef* find_format_def(const char* element_name) {
@@ -449,10 +472,35 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     // Check if this element has a format template with placeholders
     if (def->has_children && children && strstr(format_str, "{1}")) {
+        fprintf(stderr, "HENRY DEBUG: template formatting\n");  // Always visible debug
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: Using template formatting with format: '%s'\n", format_str);
+        fprintf(stderr, "DEBUG: ALWAYS PRINT THIS MESSAGE\n");
+        if (strcmp(element_name, "pow") == 0) {
+            fprintf(stderr, "DEBUG: This is a pow element, checking special conditions...\n");
+        }
         #endif
-        format_math_children_with_template(sb, children, format_str, flavor, depth);
+        
+        // Special handling for pow element - use ^2 for single characters instead of ^{2}
+        if (strcmp(element_name, "pow") == 0 && children->length == 2 && 
+            flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG: Using special pow formatting for single character exponent\n");
+            #endif
+            // Format as base^exponent without braces for single character exponents
+            format_math_item(sb, children->items[0], flavor, depth + 1);
+            strbuf_append_str(sb, "^");
+            format_math_item(sb, children->items[1], flavor, depth + 1);
+        } else {
+            #ifdef DEBUG_MATH_FORMAT
+            if (strcmp(element_name, "pow") == 0) {
+                fprintf(stderr, "DEBUG: pow element debug - element_name='%s', children->length=%ld, flavor=%d\n", 
+                        element_name, children->length, flavor);
+                fprintf(stderr, "DEBUG: MATH_OUTPUT_LATEX constant value = %d\n", MATH_OUTPUT_LATEX);
+            }
+            #endif
+            format_math_children_with_template(sb, children, format_str, flavor, depth);
+        }
     } else {
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: Using simple formatting without template\n");
@@ -523,15 +571,9 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             break;
         }
         case LMD_TYPE_INT: {
-            #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing INT\n");
-            #endif
-            int val = (int)get_int_value(item);
+            int val = get_int_value(item);
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%d", val);
-            #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: INT value=%d, formatted='%s'\n", val, num_buf);
-            #endif
             strbuf_append_str(sb, num_buf);
             break;
         }
