@@ -148,6 +148,15 @@ static const MathFormatDef special_symbols[] = {
     {"daleth", "\\daleth", "daleth", "daleth", "<mi>ℸ</mi>", "ℸ", false, false, false, 0},
     {"infty", "\\infty", "infinity", "inf", "<mi>∞</mi>", "∞", false, false, false, 0},
     {"partial", "\\partial", "diff", "partial", "<mo>∂</mo>", "∂", false, false, false, 0},
+    // Number sets (blackboard symbols)
+    {"naturals", "\\mathbb{N}", "NN", "N", "<mi>ℕ</mi>", "ℕ", false, false, false, 0},
+    {"integers", "\\mathbb{Z}", "ZZ", "Z", "<mi>ℤ</mi>", "ℤ", false, false, false, 0},
+    {"rationals", "\\mathbb{Q}", "QQ", "Q", "<mi>ℚ</mi>", "ℚ", false, false, false, 0},
+    {"reals", "\\mathbb{R}", "RR", "R", "<mi>ℝ</mi>", "ℝ", false, false, false, 0},
+    {"complex", "\\mathbb{C}", "CC", "C", "<mi>ℂ</mi>", "ℂ", false, false, false, 0},
+    {"quaternions", "\\mathbb{H}", "HH", "H", "<mi>ℍ</mi>", "ℍ", false, false, false, 0},
+    {"primes", "\\mathbb{P}", "PP", "P", "<mi>ℙ</mi>", "ℙ", false, false, false, 0},
+    {"field", "\\mathbb{F}", "FF", "F", "<mi>𝔽</mi>", "𝔽", false, false, false, 0},
     {"nabla", "\\nabla", "nabla", "nabla", "<mo>∇</mo>", "∇", false, false, false, 0},
     {"emptyset", "\\emptyset", "nothing", "emptyset", "<mi>∅</mi>", "∅", false, false, false, 0},
     {"varnothing", "\\varnothing", "nothing", "varnothing", "<mi>∅</mi>", "∅", false, false, false, 0},
@@ -934,14 +943,46 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                             bool prev_is_symbol = item_is_symbol_element(prev) || item_contains_only_symbols(prev);
                             bool curr_is_symbol = item_is_symbol_element(curr) || item_contains_only_symbols(curr);
                             
+                            // Check for specific element types that should not have spaces
+                            bool prev_is_frac = false;
+                            bool curr_is_bracket = false;
+                            
+                            Element* prev_elem = (Element*)prev;
+                            Element* curr_elem = (Element*)curr;
+                            
+                            if (prev_elem && prev_elem->type) {
+                                TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
+                                if (prev_elmt_type && prev_elmt_type->name.str && prev_elmt_type->name.length == 4 &&
+                                    strncmp(prev_elmt_type->name.str, "frac", 4) == 0) {
+                                    prev_is_frac = true;
+                                }
+                            }
+                            
+                            if (curr_elem && curr_elem->type) {
+                                TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                if (curr_elmt_type && curr_elmt_type->name.str) {
+                                    // Check for bracket/parenthesis types
+                                    const char* bracket_types[] = {"bracket_group", "paren_group", "brace_group", "abs", "norm"};
+                                    for (size_t k = 0; k < sizeof(bracket_types) / sizeof(bracket_types[0]); k++) {
+                                        size_t type_len = strlen(bracket_types[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, bracket_types[k], type_len) == 0) {
+                                            curr_is_bracket = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
                             #ifdef DEBUG_MATH_FORMAT
                             fprintf(stderr, "DEBUG: Element-Element pair: prev_is_symbol=%d, curr_is_symbol=%d\n", prev_is_symbol, curr_is_symbol);
                             #endif
                             
-                            // Debug for delta epsilon zeta case specifically
-                            printf("SPACING DEBUG: prev_is_symbol=%d, curr_is_symbol=%d\n", prev_is_symbol, curr_is_symbol);
-                            
                             if (prev_is_symbol && curr_is_symbol) {
+                                pair_needs_space = false;
+                            }
+                            // Don't add space between fractions and brackets/parentheses  
+                            else if (prev_is_frac && curr_is_bracket) {
                                 pair_needs_space = false;
                             }
                             // Don't add space between LaTeX commands
@@ -977,9 +1018,9 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         // Use compact spacing in subscript/superscript contexts
         const char* operator_format = final_format_str;
         if (in_compact_context && strcmp(element_name, "add") == 0) {
-            operator_format = "+";  // No spaces around + in compact contexts
+            operator_format = " + ";  // Keep spaces around + for readability
         } else if (in_compact_context && strcmp(element_name, "sub") == 0) {
-            operator_format = "-";  // No spaces around - in compact contexts
+            operator_format = " - ";  // Keep spaces around - for readability  
         }
         
         // Format as: child1 operator child2 operator child3 ...
@@ -1002,6 +1043,48 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                 format_math_children_with_template(sb, children, styled_format, flavor, depth);
                 return;
             }
+        }
+    }
+    
+    // Special handling for big operators (lim, sum, int) with bounds/limits
+    if (children && children->length > 0) {
+        const char* big_ops[] = {"lim", "sum", "prod", "int", "oint", "iint", "iiint", "bigcup", "bigcap"};
+        bool is_big_op = false;
+        for (size_t i = 0; i < sizeof(big_ops) / sizeof(big_ops[0]); i++) {
+            if (strcmp(element_name, big_ops[i]) == 0) {
+                is_big_op = true;
+                break;
+            }
+        }
+        
+        if (is_big_op) {
+            #ifdef DEBUG_MATH_FORMAT
+            fprintf(stderr, "DEBUG: Big operator detected: %s\n", element_name);
+            #endif
+            
+            // Format as operator with subscript for limits/bounds
+            strbuf_append_str(sb, format_str);  // e.g., "\\lim"
+            
+            if (children->length >= 1) {
+                strbuf_append_str(sb, "_{");
+                bool prev_compact_context = in_compact_context;
+                in_compact_context = true;
+                format_math_item(sb, children->items[0], flavor, depth + 1);
+                in_compact_context = prev_compact_context;
+                strbuf_append_str(sb, "}");
+            }
+            
+            // Handle additional children (like upper bounds for integrals)
+            if (children->length >= 2) {
+                strbuf_append_str(sb, "^{");
+                bool prev_compact_context = in_compact_context;
+                in_compact_context = true;
+                format_math_item(sb, children->items[1], flavor, depth + 1);
+                in_compact_context = prev_compact_context;
+                strbuf_append_str(sb, "}");
+            }
+            
+            return;
         }
     }
     

@@ -370,8 +370,8 @@ static const MathExprDef geometry[] = {
     {"circle", "circle", "circle", "circle", "○", "Circle symbol", false, 0, NULL},
     {"diamond", "diamond", "diamond", "diamond", "◊", "Diamond symbol", false, 0, NULL},
     {"parallel", "parallel", "parallel", "parallel", "∥", "Parallel symbol", false, 0, NULL},
-    {"perp", "perp", "perp", "perpendicular", "⊥", "Perpendicular symbol", false, 0, NULL},
-    {"perpendicular", "perp", "perp", "perpendicular", "⊥", "Perpendicular symbol", false, 0, NULL},
+    {"perp", "perp", "perp", "perp", "⊥", "Perpendicular symbol", false, 0, NULL},
+    {"perpendicular", "perp", "perp", "perp", "⊥", "Perpendicular symbol", false, 0, NULL},
     {"cong", "cong", "cong", "congruent", "≅", "Congruent symbol", false, 0, NULL},
     {"sim", "sim", "sim", "similar", "∼", "Similar symbol", false, 0, NULL},
     {"sphericalangle", "sphericalangle", "sphericalangle", "sphericalangle", "∢", "Spherical angle", false, 0, NULL},
@@ -1075,6 +1075,27 @@ static Item parse_latex_command(Input *input, const char **math) {
     String *cmd_string = (String*)sb->str;
     cmd_string->len = sb->length - sizeof(uint32_t);
     cmd_string->ref_cnt = 0;
+    
+    // Check for commands that might have braces that should be part of the command
+    // For example, \mathbb{N} should be treated as command "mathbb{N}" not "mathbb"
+    if (strcmp(cmd_string->chars, "mathbb") == 0 && **math == '{') {
+        // Look ahead to see if this is a specific blackboard symbol
+        const char* peek = *math + 1; // skip '{'
+        if (*peek && isalpha(*peek) && *(peek + 1) == '}') {
+            // Single letter like {N}, {Z}, etc. - include it in the command
+            strbuf_append_char(sb, '{');
+            strbuf_append_char(sb, *peek);
+            strbuf_append_char(sb, '}');
+            
+            // Update the command string
+            cmd_string = (String*)sb->str;
+            cmd_string->len = sb->length - sizeof(uint32_t);
+            cmd_string->ref_cnt = 0;
+            
+            // Advance the math pointer past the braces
+            *math += 3; // skip {X}
+        }
+    }
     
     // Handle specific commands
     if (strcmp(cmd_string->chars, "frac") == 0) {
