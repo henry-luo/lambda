@@ -6,6 +6,7 @@
 #include <unistd.h>  // for getcwd and chdir
 #include "../lambda/lambda-data.h"
 #include "../lib/arraylist.h"
+#include "../lib/num_stack.h"
 #include <lexbor/url/url.h>
 
 // Forward declarations
@@ -17,8 +18,48 @@ lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
 char* read_text_doc(lxb_url_t *url);
 void print_item(StrBuf *strbuf, Item item);
 
+// Forward declarations for Lambda runtime 
+extern __thread Context* context;
 
-TestSuite(math_roundtrip_tests);
+// Functions we need for setting up the context
+void heap_init();
+void frame_start();
+void frame_end();
+void heap_destroy();
+
+Context* create_test_context();
+void destroy_test_context(Context* ctx);
+
+// Global test context
+static Context* test_context = NULL;
+
+// Setup and teardown functions
+void setup_math_tests(void) {
+    test_context = create_test_context();
+    // Set the global context BEFORE calling heap_init
+    context = test_context;
+    
+    // Now initialize heap and frame
+    heap_init();
+    frame_start();
+}
+
+void teardown_math_tests(void) {
+    if (test_context && context) {
+        frame_end();
+        heap_destroy();
+        
+        if (test_context->num_stack) {
+            num_stack_destroy((num_stack_t*)test_context->num_stack);
+        }
+        
+        free(test_context);
+        test_context = NULL;
+        context = NULL;
+    }
+}
+
+TestSuite(math_roundtrip_tests, .init = setup_math_tests, .fini = teardown_math_tests);
 
 // Use the existing function from lib/file.c
 char* read_text_file(const char *filename);
@@ -59,6 +100,34 @@ void print_ast_debug(Input* input) {
         printf("%s\n", debug_buf->str);
         strbuf_free(debug_buf);
     }
+}
+
+// Context creation and destruction functions
+Context* create_test_context() {
+    Context* ctx = (Context*)calloc(1, sizeof(Context));
+    if (!ctx) return NULL;
+    
+    // Initialize minimal context for testing
+    ctx->num_stack = num_stack_create(16);
+    ctx->ast_pool = NULL;
+    ctx->consts = NULL;
+    ctx->type_list = NULL;
+    ctx->type_info = NULL;
+    ctx->cwd = NULL;
+    ctx->result = ITEM_NULL;
+    ctx->heap = NULL;  // Will be initialized in setup
+    
+    return ctx;
+}
+
+void destroy_test_context(Context* ctx) {
+    if (!ctx) return;
+    
+    if (ctx->num_stack) {
+        num_stack_destroy((num_stack_t*)ctx->num_stack);
+    }
+    
+    free(ctx);
 }
 
 // Test roundtrip for individual inline math expressions
