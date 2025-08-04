@@ -318,9 +318,10 @@ static void format_table_separator(StrBuf* sb, Element* header_row) {
 
 // Format paragraph elements
 static void format_paragraph(StrBuf* sb, Element* elem) {
-    // Check if this paragraph contains only displaymath elements
+    // Check if this paragraph contains only displaymath or inline math elements
     List* list = (List*)elem;
     bool only_displaymath = true;
+    bool only_math_elements = true;  // includes both inline math and displaymath
     
     if (list->length > 0) {
         for (long i = 0; i < list->length; i++) {
@@ -331,13 +332,16 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
                 Element* child_elem = (Element*)child_item;
                 TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
                 if (child_elem_type && child_elem_type->name.str) {
-                    if (strcmp(child_elem_type->name.str, "displaymath") != 0) {
+                    const char* elem_name = child_elem_type->name.str;
+                    if (strcmp(elem_name, "displaymath") != 0) {
                         only_displaymath = false;
-                        break;
+                    }
+                    if (strcmp(elem_name, "math") != 0 && strcmp(elem_name, "displaymath") != 0) {
+                        only_math_elements = false;
                     }
                 } else {
                     only_displaymath = false;
-                    break;
+                    only_math_elements = false;
                 }
             } else if (type == LMD_TYPE_STRING) {
                 // Check if it's just whitespace
@@ -346,13 +350,15 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
                     for (int j = 0; j < str->len; j++) {
                         if (!isspace(str->chars[j])) {
                             only_displaymath = false;
+                            only_math_elements = false;
                             break;
                         }
                     }
                 }
-                if (!only_displaymath) break;
+                if (!only_displaymath && !only_math_elements) break;
             } else {
                 only_displaymath = false;
+                only_math_elements = false;
                 break;
             }
         }
@@ -360,8 +366,8 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
     
     format_element_children(sb, elem);
     
-    // Only add newlines if the paragraph contains more than just displaymath
-    if (!only_displaymath) {
+    // Only add paragraph spacing if it's not a math-only paragraph
+    if (!only_math_elements) {
         strbuf_append_str(sb, "\n\n");
     }
 }

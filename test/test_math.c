@@ -51,9 +51,74 @@ lxb_url_t* create_test_url(const char* virtual_path) {
 
 // Test roundtrip for individual inline math expressions
 Test(math_roundtrip_tests, inline_math_roundtrip) {
-    printf("Starting simplified inline_math_roundtrip test\n");
+    printf("=== Starting inline_math_roundtrip test ===\n");
     
-    printf("Test completed - basic functionality works\n");
+    // Test cases: inline math expressions
+    const char* test_cases[] = {
+        "$E = mc^2$",
+        "$x^2 + y^2 = z^2$",
+        "$\\alpha + \\beta = \\gamma$",
+        "$\\frac{1}{2}$",
+        "$\\sqrt{x + y}$"
+    };
+    
+    String* type_str = create_lambda_string("markdown");
+    String* flavor_str = create_lambda_string("commonmark");
+    
+    printf("Created type string: '%s', flavor string: '%s'\n", 
+           type_str->chars, flavor_str->chars);
+    
+    for (int i = 0; i < 5; i++) {
+        printf("--- Testing inline math case %d: %s ---\n", i, test_cases[i]);
+        
+        // Create a virtual URL for this test case
+        char virtual_path[256];
+        snprintf(virtual_path, sizeof(virtual_path), "test://inline_math_%d.md", i);
+        lxb_url_t* test_url = create_test_url(virtual_path);
+        cr_assert_neq(test_url, NULL, "Failed to create test URL");
+        
+        // Create a copy of the test content (input_from_source takes ownership)
+        char* content_copy = strdup(test_cases[i]);
+        cr_assert_neq(content_copy, NULL, "Failed to duplicate test content");
+        
+        // Parse the math expression using input_from_source
+        printf("Parsing input with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
+        Input* input = input_from_source(content_copy, test_url, type_str, flavor_str);
+        
+        if (!input) {
+            printf("Failed to parse - skipping case %d\n", i);
+            continue;
+        }
+        
+        printf("Successfully parsed input\n");
+        
+        // Debug: Print AST structure
+        if (input->root) {
+            StrBuf* debug_buf = strbuf_new();
+            printf("AST: ");
+            print_item(debug_buf, input->root);
+            printf("%s\n", debug_buf->str);
+            strbuf_free(debug_buf);
+        }
+        
+        // Format it back
+        printf("Formatting back with pool at %p\n", (void*)input->pool);
+        String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
+        
+        if (!formatted) {
+            printf("Failed to format - skipping case %d\n", i);
+            continue;
+        }
+        
+        printf("Formatted result: '%s'\n", formatted->chars);
+        
+        // Verify roundtrip - formatted should equal original
+        cr_assert_str_eq(formatted->chars, test_cases[i], 
+            "Inline math roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
+            i, test_cases[i], formatted->chars);
+    }
+    
+    printf("=== Completed inline_math_roundtrip test ===\n");
 }
 
 // Test roundtrip for block math expressions  
