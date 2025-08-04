@@ -145,6 +145,22 @@ static const MathFormatDef special_symbols[] = {
     {"partial", "\\partial", "diff", "partial", "<mo>∂</mo>", "∂", false, false, false, 0},
     {"nabla", "\\nabla", "nabla", "nabla", "<mo>∇</mo>", "∇", false, false, false, 0},
     {"emptyset", "\\emptyset", "nothing", "emptyset", "<mi>∅</mi>", "∅", false, false, false, 0},
+    // Set theory symbols
+    {"in", " \\in ", "in", "in", "<mo>∈</mo>", "∈", true, false, true, 0},
+    {"notin", " \\notin ", "notin", "notin", "<mo>∉</mo>", "∉", true, false, true, 0},
+    {"subset", " \\subset ", "subset", "subset", "<mo>⊂</mo>", "⊂", true, false, true, 0},
+    {"supset", " \\supset ", "supset", "supset", "<mo>⊃</mo>", "⊃", true, false, true, 0},
+    {"subseteq", " \\subseteq ", "subset.eq", "subseteq", "<mo>⊆</mo>", "⊆", true, false, true, 0},
+    {"supseteq", " \\supseteq ", "supset.eq", "supseteq", "<mo>⊇</mo>", "⊇", true, false, true, 0},
+    {"cup", " \\cup ", "union", "cup", "<mo>∪</mo>", "∪", true, false, true, 0},
+    {"cap", " \\cap ", "sect", "cap", "<mo>∩</mo>", "∩", true, false, true, 0},
+    // Logic symbols
+    {"land", " \\land ", "and", "and", "<mo>∧</mo>", "∧", true, false, true, 0},
+    {"lor", " \\lor ", "or", "or", "<mo>∨</mo>", "∨", true, false, true, 0},
+    {"lnot", "\\lnot", "not", "not", "<mo>¬</mo>", "¬", false, false, false, 0},
+    {"forall", "\\forall", "forall", "forall", "<mo>∀</mo>", "∀", false, false, false, 0},
+    {"exists", "\\exists", "exists", "exists", "<mo>∃</mo>", "∃", false, false, false, 0},
+    {"nexists", "\\nexists", "nexists", "nexists", "<mo>∄</mo>", "∄", false, false, false, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -185,18 +201,18 @@ static const MathFormatDef accents[] = {
 
 // Relations
 static const MathFormatDef relations[] = {
-    {"leq", "\\leq", "<=", "<=", "<mo>≤</mo>", "≤", false, false, false, 0},
-    {"geq", "\\geq", ">=", ">=", "<mo>≥</mo>", "≥", false, false, false, 0},
-    {"neq", "\\neq", "!=", "!=", "<mo>≠</mo>", "≠", false, false, false, 0},
-    {"approx", "\\approx", "approx", "approx", "<mo>≈</mo>", "≈", false, false, false, 0},
-    {"equiv", "\\equiv", "equiv", "equiv", "<mo>≡</mo>", "≡", false, false, false, 0},
-    {"sim", "\\sim", "~", "~", "<mo>∼</mo>", "∼", false, false, false, 0},
-    {"simeq", "\\simeq", "simeq", "simeq", "<mo>≃</mo>", "≃", false, false, false, 0},
-    {"cong", "\\cong", "cong", "cong", "<mo>≅</mo>", "≅", false, false, false, 0},
-    {"prec", "\\prec", "prec", "prec", "<mo>≺</mo>", "≺", false, false, false, 0},
-    {"succ", "\\succ", "succ", "succ", "<mo>≻</mo>", "≻", false, false, false, 0},
-    {"preceq", "\\preceq", "preceq", "preceq", "<mo>⪯</mo>", "⪯", false, false, false, 0},
-    {"succeq", "\\succeq", "succeq", "succeq", "<mo>⪰</mo>", "⪰", false, false, false, 0},
+    {"leq", " \\leq ", "<=", "<=", "<mo>≤</mo>", "≤", true, false, true, 0},
+    {"geq", " \\geq ", ">=", ">=", "<mo>≥</mo>", "≥", true, false, true, 0},
+    {"neq", " \\neq ", "!=", "!=", "<mo>≠</mo>", "≠", true, false, true, 0},
+    {"approx", " \\approx ", "approx", "approx", "<mo>≈</mo>", "≈", true, false, true, 0},
+    {"equiv", " \\equiv ", "equiv", "equiv", "<mo>≡</mo>", "≡", true, false, true, 0},
+    {"sim", " \\sim ", "~", "~", "<mo>∼</mo>", "∼", true, false, true, 0},
+    {"simeq", " \\simeq ", "simeq", "simeq", "<mo>≃</mo>", "≃", true, false, true, 0},
+    {"cong", " \\cong ", "cong", "cong", "<mo>≅</mo>", "≅", true, false, true, 0},
+    {"prec", " \\prec ", "prec", "prec", "<mo>≺</mo>", "≺", true, false, true, 0},
+    {"succ", " \\succ ", "succ", "succ", "<mo>≻</mo>", "≻", true, false, true, 0},
+    {"preceq", " \\preceq ", "preceq", "preceq", "<mo>⪯</mo>", "⪯", true, false, true, 0},
+    {"succeq", " \\succeq ", "succeq", "succeq", "<mo>⪰</mo>", "⪰", true, false, true, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -216,14 +232,14 @@ static const MathFormatDef big_operators[] = {
 
 // Arrows
 static const MathFormatDef arrows[] = {
-    {"to", "\\to", "->", "->", "<mo>→</mo>", "→", false, false, false, 0},
-    {"rightarrow", "\\rightarrow", "arrow.r", "->", "<mo>→</mo>", "→", false, false, false, 0},
-    {"leftarrow", "\\leftarrow", "arrow.l", "<-", "<mo>←</mo>", "←", false, false, false, 0},
-    {"leftrightarrow", "\\leftrightarrow", "arrow.l.r", "<->", "<mo>↔</mo>", "↔", false, false, false, 0},
-    {"Rightarrow", "\\Rightarrow", "arrow.r.double", "=>", "<mo>⇒</mo>", "⇒", false, false, false, 0},
-    {"Leftarrow", "\\Leftarrow", "arrow.l.double", "<=", "<mo>⇐</mo>", "⇐", false, false, false, 0},
-    {"Leftrightarrow", "\\Leftrightarrow", "arrow.l.r.double", "<=>", "<mo>⇔</mo>", "⇔", false, false, false, 0},
-    {"mapsto", "\\mapsto", "arrow.bar", "|->", "<mo>↦</mo>", "↦", false, false, false, 0},
+    {"to", " \\to ", "->", "->", "<mo>→</mo>", "→", true, false, true, 0},
+    {"rightarrow", " \\rightarrow ", "arrow.r", "->", "<mo>→</mo>", "→", true, false, true, 0},
+    {"leftarrow", " \\leftarrow ", "arrow.l", "<-", "<mo>←</mo>", "←", true, false, true, 0},
+    {"leftrightarrow", " \\leftrightarrow ", "arrow.l.r", "<->", "<mo>↔</mo>", "↔", true, false, true, 0},
+    {"Rightarrow", " \\Rightarrow ", "arrow.r.double", "=>", "<mo>⇒</mo>", "⇒", true, false, true, 0},
+    {"Leftarrow", " \\Leftarrow ", "arrow.l.double", "<=", "<mo>⇐</mo>", "⇐", true, false, true, 0},
+    {"Leftrightarrow", " \\Leftrightarrow ", "arrow.l.r.double", "<=>", "<mo>⇔</mo>", "⇔", true, false, true, 0},
+    {"mapsto", " \\mapsto ", "arrow.bar", "|->", "<mo>↦</mo>", "↦", true, false, true, 0},
     {"uparrow", "\\uparrow", "arrow.t", "^", "<mo>↑</mo>", "↑", false, false, false, 0},
     {"downarrow", "\\downarrow", "arrow.b", "v", "<mo>↓</mo>", "↓", false, false, false, 0},
     {"updownarrow", "\\updownarrow", "arrow.t.b", "^v", "<mo>↕</mo>", "↕", false, false, false, 0},
@@ -297,12 +313,38 @@ static bool item_contains_integral(Item item) {
     return false;
 }
 
+// Helper function to check if an item is a logical quantifier
+static bool item_is_quantifier(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item;
+        if (elem && elem->type) {
+            // Get the element type to access the name
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+                // Check if the element name matches a quantifier
+                if ((elmt_type->name.length == 6 && strncmp(elmt_type->name.str, "forall", 6) == 0) ||
+                    (elmt_type->name.length == 6 && strncmp(elmt_type->name.str, "exists", 6) == 0) ||
+                    (elmt_type->name.length == 7 && strncmp(elmt_type->name.str, "nexists", 7) == 0)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 // Find format definition for element
 static const MathFormatDef* find_format_def(const char* element_name) {
     // Search through all format tables
     const MathFormatDef* tables[] = {
         basic_operators, functions, special_symbols, fractions, 
         roots, grouping, accents, relations, big_operators, arrows
+    };
+    
+    const char* table_names[] = {
+        "basic_operators", "functions", "special_symbols", "fractions",
+        "roots", "grouping", "accents", "relations", "big_operators", "arrows"
     };
     
     int table_count = sizeof(tables) / sizeof(tables[0]);
@@ -315,6 +357,7 @@ static const MathFormatDef* find_format_def(const char* element_name) {
             }
         }
     }
+    
     return NULL;
 }
 
@@ -427,7 +470,7 @@ static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor fl
 
 // Format a math element
 static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flavor, int depth) {
-    fprintf(stderr, "HENRY DEBUG: format_math_element called\n");  // Always visible
+    // Debug: format_math_element called
     if (!elem) return;
     
     TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -450,7 +493,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         #endif
         
         if (strcmp(element_name, "implicit_mul") == 0) {
-            fprintf(stderr, "HENRY DEBUG: Processing implicit_mul element (depth=%d)\n", implicit_mul_depth);
+        // Debug: Processing implicit_mul element
             implicit_mul_depth++;  // Increment depth when entering implicit_mul
         }
     }
@@ -467,11 +510,8 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     // Find format definition
     const MathFormatDef* def = find_format_def(element_name);
     if (strcmp(element_name, "implicit_mul") == 0) {
-        fprintf(stderr, "HENRY DEBUG: implicit_mul def=%p\n", def);
-        if (def) {
-            fprintf(stderr, "HENRY DEBUG: implicit_mul - is_binary_op=%s, has_children=%s\n", 
-                    def->is_binary_op ? "true" : "false", def->has_children ? "true" : "false");
-        }
+        // Debug: implicit_mul def
+        // Debug: implicit_mul binary op check
     }
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG: Format def for '%s': %s\n", element_name, def ? "found" : "not found");
@@ -524,49 +564,47 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     #endif
 
     // Special handling for binary operators
-    fprintf(stderr, "HENRY DEBUG: About to check binary op for %s: is_binary=%s, has_children=%s, children_len=%ld\n", 
-            element_name, def->is_binary_op ? "true" : "false", 
-            children ? "true" : "false", children ? children->length : -1L);
-            
-    // Special case for implicit_mul: check if we need space for integrals
+    // Special case for implicit_mul: check if we need space for integrals or quantifiers
     const char* final_format_str = format_str;
     if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
         bool has_integral = false;
+        bool has_quantifier = false;
+        
+        // Check for integrals in any child
         for (int i = 0; i < children->length; i++) {
             if (item_contains_integral(children->items[i])) {
                 has_integral = true;
                 break;
             }
         }
-        if (has_integral) {
-            final_format_str = " ";  // Use space for integrals
-            fprintf(stderr, "HENRY DEBUG: implicit_mul with integral detected, using space\n");
-        } else {
-            fprintf(stderr, "HENRY DEBUG: implicit_mul without integral, using empty string\n");
+        
+        // Check if first child is a quantifier
+        if (children->length >= 1 && item_is_quantifier(children->items[0])) {
+            has_quantifier = true;
+        }
+        
+        if (has_integral || has_quantifier) {
+            final_format_str = " ";  // Use space for integrals and quantifiers
         }
     }
     
     if (def->is_binary_op && children && children->length >= 2) {
-        fprintf(stderr, "HENRY DEBUG: Binary operator check passed for %s\n", element_name);
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: Formatting as binary operator: %s\n", element_name);
         #endif
         // Format as: child1 operator child2 operator child3 ...
         for (int i = 0; i < children->length; i++) {
-            fprintf(stderr, "HENRY DEBUG: Binary op loop iteration i=%d for %s\n", i, element_name);
             if (i > 0) {
                 // Use the final format string (which may have been modified for implicit_mul)
                 strbuf_append_str(sb, final_format_str);
             }
             format_math_item(sb, children->items[i], flavor, depth + 1);
         }
-        fprintf(stderr, "HENRY DEBUG: Binary op loop completed for %s\n", element_name);
         return;
     }
     
     // Check if this element has a format template with placeholders
     if (def->has_children && children && strstr(format_str, "{1}")) {
-        fprintf(stderr, "HENRY DEBUG: template formatting\n");  // Always visible debug
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: Using template formatting with format: '%s'\n", format_str);
         fprintf(stderr, "DEBUG: ALWAYS PRINT THIS MESSAGE\n");

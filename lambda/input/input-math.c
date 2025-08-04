@@ -614,6 +614,7 @@ static Item parse_math_number(Input *input, const char **math);
 static Item parse_math_identifier(Input *input, const char **math);
 static Item create_binary_expr(Input *input, const char* op_name, Item left, Item right);
 static void skip_math_whitespace(const char **math);
+static bool is_relational_operator(const char *math);
 
 // Helper functions
 static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavor);
@@ -627,6 +628,28 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
 // skip whitespace helper
 static void skip_math_whitespace(const char **math) {
     skip_common_whitespace(math);
+}
+
+// Check if a LaTeX command is a relational operator
+static bool is_relational_operator(const char *math) {
+    if (*math != '\\') return false;
+    
+    // Check for relational operators that should be parsed at relational level
+    if (strncmp(math, "\\neq", 4) == 0) return true;
+    if (strncmp(math, "\\ne", 3) == 0) return true;
+    if (strncmp(math, "\\leq", 4) == 0) return true;
+    if (strncmp(math, "\\le", 3) == 0) return true;
+    if (strncmp(math, "\\geq", 4) == 0) return true;
+    if (strncmp(math, "\\ge", 3) == 0) return true;
+    if (strncmp(math, "\\to", 3) == 0) return true;
+    if (strncmp(math, "\\in", 3) == 0) return true;
+    if (strncmp(math, "\\subset", 7) == 0) return true;
+    if (strncmp(math, "\\cup", 4) == 0) return true;
+    if (strncmp(math, "\\cap", 4) == 0) return true;
+    if (strncmp(math, "\\land", 5) == 0) return true;
+    if (strncmp(math, "\\lor", 4) == 0) return true;
+    
+    return false;
 }
 
 // parse a number (integer or float)
@@ -1581,6 +1604,51 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         } else if (**math == '>') {
             op_name = "gt";
             op_len = 1;
+        } else if (**math == '\\') {
+            // Check for LaTeX relational commands
+            if (strncmp(*math, "\\neq", 4) == 0) {
+                op_name = "neq";
+                op_len = 4;
+            } else if (strncmp(*math, "\\ne", 3) == 0) {
+                op_name = "neq";
+                op_len = 3;
+            } else if (strncmp(*math, "\\leq", 4) == 0) {
+                op_name = "leq";
+                op_len = 4;
+            } else if (strncmp(*math, "\\le", 3) == 0) {
+                op_name = "leq";
+                op_len = 3;
+            } else if (strncmp(*math, "\\geq", 4) == 0) {
+                op_name = "geq";
+                op_len = 4;
+            } else if (strncmp(*math, "\\ge", 3) == 0) {
+                op_name = "geq";
+                op_len = 3;
+            } else if (strncmp(*math, "\\to", 3) == 0) {
+                op_name = "to";
+                op_len = 3;
+            } else if (strncmp(*math, "\\in", 3) == 0) {
+                op_name = "in";
+                op_len = 3;
+            } else if (strncmp(*math, "\\subset", 7) == 0) {
+                op_name = "subset";
+                op_len = 7;
+            } else if (strncmp(*math, "\\cup", 4) == 0) {
+                op_name = "cup";
+                op_len = 4;
+            } else if (strncmp(*math, "\\cap", 4) == 0) {
+                op_name = "cap";
+                op_len = 4;
+            } else if (strncmp(*math, "\\land", 5) == 0) {
+                op_name = "land";
+                op_len = 5;
+            } else if (strncmp(*math, "\\lor", 4) == 0) {
+                op_name = "lor";
+                op_len = 4;
+            } else {
+                // No relational operation detected
+                break;
+            }
         } else {
             // No relational operation detected
             break;
@@ -1708,11 +1776,11 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
             skip_math_whitespace(math);
         }
         // Check for implicit multiplication (consecutive terms)
-        else if ((**math == '\\' && flavor == MATH_FLAVOR_LATEX) ||  // LaTeX commands
-                 isalpha(**math) ||  // identifiers (for all flavors)
+        else if ((isalpha(**math)) ||  // identifiers (for all flavors)
                  **math == '(' ||  // parentheses
                  **math == '[' ||  // square brackets
-                 isdigit(**math)) {  // numbers
+                 isdigit(**math) ||  // numbers
+                 (**math == '\\' && flavor == MATH_FLAVOR_LATEX && !is_relational_operator(*math))) {  // LaTeX commands (but not relational operators)
             // This is implicit multiplication - don't advance the pointer yet
             explicit_op = false;
             op_name = "implicit_mul";

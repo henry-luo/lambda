@@ -231,22 +231,83 @@ Test(math_roundtrip_tests, comprehensive_markdown_roundtrip, .disabled = true) {
 // Test math-only expressions (pure math without markdown)
 Test(math_roundtrip_tests, pure_math_roundtrip) {
     printf("=== Starting pure_math_roundtrip test ===\n");
-    // Test pure math expressions (no markdown wrapping)
+    // Test pure math expressions covering various mathematical expression groups
     const char* test_cases[] = {
-        "E = mc^2",  // Enhanced formatting: single-character exponent without braces
+        // Basic operators and arithmetic
+        "E = mc^2",
         "x^2 + y^2 = z^2",
+        "a - b \\cdot c",
         "\\frac{a}{b} + \\frac{c}{d}",
-        "\\int_0^\\infty e^{-x} dx = 1",
-        "\\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}"
+        
+        // Simple symbols and constants
+        "\\alpha + \\beta = \\gamma",
+        "\\pi \\neq \\infty",
+        
+        // More basic expressions
+        "\\sqrt{x + y}",
+        "\\frac{1}{2}",
+        
+        // Greek letters (lowercase)
+        "\\delta\\epsilon\\zeta",
+        "\\theta\\iota\\kappa",
+        "\\mu\\nu\\xi",
+        "\\rho\\sigma\\tau",
+        "\\chi\\psi\\omega",
+        
+        // Greek letters (uppercase)
+        "\\Gamma\\Delta\\Theta",
+        "\\Xi\\Pi\\Sigma",
+        "\\Phi\\Psi\\Omega",
+        
+        // Special symbols
+        "\\partial\\nabla",
+        
+        // Simple arrows
+        "x \\to y",
+        
+        // Relations
+        "a = b",
+        "x \\neq y",
+        "p \\leq q",
+        "r \\geq s",
+        
+        // Set theory symbols
+        "x \\in A",
+        "B \\subset C",
+        "F \\cup G",
+        "H \\cap I",
+        
+        // Simple logic
+        "P \\land Q",
+        "R \\lor S",
+        "\\forall x",
+        "\\exists y",
+        
+        // Binomial coefficient
+        "\\binom{n}{k}",
+        
+        // Simple accents
+        "\\hat{x}",
+        "\\tilde{y}",
+        "\\bar{z}",
+        "\\vec{v}",
+        
+        // Combined expressions
+        "\\alpha^2 + \\beta^2",
+        "\\frac{\\pi}{2}",
+        "\\sqrt{\\alpha + \\beta}"
     };
+    
+    int num_test_cases = sizeof(test_cases) / sizeof(test_cases[0]);
     
     String* type_str = create_lambda_string("math");
     String* flavor_str = create_lambda_string("latex");
     
     printf("Created type string: '%s', flavor string: '%s'\n", 
            type_str->chars, flavor_str->chars);
+    printf("Running %d comprehensive math test cases\n", num_test_cases);
     
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < num_test_cases; i++) {
         printf("--- Testing pure math case %d: %s ---\n", i, test_cases[i]);
         
         // Create a virtual URL for this test case
