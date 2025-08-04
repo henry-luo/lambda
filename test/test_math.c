@@ -235,9 +235,9 @@ Test(math_roundtrip_tests, pure_math_roundtrip) {
     const char* test_cases[] = {
         "E = mc^2",  // Enhanced formatting: single-character exponent without braces
         "x^2 + y^2 = z^2",
-        //"\\frac{a}{b} + \\frac{c}{d}",
-        //"\\int_0^\\infty e^{-x} dx = 1",
-        // "\\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}"
+        "\\frac{a}{b} + \\frac{c}{d}",
+        "\\int_0^\\infty e^{-x} dx = 1",
+        "\\sum_{n=1}^\\infty \\frac{1}{n^2} = \\frac{\\pi^2}{6}"
     };
     
     String* type_str = create_lambda_string("math");
