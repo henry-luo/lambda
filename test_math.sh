@@ -1,7 +1,16 @@
 #!/bin/bash
 
-# Math Test Runner
+# Math Test Runner - Enhanced Version
 # Compiles and runs math tests directly without using test_all.sh
+# 
+# Usage:
+#   ./test_math.sh                                    # Run all math tests
+#   ./test_math.sh comprehensive_markdown_roundtrip   # Run specific test
+#   ./test_math.sh inline_math_roundtrip              # Run specific test
+#
+# Note: This script includes fixes for embedded math parsing that reuse
+# the same Input context as the hosting markdown document, eliminating
+# memory corruption issues with multiple math expressions.
 
 set -e  # Exit on any error
 
@@ -86,13 +95,24 @@ else
 fi
 
 print_status "🧪 Running math tests..."
+
+# Note: Test filtering can be done by passing arguments directly to the binary
+# For example: ./test_math.sh --filter=inline_math_roundtrip
+if [ $# -gt 0 ]; then
+    print_status "Running with arguments: $*"
+    TEST_CMD="./$TEST_BINARY $*"
+else
+    print_status "Running all math tests"
+    TEST_CMD="./$TEST_BINARY"
+fi
+
 echo ""
 
 # Run the test with timeout
 set +e
 if command -v timeout >/dev/null 2>&1; then
     # First try with just basic output
-    test_output=$(timeout 30 ./$TEST_BINARY 2>&1)
+    test_output=$(timeout 30 $TEST_CMD 2>&1)
     test_exit_code=$?
     if [ $test_exit_code -eq 124 ]; then
         print_error "Math tests timed out after 30 seconds"
@@ -100,7 +120,7 @@ if command -v timeout >/dev/null 2>&1; then
     fi
 else
     # Fallback without timeout
-    test_output=$(./$TEST_BINARY 2>&1)
+    test_output=$($TEST_CMD 2>&1)
     test_exit_code=$?
 fi
 

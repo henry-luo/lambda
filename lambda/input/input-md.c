@@ -721,40 +721,39 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     // Add content to element
     if (content_str->len > 0) {
         if (is_math_block) {
-            // Parse as math content
-            Input* math_input = input_new(input->url);
-            if (math_input) {
-                parse_math(math_input, content_str->chars, "latex");
-                
-                if (math_input->root != ITEM_NULL) {
-                    // Change element type to displaymath for math blocks
-                    Element* math_elem = create_markdown_element(input, "displaymath");
-                    if (math_elem) {
-                        // Copy attributes from code_block
-                        add_attribute_to_element(input, math_elem, "language", "math");
-                        
-                        // Add parsed math content
-                        list_push((List*)math_elem, math_input->root);
-                        ((TypeElmt*)math_elem->type)->content_length = 1;
-                        
-                        // Clean up temporary input
-                        if (math_input->type_list) {
-                            arraylist_free(math_input->type_list);
-                        }
-                        pool_variable_destroy(math_input->pool);
-                        free(math_input);
-                        
-                        return (Item)math_elem;
-                    }
+            // Parse as math content using the same input context (reuse memory pool)
+            // Save current input state
+            Item saved_root = input->root;
+            StrBuf* saved_sb = input->sb;
+            
+            // Temporarily reset for math parsing
+            input->root = ITEM_NULL;
+            
+            // Parse the math content
+            parse_math(input, content_str->chars, "latex");
+            
+            if (input->root != ITEM_NULL && input->root != ITEM_ERROR) {
+                // Change element type to displaymath for math blocks
+                Element* math_elem = create_markdown_element(input, "displaymath");
+                if (math_elem) {
+                    // Copy attributes from code_block
+                    add_attribute_to_element(input, math_elem, "language", "math");
+                    
+                    // Add parsed math content
+                    list_push((List*)math_elem, input->root);
+                    ((TypeElmt*)math_elem->type)->content_length = 1;
+                    
+                    // Restore input state
+                    input->root = saved_root;
+                    input->sb = saved_sb;
+                    
+                    return (Item)math_elem;
                 }
-                
-                // Clean up on failure, fall through to regular code block
-                if (math_input->type_list) {
-                    arraylist_free(math_input->type_list);
-                }
-                pool_variable_destroy(math_input->pool);
-                free(math_input);
             }
+            
+            // Restore input state on failure, fall through to regular code block
+            input->root = saved_root;
+            input->sb = saved_sb;
         }
         
         // Regular code block or math parsing failed
@@ -1379,46 +1378,42 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     strncpy(math_content, text + math_start, content_len);
     math_content[content_len] = '\0';
     
-    // Create temporary input for math parsing
-    Input* math_input = input_new(input->url);
-    if (!math_input) {
-        free(math_content);
-        return ITEM_NULL;
-    }
+    // Parse the math content using the same input context (reuse memory pool)
+    // Save current input state
+    Item saved_root = input->root;
+    StrBuf* saved_sb = input->sb;
+    
+    // Temporarily reset for math parsing
+    input->root = ITEM_NULL;
     
     // Parse the math content using our math parser
-    parse_math(math_input, math_content, "latex");
+    parse_math(input, math_content, "latex");
     
     // Create wrapper element
     Element* math_elem = create_markdown_element(input, "math");
-    if (math_elem && math_input->root != ITEM_NULL) {
+    if (math_elem && input->root != ITEM_NULL && input->root != ITEM_ERROR) {
         // Add the parsed math as child
-        list_push((List*)math_elem, math_input->root);
+        list_push((List*)math_elem, input->root);
         ((TypeElmt*)math_elem->type)->content_length = 1;
-        
+
         // Update position
         *pos = math_end + 1;
-        
+
+        // Restore input state
+        input->root = saved_root;
+        input->sb = saved_sb;
+
         // Clean up
         free(math_content);
-        if (math_input->type_list) {
-            arraylist_free(math_input->type_list);
-        }
-        pool_variable_destroy(math_input->pool);
-        free(math_input);
-        
+
         return (Item)math_elem;
     }
-    
+
     // Cleanup on failure
-    free(math_content);
-    if (math_input->type_list) {
-        arraylist_free(math_input->type_list);
-    }
-    pool_variable_destroy(math_input->pool);
-    free(math_input);
-    
-    return ITEM_NULL;
+    // Restore input state
+    input->root = saved_root;
+    input->sb = saved_sb;
+    free(math_content);    return ITEM_NULL;
 }
 
 // Parse display math expression: $$math$$
@@ -1461,46 +1456,42 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     strncpy(math_content, text + math_start, content_len);
     math_content[content_len] = '\0';
     
-    // Create temporary input for math parsing
-    Input* math_input = input_new(input->url);
-    if (!math_input) {
-        free(math_content);
-        return ITEM_NULL;
-    }
+    // Parse the math content using the same input context (reuse memory pool)
+    // Save current input state
+    Item saved_root = input->root;
+    StrBuf* saved_sb = input->sb;
+    
+    // Temporarily reset for math parsing
+    input->root = ITEM_NULL;
     
     // Parse the math content using our math parser
-    parse_math(math_input, math_content, "latex");
+    parse_math(input, math_content, "latex");
     
     // Create wrapper element
     Element* math_elem = create_markdown_element(input, "displaymath");
-    if (math_elem && math_input->root != ITEM_NULL) {
+    if (math_elem && input->root != ITEM_NULL && input->root != ITEM_ERROR) {
         // Add the parsed math as child
-        list_push((List*)math_elem, math_input->root);
+        list_push((List*)math_elem, input->root);
         ((TypeElmt*)math_elem->type)->content_length = 1;
-        
+
         // Update position
         *pos = math_end + 2;
-        
+
+        // Restore input state
+        input->root = saved_root;
+        input->sb = saved_sb;
+
         // Clean up
         free(math_content);
-        if (math_input->type_list) {
-            arraylist_free(math_input->type_list);
-        }
-        pool_variable_destroy(math_input->pool);
-        free(math_input);
-        
+
         return (Item)math_elem;
     }
-    
+
     // Cleanup on failure
-    free(math_content);
-    if (math_input->type_list) {
-        arraylist_free(math_input->type_list);
-    }
-    pool_variable_destroy(math_input->pool);
-    free(math_input);
-    
-    return ITEM_NULL;
+    // Restore input state
+    input->root = saved_root;
+    input->sb = saved_sb;
+    free(math_content);    return ITEM_NULL;
 }
 
 // GitHub Emoji Shortcode Mapping
