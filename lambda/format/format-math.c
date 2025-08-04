@@ -69,27 +69,27 @@ static const MathFormatDef basic_operators[] = {
 
 // Functions
 static const MathFormatDef functions[] = {
-    {"sin", "\\sin", "sin", "sin", "<mi>sin</mi>", "sin", true, false, false, 1},
-    {"cos", "\\cos", "cos", "cos", "<mi>cos</mi>", "cos", true, false, false, 1},
-    {"tan", "\\tan", "tan", "tan", "<mi>tan</mi>", "tan", true, false, false, 1},
-    {"cot", "\\cot", "cot", "cot", "<mi>cot</mi>", "cot", true, false, false, 1},
-    {"sec", "\\sec", "sec", "sec", "<mi>sec</mi>", "sec", true, false, false, 1},
-    {"csc", "\\csc", "csc", "csc", "<mi>csc</mi>", "csc", true, false, false, 1},
-    {"arcsin", "\\arcsin", "arcsin", "arcsin", "<mi>arcsin</mi>", "arcsin", true, false, false, 1},
-    {"arccos", "\\arccos", "arccos", "arccos", "<mi>arccos</mi>", "arccos", true, false, false, 1},
-    {"arctan", "\\arctan", "arctan", "arctan", "<mi>arctan</mi>", "arctan", true, false, false, 1},
-    {"sinh", "\\sinh", "sinh", "sinh", "<mi>sinh</mi>", "sinh", true, false, false, 1},
-    {"cosh", "\\cosh", "cosh", "cosh", "<mi>cosh</mi>", "cosh", true, false, false, 1},
-    {"tanh", "\\tanh", "tanh", "tanh", "<mi>tanh</mi>", "tanh", true, false, false, 1},
-    {"log", "\\log", "log", "log", "<mi>log</mi>", "log", true, false, false, 1},
-    {"ln", "\\ln", "ln", "ln", "<mi>ln</mi>", "ln", true, false, false, 1},
-    {"lg", "\\lg", "lg", "lg", "<mi>lg</mi>", "lg", true, false, false, 1},
-    {"exp", "\\exp", "exp", "exp", "<mi>exp</mi>", "exp", true, false, false, 1},
+    {"sin", "\\sin({1})", "sin({1})", "sin({1})", "<mi>sin</mi>({1})", "sin({1})", true, false, false, 1},
+    {"cos", "\\cos({1})", "cos({1})", "cos({1})", "<mi>cos</mi>({1})", "cos({1})", true, false, false, 1},
+    {"tan", "\\tan({1})", "tan({1})", "tan({1})", "<mi>tan</mi>({1})", "tan({1})", true, false, false, 1},
+    {"cot", "\\cot({1})", "cot({1})", "cot({1})", "<mi>cot</mi>({1})", "cot({1})", true, false, false, 1},
+    {"sec", "\\sec({1})", "sec({1})", "sec({1})", "<mi>sec</mi>({1})", "sec({1})", true, false, false, 1},
+    {"csc", "\\csc({1})", "csc({1})", "csc({1})", "<mi>csc</mi>({1})", "csc({1})", true, false, false, 1},
+    {"arcsin", "\\arcsin({1})", "arcsin({1})", "arcsin({1})", "<mi>arcsin</mi>({1})", "arcsin({1})", true, false, false, 1},
+    {"arccos", "\\arccos({1})", "arccos({1})", "arccos({1})", "<mi>arccos</mi>({1})", "arccos({1})", true, false, false, 1},
+    {"arctan", "\\arctan({1})", "arctan({1})", "arctan({1})", "<mi>arctan</mi>({1})", "arctan({1})", true, false, false, 1},
+    {"sinh", "\\sinh({1})", "sinh({1})", "sinh({1})", "<mi>sinh</mi>({1})", "sinh({1})", true, false, false, 1},
+    {"cosh", "\\cosh({1})", "cosh({1})", "cosh({1})", "<mi>cosh</mi>({1})", "cosh({1})", true, false, false, 1},
+    {"tanh", "\\tanh({1})", "tanh({1})", "tanh({1})", "<mi>tanh</mi>({1})", "tanh({1})", true, false, false, 1},
+    {"log", "\\log({1})", "log({1})", "log({1})", "<mi>log</mi>({1})", "log({1})", true, false, false, 1},
+    {"ln", "\\ln({1})", "ln({1})", "ln({1})", "<mi>ln</mi>({1})", "ln({1})", true, false, false, 1},
+    {"lg", "\\lg({1})", "lg({1})", "lg({1})", "<mi>lg</mi>({1})", "lg({1})", true, false, false, 1},
+    {"exp", "\\exp({1})", "exp({1})", "exp({1})", "<mi>exp</mi>({1})", "exp({1})", true, false, false, 1},
     {"abs", "\\left|{1}\\right|", "abs({1})", "|{1}|", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
-    {"min", "\\min", "min", "min", "<mi>min</mi>", "min", true, false, false, -1},
-    {"max", "\\max", "max", "max", "<mi>max</mi>", "max", true, false, false, -1},
-    {"gcd", "\\gcd", "gcd", "gcd", "<mi>gcd</mi>", "gcd", true, false, false, -1},
-    {"lcm", "\\text{lcm}", "lcm", "lcm", "<mi>lcm</mi>", "lcm", true, false, false, -1},
+    {"min", "\\min({1})", "min({1})", "min({1})", "<mi>min</mi>({1})", "min({1})", true, false, false, -1},
+    {"max", "\\max({1})", "max({1})", "max({1})", "<mi>max</mi>({1})", "max({1})", true, false, false, -1},
+    {"gcd", "\\gcd({1})", "gcd({1})", "gcd({1})", "<mi>gcd</mi>({1})", "gcd({1})", true, false, false, -1},
+    {"lcm", "\\text{lcm}({1})", "lcm({1})", "lcm({1})", "<mi>lcm</mi>({1})", "lcm({1})", true, false, false, -1},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -675,6 +675,9 @@ static void format_math_string(StrBuf* sb, String* str) {
 static void format_math_children_with_template(StrBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth) {
     if (!format_str || !children) return;
     
+    printf("DEBUG: format_math_children_with_template called with format='%s', children_count=%ld\n", 
+           format_str, children->length);
+    
     int child_count = children->length;
     
     const char* p = format_str;
@@ -683,9 +686,19 @@ static void format_math_children_with_template(StrBuf* sb, List* children, const
             // Extract child index
             int child_index = *(p+1) - '1'; // Convert '1' to 0, '2' to 1, etc.
             
+            printf("DEBUG: Found placeholder {%c}, child_index=%d, child_count=%d\n", 
+                   *(p+1), child_index, child_count);
+            
             if (child_index >= 0 && child_index < child_count) {
                 Item child_item = children->items[child_index];
+                printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)child_item);
                 format_math_item(sb, child_item, flavor, depth + 1);
+            } else {
+                printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
+                // Fallback: output the placeholder as literal text
+                strbuf_append_char(sb, '{');
+                strbuf_append_char(sb, *(p+1));
+                strbuf_append_char(sb, '}');
             }
             p += 3; // Skip "{N}"
         } else {
@@ -824,13 +837,24 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         fprintf(stderr, "DEBUG: latex_format: '%s'\n", def->latex_format ? def->latex_format : "NULL");
     }
     #endif
+    // Enable debug output unconditionally for testing
+    //#ifdef DEBUG_MATH_FORMAT
+    #if 0
+    fprintf(stderr, "DEBUG: format_math_element called with element_name='%s', def=%p\n", element_name, def);
+    //#endif
+    #endif
     
     if (!def) {
         // Unknown element, try to format as generic expression
         if (flavor == MATH_OUTPUT_LATEX) {
-            strbuf_append_str(sb, "\\text{");
-            strbuf_append_str(sb, element_name);
-            strbuf_append_str(sb, "}");
+            // Special case: if it's a single letter (likely a function name), don't wrap in \text{}
+            if (strlen(element_name) == 1 && isalpha(element_name[0])) {
+                strbuf_append_str(sb, element_name);
+            } else {
+                strbuf_append_str(sb, "\\text{");
+                strbuf_append_str(sb, element_name);
+                strbuf_append_str(sb, "}");
+            }
         } else {
             strbuf_append_str(sb, element_name);
         }
@@ -856,6 +880,19 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     if (elmt_type->content_length > 0) {
         children = (List*)elem;
     }
+    
+    // Debug: check template condition components
+    //#ifdef DEBUG_MATH_FORMAT  
+    #if 0
+    if (strcmp(element_name, "paren_group") == 0) {
+        fprintf(stderr, "DEBUG: paren_group format check: has_children=%s, children=%p, format_str='%s', contains_{1}=%s\n",
+                def->has_children ? "true" : "false",
+                children,
+                format_str,
+                strstr(format_str, "{1}") ? "true" : "false");
+    }
+    //#endif
+    #endif
     
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG: Formatting element: %s (def=%p, is_binary=%s, children=%p, children_length=%ld)\n", 
@@ -1102,9 +1139,14 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     // Check if this element has a format template with placeholders
     if (def->has_children && children && strstr(format_str, "{1}")) {
-        #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: Using template formatting with format: '%s'\n", format_str);
+        //#ifdef DEBUG_MATH_FORMAT
+        #if 0
+        fprintf(stderr, "DEBUG: Using template formatting for element '%s' with format: '%s'\n", element_name, format_str);
         fprintf(stderr, "DEBUG: ALWAYS PRINT THIS MESSAGE\n");
+        if (strcmp(element_name, "paren_group") == 0) {
+            fprintf(stderr, "DEBUG: This is a paren_group element, children=%p, children->length=%ld\n", 
+                    children, children ? children->length : 0L);
+        }
         if (strcmp(element_name, "pow") == 0) {
             fprintf(stderr, "DEBUG: This is a pow element, checking special conditions...\n");
         }

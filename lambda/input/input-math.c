@@ -1435,7 +1435,34 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
             } else if (isdigit(**math) || (**math == '-' && isdigit(*(*math + 1)))) {
                 return parse_math_number(input, math);
             } else if (isalpha(**math)) {
-                return parse_math_identifier(input, math);
+                // Check if this is a function call by looking ahead for '('
+                const char* lookahead = *math;
+                while (*lookahead && (isalpha(*lookahead) || isdigit(*lookahead) || *lookahead == '_')) {
+                    lookahead++;
+                }
+                
+                if (*lookahead == '(') {
+                    // This is a function call, parse the function name first
+                    StrBuf* sb = input->sb;
+                    strbuf_full_reset(sb);
+                    
+                    while (**math && (isalpha(**math) || isdigit(**math) || **math == '_')) {
+                        strbuf_append_char(sb, **math);
+                        (*math)++;
+                    }
+                    
+                    // Create function name copy
+                    String* func_name_string = strbuf_to_string(sb);
+                    if (!func_name_string) {
+                        return ITEM_ERROR;
+                    }
+                    
+                    strbuf_full_reset(sb);
+                    Item result = parse_function_call(input, math, flavor, func_name_string->chars);
+                    return result;
+                } else {
+                    return parse_math_identifier(input, math);
+                }
             } else if (**math == '(') {
                 (*math)++; // skip (
                 Item expr = parse_math_expression(input, math, flavor);
@@ -1451,6 +1478,9 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 
                 // Add the expression as a child
                 list_push((List*)paren_element, expr);
+                
+                // Update content length
+                ((TypeElmt*)paren_element->type)->content_length = ((List*)paren_element)->length;
                 
                 return (Item)paren_element;
             } else if (**math == '<') {
