@@ -233,13 +233,13 @@ static const MathFormatDef big_operators[] = {
 // Arrows
 static const MathFormatDef arrows[] = {
     {"to", " \\to ", "->", "->", "<mo>→</mo>", "→", true, false, true, 0},
-    {"rightarrow", " \\rightarrow ", "arrow.r", "->", "<mo>→</mo>", "→", true, false, true, 0},
-    {"leftarrow", " \\leftarrow ", "arrow.l", "<-", "<mo>←</mo>", "←", true, false, true, 0},
-    {"leftrightarrow", " \\leftrightarrow ", "arrow.l.r", "<->", "<mo>↔</mo>", "↔", true, false, true, 0},
-    {"Rightarrow", " \\Rightarrow ", "arrow.r.double", "=>", "<mo>⇒</mo>", "⇒", true, false, true, 0},
-    {"Leftarrow", " \\Leftarrow ", "arrow.l.double", "<=", "<mo>⇐</mo>", "⇐", true, false, true, 0},
-    {"Leftrightarrow", " \\Leftrightarrow ", "arrow.l.r.double", "<=>", "<mo>⇔</mo>", "⇔", true, false, true, 0},
-    {"mapsto", " \\mapsto ", "arrow.bar", "|->", "<mo>↦</mo>", "↦", true, false, true, 0},
+    {"rightarrow", "\\rightarrow", "arrow.r", "->", "<mo>→</mo>", "→", true, false, true, 0},
+    {"leftarrow", "\\leftarrow", "arrow.l", "<-", "<mo>←</mo>", "←", true, false, true, 0},
+    {"leftrightarrow", "\\leftrightarrow", "arrow.l.r", "<->", "<mo>↔</mo>", "↔", true, false, true, 0},
+    {"Rightarrow", "\\Rightarrow", "arrow.r.double", "=>", "<mo>⇒</mo>", "⇒", true, false, true, 0},
+    {"Leftarrow", "\\Leftarrow", "arrow.l.double", "<=", "<mo>⇐</mo>", "⇐", true, false, true, 0},
+    {"Leftrightarrow", "\\Leftrightarrow", "arrow.l.r.double", "<=>", "<mo>⇔</mo>", "⇔", true, false, true, 0},
+    {"mapsto", "\\mapsto", "arrow.bar", "|->", "<mo>↦</mo>", "↦", true, false, true, 0},
     {"uparrow", "\\uparrow", "arrow.t", "^", "<mo>↑</mo>", "↑", false, false, false, 0},
     {"downarrow", "\\downarrow", "arrow.b", "v", "<mo>↓</mo>", "↓", false, false, false, 0},
     {"updownarrow", "\\updownarrow", "arrow.t.b", "^v", "<mo>↕</mo>", "↕", false, false, false, 0},
@@ -468,6 +468,68 @@ static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor fl
     }
 }
 
+// Helper function to get style attribute from element
+static const char* get_element_style(Element* elem) {
+    if (!elem || !elem->data) return NULL;
+    
+    TypeElmt* elem_type = (TypeElmt*)elem->type;
+    if (!elem_type) return NULL;
+    
+    // Cast the element type to TypeMap to access attributes
+    TypeMap* map_type = (TypeMap*)elem_type;
+    if (!map_type->shape) return NULL;
+    
+    // Iterate through shape entries to find the "style" attribute
+    ShapeEntry* field = map_type->shape;
+    for (int i = 0; i < map_type->length && field; i++) {
+        if (field->name && field->name->length == 5 &&  // "style" has 5 characters
+            strncmp(field->name->str, "style", 5) == 0) {
+            void* data = ((char*)elem->data) + field->byte_offset;
+            if (field->type && field->type->type_id == LMD_TYPE_STRING) {
+                String* style_str = *(String**)data;
+                if (style_str && style_str->len > 0) {
+                    return style_str->chars;
+                }
+            }
+        }
+        field = field->next;
+    }
+    return NULL;
+}
+
+// Helper function to get the format string for styled fractions
+static const char* get_styled_frac_format(const char* style, MathOutputFlavor flavor) {
+    if (!style) return NULL;
+    
+    if (strcmp(style, "dfrac") == 0) {
+        switch (flavor) {
+            case MATH_OUTPUT_LATEX: return "\\dfrac{{1}}{{2}}";
+            case MATH_OUTPUT_TYPST: return "display(frac({1}, {2}))";
+            case MATH_OUTPUT_ASCII: return "frac({1}, {2})";
+            case MATH_OUTPUT_MATHML: return "<mfrac displaystyle=\"true\">{1}{2}</mfrac>";
+            default: return "\\dfrac{{1}}{{2}}";
+        }
+    } else if (strcmp(style, "tfrac") == 0) {
+        switch (flavor) {
+            case MATH_OUTPUT_LATEX: return "\\tfrac{{1}}{{2}}";
+            case MATH_OUTPUT_TYPST: return "inline(frac({1}, {2}))";
+            case MATH_OUTPUT_ASCII: return "frac({1}, {2})";
+            case MATH_OUTPUT_MATHML: return "<mfrac displaystyle=\"false\">{1}{2}</mfrac>";
+            default: return "\\tfrac{{1}}{{2}}";
+        }
+    } else if (strcmp(style, "cfrac") == 0) {
+        switch (flavor) {
+            case MATH_OUTPUT_LATEX: return "\\cfrac{{1}}{{2}}";
+            case MATH_OUTPUT_TYPST: return "cfrac({1}, {2})";
+            case MATH_OUTPUT_ASCII: return "cfrac({1}, {2})";
+            case MATH_OUTPUT_MATHML: return "<mfrac>{1}{2}</mfrac>";
+            default: return "\\cfrac{{1}}{{2}}";
+        }
+    }
+    
+    return NULL;
+}
+
 // Format a math element
 static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flavor, int depth) {
     // Debug: format_math_element called
@@ -601,6 +663,18 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
             format_math_item(sb, children->items[i], flavor, depth + 1);
         }
         return;
+    }
+    
+    // Special handling for styled fractions
+    if (strcmp(element_name, "frac") == 0) {
+        const char* style = get_element_style(elem);
+        if (style) {
+            const char* styled_format = get_styled_frac_format(style, flavor);
+            if (styled_format && children && children->length >= 2) {
+                format_math_children_with_template(sb, children, styled_format, flavor, depth);
+                return;
+            }
+        }
     }
     
     // Check if this element has a format template with placeholders

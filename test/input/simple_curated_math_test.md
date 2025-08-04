@@ -20,3 +20,16 @@
 **Parentheses:** $(a + b)$
 
 **End**
+
+**Times Symbol:** $a \times b$
+
+**Special Symbols:** $\infty + \ell + \hbar$
+
+**Dotless letters:** $\imath + \jmath$
+
+**Styled Fractions:** $\dfrac{a}{b}$ and $\tfrac{c}{d}$
+
+**Accent symbols:** $\dot{a}$ and $\ddot{b}$
+
+**Arrow styles:** $\leftarrow$ and $\leftrightarrow$
+
