@@ -475,6 +475,54 @@ static bool item_is_identifier_or_variable(Item item) {
         }
     }
     
+    // Check if it's a symbol (LMD_TYPE_SYMBOL = 9) that represents a variable
+    if (type == LMD_TYPE_SYMBOL) {
+        String* sym = (String*)item;  // Symbol is typedef for String
+        if (sym && sym->len > 0) {
+            // Consider single-letter symbols as variables
+            if (sym->len == 1 && isalpha(sym->chars[0])) {
+                return true;
+            }
+            // Consider multi-character alphabetic symbols as identifiers
+            bool all_alpha = true;
+            for (size_t i = 0; i < sym->len; i++) {
+                if (!isalpha(sym->chars[i])) {
+                    all_alpha = false;
+                    break;
+                }
+            }
+            if (all_alpha) {
+                return true;
+            }
+        }
+    }
+    
+    // Check if it's an element that represents a variable (single letter)
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+                // Check for single-letter elements (common variables)
+                if (elmt_type->name.length == 1 && isalpha(elmt_type->name.str[0])) {
+                    return true;
+                }
+                // Check for common multi-letter variable names
+                const char* common_vars[] = {
+                    "dx", "dy", "dz", "dt", "dr", "theta", "phi", "psi", "chi"
+                };
+                
+                for (size_t i = 0; i < sizeof(common_vars) / sizeof(common_vars[0]); i++) {
+                    size_t var_len = strlen(common_vars[i]);
+                    if (elmt_type->name.length == var_len && 
+                        strncmp(elmt_type->name.str, common_vars[i], var_len) == 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    
     return false;
 }
 
@@ -771,49 +819,84 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
 
     // Special handling for binary operators
     // Special case for implicit_mul: check if we need space
-    const char* final_format_str = format_str;
     if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
-        bool has_integral = false;
-        bool has_quantifier = false;
-        bool needs_space = false;
+        // For implicit_mul, we need to check spacing between each adjacent pair
+        // rather than applying uniform spacing across the entire expression
         
-        // Check for integrals in any child
         for (int i = 0; i < children->length; i++) {
-            if (item_contains_integral(children->items[i])) {
-                has_integral = true;
-                break;
+            if (i > 0) {
+                // Check if we need space between children[i-1] and children[i]
+                Item prev = children->items[i-1];
+                Item curr = children->items[i];
+                bool pair_needs_space = false;
+                
+                // Check for integrals or quantifiers
+                if (item_contains_integral(prev) || item_contains_integral(curr) ||
+                    item_is_quantifier(prev) || item_is_quantifier(curr)) {
+                    pair_needs_space = true;
+                }
+                // Add space between LaTeX commands and identifiers/variables
+                else if (item_is_latex_command(prev) && item_is_identifier_or_variable(curr)) {
+                    pair_needs_space = true;
+                }
+                // Add space between symbols and identifiers
+                else if (item_is_symbol_element(prev) && item_is_identifier_or_variable(curr)) {
+                    pair_needs_space = true;
+                }
+                // Special case: add space between different element types
+                // but avoid double-spacing operators that already have spacing
+                else {
+                    TypeId prev_type = get_type_id((LambdaItem)prev);
+                    TypeId curr_type = get_type_id((LambdaItem)curr);
+                    
+                    // Check if either element is a spaced operator (like cdot, times)
+                    bool prev_is_spaced_operator = false;
+                    bool curr_is_spaced_operator = false;
+                    
+                    if (prev_type == LMD_TYPE_ELEMENT) {
+                        Element* elem = (Element*)prev;
+                        if (elem && elem->type) {
+                            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+                            if (elmt_type && elmt_type->name.str) {
+                                const char* spaced_ops[] = {"cdot", "times", "ast", "star", "div"};
+                                for (size_t j = 0; j < sizeof(spaced_ops) / sizeof(spaced_ops[0]); j++) {
+                                    if (strncmp(elmt_type->name.str, spaced_ops[j], elmt_type->name.length) == 0) {
+                                        prev_is_spaced_operator = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Don't add extra space around operators that already have spacing
+                    if (!prev_is_spaced_operator && !curr_is_spaced_operator) {
+                        // Add space between element and string/identifier
+                        if ((prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_STRING) ||
+                            (prev_type == LMD_TYPE_SYMBOL && curr_type == LMD_TYPE_STRING)) {
+                            pair_needs_space = true;
+                        }
+                        // Also add space between different elements (unless they're both LaTeX commands)
+                        else if (prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_ELEMENT) {
+                            if (!item_is_latex_command(prev) || !item_is_latex_command(curr)) {
+                                pair_needs_space = true;
+                            }
+                        }
+                    }
+                }
+                
+                // Apply the spacing decision for this pair
+                if (pair_needs_space) {
+                    strbuf_append_str(sb, " ");
+                }
             }
+            format_math_item(sb, children->items[i], flavor, depth + 1);
         }
-        
-        // Check if first child is a quantifier
-        if (children->length >= 1 && item_is_quantifier(children->items[0])) {
-            has_quantifier = true;
-        }
-        
-        // Add space for integrals, quantifiers, or between distinct symbols/identifiers
-        if (has_integral || has_quantifier) {
-            needs_space = true;
-        }
-        else if (children->length >= 2) {
-            Item first = children->items[0];
-            Item second = children->items[1];
-            
-            // Add space between LaTeX commands and identifiers/variables
-            if (item_is_latex_command(first) && item_is_identifier_or_variable(second)) {
-                needs_space = true;
-            }
-            // Add space between symbols and identifiers
-            else if (item_is_symbol_element(first) && item_is_identifier_or_variable(second)) {
-                needs_space = true;
-            }
-            // DO NOT add space between two LaTeX commands - they should be concatenated
-            // This allows cases like \partial\nabla to remain without space
-        }
-        
-        if (needs_space) {
-            final_format_str = " ";
-        }
+        return;
     }
+    
+    // For other binary operators, use the original logic
+    const char* final_format_str = format_str;
     
     if (def->is_binary_op && children && children->length >= 2) {
         #ifdef DEBUG_MATH_FORMAT
