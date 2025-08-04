@@ -441,6 +441,56 @@ static void format_math_display(StrBuf* sb, Element* elem) {
         }
     }
 }
+// Helper function to check if an element is a block-level element
+static bool is_block_element(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    if (type != LMD_TYPE_ELEMENT) return false;
+    
+    Element* elem = (Element*)item;
+    TypeElmt* elem_type = (TypeElmt*)elem->type;
+    if (!elem_type || !elem_type->name.str) return false;
+    
+    const char* tag_name = elem_type->name.str;
+    
+    // Check for heading elements
+    if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) return true;
+    
+    // Check for other block elements
+    return (strcmp(tag_name, "p") == 0 ||
+            strcmp(tag_name, "ul") == 0 ||
+            strcmp(tag_name, "ol") == 0 ||
+            strcmp(tag_name, "table") == 0 ||
+            strcmp(tag_name, "hr") == 0 ||
+            strcmp(tag_name, "displaymath") == 0);
+}
+
+// Helper function to get heading level from an element
+static int get_heading_level(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    if (type != LMD_TYPE_ELEMENT) return 0;
+    
+    Element* elem = (Element*)item;
+    TypeElmt* elem_type = (TypeElmt*)elem->type;
+    if (!elem_type || !elem_type->name.str) return 0;
+    
+    const char* tag_name = elem_type->name.str;
+    
+    // Check if it's a heading
+    if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
+        // First try to get level from attribute (Pandoc schema)
+        String* level_attr = get_attribute(elem, "level");
+        if (level_attr && level_attr->len > 0) {
+            int level = atoi(level_attr->chars);
+            return (level >= 1 && level <= 6) ? level : 0;
+        }
+        // Fallback: parse level from tag name
+        int level = tag_name[1] - '0';
+        return (level >= 1 && level <= 6) ? level : 0;
+    }
+    
+    return 0;
+}
+
 static void format_element_children(StrBuf* sb, Element* elem) {
     // Element extends List, so access content through List interface
     List* list = (List*)elem;
@@ -449,6 +499,32 @@ static void format_element_children(StrBuf* sb, Element* elem) {
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         format_item(sb, child_item);
+        
+        // Add appropriate spacing after block elements for better markdown formatting
+        if (i < list->length - 1) { // Not the last element
+            Item next_item = list->items[i + 1];
+            
+            bool current_is_block = is_block_element(child_item);
+            bool next_is_block = is_block_element(next_item);
+            
+            // Add blank line between different heading levels (markdown best practice)
+            int current_heading_level = get_heading_level(child_item);
+            int next_heading_level = get_heading_level(next_item);
+            
+            if (current_heading_level > 0 && next_heading_level > 0 && 
+                current_heading_level != next_heading_level) {
+                // Different heading levels: add blank line
+                strbuf_append_char(sb, '\n');
+            }
+            else if (current_heading_level > 0 && next_is_block && next_heading_level == 0) {
+                // Heading followed by non-heading block: add blank line
+                strbuf_append_char(sb, '\n');
+            }
+            else if (current_is_block && next_heading_level > 0) {
+                // Block element followed by heading: add blank line
+                strbuf_append_char(sb, '\n');
+            }
+        }
     }
 }
 

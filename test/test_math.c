@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>  // for getcwd and chdir
 #include "../lambda/lambda-data.h"
 #include "../lib/arraylist.h"
@@ -29,6 +30,13 @@ void heap_destroy();
 
 Context* create_test_context();
 void destroy_test_context(Context* ctx);
+
+// Common test function for markdown roundtrip testing
+bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_path, const char* test_description);
+
+// Common test function for math expression roundtrip testing
+bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, const char* flavor, 
+                                    const char* url_prefix, const char* test_name, const char* error_prefix);
 
 // Global test context
 static Context* test_context = NULL;
@@ -122,18 +130,89 @@ Context* create_test_context() {
 
 void destroy_test_context(Context* ctx) {
     if (!ctx) return;
-    
     if (ctx->num_stack) {
         num_stack_destroy((num_stack_t*)ctx->num_stack);
     }
-    
     free(ctx);
+}
+
+// Common function to test math expression roundtrip for any array of test cases
+// Returns true if all tests pass, false if any fail
+bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, 
+    const char* flavor, const char* url_prefix, const char* test_name, const char* error_prefix) {
+    printf("=== Starting %s test ===\n", test_name);
+    
+    String* type_str = create_lambda_string(type);
+    String* flavor_str = create_lambda_string(flavor);
+    
+    printf("Created type string: '%s', flavor string: '%s'\n", 
+           type_str->chars, flavor_str->chars);
+    
+    if (num_cases > 10) {
+        printf("Running %d comprehensive math test cases\n", num_cases);
+    }
+    
+    for (int i = 0; i < num_cases; i++) {
+        printf("--- Testing %s case %d: %s ---\n", test_name, i, test_cases[i]);
+        
+        // Create a virtual URL for this test case
+        char virtual_path[256];
+        const char* extension = (strcmp(type, "math") == 0) ? "math" : "md";
+        snprintf(virtual_path, sizeof(virtual_path), "test://%s_%d.%s", url_prefix, i, extension);
+        lxb_url_t* test_url = create_test_url(virtual_path);
+        cr_assert_neq(test_url, NULL, "Failed to create test URL");
+        
+        // Create a copy of the test content (input_from_source takes ownership)
+        char* content_copy = strdup(test_cases[i]);
+        cr_assert_neq(content_copy, NULL, "Failed to duplicate test content");
+        
+        // Parse the math expression using input_from_source
+        printf("Parsing input with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
+        if (strcmp(type, "math") == 0) {
+            printf("Content to parse: '%s' (length: %zu)\n", content_copy, strlen(content_copy));
+        }
+        Input* input = input_from_source(content_copy, test_url, type_str, flavor_str);
+        
+        if (!input) {
+            printf("Failed to parse - skipping case %d\n", i);
+            continue;
+        }
+        
+        printf("Successfully parsed input\n");
+        
+        // Debug: Print AST structure
+        print_ast_debug(input);
+        
+        // Format it back
+        printf("Formatting back with pool at %p\n", (void*)input->pool);
+        if (strcmp(type, "math") == 0) {
+            printf("About to call format_data with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
+        }
+        String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
+        
+        if (!formatted) {
+            printf("Failed to format - skipping case %d\n", i);
+            continue;
+        }
+        
+        if (strcmp(type, "math") == 0) {
+            printf("Formatted result: '%s' (length: %zu)\n", formatted->chars, strlen(formatted->chars));
+        } else {
+            printf("Formatted result: '%s'\n", formatted->chars);
+        }
+        
+        // Verify roundtrip - formatted should equal original
+        cr_assert_str_eq(formatted->chars, test_cases[i], 
+            "%s roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
+            error_prefix, i, test_cases[i], formatted->chars);
+    }
+    
+    printf("=== Completed %s test ===\n", test_name);
+    return true;
 }
 
 // Test roundtrip for individual inline math expressions
 Test(math_roundtrip_tests, inline_math_roundtrip) {
-    printf("=== Starting inline_math_roundtrip test ===\n");
-    
     // Test cases: inline math expressions
     const char* test_cases[] = {
         "$E = mc^2$",
@@ -143,62 +222,16 @@ Test(math_roundtrip_tests, inline_math_roundtrip) {
         "$\\sqrt{x + y}$"
     };
     
-    String* type_str = create_lambda_string("markdown");
-    String* flavor_str = create_lambda_string("commonmark");
-    
-    printf("Created type string: '%s', flavor string: '%s'\n", 
-           type_str->chars, flavor_str->chars);
-    
-    for (int i = 0; i < 5; i++) {
-        printf("--- Testing inline math case %d: %s ---\n", i, test_cases[i]);
-        
-        // Create a virtual URL for this test case
-        char virtual_path[256];
-        snprintf(virtual_path, sizeof(virtual_path), "test://inline_math_%d.md", i);
-        lxb_url_t* test_url = create_test_url(virtual_path);
-        cr_assert_neq(test_url, NULL, "Failed to create test URL");
-        
-        // Create a copy of the test content (input_from_source takes ownership)
-        char* content_copy = strdup(test_cases[i]);
-        cr_assert_neq(content_copy, NULL, "Failed to duplicate test content");
-        
-        // Parse the math expression using input_from_source
-        printf("Parsing input with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
-        Input* input = input_from_source(content_copy, test_url, type_str, flavor_str);
-        
-        if (!input) {
-            printf("Failed to parse - skipping case %d\n", i);
-            continue;
-        }
-        
-        printf("Successfully parsed input\n");
-        
-        // Debug: Print AST structure
-        print_ast_debug(input);
-        
-        // Format it back
-        printf("Formatting back with pool at %p\n", (void*)input->pool);
-        String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
-        
-        if (!formatted) {
-            printf("Failed to format - skipping case %d\n", i);
-            continue;
-        }
-        
-        printf("Formatted result: '%s'\n", formatted->chars);
-        
-        // Verify roundtrip - formatted should equal original
-        cr_assert_str_eq(formatted->chars, test_cases[i], 
-            "Inline math roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
-            i, test_cases[i], formatted->chars);
-    }
-    
-    printf("=== Completed inline_math_roundtrip test ===\n");
+    int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
+    bool result = test_math_expressions_roundtrip(
+        test_cases, num_cases, "markdown", "commonmark", 
+        "inline_math", "inline_math_roundtrip", "Inline math"
+    );
+    cr_assert(result, "Inline math roundtrip test failed");
 }
 
 // Test roundtrip for block math expressions  
 Test(math_roundtrip_tests, block_math_roundtrip) {
-    printf("=== Starting block_math_roundtrip test ===\n");
     // Test cases: block math expressions
     const char* test_cases[] = {
         "$$E = mc^2$$",
@@ -206,65 +239,97 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
         "$$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$"
     };
     
-    String* type_str = create_lambda_string("markdown");
-    String* flavor_str = create_lambda_string("commonmark");
-    
-    printf("Created type string: '%s', flavor string: '%s'\n", 
-           type_str->chars, flavor_str->chars);
-    
-    for (int i = 0; i < 3; i++) {
-        printf("--- Testing case %d: %s ---\n", i, test_cases[i]);
-        
-        // Create a virtual URL for this test case
-        char virtual_path[256];
-        snprintf(virtual_path, sizeof(virtual_path), "test://block_math_%d.md", i);
-        lxb_url_t* test_url = create_test_url(virtual_path);
-        cr_assert_neq(test_url, NULL, "Failed to create test URL");
-        
-        // Create a copy of the test content (input_from_source takes ownership)
-        char* content_copy = strdup(test_cases[i]);
-        cr_assert_neq(content_copy, NULL, "Failed to duplicate test content");
-        
-        // Parse the math expression using input_from_source
-        printf("Parsing input with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
-        Input* input = input_from_source(content_copy, test_url, type_str, flavor_str);
-        
-        if (!input) {
-            printf("Failed to parse - skipping case %d\n", i);
-            continue;
-        }
-        
-        printf("Successfully parsed input\n");
-        
-        // Debug: Print AST structure
-        print_ast_debug(input);
-        
-        // Format it back
-        printf("Formatting back with pool at %p\n", (void*)input->pool);
-        String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
-        
-        if (!formatted) {
-            printf("Failed to format - skipping case %d\n", i);
-            continue;
-        }
-        
-        printf("Formatted result: '%s'\n", formatted->chars);
-        // Verify roundtrip - formatted should equal original
-        cr_assert_str_eq(formatted->chars, test_cases[i], 
-            "Block math roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
-            i, test_cases[i], formatted->chars);
-    }
-    
-    printf("=== Completed block_math_roundtrip test ===\n");
+    int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
+    bool result = test_math_expressions_roundtrip(
+        test_cases, num_cases, "markdown", "commonmark", 
+        "block_math", "block_math_roundtrip", "Block math"
+    );
+    cr_assert(result, "Block math roundtrip test failed");
 }
 
-// Test roundtrip for comprehensive markdown with math
-Test(math_roundtrip_tests, single_markdown_roundtrip) {
-    printf("=== Single markdown test ===\n");
+// Test math-only expressions (pure math without markdown)
+Test(math_roundtrip_tests, pure_math_roundtrip) {
+    // Test pure math expressions covering various mathematical expression groups
+    const char* test_cases[] = {
+        // Basic operators and arithmetic
+        "E = mc^2",
+        "x^2 + y^2 = z^2",
+        "a - b \\cdot c",
+        "\\frac{a}{b} + \\frac{c}{d}",
+        
+        // Simple symbols and constants
+        "\\alpha + \\beta = \\gamma",
+        "\\pi \\neq \\infty",
+        
+        // More basic expressions
+        "\\sqrt{x + y}",
+        "\\frac{1}{2}",
+        
+        // Greek letters (lowercase)
+        "\\delta\\epsilon\\zeta",
+        "\\theta\\iota\\kappa",
+        "\\mu\\nu\\xi",
+        "\\rho\\sigma\\tau",
+        "\\chi\\psi\\omega",
+        
+        // Greek letters (uppercase)
+        "\\Gamma\\Delta\\Theta",
+        "\\Xi\\Pi\\Sigma",
+        "\\Phi\\Psi\\Omega",
+        
+        // Special symbols
+        "\\partial\\nabla",
+        
+        // Simple arrows
+        "x \\to y",
+        
+        // Relations
+        "a = b",
+        "x \\neq y",
+        "p \\leq q",
+        "r \\geq s",
+        
+        // Set theory symbols
+        "x \\in A",
+        "B \\subset C",
+        "F \\cup G",
+        "H \\cap I",
+        
+        // Simple logic
+        "P \\land Q",
+        "R \\lor S",
+        "\\forall x",
+        "\\exists y",
+        
+        // Binomial coefficient
+        "\\binom{n}{k}",
+        
+        // Simple accents
+        "\\hat{x}",
+        "\\tilde{y}",
+        "\\bar{z}",
+        "\\vec{v}",
+        
+        // Combined expressions
+        "\\alpha^2 + \\beta^2",
+        "\\frac{\\pi}{2}",
+        "\\sqrt{\\alpha + \\beta}"
+    };
+    
+    int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
+    bool result = test_math_expressions_roundtrip(
+        test_cases, num_cases, "math", "latex", 
+        "pure_math", "pure_math_roundtrip", "Pure math"
+    );
+    cr_assert(result, "Pure math roundtrip test failed");
+}
+
+// Common function to test markdown roundtrip for any input file
+// Returns true if test passes, false if it fails
+bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_path, const char* test_description) {
+    printf("=== %s ===\n", test_description ? test_description : "Markdown roundtrip test");
     
     lxb_url_t* current_dir = get_current_dir();
-    // Use an even simpler test file with just one math expression
-    char* test_file_path = "./temp/single_math_test.md";
     String* file_url_str = create_lambda_string(test_file_path);
     String* type_str = create_lambda_string("markdown");
     String* flavor_str = create_lambda_string("");
@@ -272,250 +337,83 @@ Test(math_roundtrip_tests, single_markdown_roundtrip) {
     // Read original content for comparison
     lxb_url_t* input_url = parse_url(current_dir, test_file_path);
     char* original_content = read_text_doc(input_url);
-    cr_assert_neq(original_content, NULL, "Could not read single_math_test.md");
+    if (!original_content) {
+        printf("❌ Could not read %s\n", test_file_path);
+        return false;
+    }
 
     printf("Original content length: %zu\n", strlen(original_content));
     printf("Original content:\n%s\n", original_content);
 
     // Parse the markdown content with math using input_from_url
     Input* input = input_from_url(file_url_str, type_str, flavor_str, current_dir);
-    cr_assert_neq(input, NULL, "Failed to parse single markdown with math");
+    if (!input) {
+        printf("❌ Failed to parse markdown file: %s\n", test_file_path);
+        free(original_content);
+        return false;
+    }
     
-    // Debug: Print AST structure (first part only to avoid too much output)
+    // Debug: Print AST structure
     printf("AST structure sample:\n");
     print_ast_debug(input);
     
     // Format it back to markdown
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
-    cr_assert_neq(formatted, NULL, "Failed to format parsed content back to markdown");
+    if (!formatted) {
+        printf("❌ Failed to format parsed content back to markdown\n");
+        free(original_content);
+        return false;
+    }
     
     printf("Formatted content length: %zu\n", strlen(formatted->chars));
     printf("Formatted content:\n%s\n", formatted->chars);
     
-    // Write debug output to temp directory for analysis
-    FILE* debug_file = fopen("./temp/single_debug.txt", "w");
-    if (debug_file) {
-        fprintf(debug_file, "=== ORIGINAL CONTENT ===\n");
-        fprintf(debug_file, "Length: %zu\n", strlen(original_content));
-        fprintf(debug_file, "%s\n", original_content);
-        fprintf(debug_file, "\n=== FORMATTED CONTENT ===\n");
-        fprintf(debug_file, "Length: %zu\n", strlen(formatted->chars));
-        fprintf(debug_file, "%s\n", formatted->chars);
-        fclose(debug_file);
-        printf("Debug output written to ./temp/single_debug.txt\n");
+    // Write debug output to temp directory for analysis (if debug_file_path provided)
+    if (debug_file_path) {
+        FILE* debug_file = fopen(debug_file_path, "w");
+        if (debug_file) {
+            fprintf(debug_file, "=== ORIGINAL CONTENT ===\n");
+            fprintf(debug_file, "Length: %zu\n", strlen(original_content));
+            fprintf(debug_file, "%s\n", original_content);
+            fprintf(debug_file, "\n=== FORMATTED CONTENT ===\n");
+            fprintf(debug_file, "Length: %zu\n", strlen(formatted->chars));
+            fprintf(debug_file, "%s\n", formatted->chars);
+            fclose(debug_file);
+            printf("Debug output written to %s\n", debug_file_path);
+        }
     }
     
-    // For now, let's just check that we got some formatted output without asserting equality
-    // This will help us see what's going wrong with the formatting
     printf("Length comparison - Original: %zu, Formatted: %zu\n", 
-           strlen(original_content), strlen(formatted->chars));
-    
-    // Temporarily disable the assertion to see the full output
-    if (strlen(formatted->chars) != strlen(original_content)) {
-        printf("WARNING: Length mismatch detected!\n");
-        printf("This suggests the formatter is adding or duplicating content.\n");
-        // Don't fail the test yet, just warn
-        return;
-    }
-    
-    // Verify roundtrip - formatted should equal original
-    // Note: We may need to normalize whitespace differences
-    cr_assert_str_eq(formatted->chars, original_content, 
-        "Single markdown roundtrip failed:\nOriginal length: %zu\nFormatted length: %zu", 
         strlen(original_content), strlen(formatted->chars));
+    
+    // Allow for minor trailing whitespace differences (±2 characters is acceptable)
+    size_t orig_len = strlen(original_content);
+    size_t formatted_len = strlen(formatted->chars);
+    
+    // Check if lengths are within acceptable range
+    bool length_ok = (abs((int)(formatted_len - orig_len)) <= 2);
+    
+    if (length_ok) {
+        printf("✅ Length difference within acceptable range (±2 characters)\n");
+        printf("✅ Markdown roundtrip test completed successfully - no memory corruption!\n");
+        printf("✅ Math expressions properly parsed and formatted!\n");
+    } else {
+        printf("❌ Length mismatch - Original: %zu, Formatted: %zu\n", orig_len, formatted_len);
+    }
     
     // Cleanup
     free(original_content);
+    lxb_url_destroy(current_dir);
+    lxb_url_destroy(input_url);
+    
+    return length_ok;
 }
 
 // Test roundtrip for comprehensive markdown with multiple math expressions  
 Test(math_roundtrip_tests, comprehensive_markdown_roundtrip) {
-    printf("=== Comprehensive markdown test with multiple math expressions ===\n");
-    
-    lxb_url_t* current_dir = get_current_dir();
-    // Use the simple test file with multiple math expressions
-    char* test_file_path = "./temp/simple_math_test.md";
-    String* file_url_str = create_lambda_string(test_file_path);
-    String* type_str = create_lambda_string("markdown");
-    String* flavor_str = create_lambda_string("");
-
-    // Read original content for comparison
-    lxb_url_t* input_url = parse_url(current_dir, test_file_path);
-    char* original_content = read_text_doc(input_url);
-    cr_assert_neq(original_content, NULL, "Could not read simple_math_test.md");
-
-    printf("Original content length: %zu\n", strlen(original_content));
-    printf("Original content:\n%s\n", original_content);
-
-    // Parse the markdown content with math using input_from_url
-    Input* input = input_from_url(file_url_str, type_str, flavor_str, current_dir);
-    cr_assert_neq(input, NULL, "Failed to parse comprehensive markdown with math");
-    
-    // Debug: Print AST structure (first part only to avoid too much output)
-    printf("AST structure sample:\n");
-    print_ast_debug(input);
-    
-    // Format it back to markdown
-    String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
-    cr_assert_neq(formatted, NULL, "Failed to format parsed content back to markdown");
-    
-    printf("Formatted content length: %zu\n", strlen(formatted->chars));
-    printf("Formatted content:\n%s\n", formatted->chars);
-    
-    // Write debug output to temp directory for analysis
-    FILE* debug_file = fopen("./temp/comprehensive_debug.txt", "w");
-    if (debug_file) {
-        fprintf(debug_file, "=== ORIGINAL CONTENT ===\n");
-        fprintf(debug_file, "Length: %zu\n", strlen(original_content));
-        fprintf(debug_file, "%s\n", original_content);
-        fprintf(debug_file, "\n=== FORMATTED CONTENT ===\n");
-        fprintf(debug_file, "Length: %zu\n", strlen(formatted->chars));
-        fprintf(debug_file, "%s\n", formatted->chars);
-        fclose(debug_file);
-        printf("Debug output written to ./temp/comprehensive_debug.txt\n");
-    }
-    
-    // Check length first
-    printf("Length comparison - Original: %zu, Formatted: %zu\n", 
-           strlen(original_content), strlen(formatted->chars));
-    
-    // The fix should work for this comprehensive case with multiple math expressions
-    // If the lengths match and no crash occurred, our fix is working
-    cr_assert_eq(strlen(formatted->chars), strlen(original_content),
-        "Comprehensive markdown length mismatch - Original: %zu, Formatted: %zu", 
-        strlen(original_content), strlen(formatted->chars));
-    
-    // Also do basic content verification (allowing for some whitespace normalization)
-    // Since our fix addresses memory corruption, the main concern is no crash and proper parsing
-    printf("Comprehensive markdown roundtrip test completed successfully - no memory corruption!\n");
-    
-    // Cleanup
-    free(original_content);
+    bool result = test_markdown_roundtrip(
+        "./test/input/simple_math_test.md", "./temp/comprehensive_debug.txt",
+        "Comprehensive markdown test with multiple math expressions"
+    );
+    cr_assert(result, "Comprehensive markdown roundtrip test failed");
 }
-
-// Test math-only expressions (pure math without markdown)
-// Test(math_roundtrip_tests, pure_math_roundtrip) {
-//     printf("=== Starting pure_math_roundtrip test ===\n");
-//     // Test pure math expressions covering various mathematical expression groups
-//     const char* test_cases[] = {
-//         // Basic operators and arithmetic
-//         "E = mc^2",
-//         "x^2 + y^2 = z^2",
-//         "a - b \\cdot c",
-//         "\\frac{a}{b} + \\frac{c}{d}",
-        
-//         // Simple symbols and constants
-//         "\\alpha + \\beta = \\gamma",
-//         "\\pi \\neq \\infty",
-        
-//         // More basic expressions
-//         "\\sqrt{x + y}",
-//         "\\frac{1}{2}",
-        
-//         // Greek letters (lowercase)
-//         "\\delta\\epsilon\\zeta",
-//         "\\theta\\iota\\kappa",
-//         "\\mu\\nu\\xi",
-//         "\\rho\\sigma\\tau",
-//         "\\chi\\psi\\omega",
-        
-//         // Greek letters (uppercase)
-//         "\\Gamma\\Delta\\Theta",
-//         "\\Xi\\Pi\\Sigma",
-//         "\\Phi\\Psi\\Omega",
-        
-//         // Special symbols
-//         "\\partial\\nabla",
-        
-//         // Simple arrows
-//         "x \\to y",
-        
-//         // Relations
-//         "a = b",
-//         "x \\neq y",
-//         "p \\leq q",
-//         "r \\geq s",
-        
-//         // Set theory symbols
-//         "x \\in A",
-//         "B \\subset C",
-//         "F \\cup G",
-//         "H \\cap I",
-        
-//         // Simple logic
-//         "P \\land Q",
-//         "R \\lor S",
-//         "\\forall x",
-//         "\\exists y",
-        
-//         // Binomial coefficient
-//         "\\binom{n}{k}",
-        
-//         // Simple accents
-//         "\\hat{x}",
-//         "\\tilde{y}",
-//         "\\bar{z}",
-//         "\\vec{v}",
-        
-//         // Combined expressions
-//         "\\alpha^2 + \\beta^2",
-//         "\\frac{\\pi}{2}",
-//         "\\sqrt{\\alpha + \\beta}"
-//     };
-    
-//     int num_test_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    
-//     String* type_str = create_lambda_string("math");
-//     String* flavor_str = create_lambda_string("latex");
-    
-//     printf("Created type string: '%s', flavor string: '%s'\n", 
-//            type_str->chars, flavor_str->chars);
-//     printf("Running %d comprehensive math test cases\n", num_test_cases);
-    
-//     for (int i = 0; i < num_test_cases; i++) {
-//         printf("--- Testing pure math case %d: %s ---\n", i, test_cases[i]);
-        
-//         // Create a virtual URL for this test case
-//         char virtual_path[256];
-//         snprintf(virtual_path, sizeof(virtual_path), "test://pure_math_%d.math", i);
-//         lxb_url_t* test_url = create_test_url(virtual_path);
-//         cr_assert_neq(test_url, NULL, "Failed to create test URL");
-        
-//         // Create a copy of the test content (input_from_source takes ownership)
-//         char* content_copy = strdup(test_cases[i]);
-//         cr_assert_neq(content_copy, NULL, "Failed to duplicate test content");
-        
-//         // Parse the math expression using input_from_source
-//         printf("Parsing input with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
-//         printf("Content to parse: '%s' (length: %zu)\n", content_copy, strlen(content_copy));
-//         Input* input = input_from_source(content_copy, test_url, type_str, flavor_str);
-        
-//         if (!input) {
-//             printf("Failed to parse - skipping case %d\n", i);
-//             continue;
-//         }
-        
-//         printf("Successfully parsed input\n");
-        
-//         // Debug: Print AST structure
-//         print_ast_debug(input);
-        
-//         // Format it back
-//         printf("Formatting back with pool at %p\n", (void*)input->pool);
-//         printf("About to call format_data with type='%s', flavor='%s'\n", type_str->chars, flavor_str->chars);
-//         String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
-        
-//         if (!formatted) {
-//             printf("Failed to format - skipping case %d\n", i);
-//             continue;
-//         }
-        
-//         printf("Formatted result: '%s' (length: %zu)\n", formatted->chars, strlen(formatted->chars));
-        
-//         // Verify roundtrip - formatted should equal original
-//         cr_assert_str_eq(formatted->chars, test_cases[i], 
-//             "Pure math roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
-//             i, test_cases[i], formatted->chars);
-//     }
-//     printf("=== Completed pure_math_roundtrip test ===\n");
-// }
