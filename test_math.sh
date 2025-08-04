@@ -65,6 +65,9 @@ find_criterion() {
     fi
 }
 
+# Build Lambda first
+make
+
 # Main execution
 print_status "================================================"
 print_status "         Math Test Direct Runner              "

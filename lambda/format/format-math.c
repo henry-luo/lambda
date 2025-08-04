@@ -23,7 +23,10 @@ static void format_math_children_with_template(StrBuf* sb, List* children, const
 static void format_math_string(StrBuf* sb, String* str);
 static bool is_single_character_item(Item item);
 static bool item_contains_integral(Item item);
-static bool item_contains_integral(Item item);
+static bool item_contains_only_symbols(Item item);
+static bool item_is_symbol_element(Item item);
+static void append_space_if_needed(StrBuf* sb);
+static void append_char_if_needed(StrBuf* sb, char c);
 
 // Math formatting tables for different output flavors
 typedef struct {
@@ -419,6 +422,35 @@ static bool item_is_quantifier(Item item) {
     return false;
 }
 
+// Helper function to check if an item contains only symbols (including nested implicit_mul of symbols)
+static bool item_contains_only_symbols(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+                // Check if this is an implicit_mul
+                if (elmt_type->name.length == 12 && strncmp(elmt_type->name.str, "implicit_mul", 12) == 0) {
+                    // Check all children of this implicit_mul (Element extends List)
+                    for (int i = 0; i < elem->length; i++) {
+                        if (!item_contains_only_symbols(elem->items[i])) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                // Otherwise check if it's a symbol element
+                else {
+                    return item_is_symbol_element(item);
+                }
+            }
+        }
+    }
+    return false;
+}
+
 // Helper function to check if an item is a symbol element (like Greek letters, special symbols)
 static bool item_is_symbol_element(Item item) {
     TypeId type = get_type_id((LambdaItem)item);
@@ -654,7 +686,7 @@ static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor fl
     
     for (int i = 0; i < children->length; i++) {
         if (i > 0 && flavor != MATH_OUTPUT_MATHML) {
-            strbuf_append_char(sb, ' ');
+            append_char_if_needed(sb, ' ');
         }
         format_math_item(sb, children->items[i], flavor, depth + 1);
     }
@@ -732,9 +764,9 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     
     // Get element name
     const char* element_name = NULL;
+    char name_buf[256];  // Local buffer instead of static
     if (elmt_type->name.str && elmt_type->name.length > 0) {
         // Create null-terminated string for element name
-        static char name_buf[256];
         int name_len = elmt_type->name.length;
         if (name_len >= sizeof(name_buf)) name_len = sizeof(name_buf) - 1;
         strncpy(name_buf, elmt_type->name.str, name_len);
@@ -820,6 +852,26 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     // Special handling for binary operators
     // Special case for implicit_mul: check if we need space
     if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
+        // Check if all children are symbols - if so, use default behavior (no spaces)
+        bool all_are_symbols = true;
+        for (int i = 0; i < children->length; i++) {
+            bool is_symbol = item_is_symbol_element(children->items[i]);
+            bool contains_only_symbols = item_contains_only_symbols(children->items[i]);
+            
+            if (!is_symbol && !contains_only_symbols) {
+                all_are_symbols = false;
+                break;
+            }
+        }
+        
+        // If all children are symbols, just format them without spaces
+        if (all_are_symbols) {
+            for (int i = 0; i < children->length; i++) {
+                format_math_item(sb, children->items[i], flavor, depth + 1);
+            }
+            return;
+        }
+        
         // For implicit_mul, we need to check spacing between each adjacent pair
         // rather than applying uniform spacing across the entire expression
         
@@ -871,14 +923,33 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                     
                     // Don't add extra space around operators that already have spacing
                     if (!prev_is_spaced_operator && !curr_is_spaced_operator) {
-                        // Add space between element and string/identifier
+                        // Don't add space between element and string/identifier
                         if ((prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_STRING) ||
                             (prev_type == LMD_TYPE_SYMBOL && curr_type == LMD_TYPE_STRING)) {
                             pair_needs_space = true;
                         }
-                        // Also add space between different elements (unless they're both LaTeX commands)
+                        // Also add space between different elements, but with special handling for symbol sequences
                         else if (prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_ELEMENT) {
-                            if (!item_is_latex_command(prev) || !item_is_latex_command(curr)) {
+                            // Don't add space if both items are symbols or contain only symbols
+                            bool prev_is_symbol = item_is_symbol_element(prev) || item_contains_only_symbols(prev);
+                            bool curr_is_symbol = item_is_symbol_element(curr) || item_contains_only_symbols(curr);
+                            
+                            #ifdef DEBUG_MATH_FORMAT
+                            fprintf(stderr, "DEBUG: Element-Element pair: prev_is_symbol=%d, curr_is_symbol=%d\n", prev_is_symbol, curr_is_symbol);
+                            #endif
+                            
+                            // Debug for delta epsilon zeta case specifically
+                            printf("SPACING DEBUG: prev_is_symbol=%d, curr_is_symbol=%d\n", prev_is_symbol, curr_is_symbol);
+                            
+                            if (prev_is_symbol && curr_is_symbol) {
+                                pair_needs_space = false;
+                            }
+                            // Don't add space between LaTeX commands
+                            else if (item_is_latex_command(prev) && item_is_latex_command(curr)) {
+                                pair_needs_space = false;
+                            }
+                            // Otherwise add space between different element types
+                            else {
                                 pair_needs_space = true;
                             }
                         }
@@ -887,7 +958,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                 
                 // Apply the spacing decision for this pair
                 if (pair_needs_space) {
-                    strbuf_append_str(sb, " ");
+                    append_space_if_needed(sb);
                 }
             }
             format_math_item(sb, children->items[i], flavor, depth + 1);
@@ -1207,4 +1278,20 @@ String* format_math_unicode(VariableMemPool* pool, Item root_item) {
 // Generic math formatter (defaults to LaTeX)
 String* format_math(VariableMemPool* pool, Item root_item) {
     return format_math_latex(pool, root_item);
+}
+
+// Helper function to append a space only if the last character is not already a space
+static void append_space_if_needed(StrBuf* sb) {
+    if (sb && sb->length > 0 && sb->str[sb->length - 1] != ' ') {
+        strbuf_append_str(sb, " ");
+    }
+}
+
+// Helper function to append a character only if the last character is not the same
+static void append_char_if_needed(StrBuf* sb, char c) {
+    if (sb && sb->length > 0 && sb->str[sb->length - 1] != c) {
+        strbuf_append_char(sb, c);
+    } else if (sb && sb->length == 0) {
+        strbuf_append_char(sb, c);
+    }
 }
