@@ -177,6 +177,10 @@ static const MathExprDef special_symbols[] = {
     {"partial", "diff", "partial", "partial", "∂", "Partial derivative", false, 0, NULL},
     {"nabla", "nabla", "nabla", "nabla", "∇", "Nabla", false, 0, NULL},
     {"emptyset", "nothing", "emptyset", "emptyset", "∅", "Empty set", false, 0, NULL},
+    {"cdots", "cdots", "cdots", "cdots", "⋯", "Centered dots", false, 0, NULL},
+    {"ldots", "ldots", "ldots", "ldots", "…", "Lower dots", false, 0, NULL},
+    {"vdots", "vdots", "vdots", "vdots", "⋮", "Vertical dots", false, 0, NULL},
+    {"ddots", "ddots", "ddots", "ddots", "⋱", "Diagonal dots", false, 0, NULL},
     
     {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
 };

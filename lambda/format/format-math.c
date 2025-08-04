@@ -161,6 +161,11 @@ static const MathFormatDef special_symbols[] = {
     {"nabla", "\\nabla", "nabla", "nabla", "<mo>∇</mo>", "∇", false, false, false, 0},
     {"emptyset", "\\emptyset", "nothing", "emptyset", "<mi>∅</mi>", "∅", false, false, false, 0},
     {"varnothing", "\\varnothing", "nothing", "varnothing", "<mi>∅</mi>", "∅", false, false, false, 0},
+    // Dots symbols
+    {"cdots", "\\cdots", "cdots", "cdots", "<mo>⋯</mo>", "⋯", false, false, false, 0},
+    {"ldots", "\\ldots", "ldots", "ldots", "<mo>…</mo>", "…", false, false, false, 0},
+    {"vdots", "\\vdots", "vdots", "vdots", "<mo>⋮</mo>", "⋮", false, false, false, 0},
+    {"ddots", "\\ddots", "ddots", "ddots", "<mo>⋱</mo>", "⋱", false, false, false, 0},
     // Set theory symbols
     {"in", " \\in ", "in", "in", "<mo>∈</mo>", "∈", true, false, true, 0},
     {"notin", " \\notin ", "notin", "notin", "<mo>∉</mo>", "∉", true, false, true, 0},
