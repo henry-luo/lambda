@@ -63,6 +63,7 @@ static const MathFormatDef basic_operators[] = {
     {"star", " \\star ", " * ", " * ", "<mo>⋆</mo>", " ⋆ ", true, false, true, 2},
     {"circ", " \\circ ", " compose ", " o ", "<mo>∘</mo>", " ∘ ", true, false, true, 2},
     {"bullet", " \\bullet ", " . ", " . ", "<mo>∙</mo>", " ∙ ", true, false, true, 2},
+    {"factorial", "{1}!", "{1}!", "{1}!", "{1}<mo>!</mo>", "{1}!", true, false, false, 1},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -1063,7 +1064,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
             #endif
             
             // Format as operator with subscript for limits/bounds
-            strbuf_append_str(sb, format_str);  // e.g., "\\lim"
+            strbuf_append_str(sb, format_str);  // e.g., "\\sum"
             
             if (children->length >= 1) {
                 strbuf_append_str(sb, "_{");
@@ -1082,6 +1083,12 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                 format_math_item(sb, children->items[1], flavor, depth + 1);
                 in_compact_context = prev_compact_context;
                 strbuf_append_str(sb, "}");
+            }
+            
+            // Handle summand/integrand (the expression being summed/integrated)
+            if (children->length >= 3) {
+                strbuf_append_str(sb, " ");
+                format_math_item(sb, children->items[2], flavor, depth + 1);
             }
             
             return;

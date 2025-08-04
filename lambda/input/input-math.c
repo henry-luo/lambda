@@ -818,22 +818,28 @@ static Item parse_math_identifier(Input *input, const char **math) {
 
 // parse latex fraction \frac{numerator}{denominator}
 static Item parse_latex_frac(Input *input, const char **math) {
+    printf("DEBUG: parse_latex_frac called with: '%.30s'\n", *math);
     skip_math_whitespace(math);
     
     // expect opening brace for numerator
     if (**math != '{') {
+        printf("DEBUG: parse_latex_frac failed - expected '{', got '%c'\n", **math);
         return ITEM_ERROR;
     }
     (*math)++; // skip {
     
     // parse numerator
+    printf("DEBUG: Parsing numerator...\n");
     Item numerator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (numerator == ITEM_ERROR) {
+        printf("DEBUG: Numerator parsing failed\n");
         return ITEM_ERROR;
     }
+    printf("DEBUG: Numerator parsed successfully\n");
     
     // expect closing brace
     if (**math != '}') {
+        printf("DEBUG: Expected '}' after numerator, got '%c'\n", **math);
         return ITEM_ERROR;
     }
     (*math)++; // skip }
@@ -842,18 +848,23 @@ static Item parse_latex_frac(Input *input, const char **math) {
     
     // expect opening brace for denominator
     if (**math != '{') {
+        printf("DEBUG: Expected '{' for denominator, got '%c'\n", **math);
         return ITEM_ERROR;
     }
     (*math)++; // skip {
     
     // parse denominator
+    printf("DEBUG: Parsing denominator...\n");
     Item denominator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (denominator == ITEM_ERROR) {
+        printf("DEBUG: Denominator parsing failed\n");
         return ITEM_ERROR;
     }
+    printf("DEBUG: Denominator parsed successfully\n");
     
     // expect closing brace
     if (**math != '}') {
+        printf("DEBUG: Expected '}' after denominator, got '%c'\n", **math);
         return ITEM_ERROR;
     }
     (*math)++; // skip }
@@ -1120,11 +1131,16 @@ static Item parse_latex_command(Input *input, const char **math) {
         strbuf_full_reset(sb);
         return parse_latex_root_with_index(input, math);
     } else if (strcmp(cmd_string->chars, "sum") == 0) {
+        printf("DEBUG: parse_latex_command - found 'sum' command\n");
         strbuf_full_reset(sb);
-        return parse_latex_sum_or_prod(input, math, "sum");
+        // Create a MathExprDef for the sum and use enhanced parser
+        MathExprDef sum_def = {"sum", "sum", "sum", "sum", "∑", "Summation", true, -1, "parse_big_operator"};
+        return parse_latex_sum_or_prod_enhanced(input, math, &sum_def);
     } else if (strcmp(cmd_string->chars, "prod") == 0) {
         strbuf_full_reset(sb);
-        return parse_latex_sum_or_prod(input, math, "prod");
+        // Create a MathExprDef for the product and use enhanced parser  
+        MathExprDef prod_def = {"prod", "product", "prod", "prod", "∏", "Product", true, -1, "parse_big_operator"};
+        return parse_latex_sum_or_prod_enhanced(input, math, &prod_def);
     } else if (strcmp(cmd_string->chars, "int") == 0) {
         strbuf_full_reset(sb);
         // Create a MathExprDef for the integral
@@ -1970,6 +1986,19 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 }
                 processed = true;
             }
+            
+            // Handle factorial notation
+            if (**math == '!') {
+                (*math)++; // skip !
+                Element* factorial_element = create_math_element(input, "factorial");
+                if (!factorial_element) {
+                    return ITEM_ERROR;
+                }
+                list_push((List*)factorial_element, left);
+                ((TypeElmt*)factorial_element->type)->content_length = ((List*)factorial_element)->length;
+                left = (Item)factorial_element;
+                processed = true;
+            }
         } else if (flavor == MATH_FLAVOR_TYPST) {
             if (**math == '^') {
                 (*math)++; // skip ^
@@ -1988,6 +2017,19 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 }
                 processed = true;
             }
+            
+            // Handle factorial notation
+            if (**math == '!') {
+                (*math)++; // skip !
+                Element* factorial_element = create_math_element(input, "factorial");
+                if (!factorial_element) {
+                    return ITEM_ERROR;
+                }
+                list_push((List*)factorial_element, left);
+                ((TypeElmt*)factorial_element->type)->content_length = ((List*)factorial_element)->length;
+                left = (Item)factorial_element;
+                processed = true;
+            }
         } else if (flavor == MATH_FLAVOR_ASCII) {
             // Handle prime notation for all flavors
             if (**math == '\'') {
@@ -1995,6 +2037,19 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 if (left == ITEM_ERROR) {
                     return ITEM_ERROR;
                 }
+                processed = true;
+            }
+            
+            // Handle factorial notation
+            if (**math == '!') {
+                (*math)++; // skip !
+                Element* factorial_element = create_math_element(input, "factorial");
+                if (!factorial_element) {
+                    return ITEM_ERROR;
+                }
+                list_push((List*)factorial_element, left);
+                ((TypeElmt*)factorial_element->type)->content_length = ((List*)factorial_element)->length;
+                left = (Item)factorial_element;
                 processed = true;
             }
         }
@@ -2116,15 +2171,23 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
         skip_math_whitespace(math);
     }
     
-    // Parse the expression being summed/multiplied
-    Item expr = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
-    if (expr == ITEM_ERROR) {
-        // If no expression follows, this is still valid (like \sum x)
-        expr = ITEM_NULL;
-    }
+    // Parse the summand (the expression being summed)
+    // This is critical for expressions like \sum_{n=0}^{\infty} \frac{x^n}{n!}
+    skip_math_whitespace(math);
+    printf("DEBUG: Regular sum parser - after bounds, remaining string: '%.50s'\n", *math);
+    printf("DEBUG: Current character: '%c' (code %d)\n", **math, **math);
     
-    if (expr != ITEM_NULL) {
-        list_push((List*)op_element, expr);
+    if (**math && **math != '}' && **math != '$') {
+        printf("DEBUG: Attempting to parse summand (regular parser)...\n");
+        Item summand = parse_multiplication_expression(input, math, MATH_FLAVOR_LATEX);
+        printf("DEBUG: Summand parsing result: %s\n", (summand == ITEM_ERROR) ? "ERROR" : (summand == ITEM_NULL) ? "NULL" : "SUCCESS");
+        if (summand != ITEM_ERROR && summand != ITEM_NULL) {
+            // Add summand as the third child (after lower and upper limits)
+            list_push((List*)op_element, summand);
+            printf("DEBUG: Added summand to sum element (total children: %zu)\n", ((List*)op_element)->length);
+        }
+    } else {
+        printf("DEBUG: No summand to parse - end of expression or delimiter\n");
     }
     
     ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
@@ -3445,6 +3508,8 @@ static Item parse_relation_operator(Input *input, const char **math, const char*
 static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavor) {
     if (!cmd) return NULL;
     
+    printf("DEBUG: find_math_expression called with cmd='%s', flavor=%d\n", cmd, flavor);
+    
     // Check each group for matching expression
     for (int group_idx = 0; group_idx < sizeof(math_groups) / sizeof(math_groups[0]); group_idx++) {
         const MathExprDef* defs = math_groups[group_idx].definitions;
@@ -3467,6 +3532,7 @@ static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavo
             }
             
             if (target_cmd && strcmp(cmd, target_cmd) == 0) {
+                printf("DEBUG: Found math expression match: %s -> %s\n", cmd, def->element_name);
                 return def;
             }
         }
@@ -4306,15 +4372,10 @@ static Item parse_partial_derivative(Input *input, const char **math, MathFlavor
 
 // Implementation for LaTeX sum/product with bounds (enhanced version)
 static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, const MathExprDef *def) {
-    const char *pattern = def->latex_cmd;
-    size_t pattern_length = strlen(pattern);
+    printf("DEBUG: Enhanced sum parser called with element: %s\n", def->element_name);
+    printf("DEBUG: Input string: '%.50s'\n", *math);
     
-    // Check if the pattern matches
-    if (strncmp(*math, pattern, pattern_length) != 0) {
-        return ITEM_ERROR;
-    }
-    
-    *math += pattern_length; // consume the pattern
+    // Note: The command has already been consumed by parse_latex_command, so we don't need to check pattern
     skip_math_whitespace(math);
     
     // Create operator element
@@ -4369,6 +4430,42 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
         if (upper_bound != ITEM_ERROR) {
             list_push((List*)op_element, upper_bound);
         }
+    }
+    
+    // Parse the summand (the expression being summed) - Critical for series expansion
+    skip_math_whitespace(math);
+    printf("DEBUG: Enhanced sum parser - after bounds, remaining string: '%.50s'\n", *math);
+    printf("DEBUG: Current character: '%c' (code %d)\n", **math, **math);
+    
+    if (**math && **math != '}' && **math != '$') {
+        printf("DEBUG: Attempting to parse summand...\n");
+        
+        // For summand, we need to parse a single term/factor that can include fractions
+        // but stop at operators like = + - etc. that would be part of the larger expression
+        const char* start_pos = *math;
+        Item summand = ITEM_ERROR;
+        
+        // If it starts with \frac, parse that specifically
+        if (strncmp(*math, "\\frac", 5) == 0) {
+            printf("DEBUG: Found \\frac, skipping to fraction content...\n");
+            *math += 5; // skip \frac
+            printf("DEBUG: After skipping \\frac, remaining: '%.30s'\n", *math);
+            summand = parse_latex_frac(input, math);
+            printf("DEBUG: Fraction parsing completed\n");
+        } else {
+            // For other cases, try parsing a single term
+            summand = parse_power_expression(input, math, MATH_FLAVOR_LATEX);
+        }
+        
+        printf("DEBUG: Summand parsing result: %s\n", (summand == ITEM_ERROR) ? "ERROR" : (summand == ITEM_NULL) ? "NULL" : "SUCCESS");
+        printf("DEBUG: Summand value: %lu (0x%lx)\n", (unsigned long)summand, (unsigned long)summand);
+        if (summand != ITEM_ERROR && summand != ITEM_NULL) {
+            // Add summand as the third child (after lower and upper bounds)
+            list_push((List*)op_element, summand);
+            printf("DEBUG: Added summand to sum element (total children: %zu)\n", ((List*)op_element)->length);
+        }
+    } else {
+        printf("DEBUG: No summand to parse - end of expression or delimiter\n");
     }
     
     // Set content length
