@@ -1386,7 +1386,17 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 if (**math == ')') {
                     (*math)++; // skip )
                 }
-                return expr;
+                
+                // Create a paren_group element to preserve grouping
+                Element* paren_element = create_math_element(input, "paren_group");
+                if (!paren_element) {
+                    return ITEM_ERROR;
+                }
+                
+                // Add the expression as a child
+                list_push((List*)paren_element, expr);
+                
+                return (Item)paren_element;
             } else if (**math == '<') {
                 // Handle inner product notation <u, v>
                 (*math)++; // skip <

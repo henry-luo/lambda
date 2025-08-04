@@ -50,6 +50,8 @@ static const MathFormatDef basic_operators[] = {
     {"pow", "{1}^{{2}}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
     {"subscript", "{1}_{{2}}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
     {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
+    {"lt", " < ", " < ", " < ", "<mo>&lt;</mo>", " < ", true, false, true, 2},
+    {"gt", " > ", " > ", " > ", "<mo>&gt;</mo>", " > ", true, false, true, 2},
     {"pm", "\\pm", "+-", "+-", "<mo>±</mo>", "±", false, false, false, 0},
     {"mp", "\\mp", "-+", "-+", "<mo>∓</mo>", "∓", false, false, false, 0},
     {"times", " \\times ", " * ", " * ", "<mo>×</mo>", " × ", true, false, true, 2},
@@ -181,6 +183,7 @@ static const MathFormatDef roots[] = {
 
 // Grouping and brackets
 static const MathFormatDef grouping[] = {
+    {"paren_group", "({1})", "({1})", "({1})", "<mo>(</mo>{1}<mo>)</mo>", "({1})", true, false, false, 1},
     {"bracket_group", "[{1}]", "[{1}]", "[{1}]", "<mo>[</mo>{1}<mo>]</mo>", "[{1}]", true, false, false, 1},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
