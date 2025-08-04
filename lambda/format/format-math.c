@@ -331,6 +331,7 @@ static bool is_single_character_item(Item item) {
 // Global flag to detect integral case (temporary solution)
 bool formatting_integral_case = false;
 static int implicit_mul_depth = 0;  // Track nesting depth of implicit_mul
+static bool in_compact_context = false;  // Track when we're in subscript/superscript context
 
 static bool item_contains_integral(Item item) {
     TypeId type = get_type_id((LambdaItem)item);
@@ -818,11 +819,20 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: Formatting as binary operator: %s\n", element_name);
         #endif
+        
+        // Use compact spacing in subscript/superscript contexts
+        const char* operator_format = final_format_str;
+        if (in_compact_context && strcmp(element_name, "add") == 0) {
+            operator_format = "+";  // No spaces around + in compact contexts
+        } else if (in_compact_context && strcmp(element_name, "sub") == 0) {
+            operator_format = "-";  // No spaces around - in compact contexts
+        }
+        
         // Format as: child1 operator child2 operator child3 ...
         for (int i = 0; i < children->length; i++) {
             if (i > 0) {
-                // Use the final format string (which may have been modified for implicit_mul)
-                strbuf_append_str(sb, final_format_str);
+                // Use the context-appropriate format string
+                strbuf_append_str(sb, operator_format);
             }
             format_math_item(sb, children->items[i], flavor, depth + 1);
         }
@@ -860,7 +870,12 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
             // Format as base^exponent without braces for single character exponents
             format_math_item(sb, children->items[0], flavor, depth + 1);
             strbuf_append_str(sb, "^");
+            
+            // Set compact context for the exponent
+            bool prev_compact_context = in_compact_context;
+            in_compact_context = true;
             format_math_item(sb, children->items[1], flavor, depth + 1);
+            in_compact_context = prev_compact_context;
         } else {
             #ifdef DEBUG_MATH_FORMAT
             if (strcmp(element_name, "pow") == 0) {
@@ -869,7 +884,17 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                 fprintf(stderr, "DEBUG: MATH_OUTPUT_LATEX constant value = %d\n", MATH_OUTPUT_LATEX);
             }
             #endif
+            
+            // Set compact context for subscripts and superscripts
+            bool prev_compact_context = in_compact_context;
+            if (strcmp(element_name, "pow") == 0 || strcmp(element_name, "subscript") == 0) {
+                in_compact_context = true;
+            }
+            
             format_math_children_with_template(sb, children, format_str, flavor, depth);
+            
+            // Restore previous compact context
+            in_compact_context = prev_compact_context;
         }
     } else {
         #ifdef DEBUG_MATH_FORMAT
