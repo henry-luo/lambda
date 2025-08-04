@@ -147,6 +147,7 @@ static const MathFormatDef special_symbols[] = {
     {"partial", "\\partial", "diff", "partial", "<mo>∂</mo>", "∂", false, false, false, 0},
     {"nabla", "\\nabla", "nabla", "nabla", "<mo>∇</mo>", "∇", false, false, false, 0},
     {"emptyset", "\\emptyset", "nothing", "emptyset", "<mi>∅</mi>", "∅", false, false, false, 0},
+    {"varnothing", "\\varnothing", "nothing", "varnothing", "<mi>∅</mi>", "∅", false, false, false, 0},
     // Set theory symbols
     {"in", " \\in ", "in", "in", "<mo>∈</mo>", "∈", true, false, true, 0},
     {"notin", " \\notin ", "notin", "notin", "<mo>∉</mo>", "∉", true, false, true, 0},
@@ -156,13 +157,25 @@ static const MathFormatDef special_symbols[] = {
     {"supseteq", " \\supseteq ", "supset.eq", "supseteq", "<mo>⊇</mo>", "⊇", true, false, true, 0},
     {"cup", " \\cup ", "union", "cup", "<mo>∪</mo>", "∪", true, false, true, 0},
     {"cap", " \\cap ", "sect", "cap", "<mo>∩</mo>", "∩", true, false, true, 0},
+    {"setminus", " \\setminus ", "setminus", "setminus", "<mo>∖</mo>", "∖", true, false, true, 0},
     // Logic symbols
     {"land", " \\land ", "and", "and", "<mo>∧</mo>", "∧", true, false, true, 0},
+    {"wedge", " \\wedge ", "and", "wedge", "<mo>∧</mo>", "∧", true, false, true, 0},
     {"lor", " \\lor ", "or", "or", "<mo>∨</mo>", "∨", true, false, true, 0},
+    {"vee", " \\vee ", "or", "vee", "<mo>∨</mo>", "∨", true, false, true, 0},
     {"lnot", "\\lnot", "not", "not", "<mo>¬</mo>", "¬", false, false, false, 0},
+    {"implies", " \\implies ", "implies", "implies", "<mo>⟹</mo>", "⟹", true, false, true, 0},
+    {"iff", " \\iff ", "iff", "iff", "<mo>⟺</mo>", "⟺", true, false, true, 0},
     {"forall", "\\forall", "forall", "forall", "<mo>∀</mo>", "∀", false, false, false, 0},
     {"exists", "\\exists", "exists", "exists", "<mo>∃</mo>", "∃", false, false, false, 0},
     {"nexists", "\\nexists", "nexists", "nexists", "<mo>∄</mo>", "∄", false, false, false, 0},
+    // Geometry symbols
+    {"angle", "\\angle", "angle", "angle", "<mo>∠</mo>", "∠", false, false, false, 0},
+    {"parallel", " \\parallel ", "parallel", "parallel", "<mo>∥</mo>", "∥", true, false, true, 0},
+    {"perp", " \\perp ", "perp", "perp", "<mo>⊥</mo>", "⊥", true, false, true, 0},
+    {"triangle", "\\triangle", "triangle", "triangle", "<mo>△</mo>", "△", false, false, false, 0},
+    {"square", "\\square", "square", "square", "<mo>□</mo>", "□", false, false, false, 0},
+    {"circle", "\\circle", "circle", "circle", "<mo>○</mo>", "○", false, false, false, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -181,21 +194,50 @@ static const MathFormatDef roots[] = {
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
+// Text formatting
+static const MathFormatDef text_formatting[] = {
+    {"mathbb", "\\mathbb{{1}}", "bb({1})", "mathbb({1})", "<mi mathvariant=\"double-struck\">{1}</mi>", "𝔹", true, false, false, 1},
+    {"blackboard", "\\mathbb{{1}}", "bb({1})", "mathbb({1})", "<mi mathvariant=\"double-struck\">{1}</mi>", "{1}", true, false, false, 1},
+    {"mathcal", "\\mathcal{{1}}", "cal({1})", "mathcal({1})", "<mi mathvariant=\"script\">{1}</mi>", "𝒸", true, false, false, 1},
+    {"mathfrak", "\\mathfrak{{1}}", "frak({1})", "mathfrak({1})", "<mi mathvariant=\"fraktur\">{1}</mi>", "𝔣", true, false, false, 1},
+    {"mathrm", "\\mathrm{{1}}", "rm({1})", "mathrm({1})", "<mi mathvariant=\"normal\">{1}</mi>", "r", true, false, false, 1},
+    {"mathsf", "\\mathsf{{1}}", "sf({1})", "mathsf({1})", "<mi mathvariant=\"sans-serif\">{1}</mi>", "s", true, false, false, 1},
+    {"mathtt", "\\mathtt{{1}}", "tt({1})", "mathtt({1})", "<mi mathvariant=\"monospace\">{1}</mi>", "t", true, false, false, 1},
+    {"text", "\\text{{1}}", "text({1})", "text({1})", "<mtext>{1}</mtext>", "{1}", true, false, false, 1},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
+};
+
 // Grouping and brackets
 static const MathFormatDef grouping[] = {
     {"paren_group", "({1})", "({1})", "({1})", "<mo>(</mo>{1}<mo>)</mo>", "({1})", true, false, false, 1},
     {"bracket_group", "[{1}]", "[{1}]", "[{1}]", "<mo>[</mo>{1}<mo>]</mo>", "[{1}]", true, false, false, 1},
+    {"langle", "\\langle", "⟨", "⟨", "<mo>⟨</mo>", "⟨", false, false, false, 0},
+    {"rangle", "\\rangle", "⟩", "⟩", "<mo>⟩</mo>", "⟩", false, false, false, 0},
+    {"lvert", "\\lvert", "|", "|", "<mo>|</mo>", "|", false, false, false, 0},
+    {"rvert", "\\rvert", "|", "|", "<mo>|</mo>", "|", false, false, false, 0},
+    {"lVert", "\\lVert", "‖", "‖", "<mo>‖</mo>", "‖", false, false, false, 0},
+    {"rVert", "\\rVert", "‖", "‖", "<mo>‖</mo>", "‖", false, false, false, 0},
+    {"lfloor", "\\lfloor", "⌊", "⌊", "<mo>⌊</mo>", "⌊", false, false, false, 0},
+    {"rfloor", "\\rfloor", "⌋", "⌋", "<mo>⌋</mo>", "⌋", false, false, false, 0},
+    {"lceil", "\\lceil", "⌈", "⌈", "<mo>⌈</mo>", "⌈", false, false, false, 0},
+    {"rceil", "\\rceil", "⌉", "⌉", "<mo>⌉</mo>", "⌉", false, false, false, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
 // Accents
 static const MathFormatDef accents[] = {
     {"hat", "\\hat{{1}}", "hat({1})", "hat({1})", "<mover>{1}<mo>^</mo></mover>", "̂", true, false, false, 1},
+    {"widehat", "\\widehat{{1}}", "hat({1})", "widehat({1})", "<mover>{1}<mo>^</mo></mover>", "̂", true, false, false, 1},
     {"tilde", "\\tilde{{1}}", "tilde({1})", "tilde({1})", "<mover>{1}<mo>~</mo></mover>", "̃", true, false, false, 1},
+    {"widetilde", "\\widetilde{{1}}", "tilde({1})", "widetilde({1})", "<mover>{1}<mo>~</mo></mover>", "̃", true, false, false, 1},
     {"bar", "\\bar{{1}}", "overline({1})", "bar({1})", "<mover>{1}<mo>¯</mo></mover>", "̄", true, false, false, 1},
+    {"overline", "\\overline{{1}}", "overline({1})", "overline({1})", "<mover>{1}<mo>¯</mo></mover>", "̄", true, false, false, 1},
     {"dot", "\\dot{{1}}", "dot({1})", "dot({1})", "<mover>{1}<mo>.</mo></mover>", "̇", true, false, false, 1},
     {"ddot", "\\ddot{{1}}", "dot.double({1})", "ddot({1})", "<mover>{1}<mo>..</mo></mover>", "̈", true, false, false, 1},
     {"vec", "\\vec{{1}}", "arrow({1})", "vec({1})", "<mover>{1}<mo>→</mo></mover>", "⃗", true, false, false, 1},
+    {"overrightarrow", "\\overrightarrow{{1}}", "arrow({1})", "overrightarrow({1})", "<mover>{1}<mo>→</mo></mover>", "⃗", true, false, false, 1},
+    {"check", "\\check{{1}}", "check({1})", "check({1})", "<mover>{1}<mo>ˇ</mo></mover>", "̌", true, false, false, 1},
+    {"breve", "\\breve{{1}}", "breve({1})", "breve({1})", "<mover>{1}<mo>˘</mo></mover>", "̆", true, false, false, 1},
     {"prime", "{1}'", "{1}'", "{1}'", "{1}<mo>′</mo>", "′", true, false, false, 1},
     {"double_prime", "{1}''", "{1}''", "{1}''", "{1}<mo>″</mo>", "″", true, false, false, 1},
     {"triple_prime", "{1}'''", "{1}'''", "{1}'''", "{1}<mo>‴</mo>", "‴", true, false, false, 1},
@@ -216,6 +258,7 @@ static const MathFormatDef relations[] = {
     {"succ", " \\succ ", "succ", "succ", "<mo>≻</mo>", "≻", true, false, true, 0},
     {"preceq", " \\preceq ", "preceq", "preceq", "<mo>⪯</mo>", "⪯", true, false, true, 0},
     {"succeq", " \\succeq ", "succeq", "succeq", "<mo>⪰</mo>", "⪰", true, false, true, 0},
+    {"propto", " \\propto ", "prop", "prop", "<mo>∝</mo>", "∝", true, false, true, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -230,6 +273,8 @@ static const MathFormatDef big_operators[] = {
     {"lim", "\\lim", "lim", "lim", "<mo>lim</mo>", "lim", true, false, false, -1},
     {"bigcup", "\\bigcup", "union.big", "bigcup", "<mo>⋃</mo>", "⋃", true, false, false, -1},
     {"bigcap", "\\bigcap", "sect.big", "bigcap", "<mo>⋂</mo>", "⋂", true, false, false, -1},
+    {"bigoplus", "\\bigoplus", "plus.big", "bigoplus", "<mo>⊕</mo>", "⊕", true, false, false, -1},
+    {"bigotimes", "\\bigotimes", "times.big", "bigotimes", "<mo>⊗</mo>", "⊗", true, false, false, -1},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -246,6 +291,17 @@ static const MathFormatDef arrows[] = {
     {"uparrow", "\\uparrow", "arrow.t", "^", "<mo>↑</mo>", "↑", false, false, false, 0},
     {"downarrow", "\\downarrow", "arrow.b", "v", "<mo>↓</mo>", "↓", false, false, false, 0},
     {"updownarrow", "\\updownarrow", "arrow.t.b", "^v", "<mo>↕</mo>", "↕", false, false, false, 0},
+    {"longrightarrow", " \\longrightarrow ", "-->", "-->", "<mo>⟶</mo>", "⟶", true, false, true, 0},
+    {"longleftarrow", " \\longleftarrow ", "<--", "<--", "<mo>⟵</mo>", "⟵", true, false, true, 0},
+    {"mapsto", " \\mapsto ", "mapsto", "mapsto", "<mo>↦</mo>", "↦", true, false, true, 0},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
+};
+
+// Modular arithmetic
+static const MathFormatDef modular[] = {
+    {"parentheses_mod", " \\pmod{{1}}", "pmod({1})", "pmod({1})", "<mo>(mod {1})</mo>", "(mod {1})", true, false, true, 1},
+    {"binary_mod", " \\bmod ", "mod", "mod", "<mo>mod</mo>", "mod", true, false, true, 0},
+    {"modulo", " \\mod ", "mod", "mod", "<mo>mod</mo>", "mod", true, false, true, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -283,7 +339,6 @@ static bool item_contains_integral(Item item) {
         String* str = (String*)get_pointer(item);
         if (str && str->chars) {
             if (strcmp(str->chars, "integral") == 0) {
-                fprintf(stderr, "DEBUG: item_contains_integral - found integral symbol\n");
                 return true;
             }
         }
@@ -295,7 +350,6 @@ static bool item_contains_integral(Item item) {
         if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
             // Check if element name is "int" (which represents integral)
             if (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "int", 3) == 0) {
-                fprintf(stderr, "DEBUG: item_contains_integral - found int element (integral)\n");
                 return true;
             }
         }
@@ -305,14 +359,41 @@ static bool item_contains_integral(Item item) {
         if (children && children->items) {
             for (int i = 0; i < children->length; i++) {
                 if (item_contains_integral(children->items[i])) {
-                    fprintf(stderr, "DEBUG: item_contains_integral - found integral in child %d\n", i);
                     return true;
                 }
             }
         }
     }
     
-    fprintf(stderr, "DEBUG: item_contains_integral - no integral found\n");
+    return false;
+}
+
+// Helper function to check if an item is a LaTeX command element
+static bool item_is_latex_command(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+                // Common LaTeX command prefixes and exact matches
+                const char* latex_commands[] = {
+                    "partial", "nabla", "angle", "triangle", "frac", "sqrt", "sum", "prod", "int", "lim",
+                    "sin", "cos", "tan", "ln", "log", "exp", "langle", "rangle", "lvert", "rvert", 
+                    "lVert", "rVert", "lfloor", "rfloor", "lceil", "rceil", "hat", "tilde", "bar", "vec",
+                    "dot", "ddot", "check", "breve", "widehat", "widetilde", "overline", "overrightarrow"
+                };
+                
+                for (size_t i = 0; i < sizeof(latex_commands) / sizeof(latex_commands[0]); i++) {
+                    size_t cmd_len = strlen(latex_commands[i]);
+                    if (elmt_type->name.length == cmd_len && 
+                        strncmp(elmt_type->name.str, latex_commands[i], cmd_len) == 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
     return false;
 }
 
@@ -337,17 +418,76 @@ static bool item_is_quantifier(Item item) {
     return false;
 }
 
+// Helper function to check if an item is a symbol element (like Greek letters, special symbols)
+static bool item_is_symbol_element(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    if (type == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+                // Check if the element name matches common math symbols
+                const char* symbol_names[] = {
+                    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa", 
+                    "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "upsilon", "phi", "chi", "psi", "omega",
+                    "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Upsilon", "Phi", "Psi", "Omega",
+                    "partial", "nabla", "infty", "ell", "hbar", "imath", "jmath", "aleph", "beth",
+                    "angle", "triangle", "parallel", "perpendicular", "circ", "bullet", "star", "ast"
+                };
+                
+                for (size_t i = 0; i < sizeof(symbol_names) / sizeof(symbol_names[0]); i++) {
+                    size_t symbol_len = strlen(symbol_names[i]);
+                    if (elmt_type->name.length == symbol_len && 
+                        strncmp(elmt_type->name.str, symbol_names[i], symbol_len) == 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Helper function to check if an item is an identifier or variable (single letters, strings)
+static bool item_is_identifier_or_variable(Item item) {
+    TypeId type = get_type_id((LambdaItem)item);
+    
+    // Check if it's a string (variable/identifier)
+    if (type == LMD_TYPE_STRING) {
+        String* str = (String*)item;
+        if (str && str->len > 0) {
+            // Consider single letters as variables
+            if (str->len == 1 && isalpha(str->chars[0])) {
+                return true;
+            }
+            // Consider multi-character alphabetic strings as identifiers
+            bool all_alpha = true;
+            for (size_t i = 0; i < str->len; i++) {
+                if (!isalpha(str->chars[i])) {
+                    all_alpha = false;
+                    break;
+                }
+            }
+            if (all_alpha) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
 // Find format definition for element
 static const MathFormatDef* find_format_def(const char* element_name) {
     // Search through all format tables
     const MathFormatDef* tables[] = {
         basic_operators, functions, special_symbols, fractions, 
-        roots, grouping, accents, relations, big_operators, arrows
+        roots, text_formatting, grouping, accents, relations, big_operators, arrows, modular
     };
     
     const char* table_names[] = {
         "basic_operators", "functions", "special_symbols", "fractions",
-        "roots", "grouping", "accents", "relations", "big_operators", "arrows"
+        "roots", "text_formatting", "grouping", "accents", "relations", "big_operators", "arrows", "modular"
     };
     
     int table_count = sizeof(tables) / sizeof(tables[0]);
@@ -629,11 +769,12 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     #endif
 
     // Special handling for binary operators
-    // Special case for implicit_mul: check if we need space for integrals or quantifiers
+    // Special case for implicit_mul: check if we need space
     const char* final_format_str = format_str;
     if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
         bool has_integral = false;
         bool has_quantifier = false;
+        bool needs_space = false;
         
         // Check for integrals in any child
         for (int i = 0; i < children->length; i++) {
@@ -648,8 +789,28 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
             has_quantifier = true;
         }
         
+        // Add space for integrals, quantifiers, or between distinct symbols/identifiers
         if (has_integral || has_quantifier) {
-            final_format_str = " ";  // Use space for integrals and quantifiers
+            needs_space = true;
+        }
+        else if (children->length >= 2) {
+            Item first = children->items[0];
+            Item second = children->items[1];
+            
+            // Add space between LaTeX commands and identifiers/variables
+            if (item_is_latex_command(first) && item_is_identifier_or_variable(second)) {
+                needs_space = true;
+            }
+            // Add space between symbols and identifiers
+            else if (item_is_symbol_element(first) && item_is_identifier_or_variable(second)) {
+                needs_space = true;
+            }
+            // DO NOT add space between two LaTeX commands - they should be concatenated
+            // This allows cases like \partial\nabla to remain without space
+        }
+        
+        if (needs_space) {
+            final_format_str = " ";
         }
     }
     

@@ -203,9 +203,13 @@ static const MathExprDef roots[] = {
 
 static const MathExprDef accents[] = {
     {"hat", "hat", "hat", "hat", "̂", "Hat accent", true, 1, "parse_accent"},
+    {"widehat", "hat", "widehat", "widehat", "̂", "Wide hat accent", true, 1, "parse_accent"},
     {"tilde", "tilde", "tilde", "tilde", "̃", "Tilde accent", true, 1, "parse_accent"},
+    {"widetilde", "tilde", "widetilde", "widetilde", "̃", "Wide tilde accent", true, 1, "parse_accent"},
     {"bar", "overline", "bar", "bar", "̄", "Bar accent", true, 1, "parse_accent"},
+    {"overline", "overline", "overline", "overline", "̄", "Overline accent", true, 1, "parse_accent"},
     {"vec", "arrow", "vec", "vec", "⃗", "Vector arrow", true, 1, "parse_accent"},
+    {"overrightarrow", "arrow", "overrightarrow", "overrightarrow", "⃗", "Right arrow accent", true, 1, "parse_accent"},
     {"dot", "dot", "dot", "dot", "̇", "Dot accent", true, 1, "parse_accent"},
     {"ddot", "dot.double", "ddot", "ddot", "̈", "Double dot accent", true, 1, "parse_accent"},
     {"acute", "acute", "acute", "acute", "́", "Acute accent", true, 1, "parse_accent"},
@@ -226,6 +230,8 @@ static const MathExprDef arrows[] = {
     {"Leftrightarrow", "<=>", "<=>", "Leftrightarrow", "⇔", "Left-right double arrow", false, 0, NULL},
     {"mapsto", "|->", "|->", "mapsto", "↦", "Maps to", false, 0, NULL},
     {"longmapsto", "|-->", "|-->", "longmapsto", "⟼", "Long maps to", false, 0, NULL},
+    {"longrightarrow", "-->", "-->", "longrightarrow", "⟶", "Long right arrow", false, 0, NULL},
+    {"longleftarrow", "<--", "<--", "longleftarrow", "⟵", "Long left arrow", false, 0, NULL},
     {"uparrow", "up", "up", "uparrow", "↑", "Up arrow", false, 0, NULL},
     {"downarrow", "down", "down", "downarrow", "↓", "Down arrow", false, 0, NULL},
     {"updownarrow", "updown", "updown", "updownarrow", "↕", "Up-down arrow", false, 0, NULL},
@@ -311,6 +317,8 @@ static const MathExprDef set_theory[] = {
     {"cup", "union", "cup", "cup", "∪", "Union", false, 0, NULL},
     {"cap", "sect", "cap", "cap", "∩", "Intersection", false, 0, NULL},
     {"setminus", "without", "setminus", "setminus", "∖", "Set minus", false, 0, NULL},
+    {"emptyset", "emptyset", "emptyset", "emptyset", "∅", "Empty set", false, 0, NULL},
+    {"varnothing", "emptyset", "varnothing", "varnothing", "∅", "Empty set variant", false, 0, NULL},
     {"triangle", "triangle", "triangle", "triangle", "△", "Triangle", false, 0, NULL},
     {"triangleq", "triangle.eq", "triangleq", "triangleq", "≜", "Triangle equal", false, 0, NULL},
     {"sqcup", "sqcup", "sqcup", "sqcup", "⊔", "Square cup", false, 0, NULL},
@@ -322,9 +330,13 @@ static const MathExprDef set_theory[] = {
 
 static const MathExprDef logic[] = {
     {"land", "and", "and", "land", "∧", "Logical and", false, 0, NULL},
+    {"wedge", "and", "and", "wedge", "∧", "Logical and", false, 0, NULL},
     {"lor", "or", "or", "lor", "∨", "Logical or", false, 0, NULL},
+    {"vee", "or", "or", "vee", "∨", "Logical or", false, 0, NULL},
     {"lnot", "not", "not", "lnot", "¬", "Logical not", false, 0, NULL},
     {"neg", "not", "not", "neg", "¬", "Logical negation", false, 0, NULL},
+    {"implies", "=>", "=>", "implies", "⟹", "Implies", false, 0, NULL},
+    {"iff", "<=>", "<=>", "iff", "⟺", "If and only if", false, 0, NULL},
     {"forall", "forall", "forall", "forall", "∀", "For all", false, 0, NULL},
     {"exists", "exists", "exists", "exists", "∃", "There exists", false, 0, NULL},
     {"nexists", "exists.not", "nexists", "nexists", "∄", "There does not exist", false, 0, NULL},
@@ -355,9 +367,11 @@ static const MathExprDef geometry[] = {
     {"angle", "angle", "angle", "angle", "∠", "Angle symbol", false, 0, NULL},
     {"triangle", "triangle", "triangle", "triangle", "△", "Triangle symbol", false, 0, NULL},
     {"square", "square", "square", "square", "□", "Square symbol", false, 0, NULL},
+    {"circle", "circle", "circle", "circle", "○", "Circle symbol", false, 0, NULL},
     {"diamond", "diamond", "diamond", "diamond", "◊", "Diamond symbol", false, 0, NULL},
     {"parallel", "parallel", "parallel", "parallel", "∥", "Parallel symbol", false, 0, NULL},
     {"perp", "perp", "perp", "perpendicular", "⊥", "Perpendicular symbol", false, 0, NULL},
+    {"perpendicular", "perp", "perp", "perpendicular", "⊥", "Perpendicular symbol", false, 0, NULL},
     {"cong", "cong", "cong", "congruent", "≅", "Congruent symbol", false, 0, NULL},
     {"sim", "sim", "sim", "similar", "∼", "Similar symbol", false, 0, NULL},
     {"sphericalangle", "sphericalangle", "sphericalangle", "sphericalangle", "∢", "Spherical angle", false, 0, NULL},
@@ -408,6 +422,7 @@ static const MathExprDef typography[] = {
     {"mathit", "italic", "it", "italic", "𝑖𝑡𝑎𝑙𝑖𝑐", "Italic text", true, 1, NULL},
     {"mathcal", "cal", "cal", "calligraphic", "𝒸𝒶𝓁", "Calligraphic text", true, 1, NULL},
     {"mathfrak", "frak", "frak", "fraktur", "𝔣𝔯𝔞𝔨", "Fraktur text", true, 1, NULL},
+    {"mathbb", "bb", "bb", "blackboard", "𝔹", "Blackboard bold text", true, 1, NULL},
     {"mathrm", "upright", "rm", "roman", "roman", "Roman text", true, 1, NULL},
     {"mathsf", "sans", "sf", "sans_serif", "sans", "Sans-serif text", true, 1, NULL},
     {"mathtt", "mono", "tt", "monospace", "mono", "Monospace text", true, 1, NULL},
@@ -1616,43 +1631,43 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
             op_len = 1;
         } else if (**math == '\\') {
             // Check for LaTeX relational commands
-            if (strncmp(*math, "\\neq", 4) == 0) {
+            if (strncmp(*math, "\\neq", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "neq";
                 op_len = 4;
-            } else if (strncmp(*math, "\\ne", 3) == 0) {
+            } else if (strncmp(*math, "\\ne", 3) == 0 && !isalpha(*(*math + 3))) {
                 op_name = "neq";
                 op_len = 3;
-            } else if (strncmp(*math, "\\leq", 4) == 0) {
+            } else if (strncmp(*math, "\\leq", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "leq";
                 op_len = 4;
-            } else if (strncmp(*math, "\\le", 3) == 0) {
+            } else if (strncmp(*math, "\\le", 3) == 0 && !isalpha(*(*math + 3))) {
                 op_name = "leq";
                 op_len = 3;
-            } else if (strncmp(*math, "\\geq", 4) == 0) {
+            } else if (strncmp(*math, "\\geq", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "geq";
                 op_len = 4;
-            } else if (strncmp(*math, "\\ge", 3) == 0) {
+            } else if (strncmp(*math, "\\ge", 3) == 0 && !isalpha(*(*math + 3))) {
                 op_name = "geq";
                 op_len = 3;
-            } else if (strncmp(*math, "\\to", 3) == 0) {
+            } else if (strncmp(*math, "\\to", 3) == 0 && !isalpha(*(*math + 3))) {
                 op_name = "to";
                 op_len = 3;
-            } else if (strncmp(*math, "\\in", 3) == 0) {
+            } else if (strncmp(*math, "\\in", 3) == 0 && !isalpha(*(*math + 3))) {
                 op_name = "in";
                 op_len = 3;
-            } else if (strncmp(*math, "\\subset", 7) == 0) {
+            } else if (strncmp(*math, "\\subset", 7) == 0 && !isalpha(*(*math + 7))) {
                 op_name = "subset";
                 op_len = 7;
-            } else if (strncmp(*math, "\\cup", 4) == 0) {
+            } else if (strncmp(*math, "\\cup", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "cup";
                 op_len = 4;
-            } else if (strncmp(*math, "\\cap", 4) == 0) {
+            } else if (strncmp(*math, "\\cap", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "cap";
                 op_len = 4;
-            } else if (strncmp(*math, "\\land", 5) == 0) {
+            } else if (strncmp(*math, "\\land", 5) == 0 && !isalpha(*(*math + 5))) {
                 op_name = "land";
                 op_len = 5;
-            } else if (strncmp(*math, "\\lor", 4) == 0) {
+            } else if (strncmp(*math, "\\lor", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "lor";
                 op_len = 4;
             } else {
