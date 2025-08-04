@@ -49,6 +49,17 @@ lxb_url_t* create_test_url(const char* virtual_path) {
     return test_url;
 }
 
+// Helper function to print AST structure for debugging
+void print_ast_debug(Input* input) {
+    if (input && input->root) {
+        StrBuf* debug_buf = strbuf_new();
+        printf("AST: ");
+        print_item(debug_buf, input->root);
+        printf("%s\n", debug_buf->str);
+        strbuf_free(debug_buf);
+    }
+}
+
 // Test roundtrip for individual inline math expressions
 Test(math_roundtrip_tests, inline_math_roundtrip) {
     printf("=== Starting inline_math_roundtrip test ===\n");
@@ -93,13 +104,7 @@ Test(math_roundtrip_tests, inline_math_roundtrip) {
         printf("Successfully parsed input\n");
         
         // Debug: Print AST structure
-        if (input->root) {
-            StrBuf* debug_buf = strbuf_new();
-            printf("AST: ");
-            print_item(debug_buf, input->root);
-            printf("%s\n", debug_buf->str);
-            strbuf_free(debug_buf);
-        }
+        print_ast_debug(input);
         
         // Format it back
         printf("Formatting back with pool at %p\n", (void*)input->pool);
@@ -162,13 +167,7 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
         printf("Successfully parsed input\n");
         
         // Debug: Print AST structure
-        if (input->root) {
-            StrBuf* debug_buf = strbuf_new();
-            printf("AST: ");
-            print_item(debug_buf, input->root);
-            printf("%s\n", debug_buf->str);
-            strbuf_free(debug_buf);
-        }
+        print_ast_debug(input);
         
         // Format it back
         printf("Formatting back with pool at %p\n", (void*)input->pool);
@@ -180,25 +179,17 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
         }
         
         printf("Formatted result: '%s'\n", formatted->chars);
-        
         // Verify roundtrip - formatted should equal original
         cr_assert_str_eq(formatted->chars, test_cases[i], 
             "Block math roundtrip failed for case %d:\nExpected: '%s'\nGot: '%s'", 
-            i, test_cases[i], formatted->chars);        
-        // if (strcmp(formatted->chars, test_cases[i]) == 0) {
-        //     printf("✅ Roundtrip successful for case %d\n", i);
-        // } else {
-        //     printf("❌ Roundtrip failed for case %d\n", i);
-        //     printf("Expected: '%s'\n", test_cases[i]);
-        //     printf("Got: '%s'\n", formatted->chars);
-        // }
+            i, test_cases[i], formatted->chars);
     }
     
     printf("=== Completed block_math_roundtrip test ===\n");
 }
 
 // Test roundtrip for comprehensive markdown with math
-Test(math_roundtrip_tests, comprehensive_markdown_roundtrip, .disabled = true) {
+Test(math_roundtrip_tests, comprehensive_markdown_roundtrip) {
     printf("=== Comprehensive markdown test ===\n");
     
     // Use relative path instead of hardcoded absolute path
@@ -331,14 +322,9 @@ Test(math_roundtrip_tests, pure_math_roundtrip) {
         }
         
         printf("Successfully parsed input\n");
-        printf("Input root item type: %p\n", (void*)input->root);
-        if (input->root) {
-            printf("Root item exists\n");
-            StrBuf* sb = strbuf_new();
-            print_item(sb, input->root);
-            printf("Root item: '%s'\n", sb->str);
-            strbuf_free(sb);
-        }
+        
+        // Debug: Print AST structure
+        print_ast_debug(input);
         
         // Format it back
         printf("Formatting back with pool at %p\n", (void*)input->pool);
