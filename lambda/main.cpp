@@ -1,5 +1,5 @@
 #include "transpiler.h"
-#include "validator/validator.h"
+// #include "validator/validator.h"
 #include "input/input.h"
 #include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
@@ -13,10 +13,10 @@ extern "C" {
     Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
     
     // For accessing the validator's internal structure
-    typedef struct {
-        StrView name;
-        TypeSchema* schema;  
-    } SchemaEntry;
+    // typedef struct {
+    //     StrView name;
+    //     TypeSchema* schema;  
+    // } SchemaEntry;
 }
 
 // System includes for environment and string functions
@@ -415,7 +415,7 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        run_validation(data_file, schema_file, input_format);
+        // run_validation(data_file, schema_file, input_format);
         return 0;
     }
     

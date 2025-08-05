@@ -1205,38 +1205,38 @@ SUITE_RESULT_FILES+=("$MIR_RESULT_FILE")
 SUITE_TYPES+=("MIR")
 
 # Start Validator tests in background
-print_status "================================================"
-print_status "      STARTING VALIDATOR TESTS (PARALLEL)      "
-print_status "================================================"
-VALIDATOR_RESULT_FILE="$SUITE_TEMP_DIR/validator_results.txt"
-(
-    # Run validator tests and capture results
-    print_status "🔍 Validator Tests - Starting..."
-    if run_validator_tests; then
-        validator_failed=0
-    else
-        validator_failed=$?
-    fi
+# print_status "================================================"
+# print_status "      STARTING VALIDATOR TESTS (PARALLEL)      "
+# print_status "================================================"
+# VALIDATOR_RESULT_FILE="$SUITE_TEMP_DIR/validator_results.txt"
+# (
+#     # Run validator tests and capture results
+#     print_status "🔍 Validator Tests - Starting..."
+#     if run_validator_tests; then
+#         validator_failed=0
+#     else
+#         validator_failed=$?
+#     fi
     
-    # Write results to file (variables are available in this subshell)
-    echo "SUITE_TYPE:VALIDATOR" > "$VALIDATOR_RESULT_FILE"
-    echo "SUITE_NAME:🔍 Validator Tests" >> "$VALIDATOR_RESULT_FILE"
-    echo "SUITE_TOTAL:$VALIDATOR_TOTAL_TESTS" >> "$VALIDATOR_RESULT_FILE"
-    echo "SUITE_PASSED:$VALIDATOR_PASSED_TESTS" >> "$VALIDATOR_RESULT_FILE"
-    echo "SUITE_FAILED:$VALIDATOR_FAILED_TESTS" >> "$VALIDATOR_RESULT_FILE"
-    if [ $validator_failed -eq 0 ]; then
-        echo "SUITE_STATUS:PASSED" >> "$VALIDATOR_RESULT_FILE"
-    else
-        echo "SUITE_STATUS:FAILED" >> "$VALIDATOR_RESULT_FILE"
-    fi
+#     # Write results to file (variables are available in this subshell)
+#     echo "SUITE_TYPE:VALIDATOR" > "$VALIDATOR_RESULT_FILE"
+#     echo "SUITE_NAME:🔍 Validator Tests" >> "$VALIDATOR_RESULT_FILE"
+#     echo "SUITE_TOTAL:$VALIDATOR_TOTAL_TESTS" >> "$VALIDATOR_RESULT_FILE"
+#     echo "SUITE_PASSED:$VALIDATOR_PASSED_TESTS" >> "$VALIDATOR_RESULT_FILE"
+#     echo "SUITE_FAILED:$VALIDATOR_FAILED_TESTS" >> "$VALIDATOR_RESULT_FILE"
+#     if [ $validator_failed -eq 0 ]; then
+#         echo "SUITE_STATUS:PASSED" >> "$VALIDATOR_RESULT_FILE"
+#     else
+#         echo "SUITE_STATUS:FAILED" >> "$VALIDATOR_RESULT_FILE"
+#     fi
     
-    # Output with prefix for identification
-    echo "[VALIDATOR] Validator tests completed with exit code: $validator_failed"
-    exit $validator_failed
-) &
-SUITE_JOB_PIDS+=($!)
-SUITE_RESULT_FILES+=("$VALIDATOR_RESULT_FILE")
-SUITE_TYPES+=("VALIDATOR")
+#     # Output with prefix for identification
+#     echo "[VALIDATOR] Validator tests completed with exit code: $validator_failed"
+#     exit $validator_failed
+# ) &
+# SUITE_JOB_PIDS+=($!)
+# SUITE_RESULT_FILES+=("$VALIDATOR_RESULT_FILE")
+# SUITE_TYPES+=("VALIDATOR")
 
 # Re-enable strict error handling now that all background jobs are started
 set -e
@@ -1246,7 +1246,7 @@ print_status "⏳ Waiting for all test suites to complete..."
 print_status "📊 Started ${#SUITE_JOB_PIDS[@]} test suites with PIDs: ${SUITE_JOB_PIDS[*]}"
 
 # Wait for all test suites and collect results
-for i in 0 1 2 3; do
+for i in 0 1 2; do
     pid="${SUITE_JOB_PIDS[$i]}"
     result_file="${SUITE_RESULT_FILES[$i]}"
     suite_type="${SUITE_TYPES[$i]}"

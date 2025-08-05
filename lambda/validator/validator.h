@@ -13,7 +13,7 @@
 #include "../transpiler.h"
 
 #ifdef __cplusplus
-#include "../lib/hashmap.hpp"
+#include "../../lib/hashmap.hpp"
 using namespace hashmap_cpp;
 extern "C" {
 #endif
