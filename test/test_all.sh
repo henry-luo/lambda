@@ -135,6 +135,17 @@ parse_array_string() {
     printf "%s\n" "${result_array[@]}"
 }
 
+# Helper function to get build configuration file path
+get_build_config_file() {
+    local suite_name="$1"
+    local config_file=$(get_config "$suite_name" "build_config_file")
+    if [ -n "$config_file" ] && [ "$config_file" != "null" ]; then
+        echo "$config_file"
+    else
+        echo "build_lambda_config.json"
+    fi
+}
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
