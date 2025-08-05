@@ -56,7 +56,7 @@ JOBS := $(shell echo $$(($(NPROCS) > 8 ? 8 : $(NPROCS))))
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build clean debug release rebuild test run help install uninstall \
+.PHONY: all build clean debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
         build-windows build-debug build-release clean-all distclean \
         verify-windows test-windows
@@ -86,6 +86,7 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run comprehensive unit tests"
+	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
 	@echo "  test-memory   - Run memory leak detection tests"
 	@echo "  test-benchmark- Run performance benchmark tests"  
@@ -201,6 +202,16 @@ test:
 		./test/test_all.sh; \
 	else \
 		echo "Error: Comprehensive test suite not found at test/test_all.sh"; \
+		echo "Please ensure the test script exists and is executable."; \
+		exit 1; \
+	fi
+
+test-input: build
+	@echo "Running input processing test suite..."
+	@if [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh --target=input; \
+	else \
+		echo "Error: Test script not found at test/test_all.sh"; \
 		echo "Please ensure the test script exists and is executable."; \
 		exit 1; \
 	fi

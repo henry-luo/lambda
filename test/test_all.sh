@@ -40,6 +40,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Available test targets:"
     echo "  all               Run all test suites (default)"
     echo "  library           Run only library tests"
+    echo "  input             Run only input processing tests"
     echo "  validator         Run only validator tests"
     echo "  mir               Run only MIR JIT tests"
     echo "  strbuf            Run only string buffer tests"
@@ -79,8 +80,6 @@ LIB_TEST_SOURCES=(
     "test_strview.c" 
     "test_variable_pool.c"
     "test_num_stack.c"
-    "test_mime_detect.c"
-    "test_math.c"
 )
 
 LIB_TEST_DEPENDENCIES=(
@@ -88,8 +87,6 @@ LIB_TEST_DEPENDENCIES=(
     "lib/strview.c"
     "lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
     "lib/num_stack.c"
-    "lambda/input/mime-detect.c lambda/input/mime-types.c"
-    "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
 )
 
 LIB_TEST_BINARIES=(
@@ -97,6 +94,20 @@ LIB_TEST_BINARIES=(
     "test_strview.exe"
     "test_variable_pool.exe"
     "test_num_stack.exe"
+)
+
+# INPUT Test Configuration (Input processing and MIME detection)
+INPUT_TEST_SOURCES=(
+    "test_mime_detect.c"
+    "test_math.c"
+)
+
+INPUT_TEST_DEPENDENCIES=(
+    "lambda/input/mime-detect.c lambda/input/mime-types.c"
+    "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
+)
+
+INPUT_TEST_BINARIES=(
     "test_mime_detect.exe"
     "test_math.exe"
 )
@@ -415,6 +426,159 @@ run_library_tests() {
     return $lib_failed_tests
 }
 
+# Function to compile and run input processing tests
+run_input_tests() {
+    print_status "🔧 Compiling and running Input processing tests..."
+    
+    local input_failed_tests=0
+    local input_total_tests=0
+    local input_passed_tests=0
+    
+    # Initialize arrays to store individual test results
+    INPUT_TEST_RESULTS=()
+    INPUT_TEST_NAMES=()
+    INPUT_TEST_TOTALS=()
+    INPUT_TEST_PASSED=()
+    INPUT_TEST_FAILED=()
+    
+    # Arrays to store background job PIDs and temporary result files
+    local job_pids=()
+    local result_files=()
+    
+    # Create temporary directory for parallel execution results
+    local temp_dir=$(mktemp -d)
+    
+    # Compile and start each input test in parallel
+    for i in "${!INPUT_TEST_SOURCES[@]}"; do
+        local test_source="test/${INPUT_TEST_SOURCES[$i]}"
+        local test_binary="test/${INPUT_TEST_BINARIES[$i]}"
+        local test_deps="${INPUT_TEST_DEPENDENCIES[$i]}"
+        local test_name="${INPUT_TEST_SOURCES[$i]%%.c}"  # Remove .c extension
+        local result_file="$temp_dir/result_$i.txt"
+        
+        print_status "Compiling $test_source..."
+        
+        # Compile command with dependencies
+        COMPILE_CMD="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS -fms-extensions"
+        
+        if $COMPILE_CMD 2>/dev/null; then
+            print_success "Compiled $test_source successfully"
+            
+            # Start test execution in background
+            print_status "Starting $test_binary in parallel..."
+            (
+                # Run the test and capture output
+                set +e  # Disable strict error handling for test execution
+                INPUT_TEST_OUTPUT=$(./"$test_binary" --verbose --tap 2>&1)
+                INPUT_TEST_EXIT_CODE=$?
+                set -e  # Re-enable strict error handling
+                
+                # Parse test results
+                TEST_TOTAL=$(echo "$INPUT_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
+                TEST_FAILED=$(echo "$INPUT_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
+                
+                # Clean numeric values
+                TEST_TOTAL=$(echo "$TEST_TOTAL" | tr -cd '0-9')
+                TEST_FAILED=$(echo "$TEST_FAILED" | tr -cd '0-9')
+                
+                # Ensure defaults
+                TEST_TOTAL=${TEST_TOTAL:-0}
+                TEST_FAILED=${TEST_FAILED:-0}
+                TEST_PASSED=$((TEST_TOTAL - TEST_FAILED))
+                
+                # Write results to temporary file
+                echo "TEST_NAME:$test_name" > "$result_file"
+                echo "TEST_TOTAL:$TEST_TOTAL" >> "$result_file"
+                echo "TEST_PASSED:$TEST_PASSED" >> "$result_file"
+                echo "TEST_FAILED:$TEST_FAILED" >> "$result_file"
+                echo "TEST_OUTPUT_START" >> "$result_file"
+                echo "$INPUT_TEST_OUTPUT" >> "$result_file"
+                echo "TEST_OUTPUT_END" >> "$result_file"
+                
+                # Cleanup test binary
+                if [ -f "$test_binary" ]; then
+                    rm "$test_binary"
+                fi
+                
+                exit $TEST_FAILED
+            ) &
+            
+            # Store background job PID and result file
+            job_pids+=($!)
+            result_files+=("$result_file")
+            
+        else
+            print_error "Failed to compile $test_source"
+            print_error "Attempting compilation with detailed error output..."
+            $COMPILE_CMD
+            input_failed_tests=$((input_failed_tests + 1))
+            
+            # Store failed compilation result
+            INPUT_TEST_NAMES+=("$test_name")
+            INPUT_TEST_TOTALS+=(0)
+            INPUT_TEST_PASSED+=(0)
+            INPUT_TEST_FAILED+=(1)
+        fi
+    done
+    
+    # Wait for all background jobs and collect results
+    print_status "⏳ Waiting for parallel test execution to complete..."
+    
+    for i in "${!job_pids[@]}"; do
+        local pid="${job_pids[$i]}"
+        local result_file="${result_files[$i]}"
+        
+        # Wait for this specific job
+        wait $pid
+        local job_exit_code=$?
+        
+        # Read results from temporary file
+        if [ -f "$result_file" ]; then
+            local test_name=$(grep "^TEST_NAME:" "$result_file" | cut -d: -f2)
+            local test_total=$(grep "^TEST_TOTAL:" "$result_file" | cut -d: -f2)
+            local test_passed=$(grep "^TEST_PASSED:" "$result_file" | cut -d: -f2)
+            local test_failed=$(grep "^TEST_FAILED:" "$result_file" | cut -d: -f2)
+            
+            # Extract and display test output
+            local test_output=$(sed -n '/^TEST_OUTPUT_START$/,/^TEST_OUTPUT_END$/p' "$result_file" | sed '1d;$d')
+            
+            print_status "📋 Results for $test_name:"
+            echo "$test_output"
+            echo ""
+            
+            # Store individual test results
+            INPUT_TEST_NAMES+=("$test_name")
+            INPUT_TEST_TOTALS+=($test_total)
+            INPUT_TEST_PASSED+=($test_passed)
+            INPUT_TEST_FAILED+=($test_failed)
+            
+            input_total_tests=$((input_total_tests + test_total))
+            input_failed_tests=$((input_failed_tests + test_failed))
+        else
+            print_error "Failed to read results for job $i"
+            input_failed_tests=$((input_failed_tests + 1))
+        fi
+    done
+    
+    # Cleanup temporary directory
+    rm -rf "$temp_dir"
+    
+    input_passed_tests=$((input_total_tests - input_failed_tests))
+    
+    # Store totals for final summary
+    INPUT_TOTAL_TESTS=$input_total_tests
+    INPUT_PASSED_TESTS=$input_passed_tests
+    INPUT_FAILED_TESTS=$input_failed_tests
+    
+    echo ""
+    print_status "📊 Input Test Results Summary:"
+    echo "   Total Tests: $input_total_tests"
+    echo "   Passed: $input_passed_tests"
+    echo "   Failed: $input_failed_tests"
+    
+    return $input_failed_tests
+}
+
 # Function to compile and run MIR JIT tests
 run_mir_tests() {
     print_status "🔧 Compiling and running MIR JIT tests..."
@@ -686,7 +850,129 @@ run_individual_library_test() {
     return $failed_tests
 }
 
-# Function to run individual test suites
+# Function to run individual input test
+run_individual_input_test() {
+    local test_name="$1"
+    local test_index=-1
+    
+    # Find the test index
+    for i in "${!INPUT_TEST_SOURCES[@]}"; do
+        if [[ "${INPUT_TEST_SOURCES[$i]}" == "test_${test_name}.c" ]]; then
+            test_index=$i
+            break
+        fi
+    done
+    
+    if [ $test_index -eq -1 ]; then
+        print_error "Test '$test_name' not found in input tests"
+        print_status "Available input tests:"
+        for source in "${INPUT_TEST_SOURCES[@]}"; do
+            test_basename=$(basename "$source" .c)
+            echo "  - ${test_basename#test_}"
+        done
+        return 1
+    fi
+    
+    print_status "🧪 Running individual test: $test_name"
+    
+    local source="${INPUT_TEST_SOURCES[$test_index]}"
+    local deps="${INPUT_TEST_DEPENDENCIES[$test_index]}"
+    local binary="${INPUT_TEST_BINARIES[$test_index]}"
+    
+    print_status "Compiling test/test_$test_name.c..."
+    
+    # Build compile command
+    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps"
+    
+    if $compile_cmd 2>/dev/null; then
+        print_success "Compiled test/$source successfully"
+    else
+        print_error "Failed to compile test/$source"
+        print_error "Attempting compilation with detailed error output..."
+        $compile_cmd
+        return 1
+    fi
+    
+    print_status "🧪 Running $test_name tests..."
+    echo ""
+    
+    # Run the test with timeout - try different output formats
+    set +e
+    if command -v timeout >/dev/null 2>&1; then
+        # First try with just basic output
+        test_output=$(timeout 30 ./test/$binary 2>&1)
+        test_exit_code=$?
+        if [ $test_exit_code -eq 124 ]; then
+            print_error "Test $test_name timed out after 30 seconds"
+            test_output="Test timed out"
+            test_exit_code=1
+        fi
+    else
+        test_output=$(./test/$binary 2>&1)
+        test_exit_code=$?
+    fi
+    set -e
+    
+    echo "$test_output"
+    echo ""
+    
+    # Parse results from Criterion's standard output format
+    local total_tests=0
+    local failed_tests=0
+    local passing_tests=0
+    local crashing_tests=0
+    
+    # Parse Criterion synthesis line: "[====] Synthesis: Tested: X | Passing: Y | Failing: Z | Crashing: W"
+    if echo "$test_output" | grep -q "Synthesis:"; then
+        synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
+        total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        passing_tests=$(echo "$synthesis_line" | grep -o "Passing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        
+        # Total failures include both failing and crashing tests
+        failed_tests=$((failed_tests + crashing_tests))
+    else
+        # Fallback: assume success if no clear failure indicators and exit code is 0
+        if [ $test_exit_code -eq 0 ]; then
+            total_tests=1
+            failed_tests=0
+        else
+            total_tests=1
+            failed_tests=1
+        fi
+    fi
+    
+    # Clean up binary
+    if [ -f "test/$binary" ]; then
+        rm "test/$binary"
+    fi
+    
+    # Clean numeric values
+    total_tests=$(echo "$total_tests" | tr -cd '0-9')
+    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
+    total_tests=${total_tests:-0}
+    failed_tests=${failed_tests:-0}
+    
+    # Print summary
+    local passed_tests=$((total_tests - failed_tests))
+    echo "================================================"
+    print_status "📊 $test_name Test Results:"
+    print_status "   Total: $total_tests, Passed: $passed_tests, Failed: $failed_tests"
+    
+    if [ $failed_tests -eq 0 ] && [ $total_tests -gt 0 ]; then
+        print_success "All $test_name tests passed! ✨"
+    elif [ $total_tests -eq 0 ]; then
+        print_warning "No tests were detected for $test_name"
+    else
+        print_error "$failed_tests $test_name test(s) failed"
+    fi
+    echo "================================================"
+    
+    return $failed_tests
+}
+
+# Function to run target test suites
 run_target_test() {
     local target="$1"
     
@@ -700,6 +986,11 @@ run_target_test() {
             run_library_tests
             return $?
             ;;
+        "input")
+            print_status "🚀 Running Input Processing Tests Suite"
+            run_input_tests
+            return $?
+            ;;
         "validator")
             print_status "🚀 Running Validator Tests Suite"
             run_validator_tests
@@ -710,13 +1001,17 @@ run_target_test() {
             run_mir_tests
             return $?
             ;;
-        "strbuf"|"strview"|"variable_pool"|"num_stack"|"mime_detect"|"math")
+        "strbuf"|"strview"|"variable_pool"|"num_stack")
             run_individual_library_test "$target"
+            return $?
+            ;;
+        "mime_detect"|"math")
+            run_individual_input_test "$target"
             return $?
             ;;
         *)
             print_error "Unknown target: $target"
-            print_status "Available targets: all, library, validator, mir, strbuf, strview, variable_pool, num_stack, mime_detect, math"
+            print_status "Available targets: all, library, input, validator, mir, strbuf, strview, variable_pool, num_stack, mime_detect, math"
             return 1
             ;;
     esac
@@ -811,6 +1106,40 @@ SUITE_JOB_PIDS+=($!)
 SUITE_RESULT_FILES+=("$LIBRARY_RESULT_FILE")
 SUITE_TYPES+=("LIBRARY")
 
+# Start Input Processing tests in background
+print_status "================================================"
+print_status "      STARTING INPUT PROCESSING TESTS (PARALLEL)"
+print_status "================================================"
+INPUT_RESULT_FILE="$SUITE_TEMP_DIR/input_results.txt"
+(
+    # Run input tests and capture results
+    print_status "📄 Input Processing Tests - Starting..."
+    if run_input_tests; then
+        input_failed=0
+    else
+        input_failed=$?
+    fi
+    
+    # Write results to file (variables are available in this subshell)
+    echo "SUITE_TYPE:INPUT" > "$INPUT_RESULT_FILE"
+    echo "SUITE_NAME:📄 Input Processing Tests" >> "$INPUT_RESULT_FILE"
+    echo "SUITE_TOTAL:$INPUT_TOTAL_TESTS" >> "$INPUT_RESULT_FILE"
+    echo "SUITE_PASSED:$INPUT_PASSED_TESTS" >> "$INPUT_RESULT_FILE"
+    echo "SUITE_FAILED:$INPUT_FAILED_TESTS" >> "$INPUT_RESULT_FILE"
+    if [ $input_failed -eq 0 ]; then
+        echo "SUITE_STATUS:PASSED" >> "$INPUT_RESULT_FILE"
+    else
+        echo "SUITE_STATUS:FAILED" >> "$INPUT_RESULT_FILE"
+    fi
+    
+    # Output with prefix for identification
+    echo "[INPUT] Input processing tests completed with exit code: $input_failed"
+    exit $input_failed
+) &
+SUITE_JOB_PIDS+=($!)
+SUITE_RESULT_FILES+=("$INPUT_RESULT_FILE")
+SUITE_TYPES+=("INPUT")
+
 # Start MIR JIT tests in background
 print_status "================================================"
 print_status "       STARTING MIR JIT TESTS (PARALLEL)       "
@@ -887,7 +1216,7 @@ print_status "⏳ Waiting for all test suites to complete..."
 print_status "📊 Started ${#SUITE_JOB_PIDS[@]} test suites with PIDs: ${SUITE_JOB_PIDS[*]}"
 
 # Wait for all test suites and collect results
-for i in 0 1 2; do
+for i in 0 1 2 3; do
     pid="${SUITE_JOB_PIDS[$i]}"
     result_file="${SUITE_RESULT_FILES[$i]}"
     suite_type="${SUITE_TYPES[$i]}"
@@ -996,6 +1325,14 @@ if [ "$total_failed_tests" -eq 0 ]; then
                 
                 echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed)"
             done
+        elif [ "$suite_type" = "INPUT" ]; then
+            for j in "${!INPUT_TEST_NAMES[@]}"; do
+                test_name="${INPUT_TEST_NAMES[$j]}"
+                test_total="${INPUT_TEST_TOTALS[$j]}"
+                test_passed="${INPUT_TEST_PASSED[$j]}"
+                
+                echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed)"
+            done
         elif [ "$suite_type" = "MIR" ]; then
             echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed)"
         fi
@@ -1042,6 +1379,19 @@ else
                     echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed, ❌ $test_failed failed) ❌"
                 fi
             done
+        elif [ "$suite_type" = "INPUT" ]; then
+            for j in "${!INPUT_TEST_NAMES[@]}"; do
+                test_name="${INPUT_TEST_NAMES[$j]}"
+                test_total="${INPUT_TEST_TOTALS[$j]}"
+                test_passed="${INPUT_TEST_PASSED[$j]}"
+                test_failed="${INPUT_TEST_FAILED[$j]}"
+                
+                if [ "$test_failed" -eq 0 ]; then
+                    echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed) ✅"
+                else
+                    echo "   ├─ $test_name: $test_total tests (✅ $test_passed passed, ❌ $test_failed failed) ❌"
+                fi
+            done
         elif [ "$suite_type" = "MIR" ]; then
             if [ "$suite_failed" -eq 0 ]; then
                 echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed) ✅"
@@ -1074,6 +1424,8 @@ else
         
         if [ "$suite_type" = "LIBRARY" ]; then
             echo "   Library test failures: $suite_failed"
+        elif [ "$suite_type" = "INPUT" ]; then
+            echo "   Input processing test failures: $suite_failed"
         elif [ "$suite_type" = "VALIDATOR" ]; then
             echo "   Validator test failures: $suite_failed"
         elif [ "$suite_type" = "MIR" ]; then
