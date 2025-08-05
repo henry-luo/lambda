@@ -1,55 +1,69 @@
 /**
- * @file validator.c
- * @brief Lambda Schema Validator - Core Implementation
+ * @file validator.cpp
+ * @brief Lambda Schema Validator - Core Implementation (C++)
  * @author Henry Luo
  * @license MIT
  */
 
 #include "validator.h"
-#include <string.h>
-#include <assert.h>
+#include "../lib/hashmap.hpp"
+#include <cstring>
+#include <cassert>
+#include <memory>
+#include <string>
+
+// Use the C++ hashmap namespace
+using namespace hashmap_cpp;
 
 // ==================== Hashmap Entry Structures ====================
 
-typedef struct {
+struct SchemaEntry {
     StrView name;
     TypeSchema* schema;
-} SchemaEntry;
+    
+    bool operator==(const SchemaEntry& other) const {
+        return name.length == other.name.length && 
+               memcmp(name.str, other.name.str, name.length) == 0;
+    }
+};
 
-typedef struct {
+struct VisitedEntry {
     StrView key;
     bool visited;
-} VisitedEntry;
+    
+    bool operator==(const VisitedEntry& other) const {
+        return key.length == other.key.length && 
+               memcmp(key.str, other.key.str, key.length) == 0;
+    }
+};
+
+// Hash functions for C++ hashmap
+namespace std {
+    template<>
+    struct hash<SchemaEntry> {
+        size_t operator()(const SchemaEntry& entry) const {
+            // Use MurmurHash-like approach
+            size_t hash_val = 0;
+            for (size_t i = 0; i < entry.name.length; ++i) {
+                hash_val = hash_val * 31 + entry.name.str[i];
+            }
+            return hash_val;
+        }
+    };
+    
+    template<>
+    struct hash<VisitedEntry> {
+        size_t operator()(const VisitedEntry& entry) const {
+            size_t hash_val = 0;
+            for (size_t i = 0; i < entry.key.length; ++i) {
+                hash_val = hash_val * 31 + entry.key.str[i];
+            }
+            return hash_val;
+        }
+    };
+}
 
 // ==================== Hashmap Helper Functions ====================
-
-static int schema_compare(const void *a, const void *b, void *udata) {
-    const SchemaEntry *sa = a;
-    const SchemaEntry *sb = b;
-    if (sa->name.length != sb->name.length) {
-        return sa->name.length < sb->name.length ? -1 : 1;
-    }
-    return memcmp(sa->name.str, sb->name.str, sa->name.length);
-}
-
-static uint64_t schema_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const SchemaEntry *entry = item;
-    return hashmap_murmur(entry->name.str, entry->name.length, seed0, seed1);
-}
-
-static int visited_compare(const void *a, const void *b, void *udata) {
-    const VisitedEntry *va = a;
-    const VisitedEntry *vb = b;
-    if (va->key.length != vb->key.length) {
-        return va->key.length < vb->key.length ? -1 : 1;
-    }
-    return memcmp(va->key.str, vb->key.str, va->key.length);
-}
-
-static uint64_t visited_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const VisitedEntry *entry = item;
-    return hashmap_murmur(entry->key.str, entry->key.length, seed0, seed1);
-}
 
 // ==================== Schema Validator Creation ====================
 
@@ -57,9 +71,19 @@ SchemaValidator* schema_validator_create(VariableMemPool* pool) {
     SchemaValidator* validator = (SchemaValidator*)pool_calloc(pool, sizeof(SchemaValidator));
     
     validator->pool = pool;
-    validator->schemas = hashmap_new(sizeof(SchemaEntry), 0, 0, 0, schema_hash, schema_compare, NULL, NULL);
+    
+    // Create C++ hashmap instances using proper construction
+    auto schemas_result = hashmap_cpp::HashMap<StrView, TypeSchema*>::create();
+    if (!schemas_result) {
+        return nullptr;
+    }
+    
+    // Allocate space and move construct
+    void* schemas_mem = pool_alloc(pool, sizeof(hashmap_cpp::HashMap<StrView, TypeSchema*>));
+    validator->schemas_cpp = new(schemas_mem) hashmap_cpp::HashMap<StrView, TypeSchema*>(std::move(*schemas_result));
+    
     validator->context = (ValidationContext*)pool_calloc(pool, sizeof(ValidationContext));
-    validator->custom_validators = NULL;
+    validator->custom_validators = nullptr;
     
     // Initialize default options
     validator->default_options.strict_mode = false;
@@ -70,10 +94,18 @@ SchemaValidator* schema_validator_create(VariableMemPool* pool) {
     
     // Initialize validation context
     validator->context->pool = pool;
-    validator->context->path = NULL;
-    validator->context->schema_registry = validator->schemas;
-    validator->context->visited = hashmap_new(sizeof(VisitedEntry), 0, 0, 0, visited_hash, visited_compare, NULL, NULL);
-    validator->context->custom_validators = NULL;
+    validator->context->path = nullptr;
+    validator->context->schema_registry_cpp = validator->schemas_cpp;
+    
+    auto visited_result = hashmap_cpp::HashMap<StrView, bool>::create();
+    if (!visited_result) {
+        return nullptr;
+    }
+    
+    void* visited_mem = pool_alloc(pool, sizeof(hashmap_cpp::HashMap<StrView, bool>));
+    validator->context->visited_cpp = new(visited_mem) hashmap_cpp::HashMap<StrView, bool>(std::move(*visited_result));
+    
+    validator->context->custom_validators = nullptr;
     validator->context->options = validator->default_options;
     validator->context->current_depth = 0;
     
@@ -83,8 +115,13 @@ SchemaValidator* schema_validator_create(VariableMemPool* pool) {
 void schema_validator_destroy(SchemaValidator* validator) {
     if (!validator) return;
     
-    hashmap_free(validator->schemas);
-    hashmap_free(validator->context->visited);
+    // Explicitly destroy C++ objects
+    if (validator->schemas_cpp) {
+        validator->schemas_cpp->~HashMap();
+    }
+    if (validator->context && validator->context->visited_cpp) {
+        validator->context->visited_cpp->~HashMap();
+    }
     // Note: memory pool cleanup handled by caller
 }
 
@@ -103,12 +140,13 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
         return -1;
     }
     
-    // Store schema in registry
-    SchemaEntry entry = {
-        .name = strview_from_cstr(schema_name),
-        .schema = schema
-    };
-    hashmap_set(validator->schemas, &entry);
+    // Store schema in C++ hashmap registry
+    StrView name_view = strview_from_cstr(schema_name);
+    auto insert_result = validator->schemas_cpp->emplace(name_view, schema);
+    if (!insert_result || !insert_result->second) {
+        schema_parser_destroy(parser);
+        return -1;
+    }
     
     schema_parser_destroy(parser);
     return 0;
@@ -122,7 +160,7 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
         ValidationResult* result = create_validation_result(context ? context->pool : validator->pool);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_PARSE_ERROR, "Invalid validation parameters", 
-            context ? context->path : NULL, 
+            context ? context->path : nullptr, 
             context ? context->pool : validator->pool));
         return result;
     }
@@ -138,7 +176,7 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
     
     context->current_depth++;
     
-    ValidationResult* result = NULL;
+    ValidationResult* result = nullptr;
     
     // Dispatch to appropriate validation function based on schema type
     switch (schema->schema_type) {
@@ -553,7 +591,7 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     }
     
     // Resolve the reference
-    TypeSchema* resolved = resolve_reference(schema, ctx->schema_registry);
+    TypeSchema* resolved = resolve_reference_cpp(schema, ctx->schema_registry_cpp);
     if (!resolved) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
@@ -566,9 +604,8 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     }
     
     // Check for circular references
-    VisitedEntry lookup = { .key = schema->name };
-    const VisitedEntry* visited_entry = hashmap_get(ctx->visited, &lookup);
-    if (visited_entry && visited_entry->visited) {
+    auto visited_lookup = ctx->visited_cpp->find(schema->name);
+    if (visited_lookup != ctx->visited_cpp->end() && (*visited_lookup).second) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_CIRCULAR_REFERENCE, "Circular type reference detected", 
             ctx->path, ctx->pool));
@@ -576,15 +613,13 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     }
     
     // Mark as visited and validate
-    VisitedEntry visited_entry_set = { .key = schema->name, .visited = true };
-    hashmap_set(ctx->visited, &visited_entry_set);
+    ctx->visited_cpp->insert_or_assign(schema->name, true);
     
     validation_result_destroy(result);
     result = validate_item(validator, item, resolved, ctx);
     
     // Unmark as visited
-    VisitedEntry visited_entry_unset = { .key = schema->name, .visited = false };
-    hashmap_set(ctx->visited, &visited_entry_unset);
+    ctx->visited_cpp->insert_or_assign(schema->name, false);
     
     return result;
 }
@@ -727,12 +762,22 @@ String* string_from_strview(StrView view, VariableMemPool* pool) {
 
 TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry) {
     if (!ref_schema || ref_schema->schema_type != LMD_SCHEMA_REFERENCE) {
-        return NULL;
+        return nullptr;
     }
     
     SchemaEntry lookup = { .name = ref_schema->name };
     const SchemaEntry* entry = hashmap_get(registry, &lookup);
-    return entry ? entry->schema : NULL;
+    return entry ? entry->schema : nullptr;
+}
+
+// C++ hashmap version
+TypeSchema* resolve_reference_cpp(TypeSchema* ref_schema, hashmap_cpp::HashMap<StrView, TypeSchema*>* registry) {
+    if (!ref_schema || ref_schema->schema_type != LMD_SCHEMA_REFERENCE) {
+        return nullptr;
+    }
+    
+    auto found = registry->find(ref_schema->name);
+    return found != registry->end() ? (*found).second : nullptr;
 }
 
 // ==================== Missing Implementation Functions ====================
@@ -1295,25 +1340,25 @@ void validation_result_destroy(ValidationResult* result) {
 
 ValidationResult* validate_document(SchemaValidator* validator, Item document, const char* schema_name) {
     if (!validator || !schema_name) {
-        return NULL;
+        return nullptr;
     }
     
-    // Look up the schema by name in the validator's schema registry
-    SchemaEntry lookup;
-    lookup.name.str = schema_name;
-    lookup.name.length = strlen(schema_name);
+    // Look up the schema by name in the validator's C++ schema registry
+    StrView lookup_name;
+    lookup_name.str = schema_name;
+    lookup_name.length = strlen(schema_name);
     
-    const SchemaEntry* entry = hashmap_get(validator->schemas, &lookup);
-    if (!entry || !entry->schema) {
+    auto found_schema = validator->schemas_cpp->find(lookup_name);
+    if (found_schema == validator->schemas_cpp->end()) {
         // If schema not found, fall back to a basic validation
         printf("Warning: Schema '%s' not found, using basic validation\n", schema_name);
         TypeSchema* fallback_schema = create_primitive_schema(LMD_TYPE_ANY, validator->pool);
         if (!fallback_schema) {
-            return NULL;
+            return nullptr;
         }
         return validate_item(validator, document, fallback_schema, validator->context);
     }
     
     // Use the actual loaded schema for validation
-    return validate_item(validator, document, entry->schema, validator->context);
+    return validate_item(validator, document, (*found_schema).second, validator->context);
 }

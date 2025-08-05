@@ -12,9 +12,10 @@ VALIDATOR_HEADERS = $(wildcard $(VALIDATOR_DIR)/*.h)
 VALIDATOR_OBJECTS = $(VALIDATOR_SOURCES:.c=.o)
 
 # Main validator sources (excluding main.c for library)
-VALIDATOR_LIB_SOURCES = validator.c schema_parser.c validation_engine.c \
-                       doc_validators.c error_reporting.c
-VALIDATOR_LIB_OBJECTS = $(VALIDATOR_LIB_SOURCES:.c=.o)
+VALIDATOR_LIB_SOURCES = validator.cpp schema_parser.c validation_engine.c \
+                       doc_validators.c error_reporting.c validate.cpp
+VALIDATOR_LIB_OBJECTS = $(VALIDATOR_LIB_SOURCES:.cpp=.o)
+VALIDATOR_LIB_OBJECTS := $(VALIDATOR_LIB_OBJECTS:.c=.o)
 
 # Dependencies from parent Lambda implementation
 LAMBDA_LIB = $(PARENT_DIR)/lambda.a
@@ -32,7 +33,9 @@ TREE_SITTER_LAMBDA = $(PARENT_DIR)/lambda/tree-sitter-lambda/src/parser.c
 
 # Compiler flags
 CC = gcc
+CXX = g++
 CFLAGS = -std=c11 -Wall -Wextra -O2 -g
+CXXFLAGS = -std=c++23 -Wall -Wextra -O2 -g
 INCLUDES = -I$(PARENT_DIR) -I$(PARENT_DIR)/lib -I$(PARENT_DIR)/lib/mem-pool/include \
            -I$(PARENT_DIR)/lambda -I$(PARENT_DIR)/lambda/tree-sitter/lib/include
 DEFINES = -DLAMBDA_VALIDATOR
@@ -60,13 +63,18 @@ libvalidator.a: $(VALIDATOR_LIB_OBJECTS)
 # CLI tool target
 lambda-validate: main.o libvalidator.a $(REQUIRED_LIBS)
 	@echo "Building validator CLI tool..."
-	$(CC) $(CFLAGS) -o $@ main.o libvalidator.a $(REQUIRED_LIBS) $(TREE_SITTER_LIB) -lm
+	$(CXX) $(CXXFLAGS) -o $@ main.o libvalidator.a $(REQUIRED_LIBS) $(TREE_SITTER_LIB) -lm
 	@echo "CLI tool created: $@"
 
 # Object file compilation
 %.o: %.c $(VALIDATOR_HEADERS)
 	@echo "Compiling $<..."
 	$(CC) $(CFLAGS) $(INCLUDES) $(DEFINES) -c $< -o $@
+
+# C++ Object file compilation
+%.o: %.cpp $(VALIDATOR_HEADERS)
+	@echo "Compiling C++ $<..."
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $(DEFINES) -c $< -o $@
 
 # Dependency on parent Lambda library
 $(LAMBDA_LIB):

@@ -1,12 +1,17 @@
 #include "validator.h"
 #include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
+#include <cstring>   // for C++ string functions
+#include <cstdio>    // for C++ stdio functions
+#include <cstdlib>   // for C++ stdlib functions
 
-// Forward declare read_text_file from lib/file.c
-char* read_text_file(const char *filename);
+extern "C" {
+    // Forward declare read_text_file from lib/file.c
+    char* read_text_file(const char *filename);
 
-// Forward declare input_from_url
-Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
+    // Forward declare input_from_url
+    Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
+}
 
 void run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     printf("Lambda Validator v1.0\n");
