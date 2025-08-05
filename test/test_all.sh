@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Lambda Comprehensive Test Suite Runner
 # Compiles and runs all tests including validator and library tests as proper Criterion unit tests
@@ -50,6 +50,10 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  mime_detect       Run only MIME detection tests"
     echo "  math              Run only math roundtrip tests"
     echo ""
+    echo "Configuration:"
+    echo "  Test configurations are loaded from test/test_config.json"
+    echo "  This file defines test suites, sources, dependencies, and compilation flags"
+    echo ""
     echo "Examples:"
     echo "  $0                      # Run all tests"
     echo "  $0 --target=math        # Run only math tests"
@@ -71,50 +75,65 @@ else
 fi
 echo ""
 
-# Configuration
-VALIDATOR_TEST_SOURCES="test/test_validator.c"
-VALIDATOR_TEST_BINARY="test/test_validator"
+# Configuration file path
+TEST_CONFIG_FILE="test/test_config.json"
 
-LIB_TEST_SOURCES=(
-    "test_strbuf.c"
-    "test_strview.c" 
-    "test_variable_pool.c"
-    "test_num_stack.c"
-)
+# Global variables for loaded test configuration
+declare -a TEST_SUITE_NAMES
+declare -a SUITE_CONFIGS
 
-LIB_TEST_DEPENDENCIES=(
-    "lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
-    "lib/strview.c"
-    "lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
-    "lib/num_stack.c"
-)
+# Helper function to get configuration value
+get_config() {
+    local suite="$1"
+    local key="$2"
+    
+    if [ ! -f "$TEST_CONFIG_FILE" ]; then
+        echo ""
+        return 1
+    fi
+    
+    jq -r ".tests[] | select(.suite == \"$suite\") | .$key // \"\"" "$TEST_CONFIG_FILE" 2>/dev/null || echo ""
+}
 
-LIB_TEST_BINARIES=(
-    "test_strbuf.exe"
-    "test_strview.exe"
-    "test_variable_pool.exe"
-    "test_num_stack.exe"
-)
+# Helper function to get configuration array as string
+get_config_array() {
+    local suite="$1"
+    local key="$2"
+    local separator="${3:-|||}"
+    
+    if [ ! -f "$TEST_CONFIG_FILE" ]; then
+        echo ""
+        return 1
+    fi
+    
+    jq -r ".tests[] | select(.suite == \"$suite\") | .$key | join(\"$separator\")" "$TEST_CONFIG_FILE" 2>/dev/null || echo ""
+}
 
-# INPUT Test Configuration (Input processing and MIME detection)
-INPUT_TEST_SOURCES=(
-    "test_mime_detect.c"
-    "test_math.c"
-)
-
-INPUT_TEST_DEPENDENCIES=(
-    "lambda/input/mime-detect.c lambda/input/mime-types.c"
-    "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
-)
-
-INPUT_TEST_BINARIES=(
-    "test_mime_detect.exe"
-    "test_math.exe"
-)
-
-# MIR Test Configuration
-MIR_TEST_SOURCES="test/test_mir.c"
-MIR_TEST_BINARY="test/test_mir.exe"
+# Helper function to parse delimiter-separated string into array (bash 3.2 compatible)
+parse_array_string() {
+    local input_str="$1"
+    local delimiter="$2"
+    local -a result_array=()
+    
+    local temp_str="$input_str"
+    
+    while true; do
+        if [[ "$temp_str" == *"$delimiter"* ]]; then
+            # Extract first part before delimiter
+            local first_part="${temp_str%%$delimiter*}"
+            result_array+=("$first_part")
+            # Remove first part and delimiter
+            temp_str="${temp_str#*$delimiter}"
+        else
+            # Last part (no more delimiters)
+            result_array+=("$temp_str")
+            break
+        fi
+    done
+    
+    # Print the array elements (this function is used in command substitution)
+    printf "%s\n" "${result_array[@]}"
+}
 
 # Colors for output
 RED='\033[0;31m'
@@ -137,6 +156,467 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}❌ $1${NC}"
+}
+
+# Function to load test configuration from JSON
+load_test_config() {
+    if [ ! -f "$TEST_CONFIG_FILE" ]; then
+        print_error "Test configuration file $TEST_CONFIG_FILE not found!"
+        exit 1
+    fi
+    
+    if ! command -v jq &> /dev/null; then
+        print_error "jq is required to parse the configuration file"
+        print_error "Please install jq: brew install jq"
+        exit 1
+    fi
+    
+    print_status "Loading test configuration from $TEST_CONFIG_FILE..."
+    
+    # Load all test suite names (compatible with bash 3.2+)
+    TEST_SUITE_NAMES=()
+    while IFS= read -r suite_name; do
+        TEST_SUITE_NAMES+=("$suite_name")
+    done < <(jq -r '.tests[].suite' "$TEST_CONFIG_FILE")
+    
+    print_success "Loaded ${#TEST_SUITE_NAMES[@]} test suite configurations"
+}
+
+# Common function to run any test suite based on configuration
+run_common_test_suite() {
+    local suite_name="$1"
+    local is_parallel="${2:-false}"
+    
+    local suite_display_name=$(get_config "$suite_name" "name")
+    print_status "🔧 Compiling and running $suite_display_name..."
+    
+    # Check prerequisites
+    local requires_lambda_exe=$(get_config "$suite_name" "requires_lambda_exe")
+    if [ "$requires_lambda_exe" = "true" ]; then
+        if [ ! -f "./lambda.exe" ]; then
+            print_error "Lambda executable not found. Run 'make' first."
+            return 1
+        fi
+        print_success "Lambda executable ready"
+    fi
+    
+    local requires_jq=$(get_config "$suite_name" "requires_jq")
+    if [ "$requires_jq" = "true" ]; then
+        if ! command -v jq &> /dev/null; then
+            print_error "jq is required for ${suite_name} tests"
+            print_error "Please install jq: brew install jq"
+            return 1
+        fi
+    fi
+    
+    # Set environment variables if specified
+    local env_vars=$(jq -r ".tests[] | select(.suite == \"$suite_name\") | .environment // {} | to_entries | map(\"\(.key)=\(.value)\") | join(\"|||\")" "$TEST_CONFIG_FILE" 2>/dev/null || echo "")
+    if [ -n "$env_vars" ] && [ "$env_vars" != "null" ]; then
+        IFS='|||' read -ra ENV_ARRAY <<< "$env_vars"
+        for env_var in "${ENV_ARRAY[@]}"; do
+            if [ -n "$env_var" ]; then
+                # Expand variables in the environment value
+                expanded_env_var=$(eval echo "$env_var")
+                export "$expanded_env_var"
+                print_status "Set environment: $expanded_env_var"
+            fi
+        done
+    fi
+    
+    # Handle different test types
+    local suite_type=$(get_config "$suite_name" "type")
+    case "$suite_type" in
+        "validator")
+            run_validator_suite_impl "$suite_name"
+            return $?
+            ;;
+        "library")
+            if [ "$is_parallel" = "true" ]; then
+                run_parallel_suite_impl "$suite_name"
+                return $?
+            else
+                run_sequential_suite_impl "$suite_name"
+                return $?
+            fi
+            ;;
+        "input")
+            if [ "$is_parallel" = "true" ]; then
+                run_parallel_suite_impl "$suite_name"
+                return $?
+            else
+                run_sequential_suite_impl "$suite_name"
+                return $?
+            fi
+            ;;
+        "mir")
+            run_mir_suite_impl "$suite_name"
+            return $?
+            ;;
+        *)
+            print_error "Unknown test type: $suite_type"
+            return 1
+            ;;
+    esac
+}
+
+# Implementation for validator test suite
+run_validator_suite_impl() {
+    local suite_name="$1"
+    local sources=$(get_config_array "$suite_name" "sources" " ")
+    local binary=$(get_config_array "$suite_name" "binaries" " ")
+    local special_flags=$(get_config "$suite_name" "special_flags")
+    
+    # Compile validator tests
+    local compile_cmd="gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS $sources -o $binary"
+    
+    print_status "Compiling validator tests..."
+    if $compile_cmd 2>/dev/null; then
+        print_success "Validator test suite compiled successfully"
+    else
+        print_error "Failed to compile validator test suite"
+        print_error "Attempting compilation with detailed error output..."
+        $compile_cmd
+        return 1
+    fi
+    
+    # Run validator tests
+    print_status "🧪 Running validator tests..."
+    echo ""
+    
+    set +e
+    local test_output=$(./"$binary" --verbose --tap --jobs=$CPU_CORES 2>&1)
+    local test_exit_code=$?
+    set -e
+    
+    echo "$test_output"
+    echo ""
+    
+    # Parse results
+    local total_tests=$(echo "$test_output" | grep -c "^ok " 2>/dev/null || echo "0")
+    local failed_tests=$(echo "$test_output" | grep -c "^not ok " 2>/dev/null || echo "0")
+    
+    # Clean numeric values
+    total_tests=$(echo "$total_tests" | tr -cd '0-9')
+    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
+    total_tests=${total_tests:-0}
+    failed_tests=${failed_tests:-0}
+    
+    # Store for final summary
+    VALIDATOR_TOTAL_TESTS=$total_tests
+    VALIDATOR_FAILED_TESTS=$failed_tests
+    VALIDATOR_PASSED_TESTS=$((total_tests - failed_tests))
+    
+    # Cleanup
+    if [ -f "$binary" ]; then
+        rm "$binary"
+    fi
+    
+    return $failed_tests
+}
+
+# Implementation for MIR test suite using build config
+run_mir_suite_impl() {
+    local suite_name="$1"
+    local sources=$(get_config_array "$suite_name" "sources" " ")
+    local binary=$(get_config_array "$suite_name" "binaries" " ")
+    local special_flags=$(get_config "$suite_name" "special_flags")
+    
+    # Get build configuration
+    local config_file="build_lambda_config.json"
+    if [ ! -f "$config_file" ]; then
+        print_error "Configuration file $config_file not found!"
+        return 1
+    fi
+    
+    print_status "Loading object files from $config_file..."
+    
+    # Extract and build object files list (reusing existing logic)
+    local object_files=()
+    while IFS= read -r source_file; do
+        local obj_file="build/$(basename "$source_file" .c).o"
+        if [ -f "$obj_file" ]; then
+            object_files+=("$PWD/$obj_file")
+        else
+            print_warning "Object file $obj_file not found. You may need to build the project first."
+        fi
+    done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+    
+    # Process source_dirs if any
+    local source_dirs
+    source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+    if [ -n "$source_dirs" ]; then
+        while IFS= read -r source_dir; do
+            if [ -d "$source_dir" ]; then
+                while IFS= read -r source_file; do
+                    local rel_path="${source_file#$PWD/}"
+                    local obj_file="build/$(basename "$rel_path" .c).o"
+                    if [ -f "$obj_file" ]; then
+                        object_files+=("$PWD/$obj_file")
+                    fi
+                done < <(find "$source_dir" -name "*.c" -type f)
+            fi
+        done <<< "$source_dirs"
+    fi
+    
+    if [ ${#object_files[@]} -eq 0 ]; then
+        print_error "No object files found. Please build the project first using: ./compile.sh"
+        return 1
+    fi
+    
+    # Build library flags (reusing existing logic)
+    local include_flags=""
+    local static_libs=""
+    local dynamic_libs=""
+    local libraries
+    libraries=$(jq -r '.libraries // []' "$config_file")
+    
+    if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
+        while IFS= read -r lib_info; do
+            local name include lib link
+            name=$(echo "$lib_info" | jq -r '.name')
+            include=$(echo "$lib_info" | jq -r '.include // empty')
+            lib=$(echo "$lib_info" | jq -r '.lib // empty')
+            link=$(echo "$lib_info" | jq -r '.link // "static"')
+            
+            if [ -n "$include" ] && [ "$include" != "null" ]; then
+                include_flags="$include_flags -I$include"
+            fi
+            
+            if [ "$link" = "static" ]; then
+                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                    static_libs="$static_libs $lib"
+                fi
+            else
+                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                    dynamic_libs="$dynamic_libs -L$lib -l$name"
+                fi
+            fi
+        done < <(echo "$libraries" | jq -c '.[]')
+    fi
+    
+    # Compile MIR tests
+    print_status "Compiling MIR test..."
+    local compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $binary $sources ${object_files[*]} $static_libs $dynamic_libs"
+    
+    if $compile_cmd 2>/dev/null; then
+        print_success "MIR test suite compiled successfully"
+    else
+        print_error "Failed to compile MIR test suite"
+        print_error "Attempting compilation with detailed error output..."
+        $compile_cmd
+        return 1
+    fi
+    
+    # Run MIR tests
+    print_status "🧪 Running MIR JIT tests..."
+    echo ""
+    
+    set +e
+    local test_output=$(./"$binary" --verbose --tap 2>&1)
+    local test_exit_code=$?
+    set -e
+    
+    echo "$test_output"
+    echo ""
+    
+    # Parse results
+    local total_tests=$(echo "$test_output" | grep -c "^ok " 2>/dev/null || echo "0")
+    local failed_tests=$(echo "$test_output" | grep -c "^not ok " 2>/dev/null || echo "0")
+    
+    # Clean numeric values
+    total_tests=$(echo "$total_tests" | tr -cd '0-9')
+    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
+    total_tests=${total_tests:-0}
+    failed_tests=${failed_tests:-0}
+    
+    # Store for final summary
+    MIR_TOTAL_TESTS=$total_tests
+    MIR_FAILED_TESTS=$failed_tests
+    MIR_PASSED_TESTS=$((total_tests - failed_tests))
+    
+    # Cleanup
+    if [ -f "$binary" ]; then
+        rm "$binary"
+    fi
+    
+    return $failed_tests
+}
+
+# Implementation for parallel test suites (library and input)
+run_parallel_suite_impl() {
+    local suite_name="$1"
+    local sources_str=$(get_config_array "$suite_name" "sources" " ")
+    local dependencies_str=$(get_config_array "$suite_name" "dependencies" "|||")
+    local binaries_str=$(get_config_array "$suite_name" "binaries" " ")
+    local special_flags=$(get_config "$suite_name" "special_flags")
+    
+    # Parse arrays using bash 3.2 compatible method
+    IFS=' ' read -ra sources_array <<< "$sources_str"
+    IFS=' ' read -ra binaries_array <<< "$binaries_str"
+    
+    # Parse dependencies using custom function
+    local dependencies_array=()
+    while IFS= read -r dep; do
+        dependencies_array+=("$dep")
+    done < <(parse_array_string "$dependencies_str" "|||")
+    
+    local total_failed=0
+    local total_tests=0
+    local total_passed=0
+    
+    # Arrays to store results for this suite
+    local test_results=()
+    local test_names=()
+    local test_totals=()
+    local test_passed=()
+    local test_failed=()
+    
+    # Arrays for parallel execution
+    local job_pids=()
+    local result_files=()
+    
+    # Create temporary directory
+    local temp_dir=$(mktemp -d)
+    
+    # Start each test in parallel
+    for i in "${!sources_array[@]}"; do
+        local test_source="test/${sources_array[$i]}"
+        local test_binary="test/${binaries_array[$i]}"
+        local test_deps="${dependencies_array[$i]}"
+        local test_name="${sources_array[$i]%%.c}"
+        local result_file="$temp_dir/result_$i.txt"
+        
+        print_status "Compiling $test_source..."
+        
+        local compile_cmd="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS $special_flags"
+        
+        if $compile_cmd 2>/dev/null; then
+            print_success "Compiled $test_source successfully"
+            
+            # Start test in background
+            print_status "Starting $test_binary in parallel..."
+            (
+                set +e
+                local output=$(./"$test_binary" --verbose --tap 2>&1)
+                local exit_code=$?
+                set -e
+                
+                # Parse results
+                local test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
+                local test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
+                
+                test_total=$(echo "$test_total" | tr -cd '0-9')
+                test_failed=$(echo "$test_failed" | tr -cd '0-9')
+                test_total=${test_total:-0}
+                test_failed=${test_failed:-0}
+                local test_passed=$((test_total - test_failed))
+                
+                # Write results
+                echo "TEST_NAME:$test_name" > "$result_file"
+                echo "TEST_TOTAL:$test_total" >> "$result_file"
+                echo "TEST_PASSED:$test_passed" >> "$result_file"
+                echo "TEST_FAILED:$test_failed" >> "$result_file"
+                echo "TEST_OUTPUT_START" >> "$result_file"
+                echo "$output" >> "$result_file"
+                echo "TEST_OUTPUT_END" >> "$result_file"
+                
+                # Cleanup
+                if [ -f "$test_binary" ]; then
+                    rm "$test_binary"
+                fi
+                
+                exit $test_failed
+            ) &
+            
+            job_pids+=($!)
+            result_files+=("$result_file")
+        else
+            print_error "Failed to compile $test_source"
+            $compile_cmd
+            total_failed=$((total_failed + 1))
+            
+            test_names+=("$test_name")
+            test_totals+=(0)
+            test_passed+=(0)
+            test_failed+=(1)
+        fi
+    done
+    
+    # Wait for all jobs and collect results
+    print_status "⏳ Waiting for parallel test execution to complete..."
+    
+    for i in "${!job_pids[@]}"; do
+        local pid="${job_pids[$i]}"
+        local result_file="${result_files[$i]}"
+        
+        wait $pid
+        
+        if [ -f "$result_file" ]; then
+            local test_name=$(grep "^TEST_NAME:" "$result_file" | cut -d: -f2)
+            local test_total=$(grep "^TEST_TOTAL:" "$result_file" | cut -d: -f2)
+            local test_passed=$(grep "^TEST_PASSED:" "$result_file" | cut -d: -f2)
+            local test_failed=$(grep "^TEST_FAILED:" "$result_file" | cut -d: -f2)
+            
+            local test_output=$(sed -n '/^TEST_OUTPUT_START$/,/^TEST_OUTPUT_END$/p' "$result_file" | sed '1d;$d')
+            
+            print_status "📋 Results for $test_name:"
+            echo "$test_output"
+            echo ""
+            
+            test_names+=("$test_name")
+            test_totals+=($test_total)
+            test_passed+=($test_passed)
+            test_failed+=($test_failed)
+            
+            total_tests=$((total_tests + test_total))
+            total_failed=$((total_failed + test_failed))
+        else
+            print_error "Failed to read results for job $i"
+            total_failed=$((total_failed + 1))
+        fi
+    done
+    
+    # Cleanup
+    rm -rf "$temp_dir"
+    
+    total_passed=$((total_tests - total_failed))
+    
+    # Store results based on suite type
+    if [ "$suite_name" = "library" ]; then
+        LIB_TOTAL_TESTS=$total_tests
+        LIB_PASSED_TESTS=$total_passed
+        LIB_FAILED_TESTS=$total_failed
+        LIB_TEST_NAMES=("${test_names[@]}")
+        LIB_TEST_TOTALS=("${test_totals[@]}")
+        LIB_TEST_PASSED=("${test_passed[@]}")
+        LIB_TEST_FAILED=("${test_failed[@]}")
+    elif [ "$suite_name" = "input" ]; then
+        INPUT_TOTAL_TESTS=$total_tests
+        INPUT_PASSED_TESTS=$total_passed
+        INPUT_FAILED_TESTS=$total_failed
+        INPUT_TEST_NAMES=("${test_names[@]}")
+        INPUT_TEST_TOTALS=("${test_totals[@]}")
+        INPUT_TEST_PASSED=("${test_passed[@]}")
+        INPUT_TEST_FAILED=("${test_failed[@]}")
+    fi
+    
+    echo ""
+    local suite_display_name=$(get_config "$suite_name" "name")
+    print_status "📊 $suite_display_name Results Summary:"
+    echo "   Total Tests: $total_tests"
+    echo "   Passed: $total_passed"
+    echo "   Failed: $total_failed"
+    
+    return $total_failed
+}
+
+# Implementation for sequential test suites
+run_sequential_suite_impl() {
+    local suite_name="$1"
+    # This can be implemented if needed for sequential execution
+    # For now, just call the parallel implementation
+    run_parallel_suite_impl "$suite_name"
+    return $?
 }
 
 # Function to detect CPU cores
@@ -205,537 +685,56 @@ find_criterion() {
 
 # Function to compile and run validator tests
 run_validator_tests() {
-    print_status "🔧 Compiling and running Validator tests..."
-    
-    # Check if lambda executable exists
-    if [ ! -f "./lambda.exe" ]; then
-        print_error "Lambda executable not found. Run 'make' first."
-        return 1
-    fi
-
-    print_success "Lambda executable ready"
-
-    # Compile with full validator integration
-    COMPILE_CMD="gcc -std=c99 -Wall -Wextra -g \
-        -Iinclude -Ilambda -Ilambda/validator \
-        $CRITERION_FLAGS \
-        $VALIDATOR_TEST_SOURCES \
-        -o $VALIDATOR_TEST_BINARY"
-
-    print_status "Compiling validator tests..."
-
-    if $COMPILE_CMD 2>/dev/null; then
-        print_success "Validator test suite compiled successfully"
-    else
-        print_error "Failed to compile validator test suite"
-        print_error "Attempting compilation with detailed error output..."
-        $COMPILE_CMD
-        return 1
-    fi
-
-    # Run the comprehensive Criterion test suite
-    print_status "🧪 Running validator tests..."
-    echo ""
-
-    # Set environment variables for test files
-    export TEST_DIR_PATH="$PWD/test/lambda/validator"
-    export LAMBDA_EXE_PATH="$PWD/lambda.exe"
-
-    # Run tests with detailed output
-    set +e  # Disable strict error handling for test execution
-    VALIDATOR_TEST_OUTPUT=$(./"$VALIDATOR_TEST_BINARY" --verbose --tap --jobs=$CPU_CORES 2>&1)
-    VALIDATOR_TEST_EXIT_CODE=$?
-    set -e  # Re-enable strict error handling
-
-    echo "$VALIDATOR_TEST_OUTPUT"
-    echo ""
-
-    # Parse validator test results
-    VALIDATOR_TOTAL_TESTS=$(echo "$VALIDATOR_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
-    VALIDATOR_FAILED_TESTS=$(echo "$VALIDATOR_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
-
-    # Clean numeric values
-    VALIDATOR_TOTAL_TESTS=$(echo "$VALIDATOR_TOTAL_TESTS" | tr -cd '0-9')
-    VALIDATOR_FAILED_TESTS=$(echo "$VALIDATOR_FAILED_TESTS" | tr -cd '0-9')
-
-    # Ensure defaults
-    VALIDATOR_TOTAL_TESTS=${VALIDATOR_TOTAL_TESTS:-0}
-    VALIDATOR_FAILED_TESTS=${VALIDATOR_FAILED_TESTS:-0}
-    
-    # Store for final summary
-    VALIDATOR_PASSED_TESTS=$((VALIDATOR_TOTAL_TESTS - VALIDATOR_FAILED_TESTS))
-
-    # Cleanup validator binary
-    if [ -f "$VALIDATOR_TEST_BINARY" ]; then
-        rm "$VALIDATOR_TEST_BINARY"
-    fi
-
-    return $VALIDATOR_FAILED_TESTS
+    run_common_test_suite "validator"
+    return $?
 }
 
 # Function to compile and run library tests
 run_library_tests() {
-    print_status "🔧 Compiling and running Library tests..."
-    
-    local lib_failed_tests=0
-    local lib_total_tests=0
-    local lib_passed_tests=0
-    
-    # Initialize arrays to store individual test results
-    LIB_TEST_RESULTS=()
-    LIB_TEST_NAMES=()
-    LIB_TEST_TOTALS=()
-    LIB_TEST_PASSED=()
-    LIB_TEST_FAILED=()
-    
-    # Arrays to store background job PIDs and temporary result files
-    local job_pids=()
-    local result_files=()
-    
-    # Create temporary directory for parallel execution results
-    local temp_dir=$(mktemp -d)
-    
-    # Compile and start each library test in parallel
-    for i in "${!LIB_TEST_SOURCES[@]}"; do
-        local test_source="test/${LIB_TEST_SOURCES[$i]}"
-        local test_binary="test/${LIB_TEST_BINARIES[$i]}"
-        local test_deps="${LIB_TEST_DEPENDENCIES[$i]}"
-        local test_name="${LIB_TEST_SOURCES[$i]%%.c}"  # Remove .c extension
-        local result_file="$temp_dir/result_$i.txt"
-        
-        print_status "Compiling $test_source..."
-        
-        # Compile command with dependencies
-        COMPILE_CMD="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS -fms-extensions"
-        
-        if $COMPILE_CMD 2>/dev/null; then
-            print_success "Compiled $test_source successfully"
-            
-            # Start test execution in background
-            print_status "Starting $test_binary in parallel..."
-            (
-                # Run the test and capture output
-                set +e  # Disable strict error handling for test execution
-                LIB_TEST_OUTPUT=$(./"$test_binary" --verbose --tap 2>&1)
-                LIB_TEST_EXIT_CODE=$?
-                set -e  # Re-enable strict error handling
-                
-                # Parse test results
-                TEST_TOTAL=$(echo "$LIB_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
-                TEST_FAILED=$(echo "$LIB_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
-                
-                # Clean numeric values
-                TEST_TOTAL=$(echo "$TEST_TOTAL" | tr -cd '0-9')
-                TEST_FAILED=$(echo "$TEST_FAILED" | tr -cd '0-9')
-                
-                # Ensure defaults
-                TEST_TOTAL=${TEST_TOTAL:-0}
-                TEST_FAILED=${TEST_FAILED:-0}
-                TEST_PASSED=$((TEST_TOTAL - TEST_FAILED))
-                
-                # Write results to temporary file
-                echo "TEST_NAME:$test_name" > "$result_file"
-                echo "TEST_TOTAL:$TEST_TOTAL" >> "$result_file"
-                echo "TEST_PASSED:$TEST_PASSED" >> "$result_file"
-                echo "TEST_FAILED:$TEST_FAILED" >> "$result_file"
-                echo "TEST_OUTPUT_START" >> "$result_file"
-                echo "$LIB_TEST_OUTPUT" >> "$result_file"
-                echo "TEST_OUTPUT_END" >> "$result_file"
-                
-                # Cleanup test binary
-                if [ -f "$test_binary" ]; then
-                    rm "$test_binary"
-                fi
-                
-                exit $TEST_FAILED
-            ) &
-            
-            # Store background job PID and result file
-            job_pids+=($!)
-            result_files+=("$result_file")
-            
-        else
-            print_error "Failed to compile $test_source"
-            print_error "Attempting compilation with detailed error output..."
-            $COMPILE_CMD
-            lib_failed_tests=$((lib_failed_tests + 1))
-            
-            # Store failed compilation result
-            LIB_TEST_NAMES+=("$test_name")
-            LIB_TEST_TOTALS+=(0)
-            LIB_TEST_PASSED+=(0)
-            LIB_TEST_FAILED+=(1)
-        fi
-    done
-    
-    # Wait for all background jobs and collect results
-    print_status "⏳ Waiting for parallel test execution to complete..."
-    
-    for i in "${!job_pids[@]}"; do
-        local pid="${job_pids[$i]}"
-        local result_file="${result_files[$i]}"
-        
-        # Wait for this specific job
-        wait $pid
-        local job_exit_code=$?
-        
-        # Read results from temporary file
-        if [ -f "$result_file" ]; then
-            local test_name=$(grep "^TEST_NAME:" "$result_file" | cut -d: -f2)
-            local test_total=$(grep "^TEST_TOTAL:" "$result_file" | cut -d: -f2)
-            local test_passed=$(grep "^TEST_PASSED:" "$result_file" | cut -d: -f2)
-            local test_failed=$(grep "^TEST_FAILED:" "$result_file" | cut -d: -f2)
-            
-            # Extract and display test output
-            local test_output=$(sed -n '/^TEST_OUTPUT_START$/,/^TEST_OUTPUT_END$/p' "$result_file" | sed '1d;$d')
-            
-            print_status "📋 Results for $test_name:"
-            echo "$test_output"
-            echo ""
-            
-            # Store individual test results
-            LIB_TEST_NAMES+=("$test_name")
-            LIB_TEST_TOTALS+=($test_total)
-            LIB_TEST_PASSED+=($test_passed)
-            LIB_TEST_FAILED+=($test_failed)
-            
-            lib_total_tests=$((lib_total_tests + test_total))
-            lib_failed_tests=$((lib_failed_tests + test_failed))
-        else
-            print_error "Failed to read results for job $i"
-            lib_failed_tests=$((lib_failed_tests + 1))
-        fi
-    done
-    
-    # Cleanup temporary directory
-    rm -rf "$temp_dir"
-    
-    lib_passed_tests=$((lib_total_tests - lib_failed_tests))
-    
-    # Store totals for final summary
-    LIB_TOTAL_TESTS=$lib_total_tests
-    LIB_PASSED_TESTS=$lib_passed_tests
-    LIB_FAILED_TESTS=$lib_failed_tests
-    
-    echo ""
-    print_status "📊 Library Test Results Summary:"
-    echo "   Total Tests: $lib_total_tests"
-    echo "   Passed: $lib_passed_tests"
-    echo "   Failed: $lib_failed_tests"
-    
-    return $lib_failed_tests
+    run_common_test_suite "library" "true"
+    return $?
 }
 
 # Function to compile and run input processing tests
 run_input_tests() {
-    print_status "🔧 Compiling and running Input processing tests..."
-    
-    local input_failed_tests=0
-    local input_total_tests=0
-    local input_passed_tests=0
-    
-    # Initialize arrays to store individual test results
-    INPUT_TEST_RESULTS=()
-    INPUT_TEST_NAMES=()
-    INPUT_TEST_TOTALS=()
-    INPUT_TEST_PASSED=()
-    INPUT_TEST_FAILED=()
-    
-    # Arrays to store background job PIDs and temporary result files
-    local job_pids=()
-    local result_files=()
-    
-    # Create temporary directory for parallel execution results
-    local temp_dir=$(mktemp -d)
-    
-    # Compile and start each input test in parallel
-    for i in "${!INPUT_TEST_SOURCES[@]}"; do
-        local test_source="test/${INPUT_TEST_SOURCES[$i]}"
-        local test_binary="test/${INPUT_TEST_BINARIES[$i]}"
-        local test_deps="${INPUT_TEST_DEPENDENCIES[$i]}"
-        local test_name="${INPUT_TEST_SOURCES[$i]%%.c}"  # Remove .c extension
-        local result_file="$temp_dir/result_$i.txt"
-        
-        print_status "Compiling $test_source..."
-        
-        # Compile command with dependencies
-        COMPILE_CMD="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS -fms-extensions"
-        
-        if $COMPILE_CMD 2>/dev/null; then
-            print_success "Compiled $test_source successfully"
-            
-            # Start test execution in background
-            print_status "Starting $test_binary in parallel..."
-            (
-                # Run the test and capture output
-                set +e  # Disable strict error handling for test execution
-                INPUT_TEST_OUTPUT=$(./"$test_binary" --verbose --tap 2>&1)
-                INPUT_TEST_EXIT_CODE=$?
-                set -e  # Re-enable strict error handling
-                
-                # Parse test results
-                TEST_TOTAL=$(echo "$INPUT_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
-                TEST_FAILED=$(echo "$INPUT_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
-                
-                # Clean numeric values
-                TEST_TOTAL=$(echo "$TEST_TOTAL" | tr -cd '0-9')
-                TEST_FAILED=$(echo "$TEST_FAILED" | tr -cd '0-9')
-                
-                # Ensure defaults
-                TEST_TOTAL=${TEST_TOTAL:-0}
-                TEST_FAILED=${TEST_FAILED:-0}
-                TEST_PASSED=$((TEST_TOTAL - TEST_FAILED))
-                
-                # Write results to temporary file
-                echo "TEST_NAME:$test_name" > "$result_file"
-                echo "TEST_TOTAL:$TEST_TOTAL" >> "$result_file"
-                echo "TEST_PASSED:$TEST_PASSED" >> "$result_file"
-                echo "TEST_FAILED:$TEST_FAILED" >> "$result_file"
-                echo "TEST_OUTPUT_START" >> "$result_file"
-                echo "$INPUT_TEST_OUTPUT" >> "$result_file"
-                echo "TEST_OUTPUT_END" >> "$result_file"
-                
-                # Cleanup test binary
-                if [ -f "$test_binary" ]; then
-                    rm "$test_binary"
-                fi
-                
-                exit $TEST_FAILED
-            ) &
-            
-            # Store background job PID and result file
-            job_pids+=($!)
-            result_files+=("$result_file")
-            
-        else
-            print_error "Failed to compile $test_source"
-            print_error "Attempting compilation with detailed error output..."
-            $COMPILE_CMD
-            input_failed_tests=$((input_failed_tests + 1))
-            
-            # Store failed compilation result
-            INPUT_TEST_NAMES+=("$test_name")
-            INPUT_TEST_TOTALS+=(0)
-            INPUT_TEST_PASSED+=(0)
-            INPUT_TEST_FAILED+=(1)
-        fi
-    done
-    
-    # Wait for all background jobs and collect results
-    print_status "⏳ Waiting for parallel test execution to complete..."
-    
-    for i in "${!job_pids[@]}"; do
-        local pid="${job_pids[$i]}"
-        local result_file="${result_files[$i]}"
-        
-        # Wait for this specific job
-        wait $pid
-        local job_exit_code=$?
-        
-        # Read results from temporary file
-        if [ -f "$result_file" ]; then
-            local test_name=$(grep "^TEST_NAME:" "$result_file" | cut -d: -f2)
-            local test_total=$(grep "^TEST_TOTAL:" "$result_file" | cut -d: -f2)
-            local test_passed=$(grep "^TEST_PASSED:" "$result_file" | cut -d: -f2)
-            local test_failed=$(grep "^TEST_FAILED:" "$result_file" | cut -d: -f2)
-            
-            # Extract and display test output
-            local test_output=$(sed -n '/^TEST_OUTPUT_START$/,/^TEST_OUTPUT_END$/p' "$result_file" | sed '1d;$d')
-            
-            print_status "📋 Results for $test_name:"
-            echo "$test_output"
-            echo ""
-            
-            # Store individual test results
-            INPUT_TEST_NAMES+=("$test_name")
-            INPUT_TEST_TOTALS+=($test_total)
-            INPUT_TEST_PASSED+=($test_passed)
-            INPUT_TEST_FAILED+=($test_failed)
-            
-            input_total_tests=$((input_total_tests + test_total))
-            input_failed_tests=$((input_failed_tests + test_failed))
-        else
-            print_error "Failed to read results for job $i"
-            input_failed_tests=$((input_failed_tests + 1))
-        fi
-    done
-    
-    # Cleanup temporary directory
-    rm -rf "$temp_dir"
-    
-    input_passed_tests=$((input_total_tests - input_failed_tests))
-    
-    # Store totals for final summary
-    INPUT_TOTAL_TESTS=$input_total_tests
-    INPUT_PASSED_TESTS=$input_passed_tests
-    INPUT_FAILED_TESTS=$input_failed_tests
-    
-    echo ""
-    print_status "📊 Input Test Results Summary:"
-    echo "   Total Tests: $input_total_tests"
-    echo "   Passed: $input_passed_tests"
-    echo "   Failed: $input_failed_tests"
-    
-    return $input_failed_tests
+    run_common_test_suite "input" "true"
+    return $?
 }
 
 # Function to compile and run MIR JIT tests
 run_mir_tests() {
-    print_status "🔧 Compiling and running MIR JIT tests..."
-    
-    # Check if jq is available
-    if ! command -v jq &> /dev/null; then
-        print_error "jq is required to parse the configuration file"
-        print_error "Please install jq: brew install jq"
-        return 1
-    fi
-
-    # Get the project root and config file
-    CONFIG_FILE="build_lambda_config.json"
-
-    if [ ! -f "$CONFIG_FILE" ]; then
-        print_error "Configuration file $CONFIG_FILE not found!"
-        return 1
-    fi
-
-    print_status "Loading object files from $CONFIG_FILE..."
-
-    # Extract source files from JSON and convert to object file paths
-    OBJECT_FILES=()
-
-    # Process source_files
-    while IFS= read -r source_file; do
-        # Convert source file path to object file path
-        # Remove leading directory path and change extension to .o
-        obj_file="build/$(basename "$source_file" .c).o"
-        if [ -f "$obj_file" ]; then
-            OBJECT_FILES+=("$PWD/$obj_file")
-        else
-            print_warning "Object file $obj_file not found. You may need to build the project first."
-        fi
-    done < <(jq -r '.source_files[]' "$CONFIG_FILE" | grep -E '\.(c|cpp)$')
-
-    # Process source_dirs - find all .c files in the directories
-    SOURCE_DIRS=$(jq -r '.source_dirs[]?' "$CONFIG_FILE" 2>/dev/null)
-    if [ -n "$SOURCE_DIRS" ]; then
-        while IFS= read -r source_dir; do
-            if [ -d "$source_dir" ]; then
-                while IFS= read -r source_file; do
-                    # Convert absolute path to relative path from project root
-                    rel_path="${source_file#$PWD/}"
-                    obj_file="build/$(basename "$rel_path" .c).o"
-                    if [ -f "$obj_file" ]; then
-                        OBJECT_FILES+=("$PWD/$obj_file")
-                    else
-                        print_warning "Object file $obj_file not found for $rel_path. You may need to build the project first."
-                    fi
-                done < <(find "$source_dir" -name "*.c" -type f)
-            fi
-        done <<< "$SOURCE_DIRS"
-    fi
-
-    print_status "Found ${#OBJECT_FILES[@]} object files"
-
-    # Check if we have any object files
-    if [ ${#OBJECT_FILES[@]} -eq 0 ]; then
-        print_error "No object files found. Please build the project first using: ./compile.sh"
-        return 1
-    fi
-
-    # Extract compiler flags from JSON
-    COMPILER_FLAGS=$(jq -r '.compiler_flags // []' "$CONFIG_FILE")
-    LIBRARIES=$(jq -r '.libraries // []' "$CONFIG_FILE")
-
-    # Default compiler flags for MIR testing
-    DEFAULT_FLAGS="-std=c99 -Wall -Wextra -O2 -g -fms-extensions -pedantic"
-
-    # Build include directory flags from libraries
-    INCLUDE_FLAGS=""
-    STATIC_LIBS=""
-    DYNAMIC_LIBS=""
-
-    if [ "$LIBRARIES" != "null" ] && [ "$LIBRARIES" != "[]" ]; then
-        while IFS= read -r lib_info; do
-            name=$(echo "$lib_info" | jq -r '.name')
-            include=$(echo "$lib_info" | jq -r '.include // empty')
-            lib=$(echo "$lib_info" | jq -r '.lib // empty')
-            link=$(echo "$lib_info" | jq -r '.link // "static"')
-            
-            # Add include directory if specified
-            if [ -n "$include" ] && [ "$include" != "null" ]; then
-                INCLUDE_FLAGS="$INCLUDE_FLAGS -I$include"
-            fi
-            
-            # Add library based on link type
-            if [ "$link" = "static" ]; then
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    STATIC_LIBS="$STATIC_LIBS $lib"
-                fi
-            else
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    DYNAMIC_LIBS="$DYNAMIC_LIBS -L$lib -l$name"
-                fi
-            fi
-        done < <(echo "$LIBRARIES" | jq -c '.[]')
-    fi
-
-    # Compile the MIR test
-    print_status "Compiling MIR test..."
-    COMPILE_CMD="gcc $DEFAULT_FLAGS $INCLUDE_FLAGS $CRITERION_FLAGS -o $MIR_TEST_BINARY $MIR_TEST_SOURCES ${OBJECT_FILES[*]} $STATIC_LIBS $DYNAMIC_LIBS"
-
-    if $COMPILE_CMD 2>/dev/null; then
-        print_success "MIR test suite compiled successfully"
-    else
-        print_error "Failed to compile MIR test suite"
-        print_error "Attempting compilation with detailed error output..."
-        $COMPILE_CMD
-        return 1
-    fi
-
-    # Run the MIR tests
-    print_status "🧪 Running MIR JIT tests..."
-    echo ""
-
-    # Run tests with detailed output
-    set +e  # Disable strict error handling for test execution
-    MIR_TEST_OUTPUT=$(./"$MIR_TEST_BINARY" --verbose --tap 2>&1)
-    MIR_TEST_EXIT_CODE=$?
-    set -e  # Re-enable strict error handling
-
-    echo "$MIR_TEST_OUTPUT"
-    echo ""
-
-    # Parse MIR test results
-    MIR_TOTAL_TESTS=$(echo "$MIR_TEST_OUTPUT" | grep -c "^ok " 2>/dev/null || echo "0")
-    MIR_FAILED_TESTS=$(echo "$MIR_TEST_OUTPUT" | grep -c "^not ok " 2>/dev/null || echo "0")
-
-    # Clean numeric values
-    MIR_TOTAL_TESTS=$(echo "$MIR_TOTAL_TESTS" | tr -cd '0-9')
-    MIR_FAILED_TESTS=$(echo "$MIR_FAILED_TESTS" | tr -cd '0-9')
-
-    # Ensure defaults
-    MIR_TOTAL_TESTS=${MIR_TOTAL_TESTS:-0}
-    MIR_FAILED_TESTS=${MIR_FAILED_TESTS:-0}
-    
-    # Store for final summary
-    MIR_PASSED_TESTS=$((MIR_TOTAL_TESTS - MIR_FAILED_TESTS))
-
-    # Cleanup MIR binary
-    if [ -f "$MIR_TEST_BINARY" ]; then
-        rm "$MIR_TEST_BINARY"
-    fi
-
-    return $MIR_FAILED_TESTS
+    run_common_test_suite "mir"
+    return $?
 }
 
 # Function to run individual library test
 run_individual_library_test() {
     local test_name="$1"
-    local test_index=-1
     
-    # Find the test index
-    for i in "${!LIB_TEST_SOURCES[@]}"; do
-        if [[ "${LIB_TEST_SOURCES[$i]}" == "test_${test_name}.c" ]]; then
+    # Load configuration if not already loaded
+    if [ ${#TEST_SUITE_NAMES[@]} -eq 0 ]; then
+        load_test_config
+    fi
+    
+    # Find the test in library suite configuration
+    local sources_str=$(get_config_array "library" "sources" " ")
+    local dependencies_str=$(get_config_array "library" "dependencies" "|||")
+    local binaries_str=$(get_config_array "library" "binaries" " ")
+    local special_flags=$(get_config "library" "special_flags")
+    
+    # Parse arrays using bash 3.2 compatible method
+    IFS=' ' read -ra sources_array <<< "$sources_str"
+    IFS=' ' read -ra binaries_array <<< "$binaries_str"
+    
+    # Parse dependencies using custom function
+    local dependencies_array=()
+    while IFS= read -r dep; do
+        dependencies_array+=("$dep")
+    done < <(parse_array_string "$dependencies_str" "|||")
+    
+    local test_index=-1
+    for i in "${!sources_array[@]}"; do
+        if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
             test_index=$i
             break
         fi
@@ -744,7 +743,7 @@ run_individual_library_test() {
     if [ $test_index -eq -1 ]; then
         print_error "Test '$test_name' not found in library tests"
         print_status "Available library tests:"
-        for source in "${LIB_TEST_SOURCES[@]}"; do
+        for source in "${sources_array[@]}"; do
             test_basename=$(basename "$source" .c)
             echo "  - ${test_basename#test_}"
         done
@@ -753,14 +752,13 @@ run_individual_library_test() {
     
     print_status "🧪 Running individual test: $test_name"
     
-    local source="${LIB_TEST_SOURCES[$test_index]}"
-    local deps="${LIB_TEST_DEPENDENCIES[$test_index]}"
-    local binary="${LIB_TEST_BINARIES[$test_index]}"
+    local source="${sources_array[$test_index]}"
+    local deps="${dependencies_array[$test_index]}"
+    local binary="${binaries_array[$test_index]}"
     
     print_status "Compiling test/test_$test_name.c..."
     
-    # Build compile command
-    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps"
+    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
     
     if $compile_cmd 2>/dev/null; then
         print_success "Compiled test/$source successfully"
@@ -774,12 +772,11 @@ run_individual_library_test() {
     print_status "🧪 Running $test_name tests..."
     echo ""
     
-    # Run the test with timeout - try different output formats
     set +e
+    local test_output
     if command -v timeout >/dev/null 2>&1; then
-        # First try with just basic output
         test_output=$(timeout 30 ./test/$binary 2>&1)
-        test_exit_code=$?
+        local test_exit_code=$?
         if [ $test_exit_code -eq 124 ]; then
             print_error "Test $test_name timed out after 30 seconds"
             test_output="Test timed out"
@@ -797,21 +794,18 @@ run_individual_library_test() {
     # Parse results from Criterion's standard output format
     local total_tests=0
     local failed_tests=0
-    local passing_tests=0
-    local crashing_tests=0
     
-    # Parse Criterion synthesis line: "[====] Synthesis: Tested: X | Passing: Y | Failing: Z | Crashing: W"
     if echo "$test_output" | grep -q "Synthesis:"; then
+        local synthesis_line
         synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
         total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        local passing_tests
         passing_tests=$(echo "$synthesis_line" | grep -o "Passing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
         failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        local crashing_tests
         crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        
-        # Total failures include both failing and crashing tests
         failed_tests=$((failed_tests + crashing_tests))
     else
-        # Fallback: assume success if no clear failure indicators and exit code is 0
         if [ $test_exit_code -eq 0 ]; then
             total_tests=1
             failed_tests=0
@@ -832,7 +826,6 @@ run_individual_library_test() {
     total_tests=${total_tests:-0}
     failed_tests=${failed_tests:-0}
     
-    # Print summary
     local passed_tests=$((total_tests - failed_tests))
     echo "================================================"
     print_status "📊 $test_name Test Results:"
@@ -853,11 +846,31 @@ run_individual_library_test() {
 # Function to run individual input test
 run_individual_input_test() {
     local test_name="$1"
-    local test_index=-1
     
-    # Find the test index
-    for i in "${!INPUT_TEST_SOURCES[@]}"; do
-        if [[ "${INPUT_TEST_SOURCES[$i]}" == "test_${test_name}.c" ]]; then
+    # Load configuration if not already loaded
+    if [ ${#TEST_SUITE_NAMES[@]} -eq 0 ]; then
+        load_test_config
+    fi
+    
+    # Find the test in input suite configuration
+    local sources_str=$(get_config_array "input" "sources" " ")
+    local dependencies_str=$(get_config_array "input" "dependencies" "|||")
+    local binaries_str=$(get_config_array "input" "binaries" " ")
+    local special_flags=$(get_config "input" "special_flags")
+    
+    # Parse arrays using bash 3.2 compatible method
+    IFS=' ' read -ra sources_array <<< "$sources_str"
+    IFS=' ' read -ra binaries_array <<< "$binaries_str"
+    
+    # Parse dependencies using custom function
+    local dependencies_array=()
+    while IFS= read -r dep; do
+        dependencies_array+=("$dep")
+    done < <(parse_array_string "$dependencies_str" "|||")
+    
+    local test_index=-1
+    for i in "${!sources_array[@]}"; do
+        if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
             test_index=$i
             break
         fi
@@ -866,7 +879,7 @@ run_individual_input_test() {
     if [ $test_index -eq -1 ]; then
         print_error "Test '$test_name' not found in input tests"
         print_status "Available input tests:"
-        for source in "${INPUT_TEST_SOURCES[@]}"; do
+        for source in "${sources_array[@]}"; do
             test_basename=$(basename "$source" .c)
             echo "  - ${test_basename#test_}"
         done
@@ -875,14 +888,13 @@ run_individual_input_test() {
     
     print_status "🧪 Running individual test: $test_name"
     
-    local source="${INPUT_TEST_SOURCES[$test_index]}"
-    local deps="${INPUT_TEST_DEPENDENCIES[$test_index]}"
-    local binary="${INPUT_TEST_BINARIES[$test_index]}"
+    local source="${sources_array[$test_index]}"
+    local deps="${dependencies_array[$test_index]}"
+    local binary="${binaries_array[$test_index]}"
     
     print_status "Compiling test/test_$test_name.c..."
     
-    # Build compile command
-    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps"
+    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
     
     if $compile_cmd 2>/dev/null; then
         print_success "Compiled test/$source successfully"
@@ -896,12 +908,11 @@ run_individual_input_test() {
     print_status "🧪 Running $test_name tests..."
     echo ""
     
-    # Run the test with timeout - try different output formats
     set +e
+    local test_output
     if command -v timeout >/dev/null 2>&1; then
-        # First try with just basic output
         test_output=$(timeout 30 ./test/$binary 2>&1)
-        test_exit_code=$?
+        local test_exit_code=$?
         if [ $test_exit_code -eq 124 ]; then
             print_error "Test $test_name timed out after 30 seconds"
             test_output="Test timed out"
@@ -919,21 +930,18 @@ run_individual_input_test() {
     # Parse results from Criterion's standard output format
     local total_tests=0
     local failed_tests=0
-    local passing_tests=0
-    local crashing_tests=0
     
-    # Parse Criterion synthesis line: "[====] Synthesis: Tested: X | Passing: Y | Failing: Z | Crashing: W"
     if echo "$test_output" | grep -q "Synthesis:"; then
+        local synthesis_line
         synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
         total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        local passing_tests
         passing_tests=$(echo "$synthesis_line" | grep -o "Passing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
         failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        local crashing_tests
         crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        
-        # Total failures include both failing and crashing tests
         failed_tests=$((failed_tests + crashing_tests))
     else
-        # Fallback: assume success if no clear failure indicators and exit code is 0
         if [ $test_exit_code -eq 0 ]; then
             total_tests=1
             failed_tests=0
@@ -954,7 +962,6 @@ run_individual_input_test() {
     total_tests=${total_tests:-0}
     failed_tests=${failed_tests:-0}
     
-    # Print summary
     local passed_tests=$((total_tests - failed_tests))
     echo "================================================"
     print_status "📊 $test_name Test Results:"
@@ -1020,6 +1027,9 @@ run_target_test() {
 # Main execution
 echo ""
 print_status "🚀 Starting comprehensive test suite..."
+
+# Load test configuration
+load_test_config
 
 # Detect CPU cores for parallel execution
 detect_cpu_cores
