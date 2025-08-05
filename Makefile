@@ -209,7 +209,8 @@ test:
 test-input: build
 	@echo "Running input processing test suite..."
 	@if [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=input; \
+		./test/test_all.sh --target=mime_detect --raw; \
+		./test/test_all.sh --target=math --raw; \
 	else \
 		echo "Error: Test script not found at test/test_all.sh"; \
 		echo "Please ensure the test script exists and is executable."; \
