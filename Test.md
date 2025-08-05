@@ -27,12 +27,13 @@ The Lambda project features a comprehensive, multi-layered testing infrastructur
 
 ### Key Features
 
+✅ **JSON Configuration**: Dynamic test suite configuration via `test/test_config.json`  
+✅ **Targeted Testing**: Run specific test suites or individual tests  
+✅ **Raw Output Mode**: Direct test execution without shell wrapper formatting  
 ✅ **Parallel Execution**: All test suites run in parallel for maximum speed  
 ✅ **Dynamic CPU Detection**: Automatically uses optimal CPU core count  
-✅ **Comprehensive Coverage**: Tests all major components (Library, MIR JIT, Validator)  
+✅ **Comprehensive Coverage**: Tests all major components (Library, Input, Validator, MIR JIT)  
 ✅ **Memory Safety**: Built-in leak detection and AddressSanitizer integration  
-✅ **Performance Tracking**: Benchmark results stored for regression analysis  
-✅ **CI Ready**: Optimized test targets for continuous integration  
 
 ## 🚀 Quick Start
 
@@ -40,37 +41,43 @@ The Lambda project features a comprehensive, multi-layered testing infrastructur
 # Install dependencies
 brew install criterion jq valgrind lcov
 
-# Run basic test suite
-make test
+# Run all tests
+./test/test_all.sh
 
-# Run all tests (comprehensive)
-make test-all
+# Run specific test suite
+./test/test_all.sh --target=library
 
-# Run CI test suite
-make test-ci
+# Run individual test
+./test/test_all.sh --target=math
+
+# Run with raw output (no shell wrapper)
+./test/test_all.sh --target=math --raw
 ```
 
 ## 🧪 Test Types
 
-### 1. Unit Tests (`make test`)
+### 1. Unit Tests
 
-Comprehensive Criterion-based unit tests covering all major components:
+JSON-configured test suites covering all major components:
 
-**Library Tests** (5 test suites, run in parallel):
-- `test_strbuf.c` - String buffer operations and memory management
-- `test_strview.c` - String view utilities and parsing
-- `test_variable_pool.c` - Memory pool allocation and reallocation (18 tests)
-- `test_num_stack.c` - Numeric stack operations
-- `test_mime_detect.c` - MIME type detection algorithms
+**Library Tests** (parallel execution):
+- `strbuf` - String buffer operations and memory management
+- `strview` - String view utilities and parsing  
+- `variable_pool` - Memory pool allocation and reallocation
+- `num_stack` - Numeric stack operations
 
-**MIR JIT Tests** (`test_mir.c`):
+**Input Processing Tests** (parallel execution):
+- `mime_detect` - MIME type detection algorithms (24 tests)
+- `math` - Mathematical expression parsing and roundtrip testing (38 tests)
+
+**MIR JIT Tests**:
 - JIT context initialization and cleanup
 - C code compilation to MIR intermediate representation
 - Native code generation and execution
 - Function pointer management and execution
 - Error handling for compilation failures
 
-**Validator Tests** (`test_validator.c`):
+**Validator Tests**:
 - Schema parsing for all Lambda type constructs
 - Validation logic for primitive, union, array, map types
 - Element types, reference types, and function types
@@ -135,23 +142,40 @@ Line and branch coverage analysis:
 
 ## 🏗️ Test Architecture
 
+### JSON Configuration System
+
+Test suites are defined in `test/test_config.json`:
+
+```json
+{
+  "tests": [
+    {
+      "suite": "library",
+      "name": "📚 Library Tests",
+      "sources": ["test_strbuf.c", "test_strview.c", ...],
+      "dependencies": [...],
+      "binaries": [...],
+      "type": "library",
+      "parallel": true
+    },
+    ...
+  ]
+}
+```
+
 ### Parallel Execution Design
 
 ```
 Main Test Runner (test_all.sh)
+├── Configuration Loading (test_config.json)
 ├── CPU Detection (detect_cpu_cores)
 ├── Criterion Discovery (find_criterion)
-└── Parallel Suite Execution
-    ├── Library Tests (Background Process 1)
-    │   ├── test_strbuf.exe (Parallel)
-    │   ├── test_strview.exe (Parallel)
-    │   ├── test_variable_pool.exe (Parallel)
-    │   ├── test_num_stack.exe (Parallel)
-    │   └── test_mime_detect.exe (Parallel)
-    ├── MIR JIT Tests (Background Process 2)
-    │   └── test_mir.exe (--jobs=CPU_CORES)
-    └── Validator Tests (Background Process 3)
-        └── test_validator.exe (--jobs=CPU_CORES)
+└── Test Execution
+    ├── All Tests (--target=all)
+    ├── Suite Tests (--target=library)
+    └── Individual Tests (--target=math)
+        ├── Normal Mode (with shell wrapper)
+        └── Raw Mode (--raw, direct execution)
 ```
 
 ### Test Result Collection
@@ -178,50 +202,101 @@ Results are collected, parsed, and aggregated for final reporting.
 ### Basic Commands
 
 ```bash
-# Run unit tests only
-make test
+# Run all tests
+./test/test_all.sh
 
-# Run with memory leak detection
-make test-memory
+# Get help and see available targets
+./test/test_all.sh --help
 
-# Run performance benchmarks
-make test-benchmark
+# Run specific test suite
+./test/test_all.sh --target=library
+./test/test_all.sh --target=input
+./test/test_all.sh --target=validator
+./test/test_all.sh --target=mir
 
-# Run fuzzing tests
-make test-fuzz
+# Run individual tests
+./test/test_all.sh --target=strbuf
+./test/test_all.sh --target=math
+./test/test_all.sh --target=mime_detect
 
-# Run integration tests
-make test-integration
-
-# Run everything
-make test-all
-
-# CI-optimized suite
-make test-ci
+# Run with raw output (no shell wrapper)
+./test/test_all.sh --target=math --raw
 ```
+
+### Available Test Targets
+
+**Suite Targets**:
+- `all` - Run all test suites (default)
+- `library` - Run all library tests  
+- `input` - Run all input processing tests
+- `validator` - Run validator tests
+- `mir` - Run MIR JIT tests
+
+**Individual Test Targets**:
+- `strbuf` - String buffer tests
+- `strview` - String view tests  
+- `variable_pool` - Memory pool tests
+- `num_stack` - Number stack tests
+- `mime_detect` - MIME detection tests
+- `math` - Math expression parsing tests
 
 ### Advanced Usage
 
 ```bash
-# Run with specific CPU core count
-CPU_CORES=4 ./test/test_all.sh
+# Raw mode for integration with external tools
+./test/test_all.sh --target=math --raw | grep "PASSED\|FAILED"
 
-# Run specific test suite
-cd test && ./test_strbuf.exe --verbose
+# Run specific test with verbose Criterion output
+cd test && ./test_math.exe --verbose
 
-# Run with TAP output for CI
-cd test && ./test_validator.exe --tap
+# Run with TAP output for CI integration
+cd test && ./test_math.exe --tap
 
-# Run memory tests with Valgrind only
-cd test && ./test_memory.sh --valgrind-only
-
-# Generate coverage report
-make test-coverage && open coverage-report/index.html
+# Configuration-driven test execution
+jq '.tests[] | select(.suite == "library")' test/test_config.json
 ```
+
+### Raw Output Mode
+
+The `--raw` option runs test executables directly without shell wrapper formatting:
+
+```bash
+# Normal mode (with shell wrapper)
+./test/test_all.sh --target=math
+# Output: Colored headers, status messages, test runner info
+
+# Raw mode (direct execution)  
+./test/test_all.sh --target=math --raw
+# Output: Direct test output from Criterion executable
+
+# Use cases for raw mode:
+- Integration with external test result parsers
+- Debugging test output without formatting
+- Automated test result processing
+- CI pipelines requiring clean output
+```
+
+**Note**: `--raw` is only supported for individual tests, not suite targets.
 
 ### Test Configuration
 
-Environment variables:
+**JSON Configuration** (`test/test_config.json`):
+```json
+{
+  "tests": [
+    {
+      "suite": "input",
+      "name": "📄 Input Processing Tests", 
+      "sources": ["test_mime_detect.c", "test_math.c"],
+      "dependencies": [...],
+      "type": "input",
+      "parallel": true
+    }
+  ]
+}
+```
+
+**Environment Variables**:
 ```bash
 export CPU_CORES=8              # Override CPU detection
 export ASAN_OPTIONS="..."       # AddressSanitizer options
@@ -447,10 +522,11 @@ cd test && gcc -Wall -Wextra -g test_strbuf.c ../lib/strbuf.c -lcriterion
 
 | Test Suite | Average Time | Tests Count | Parallel |
 |------------|--------------|-------------|----------|
-| Library Tests | ~2.5s | 63 tests | ✅ |
+| Library Tests | ~2.5s | 4 suites | ✅ |
+| Input Tests | ~3.2s | 62 tests | ✅ |
 | MIR JIT Tests | ~3.2s | 8 tests | ✅ |
 | Validator Tests | ~4.1s | 22 tests | ✅ |
-| **Total Suite** | **~10s** | **93 tests** | ✅ |
+| **Total Suite** | **~10s** | **90+ tests** | ✅ |
 
 ### Memory Usage
 
@@ -470,14 +546,19 @@ cd test && gcc -Wall -Wextra -g test_strbuf.c ../lib/strbuf.c -lcriterion
 
 The Lambda project testing infrastructure provides comprehensive quality assurance through:
 
-- **93 unit tests** across all major components
+- **JSON-configured test suites** with flexible targeting capabilities
+- **90+ unit tests** across all major components (Library, Input, Validator, MIR JIT)
+- **Individual test execution** with optional raw output mode
 - **Parallel execution** utilizing all available CPU cores
 - **Memory safety verification** with AddressSanitizer and Valgrind
-- **Performance tracking** to detect regressions
-- **Fuzzing tests** for robustness validation
-- **Integration tests** for end-to-end workflow verification
-- **Code coverage analysis** for completeness assessment
+- **Comprehensive test targeting** from full suites to individual tests
+
+Key innovations:
+- **`--raw` option** for direct test execution without shell wrapper
+- **JSON configuration system** for flexible test suite management  
+- **Granular test targeting** supporting both suites and individual tests
+- **Enhanced error handling** with comprehensive validation
 
 This multi-layered approach ensures the Lambda project maintains high quality, performance, and reliability standards throughout development.
 
-For questions or issues, please refer to the troubleshooting section or open an issue in the project repository.
+For questions or issues, please refer to the troubleshooting section or run `./test/test_all.sh --help` for usage information.

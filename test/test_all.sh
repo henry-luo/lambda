@@ -8,12 +8,17 @@ set -e  # Exit on any error
 # Parse command line arguments
 TARGET_TEST=""
 SHOW_HELP=false
+RAW_OUTPUT=false
 
 # Parse arguments
 for arg in "$@"; do
     case $arg in
         --target=*)
             TARGET_TEST="${arg#*=}"
+            shift
+            ;;
+        --raw)
+            RAW_OUTPUT=true
             shift
             ;;
         --help|-h)
@@ -35,6 +40,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo ""
     echo "Options:"
     echo "  --target=TEST     Run a specific test suite"
+    echo "  --raw             Run test executable directly without shell wrapper"
     echo "  --help, -h        Show this help message"
     echo ""
     echo "Available test targets:"
@@ -58,6 +64,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  $0                      # Run all tests"
     echo "  $0 --target=math        # Run only math tests"
     echo "  $0 --target=library     # Run all library tests"
+    echo "  $0 --target=input --raw # Run input tests with raw output"
     echo ""
     exit 0
 fi
@@ -144,6 +151,20 @@ get_build_config_file() {
     else
         echo "build_lambda_config.json"
     fi
+}
+
+# Function to run test executable with raw output (no shell wrapper)
+run_raw_test() {
+    local test_binary="$1"
+    local test_name="$2"
+    
+    if [ ! -f "$test_binary" ]; then
+        echo "❌ Test binary $test_binary not found"
+        return 1
+    fi
+    
+    # Run the test directly and let it handle its own output
+    exec ./"$test_binary"
 }
 
 # Colors for output
@@ -761,11 +782,25 @@ run_individual_library_test() {
         return 1
     fi
     
-    print_status "🧪 Running individual test: $test_name"
-    
     local source="${sources_array[$test_index]}"
     local deps="${dependencies_array[$test_index]}"
     local binary="${binaries_array[$test_index]}"
+    
+    if [ "$RAW_OUTPUT" = true ]; then
+        # Raw mode: just compile and run without wrapper
+        local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+        
+        if $compile_cmd 2>/dev/null; then
+            run_raw_test "test/$binary" "$test_name"
+            return $?
+        else
+            echo "❌ Failed to compile test/$source"
+            $compile_cmd
+            return 1
+        fi
+    fi
+    
+    print_status "🧪 Running individual test: $test_name"
     
     print_status "Compiling test/test_$test_name.c..."
     
@@ -897,11 +932,25 @@ run_individual_input_test() {
         return 1
     fi
     
-    print_status "🧪 Running individual test: $test_name"
-    
     local source="${sources_array[$test_index]}"
     local deps="${dependencies_array[$test_index]}"
     local binary="${binaries_array[$test_index]}"
+    
+    if [ "$RAW_OUTPUT" = true ]; then
+        # Raw mode: just compile and run without wrapper
+        local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+        
+        if $compile_cmd 2>/dev/null; then
+            run_raw_test "test/$binary" "$test_name"
+            return $?
+        else
+            echo "❌ Failed to compile test/$source"
+            $compile_cmd
+            return 1
+        fi
+    fi
+    
+    print_status "🧪 Running individual test: $test_name"
     
     print_status "Compiling test/test_$test_name.c..."
     
@@ -996,25 +1045,51 @@ run_target_test() {
     
     case "$target" in
         "all")
+            # Raw mode not supported for "all" target
+            if [ "$RAW_OUTPUT" = true ]; then
+                print_error "--raw option is not supported with --target=all"
+                print_status "Use --raw with individual tests like: --target=math --raw"
+                return 1
+            fi
             # Run all tests (existing behavior)
             return 0
             ;;
         "library")
+            if [ "$RAW_OUTPUT" = true ]; then
+                print_error "--raw option is not supported with suite targets"
+                print_status "Use --raw with individual tests like: --target=strbuf --raw"
+                return 1
+            fi
             print_status "🚀 Running Library Tests Suite"
             run_library_tests
             return $?
             ;;
         "input")
+            if [ "$RAW_OUTPUT" = true ]; then
+                print_error "--raw option is not supported with suite targets"
+                print_status "Use --raw with individual tests like: --target=math --raw"
+                return 1
+            fi
             print_status "🚀 Running Input Processing Tests Suite"
             run_input_tests
             return $?
             ;;
         "validator")
+            if [ "$RAW_OUTPUT" = true ]; then
+                print_error "--raw option is not supported with suite targets"
+                print_status "Use --raw with individual tests like: --target=validator --raw"
+                return 1
+            fi
             print_status "🚀 Running Validator Tests Suite"
             run_validator_tests
             return $?
             ;;
         "mir")
+            if [ "$RAW_OUTPUT" = true ]; then
+                print_error "--raw option is not supported with suite targets"
+                print_status "Use --raw with individual tests like: --target=mir --raw"
+                return 1
+            fi
             print_status "🚀 Running MIR JIT Tests Suite"
             run_mir_tests
             return $?
