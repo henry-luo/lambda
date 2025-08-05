@@ -13,12 +13,12 @@ typedef int int32_t;
 typedef long long int64_t;
 #endif
 
-#ifndef bool
+#ifndef __cplusplus
 #define bool uint8_t
-#endif
-
 #define true 1
 #define false 0
+#endif
+
 #define null 0
 // #define infinity (1.0 / 0.0)
 // #define not_a_number (0.0 / 0.0)
@@ -55,7 +55,7 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
-# define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
+#define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
 
 typedef struct Type {
     TypeId type_id;
@@ -93,29 +93,46 @@ typedef struct Container {
     uint16_t ref_cnt;  // reference count
 } Container;
 
-typedef struct Range {
-    TypeId type_id;
-    uint8_t flags;
-    uint16_t ref_cnt;  // reference count
-    // --------
-    long start;  // inclusive start
-    long end;    // inclusive end
-    long length;
-} Range;
+#ifndef __cplusplus
+    typedef struct Range {
+        TypeId type_id;
+        uint8_t flags;
+        uint16_t ref_cnt;  // reference count
+        //---------------------    
+        long start;  // inclusive start
+        long end;    // inclusive end
+        long length;
+    } Range;
+#else
+    typedef struct Range : Container {
+        long start;  // inclusive start
+        long end;    // inclusive end
+        long length;
+    } Range;
+#endif
 
 Range* range();
 long range_get(Range *range, int index);
 
-typedef struct List {
-    TypeId type_id;
-    uint8_t flags;
-    uint16_t ref_cnt;  // reference count
-    // --------
-    Item* items;
-    long length;
-    long extra;  // count of extra items stored at the end of the list
-    long capacity;
-} List;
+#ifndef __cplusplus
+    typedef struct List {
+        TypeId type_id;
+        uint8_t flags;
+        uint16_t ref_cnt;  // reference count
+        //---------------------
+        Item* items;  // pointer to items
+        long length;  // number of items
+        long extra;   // count of extra items stored at the end of the list
+        long capacity;  // allocated capacity
+    } List;
+#else
+    typedef struct List : Container {
+        Item* items;
+        long length;
+        long extra;  // count of extra items stored at the end of the list
+        long capacity;
+    } List;
+#endif
 
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
@@ -124,16 +141,25 @@ Item list_get(List *list, int index);
 
 typedef struct List Array;
 
-typedef struct ArrayLong {
-    TypeId type_id;
-    uint8_t flags;
-    uint16_t ref_cnt;  // reference count
-    // --------
-    long* items;
-    long length;
-    long extra;  // count of extra items
-    long capacity;
-} ArrayLong;
+#ifndef __cplusplus
+    typedef struct ArrayLong {
+        TypeId type_id;
+        uint8_t flags;
+        uint16_t ref_cnt;  // reference count
+        //---------------------
+        long* items;  // pointer to items
+        long length;  // number of items
+        long extra;   // count of extra items stored at the end of the array
+        long capacity;  // allocated capacity
+    } ArrayLong;
+#else
+    typedef struct ArrayLong : Container {
+        long* items;
+        long length;
+        long extra;  // count of extra items
+        long capacity;
+    } ArrayLong;
+#endif
 
 Array* array();
 ArrayLong* array_long_new(int count, ...);
