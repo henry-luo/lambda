@@ -739,77 +739,130 @@ run_mir_tests() {
     return $?
 }
 
-# Function to run individual library test
-run_individual_library_test() {
-    local test_name="$1"
+# Common function to run individual tests for different suite types
+run_individual_test() {
+    local suite_type="$1"
+    local test_name="$2"
     
     # Load configuration if not already loaded
     if [ ${#TEST_SUITE_NAMES[@]} -eq 0 ]; then
         load_test_config
     fi
     
-    # Find the test in library suite configuration
-    local sources_str=$(get_config_array "library" "sources" " ")
-    local dependencies_str=$(get_config_array "library" "dependencies" "|||")
-    local binaries_str=$(get_config_array "library" "binaries" " ")
-    local special_flags=$(get_config "library" "special_flags")
+    # Get suite configuration
+    local sources_str=$(get_config_array "$suite_type" "sources" " ")
+    local binaries_str=$(get_config_array "$suite_type" "binaries" " ")
+    local special_flags=$(get_config "$suite_type" "special_flags")
     
     # Parse arrays using bash 3.2 compatible method
     IFS=' ' read -ra sources_array <<< "$sources_str"
     IFS=' ' read -ra binaries_array <<< "$binaries_str"
     
-    # Parse dependencies using custom function
-    local dependencies_array=()
-    while IFS= read -r dep; do
-        dependencies_array+=("$dep")
-    done < <(parse_array_string "$dependencies_str" "|||")
+    local source=""
+    local binary=""
+    local deps=""
     
-    local test_index=-1
-    for i in "${!sources_array[@]}"; do
-        if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
-            test_index=$i
-            break
-        fi
-    done
-    
-    if [ $test_index -eq -1 ]; then
-        print_error "Test '$test_name' not found in library tests"
-        print_status "Available library tests:"
-        for source in "${sources_array[@]}"; do
-            test_basename=$(basename "$source" .c)
-            echo "  - ${test_basename#test_}"
+    # Handle different suite types differently
+    if [ "$suite_type" = "validator" ]; then
+        # Validator has only one test
+        source="${sources_array[0]}"
+        binary="${binaries_array[0]}"
+        deps=""
+    else
+        # Library and input tests: find specific test by name
+        local dependencies_str=$(get_config_array "$suite_type" "dependencies" "|||")
+        
+        # Parse dependencies using custom function
+        local dependencies_array=()
+        while IFS= read -r dep; do
+            dependencies_array+=("$dep")
+        done < <(parse_array_string "$dependencies_str" "|||")
+        
+        local test_index=-1
+        for i in "${!sources_array[@]}"; do
+            if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
+                test_index=$i
+                break
+            fi
         done
-        return 1
+        
+        if [ $test_index -eq -1 ]; then
+            print_error "Test '$test_name' not found in $suite_type tests"
+            print_status "Available $suite_type tests:"
+            for source_file in "${sources_array[@]}"; do
+                test_basename=$(basename "$source_file" .c)
+                echo "  - ${test_basename#test_}"
+            done
+            return 1
+        fi
+        
+        source="${sources_array[$test_index]}"
+        binary="${binaries_array[$test_index]}"
+        deps="${dependencies_array[$test_index]}"
     fi
     
-    local source="${sources_array[$test_index]}"
-    local deps="${dependencies_array[$test_index]}"
-    local binary="${binaries_array[$test_index]}"
-    
+    # Handle raw mode
     if [ "$RAW_OUTPUT" = true ]; then
-        # Raw mode: just compile and run without wrapper
-        local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+        local raw_compile_cmd=""
+        local raw_binary_path=""
         
-        if $compile_cmd 2>/dev/null; then
-            run_raw_test "test/$binary" "$test_name"
+        if [ "$suite_type" = "validator" ]; then
+            raw_compile_cmd="gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS -o $binary $source"
+            raw_binary_path="$binary"
+        else
+            raw_compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+            raw_binary_path="test/$binary"
+        fi
+        
+        if $raw_compile_cmd 2>/dev/null; then
+            run_raw_test "$raw_binary_path" "$test_name"
             return $?
         else
-            echo "❌ Failed to compile test/$source"
-            $compile_cmd
+            echo "❌ Failed to compile $source"
+            $raw_compile_cmd
             return 1
         fi
     fi
     
-    print_status "🧪 Running individual test: $test_name"
+    # Check prerequisites for specific suite types
+    if [ "$suite_type" = "validator" ]; then
+        if [ ! -f "./lambda.exe" ]; then
+            print_error "Lambda executable not found. Run 'make' first."
+            return 1
+        fi
+        
+        # Set environment variables from config for validator
+        local env_vars=$(jq -r ".tests[] | select(.suite == \"$suite_type\") | .environment // {} | to_entries | map(\"\(.key)=\(.value)\") | join(\"|||\")" "$TEST_CONFIG_FILE" 2>/dev/null || echo "")
+        if [ -n "$env_vars" ] && [ "$env_vars" != "null" ]; then
+            IFS='|||' read -ra ENV_ARRAY <<< "$env_vars"
+            for env_var in "${ENV_ARRAY[@]}"; do
+                if [ -n "$env_var" ]; then
+                    # Expand variables in the environment value
+                    expanded_env_var=$(eval echo "$env_var")
+                    export "$expanded_env_var"
+                    print_status "Set environment: $expanded_env_var"
+                fi
+            done
+        fi
+    fi
     
-    print_status "Compiling test/test_$test_name.c..."
-    
-    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+    # Print status and compile
+    if [ "$suite_type" = "validator" ]; then
+        print_status "🧪 Running individual validator test: $test_name"
+        print_status "Compiling validator test..."
+        local compile_cmd="gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS -o $binary $source"
+        local binary_path="./$binary"
+    else
+        print_status "🧪 Running individual test: $test_name"
+        print_status "Compiling test/test_$test_name.c..."
+        local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+        local binary_path="./test/$binary"
+    fi
     
     if $compile_cmd 2>/dev/null; then
-        print_success "Compiled test/$source successfully"
+        print_success "Compiled $source successfully"
     else
-        print_error "Failed to compile test/$source"
+        print_error "Failed to compile $source"
         print_error "Attempting compilation with detailed error output..."
         $compile_cmd
         return 1
@@ -818,10 +871,19 @@ run_individual_library_test() {
     print_status "🧪 Running $test_name tests..."
     echo ""
     
+    # Run the test with appropriate flags
     set +e
     local test_output
+    local test_command=""
+    
+    if [ "$suite_type" = "validator" ]; then
+        test_command="$binary_path --verbose --tap --jobs=$CPU_CORES"
+    else
+        test_command="$binary_path"
+    fi
+    
     if command -v timeout >/dev/null 2>&1; then
-        test_output=$(timeout 30 ./test/$binary 2>&1)
+        test_output=$(timeout 30 $test_command 2>&1)
         local test_exit_code=$?
         if [ $test_exit_code -eq 124 ]; then
             print_error "Test $test_name timed out after 30 seconds"
@@ -829,7 +891,7 @@ run_individual_library_test() {
             test_exit_code=1
         fi
     else
-        test_output=$(./test/$binary 2>&1)
+        test_output=$($test_command 2>&1)
         test_exit_code=$?
     fi
     set -e
@@ -837,33 +899,38 @@ run_individual_library_test() {
     echo "$test_output"
     echo ""
     
-    # Parse results from Criterion's standard output format
+    # Parse results - different parsing for different output formats
     local total_tests=0
     local failed_tests=0
     
-    if echo "$test_output" | grep -q "Synthesis:"; then
-        local synthesis_line
-        synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
-        total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        local passing_tests
-        passing_tests=$(echo "$synthesis_line" | grep -o "Passing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        local crashing_tests
-        crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        failed_tests=$((failed_tests + crashing_tests))
+    if [ "$suite_type" = "validator" ]; then
+        # Parse TAP output for validator
+        total_tests=$(echo "$test_output" | grep -c "^ok " 2>/dev/null || echo "0")
+        failed_tests=$(echo "$test_output" | grep -c "^not ok " 2>/dev/null || echo "0")
     else
-        if [ $test_exit_code -eq 0 ]; then
-            total_tests=1
-            failed_tests=0
+        # Parse Criterion output for library/input tests
+        if echo "$test_output" | grep -q "Synthesis:"; then
+            local synthesis_line
+            synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
+            total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            local crashing_tests
+            crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            failed_tests=$((failed_tests + crashing_tests))
         else
-            total_tests=1
-            failed_tests=1
+            if [ $test_exit_code -eq 0 ]; then
+                total_tests=1
+                failed_tests=0
+            else
+                total_tests=1
+                failed_tests=1
+            fi
         fi
     fi
     
     # Clean up binary
-    if [ -f "test/$binary" ]; then
-        rm "test/$binary"
+    if [ -f "$binary_path" ]; then
+        rm "$binary_path"
     fi
     
     # Clean numeric values
@@ -889,154 +956,22 @@ run_individual_library_test() {
     return $failed_tests
 }
 
+# Function to run individual library test
+run_individual_library_test() {
+    run_individual_test "library" "$1"
+    return $?
+}
+
+# Function to run individual validator test
+run_individual_validator_test() {
+    run_individual_test "validator" "$1"
+    return $?
+}
+
 # Function to run individual input test
 run_individual_input_test() {
-    local test_name="$1"
-    
-    # Load configuration if not already loaded
-    if [ ${#TEST_SUITE_NAMES[@]} -eq 0 ]; then
-        load_test_config
-    fi
-    
-    # Find the test in input suite configuration
-    local sources_str=$(get_config_array "input" "sources" " ")
-    local dependencies_str=$(get_config_array "input" "dependencies" "|||")
-    local binaries_str=$(get_config_array "input" "binaries" " ")
-    local special_flags=$(get_config "input" "special_flags")
-    
-    # Parse arrays using bash 3.2 compatible method
-    IFS=' ' read -ra sources_array <<< "$sources_str"
-    IFS=' ' read -ra binaries_array <<< "$binaries_str"
-    
-    # Parse dependencies using custom function
-    local dependencies_array=()
-    while IFS= read -r dep; do
-        dependencies_array+=("$dep")
-    done < <(parse_array_string "$dependencies_str" "|||")
-    
-    local test_index=-1
-    for i in "${!sources_array[@]}"; do
-        if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
-            test_index=$i
-            break
-        fi
-    done
-    
-    if [ $test_index -eq -1 ]; then
-        print_error "Test '$test_name' not found in input tests"
-        print_status "Available input tests:"
-        for source in "${sources_array[@]}"; do
-            test_basename=$(basename "$source" .c)
-            echo "  - ${test_basename#test_}"
-        done
-        return 1
-    fi
-    
-    local source="${sources_array[$test_index]}"
-    local deps="${dependencies_array[$test_index]}"
-    local binary="${binaries_array[$test_index]}"
-    
-    if [ "$RAW_OUTPUT" = true ]; then
-        # Raw mode: just compile and run without wrapper
-        local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
-        
-        if $compile_cmd 2>/dev/null; then
-            run_raw_test "test/$binary" "$test_name"
-            return $?
-        else
-            echo "❌ Failed to compile test/$source"
-            $compile_cmd
-            return 1
-        fi
-    fi
-    
-    print_status "🧪 Running individual test: $test_name"
-    
-    print_status "Compiling test/test_$test_name.c..."
-    
-    local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
-    
-    if $compile_cmd 2>/dev/null; then
-        print_success "Compiled test/$source successfully"
-    else
-        print_error "Failed to compile test/$source"
-        print_error "Attempting compilation with detailed error output..."
-        $compile_cmd
-        return 1
-    fi
-    
-    print_status "🧪 Running $test_name tests..."
-    echo ""
-    
-    set +e
-    local test_output
-    if command -v timeout >/dev/null 2>&1; then
-        test_output=$(timeout 30 ./test/$binary 2>&1)
-        local test_exit_code=$?
-        if [ $test_exit_code -eq 124 ]; then
-            print_error "Test $test_name timed out after 30 seconds"
-            test_output="Test timed out"
-            test_exit_code=1
-        fi
-    else
-        test_output=$(./test/$binary 2>&1)
-        test_exit_code=$?
-    fi
-    set -e
-    
-    echo "$test_output"
-    echo ""
-    
-    # Parse results from Criterion's standard output format
-    local total_tests=0
-    local failed_tests=0
-    
-    if echo "$test_output" | grep -q "Synthesis:"; then
-        local synthesis_line
-        synthesis_line=$(echo "$test_output" | grep "Synthesis:" | tail -1)
-        total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        local passing_tests
-        passing_tests=$(echo "$synthesis_line" | grep -o "Passing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        local crashing_tests
-        crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        failed_tests=$((failed_tests + crashing_tests))
-    else
-        if [ $test_exit_code -eq 0 ]; then
-            total_tests=1
-            failed_tests=0
-        else
-            total_tests=1
-            failed_tests=1
-        fi
-    fi
-    
-    # Clean up binary
-    if [ -f "test/$binary" ]; then
-        rm "test/$binary"
-    fi
-    
-    # Clean numeric values
-    total_tests=$(echo "$total_tests" | tr -cd '0-9')
-    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
-    total_tests=${total_tests:-0}
-    failed_tests=${failed_tests:-0}
-    
-    local passed_tests=$((total_tests - failed_tests))
-    echo "================================================"
-    print_status "📊 $test_name Test Results:"
-    print_status "   Total: $total_tests, Passed: $passed_tests, Failed: $failed_tests"
-    
-    if [ $failed_tests -eq 0 ] && [ $total_tests -gt 0 ]; then
-        print_success "All $test_name tests passed! ✨"
-    elif [ $total_tests -eq 0 ]; then
-        print_warning "No tests were detected for $test_name"
-    else
-        print_error "$failed_tests $test_name test(s) failed"
-    fi
-    echo "================================================"
-    
-    return $failed_tests
+    run_individual_test "input" "$1"
+    return $?
 }
 
 # Function to run target test suites
@@ -1076,9 +1011,8 @@ run_target_test() {
             ;;
         "validator")
             if [ "$RAW_OUTPUT" = true ]; then
-                print_error "--raw option is not supported with suite targets"
-                print_status "Use --raw with individual tests like: --target=validator --raw"
-                return 1
+                run_individual_validator_test "validator"
+                return $?
             fi
             print_status "🚀 Running Validator Tests Suite"
             run_validator_tests
