@@ -92,7 +92,7 @@ static Item parse_pdf_number(Input *input, const char **pdf) {
     *dval = strtod(*pdf, &end);
     *pdf = end;
     
-    return {.item = d2it(dval);
+    return {.item = d2it(dval)};
 }
 
 static Array* parse_pdf_array(Input *input, const char **pdf) {
@@ -108,8 +108,7 @@ static Array* parse_pdf_array(Input *input, const char **pdf) {
     while (**pdf && **pdf != ']' && item_count < 10) { // reduced limit for safety
         Item obj = parse_pdf_object(input, pdf);
         if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
-            Item lambda_obj = {.item = obj};
-            array_append(arr, lambda_obj, input->pool);
+            array_append(arr, obj, input->pool);
             item_count++;
         }
         skip_whitespace_and_comments(pdf);
@@ -148,8 +147,7 @@ static Map* parse_pdf_dictionary(Input *input, const char **pdf) {
         // parse value
         Item value = parse_pdf_object(input, pdf);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
-            Item lambda_value = {.item = value};
-            map_put(dict, key, lambda_value, input);
+            map_put(dict, key, value, input);
             pair_count++;
         }
         
@@ -1201,8 +1199,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             }
             
             if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
-                Item obj_item = {.item = obj};
-                array_append(objects, obj_item, input->pool);
+                array_append(objects, obj, input->pool);
                 obj_count++;
                 consecutive_errors = 0; // Reset error counter on success
             } else {

@@ -309,7 +309,7 @@ void parse_vcf(Input* input, const char* vcf_string) {
             Map* name_struct = parse_structured_name(input, property_value->chars);
             if (name_struct) {
                 String* name_key = input_create_string(input, "name");
-                Item name_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(name_struct));
+                Item name_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(name_struct))};
                 map_put(contact_map, name_key, name_value, input);
             }
         }
@@ -330,7 +330,7 @@ void parse_vcf(Input* input, const char* vcf_string) {
             Map* addr_struct = parse_address(input, property_value->chars);
             if (addr_struct) {
                 String* addr_key = input_create_string(input, "address");
-                Item addr_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(addr_struct));
+                Item addr_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(addr_struct))};
                 map_put(contact_map, addr_key, addr_value, input);
             }
         }
@@ -374,10 +374,9 @@ void parse_vcf(Input* input, const char* vcf_string) {
     
     // Store properties map in contact
     String* properties_key = input_create_string(input, "properties");
-    Item properties_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map));
+    Item properties_value = {.item = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map))};
     map_put(contact_map, properties_key, properties_value, input);
     
     // Set the contact map as the root of the input
-    input->root = (Item)contact_map;
-    input->root |= ((uint64_t)LMD_TYPE_MAP << 56);
+    input->root = {.item = ((uint64_t)LMD_TYPE_MAP << 56) | (uint64_t)contact_map};
 }

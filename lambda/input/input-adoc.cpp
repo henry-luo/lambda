@@ -80,7 +80,7 @@ static Item parse_asciidoc_heading(Input *input, const char* line) {
         if (content) free(content);
     }
     
-    return (Item)header;
+    return {.item = (uint64_t)header};
 }
 
 static Item parse_asciidoc_paragraph(Input *input, const char* text) {
@@ -92,7 +92,7 @@ static Item parse_asciidoc_paragraph(Input *input, const char* text) {
     list_push((List*)paragraph, inline_content);
     ((TypeElmt*)paragraph->type)->content_length++;
     
-    return (Item)paragraph;
+    return {.item = (uint64_t)paragraph};
 }
 
 static Item parse_asciidoc_listing_block(Input *input, char** lines, int* current_line, int total_lines) {
@@ -129,7 +129,7 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
             total_len += strlen(lines[i]) + 1; // +1 for newline
         }
         
-        char* content = malloc(total_len + 1);
+        char* content = (char*)malloc(total_len + 1);
         content[0] = '\0';
         
         for (int i = *current_line; i < end_line; i++) {
@@ -139,7 +139,7 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
         
         String* content_str = create_string(input, content);
         if (content_str) {
-            list_push((List*)code_block, s2it(content_str));
+            list_push((List*)code_block, {.item = s2it(content_str)});
             ((TypeElmt*)code_block->type)->content_length++;
         }
         
@@ -147,11 +147,11 @@ static Item parse_asciidoc_listing_block(Input *input, char** lines, int* curren
     }
     
     // Add code block to pre block
-    list_push((List*)pre_block, (Item)code_block);
+    list_push((List*)pre_block, {.item = (uint64_t)code_block});
     ((TypeElmt*)pre_block->type)->content_length++;
     
     *current_line = end_line + 1; // Skip closing ----
-    return (Item)pre_block;
+    return {.item = (uint64_t)pre_block};
 }
 
 static Item parse_asciidoc_list(Input *input, char** lines, int* current_line, int total_lines) {
@@ -172,7 +172,7 @@ static Item parse_asciidoc_list(Input *input, char** lines, int* current_line, i
                     list_push((List*)list_item, inline_content);
                     ((TypeElmt*)list_item->type)->content_length++;
                 }
-                list_push((List*)list_elem, (Item)list_item);
+                list_push((List*)list_elem, {.item = (uint64_t)list_item});
                 ((TypeElmt*)list_elem->type)->content_length++;
             }
         }
@@ -181,7 +181,7 @@ static Item parse_asciidoc_list(Input *input, char** lines, int* current_line, i
         (*current_line)++;
     }
     
-    return (Item)list_elem;
+    return {.item = (uint64_t)list_elem};
 }
 
 static Item parse_asciidoc_admonition(Input *input, const char* line) {
@@ -223,7 +223,7 @@ static Item parse_asciidoc_admonition(Input *input, const char* line) {
         }
     }
     
-    return (Item)admonition;
+    return {.item = (uint64_t)admonition};
 }
 
 static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, int total_lines) {
@@ -273,7 +273,7 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                         cell_len++; // Include last character if not |
                     }
                     
-                    char* cell_text = malloc(cell_len + 1);
+                    char* cell_text = (char*)malloc(cell_len + 1);
                     strncpy(cell_text, cell_start, cell_len);
                     cell_text[cell_len] = '\0';
                     
@@ -289,7 +289,7 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                             list_push((List*)cell, cell_content);
                             ((TypeElmt*)cell->type)->content_length++;
                         }
-                        list_push((List*)row, (Item)cell);
+                        list_push((List*)row, {.item = (uint64_t)cell});
                         ((TypeElmt*)row->type)->content_length++;
                     }
                     
@@ -312,12 +312,12 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
                     thead = create_asciidoc_element(input, "thead");
                 }
                 if (thead) {
-                    list_push((List*)thead, (Item)row);
+                    list_push((List*)thead, {.item = (uint64_t)row});
                     ((TypeElmt*)thead->type)->content_length++;
                 }
                 header_parsed = true;
             } else {
-                list_push((List*)tbody, (Item)row);
+                list_push((List*)tbody, {.item = (uint64_t)row});
                 ((TypeElmt*)tbody->type)->content_length++;
             }
         }
@@ -327,16 +327,16 @@ static Item parse_asciidoc_table(Input *input, char** lines, int* current_line, 
     
     // Add sections to table
     if (thead && ((TypeElmt*)thead->type)->content_length > 0) {
-        list_push((List*)table, (Item)thead);
+        list_push((List*)table, {.item = (uint64_t)thead});
         ((TypeElmt*)table->type)->content_length++;
     }
     
     if (((TypeElmt*)tbody->type)->content_length > 0) {
-        list_push((List*)table, (Item)tbody);
+        list_push((List*)table, {.item = (uint64_t)tbody});
         ((TypeElmt*)table->type)->content_length++;
     }
     
-    return (Item)table;
+    return {.item = (uint64_t)table};
 }
 
 static Item parse_asciidoc_inline(Input *input, const char* text) {
@@ -356,11 +356,11 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
     
     // If no formatting, just return the text as a string properly boxed as Item
     if (!has_formatting) {
-        return {.item = s2it(create_string(input, text));
+        return {.item = s2it(create_string(input, text))};
     }
     
     Element* container = create_asciidoc_element(input, "span");
-    if (!container) return {.item = s2it(create_string(input, text));
+    if (!container) return {.item = s2it(create_string(input, text))};
     
     const char* ptr = text;
     const char* start = text;
