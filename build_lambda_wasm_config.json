@@ -19,15 +19,15 @@
         "lib/url.c",
         "lib/utf.c",
         "lib/num_stack.c",
-        "lambda/runner.c",
-        "lambda/transpile.c",
-        "lambda/transpile-mir.c",
-        "lambda/build_ast.c",
-        "lambda/mir.c",
+        "lambda/runner.cpp",
+        "lambda/transpile.cpp",
+        "lambda/transpile-mir.cpp",
+        "lambda/build_ast.cpp",
+        "lambda/mir.cpp",
         "lambda/pack.c",
-        "lambda/print.c",
-        "lambda/lambda-eval.c",
-        "lambda/lambda-mem.c"
+        "lambda/print.cpp",
+        "lambda/lambda-eval.cpp",
+        "lambda/lambda-mem.cpp"
     ],
     "libraries": [
         {

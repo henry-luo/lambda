@@ -1,15 +1,15 @@
-#include "transpiler.h"
+#include "transpiler.hpp"
 
 extern __thread Context* context;
 
 int dataowner_compare(const void *a, const void *b, void *udata) {
-    const DataOwner *da = a;
-    const DataOwner *db = b;
+    const DataOwner *da = (const DataOwner *)a;
+    const DataOwner *db = (const DataOwner *)b;
     return da->data == db->data;
 }
 
 uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const DataOwner *dataowner = item;
+    const DataOwner *dataowner = (const DataOwner *)item;
     return hashmap_xxhash3(dataowner->data, sizeof(dataowner->data), seed0, seed1);
 }
 
@@ -220,7 +220,7 @@ void free_item(Item item, bool clear_entry) {
         // remove the entry from heap entries
         for (int i = entries->length - 1; i >= 0; i--) {
             void *data = entries->data[i];
-            if (data == item) { 
+            if ((Item)data == item) { 
                 entries->data[i] = NULL;  break;
             }
         }
@@ -259,7 +259,7 @@ void frame_end() {
         else if (itm.type_id == LMD_CONTAINER_HEAP_START) {
             printf("reached container start: %d\n", i);
             size_t stack_pos = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
-            num_stack_reset_to_index(context->num_stack, stack_pos);
+            num_stack_reset_to_index((num_stack_t*)context->num_stack, stack_pos);
             entries->length = i-1;
             return;
         }

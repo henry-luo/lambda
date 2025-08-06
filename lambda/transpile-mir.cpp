@@ -1,4 +1,4 @@
-#include "transpiler.h"
+#include "transpiler.hpp"
 #include <mir.h>
 #include <mir-gen.h>
 
@@ -6,7 +6,9 @@ extern Type TYPE_ANY, TYPE_INT;
 void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstNode *expr_node, MIR_reg_t *result_reg);
 
 // Forward declare import resolver from mir.c
-extern void *import_resolver(const char *name);
+extern "C" {
+    void *import_resolver(const char *name);
+}
 
 // MIR type mappings
 static MIR_type_t get_mir_type(Type *type) {

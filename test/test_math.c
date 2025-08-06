@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>  // for getcwd and chdir
-#include "../lambda/lambda-data.h"
+#include "../lambda/lambda-data.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include <lexbor/url/url.h>

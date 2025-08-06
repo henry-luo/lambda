@@ -1,9 +1,9 @@
-#include "transpiler.h"
+#include "transpiler.hpp"
 
 extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
-Type* build_lit_string(Transpiler* tp, TSNode node);
+Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
     if (import) {
@@ -81,7 +81,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
             item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';
@@ -97,6 +97,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
+    }
     case LMD_TYPE_LIST:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:
         transpile_expr(tp, item);  // raw pointer
@@ -648,7 +649,8 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
     }
     strbuf_append_char(tp->code_buf, ',');
     if (field_node->field->node_type == AST_NODE_IDENT) {
-        TypeString* type = (TypeString*)build_lit_string(tp, field_node->field->node);
+        TSSymbol symbol = ts_node_symbol(field_node->field->node);
+        TypeString* type = (TypeString*)build_lit_string(tp, field_node->field->node, symbol);
         strbuf_append_format(tp->code_buf, "const_s2it(%d)", type->const_index);
     } 
     else {
@@ -756,31 +758,36 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_TYPE:
         transpile_base_type(tp, (AstTypeNode*)expr_node);
         break;
-    case AST_NODE_LIST_TYPE:
+    case AST_NODE_LIST_TYPE: {
         TypeType* list_type = (TypeType*)((AstListNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((TypeList*)list_type->type)->type_index);
         break;
-    case AST_NODE_ARRAY_TYPE:
+    }
+    case AST_NODE_ARRAY_TYPE: {
         TypeType* array_type = (TypeType*)((AstArrayNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((TypeArray*)array_type->type)->type_index);
         break;
-    case AST_NODE_MAP_TYPE:
+    }
+    case AST_NODE_MAP_TYPE: {
         TypeType* map_type = (TypeType*)((AstMapNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((TypeMap*)map_type->type)->type_index);
         break;
-    case AST_NODE_ELMT_TYPE:
+    }
+    case AST_NODE_ELMT_TYPE: {
         TypeType* elmt_type = (TypeType*)((AstElementNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((TypeElmt*)elmt_type->type)->type_index);
         break;
-    case AST_NODE_FUNC_TYPE:
+    }
+    case AST_NODE_FUNC_TYPE: {
         TypeType* fn_type = (TypeType*)((AstFuncNode*)expr_node)->type;
         strbuf_append_format(tp->code_buf, "const_type(%d)", 
             ((TypeFunc*)fn_type->type)->type_index);
         break;
+    }
     case AST_NODE_BINARY_TYPE:
         transpile_binary_type(tp, (AstBinaryNode*)expr_node);
         break;
@@ -856,7 +863,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         define_ast_node(tp, ((AstBinaryNode*)node)->left);
         define_ast_node(tp, ((AstBinaryNode*)node)->right);
         break;
-    case AST_NODE_IF_EXPR:
+    case AST_NODE_IF_EXPR: {
         AstIfExprNode* if_node = (AstIfExprNode*)node;
         define_ast_node(tp, if_node->cond);
         define_ast_node(tp, if_node->then);
@@ -864,22 +871,25 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             define_ast_node(tp, if_node->otherwise);
         }
         break;
-    case AST_NODE_LET_STAM:  
+    }
+    case AST_NODE_LET_STAM: {
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             define_ast_node(tp, declare);
             declare = declare->next;
         }
         break;
-    case AST_NODE_PUB_STAM:
+    }
+    case AST_NODE_PUB_STAM: {
         // pub vars need to be brought to global scope in C, to allow them to be exported
         AstNode *decl = ((AstLetNode*)node)->declare;
         while (decl) {
             transpile_assign_expr(tp, (AstNamedNode*)decl);
             decl = decl->next;
         }
-        break;    
-    case AST_NODE_FOR_EXPR:
+        break;
+    }
+    case AST_NODE_FOR_EXPR: {
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             define_ast_node(tp, loop);
@@ -889,25 +899,29 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             define_ast_node(tp, ((AstForNode*)node)->then);
         }
         break;
-    case AST_NODE_ASSIGN:
+    }
+    case AST_NODE_ASSIGN: {
         AstNamedNode* assign = (AstNamedNode*)node;
         define_ast_node(tp, assign->as);
         break;
-    case AST_NODE_KEY_EXPR:
+    }
+    case AST_NODE_KEY_EXPR: {
         AstNamedNode* key = (AstNamedNode*)node;
         define_ast_node(tp, key->as);
         break;
+    }
     case AST_NODE_LOOP:
         define_ast_node(tp, ((AstNamedNode*)node)->as);
         break;
-    case AST_NODE_ARRAY:
+    case AST_NODE_ARRAY: {
         AstNode *item = ((AstArrayNode*)node)->item;
         while (item) {
             define_ast_node(tp, item);
             item = item->next;
         }        
         break;
-    case AST_NODE_LIST:  case AST_NODE_CONTENT:
+    }
+    case AST_NODE_LIST:  case AST_NODE_CONTENT: {
         AstNode *ld = ((AstListNode*)node)->declare;
         while (ld) {
             define_ast_node(tp, ld);
@@ -919,18 +933,20 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             li = li->next;
         }        
         break; 
-    case AST_NODE_MAP:  case AST_NODE_ELEMENT:
+    }
+    case AST_NODE_MAP:  case AST_NODE_ELEMENT: {
         AstNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
             define_ast_node(tp, nm_item);
             nm_item = nm_item->next;
         }
         break;
+    }
     case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
         define_ast_node(tp, ((AstFieldNode*)node)->object);
         define_ast_node(tp, ((AstFieldNode*)node)->field);
         break;
-    case AST_NODE_CALL_EXPR:
+    case AST_NODE_CALL_EXPR: {
         define_ast_node(tp, ((AstCallNode*)node)->function);
         AstNode* arg = ((AstCallNode*)node)->argument;
         while (arg) {
@@ -938,7 +954,8 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             arg = arg->next;
         }
         break;
-    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
+    }
+    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR: {
         define_func(tp, (AstFuncNode*)node, false);
         AstFuncNode* func = (AstFuncNode*)node;
         AstNode* fn_param = (AstNode*)func->param;
@@ -948,6 +965,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }        
         define_ast_node(tp, func->body);
         break;
+    }
     case AST_NODE_IMPORT:
         define_module_import(tp, (AstImportNode*)node);
         break;
@@ -962,7 +980,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
 #include "lambda-embed.h"
 
 void transpile_ast(Transpiler* tp, AstScript *script) {
-    strbuf_append_str_n(tp->code_buf, lambda_lambda_h, lambda_lambda_h_len);
+    strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
     AstNode* child = script->child;
     while (child) {

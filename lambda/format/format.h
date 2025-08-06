@@ -1,7 +1,7 @@
 #ifndef FORMAT_H
 #define FORMAT_H
 
-#include "../lambda-data.h"
+#include "../lambda-data.hpp"
 
 // Common macros for extracting values from Lambda Items
 #define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))

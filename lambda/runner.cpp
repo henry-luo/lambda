@@ -1,4 +1,4 @@
-#include "transpiler.h"
+#include "transpiler.hpp"
 #include <time.h>
 
 #ifdef _WIN32
@@ -42,10 +42,13 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
 }
 #endif
 
+
+extern "C" {
 char* read_text_file(const char *filename);
 void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+}
 void transpile_ast(Transpiler* tp, AstScript *script);
 void check_memory_leak();
 void print_heap_entries();
@@ -103,7 +106,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                     (int)(import->module.length), import->module.str);
                 return;
             }
-            uint8_t* mod_def = imp->addr;
+            uint8_t* mod_def = (uint8_t*)imp->addr;
             // loop through the public functions in the module
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
@@ -233,7 +236,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;
     // generate native code and return the function
-    tp->main_func = jit_gen_func(tp->jit_context, "main");
+    tp->main_func = (main_func_t)jit_gen_func(tp->jit_context, "main");
     get_time(&end);
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
@@ -276,7 +279,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
 }
 
 #include <lexbor/url/url.h>
-lxb_url_t* get_current_dir();
+#include "../lib/url.h"
 
 void runner_setup_context(Runner* runner) {
     printf("runner setup exec context\n");
@@ -302,7 +305,7 @@ void runner_cleanup(Runner* runner) {
         // check memory leaks
         check_memory_leak();
         heap_destroy();
-        if (runner->context.num_stack) num_stack_destroy(runner->context.num_stack);
+        if (runner->context.num_stack) num_stack_destroy((num_stack_t*)runner->context.num_stack);
     }
 }
 

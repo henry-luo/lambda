@@ -1,4 +1,4 @@
-#include "../lambda-data.h"
+#include "../lambda-data.hpp"
 #include <lexbor/url/url.h>
 
 // Input creation and management

@@ -64,6 +64,12 @@ Lambda runtime uses the following to represent its runtime data:
 
 #include "lambda.h"
 
+#pragma clang diagnostic pop
+
+#ifdef __cplusplus
+}
+#endif
+
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type
     char* name;  // name of the type
@@ -83,15 +89,13 @@ typedef struct DataOwner {
     void *owner;  // element/map/list/array that contains/owns the data
 } DataOwner;
 
-struct Map {
-    Container;  // extends Container
+struct Map : Container {
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
     int data_cap;  // capacity of the data struct
 };
 
-struct Element {
-    List;  // extends List for content
+struct Element : List {
     // attributes map
     void* type;  // attr type/shape
     void* data;  // packed data struct of the attrs
@@ -100,30 +104,25 @@ struct Element {
 
 typedef struct Script Script;
 
-typedef struct {
-    Type;  // extends Type
+typedef struct : Type {
     int const_index;
 } TypeConst;
 
-typedef struct {
-    TypeConst;  // extends TypeConst
+typedef struct TypeFloat : TypeConst {
     double double_val;
 } TypeFloat;
 
-typedef struct {
-    TypeConst;  // extends TypeConst
+typedef struct TypeDecimal : TypeConst  {
     mpf_t dec_val;
 } TypeDecimal;
 
-typedef struct {
-    TypeConst;  // extends TypeConst
+typedef struct TypeString : TypeConst {
     String *string;
 } TypeString;
 
 typedef TypeString TypeSymbol;
 
-typedef struct {
-    Type;  // extends Type
+typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array
     long length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
@@ -138,8 +137,7 @@ typedef struct ShapeEntry {
     struct ShapeEntry* next;
 } ShapeEntry;
 
-typedef struct {
-    Type;  // extends Type
+typedef struct TypeMap : Type {
     long length;  // no. of items in the map
     long byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
@@ -147,8 +145,7 @@ typedef struct {
     ShapeEntry* last;  // last shape entry of the map
 } TypeMap;
 
-typedef struct {
-    TypeMap; // extends TypeMap
+typedef struct TypeElmt : TypeMap {
     StrView name;  // name of the element
     long content_length;  // no. of content items, needed for element type
 } TypeElmt;
@@ -218,21 +215,18 @@ typedef enum SysFunc {
     SYSFUNC_ERROR,
 } SysFunc;
 
-typedef struct {
-    Type;  // extends Type
+typedef struct TypeBinary : Type {
     Type* left;
     Type* right;
     Operator op;  // operator
     int type_index;  // index of the type in the type list
 } TypeBinary;
 
-typedef struct TypeParam {
-    Type;  // extends Type
+typedef struct TypeParam : Type {
     struct TypeParam *next;
 } TypeParam;
 
-typedef struct {
-    Type;  // extends Type
+typedef struct TypeFunc : Type {
     TypeParam *param;
     Type *returned;
     int param_count;
@@ -241,13 +235,11 @@ typedef struct {
     bool is_public;
 } TypeFunc;
 
-typedef struct {
-    Type;
+typedef struct TypeSysFunc : Type {
     SysFunc *fn;
 } TypeSysFunc;
 
-typedef struct {
-    Type;  // extends Type
+typedef struct TypeType : Type {
     Type *type;  // full type defintion
 } TypeType;
 
@@ -309,8 +301,5 @@ void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* poo
 
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 
-#pragma clang diagnostic pop
 
-#ifdef __cplusplus
-}
-#endif
+

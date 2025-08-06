@@ -1,4 +1,4 @@
-#include "transpiler.h"
+#include "transpiler.hpp"
 #include <stdarg.h>
 
 extern __thread Context* context;
@@ -11,7 +11,7 @@ extern __thread Context* context;
 void expand_list(List *list);
 
 Array* array() {
-    Array *arr = calloc(1, sizeof(Array));
+    Array *arr = (Array*)calloc(1, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
     frame_start();
     return arr;
@@ -34,29 +34,32 @@ void array_set(Array* arr, int index, LambdaItem itm, VariableMemPool *pool) {
     // input files uses pool, instead of extra slots in the array
     if (pool) return;
     switch (itm.type_id) {
-    case LMD_TYPE_FLOAT:
+    case LMD_TYPE_FLOAT: {
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
         *dval = *(double*)itm.pointer;  arr->items[index] = d2it(dval);        
         arr->extra++;
         printf("array set float: %lf\n", *dval);
         break;
-    case LMD_TYPE_INT64:
+    }
+    case LMD_TYPE_INT64: {
         long* ival = (long*)(arr->items + (arr->capacity - arr->extra - 1));
         *ival = *(long*)itm.pointer;  arr->items[index] = l2it(ival);
         arr->extra++;
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
         String *str = (String*)itm.pointer;
         str->ref_cnt++;
         break;
-    case LMD_TYPE_RAW_POINTER: 
+    }
+    case LMD_TYPE_RAW_POINTER: {
         TypeId type_id = *((uint8_t*)itm.raw_pointer);
         if (type_id >= LMD_TYPE_LIST && type_id <= LMD_TYPE_ELEMENT) {
             Container *container = (Container*)itm.raw_pointer;
             container->ref_cnt++;
         }
         break;
-    }
+    }}
 }
 
 void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool) {
@@ -70,7 +73,7 @@ Array* array_fill(Array* arr, int count, ...) {
         va_list args;
         va_start(args, count);
         arr->capacity = count;
-        arr->items = Malloc(count * sizeof(Item));
+        arr->items = (Item*)Malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
             if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
             array_set(arr, i, va_arg(args, LambdaItem), NULL);
@@ -87,14 +90,16 @@ Array* array_fill(Array* arr, int count, ...) {
 
 Item array_get(Array *array, int index) {
     if (index < 0 || index >= array->length) { return ITEM_NULL; }
-    LambdaItem item = (LambdaItem)array->items[index];
+    LambdaItem item = ((LambdaItem*)(array->items))[index];
     switch (item.type_id) {
-    case LMD_TYPE_INT64:
+    case LMD_TYPE_INT64: {
         long lval = *(long*)item.pointer;
         return push_l(lval);
-    case LMD_TYPE_FLOAT:
+    }
+    case LMD_TYPE_FLOAT: {
         double dval = *(double*)item.pointer;
         return push_d(dval);
+    }
     default:
         return item.item;
     }    
@@ -104,9 +109,9 @@ ArrayLong* array_long_new(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    ArrayLong *arr = heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
+    ArrayLong *arr = (ArrayLong*)heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
     arr->type_id = LMD_TYPE_ARRAY_INT;  arr->capacity = count;
-    arr->items = Malloc(count * sizeof(long));
+    arr->items = (long*)Malloc(count * sizeof(long));
     arr->length = count;
     for (int i = 0; i < count; i++) {
         arr->items[i] = va_arg(args, long);
@@ -128,7 +133,7 @@ void expand_list(List *list) {
     // to consider: could also alloc directly from Lambda heap without the heap entry
     // need to profile to see which is faster
     Item* old_items = list->items;
-    list->items = Realloc(list->items, list->capacity * sizeof(Item));
+    list->items = (Item*)Realloc(list->items, list->capacity * sizeof(Item));
     // copy extra items to the end of the list
     if (list->extra) {
         memcpy(list->items + (list->capacity - list->extra), 
@@ -136,7 +141,7 @@ void expand_list(List *list) {
         // scan the list, if the item is long/double,
         // and is stored in the list extra slots, need to update the pointer
         for (int i = 0; i < list->length; i++) {
-            LambdaItem itm = (LambdaItem)list->items[i];
+            LambdaItem itm = ((LambdaItem*)list->items)[i];
             if (itm.type_id == LMD_TYPE_FLOAT || itm.type_id == LMD_TYPE_INT64) {
                 Item* old_pointer = (Item*)itm.pointer;
                 // Only update pointers that are in the old list buffer's extra space
@@ -190,22 +195,24 @@ void list_push(List *list, Item item) {
     list->items[list->length++] = item;
     // printf("list push item: type: %d, length: %ld\n", itm.type_id, list->length);
     switch (itm.type_id) {
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
         String *str = (String*)itm.pointer;
         str->ref_cnt++;
         break;
-    case LMD_TYPE_FLOAT:
+    }
+    case LMD_TYPE_FLOAT: {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = *(double*)itm.pointer;  list->items[list->length-1] = d2it(dval);
         list->extra++;
         printf("list push float: %f, extra: %ld\n", *dval, list->extra);
         break;
-    case LMD_TYPE_INT64:
+    }
+    case LMD_TYPE_INT64: {
         long* ival = (long*)(list->items + (list->capacity - list->extra - 1));
         *ival = *(long*)itm.pointer;  list->items[list->length-1] = l2it(ival);
         list->extra++;
         break;
-    }
+    }}
 }
 
 Item list_fill(List *list, int count, ...) {
@@ -227,14 +234,16 @@ Item list_fill(List *list, int count, ...) {
 
 Item list_get(List *list, int index) {
     if (index < 0 || index >= list->length) { return ITEM_NULL; }
-    LambdaItem item = (LambdaItem)list->items[index];
+    LambdaItem item = ((LambdaItem*)list->items)[index];
     switch (item.type_id) {
-    case LMD_TYPE_INT64:
+    case LMD_TYPE_INT64: {
         long lval = *(long*)item.pointer;
         return push_l(lval);
-    case LMD_TYPE_FLOAT:
+    }
+    case LMD_TYPE_FLOAT: {
         double dval = *(double*)item.pointer;
         return push_d(dval);
+    }
     default:
         return item.item;
     }
@@ -259,38 +268,44 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
         } else {
             switch (field->type->type_id) {
-            case LMD_TYPE_NULL:
+            case LMD_TYPE_NULL: {
                 *(bool*)field_ptr = va_arg(args, bool);
                 break;
-            case LMD_TYPE_BOOL:
+            }
+            case LMD_TYPE_BOOL: {
                 *(bool*)field_ptr = va_arg(args, bool);
                 printf("field bool value: %s\n", *(bool*)field_ptr ? "true" : "false");
-                break;                
-            case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+                break;
+            }
+            case LMD_TYPE_INT:  case LMD_TYPE_INT64: {
                 *(long*)field_ptr = va_arg(args, long);
                 printf("field int value: %ld\n", *(long*)field_ptr);
                 break;
-            case LMD_TYPE_FLOAT:
+            }
+            case LMD_TYPE_FLOAT: {
                 *(double*)field_ptr = va_arg(args, double);
                 printf("field float value: %f\n", *(double*)field_ptr);
                 break;
-            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  
-            case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
+            }
+            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
                 String *str = va_arg(args, String*);
                 printf("field string value: %s\n", str->chars);
                 *(String**)field_ptr = str;
                 str->ref_cnt++;
                 break;
+            }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container *container = va_arg(args, Container*);
                 *(Container**)field_ptr = container;
                 container->ref_cnt++;
-                break;            
-            case LMD_TYPE_FUNC:  case LMD_TYPE_ANY:
+                break;
+            }
+            case LMD_TYPE_FUNC:  case LMD_TYPE_ANY: {
                 void *arr = va_arg(args, void*);
                 *(void**)field_ptr = arr;
                 break;
+            }
             default:
                 printf("unknown type %d\n", field->type->type_id);
             }
@@ -310,10 +325,7 @@ Map* map(int type_index) {
     return map;
 }
 
-TypeMap EmptyMap = {
-    .type_id = LMD_TYPE_MAP,
-    .type_index = -1,
-};
+extern TypeMap EmptyMap;
 
 Map* map_pooled(VariableMemPool *pool) {
     Map *map = (Map *)pool_calloc(pool, sizeof(Map));
@@ -363,12 +375,14 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                     return b2it(*(bool*)field_ptr);
                 case LMD_TYPE_INT:
                     return i2it(*(int*)field_ptr);
-                case LMD_TYPE_INT64:
+                case LMD_TYPE_INT64: {
                     long lval = *(long*)field_ptr;
                     return push_l(lval);
-                case LMD_TYPE_FLOAT:
+                }
+                case LMD_TYPE_FLOAT: {
                     double dval = *(double*)field_ptr;
                     return push_d(dval);
+                }
                 case LMD_TYPE_DTIME:
                     //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
                     return k2it(*(char**)field_ptr);
@@ -424,11 +438,7 @@ Element* elmt(int type_index) {
     return elmt;
 }
 
-TypeElmt EmptyElmt = {
-    .type_id = LMD_TYPE_ELEMENT,
-    .type_index = -1,
-    .name = {0},
-};
+extern TypeElmt EmptyElmt;
 
 Element* elmt_pooled(VariableMemPool *pool) {
     Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
@@ -545,7 +555,7 @@ Item add(Item a, Item b) {
 }
 
 Range* fn_to(Item a, Item b) {
-    LambdaItem item_a = (LambdaItem)a;  LambdaItem item_b = (LambdaItem)b;
+    LambdaItem item_a = *(LambdaItem*)&a;  LambdaItem item_b = *(LambdaItem*)&b;
     // todo: join binary, list, array, map
     if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64) && 
         (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64)) {
@@ -599,7 +609,7 @@ double it2d(Item item) {
 
 Function* to_fn(fn_ptr ptr) {
     printf("create fn %p\n", ptr);
-    Function *fn = calloc(1, sizeof(Function));
+    Function *fn = (Function*)calloc(1, sizeof(Function));
     fn->type_id = LMD_TYPE_FUNC;
     fn->ptr = ptr;
     return fn;
@@ -607,7 +617,7 @@ Function* to_fn(fn_ptr ptr) {
 
 bool fn_is(Item a, Item b) {
     printf("is expr\n");
-    LambdaItem a_item = (LambdaItem)a, b_item = (LambdaItem)b;
+    LambdaItem a_item = *(LambdaItem*)&a, b_item = *(LambdaItem*)&b;
     if (b_item.type_id || *((uint8_t*)b) != LMD_TYPE_TYPE) {
         return false;
     }
@@ -788,7 +798,7 @@ Type* const_type(int type_index) {
 
 Type* fn_type(Item item) {
     LambdaItem itm = {.item = item};
-    TypeType *type = calloc(1, sizeof(TypeType) + sizeof(Type)); 
+    TypeType *type = (TypeType *)calloc(1, sizeof(TypeType) + sizeof(Type)); 
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     if (itm.type_id) {
@@ -834,7 +844,7 @@ Item fn_input(Item url, Item type) {
         // Extract 'type' from map
         bool is_found;
         Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
-        if (!is_found || !input_type || ((LambdaItem)input_type).type_id == LMD_TYPE_NULL) { // missing 'type' key
+        if (!is_found || !input_type || ((LambdaItem*)&input_type)->type_id == LMD_TYPE_NULL) { // missing 'type' key
             type_str = NULL;
         } else {
             LambdaItem type_value_item = {.item = input_type};
@@ -851,7 +861,7 @@ Item fn_input(Item url, Item type) {
 
         // Extract 'flavor' from map
         Item input_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
-        if (!is_found || !input_flavor || ((LambdaItem)input_flavor).type_id == LMD_TYPE_NULL) { // missing 'flavor' key
+        if (!is_found || !input_flavor || ((LambdaItem*)&input_flavor)->type_id == LMD_TYPE_NULL) { // missing 'flavor' key
             flavor_str = NULL;
         } else {
             LambdaItem flavor_value_item = {.item = input_flavor};
@@ -871,9 +881,10 @@ Item fn_input(Item url, Item type) {
         return ITEM_NULL;  // todo: push error
     }
     
-    Input *input = input_data(context, url_str, type_str, flavor_str);
+    // Input *input = input_data(context, url_str, type_str, flavor_str);
     // todo: input should be cached in context
-    return (input && input->root) ? input->root : ITEM_NULL;
+    // return (input && input->root) ? input->root : ITEM_NULL;
+    return ITEM_NULL;
 }
 
 void fn_print(Item item) {
@@ -906,7 +917,7 @@ String* fn_format(Item item, Item type) {
         // Extract 'type' from map
         bool is_found;
         Item format_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
-        if (!is_found || !format_type || ((LambdaItem)format_type).type_id == LMD_TYPE_NULL) { // missing 'type' key
+        if (!is_found || !format_type || ((LambdaItem*)&format_type)->type_id == LMD_TYPE_NULL) { // missing 'type' key
             type_str = NULL;
         } else {
             LambdaItem type_value_item = {.item = format_type};
@@ -923,7 +934,7 @@ String* fn_format(Item item, Item type) {
 
         // Extract 'flavor' from map
         Item format_flavor = _map_get((TypeMap*)options_map->type, options_map->data, "flavor", &is_found);
-        if (!is_found || !format_flavor || ((LambdaItem)format_flavor).type_id == LMD_TYPE_NULL) { // missing 'flavor' key
+        if (!is_found || !format_flavor || ((LambdaItem*)&format_flavor)->type_id == LMD_TYPE_NULL) { // missing 'flavor' key
             flavor_str = NULL;
         } else {
             LambdaItem flavor_value_item = {.item = format_flavor};
@@ -944,19 +955,20 @@ String* fn_format(Item item, Item type) {
     }
     
     // printf("format item type: %s, flavor: %s\n", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    String* result = format_data(item, type_str, flavor_str, context->heap->pool);
-    if (result) {
-        arraylist_append(context->heap->entries, (void*)s2it(result));
-    }
-    return result;
+    // String* result = format_data(item, type_str, flavor_str, context->heap->pool);
+    // if (result) {
+    //     arraylist_append(context->heap->entries, (void*)s2it(result));
+    // }
+    // return result;
+    return NULL;
 }
 
-int utf8_char_count(const char* utf8_string);
+#include "../lib/utf.h"
 
 // generic field access function for any type
 Item fn_index(Item item, long index) {
     // Determine the type and delegate to appropriate getter
-    LambdaItem litem = (LambdaItem)item;
+    LambdaItem litem = *(LambdaItem*)&item;
     TypeId type_id = get_type_id(litem);
 
     switch (type_id) {
@@ -988,18 +1000,20 @@ Item fn_index(Item item, long index) {
 }
 
 Item fn_member(Item item, Item key) {
-    LambdaItem litem = (LambdaItem)item;
+    LambdaItem litem = *(LambdaItem*)&item;
     TypeId type_id = get_type_id(litem);
     switch (type_id) {
-    case LMD_TYPE_MAP:
+    case LMD_TYPE_MAP: {
         Map *map = (Map*)litem.raw_pointer;
         return map_get(map, key);
-    case LMD_TYPE_ELEMENT:
+    }
+    case LMD_TYPE_ELEMENT: {
         Element *elmt = (Element*)litem.raw_pointer;
         return elmt_get(elmt, key);
+    }
     case LMD_TYPE_LIST: {
         // Handle built-in properties for List type
-        LambdaItem key_item = (LambdaItem)key;
+        LambdaItem key_item = *(LambdaItem*)&key;
         if (key_item.type_id == LMD_TYPE_STRING || key_item.type_id == LMD_TYPE_SYMBOL) {
             String *key_str = (String*)key_item.pointer;
             if (key_str && strcmp(key_str->chars, "length") == 0) {
@@ -1017,7 +1031,7 @@ Item fn_member(Item item, Item key) {
 
 // length function for item
 Item fn_len(Item item) {
-    LambdaItem litem = (LambdaItem)item;
+    LambdaItem litem = *(LambdaItem*)&item;
     TypeId type_id = get_type_id(litem);
     printf("fn_len item: %d\n", type_id);
     long size = 0;
@@ -1034,11 +1048,12 @@ Item fn_len(Item item) {
     case LMD_TYPE_ARRAY_INT:
         size = ((ArrayLong*)litem.raw_pointer)->length;
         break;
-    case LMD_TYPE_MAP:
+    case LMD_TYPE_MAP: {
         TypeMap *map_type = (TypeMap*)((Map*)litem.raw_pointer)->type;
         // returns the num of fields in the map
         size = map_type ? map_type->length : 0;
         break;
+    }
     case LMD_TYPE_ELEMENT: {
         Element *elmt = (Element*)litem.raw_pointer;
         TypeElmt *elmt_type = (TypeElmt*)elmt->type;

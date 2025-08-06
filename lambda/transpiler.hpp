@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lambda-data.h"
+#include "lambda-data.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,107 +73,90 @@ struct AstNode {
     TSNode node;
 };
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstFieldNode : AstNode {
     AstNode *object, *field;
 } AstFieldNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstCallNode : AstNode {
     AstNode *function;
     AstNode *argument;
 } AstCallNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstSysFuncNode : AstNode {
     SysFunc fn;
 } AstSysFuncNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstPrimaryNode : AstNode {
     AstNode *expr;
 } AstPrimaryNode;
 
 typedef AstNode AstTypeNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstUnaryNode : AstNode {
     AstNode *operand;
     StrView op_str;
     Operator op;
 } AstUnaryNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstBinaryNode : AstNode {
     AstNode *left, *right;
     StrView op_str;
     Operator op;
 } AstBinaryNode;
 
 // for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_LOOP, AST_NODE_PARAM
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstNamedNode : AstNode {
     StrView name;
     AstNode *as;
 } AstNamedNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstIdentNode : AstNode {
     StrView name;
     NameEntry *entry;
 } AstIdentNode;
 
-struct AstImportNode {
-    AstNode;  // extends AstNode
+struct AstImportNode : AstNode {
     StrView alias;
     StrView module;
     Script* script; // imported script
     bool is_relative;
 };
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstLetNode : AstNode {
     AstNode *declare;  // declarations in let expression
 } AstLetNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstForNode : AstNode {
     AstNode *loop;
     AstNode *then;
     NameScope *vars;  // scope for the variables in the loop
 } AstForNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstIfExprNode : AstNode {
     AstNode *cond;
     AstNode *then;
     AstNode *otherwise;
 } AstIfExprNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstArrayNode : AstNode {
     AstNode *item;  // first item in the array
 } AstArrayNode;
 
-typedef struct {
-    AstArrayNode;  // extends AstArrayNode
+typedef struct AstListNode : AstArrayNode {
     AstNode *declare;  // declarations in the list
     NameScope *vars;  // scope for the variables in the list
 } AstListNode;
 
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstMapNode : AstNode {
     AstNode *item;  // first item in the map
 } AstMapNode;
 
-typedef struct {
-    AstMapNode;  // extends AstMapNode
+typedef struct AstElementNode : AstMapNode {
     AstNode *content;  // first content node
 } AstElementNode;
 
 // aligned with AstNamedNode on name
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstFuncNode : AstNode {
     StrView name;
     AstNamedNode *param; // first parameter of the function
     AstNode *body;
@@ -181,8 +164,7 @@ typedef struct {
 } AstFuncNode;
 
 // root of the AST
-typedef struct {
-    AstNode;  // extends AstNode
+typedef struct AstScript : AstNode {
     AstNode *child;  // first child
     NameScope *global_vars;  // global variables
 } AstScript;
@@ -233,8 +215,7 @@ struct Script {
     main_func_t main_func;  // transpiled main function
 };
 
-typedef struct Transpiler {
-    Script;  // extends Script
+typedef struct Transpiler : Script {
     TSParser* parser;
     StrBuf* code_buf;
     Runtime* runtime;

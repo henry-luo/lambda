@@ -1,4 +1,4 @@
-#include "transpiler.h"
+#include "transpiler.hpp"
 #include "../lib/hashmap.h"
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
@@ -14,7 +14,7 @@ Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
 Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
 Type TYPE_LIST = {.type_id = LMD_TYPE_LIST};
 Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
-TypeArray TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
+TypeArray TYPE_ARRAY;
 Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
 Type TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
 Type TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
@@ -35,25 +35,66 @@ Type LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_const = 1, .is_literal = 1}
 Type LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
 Type LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
 
-TypeType LIT_TYPE_NULL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_NULL};
-TypeType LIT_TYPE_BOOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_BOOL};
-TypeType LIT_TYPE_INT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_INT64};
-TypeType LIT_TYPE_FLOAT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FLOAT};
-TypeType LIT_TYPE_DECIMAL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_DECIMAL};
-TypeType LIT_TYPE_NUMBER = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_NUMBER};
-TypeType LIT_TYPE_STRING = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_STRING};
-TypeType LIT_TYPE_BINARY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_BINARY};
-TypeType LIT_TYPE_SYMBOL = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_SYMBOL};
-TypeType LIT_TYPE_DTIME = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_DTIME};
-TypeType LIT_TYPE_LIST = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_LIST};
-TypeType LIT_TYPE_RANGE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_RANGE};
-TypeType LIT_TYPE_ARRAY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = (Type*)&TYPE_ARRAY};
-TypeType LIT_TYPE_MAP = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_MAP};
-TypeType LIT_TYPE_ELMT = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ELMT};
-TypeType LIT_TYPE_FUNC = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_FUNC};
-TypeType LIT_TYPE_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_TYPE};
-TypeType LIT_TYPE_ANY = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ANY};
-TypeType LIT_TYPE_ERROR = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1, .type = &TYPE_ERROR};
+TypeType LIT_TYPE_NULL;
+TypeType LIT_TYPE_BOOL;
+TypeType LIT_TYPE_INT;
+TypeType LIT_TYPE_FLOAT;
+TypeType LIT_TYPE_DECIMAL;
+TypeType LIT_TYPE_NUMBER;
+TypeType LIT_TYPE_STRING;
+TypeType LIT_TYPE_BINARY;
+TypeType LIT_TYPE_SYMBOL;
+TypeType LIT_TYPE_DTIME;
+TypeType LIT_TYPE_LIST;
+TypeType LIT_TYPE_RANGE;
+TypeType LIT_TYPE_ARRAY;
+TypeType LIT_TYPE_MAP;
+TypeType LIT_TYPE_ELMT;
+TypeType LIT_TYPE_FUNC;
+TypeType LIT_TYPE_TYPE;
+TypeType LIT_TYPE_ANY;
+TypeType LIT_TYPE_ERROR;
+
+TypeMap EmptyMap;
+TypeElmt EmptyElmt;
+
+void init_typetype() {
+    *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
+    TYPE_ARRAY.nested = &TYPE_ANY;  // default nested type
+    TYPE_ARRAY.length = 0;  TYPE_ARRAY.type_index = -1;
+    *(Type*)(&LIT_TYPE_NULL) = LIT_TYPE;  LIT_TYPE_NULL.type = &TYPE_NULL;
+    *(Type*)(&LIT_TYPE_BOOL) = LIT_TYPE;  LIT_TYPE_BOOL.type = &TYPE_BOOL;
+    *(Type*)(&LIT_TYPE_INT) = LIT_TYPE;  LIT_TYPE_INT.type = &TYPE_INT64;
+    *(Type*)(&LIT_TYPE_FLOAT) = LIT_TYPE;  LIT_TYPE_FLOAT.type = &TYPE_FLOAT;
+    *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
+    *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
+    *(Type*)(&LIT_TYPE_STRING) = LIT_TYPE;  LIT_TYPE_STRING.type = &TYPE_STRING;
+    *(Type*)(&LIT_TYPE_BINARY) = LIT_TYPE;  LIT_TYPE_BINARY.type = &TYPE_BINARY;
+    *(Type*)(&LIT_TYPE_SYMBOL) = LIT_TYPE;  LIT_TYPE_SYMBOL.type = &TYPE_SYMBOL;
+    *(Type*)(&LIT_TYPE_DTIME) = LIT_TYPE;  LIT_TYPE_DTIME.type = &TYPE_DTIME;
+    *(Type*)(&LIT_TYPE_LIST) = LIT_TYPE;  LIT_TYPE_LIST.type = &TYPE_LIST;
+    *(Type*)(&LIT_TYPE_RANGE) = LIT_TYPE;  LIT_TYPE_RANGE.type = &TYPE_RANGE;
+    *(Type*)(&LIT_TYPE_ARRAY) = LIT_TYPE;  LIT_TYPE_ARRAY.type = (Type*)&TYPE_ARRAY;
+    *(Type*)(&LIT_TYPE_MAP) = LIT_TYPE;  LIT_TYPE_MAP.type = &TYPE_MAP;
+    *(Type*)(&LIT_TYPE_ELMT) = LIT_TYPE;  LIT_TYPE_ELMT.type = &TYPE_ELMT;
+    *(Type*)(&LIT_TYPE_FUNC) = LIT_TYPE;  LIT_TYPE_FUNC.type = &TYPE_FUNC;
+    *(Type*)(&LIT_TYPE_TYPE) = LIT_TYPE;  LIT_TYPE_TYPE.type = &TYPE_TYPE;
+    *(Type*)(&LIT_TYPE_ANY) = LIT_TYPE;  LIT_TYPE_ANY.type = &TYPE_ANY;
+    *(Type*)(&LIT_TYPE_ERROR) = LIT_TYPE;  LIT_TYPE_ERROR.type = &TYPE_ERROR;
+
+    memset(&EmptyMap, 0, sizeof(TypeMap));
+    EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
+
+    memset(&EmptyElmt, 0, sizeof(TypeElmt));
+    EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
+}
+
+struct Initializer {
+    Initializer() {
+        init_typetype();
+    }
+};
+static Initializer initializer; 
 
 String EMPTY_STRING = {.chars = "lambda.nil", .len = sizeof("lambda.nil") - 1, .ref_cnt = 0};
 
@@ -1369,18 +1410,21 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     case SYM_DATETIME:  case SYM_TIME:
         return build_lit_node(tp, expr_node, false, symbol);
         break;
-    case SYM_TRUE:  case SYM_FALSE:
+    case SYM_TRUE:  case SYM_FALSE: {
         AstPrimaryNode* b_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         b_node->type = &LIT_BOOL;
         return (AstNode*)b_node;
-    case SYM_INT:
+    }
+    case SYM_INT: {
         AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         i_node->type = &LIT_INT;   // todo: check int value range
         return (AstNode*)i_node;
-    case SYM_FLOAT:
+    }
+    case SYM_FLOAT: {
         AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
         f_node->type = build_lit_float(tp, expr_node, symbol);
         return (AstNode*)f_node;
+    }
     case SYM_BASE_TYPE:
         return build_base_type(tp, expr_node);
     case SYM_PRIMARY_TYPE:

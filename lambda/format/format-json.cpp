@@ -76,7 +76,7 @@ static void format_map(StrBuf* sb, Map* mp) {
 }
 
 static void format_item(StrBuf* sb, Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(*(LambdaItem*)&item);
     switch (type) {
     case LMD_TYPE_NULL:
         strbuf_append_str(sb, "null");
@@ -119,7 +119,8 @@ static void format_item(StrBuf* sb, Item item) {
         // Add attributes if any
         if (elmt_type && elmt_type->length > 0 && element->data) {
             strbuf_append_str(sb, ",");
-            Map temp_map = {.type_id = LMD_TYPE_ELEMENT};
+            Map temp_map;  memset(&temp_map, 0, sizeof(Map));
+            temp_map.type_id = LMD_TYPE_MAP;
             temp_map.type = (Type*)elmt_type;
             temp_map.data = element->data;
             temp_map.data_cap = element->data_cap;
