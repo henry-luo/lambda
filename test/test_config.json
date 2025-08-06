@@ -65,7 +65,8 @@
       "type": "mir",
       "special_flags": "-std=c99 -Wall -Wextra -O2 -g -fms-extensions -pedantic",
       "uses_build_config": true,
-      "requires_jq": true
+      "requires_jq": true,
+      "parallel": true
     },
     {
       "suite": "lambda",
@@ -76,7 +77,8 @@
       "type": "lambda",
       "special_flags": "-fms-extensions",
       "uses_build_config": true,
-      "requires_jq": true
+      "requires_jq": true,
+      "parallel": true
     }
   ]
 }

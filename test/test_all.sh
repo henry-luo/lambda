@@ -256,38 +256,24 @@ run_common_test_suite() {
         done
     fi
     
-    # Handle different test types
+    # Handle different test types based on configuration
     local suite_type=$(get_config "$suite_name" "type")
+    local is_parallel_suite=$(get_config "$suite_name" "parallel")
+    
     case "$suite_type" in
         "validator")
             run_validator_suite_impl "$suite_name"
             return $?
             ;;
-        "library")
-            if [ "$is_parallel" = "true" ]; then
+        "library"|"input"|"mir"|"lambda")
+            # All these suite types now use the unified parallel implementation
+            if [ "$is_parallel" = "true" ] || [ "$is_parallel_suite" = "true" ] || [ "$suite_type" = "mir" ] || [ "$suite_type" = "lambda" ]; then
                 run_parallel_suite_impl "$suite_name"
                 return $?
             else
                 run_sequential_suite_impl "$suite_name"
                 return $?
             fi
-            ;;
-        "input")
-            if [ "$is_parallel" = "true" ]; then
-                run_parallel_suite_impl "$suite_name"
-                return $?
-            else
-                run_sequential_suite_impl "$suite_name"
-                return $?
-            fi
-            ;;
-        "mir")
-            run_mir_suite_impl "$suite_name"
-            return $?
-            ;;
-        "lambda")
-            run_lambda_suite_impl "$suite_name"
-            return $?
             ;;
         *)
             print_error "Unknown test type: $suite_type"
@@ -351,179 +337,30 @@ run_validator_suite_impl() {
     return $failed_tests
 }
 
-# Implementation for Lambda test suite using build config
+# Implementation for Lambda test suite using parallel execution
 run_lambda_suite_impl() {
     local suite_name="$1"
-    
-    # Use run_individual_test to handle the Lambda test execution
-    # We need to temporarily modify global state to capture results for the suite summary
-    local old_raw_output="$RAW_OUTPUT"
-    RAW_OUTPUT=false  # Force non-raw mode for suite execution
-    
-    # Save current test output by capturing it
-    local test_output_file=$(mktemp)
-    
-    # Run the individual Lambda test and capture both exit code and output
-    {
-        if run_individual_test "lambda" "lambda" 2>&1; then
-            local test_exit_code=0
-        else
-            local test_exit_code=$?
-        fi
-        echo "EXIT_CODE:$test_exit_code" >&3
-    } 3>"$test_output_file.exit" >"$test_output_file.output" 2>&1
-    
-    # Read the captured results
-    local captured_exit_code=$(grep "^EXIT_CODE:" "$test_output_file.exit" | cut -d: -f2)
-    local captured_output=$(cat "$test_output_file.output")
-    
-    # Display the output
-    echo "$captured_output"
-    
-    # Parse results from the output to set global variables for suite summary
-    local total_tests=0
-    local failed_tests=0
-    
-    if echo "$captured_output" | grep -q "Total:"; then
-        # Extract from the summary line that run_individual_test produces
-        local summary_line=$(echo "$captured_output" | grep "Total:" | tail -1)
-        total_tests=$(echo "$summary_line" | grep -o "Total: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        failed_tests=$(echo "$summary_line" | grep -o "Failed: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-    else
-        # Fallback: parse TAP or Criterion output directly
-        if echo "$captured_output" | grep -q "^ok "; then
-            # TAP format
-            total_tests=$(echo "$captured_output" | grep -c "^ok " 2>/dev/null || echo "0")
-            failed_tests=$(echo "$captured_output" | grep -c "^not ok " 2>/dev/null || echo "0")
-        elif echo "$captured_output" | grep -q "Synthesis:"; then
-            # Criterion synthesis format
-            local synthesis_line=$(echo "$captured_output" | grep "Synthesis:" | tail -1)
-            total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-            failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-            local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-            failed_tests=$((failed_tests + crashing_tests))
-        else
-            # Fallback based on exit code
-            if [ "$captured_exit_code" -eq 0 ]; then
-                total_tests=1
-                failed_tests=0
-            else
-                total_tests=1
-                failed_tests=1
-            fi
-        fi
-    fi
-    
-    # Clean numeric values
-    total_tests=$(echo "$total_tests" | tr -cd '0-9')
-    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
-    total_tests=${total_tests:-0}
-    failed_tests=${failed_tests:-0}
-    
-    # Store for final summary (maintaining compatibility with existing code)
-    LAMBDA_TOTAL_TESTS=$total_tests
-    LAMBDA_FAILED_TESTS=$failed_tests
-    LAMBDA_PASSED_TESTS=$((total_tests - failed_tests))
-    
-    # Cleanup temporary files
-    rm -f "$test_output_file" "$test_output_file.exit" "$test_output_file.output"
-    
-    # Restore original RAW_OUTPUT setting
-    RAW_OUTPUT="$old_raw_output"
-    
-    return $failed_tests
+    # Simply delegate to the parallel suite implementation
+    run_parallel_suite_impl "$suite_name"
+    return $?
 }
 
-# Implementation for MIR test suite using build config
+# Implementation for MIR test suite using parallel execution
 run_mir_suite_impl() {
     local suite_name="$1"
-    
-    # Use run_individual_test to handle the MIR test execution
-    # We need to temporarily modify global state to capture results for the suite summary
-    local old_raw_output="$RAW_OUTPUT"
-    RAW_OUTPUT=false  # Force non-raw mode for suite execution
-    
-    # Save current test output by capturing it
-    local test_output_file=$(mktemp)
-    
-    # Run the individual MIR test and capture both exit code and output
-    {
-        if run_individual_test "mir" "mir" 2>&1; then
-            local test_exit_code=0
-        else
-            local test_exit_code=$?
-        fi
-        echo "EXIT_CODE:$test_exit_code" >&3
-    } 3>"$test_output_file.exit" >"$test_output_file.output" 2>&1
-    
-    # Read the captured results
-    local captured_exit_code=$(grep "^EXIT_CODE:" "$test_output_file.exit" | cut -d: -f2)
-    local captured_output=$(cat "$test_output_file.output")
-    
-    # Display the output
-    echo "$captured_output"
-    
-    # Parse results from the output to set global variables for suite summary
-    local total_tests=0
-    local failed_tests=0
-    
-    if echo "$captured_output" | grep -q "Total:"; then
-        # Extract from the summary line that run_individual_test produces
-        local summary_line=$(echo "$captured_output" | grep "Total:" | tail -1)
-        total_tests=$(echo "$summary_line" | grep -o "Total: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-        failed_tests=$(echo "$summary_line" | grep -o "Failed: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-    else
-        # Fallback: parse TAP or Criterion output directly
-        if echo "$captured_output" | grep -q "^ok "; then
-            # TAP format
-            total_tests=$(echo "$captured_output" | grep -c "^ok " 2>/dev/null || echo "0")
-            failed_tests=$(echo "$captured_output" | grep -c "^not ok " 2>/dev/null || echo "0")
-        elif echo "$captured_output" | grep -q "Synthesis:"; then
-            # Criterion synthesis format
-            local synthesis_line=$(echo "$captured_output" | grep "Synthesis:" | tail -1)
-            total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-            failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-            local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
-            failed_tests=$((failed_tests + crashing_tests))
-        else
-            # Fallback based on exit code
-            if [ "$captured_exit_code" -eq 0 ]; then
-                total_tests=1
-                failed_tests=0
-            else
-                total_tests=1
-                failed_tests=1
-            fi
-        fi
-    fi
-    
-    # Clean numeric values
-    total_tests=$(echo "$total_tests" | tr -cd '0-9')
-    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
-    total_tests=${total_tests:-0}
-    failed_tests=${failed_tests:-0}
-    
-    # Store for final summary (maintaining compatibility with existing code)
-    MIR_TOTAL_TESTS=$total_tests
-    MIR_FAILED_TESTS=$failed_tests
-    MIR_PASSED_TESTS=$((total_tests - failed_tests))
-    
-    # Cleanup temporary files
-    rm -f "$test_output_file" "$test_output_file.exit" "$test_output_file.output"
-    
-    # Restore original RAW_OUTPUT setting
-    RAW_OUTPUT="$old_raw_output"
-    
-    return $failed_tests
+    # Simply delegate to the parallel suite implementation
+    run_parallel_suite_impl "$suite_name"
+    return $?
 }
 
-# Implementation for parallel test suites (library and input)
+# Implementation for parallel test suites (library, input, mir, and lambda)
 run_parallel_suite_impl() {
     local suite_name="$1"
     local sources_str=$(get_config_array "$suite_name" "sources" " ")
     local dependencies_str=$(get_config_array "$suite_name" "dependencies" "|||")
     local binaries_str=$(get_config_array "$suite_name" "binaries" " ")
     local special_flags=$(get_config "$suite_name" "special_flags")
+    local uses_build_config=$(get_config "$suite_name" "uses_build_config")
     
     # Parse arrays using bash 3.2 compatible method
     IFS=' ' read -ra sources_array <<< "$sources_str"
@@ -555,15 +392,125 @@ run_parallel_suite_impl() {
     
     # Start each test in parallel
     for i in "${!sources_array[@]}"; do
-        local test_source="test/${sources_array[$i]}"
-        local test_binary="test/${binaries_array[$i]}"
+        local test_source="${sources_array[$i]}"
+        local test_binary="${binaries_array[$i]}"
         local test_deps="${dependencies_array[$i]}"
         local test_name="${sources_array[$i]%%.c}"
         local result_file="$temp_dir/result_$i.txt"
         
+        # Add test/ prefix if not already present
+        if [[ "$test_source" != test/* ]]; then
+            test_source="test/$test_source"
+        fi
+        if [[ "$test_binary" != test/* ]]; then
+            test_binary="test/$test_binary"
+        fi
+        
         print_status "Compiling $test_source..."
         
-        local compile_cmd="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS $special_flags"
+        local compile_cmd=""
+        
+        # Handle different compilation methods based on configuration
+        if [ "$uses_build_config" = "true" ]; then
+            # Build config-based compilation (for MIR and Lambda)
+            local config_file=$(get_build_config_file "$suite_name")
+            if [ ! -f "$config_file" ]; then
+                print_error "Configuration file $config_file not found!"
+                total_failed=$((total_failed + 1))
+                continue
+            fi
+            
+            # Extract and build object files list
+            local object_files=()
+            while IFS= read -r source_file; do
+                local base_name
+                if [[ "$source_file" == *.cpp ]]; then
+                    base_name=$(basename "$source_file" .cpp)
+                else
+                    base_name=$(basename "$source_file" .c)
+                fi
+                local obj_file="build/${base_name}.o"
+                if [ -f "$obj_file" ]; then
+                    object_files+=("$PWD/$obj_file")
+                fi
+            done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+            
+            # Process source_dirs if any
+            local source_dirs
+            source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+            if [ -n "$source_dirs" ]; then
+                while IFS= read -r source_dir; do
+                    if [ -d "$source_dir" ]; then
+                        while IFS= read -r source_file; do
+                            local rel_path="${source_file#$PWD/}"
+                            local base_name
+                            if [[ "$rel_path" == *.cpp ]]; then
+                                base_name=$(basename "$rel_path" .cpp)
+                            else
+                                base_name=$(basename "$rel_path" .c)
+                            fi
+                            local obj_file="build/${base_name}.o"
+                            if [ -f "$obj_file" ]; then
+                                object_files+=("$PWD/$obj_file")
+                            fi
+                        done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
+                    fi
+                done <<< "$source_dirs"
+            fi
+            
+            # Exclude main.o since Criterion provides its own main function
+            local filtered_object_files=()
+            for obj_file in "${object_files[@]}"; do
+                if [[ "$obj_file" != *"/main.o" ]]; then
+                    filtered_object_files+=("$obj_file")
+                fi
+            done
+            object_files=("${filtered_object_files[@]}")
+            
+            # Build library flags
+            local include_flags=""
+            local static_libs=""
+            local dynamic_libs=""
+            local libraries
+            libraries=$(jq -r '.libraries // []' "$config_file")
+            
+            if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
+                while IFS= read -r lib_info; do
+                    local name include lib link
+                    name=$(echo "$lib_info" | jq -r '.name')
+                    include=$(echo "$lib_info" | jq -r '.include // empty')
+                    lib=$(echo "$lib_info" | jq -r '.lib // empty')
+                    link=$(echo "$lib_info" | jq -r '.link // "static"')
+                    
+                    if [ -n "$include" ] && [ "$include" != "null" ]; then
+                        include_flags="$include_flags -I$include"
+                    fi
+                    
+                    if [ "$link" = "static" ]; then
+                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                            static_libs="$static_libs $lib"
+                        fi
+                    else
+                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                            dynamic_libs="$dynamic_libs -L$lib -l$name"
+                        fi
+                    fi
+                done < <(echo "$libraries" | jq -c '.[]')
+            fi
+            
+            # Special handling for lambda tests
+            if [ "$suite_name" = "lambda" ]; then
+                include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
+                include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
+                dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+                compile_cmd="clang $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
+            else
+                compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
+            fi
+        else
+            # Standard compilation (for library and input tests)
+            compile_cmd="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS $special_flags"
+        fi
         
         if $compile_cmd 2>/dev/null; then
             print_success "Compiled $test_source successfully"
@@ -576,9 +523,31 @@ run_parallel_suite_impl() {
                 local exit_code=$?
                 set -e
                 
-                # Parse results
-                local test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
-                local test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
+                # Parse results - handle both TAP and Criterion output formats
+                local test_total=0
+                local test_failed=0
+                
+                if echo "$output" | grep -q "^ok "; then
+                    # TAP format
+                    test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
+                    test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
+                elif echo "$output" | grep -q "Synthesis:"; then
+                    # Criterion synthesis format
+                    local synthesis_line=$(echo "$output" | grep "Synthesis:" | tail -1)
+                    test_total=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+                    test_failed=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+                    local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+                    test_failed=$((test_failed + crashing_tests))
+                else
+                    # Fallback based on exit code
+                    if [ $exit_code -eq 0 ]; then
+                        test_total=1
+                        test_failed=0
+                    else
+                        test_total=1
+                        test_failed=1
+                    fi
+                fi
                 
                 test_total=$(echo "$test_total" | tr -cd '0-9')
                 test_failed=$(echo "$test_failed" | tr -cd '0-9')
@@ -656,24 +625,45 @@ run_parallel_suite_impl() {
     
     total_passed=$((total_tests - total_failed))
     
-    # Store results based on suite type
-    if [ "$suite_name" = "library" ]; then
-        LIB_TOTAL_TESTS=$total_tests
-        LIB_PASSED_TESTS=$total_passed
-        LIB_FAILED_TESTS=$total_failed
-        LIB_TEST_NAMES=("${test_names[@]}")
-        LIB_TEST_TOTALS=("${test_totals[@]}")
-        LIB_TEST_PASSED=("${test_passed[@]}")
-        LIB_TEST_FAILED=("${test_failed[@]}")
-    elif [ "$suite_name" = "input" ]; then
-        INPUT_TOTAL_TESTS=$total_tests
-        INPUT_PASSED_TESTS=$total_passed
-        INPUT_FAILED_TESTS=$total_failed
-        INPUT_TEST_NAMES=("${test_names[@]}")
-        INPUT_TEST_TOTALS=("${test_totals[@]}")
-        INPUT_TEST_PASSED=("${test_passed[@]}")
-        INPUT_TEST_FAILED=("${test_failed[@]}")
-    fi
+    # Store results based on suite type (generic approach)
+    case "$suite_name" in
+        "library")
+            LIB_TOTAL_TESTS=$total_tests
+            LIB_PASSED_TESTS=$total_passed
+            LIB_FAILED_TESTS=$total_failed
+            LIB_TEST_NAMES=("${test_names[@]}")
+            LIB_TEST_TOTALS=("${test_totals[@]}")
+            LIB_TEST_PASSED=("${test_passed[@]}")
+            LIB_TEST_FAILED=("${test_failed[@]}")
+            ;;
+        "input")
+            INPUT_TOTAL_TESTS=$total_tests
+            INPUT_PASSED_TESTS=$total_passed
+            INPUT_FAILED_TESTS=$total_failed
+            INPUT_TEST_NAMES=("${test_names[@]}")
+            INPUT_TEST_TOTALS=("${test_totals[@]}")
+            INPUT_TEST_PASSED=("${test_passed[@]}")
+            INPUT_TEST_FAILED=("${test_failed[@]}")
+            ;;
+        "mir")
+            MIR_TOTAL_TESTS=$total_tests
+            MIR_PASSED_TESTS=$total_passed
+            MIR_FAILED_TESTS=$total_failed
+            MIR_TEST_NAMES=("${test_names[@]}")
+            MIR_TEST_TOTALS=("${test_totals[@]}")
+            MIR_TEST_PASSED=("${test_passed[@]}")
+            MIR_TEST_FAILED=("${test_failed[@]}")
+            ;;
+        "lambda")
+            LAMBDA_TOTAL_TESTS=$total_tests
+            LAMBDA_PASSED_TESTS=$total_passed
+            LAMBDA_FAILED_TESTS=$total_failed
+            LAMBDA_TEST_NAMES=("${test_names[@]}")
+            LAMBDA_TEST_TOTALS=("${test_totals[@]}")
+            LAMBDA_TEST_PASSED=("${test_passed[@]}")
+            LAMBDA_TEST_FAILED=("${test_failed[@]}")
+            ;;
+    esac
     
     echo ""
     local suite_display_name=$(get_config "$suite_name" "name")
