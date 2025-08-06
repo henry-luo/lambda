@@ -80,8 +80,14 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     char original_cwd[1024];
     getcwd(original_cwd, sizeof(original_cwd));
     
-    // Change to project root so lambda scripts can find lambda/lambda.h
-    chdir("..");
+    // Check if we're already in project root or in test directory
+    // If we're in test directory, go up one level
+    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
+        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
+        // We're in the test directory, change to project root
+        chdir("..");
+    }
+    // If we're already in project root, stay there
     
     // Initialize runtime
     Runtime runtime;
@@ -130,8 +136,11 @@ Test(lambda_tests, test_expr_ls) {
     char original_cwd[1024];
     getcwd(original_cwd, sizeof(original_cwd));
     
-    // Change to project root so lambda scripts can find lambda/lambda.h
-    chdir("..");
+    // Check if we're already in project root or in test directory
+    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
+        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
+        chdir("..");
+    }
     
     Runtime runtime;
     runtime_init(&runtime);
@@ -155,8 +164,11 @@ Test(lambda_tests, test_box_unbox_ls) {
     char original_cwd[1024];
     getcwd(original_cwd, sizeof(original_cwd));
     
-    // Change to project root so lambda scripts can find lambda/lambda.h
-    chdir("..");
+    // Check if we're already in project root or in test directory
+    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
+        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
+        chdir("..");
+    }
     
     Runtime runtime;
     runtime_init(&runtime);
@@ -179,8 +191,11 @@ Test(lambda_tests, test_csv_test_ls) {
     char original_cwd[1024];
     getcwd(original_cwd, sizeof(original_cwd));
     
-    // Change to project root so lambda scripts can find lambda/lambda.h
-    chdir("..");
+    // Check if we're already in project root or in test directory
+    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
+        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
+        chdir("..");
+    }
     
     Runtime runtime;
     runtime_init(&runtime);

@@ -66,6 +66,17 @@
       "special_flags": "-std=c99 -Wall -Wextra -O2 -g -fms-extensions -pedantic",
       "uses_build_config": true,
       "requires_jq": true
+    },
+    {
+      "suite": "lambda",
+      "name": "🐑 Lambda Runtime Tests",
+      "sources": ["test/test_lambda.c"],
+      "dependencies": ["build_lambda_config.json"],
+      "binaries": ["test/test_lambda.exe"],
+      "type": "lambda",
+      "special_flags": "-fms-extensions",
+      "uses_build_config": true,
+      "requires_jq": true
     }
   ]
 }

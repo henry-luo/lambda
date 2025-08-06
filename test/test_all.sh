@@ -49,6 +49,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  input             Run only input processing tests"
     echo "  validator         Run only validator tests"
     echo "  mir               Run only MIR JIT tests"
+    echo "  lambda            Run only lambda runtime tests"
     echo "  strbuf            Run only string buffer tests"
     echo "  strview           Run only string view tests"
     echo "  variable_pool     Run only variable pool tests"
@@ -284,6 +285,10 @@ run_common_test_suite() {
             run_mir_suite_impl "$suite_name"
             return $?
             ;;
+        "lambda")
+            run_lambda_suite_impl "$suite_name"
+            return $?
+            ;;
         *)
             print_error "Unknown test type: $suite_type"
             return 1
@@ -342,6 +347,89 @@ run_validator_suite_impl() {
     if [ -f "$binary" ]; then
         rm "$binary"
     fi
+    
+    return $failed_tests
+}
+
+# Implementation for Lambda test suite using build config
+run_lambda_suite_impl() {
+    local suite_name="$1"
+    
+    # Use run_individual_test to handle the Lambda test execution
+    # We need to temporarily modify global state to capture results for the suite summary
+    local old_raw_output="$RAW_OUTPUT"
+    RAW_OUTPUT=false  # Force non-raw mode for suite execution
+    
+    # Save current test output by capturing it
+    local test_output_file=$(mktemp)
+    
+    # Run the individual Lambda test and capture both exit code and output
+    {
+        if run_individual_test "lambda" "lambda" 2>&1; then
+            local test_exit_code=0
+        else
+            local test_exit_code=$?
+        fi
+        echo "EXIT_CODE:$test_exit_code" >&3
+    } 3>"$test_output_file.exit" >"$test_output_file.output" 2>&1
+    
+    # Read the captured results
+    local captured_exit_code=$(grep "^EXIT_CODE:" "$test_output_file.exit" | cut -d: -f2)
+    local captured_output=$(cat "$test_output_file.output")
+    
+    # Display the output
+    echo "$captured_output"
+    
+    # Parse results from the output to set global variables for suite summary
+    local total_tests=0
+    local failed_tests=0
+    
+    if echo "$captured_output" | grep -q "Total:"; then
+        # Extract from the summary line that run_individual_test produces
+        local summary_line=$(echo "$captured_output" | grep "Total:" | tail -1)
+        total_tests=$(echo "$summary_line" | grep -o "Total: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        failed_tests=$(echo "$summary_line" | grep -o "Failed: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+    else
+        # Fallback: parse TAP or Criterion output directly
+        if echo "$captured_output" | grep -q "^ok "; then
+            # TAP format
+            total_tests=$(echo "$captured_output" | grep -c "^ok " 2>/dev/null || echo "0")
+            failed_tests=$(echo "$captured_output" | grep -c "^not ok " 2>/dev/null || echo "0")
+        elif echo "$captured_output" | grep -q "Synthesis:"; then
+            # Criterion synthesis format
+            local synthesis_line=$(echo "$captured_output" | grep "Synthesis:" | tail -1)
+            total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            failed_tests=$((failed_tests + crashing_tests))
+        else
+            # Fallback based on exit code
+            if [ "$captured_exit_code" -eq 0 ]; then
+                total_tests=1
+                failed_tests=0
+            else
+                total_tests=1
+                failed_tests=1
+            fi
+        fi
+    fi
+    
+    # Clean numeric values
+    total_tests=$(echo "$total_tests" | tr -cd '0-9')
+    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
+    total_tests=${total_tests:-0}
+    failed_tests=${failed_tests:-0}
+    
+    # Store for final summary (maintaining compatibility with existing code)
+    LAMBDA_TOTAL_TESTS=$total_tests
+    LAMBDA_FAILED_TESTS=$failed_tests
+    LAMBDA_PASSED_TESTS=$((total_tests - failed_tests))
+    
+    # Cleanup temporary files
+    rm -f "$test_output_file" "$test_output_file.exit" "$test_output_file.output"
+    
+    # Restore original RAW_OUTPUT setting
+    RAW_OUTPUT="$old_raw_output"
     
     return $failed_tests
 }
@@ -694,6 +782,12 @@ run_mir_tests() {
     return $?
 }
 
+# Function to compile and run lambda runtime tests
+run_lambda_tests() {
+    run_common_test_suite "lambda"
+    return $?
+}
+
 # Common function to run individual tests for different suite types
 run_individual_test() {
     local suite_type="$1"
@@ -725,6 +819,11 @@ run_individual_test() {
         deps=""
     elif [ "$suite_type" = "mir" ]; then
         # MIR has only one test
+        source="${sources_array[0]}"
+        binary="${binaries_array[0]}"
+        deps=""
+    elif [ "$suite_type" = "lambda" ]; then
+        # Lambda has only one test
         source="${sources_array[0]}"
         binary="${binaries_array[0]}"
         deps=""
@@ -857,6 +956,100 @@ run_individual_test() {
             fi
             
             raw_compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
+            raw_binary_path="$binary"
+        elif [ "$suite_type" = "lambda" ]; then
+            # Lambda tests need special compilation with object files from build config
+            # Use the same compilation logic as MIR tests
+            local config_file="build_lambda_config.json"
+            if [ ! -f "$config_file" ]; then
+                print_error "Configuration file $config_file not found!"
+                return 1
+            fi
+            
+            # Extract and build object files list (same as run_mir_suite_impl)
+            local object_files=()
+            while IFS= read -r source_file; do
+                local base_name
+                if [[ "$source_file" == *.cpp ]]; then
+                    base_name=$(basename "$source_file" .cpp)
+                else
+                    base_name=$(basename "$source_file" .c)
+                fi
+                local obj_file="build/${base_name}.o"
+                if [ -f "$obj_file" ]; then
+                    object_files+=("$PWD/$obj_file")
+                fi
+            done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+            
+            # Process source_dirs if any
+            local source_dirs
+            source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+            if [ -n "$source_dirs" ]; then
+                while IFS= read -r source_dir; do
+                    if [ -d "$source_dir" ]; then
+                        while IFS= read -r source_file; do
+                            local rel_path="${source_file#$PWD/}"
+                            local base_name
+                            if [[ "$rel_path" == *.cpp ]]; then
+                                base_name=$(basename "$rel_path" .cpp)
+                            else
+                                base_name=$(basename "$rel_path" .c)
+                            fi
+                            local obj_file="build/${base_name}.o"
+                            if [ -f "$obj_file" ]; then
+                                object_files+=("$PWD/$obj_file")
+                            fi
+                        done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
+                    fi
+                done <<< "$source_dirs"
+            fi
+            
+            # For Lambda tests, exclude main.o since Criterion provides its own main function
+            local filtered_object_files=()
+            for obj_file in "${object_files[@]}"; do
+                if [[ "$obj_file" != *"/main.o" ]]; then
+                    filtered_object_files+=("$obj_file")
+                fi
+            done
+            object_files=("${filtered_object_files[@]}")
+            
+            # Build library flags
+            local include_flags=""
+            local static_libs=""
+            local dynamic_libs=""
+            local libraries
+            libraries=$(jq -r '.libraries // []' "$config_file")
+            
+            if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
+                while IFS= read -r lib_info; do
+                    local name include lib link
+                    name=$(echo "$lib_info" | jq -r '.name')
+                    include=$(echo "$lib_info" | jq -r '.include // empty')
+                    lib=$(echo "$lib_info" | jq -r '.lib // empty')
+                    link=$(echo "$lib_info" | jq -r '.link // "static"')
+                    
+                    if [ -n "$include" ] && [ "$include" != "null" ]; then
+                        include_flags="$include_flags -I$include"
+                    fi
+                    
+                    if [ "$link" = "static" ]; then
+                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                            static_libs="$static_libs $lib"
+                        fi
+                    else
+                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                            dynamic_libs="$dynamic_libs -L$lib -l$name"
+                        fi
+                    fi
+                done < <(echo "$libraries" | jq -c '.[]')
+            fi
+            
+            # Add additional includes and libraries for lambda tests
+            include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
+            include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
+            dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+            
+            raw_compile_cmd="clang $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
             raw_binary_path="$binary"
         else
             raw_compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
@@ -992,6 +1185,102 @@ run_individual_test() {
         
         local compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
         local binary_path="./$binary"
+    elif [ "$suite_type" = "lambda" ]; then
+        print_status "🧪 Running individual Lambda test: $test_name"
+        print_status "Compiling Lambda test..."
+        
+        # Use the same compilation logic as MIR tests for Lambda
+        local config_file="build_lambda_config.json"
+        if [ ! -f "$config_file" ]; then
+            print_error "Configuration file $config_file not found!"
+            return 1
+        fi
+        
+        # Extract and build object files list (same as run_mir_suite_impl)
+        local object_files=()
+        while IFS= read -r source_file; do
+            local base_name
+            if [[ "$source_file" == *.cpp ]]; then
+                base_name=$(basename "$source_file" .cpp)
+            else
+                base_name=$(basename "$source_file" .c)
+            fi
+            local obj_file="build/${base_name}.o"
+            if [ -f "$obj_file" ]; then
+                object_files+=("$PWD/$obj_file")
+            fi
+        done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+        
+        # Process source_dirs if any
+        local source_dirs
+        source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+        if [ -n "$source_dirs" ]; then
+            while IFS= read -r source_dir; do
+                if [ -d "$source_dir" ]; then
+                    while IFS= read -r source_file; do
+                        local rel_path="${source_file#$PWD/}"
+                        local base_name
+                        if [[ "$rel_path" == *.cpp ]]; then
+                            base_name=$(basename "$rel_path" .cpp)
+                        else
+                            base_name=$(basename "$rel_path" .c)
+                        fi
+                        local obj_file="build/${base_name}.o"
+                        if [ -f "$obj_file" ]; then
+                            object_files+=("$PWD/$obj_file")
+                        fi
+                    done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
+                fi
+            done <<< "$source_dirs"
+        fi
+        
+        # For Lambda tests, exclude main.o since Criterion provides its own main function
+        local filtered_object_files=()
+        for obj_file in "${object_files[@]}"; do
+            if [[ "$obj_file" != *"/main.o" ]]; then
+                filtered_object_files+=("$obj_file")
+            fi
+        done
+        object_files=("${filtered_object_files[@]}")
+        
+        # Build library flags
+        local include_flags=""
+        local static_libs=""
+        local dynamic_libs=""
+        local libraries
+        libraries=$(jq -r '.libraries // []' "$config_file")
+        
+        if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
+            while IFS= read -r lib_info; do
+                local name include lib link
+                name=$(echo "$lib_info" | jq -r '.name')
+                include=$(echo "$lib_info" | jq -r '.include // empty')
+                lib=$(echo "$lib_info" | jq -r '.lib // empty')
+                link=$(echo "$lib_info" | jq -r '.link // "static"')
+                
+                if [ -n "$include" ] && [ "$include" != "null" ]; then
+                    include_flags="$include_flags -I$include"
+                fi
+                
+                if [ "$link" = "static" ]; then
+                    if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                        static_libs="$static_libs $lib"
+                    fi
+                else
+                    if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                        dynamic_libs="$dynamic_libs -L$lib -l$name"
+                    fi
+                fi
+            done < <(echo "$libraries" | jq -c '.[]')
+        fi
+        
+        # Add additional includes and libraries for lambda tests
+        include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
+        include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
+        dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+        
+        local compile_cmd="clang $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
+        local binary_path="./$binary"
     else
         print_status "🧪 Running individual test: $test_name"
         print_status "Compiling test/test_$test_name.c..."
@@ -1120,6 +1409,12 @@ run_individual_mir_test() {
     return $?
 }
 
+# Function to run individual Lambda test
+run_individual_lambda_test() {
+    run_individual_test "lambda" "$1"
+    return $?
+}
+
 # Function to run target test suites
 run_target_test() {
     local target="$1"
@@ -1173,6 +1468,15 @@ run_target_test() {
             run_mir_tests
             return $?
             ;;
+        "lambda")
+            if [ "$RAW_OUTPUT" = true ]; then
+                run_individual_lambda_test "lambda"
+                return $?
+            fi
+            print_status "🚀 Running Lambda Runtime Tests Suite"
+            run_lambda_tests
+            return $?
+            ;;
         "strbuf"|"strview"|"variable_pool"|"num_stack")
             run_individual_library_test "$target"
             return $?
@@ -1183,7 +1487,7 @@ run_target_test() {
             ;;
         *)
             print_error "Unknown target: $target"
-            print_status "Available targets: all, library, input, validator, mir, strbuf, strview, variable_pool, num_stack, mime_detect, math"
+            print_status "Available targets: all, library, input, validator, mir, lambda, strbuf, strview, variable_pool, num_stack, mime_detect, math"
             return 1
             ;;
     esac
@@ -1349,6 +1653,40 @@ SUITE_JOB_PIDS+=($!)
 SUITE_RESULT_FILES+=("$MIR_RESULT_FILE")
 SUITE_TYPES+=("MIR")
 
+# Start Lambda Runtime tests in background
+print_status "================================================"
+print_status "      STARTING LAMBDA RUNTIME TESTS (PARALLEL) "
+print_status "================================================"
+LAMBDA_RESULT_FILE="$SUITE_TEMP_DIR/lambda_results.txt"
+(
+    # Run Lambda tests and capture results
+    print_status "🐑 Lambda Runtime Tests - Starting..."
+    if run_lambda_tests; then
+        lambda_failed=0
+    else
+        lambda_failed=$?
+    fi
+    
+    # Write results to file (variables are available in this subshell)
+    echo "SUITE_TYPE:LAMBDA" > "$LAMBDA_RESULT_FILE"
+    echo "SUITE_NAME:🐑 Lambda Runtime Tests" >> "$LAMBDA_RESULT_FILE"
+    echo "SUITE_TOTAL:$LAMBDA_TOTAL_TESTS" >> "$LAMBDA_RESULT_FILE"
+    echo "SUITE_PASSED:$LAMBDA_PASSED_TESTS" >> "$LAMBDA_RESULT_FILE"
+    echo "SUITE_FAILED:$LAMBDA_FAILED_TESTS" >> "$LAMBDA_RESULT_FILE"
+    if [ $lambda_failed -eq 0 ]; then
+        echo "SUITE_STATUS:PASSED" >> "$LAMBDA_RESULT_FILE"
+    else
+        echo "SUITE_STATUS:FAILED" >> "$LAMBDA_RESULT_FILE"
+    fi
+    
+    # Output with prefix for identification
+    echo "[LAMBDA] Lambda Runtime tests completed with exit code: $lambda_failed"
+    exit $lambda_failed
+) &
+SUITE_JOB_PIDS+=($!)
+SUITE_RESULT_FILES+=("$LAMBDA_RESULT_FILE")
+SUITE_TYPES+=("LAMBDA")
+
 # Start Validator tests in background
 # print_status "================================================"
 # print_status "      STARTING VALIDATOR TESTS (PARALLEL)      "
@@ -1391,7 +1729,7 @@ print_status "⏳ Waiting for all test suites to complete..."
 print_status "📊 Started ${#SUITE_JOB_PIDS[@]} test suites with PIDs: ${SUITE_JOB_PIDS[*]}"
 
 # Wait for all test suites and collect results
-for i in 0 1 2; do
+for i in 0 1 2 3; do
     pid="${SUITE_JOB_PIDS[$i]}"
     result_file="${SUITE_RESULT_FILES[$i]}"
     suite_type="${SUITE_TYPES[$i]}"
@@ -1510,6 +1848,8 @@ if [ "$total_failed_tests" -eq 0 ]; then
             done
         elif [ "$suite_type" = "MIR" ]; then
             echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed)"
+        elif [ "$suite_type" = "LAMBDA" ]; then
+            echo "   ├─ Lambda Runtime Tests: $suite_total tests (✅ $suite_passed passed)"
         fi
         
         echo "   └─ Total: $suite_total, Passed: $suite_passed, Failed: $suite_failed"
@@ -1573,6 +1913,12 @@ else
             else
                 echo "   ├─ MIR JIT Tests: $suite_total tests (✅ $suite_passed passed, ❌ $suite_failed failed) ❌"
             fi
+        elif [ "$suite_type" = "LAMBDA" ]; then
+            if [ "$suite_failed" -eq 0 ]; then
+                echo "   ├─ Lambda Runtime Tests: $suite_total tests (✅ $suite_passed passed) ✅"
+            else
+                echo "   ├─ Lambda Runtime Tests: $suite_total tests (✅ $suite_passed passed, ❌ $suite_failed failed) ❌"
+            fi
         fi
         
         # Add status indicator for overall suite
@@ -1605,6 +1951,8 @@ else
             echo "   Validator test failures: $suite_failed"
         elif [ "$suite_type" = "MIR" ]; then
             echo "   MIR JIT test failures: $suite_failed"
+        elif [ "$suite_type" = "LAMBDA" ]; then
+            echo "   Lambda Runtime test failures: $suite_failed"
         fi
     done
     
