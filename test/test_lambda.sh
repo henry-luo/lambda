@@ -30,8 +30,18 @@ OBJECT_FILES=()
 while IFS= read -r source_file; do
     # Convert source file path to object file path
     # Remove the directory structure and change extension to .o
-    obj_file="$PROJECT_ROOT/build/$(basename "$source_file" .c).o"
-    OBJECT_FILES+=("$obj_file")
+    if [[ "$source_file" == *.cpp ]]; then
+        # For C++ files, just change extension to .o
+        obj_file="$PROJECT_ROOT/build/$(basename "$source_file" .cpp).o"
+    else
+        # For C files, change extension to .o
+        obj_file="$PROJECT_ROOT/build/$(basename "$source_file" .c).o"
+    fi
+    
+    # Skip main.o since we have our own main() in the test
+    if [[ "$(basename "$obj_file")" != "main.o" ]]; then
+        OBJECT_FILES+=("$obj_file")
+    fi
 done < <(jq -r '.source_files[]' "$CONFIG_FILE")
 
 echo "Found ${#OBJECT_FILES[@]} object files to link"
