@@ -688,7 +688,7 @@ static Item parse_element(Input *input, const char **html) {
                         const char* before_child_parse = *html;
                         Item child = parse_element(input, html);
                         
-                        if (child == ITEM_ERROR) {
+                        if (child.item == ITEM_ERROR) {
                             // If we hit an error, try to recover by skipping this character
                             if (**html) (*html)++;
                             break;

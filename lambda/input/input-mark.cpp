@@ -191,7 +191,7 @@ static Item parse_binary(Input *input, const char **mark) {
     }
     
     String* binary_str = strbuf_to_string(sb);
-    return binary_str ? s2it(binary_str) : ITEM_ERROR;
+    return binary_str ? (Item){.item = s2it(binary_str)} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_datetime(Input *input, const char **mark) {
@@ -213,7 +213,7 @@ static Item parse_datetime(Input *input, const char **mark) {
     }
     
     String* datetime_str = strbuf_to_string(sb);
-    return datetime_str ? s2it(datetime_str) : ITEM_ERROR;
+    return datetime_str ? (Item){.item = s2it(datetime_str)} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_number(Input *input, const char **mark) {
@@ -231,7 +231,7 @@ static Item parse_number(Input *input, const char **mark) {
         // For now, treat as regular double - could enhance for true decimal support
     }
     
-    return {.item = d2it(dval);
+    return {.item = d2it(dval)};
 }
 
 static Array* parse_array(Input *input, const char **mark) {

@@ -294,7 +294,7 @@ static Item parse_number(Input *input, const char **toml) {
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = INFINITY;
         *toml += 3;
-        return {.item = d2it(dval);
+        return {.item = d2it(dval)};
     }
     if (strncmp(*toml, "-inf", 4) == 0) {
         double *dval;
@@ -302,7 +302,7 @@ static Item parse_number(Input *input, const char **toml) {
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = -INFINITY;
         *toml += 4;
-        return {.item = d2it(dval);
+        return {.item = d2it(dval)};
     }
     if (strncmp(*toml, "nan", 3) == 0) {
         double *dval;
@@ -310,7 +310,7 @@ static Item parse_number(Input *input, const char **toml) {
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = NAN;
         *toml += 3;
-        return {.item = d2it(dval);
+        return {.item = d2it(dval)};
     }
     if (strncmp(*toml, "-nan", 4) == 0) {
         double *dval;
@@ -318,24 +318,36 @@ static Item parse_number(Input *input, const char **toml) {
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = NAN;
         *toml += 4;
-        return {.item = d2it(dval);
+        return {.item = d2it(dval)};
     }
     
     // Handle hex, octal, binary integers
     if (**toml == '0' && (*(*toml + 1) == 'x' || *(*toml + 1) == 'X')) {
         long val = strtol(start, &end, 16);
+        long *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        *lval = val;
         *toml = end;
-        return i2it(val);
+        return {.item = l2it(lval)};
     }
     if (**toml == '0' && (*(*toml + 1) == 'o' || *(*toml + 1) == 'O')) {
         long val = strtol(start + 2, &end, 8);
+        long *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        *lval = val;
         *toml = end;
-        return i2it(val);
+        return {.item = l2it(lval)};
     }
     if (**toml == '0' && (*(*toml + 1) == 'b' || *(*toml + 1) == 'B')) {
         long val = strtol(start + 2, &end, 2);
+        long *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        *lval = val;
         *toml = end;
-        return i2it(val);
+        return {.item = l2it(lval)};
     }
     
     // Check if it's a float (contains . or e/E)
@@ -361,11 +373,15 @@ static Item parse_number(Input *input, const char **toml) {
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = strtod(start, &end);
         *toml = end;
-        return {.item = d2it(dval);
+        return {.item = d2it(dval)};
     } else {
         long val = strtol(start, &end, 10);
+        long *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        *lval = val;
         *toml = end;
-        return i2it(val);
+        return {.item = l2it(lval)};
     }
 }
 
@@ -384,7 +400,7 @@ static Array* parse_array(Input *input, const char **toml, int *line_num) {
 
     while (**toml) {
         Item value = parse_value(input, toml, line_num);
-        if (value == ITEM_ERROR) {
+        if (value.item == ITEM_ERROR) {
             return NULL;
         }
         array_append(arr, value, input->pool);
@@ -438,7 +454,7 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
         skip_whitespace(toml);
 
         Item value = parse_value(input, toml, line_num);
-        if (value == ITEM_ERROR) {
+        if (value.item == ITEM_ERROR) {
             return NULL;
         }
         
@@ -464,11 +480,11 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
     switch (**toml) {
         case '{': {
             Map* table = parse_inline_table(input, toml, line_num);
-            return table ? (Item)table : ITEM_ERROR;
+            return table ? (Item){.item = (uint64_t)table} : (Item){.item = ITEM_ERROR};
         }
         case '[': {
             Array* array = parse_array(input, toml, line_num);
-            return array ? (Item)array : ITEM_ERROR;
+            return array ? (Item){.item = (uint64_t)array} : (Item){.item = ITEM_ERROR};
         }
         case '"': {
             String* str = NULL;
@@ -477,7 +493,7 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
             } else {
                 str = parse_basic_string(input, toml);
             }
-            return str ? (str == &EMPTY_STRING ? ITEM_NULL : s2it(str)) : ITEM_ERROR;
+            return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = ITEM_ERROR};
         }
         case '\'': {
             String* str = NULL;
@@ -486,18 +502,18 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
             } else {
                 str = parse_literal_string(input, toml);
             }
-            return str ? (str == &EMPTY_STRING ? ITEM_NULL : s2it(str)) : ITEM_ERROR;
+            return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = ITEM_ERROR};
         }
         case 't':
             if (strncmp(*toml, "true", 4) == 0 && !isalnum(*(*toml + 4))) {
                 *toml += 4;
-                return {.item = b2it(true);
+                return {.item = b2it(true)};
             }
             return {.item = ITEM_ERROR};
         case 'f':
             if (strncmp(*toml, "false", 5) == 0 && !isalnum(*(*toml + 5))) {
                 *toml += 5;
-                return {.item = b2it(false);
+                return {.item = b2it(false)};
             }
             return {.item = ITEM_ERROR};
         case 'i':
@@ -589,7 +605,7 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
     if (!remaining_path) return current_map;
     
     // Handle nested parts
-    TypeMap* current_map_type = current_map->type;
+    TypeMap* current_map_type = (TypeMap*)current_map->type;
     ShapeEntry* current_shape_entry = current_map_type->shape;
     if (current_shape_entry) {
         while (current_shape_entry->next) {
@@ -621,11 +637,11 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
             nested_map = map_pooled(input->pool);
             if (!nested_map) return NULL;
             
-            map_put(current_map, key, (Item)nested_map, input);
+            map_put(current_map, key, {.item = (uint64_t)nested_map}, input);
         }
         
         current_map = nested_map;
-        current_map_type = nested_map->type;
+        current_map_type = (TypeMap*)nested_map->type;
         // Find the last shape entry in the current table
         current_shape_entry = current_map_type->shape;
         if (current_shape_entry) {
@@ -701,7 +717,7 @@ void parse_toml(Input* input, const char* toml_string) {
                 Map* section_map = handle_nested_section(input, root_map, table_name);
                 if (section_map) {
                     current_table = section_map;
-                    current_table_type = section_map->type;
+                    current_table_type = (TypeMap*)section_map->type;
                 }
                 skip_line(&toml, &line_num);
                 continue;
@@ -723,7 +739,7 @@ void parse_toml(Input* input, const char* toml_string) {
         toml++; // skip '='
         
         Item value = parse_value(input, &toml, &line_num);
-        if (value == ITEM_ERROR) {
+        if (value.item == ITEM_ERROR) {
             skip_line(&toml, &line_num);
             continue;
         }

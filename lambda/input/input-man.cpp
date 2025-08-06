@@ -84,7 +84,7 @@ static Item parse_man_section_header(Input *input, const char* line) {
         if (trimmed_content) free(trimmed_content);
     }
     
-    return (Item)header;
+    return {.item = (uint64_t)header};
 }
 
 static Item parse_man_paragraph(Input *input, const char* text) {
@@ -96,7 +96,7 @@ static Item parse_man_paragraph(Input *input, const char* text) {
     list_push((List*)paragraph, inline_content);
     ((TypeElmt*)paragraph->type)->content_length++;
     
-    return (Item)paragraph;
+    return {.item = (uint64_t)paragraph};
 }
 
 static Item parse_man_formatted_text(Input *input, const char* line, const char* tag_name) {
@@ -112,7 +112,7 @@ static Item parse_man_formatted_text(Input *input, const char* line, const char*
         if (trimmed_content && strlen(trimmed_content) > 0) {
             String* content_str = create_string(input, trimmed_content);
             if (content_str) {
-                list_push((List*)element, s2it(content_str));
+                list_push((List*)element, {.item = s2it(content_str)});
                 ((TypeElmt*)element->type)->content_length++;
             }
         }
@@ -138,7 +138,7 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
             if (trimmed_tag && strlen(trimmed_tag) > 0) {
                 String* tag_str = create_string(input, trimmed_tag);
                 if (tag_str) {
-                    list_push((List*)list_item, s2it(tag_str));
+                    list_push((List*)list_item, {.item = s2it(tag_str)});
                     ((TypeElmt*)list_item->type)->content_length++;
                 }
             }
@@ -154,10 +154,10 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
                 if (tag_element) {
                     String* tag_str = create_string(input, tag_line);
                     if (tag_str) {
-                        list_push((List*)tag_element, s2it(tag_str));
+                        list_push((List*)tag_element, {.item = s2it(tag_str)});
                         ((TypeElmt*)tag_element->type)->content_length++;
                     }
-                    list_push((List*)list_item, (Item)tag_element);
+                    list_push((List*)list_item, {.item = (uint64_t)tag_element});
                     ((TypeElmt*)list_item->type)->content_length++;
                 }
             }
@@ -185,7 +185,7 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
         (*current_line)++;
     }
     
-    return (Item)list_item;
+    return {.item = (uint64_t)list_item};
 }
 
 static Item parse_man_inline(Input *input, const char* text) {
@@ -204,11 +204,11 @@ static Item parse_man_inline(Input *input, const char* text) {
     
     // If no formatting, just return the text as a string properly boxed as Item
     if (!has_formatting) {
-        return {.item = s2it(create_string(input, text));
+        return {.item = s2it(create_string(input, text))};
     }
     
     Element* container = create_man_element(input, "span");
-    if (!container) return {.item = s2it(create_string(input, text));
+    if (!container) return {.item = s2it(create_string(input, text))};
     
     const char* ptr = text;
     const char* start = text;
@@ -220,12 +220,12 @@ static Item parse_man_inline(Input *input, const char* text) {
                 // Add text before formatting
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = malloc(len + 1);
+                    char* before_text = (char*)malloc(len + 1);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
                     if (before_str) {
-                        list_push((List*)container, s2it(before_str));
+                        list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
                     free(before_text);
@@ -243,15 +243,15 @@ static Item parse_man_inline(Input *input, const char* text) {
                     Element* format_element = create_man_element(input, tag_name);
                     if (format_element) {
                         int format_len = format_end - format_start;
-                        char* format_text = malloc(format_len + 1);
+                        char* format_text = (char*)malloc(format_len + 1);
                         strncpy(format_text, format_start, format_len);
                         format_text[format_len] = '\0';
                         String* format_str = create_string(input, format_text);
                         if (format_str) {
-                            list_push((List*)format_element, s2it(format_str));
+                            list_push((List*)format_element, {.item = s2it(format_str)});
                             ((TypeElmt*)format_element->type)->content_length++;
                         }
-                        list_push((List*)container, (Item)format_element);
+                        list_push((List*)container, {.item = (uint64_t)format_element});
                         ((TypeElmt*)container->type)->content_length++;
                         free(format_text);
                     }
@@ -272,12 +272,12 @@ static Item parse_man_inline(Input *input, const char* text) {
     // Add remaining text
     if (ptr > start) {
         int len = ptr - start;
-        char* remaining_text = malloc(len + 1);
+        char* remaining_text = (char*)malloc(len + 1);
         strncpy(remaining_text, start, len);
         remaining_text[len] = '\0';
         String* remaining_str = create_string(input, remaining_text);
         if (remaining_str) {
-            list_push((List*)container, s2it(remaining_str));
+            list_push((List*)container, {.item = s2it(remaining_str)});
             ((TypeElmt*)container->type)->content_length++;
         }
         free(remaining_text);
@@ -291,10 +291,10 @@ static Item parse_man_inline(Input *input, const char* text) {
     
     // If container is empty, return a simple string
     if (((TypeElmt*)container->type)->content_length == 0) {
-        return {.item = s2it(create_string(input, text));
+        return {.item = s2it(create_string(input, text))};
     }
     
-    return (Item)container;
+    return {.item = (uint64_t)container};
 }
 
 static Item parse_man_block(Input *input, char** lines, int* current_line, int total_lines) {
@@ -365,19 +365,19 @@ static Item parse_man_content(Input *input, char** lines, int line_count) {
     
     // Create meta element for metadata (required by schema)
     Element* meta = create_man_element(input, "meta");
-    if (!meta) return (Item)doc;
+    if (!meta) return {.item = (uint64_t)doc};
     
     // Add default metadata
     add_attribute_to_element(input, meta, "title", "Man Page Document");
     add_attribute_to_element(input, meta, "language", "en");
     
     // Add meta to doc
-    list_push((List*)doc, (Item)meta);
+    list_push((List*)doc, {.item = (uint64_t)meta});
     ((TypeElmt*)doc->type)->content_length++;
     
     // Create body element for content (required by schema)
     Element* body = create_man_element(input, "body");
-    if (!body) return (Item)doc;
+    if (!body) return {.item = (uint64_t)doc};
     
     int current_line = 0;
     while (current_line < line_count) {
@@ -392,10 +392,10 @@ static Item parse_man_content(Input *input, char** lines, int line_count) {
     }
     
     // Add body to doc
-    list_push((List*)doc, (Item)body);
+    list_push((List*)doc, {.item = (uint64_t)body});
     ((TypeElmt*)doc->type)->content_length++;
     
-    return (Item)doc;
+    return {.item = (uint64_t)doc};
 }
 
 void parse_man(Input* input, const char* man_string) {

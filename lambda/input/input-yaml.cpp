@@ -52,19 +52,27 @@ Item parse_scalar_value(Input *input, const char* str) {
     // Check for boolean
     if (strcmp(copy, "true") == 0 || strcmp(copy, "yes") == 0) {
         free(copy);
-        return {.item = b2it(true);
+        return {.item = b2it(true)};
     }
     if (strcmp(copy, "false") == 0 || strcmp(copy, "no") == 0) {
         free(copy);
-        return {.item = b2it(false);
+        return {.item = b2it(false)};
     }
     
     // Check for number
     char* end;
     long int_val = strtol(copy, &end, 10);
     if (*end == '\0') {
+        // Allocate long on pool
+        long *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        if (err != MEM_POOL_ERR_OK) {
+            free(copy);
+            return {.item = ITEM_ERROR};
+        }
+        *lval = int_val;
         free(copy);
-        return i2it(int_val);
+        return {.item = l2it(lval)};
     }
     
     double float_val = strtod(copy, &end);
@@ -78,7 +86,7 @@ Item parse_scalar_value(Input *input, const char* str) {
         }
         *dval = float_val;
         free(copy);
-        return {.item = d2it(dval);
+        return {.item = d2it(dval)};
     }
     
     // Handle quoted strings
@@ -98,10 +106,7 @@ Item parse_scalar_value(Input *input, const char* str) {
         strcpy(str_result->chars, copy + 1);
         
         free(copy);
-        return {.item = s2it(str_result);
-        
-        free(copy);
-        return {.item = s2it(str);
+        return {.item = s2it(str_result)};
     }
     
     // Default to string
@@ -117,7 +122,7 @@ Item parse_scalar_value(Input *input, const char* str) {
     strcpy(str_result->chars, copy);
     
     free(copy);
-    return {.item = s2it(str_result);
+    return {.item = s2it(str_result)};
 }
 
 // Parse flow array like [item1, item2, item3]
@@ -217,7 +222,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             array_append(array, item, input->pool);
         }
         
-        return (Item)array;
+        return {.item = (uint64_t)array};
     }
     
     // Check for object (key: value)
@@ -245,7 +250,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             
             // Extract key
             int key_len = colon_pos - content;
-            char* key_str = malloc(key_len + 1);
+            char* key_str = (char*)malloc(key_len + 1);
             strncpy(key_str, content, key_len);
             key_str[key_len] = '\0';
             trim_string_inplace(key_str);
@@ -265,7 +270,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
                 if (value_content[0] == '[') {
                     // Flow array
                     Array* flow_array = parse_flow_array(input, value_content);
-                    value = (Item)flow_array;
+                    value = {.item = (uint64_t)flow_array};
                 } else {
                     // Scalar value
                     value = parse_scalar_value(input, value_content);
@@ -278,7 +283,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             // Add to map using shared function
             map_put(map, key, value, input);
         }        
-        return (Item)map;
+        return {.item = (uint64_t)map};
     }
     
     // Single scalar value
@@ -291,7 +296,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
 
     // Split into lines
     char* yaml_copy = strdup(yaml_str);
-    char** all_lines = malloc(1000 * sizeof(char*));
+    char** all_lines = (char**)malloc(1000 * sizeof(char*));
     int total_line_count = 0;
     
     char* saveptr;
@@ -309,7 +314,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
     }
     
     // Find document boundaries
-    int* doc_starts = malloc(100 * sizeof(int));
+    int* doc_starts = (int*)malloc(100 * sizeof(int));
     int doc_count = 0;
     bool has_doc_markers = false;
     
@@ -344,7 +349,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
     
     // Parse each document
     Array* documents = NULL;
-    Item final_result = ITEM_NULL;
+    Item final_result = {.item = ITEM_NULL};
     int parsed_doc_count = 0;
     
     for (int doc_idx = 0; doc_idx < doc_count; doc_idx++) {
@@ -355,7 +360,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
         if (start_line >= end_line) continue;
         
         // Create lines array for this document, excluding document markers and empty lines
-        char** doc_lines = malloc(1000 * sizeof(char*));
+        char** doc_lines = (char**)malloc(1000 * sizeof(char*));
         int doc_line_count = 0;
         
         for (int i = start_line; i < end_line; i++) {
@@ -407,7 +412,7 @@ void parse_yaml(Input *input, const char* yaml_str) {
     
     // Set the final result
     if (documents) {
-        input->root = (Item)documents;
+        input->root = {.item = (uint64_t)documents};
     } else {
         input->root = final_result;
     }

@@ -281,7 +281,7 @@ void parse_eml(Input* input, const char* eml_string) {
     
     // Store headers map in email
     String* headers_key = input_create_string(input, "headers");
-    Item headers_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(headers_map));
+    Item headers_value = {.item = (uint64_t)headers_map};
     map_put(email_map, headers_key, headers_value, input);
     
     // At this point, eml should be positioned at the start of the body
@@ -304,6 +304,5 @@ void parse_eml(Input* input, const char* eml_string) {
     }
     
     // Set the email map as the root of the input
-    input->root = (Item)email_map;
-    input->root |= ((uint64_t)LMD_TYPE_MAP << 56);
+    input->root = {.item = (uint64_t)email_map};
 }

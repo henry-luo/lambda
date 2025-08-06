@@ -105,7 +105,7 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
             
             if (name_end > name_start) {
                 size_t name_len = name_end - name_start;
-                char* name_buf = malloc(name_len + 1);
+                char* name_buf = (char*)malloc(name_len + 1);
                 if (name_buf) {
                     strncpy(name_buf, name_start, name_len);
                     name_buf[name_len] = '\0';
@@ -153,24 +153,24 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
     }
     
     // Add all collections to the stylesheet
-    input_add_attribute_item_to_element(input, stylesheet, "rules", (Item)rules);
+    input_add_attribute_item_to_element(input, stylesheet, "rules", {.item = (uint64_t)rules});
     if (keyframes->length > 0) {
-        input_add_attribute_item_to_element(input, stylesheet, "keyframes", (Item)keyframes);
+        input_add_attribute_item_to_element(input, stylesheet, "keyframes", {.item = (uint64_t)keyframes});
     }
     if (media_queries->length > 0) {
-        input_add_attribute_item_to_element(input, stylesheet, "media", (Item)media_queries);
+        input_add_attribute_item_to_element(input, stylesheet, "media", {.item = (uint64_t)media_queries});
     }
     if (supports_queries->length > 0) {
-        input_add_attribute_item_to_element(input, stylesheet, "supports", (Item)supports_queries);
+        input_add_attribute_item_to_element(input, stylesheet, "supports", {.item = (uint64_t)supports_queries});
     }
     if (font_faces->length > 0) {
-        input_add_attribute_item_to_element(input, stylesheet, "font_faces", (Item)font_faces);
+        input_add_attribute_item_to_element(input, stylesheet, "font_faces", {.item = (uint64_t)font_faces});
     }
     if (other_at_rules->length > 0) {
-        input_add_attribute_item_to_element(input, stylesheet, "at_rules", (Item)other_at_rules);
+        input_add_attribute_item_to_element(input, stylesheet, "at_rules", {.item = (uint64_t)other_at_rules});
     }
     
-    return (Item)stylesheet;
+    return {.item = (uint64_t)stylesheet};
 }
 
 static Array* parse_css_rules(Input *input, const char **css) {
@@ -310,7 +310,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                     skip_css_comments(css);
                 }
                 
-                input_add_attribute_item_to_element(input, at_rule, "rules", (Item)nested_rules);
+                input_add_attribute_item_to_element(input, at_rule, "rules", {.item = (uint64_t)nested_rules});
             }
         } else if (strcmp(at_rule_name->chars, "keyframes") == 0) {
             // @keyframes contains keyframe rules
@@ -389,14 +389,14 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                                 (*css)++; // Skip closing brace
                             }
                             
-                            array_append(keyframe_rules, (Item)keyframe_rule, input->pool);
+                            array_append(keyframe_rules, {.item = (uint64_t)keyframe_rule}, input->pool);
                         }
                     }
                     
                     skip_css_comments(css);
                 }
                 
-                input_add_attribute_item_to_element(input, at_rule, "keyframes", (Item)keyframe_rules);
+                input_add_attribute_item_to_element(input, at_rule, "keyframes", {.item = (uint64_t)keyframe_rules});
             }
         } else {
             // Other at-rules contain declarations - parse them directly as properties
@@ -455,7 +455,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
         (*css)++; // Skip semicolon
     }
     
-    return (Item)at_rule;
+    return {.item = (uint64_t)at_rule};
 }
 
 static Item parse_css_qualified_rule(Input *input, const char **css) {
@@ -506,7 +506,7 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
                 if (values) {
                     // Flatten single property value array
                     Item values_item = flatten_single_array(values);
-                    printf("Adding property %s with values %p\n", property_str->chars, (void*)values_item);
+                    printf("Adding property %s with values %p\n", property_str->chars, (void*)values_item.item);
                     input_add_attribute_item_to_element(input, rule, property_str->chars, values_item);
                 }
                 
@@ -531,7 +531,7 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
         }
     }
     
-    return (Item)rule;
+    return {.item = (uint64_t)rule};
 }
 
 static Array* parse_css_selectors(Input *input, const char **css) {
@@ -611,7 +611,7 @@ static Item parse_css_selector(Input *input, const char **css) {
         if (trimmed) {
             String* trimmed_str = input_create_string(input, trimmed);
             free(trimmed);
-            return trimmed_str ? s2it(trimmed_str) : ITEM_ERROR;
+            return trimmed_str ? (Item){.item = s2it(trimmed_str)} : (Item){.item = ITEM_ERROR};
         }
     }
     
@@ -679,7 +679,7 @@ static Item parse_css_declaration(Input *input, const char **css) {
         // Parse value
         Array* values = parse_css_value_list(input, css);
         if (values) {
-            input_add_attribute_item_to_element(input, declaration, "values", (Item)values);
+            input_add_attribute_item_to_element(input, declaration, "values", {.item = (uint64_t)values});
         }
         
         // Check for !important
@@ -690,7 +690,7 @@ static Item parse_css_declaration(Input *input, const char **css) {
         }
     }
     
-    return (Item)declaration;
+    return {.item = (uint64_t)declaration};
 }
 
 static Item parse_css_string(Input *input, const char **css) {
@@ -752,7 +752,7 @@ static Item parse_css_string(Input *input, const char **css) {
     
     String* str = strbuf_to_string(sb);
     printf("Parsed CSS string: %s\n", str ? str->chars : "NULL");
-    return str ? s2it(str) : ITEM_ERROR;
+    return str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_css_url(Input *input, const char **css) {
@@ -761,7 +761,7 @@ static Item parse_css_url(Input *input, const char **css) {
     *css += 4; // Skip "url("
     skip_css_whitespace(css);
     
-    Item url_value = ITEM_ERROR;
+    Item url_value = {.item = ITEM_ERROR};
     
     // Parse URL - can be quoted or unquoted
     if (**css == '"' || **css == '\'') {
@@ -781,7 +781,7 @@ static Item parse_css_url(Input *input, const char **css) {
             (*css)++;
         }
         String* str = strbuf_to_string(sb);
-        url_value = str ? s2it(str) : ITEM_ERROR;
+        url_value = str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
     }
     
     skip_css_whitespace(css);
@@ -796,7 +796,7 @@ static Item parse_css_url(Input *input, const char **css) {
         input_add_attribute_item_to_element(input, url_element, "href", url_value);
     }
     
-    return url_element ? (Item)url_element : ITEM_ERROR;
+    return url_element ? (Item){.item = (uint64_t)url_element} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_css_color(Input *input, const char **css) {
@@ -817,7 +817,7 @@ static Item parse_css_color(Input *input, const char **css) {
         // Valid hex colors are 3, 4, 6, or 8 digits
         if (hex_count == 3 || hex_count == 4 || hex_count == 6 || hex_count == 8) {
             String* color_str = strbuf_to_string(sb);
-            return color_str ? s2it(color_str) : ITEM_ERROR;
+            return color_str ? (Item){.item = s2it(color_str)} : (Item){.item = ITEM_ERROR};
         }
         // Clear buffer even on error path
         strbuf_to_string(sb);
@@ -851,7 +851,7 @@ static Item parse_css_color(Input *input, const char **css) {
                 strcmp(name, "green") == 0 || strcmp(name, "white") == 0 ||
                 strcmp(name, "black") == 0 || strcmp(name, "yellow") == 0 ||
                 strcmp(name, "transparent") == 0 || strcmp(name, "currentColor") == 0) {
-                return y2it(color_name);
+                return (Item){.item = y2it(color_name)};
             }
         }
         
@@ -872,7 +872,7 @@ static Item parse_css_number(Input *input, const char **css) {
     *dval = strtod(*css, &end);
     *css = end;
     
-    return {.item = d2it(dval);
+    return {.item = d2it(dval)};
 }
 
 static Item parse_css_measure(Input *input, const char **css) {
@@ -950,10 +950,10 @@ static Item parse_css_measure(Input *input, const char **css) {
             // CSS3 resolution units
             (unit_len == 3 && (strncmp(unit, "dpi", 3) == 0 || strncmp(unit, "dpcm", 4) == 0)) ||
             (unit_len == 4 && (strncmp(unit, "dpcm", 4) == 0 || strncmp(unit, "dppx", 4) == 0))) {
-            return measure_str ? s2it(measure_str) : ITEM_ERROR;
+            return measure_str ? (Item){.item = s2it(measure_str)} : (Item){.item = ITEM_ERROR};
         } else {
             // Unknown unit, but still return as measure
-            return measure_str ? s2it(measure_str) : ITEM_ERROR;
+            return measure_str ? (Item){.item = s2it(measure_str)} : (Item){.item = ITEM_ERROR};
         }
     } else {
         // Reset and parse as number only
@@ -1006,7 +1006,7 @@ static Item parse_css_identifier(Input *input, const char **css) {
     
     // Convert CSS keyword values to Lambda symbols using y2it()
     // CSS identifiers like 'flex', 'red', etc. should be symbols, not strings
-    return y2it(id_str);
+    return (Item){.item = y2it(id_str)};
 }
 
 static Array* parse_css_function_params(Input *input, const char **css) {
@@ -1071,7 +1071,7 @@ static Item flatten_single_array(Array* arr) {
     
     if (arr->length != 1) {
         // Return array as-is if not single element
-        return (Item)arr;
+        return {.item = (uint64_t)arr};
     }
     
     // For single-element arrays, return the single item directly
@@ -1080,12 +1080,12 @@ static Item flatten_single_array(Array* arr) {
     
     // Debug: check what type we're flattening
     if (single_item .item != ITEM_ERROR) {
-        printf("Flattening single array item, type: %llu\n", single_item >> 56);
+        printf("Flattening single array item, type: %llu\n", single_item.item >> 56);
         
         // For container types (like Elements), the type is determined by the container's type_id field
         // Check if this is a direct pointer to a container
-        if ((single_item >> 56) == 0) {
-            Container* container = (Container*)single_item;
+        if ((single_item.item >> 56) == 0) {
+            Container* container = (Container*)single_item.item;
             if (container && container->type_id == LMD_TYPE_ELEMENT) {
                 printf("Single item is element container, keeping as-is\n");
                 return single_item;
@@ -1110,7 +1110,7 @@ static Item parse_css_function(Input *input, const char **css) {
     if (**css != '(') {
         // Not a function, treat as identifier (symbol)
         String* id_str = strbuf_to_string(sb);
-        return id_str ? y2it(id_str) : ITEM_ERROR;
+        return id_str ? (Item){.item = y2it(id_str)} : (Item){.item = ITEM_ERROR};
     }
     
     String* func_name = strbuf_to_string(sb);
@@ -1143,7 +1143,7 @@ static Item parse_css_function(Input *input, const char **css) {
     
     // For container types like Element, return direct pointer (not tagged)
     // The container's type_id field indicates it's an element
-    return (Item)func_element;
+    return {.item = (uint64_t)func_element};
 }
 
 static Array* parse_css_value_list(Input *input, const char **css) {
@@ -1311,8 +1311,8 @@ void parse_css(Input* input, const char* css_string) {
         Element* empty_stylesheet = input_create_element(input, "stylesheet");
         Array* empty_rules = array_pooled(input->pool);
         if (empty_stylesheet && empty_rules) {
-            input_add_attribute_item_to_element(input, empty_stylesheet, "rules", (Item)empty_rules);
-            input->root = (Item)empty_stylesheet;
+            input_add_attribute_item_to_element(input, empty_stylesheet, "rules", {.item = (uint64_t)empty_rules});
+            input->root = {.item = (uint64_t)empty_stylesheet};
         } else {
             input->root = {.item = ITEM_ERROR};
         }
