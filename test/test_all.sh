@@ -349,132 +349,65 @@ run_validator_suite_impl() {
 # Implementation for MIR test suite using build config
 run_mir_suite_impl() {
     local suite_name="$1"
-    local sources=$(get_config_array "$suite_name" "sources" " ")
-    local binary=$(get_config_array "$suite_name" "binaries" " ")
-    local special_flags=$(get_config "$suite_name" "special_flags")
     
-    # Get build configuration
-    local config_file="build_lambda_config.json"
-    if [ ! -f "$config_file" ]; then
-        print_error "Configuration file $config_file not found!"
-        return 1
-    fi
+    # Use run_individual_test to handle the MIR test execution
+    # We need to temporarily modify global state to capture results for the suite summary
+    local old_raw_output="$RAW_OUTPUT"
+    RAW_OUTPUT=false  # Force non-raw mode for suite execution
     
-    print_status "Loading object files from $config_file..."
+    # Save current test output by capturing it
+    local test_output_file=$(mktemp)
     
-    # Extract and build object files list (reusing existing logic)
-    local object_files=()
-    while IFS= read -r source_file; do
-        local base_name
-        if [[ "$source_file" == *.cpp ]]; then
-            base_name=$(basename "$source_file" .cpp)
+    # Run the individual MIR test and capture both exit code and output
+    {
+        if run_individual_test "mir" "mir" 2>&1; then
+            local test_exit_code=0
         else
-            base_name=$(basename "$source_file" .c)
+            local test_exit_code=$?
         fi
-        local obj_file="build/${base_name}.o"
-        if [ -f "$obj_file" ]; then
-            object_files+=("$PWD/$obj_file")
-        else
-            print_warning "Object file $obj_file not found. You may need to build the project first."
-        fi
-    done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+        echo "EXIT_CODE:$test_exit_code" >&3
+    } 3>"$test_output_file.exit" >"$test_output_file.output" 2>&1
     
-    # Process source_dirs if any
-    local source_dirs
-    source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
-    if [ -n "$source_dirs" ]; then
-        while IFS= read -r source_dir; do
-            if [ -d "$source_dir" ]; then
-                while IFS= read -r source_file; do
-                    local rel_path="${source_file#$PWD/}"
-                    local base_name
-                    if [[ "$rel_path" == *.cpp ]]; then
-                        base_name=$(basename "$rel_path" .cpp)
-                    else
-                        base_name=$(basename "$rel_path" .c)
-                    fi
-                    local obj_file="build/${base_name}.o"
-                    if [ -f "$obj_file" ]; then
-                        object_files+=("$PWD/$obj_file")
-                    fi
-                done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
-            fi
-        done <<< "$source_dirs"
-    fi
+    # Read the captured results
+    local captured_exit_code=$(grep "^EXIT_CODE:" "$test_output_file.exit" | cut -d: -f2)
+    local captured_output=$(cat "$test_output_file.output")
     
-    if [ ${#object_files[@]} -eq 0 ]; then
-        print_error "No object files found. Please build the project first using: ./compile.sh"
-        return 1
-    fi
+    # Display the output
+    echo "$captured_output"
     
-    # For MIR tests, exclude main.o since Criterion provides its own main function
-    local filtered_object_files=()
-    for obj_file in "${object_files[@]}"; do
-        if [[ "$obj_file" != *"/main.o" ]]; then
-            filtered_object_files+=("$obj_file")
-        fi
-    done
-    object_files=("${filtered_object_files[@]}")
+    # Parse results from the output to set global variables for suite summary
+    local total_tests=0
+    local failed_tests=0
     
-    # Build library flags (reusing existing logic)
-    local include_flags=""
-    local static_libs=""
-    local dynamic_libs=""
-    local libraries
-    libraries=$(jq -r '.libraries // []' "$config_file")
-    
-    if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
-        while IFS= read -r lib_info; do
-            local name include lib link
-            name=$(echo "$lib_info" | jq -r '.name')
-            include=$(echo "$lib_info" | jq -r '.include // empty')
-            lib=$(echo "$lib_info" | jq -r '.lib // empty')
-            link=$(echo "$lib_info" | jq -r '.link // "static"')
-            
-            if [ -n "$include" ] && [ "$include" != "null" ]; then
-                include_flags="$include_flags -I$include"
-            fi
-            
-            if [ "$link" = "static" ]; then
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    static_libs="$static_libs $lib"
-                fi
-            else
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    dynamic_libs="$dynamic_libs -L$lib -l$name"
-                fi
-            fi
-        done < <(echo "$libraries" | jq -c '.[]')
-    fi
-    
-    # Compile MIR tests
-    print_status "Compiling MIR test..."
-    local compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $binary $sources ${object_files[*]} $static_libs $dynamic_libs"
-    
-    if $compile_cmd 2>/dev/null; then
-        print_success "MIR test suite compiled successfully"
+    if echo "$captured_output" | grep -q "Total:"; then
+        # Extract from the summary line that run_individual_test produces
+        local summary_line=$(echo "$captured_output" | grep "Total:" | tail -1)
+        total_tests=$(echo "$summary_line" | grep -o "Total: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+        failed_tests=$(echo "$summary_line" | grep -o "Failed: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
     else
-        print_error "Failed to compile MIR test suite"
-        print_error "Attempting compilation with detailed error output..."
-        $compile_cmd
-        return 1
+        # Fallback: parse TAP or Criterion output directly
+        if echo "$captured_output" | grep -q "^ok "; then
+            # TAP format
+            total_tests=$(echo "$captured_output" | grep -c "^ok " 2>/dev/null || echo "0")
+            failed_tests=$(echo "$captured_output" | grep -c "^not ok " 2>/dev/null || echo "0")
+        elif echo "$captured_output" | grep -q "Synthesis:"; then
+            # Criterion synthesis format
+            local synthesis_line=$(echo "$captured_output" | grep "Synthesis:" | tail -1)
+            total_tests=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            failed_tests=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+            failed_tests=$((failed_tests + crashing_tests))
+        else
+            # Fallback based on exit code
+            if [ "$captured_exit_code" -eq 0 ]; then
+                total_tests=1
+                failed_tests=0
+            else
+                total_tests=1
+                failed_tests=1
+            fi
+        fi
     fi
-    
-    # Run MIR tests
-    print_status "🧪 Running MIR JIT tests..."
-    echo ""
-    
-    set +e
-    local test_output=$(./"$binary" --verbose --tap 2>&1)
-    local test_exit_code=$?
-    set -e
-    
-    echo "$test_output"
-    echo ""
-    
-    # Parse results
-    local total_tests=$(echo "$test_output" | grep -c "^ok " 2>/dev/null || echo "0")
-    local failed_tests=$(echo "$test_output" | grep -c "^not ok " 2>/dev/null || echo "0")
     
     # Clean numeric values
     total_tests=$(echo "$total_tests" | tr -cd '0-9')
@@ -482,15 +415,16 @@ run_mir_suite_impl() {
     total_tests=${total_tests:-0}
     failed_tests=${failed_tests:-0}
     
-    # Store for final summary
+    # Store for final summary (maintaining compatibility with existing code)
     MIR_TOTAL_TESTS=$total_tests
     MIR_FAILED_TESTS=$failed_tests
     MIR_PASSED_TESTS=$((total_tests - failed_tests))
     
-    # Cleanup
-    if [ -f "$binary" ]; then
-        rm "$binary"
-    fi
+    # Cleanup temporary files
+    rm -f "$test_output_file" "$test_output_file.exit" "$test_output_file.output"
+    
+    # Restore original RAW_OUTPUT setting
+    RAW_OUTPUT="$old_raw_output"
     
     return $failed_tests
 }
