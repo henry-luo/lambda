@@ -5,7 +5,7 @@
 Input* input_new(lxb_url_t* abs_url);
 
 // Common input utility functions
-void map_put(Map* mp, String* key, LambdaItem value, Input *input);
+void map_put(Map* mp, String* key, Item value, Input *input);
 void input_skip_whitespace(const char **text);
 bool input_is_whitespace_char(char c);
 bool input_is_empty_line(const char* line);

@@ -254,30 +254,8 @@ void* pack_alloc(Pack* pack, size_t size);
 void* pack_calloc(Pack* pack, size_t size);
 void pack_free(Pack* pack);
 
-// uses the high byte to tag the pointer, defined for little-endian
-typedef union LambdaItem {
-    struct {
-        union {
-            struct {
-                uint64_t long_val: 56;
-                uint64_t _8: 8;
-            };
-            struct {
-                uint64_t bool_val: 8;
-                uint64_t _56: 56;
-            };
-            struct {
-                uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
-                uint64_t type_id : 8;        
-            };           
-        };
-    };
-    uint64_t item;
-    void* raw_pointer;
-} LambdaItem;
-
 // get type_id from an Item
-static inline TypeId get_type_id(LambdaItem value) {
+static inline TypeId get_type_id(Item value) {
     return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
 }
 
@@ -294,10 +272,10 @@ typedef struct Input {
 } Input;
 
 Array* array_pooled(VariableMemPool *pool);
-void array_append(Array* arr, LambdaItem itm, VariableMemPool *pool);
+void array_append(Array* arr, Item itm, VariableMemPool *pool);
 Map* map_pooled(VariableMemPool *pool);
 Element* elmt_pooled(VariableMemPool *pool);
-void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool);
+void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool);
 
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
 

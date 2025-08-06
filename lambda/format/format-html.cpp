@@ -180,26 +180,25 @@ static void format_item(StrBuf* sb, Item item, int depth) {
     }
     
     // Check if item is null (0)
-    if (item == 0) {
+    if (!item.item) {
         strbuf_append_str(sb, "null");
         return;
     }
     
-    // Additional safety check for LambdaItem structure
-    LambdaItem lambda_item = (LambdaItem)item;
-    if (lambda_item.type_id == 0 && lambda_item.raw_pointer == NULL) {
+    // Additional safety check for Item structure
+    if (item.type_id == 0 && item.raw_pointer == NULL) {
         strbuf_append_str(sb, "null");
         return;
     }
-    
-    TypeId type = get_type_id(lambda_item);
+
+    TypeId type = get_type_id(item);
     
     switch (type) {
     case LMD_TYPE_NULL:
         strbuf_append_str(sb, "null");
         break;
     case LMD_TYPE_BOOL: {
-        bool val = get_bool_value(item);
+        bool val = item.bool_val;
         strbuf_append_str(sb, val ? "true" : "false");
         break;
     }
@@ -209,14 +208,14 @@ static void format_item(StrBuf* sb, Item item, int depth) {
         format_number(sb, item);
         break;
     case LMD_TYPE_STRING: {
-        String* str = (String*)get_pointer(item);
+        String* str = (String*)item.pointer;
         if (str) {
             format_html_string(sb, str);
         }
         break;
     }
     case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)item;
+        Array* arr = item.array;
         if (arr && arr->length > 0) {
             strbuf_append_str(sb, "<ul>");
             for (long i = 0; i < arr->length; i++) {
@@ -232,7 +231,7 @@ static void format_item(StrBuf* sb, Item item, int depth) {
         break;
     }
     case LMD_TYPE_MAP: {
-        Map* mp = (Map*)item;
+        Map* mp = item.map;
         if (mp && mp->type) {
             strbuf_append_str(sb, "<div>");
             // Simple map representation
@@ -244,7 +243,7 @@ static void format_item(StrBuf* sb, Item item, int depth) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* element = (Element*)item;
+        Element* element = item.element;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
@@ -317,21 +316,19 @@ String* format_html(VariableMemPool* pool, Item root_item) {
     if (!sb) return NULL;
     
     // Check if root is already an HTML element, if so, format as-is
-    if (root_item != 0) {
-        LambdaItem lambda_item = (LambdaItem)root_item;
-        TypeId type = get_type_id(lambda_item);
-        
+    if (root_item.item) {
+        TypeId type = get_type_id(root_item);
+
         // Check if it's an array (most likely case for parsed HTML)
         if (type == LMD_TYPE_ARRAY) {
-            Array* arr = (Array*)root_item;
+            Array* arr = root_item.array;
             if (arr && arr->length > 0) {
                 // Check if the first element is an HTML element
                 Item first_item = arr->items[0];
-                LambdaItem first_lambda = (LambdaItem)first_item;
-                TypeId first_type = get_type_id(first_lambda);
-                
+                TypeId first_type = get_type_id(first_item);
+
                 if (first_type == LMD_TYPE_ELEMENT) {
-                    Element* element = (Element*)first_item;
+                    Element* element = first_item.element;
                     if (element && element->type) {
                         TypeElmt* elmt_type = (TypeElmt*)element->type;
                         // Check if this is an HTML element
@@ -346,7 +343,7 @@ String* format_html(VariableMemPool* pool, Item root_item) {
                 }
             }
         } else if (type == LMD_TYPE_ELEMENT) {
-            Element* element = (Element*)root_item;
+            Element* element = root_item.element;
             if (element && element->type) {
                 TypeElmt* elmt_type = (TypeElmt*)element->type;
                 // Check if this is an HTML element

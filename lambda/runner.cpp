@@ -288,7 +288,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.type_info = type_info;
     runner->context.consts = runner->script->const_list->data;
     runner->context.num_stack = num_stack_create(16);
-    runner->context.result = ITEM_NULL;  // exec result
+    runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();
     context = &runner->context;
     heap_init();
@@ -301,7 +301,7 @@ void runner_cleanup(Runner* runner) {
     if (runner->context.heap) {
         print_heap_entries();
         printf("freeing final result -----------------\n");
-        if (runner->context.result) free_item(runner->context.result, true);
+        if (runner->context.result.item) free_item(runner->context.result, true);
         // check memory leaks
         check_memory_leak();
         heap_destroy();
@@ -317,7 +317,7 @@ Item run_script(Runtime *runtime, const char* source, char* script_path) {
     Item result;
     if (!runner.script || !runner.script->main_func) { 
         printf("Error: Failed to compile the function.\n"); 
-        result = ITEM_NULL;
+        result = ItemNull;
     } else {
         printf("Executing JIT compiled code...\n");
         runner_setup_context(&runner);

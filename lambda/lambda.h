@@ -63,7 +63,59 @@ typedef struct Type {
     uint8_t is_const:1;  // is a constant expr
 } Type;
 
+typedef struct Container Container;
+typedef struct Range Range;
+typedef struct List List;
+typedef struct List Array;
+typedef struct ArrayLong ArrayLong;
+typedef struct Map Map;
+typedef struct Element Element;
+typedef struct Function Function;
+
+#ifndef __cplusplus
 typedef uint64_t Item;
+#else
+// uses the high byte to tag the pointer, defined for little-endian
+typedef union Item {
+    struct {
+        union {
+            struct {
+                int int_val: 32;
+                uint32_t _32: 32;
+            };            
+            struct {
+                uint64_t long_val: 56;
+                uint64_t _8: 8;
+            };
+            struct {
+                uint64_t bool_val: 8;
+                uint64_t _56: 56;
+            };
+            struct {
+                uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
+                uint64_t type_id : 8;        
+            };           
+        };
+    };
+    uint64_t item;
+    void* raw_pointer;
+
+    // pointers to the container types
+    Container* container;
+    Range* range;
+    List* list;
+    Array* array;
+    ArrayLong* array_long;
+    Map* map;
+    Element* element;
+    Type* type;
+    Function* function;
+} Item;
+
+extern Item ItemNull;
+extern Item ItemError;
+
+#endif
 
 // a fat string with prefixed length and flags
 typedef struct String {
@@ -87,14 +139,14 @@ typedef struct Context {
 } Context;
 
 // Array and List struct defintions needed for for-loop
-typedef struct Container {
+struct Container {
     TypeId type_id;
     uint8_t flags;
     uint16_t ref_cnt;  // reference count
-} Container;
+};
 
 #ifndef __cplusplus
-    typedef struct Range {
+    struct Range {
         TypeId type_id;
         uint8_t flags;
         uint16_t ref_cnt;  // reference count
@@ -102,20 +154,20 @@ typedef struct Container {
         long start;  // inclusive start
         long end;    // inclusive end
         long length;
-    } Range;
+    };
 #else
-    typedef struct Range : Container {
+    struct Range : Container {
         long start;  // inclusive start
         long end;    // inclusive end
         long length;
-    } Range;
+    };
 #endif
 
 Range* range();
 long range_get(Range *range, int index);
 
 #ifndef __cplusplus
-    typedef struct List {
+    struct List {
         TypeId type_id;
         uint8_t flags;
         uint16_t ref_cnt;  // reference count
@@ -124,14 +176,14 @@ long range_get(Range *range, int index);
         long length;  // number of items
         long extra;   // count of extra items stored at the end of the list
         long capacity;  // allocated capacity
-    } List;
+    };
 #else
-    typedef struct List : Container {
+    struct List : Container {
         Item* items;
         long length;
         long extra;  // count of extra items stored at the end of the list
         long capacity;
-    } List;
+    };
 #endif
 
 List* list();  // constructs an empty list
@@ -139,10 +191,8 @@ Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
 Item list_get(List *list, int index);
 
-typedef struct List Array;
-
 #ifndef __cplusplus
-    typedef struct ArrayLong {
+    struct ArrayLong {
         TypeId type_id;
         uint8_t flags;
         uint16_t ref_cnt;  // reference count
@@ -151,14 +201,14 @@ typedef struct List Array;
         long length;  // number of items
         long extra;   // count of extra items stored at the end of the array
         long capacity;  // allocated capacity
-    } ArrayLong;
+    };
 #else
-    typedef struct ArrayLong : Container {
+    struct ArrayLong : Container {
         long* items;
         long length;
         long extra;  // count of extra items
         long capacity;
-    } ArrayLong;
+    };
 #endif
 
 Array* array();
@@ -226,11 +276,11 @@ Item add(Item a, Item b);
 String *str_cat(String *left, String *right);
 
 typedef void* (*fn_ptr)();
-typedef struct Function {
+struct Function {
     uint8_t type_id;
     void* fn;  // fn definition, TypeFunc
     fn_ptr ptr;
-} Function;
+};
 
 Function* to_fn(fn_ptr ptr);
 

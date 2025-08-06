@@ -410,7 +410,7 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
     
     if (!script || !script->ast_root) {
         printf("Failed to parse script\n");
-        return 0; // ITEM_ERROR
+        return ItemError;
     }
     
     // Initialize MIR context
@@ -429,7 +429,7 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
     if (!main_fn) {
         printf("Failed to find main function\n");
         jit_cleanup(ctx);
-        return 0;
+        return ItemError;
     }
     
     // Create a simple context for execution

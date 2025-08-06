@@ -50,7 +50,7 @@ void heap_destroy() {
     }
 }
 
-Item HEAP_ENTRY_START = ((uint64_t)LMD_CONTAINER_HEAP_START << 56); 
+Item HEAP_ENTRY_START = {.item = ((uint64_t)LMD_CONTAINER_HEAP_START << 56)}; 
 
 void print_heap_entries() {
     ArrayList *entries = context->heap->entries;
@@ -58,7 +58,7 @@ void print_heap_entries() {
     for (int i = 0; i < entries->length; i++) {
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
-        LambdaItem itm = {.raw_pointer = data};
+        Item itm = {.raw_pointer = data};
         printf("heap entry index: %d, type: %d, data: %p\n", i, itm.type_id, data);
         if (itm.type_id == LMD_TYPE_RAW_POINTER) {
             TypeId type_id = *((uint8_t*)data);
@@ -80,7 +80,7 @@ void check_memory_leak() {
     printf("check heap entries: %d\n", entries->length);
     for (int i = 0; i < entries->length; i++) {
         void *data = entries->data[i];
-        LambdaItem itm = {.raw_pointer = data};
+        Item itm = {.raw_pointer = data};
         printf("heap entry index: %d, type: %s, data: %p\n", i, type_info[itm.type_id].name, data);
         if (!data) { continue; }  // skip NULL entries
         if (itm.type_id == LMD_TYPE_RAW_POINTER) {
@@ -90,7 +90,7 @@ void check_memory_leak() {
                 List *list = (List*)data;
                 printf("heap entry list: %p, length: %ld, ref_cnt: %d\n", list, list->length, list->ref_cnt);
                 strbuf_reset(strbuf);
-                print_item(strbuf, itm.item);
+                print_item(strbuf, itm);
                 printf("heap entry list: %s\n", strbuf->str);
             }
             else if (type_id == LMD_TYPE_ARRAY) {
@@ -125,7 +125,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
         else if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
             field->type->type_id == LMD_TYPE_DTIME || field->type->type_id == LMD_TYPE_BINARY) {
             String *str = *(String**)field_ptr;
-            Item item = s2it(str);
+            Item item = {.item = s2it(str)};
             free_item(item, clear_entry);
         }
         else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
@@ -201,16 +201,15 @@ void free_container(Container* cont, bool clear_entry) {
 }
 
 void free_item(Item item, bool clear_entry) {
-    LambdaItem itm = {.item = item};
-    if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
-        itm.type_id == LMD_TYPE_DTIME || itm.type_id == LMD_TYPE_BINARY) {
-        String *str = (String*)itm.pointer;
+    if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL || 
+        item.type_id == LMD_TYPE_DTIME || item.type_id == LMD_TYPE_BINARY) {
+        String *str = (String*)item.pointer;
         if (!str->ref_cnt) {
             pool_variable_free(context->heap->pool, str);
         }
     }
-    else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
-        Container* container = (Container*)itm.raw_pointer;
+    else if (item.type_id == LMD_TYPE_RAW_POINTER) {
+        Container* container = item.container;
         // delink with the container
         if (container->ref_cnt > 0) container->ref_cnt--;
         if (!container->ref_cnt) free_container(container, clear_entry);
@@ -220,7 +219,7 @@ void free_item(Item item, bool clear_entry) {
         // remove the entry from heap entries
         for (int i = entries->length - 1; i >= 0; i--) {
             void *data = entries->data[i];
-            if ((Item)data == item) { 
+            if (data == item.raw_pointer) { 
                 entries->data[i] = NULL;  break;
             }
         }
@@ -230,7 +229,7 @@ void free_item(Item item, bool clear_entry) {
 void frame_start() {
     size_t stack_pos = ((num_stack_t *)context->num_stack)->current_position;
     arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
-    arraylist_append(context->heap->entries, (void*)HEAP_ENTRY_START);
+    arraylist_append(context->heap->entries, HEAP_ENTRY_START.raw_pointer);
 }
 
 void frame_end() {
@@ -240,7 +239,7 @@ void frame_end() {
         printf("free heap entry index: %d\n", i);
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
-        LambdaItem itm = {.raw_pointer = data};
+        Item itm = {.raw_pointer = data};
         if (itm.type_id == LMD_TYPE_STRING) {
             String *str = (String*)itm.pointer;
             if (!str->ref_cnt) {

@@ -221,8 +221,7 @@ void run_assertions() {
     static_assert(sizeof(uint64_t) == 8, "uint64_t size == 8 bytes");
     static_assert(sizeof(int32_t) == 4, "int32_t size == 4 bytes");
     static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
-    static_assert(sizeof(Item) == sizeof(double), "Item size == double size");
-    static_assert(sizeof(LambdaItem) == sizeof(Item), "LambdaItem size == Item size");
+    static_assert(sizeof(Item) == 8, "Item size == 8 bytes");
 #else
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
     _Static_assert(sizeof(uint8_t) == 1, "uint8_t size == 1 byte");
@@ -231,10 +230,9 @@ void run_assertions() {
     _Static_assert(sizeof(uint64_t) == 8, "uint64_t size == 8 bytes");
     _Static_assert(sizeof(int32_t) == 4, "int32_t size == 4 bytes");
     _Static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
-    _Static_assert(sizeof(Item) == sizeof(double), "Item size == double size");
-    _Static_assert(sizeof(LambdaItem) == sizeof(Item), "LambdaItem size == Item size");
+    _Static_assert(sizeof(Item) == 8, "Item size == 8 bytes");
 #endif
-    LambdaItem itm = {.item = ITEM_ERROR};
+    Item itm = {.item = ITEM_ERROR};
     assert(itm.type_id == LMD_TYPE_ERROR);
     assert(1.0/0.0 == INFINITY);
     assert(-1.0/0.0 == -INFINITY);

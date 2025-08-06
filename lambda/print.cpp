@@ -257,27 +257,26 @@ void print_item(StrBuf *strbuf, Item item) {
 void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
-    if (!item) { strbuf_append_str(strbuf, "null"); return; }
+    if (!item.item) { strbuf_append_str(strbuf, "null"); return; }
 
-    LambdaItem ld_item = {.item = item};  
-    if (ld_item.type_id) { // packed value
-        TypeId type_id = ld_item.type_id;
+    if (item.type_id) { // packed value
+        TypeId type_id = item.type_id;
         if (type_id == LMD_TYPE_NULL) {
             strbuf_append_str(strbuf, "null");
         } 
         else if (type_id == LMD_TYPE_BOOL) {
-            strbuf_append_str(strbuf, ld_item.bool_val ? "true" : "false");
+            strbuf_append_str(strbuf, item.bool_val ? "true" : "false");
         }
         else if (type_id == LMD_TYPE_INT) {
-            int int_val = (int32_t)ld_item.long_val;
+            int int_val = item.int_val;
             strbuf_append_format(strbuf, "%d", int_val);
         }
         else if (type_id == LMD_TYPE_INT64) {
-            long long_val = *(long*)ld_item.pointer;
+            long long_val = *(long*)item.pointer;
             strbuf_append_format(strbuf, "%ld", long_val);
         }
         else if (type_id == LMD_TYPE_FLOAT) {
-            double num = *(double*)ld_item.pointer;
+            double num = *(double*)item.pointer;
             int exponent;
             double mantissa = frexp(num, &exponent);
             if (-20 < exponent && exponent < 30) {
@@ -303,7 +302,7 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             }
         }
         else if (type_id == LMD_TYPE_DECIMAL) {
-            mpf_t *num = (mpf_t*)ld_item.pointer;
+            mpf_t *num = (mpf_t*)item.pointer;
             char buf[128];
             
 #ifdef CROSS_COMPILE
@@ -323,26 +322,26 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             strbuf_append_str(strbuf, buf);
         }
         else if (type_id == LMD_TYPE_STRING) {
-            String *string = (String*)ld_item.pointer;
+            String *string = (String*)item.pointer;
             assert(strlen(string->chars) == string->len && "asserting tring length");
             // todo: escape the string
             if (string && string->chars) strbuf_append_format(strbuf, "\"%s\"", string->chars);
             else strbuf_append_str(strbuf, "\"\"");
         }
         else if (type_id == LMD_TYPE_SYMBOL) {
-            String *string = (String*)ld_item.pointer;
+            String *string = (String*)item.pointer;
             assert(strlen(string->chars) == string->len && "asserting symbol length");
             // todo: escape the symbol chars
             if (string && string->chars) strbuf_append_format(strbuf, "'%s'", string->chars);
             else strbuf_append_str(strbuf, "''");
         } 
         else if (type_id == LMD_TYPE_DTIME) {
-            String *string = (String*)ld_item.pointer;
+            String *string = (String*)item.pointer;
             if (string && string->chars) strbuf_append_format(strbuf, "t'%s'", string->chars);
             else strbuf_append_str(strbuf, "t''");
         }
         else if (type_id == LMD_TYPE_BINARY) {
-            String *string = (String*)ld_item.pointer;
+            String *string = (String*)item.pointer;
             if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
             else strbuf_append_str(strbuf, "b''");
         }
@@ -354,9 +353,9 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
         }        
     }
     else { // pointer types
-        TypeId type_id = *((uint8_t*)item);
+        TypeId type_id = item.container->type_id;
         if (type_id == LMD_TYPE_LIST) {
-            List *list = (List*)item;
+            List *list = item.list;
             // printf("print list: %p, length: %ld\n", list, list->length);
             strbuf_append_char(strbuf, '(');
             for (int i = 0; i < list->length; i++) {
@@ -366,12 +365,12 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             strbuf_append_char(strbuf, ')');
         }
         else if (type_id == LMD_TYPE_RANGE) {
-            Range *range = (Range*)item;
+            Range *range = item.range;
             // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
             strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
         }
         else if (type_id == LMD_TYPE_ARRAY) {
-            Array *array = (Array*)item;
+            Array *array = item.array;
             // printf("print array: %p, length: %ld\n", array, array->length);
             strbuf_append_char(strbuf, '[');
             for (int i = 0; i < array->length; i++) {
@@ -382,7 +381,7 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
         }        
         else if (type_id == LMD_TYPE_ARRAY_INT) {
             strbuf_append_char(strbuf, '[');
-            ArrayLong *array = (ArrayLong*)item;
+            ArrayLong *array = item.array_long;
             for (int i = 0; i < array->length; i++) {
                 if (i) strbuf_append_char(strbuf, ',');
                 strbuf_append_format(strbuf, "%ld", array->items[i]);
@@ -390,14 +389,14 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             strbuf_append_char(strbuf, ']');            
         }
         else if (type_id == LMD_TYPE_MAP) {
-            Map *map = (Map*)item;
+            Map *map = item.map;
             TypeMap *map_type = (TypeMap*)map->type;
             strbuf_append_char(strbuf, '{');
             print_named_items_with_depth(strbuf, map_type, map->data, depth + 1);
             strbuf_append_char(strbuf, '}');
         }
         else if (type_id == LMD_TYPE_ELEMENT) {
-            Element *element = (Element*)item;
+            Element *element = item.element;
             TypeElmt *elmt_type = (TypeElmt*)element->type;
             // printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
             //     elmt_type->length, elmt_type->content_length, element->length);
@@ -415,11 +414,11 @@ void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
             strbuf_append_str(strbuf, "function");
         }
         else if (type_id == LMD_TYPE_FUNC) {
-            Function *func = (Function*)item;
+            Function *func = item.function;
             strbuf_append_format(strbuf, "fn %p", func);
         }
         else if (type_id == LMD_TYPE_TYPE) {
-            TypeType *type = (TypeType*)item;
+            TypeType *type = (TypeType*)item.type;
             strbuf_append_format(strbuf, "type %s", type_info[type->type->type_id].name);
         }
         else {

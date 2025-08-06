@@ -58,6 +58,9 @@ TypeType LIT_TYPE_ERROR;
 TypeMap EmptyMap;
 TypeElmt EmptyElmt;
 
+Item ItemNull = {.type_id = LMD_TYPE_NULL};
+Item ItemError = {.type_id = LMD_TYPE_ERROR};
+
 void init_typetype() {
     *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
     TYPE_ARRAY.nested = &TYPE_ANY;  // default nested type
