@@ -451,7 +451,7 @@ static Item parse_content(Input *input, const char **mark) {
     skip_comments(mark);
     
     if (**mark == '<') {
-        return (Item)parse_element(input, mark);
+        return {.item = (uint64_t)parse_element(input, mark)};
     } else {
         return parse_value(input, mark);
     }
@@ -462,19 +462,19 @@ static Item parse_value(Input *input, const char **mark) {
     
     switch (**mark) {
         case '{':
-            return (Item)parse_map(input, mark);
+            return {.item = (uint64_t)parse_map(input, mark)};
         case '[':
-            return (Item)parse_array(input, mark);
+            return {.item = (uint64_t)parse_array(input, mark)};
         case '(':
-            return (Item)parse_list(input, mark);
+            return {.item = (uint64_t)parse_list(input, mark)};
         case '<':
-            return (Item)parse_element(input, mark);
+            return {.item = (uint64_t)parse_element(input, mark)};
         case '"':
-            return {.item = s2it(parse_string(input, mark));
+            return {.item = s2it(parse_string(input, mark))};
         case '\'':
             {
                 String* sym = parse_symbol(input, mark);
-                return y2it(sym);
+                return {.item = y2it(sym)};
             }
         case 'b':
             if (*(*mark + 1) == '\'') {
@@ -486,13 +486,13 @@ static Item parse_value(Input *input, const char **mark) {
                 return parse_datetime(input, mark);
             } else if (strncmp(*mark, "true", 4) == 0) {
                 *mark += 4;
-                return {.item = b2it(true);
+                return {.item = b2it(true)};
             }
             goto UNQUOTED_IDENTIFIER;
         case 'f':
             if (strncmp(*mark, "false", 5) == 0) {
                 *mark += 5;
-                return {.item = b2it(false);
+                return {.item = b2it(false)};
             }
             goto UNQUOTED_IDENTIFIER;
         case 'n':
@@ -501,22 +501,38 @@ static Item parse_value(Input *input, const char **mark) {
                 return {.item = ITEM_NULL};
             } else if (strncmp(*mark, "nan", 3) == 0) {
                 *mark += 3;
-                return {.item = d2it(&(double){NAN});
+                double *dval;
+                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
+                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                *dval = NAN;
+                return {.item = d2it(dval)};
             }
             goto UNQUOTED_IDENTIFIER;
         case 'i':
             if (strncmp(*mark, "inf", 3) == 0) {
                 *mark += 3;
-                return {.item = d2it(&(double){INFINITY});
+                double *dval;
+                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
+                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                *dval = INFINITY;
+                return {.item = d2it(dval)};
             }
             goto UNQUOTED_IDENTIFIER;
         case '-':
             if (strncmp(*mark, "-inf", 4) == 0) {
                 *mark += 4;
-                return {.item = d2it(&(double){-INFINITY});
+                double *dval;
+                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
+                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                *dval = -INFINITY;
+                return {.item = d2it(dval)};
             } else if (strncmp(*mark, "-nan", 4) == 0) {
                 *mark += 4;
-                return {.item = d2it(&(double){-NAN});
+                double *dval;
+                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
+                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                *dval = -NAN;
+                return {.item = d2it(dval)};
             }
             // Fall through to number parsing
         default:
@@ -528,7 +544,7 @@ static Item parse_value(Input *input, const char **mark) {
                 UNQUOTED_IDENTIFIER:
                 // Parse as identifier/symbol
                 String* id = parse_unquoted_identifier(input, mark);
-                return id ? y2it(id) : ITEM_ERROR;
+                return id ? (Item){.item = y2it(id)} : (Item){.item = ITEM_ERROR};
             }
             return {.item = ITEM_ERROR};
     }

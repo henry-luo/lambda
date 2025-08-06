@@ -311,44 +311,44 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
         return {.item = ITEM_NULL};
     }
     
-    Item result = ITEM_ERROR;
+    Item result = {.item = ITEM_ERROR};
     
     // Check for special PDF keywords first
     if (strncmp(*pdf, "endobj", 6) == 0) {
         *pdf += 6;
-        result = ITEM_NULL; // Signal end of object
+        result = {.item = ITEM_NULL}; // Signal end of object
     }
     // Check for stream keywords
     else if (strncmp(*pdf, "stream", 6) == 0) {
-        result = ITEM_NULL; // Stream handling is done elsewhere
+        result = {.item = ITEM_NULL}; // Stream handling is done elsewhere
     }
     else if (strncmp(*pdf, "endstream", 9) == 0) {
         *pdf += 9;
-        result = ITEM_NULL; // Signal end of stream
+        result = {.item = ITEM_NULL}; // Signal end of stream
     }
     // check for null
     else if (strncmp(*pdf, "null", 4) == 0 && (!isalnum(*(*pdf + 4)))) {
         *pdf += 4;
-        result = ITEM_NULL;
+        result = {.item = ITEM_NULL};
     }
     // check for boolean values
     else if (strncmp(*pdf, "true", 4) == 0 && (!isalnum(*(*pdf + 4)))) {
         *pdf += 4;
-        result = b2it(true);
+        result = {.item = b2it(true)});
     }
     else if (strncmp(*pdf, "false", 5) == 0 && (!isalnum(*(*pdf + 5)))) {
         *pdf += 5;
-        result = b2it(false);
+        result = {.item = b2it(false)});
     }
     // check for names
     else if (**pdf == '/') {
         String* name = parse_pdf_name(input, pdf);
-        result = name ? s2it(name) : ITEM_ERROR;
+        result = name ? (Item){.item = s2it(name)} : (Item){.item = ITEM_ERROR};
     }
     // check for simple strings (no complex nesting)
     else if (**pdf == '(' || (**pdf == '<' && *(*pdf + 1) != '<')) {
         String* str = parse_pdf_string(input, pdf);
-        result = str ? s2it(str) : ITEM_ERROR;
+        result = str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
     }
     // check for indirect references (n m R) before numbers
     else if ((**pdf >= '0' && **pdf <= '9') && is_digit_or_space_ahead(*pdf + 1, 10)) {
@@ -370,7 +370,7 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
     // check for simple arrays (limited depth)
     else if (**pdf == '[' && call_count <= 3) {
         Array* arr = parse_pdf_array(input, pdf);
-        result = arr ? (Item)arr : ITEM_ERROR;
+        result = arr ? (Item){.item = (uint64_t)arr} : ITEM_ERROR;
     }
     // check for simple dictionaries (limited depth) 
     else if (**pdf == '<' && *(*pdf + 1) == '<' && call_count <= 3) {
@@ -382,20 +382,20 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
             if (strncmp(*pdf, "stream", 6) == 0) {
                 // Parse as stream with dictionary
                 Item stream = parse_pdf_stream(input, pdf, dict);
-                result = stream .item != ITEM_ERROR ? stream : (Item)dict;
+                result = stream .item != ITEM_ERROR ? stream : (Item){.item = (uint64_t)dict};
             } else {
                 // Just a dictionary
                 *pdf = saved_pos;
-                result = (Item)dict;
+                result = (Item){.item = (uint64_t)dict};
             }
         } else {
-            result = ITEM_ERROR;
+            result = {.item = ITEM_ERROR};
         }
     }
     // skip complex structures (streams and other complex cases)
     else {
         advance_safely(pdf, 1);
-        result = ITEM_NULL;
+        result = {.item = ITEM_NULL};
     }
     
     call_count--;
@@ -482,7 +482,7 @@ static Item parse_pdf_indirect_ref(Input *input, const char **pdf) {
             map_put(ref_map, gen_key, gen_item, input);
         }
     }
-    return (Item)ref_map;
+    return {.item = (uint64_t)ref_map};
 }
 
 static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
@@ -585,11 +585,11 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
             content_key->len = 7;
             content_key->ref_cnt = 0;
             
-            Item content_item = {.item = content};
+            Item content_item = {.item = content.item};
             map_put(obj_map, content_key, content_item, input);
         }
     }
-    return (Item)obj_map;
+    return {.item = (uint64_t)obj_map};
 }
 
 static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
@@ -642,7 +642,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
             dict_key->len = 10;
             dict_key->ref_cnt = 0;
             
-            Item dict_item = {.item = (Item)dict};
+            Item dict_item = {.item = (Item){.item = (uint64_t)dict}};
             map_put(stream_map, dict_key, dict_item, input);
         }
     }
@@ -693,7 +693,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
                         strcpy(analysis_key->chars, "analysis");
                         analysis_key->len = 8;
                         analysis_key->ref_cnt = 0;
-                        Item analysis_item = {.item = content_analysis};
+                        Item analysis_item = {.item = content_analysis.item};
                         map_put(stream_map, analysis_key, analysis_item, input);
                     }
                 }
@@ -702,7 +702,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
     }
     
     *pdf = end_stream + 9; // skip endstream
-    return (Item)stream_map;
+    return {.item = (uint64_t)stream_map};
 }
 
 static Item parse_pdf_xref_table(Input *input, const char **pdf) {
@@ -864,7 +864,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
             map_put(xref_map, entries_key, entries_item, input);
         }
     }
-    return (Item)xref_map;
+    return {.item = (uint64_t)xref_map};
 }
 
 static Item parse_pdf_trailer(Input *input, const char **pdf) {
@@ -880,7 +880,7 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
     
     // Create a wrapper map to indicate this is a trailer
     Map* trailer_map = map_pooled(input->pool);
-    if (!trailer_map) return (Item)trailer_dict;
+    if (!trailer_map) return {.item = (uint64_t)trailer_dict};
     
     // Store type identifier
     String* type_key;
@@ -912,7 +912,7 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
         Item dict_item = {.item = (Item)trailer_dict};
         map_put(trailer_map, dict_key, dict_item, input);
     }
-    return (Item)trailer_map;
+    return {.item = (uint64_t)trailer_map};
 }
 
 // Analyze PDF content streams for basic information
@@ -1003,7 +1003,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
             map_put(analysis_map, draw_key, draw_item, input);
         }
     }
-    return (Item)analysis_map;
+    return {.item = (uint64_t)analysis_map};
 }
 
 // Analyze font information from font dictionaries
@@ -1044,7 +1044,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
         Item original_item = {.item = (Item)font_dict};
         map_put(font_analysis, original_key, original_item, input);
     }
-    return (Item)font_analysis;
+    return {.item = (uint64_t)font_analysis};
 }
 
 // Extract basic page information
@@ -1085,7 +1085,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
         Item original_item = {.item = (Item)page_dict};
         map_put(page_analysis, original_key, original_item, input);
     }
-    return (Item)page_analysis;
+    return {.item = (uint64_t)page_analysis};
 }
 
 void parse_pdf(Input* input, const char* pdf_string) {

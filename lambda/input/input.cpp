@@ -2,8 +2,10 @@
 #include <lexbor/url/url.h>
 #include "mime-detect.h"
 
-lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-char* read_text_doc(lxb_url_t *url);
+extern "C" {
+    lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+    char* read_text_doc(lxb_url_t *url);
+}
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
 void parse_ini(Input* input, const char* ini_string);
@@ -11,12 +13,12 @@ void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
 void parse_markdown(Input* input, const char* markdown_string);
-void parse_rst(Input* input, const char* rst_string);
+// void parse_rst(Input* input, const char* rst_string);  // Not yet working
 void parse_html(Input* input, const char* html_string);
 void parse_latex(Input* input, const char* latex_string);
-void parse_rtf(Input* input, const char* rtf_string);
-void parse_pdf(Input* input, const char* pdf_string);
-void parse_mediawiki(Input* input, const char* mediawiki_string);
+// void parse_rtf(Input* input, const char* rtf_string);  // Not yet working
+// void parse_pdf(Input* input, const char* pdf_string);  // Not yet working
+// void parse_mediawiki(Input* input, const char* mediawiki_string);  // Not yet working
 void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_man(Input* input, const char* man_string);
 void parse_eml(Input* input, const char* eml_string);
@@ -451,24 +453,28 @@ Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String*
         else if (strcmp(effective_type, "markdown") == 0) {
             parse_markdown(input, source);
         }
-        else if (strcmp(effective_type, "rst") == 0) {
-            parse_rst(input, source);
-        }
+        // RST parser not yet working - commented out
+        // else if (strcmp(effective_type, "rst") == 0) {
+        //     parse_rst(input, source);
+        // }
         else if (strcmp(effective_type, "html") == 0) {
             parse_html(input, source);
         }
         else if (strcmp(effective_type, "latex") == 0) {
             parse_latex(input, source);
         }
-        else if (strcmp(effective_type, "rtf") == 0) {
-            parse_rtf(input, source);
-        }
-        else if (strcmp(effective_type, "pdf") == 0) {
-            parse_pdf(input, source);
-        }
-        else if (strcmp(effective_type, "wiki") == 0) {
-            parse_mediawiki(input, source);
-        }
+        // RTF parser not yet working - commented out
+        // else if (strcmp(effective_type, "rtf") == 0) {
+        //     parse_rtf(input, source);
+        // }
+        // PDF parser not yet working - commented out  
+        // else if (strcmp(effective_type, "pdf") == 0) {
+        //     parse_pdf(input, source);
+        // }
+        // MediaWiki parser not yet working - commented out
+        // else if (strcmp(effective_type, "wiki") == 0) {
+        //     parse_mediawiki(input, source);
+        // }
         else if (strcmp(effective_type, "asciidoc") == 0) {
             parse_asciidoc(input, source);
         }

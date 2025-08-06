@@ -2,6 +2,10 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // MIME type detection structure
 typedef struct MimePattern {
     const char* pattern;
@@ -41,3 +45,7 @@ extern MimeGlob glob_patterns[];
 // External declarations for counts
 extern const size_t MAGIC_PATTERNS_COUNT;
 extern const size_t GLOB_PATTERNS_COUNT;
+
+#ifdef __cplusplus
+}
+#endif

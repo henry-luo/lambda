@@ -374,12 +374,12 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 // Add text before bold
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = malloc(len + 1);
+                    char* before_text = (char*)malloc(len + 1);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
                     if (before_str) {
-                        list_push((List*)container, s2it(before_str));
+                        list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
                     free(before_text);
@@ -389,15 +389,15 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 Element* bold = create_asciidoc_element(input, "strong");
                 if (bold) {
                     int bold_len = bold_end - bold_start;
-                    char* bold_text = malloc(bold_len + 1);
+                    char* bold_text = (char*)malloc(bold_len + 1);
                     strncpy(bold_text, bold_start, bold_len);
                     bold_text[bold_len] = '\0';
                     String* bold_str = create_string(input, bold_text);
                     if (bold_str) {
-                        list_push((List*)bold, s2it(bold_str));
+                        list_push((List*)bold, {.item = s2it(bold_str)});
                         ((TypeElmt*)bold->type)->content_length++;
                     }
-                    list_push((List*)container, (Item)bold);
+                    list_push((List*)container, {.item = (uint64_t)bold});
                     ((TypeElmt*)container->type)->content_length++;
                     free(bold_text);
                 }
@@ -414,12 +414,12 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 // Add text before italic
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = malloc(len + 1);
+                    char* before_text = (char*)malloc(len + 1);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
                     if (before_str) {
-                        list_push((List*)container, s2it(before_str));
+                        list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
                     free(before_text);
@@ -429,15 +429,15 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 Element* italic = create_asciidoc_element(input, "em");
                 if (italic) {
                     int italic_len = italic_end - italic_start;
-                    char* italic_text = malloc(italic_len + 1);
+                    char* italic_text = (char*)malloc(italic_len + 1);
                     strncpy(italic_text, italic_start, italic_len);
                     italic_text[italic_len] = '\0';
                     String* italic_str = create_string(input, italic_text);
                     if (italic_str) {
-                        list_push((List*)italic, s2it(italic_str));
+                        list_push((List*)italic, {.item = s2it(italic_str)});
                         ((TypeElmt*)italic->type)->content_length++;
                     }
-                    list_push((List*)container, (Item)italic);
+                    list_push((List*)container, {.item = (uint64_t)italic});
                     ((TypeElmt*)container->type)->content_length++;
                     free(italic_text);
                 }
@@ -454,12 +454,12 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 // Add text before code
                 if (ptr > start) {
                     int len = ptr - start;
-                    char* before_text = malloc(len + 1);
+                    char* before_text = (char*)malloc(len + 1);
                     strncpy(before_text, start, len);
                     before_text[len] = '\0';
                     String* before_str = create_string(input, before_text);
                     if (before_str) {
-                        list_push((List*)container, s2it(before_str));
+                        list_push((List*)container, {.item = s2it(before_str)});
                         ((TypeElmt*)container->type)->content_length++;
                     }
                     free(before_text);
@@ -469,15 +469,15 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
                 Element* code = create_asciidoc_element(input, "code");
                 if (code) {
                     int code_len = code_end - code_start;
-                    char* code_text = malloc(code_len + 1);
+                    char* code_text = (char*)malloc(code_len + 1);
                     strncpy(code_text, code_start, code_len);
                     code_text[code_len] = '\0';
                     String* code_str = create_string(input, code_text);
                     if (code_str) {
-                        list_push((List*)code, s2it(code_str));
+                        list_push((List*)code, {.item = s2it(code_str)});
                         ((TypeElmt*)code->type)->content_length++;
                     }
-                    list_push((List*)container, (Item)code);
+                    list_push((List*)container, {.item = (uint64_t)code});
                     ((TypeElmt*)container->type)->content_length++;
                     free(code_text);
                 }
@@ -494,12 +494,12 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
     // Add remaining text
     if (ptr > start) {
         int len = ptr - start;
-        char* remaining_text = malloc(len + 1);
+        char* remaining_text = (char*)malloc(len + 1);
         strncpy(remaining_text, start, len);
         remaining_text[len] = '\0';
         String* remaining_str = create_string(input, remaining_text);
         if (remaining_str) {
-            list_push((List*)container, s2it(remaining_str));
+            list_push((List*)container, {.item = s2it(remaining_str)});
             ((TypeElmt*)container->type)->content_length++;
         }
         free(remaining_text);
@@ -513,10 +513,10 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
     
     // If container is empty, return a simple string
     if (((TypeElmt*)container->type)->content_length == 0) {
-        return {.item = s2it(create_string(input, text));
+        return {.item = s2it(create_string(input, text))};
     }
     
-    return (Item)container;
+    return {.item = (uint64_t)container};
 }
 
 static Item parse_asciidoc_block(Input *input, char** lines, int* current_line, int total_lines) {
@@ -571,19 +571,19 @@ static Item parse_asciidoc_content(Input *input, char** lines, int line_count) {
     
     // Create meta element for metadata (required by schema)
     Element* meta = create_asciidoc_element(input, "meta");
-    if (!meta) return (Item)doc;
+    if (!meta) return {.item = (uint64_t)doc};
     
     // Add default metadata
     add_attribute_to_element(input, meta, "title", "AsciiDoc Document");
     add_attribute_to_element(input, meta, "language", "en");
     
     // Add meta to doc
-    list_push((List*)doc, (Item)meta);
+    list_push((List*)doc, {.item = (uint64_t)meta});
     ((TypeElmt*)doc->type)->content_length++;
     
     // Create body element for content (required by schema)
     Element* body = create_asciidoc_element(input, "body");
-    if (!body) return (Item)doc;
+    if (!body) return {.item = (uint64_t)doc};
     
     int current_line = 0;
     while (current_line < line_count) {
@@ -598,10 +598,10 @@ static Item parse_asciidoc_content(Input *input, char** lines, int line_count) {
     }
     
     // Add body to doc
-    list_push((List*)doc, (Item)body);
+    list_push((List*)doc, {.item = (uint64_t)body});
     ((TypeElmt*)doc->type)->content_length++;
     
-    return (Item)doc;
+    return {.item = (uint64_t)doc};
 }
 
 void parse_asciidoc(Input* input, const char* asciidoc_string) {
