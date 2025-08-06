@@ -215,6 +215,115 @@ load_test_config() {
     print_success "Loaded ${#TEST_SUITE_NAMES[@]} test suite configurations"
 }
 
+# Generic function to store test suite results
+store_suite_results() {
+    local suite_name="$1"
+    local total_tests="$2"
+    local passed_tests="$3"
+    local failed_tests="$4"
+    local test_names_arr_name="$5"
+    local test_totals_arr_name="$6"
+    local test_passed_arr_name="$7"
+    local test_failed_arr_name="$8"
+    
+    # Convert suite name to uppercase for variable naming
+    local suite_upper=$(echo "$suite_name" | tr '[:lower:]' '[:upper:]')
+    
+    # Store test counts using eval for compatibility
+    eval "${suite_upper}_TOTAL_TESTS=$total_tests"
+    eval "${suite_upper}_PASSED_TESTS=$passed_tests"
+    eval "${suite_upper}_FAILED_TESTS=$failed_tests"
+    
+    # Copy arrays using eval for compatibility
+    eval "${suite_upper}_TEST_NAMES=(\"\${${test_names_arr_name}[@]}\")"
+    eval "${suite_upper}_TEST_TOTALS=(\"\${${test_totals_arr_name}[@]}\")"
+    eval "${suite_upper}_TEST_PASSED=(\"\${${test_passed_arr_name}[@]}\")"
+    eval "${suite_upper}_TEST_FAILED=(\"\${${test_failed_arr_name}[@]}\")"
+    
+    # Also create legacy aliases for backward compatibility
+    # Define legacy alias mappings (suite_name -> legacy_prefix)
+    local legacy_prefix=""
+    case "$suite_name" in
+        "library") legacy_prefix="LIB" ;;
+        "input") legacy_prefix="INPUT" ;;
+        "mir") legacy_prefix="MIR" ;;
+        "lambda") legacy_prefix="LAMBDA" ;;
+        *) legacy_prefix="" ;;  # No legacy aliases for other suites
+    esac
+    
+    # Create legacy aliases if a mapping exists
+    if [ -n "$legacy_prefix" ]; then
+        eval "${legacy_prefix}_TOTAL_TESTS=$total_tests"
+        eval "${legacy_prefix}_PASSED_TESTS=$passed_tests"
+        eval "${legacy_prefix}_FAILED_TESTS=$failed_tests"
+        eval "${legacy_prefix}_TEST_NAMES=(\"\${${test_names_arr_name}[@]}\")"
+        eval "${legacy_prefix}_TEST_TOTALS=(\"\${${test_totals_arr_name}[@]}\")"
+        eval "${legacy_prefix}_TEST_PASSED=(\"\${${test_passed_arr_name}[@]}\")"
+        eval "${legacy_prefix}_TEST_FAILED=(\"\${${test_failed_arr_name}[@]}\")"
+    fi
+}
+
+# Generic function to get test suite results
+get_suite_results() {
+    local suite_name="$1"
+    local result_type="$2"  # "total", "passed", "failed", "names", "totals", "test_passed", "test_failed"
+    
+    # Convert suite name to uppercase for variable naming
+    local suite_upper=$(echo "$suite_name" | tr '[:lower:]' '[:upper:]')
+    local var_name="${suite_upper}_"
+    
+    case "$result_type" in
+        "total")
+            var_name="${var_name}TOTAL_TESTS"
+            ;;
+        "passed")
+            var_name="${var_name}PASSED_TESTS"
+            ;;
+        "failed")
+            var_name="${var_name}FAILED_TESTS"
+            ;;
+        "names")
+            var_name="${var_name}TEST_NAMES"
+            ;;
+        "totals")
+            var_name="${var_name}TEST_TOTALS"
+            ;;
+        "test_passed")
+            var_name="${var_name}TEST_PASSED"
+            ;;
+        "test_failed")
+            var_name="${var_name}TEST_FAILED"
+            ;;
+        *)
+            echo ""
+            return 1
+            ;;
+    esac
+    
+    # Return the value of the dynamic variable
+    eval "echo \"\${$var_name}\""
+}
+
+# Function to display suite results summary using the generic approach
+display_suite_summary() {
+    local suite_name="$1"
+    local suite_display_name=$(get_config "$suite_name" "name")
+    
+    local total=$(get_suite_results "$suite_name" "total")
+    local passed=$(get_suite_results "$suite_name" "passed")
+    local failed=$(get_suite_results "$suite_name" "failed")
+    
+    if [ -n "$total" ] && [ "$total" -gt 0 ]; then
+        print_status "📊 $suite_display_name Summary (via generic API):"
+        echo "   Total: $total, Passed: $passed, Failed: $failed"
+        if [ "$failed" -eq 0 ]; then
+            print_success "All $suite_name tests passed!"
+        else
+            print_error "$failed $suite_name test(s) failed"
+        fi
+    fi
+}
+
 # Common function to run any test suite based on configuration
 run_common_test_suite() {
     local suite_name="$1"
@@ -625,45 +734,9 @@ run_parallel_suite_impl() {
     
     total_passed=$((total_tests - total_failed))
     
-    # Store results based on suite type (generic approach)
-    case "$suite_name" in
-        "library")
-            LIB_TOTAL_TESTS=$total_tests
-            LIB_PASSED_TESTS=$total_passed
-            LIB_FAILED_TESTS=$total_failed
-            LIB_TEST_NAMES=("${test_names[@]}")
-            LIB_TEST_TOTALS=("${test_totals[@]}")
-            LIB_TEST_PASSED=("${test_passed[@]}")
-            LIB_TEST_FAILED=("${test_failed[@]}")
-            ;;
-        "input")
-            INPUT_TOTAL_TESTS=$total_tests
-            INPUT_PASSED_TESTS=$total_passed
-            INPUT_FAILED_TESTS=$total_failed
-            INPUT_TEST_NAMES=("${test_names[@]}")
-            INPUT_TEST_TOTALS=("${test_totals[@]}")
-            INPUT_TEST_PASSED=("${test_passed[@]}")
-            INPUT_TEST_FAILED=("${test_failed[@]}")
-            ;;
-        "mir")
-            MIR_TOTAL_TESTS=$total_tests
-            MIR_PASSED_TESTS=$total_passed
-            MIR_FAILED_TESTS=$total_failed
-            MIR_TEST_NAMES=("${test_names[@]}")
-            MIR_TEST_TOTALS=("${test_totals[@]}")
-            MIR_TEST_PASSED=("${test_passed[@]}")
-            MIR_TEST_FAILED=("${test_failed[@]}")
-            ;;
-        "lambda")
-            LAMBDA_TOTAL_TESTS=$total_tests
-            LAMBDA_PASSED_TESTS=$total_passed
-            LAMBDA_FAILED_TESTS=$total_failed
-            LAMBDA_TEST_NAMES=("${test_names[@]}")
-            LAMBDA_TEST_TOTALS=("${test_totals[@]}")
-            LAMBDA_TEST_PASSED=("${test_passed[@]}")
-            LAMBDA_TEST_FAILED=("${test_failed[@]}")
-            ;;
-    esac
+    # Store results using generic approach
+    store_suite_results "$suite_name" "$total_tests" "$total_passed" "$total_failed" \
+                       test_names test_totals test_passed test_failed
     
     echo ""
     local suite_display_name=$(get_config "$suite_name" "name")
@@ -671,6 +744,9 @@ run_parallel_suite_impl() {
     echo "   Total Tests: $total_tests"
     echo "   Passed: $total_passed"
     echo "   Failed: $total_failed"
+    
+    # Demonstrate the generic results retrieval API
+    display_suite_summary "$suite_name"
     
     return $total_failed
 }
