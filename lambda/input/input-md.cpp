@@ -346,11 +346,11 @@ static void free_table_row(char** cells, int cell_count) {
 }
 
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_table_row(lines[*current_line])) return ITEM_NULL;
+    if (!is_table_row(lines[*current_line])) return {.item = ITEM_NULL};
     
     // Check if next line is separator
     if (*current_line + 1 >= total_lines || !is_table_separator(lines[*current_line + 1])) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Parse alignment from separator line
@@ -364,7 +364,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Create colgroup for column specifications
@@ -393,7 +393,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Create thead
@@ -404,7 +404,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* header_row = create_markdown_element(input, "tr");
@@ -414,7 +414,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Add header cells
@@ -428,7 +428,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             
             if (header_cells[i] && strlen(header_cells[i]) > 0) {
                 Item cell_content = parse_inline_content(input, header_cells[i]);
-                if (cell_content != ITEM_NULL) {
+                if (cell_content .item != ITEM_NULL) {
                     list_push((List*)th, cell_content);
                     ((TypeElmt*)th->type)->content_length++;
                 }
@@ -484,7 +484,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                 
                 if (i < cell_count && cells[i] && strlen(cells[i]) > 0) {
                     Item cell_content = parse_inline_content(input, cells[i]);
-                    if (cell_content != ITEM_NULL) {
+                    if (cell_content .item != ITEM_NULL) {
                         list_push((List*)td, cell_content);
                         ((TypeElmt*)td->type)->content_length++;
                     }
@@ -598,7 +598,7 @@ static void parse_yaml_line(Input *input, const char* line, Element* meta) {
 }
 
 static Item parse_header(Input *input, const char* line) {
-    if (!is_atx_heading(line)) return ITEM_NULL;
+    if (!is_atx_heading(line)) return {.item = ITEM_NULL};
     
     int hash_count = count_leading_chars(line, '#');
     
@@ -612,7 +612,7 @@ static Item parse_header(Input *input, const char* line) {
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", hash_count);
     Element* header = create_markdown_element(input, tag_name);
-    if (!header) return ITEM_NULL;
+    if (!header) return {.item = ITEM_NULL};
     
     // Add level attribute as required by PandocSchema
     char level_str[10];
@@ -624,7 +624,7 @@ static Item parse_header(Input *input, const char* line) {
         char* content = trim_whitespace(content_start);
         if (content && strlen(content) > 0) {
             Item text_content = parse_inline_content(input, content);
-            if (text_content != ITEM_NULL) {
+            if (text_content .item != ITEM_NULL) {
                 list_push((List*)header, text_content);
                 ((TypeElmt*)header->type)->content_length++;
             }
@@ -645,7 +645,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     int fence_length;
     
     if (!is_fenced_code_block_start(lines[*current_line], &fence_char, &fence_length)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Extract info string (language)
@@ -659,7 +659,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     Element* code_block = create_markdown_element(input, "code");
     if (!code_block) {
         free(info_string);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Add language attribute if present
@@ -727,12 +727,12 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
             StrBuf* saved_sb = input->sb;
             
             // Temporarily reset for math parsing
-            input->root = ITEM_NULL;
+            input->root = {.item = ITEM_NULL};
             
             // Parse the math content
             parse_math(input, content_str->chars, "latex");
             
-            if (input->root != ITEM_NULL && input->root != ITEM_ERROR) {
+            if (input->root .item != ITEM_NULL && input->root .item != ITEM_ERROR) {
                 // Change element type to displaymath for math blocks
                 Element* math_elem = create_markdown_element(input, "displaymath");
                 if (math_elem) {
@@ -769,11 +769,11 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
     int number;
     
     if (!is_list_marker(lines[*current_line], &is_ordered, &number)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* list = create_markdown_element(input, is_ordered ? "ol" : "ul");
-    if (!list) return ITEM_NULL;
+    if (!list) return {.item = ITEM_NULL};
     
     if (is_ordered) {
         // Add attributes according to PandocSchema
@@ -836,7 +836,7 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
             Element* paragraph = create_markdown_element(input, "p");
             if (paragraph) {
                 Item text_content = parse_inline_content(input, content);
-                if (text_content != ITEM_NULL) {
+                if (text_content .item != ITEM_NULL) {
                     list_push((List*)paragraph, text_content);
                     ((TypeElmt*)paragraph->type)->content_length++;
                 }
@@ -856,10 +856,10 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
 }
 
 static Item parse_blockquote(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_blockquote(lines[*current_line])) return ITEM_NULL;
+    if (!is_blockquote(lines[*current_line])) return {.item = ITEM_NULL};
     
     Element* blockquote = create_markdown_element(input, "blockquote");
-    if (!blockquote) return ITEM_NULL;
+    if (!blockquote) return {.item = ITEM_NULL};
     
     StrBuf* content_buffer = strbuf_new_cap(512);
     bool first_line = true;
@@ -898,7 +898,7 @@ static Item parse_blockquote(Input *input, char** lines, int* current_line, int 
             }
             
             Item element = parse_block_element(input, sub_lines, &sub_current_line, sub_line_count);
-            if (element != ITEM_NULL) {
+            if (element .item != ITEM_NULL) {
                 list_push((List*)blockquote, element);
                 ((TypeElmt*)blockquote->type)->content_length++;
             } else {
@@ -917,17 +917,17 @@ static Item parse_paragraph(Input *input, const char* line) {
     char* content = trim_whitespace(line);
     if (!content || strlen(content) == 0) {
         free(content);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* paragraph = create_markdown_element(input, "p");
     if (!paragraph) {
         free(content);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Item text_content = parse_inline_content(input, content);
-    if (text_content != ITEM_NULL) {
+    if (text_content .item != ITEM_NULL) {
         list_push((List*)paragraph, text_content);
         ((TypeElmt*)paragraph->type)->content_length++;
     }
@@ -947,7 +947,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
         (*pos)++;
     }
     
-    if (marker_count == 0) return ITEM_NULL;
+    if (marker_count == 0) return {.item = ITEM_NULL};
     
     int content_start = *pos;
     int content_end = -1;
@@ -975,13 +975,13 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
     if (content_end == -1) {
         // No closing marker found, revert
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Create element
     const char* tag_name = (marker_count >= 2) ? "strong" : "em";
     Element* emphasis_elem = create_markdown_element(input, tag_name);
-    if (!emphasis_elem) return ITEM_NULL;
+    if (!emphasis_elem) return {.item = ITEM_NULL};
     
     // Extract content between markers
     int content_len = content_end - content_start;
@@ -991,7 +991,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
     
     if (strlen(content) > 0) {
         Item text_content = parse_inline_content(input, content);
-        if (text_content != ITEM_NULL) {
+        if (text_content .item != ITEM_NULL) {
             list_push((List*)emphasis_elem, text_content);
             ((TypeElmt*)emphasis_elem->type)->content_length++;
         }
@@ -1002,7 +1002,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
 }
 
 static Item parse_code_span(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '`') return ITEM_NULL;
+    if (text[*pos] != '`') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     int backtick_count = 0;
@@ -1039,11 +1039,11 @@ static Item parse_code_span(Input *input, const char* text, int* pos) {
     if (content_end == -1) {
         // No closing backticks found, revert
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* code_elem = create_markdown_element(input, "code");
-    if (!code_elem) return ITEM_NULL;
+    if (!code_elem) return {.item = ITEM_NULL};
     
     // Extract content between backticks
     int content_len = content_end - content_start;
@@ -1069,7 +1069,7 @@ static Item parse_code_span(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_link(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '[') return ITEM_NULL;
+    if (text[*pos] != '[') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     (*pos)++; // Skip opening [
@@ -1084,7 +1084,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     if (text[*pos] != ']') {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     link_text_end = *pos;
@@ -1093,7 +1093,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     // Check for ( to start URL
     if (text[*pos] != '(') {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     (*pos)++; // Skip (
@@ -1157,12 +1157,12 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     if (url_end == -1) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Create link element
     Element* link_elem = create_markdown_element(input, "a");
-    if (!link_elem) return ITEM_NULL;
+    if (!link_elem) return {.item = ITEM_NULL};
     
     // Extract and add href attribute
     int url_len = url_end - url_start;
@@ -1190,7 +1190,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     if (strlen(link_text) > 0) {
         Item text_content = parse_inline_content(input, link_text);
-        if (text_content != ITEM_NULL) {
+        if (text_content .item != ITEM_NULL) {
             list_push((List*)link_elem, text_content);
             ((TypeElmt*)link_elem->type)->content_length++;
         }
@@ -1201,7 +1201,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_strikethrough(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '~' || text[*pos + 1] != '~') return ITEM_NULL;
+    if (text[*pos] != '~' || text[*pos + 1] != '~') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     *pos += 2; // Skip ~~
@@ -1221,11 +1221,11 @@ static Item parse_strikethrough(Input *input, const char* text, int* pos) {
     
     if (content_end == -1) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* strike_elem = create_markdown_element(input, "s");
-    if (!strike_elem) return ITEM_NULL;
+    if (!strike_elem) return {.item = ITEM_NULL};
     
     // Extract content
     int content_len = content_end - content_start;
@@ -1235,7 +1235,7 @@ static Item parse_strikethrough(Input *input, const char* text, int* pos) {
     
     if (strlen(content) > 0) {
         Item text_content = parse_inline_content(input, content);
-        if (text_content != ITEM_NULL) {
+        if (text_content .item != ITEM_NULL) {
             list_push((List*)strike_elem, text_content);
             ((TypeElmt*)strike_elem->type)->content_length++;
         }
@@ -1246,7 +1246,7 @@ static Item parse_strikethrough(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_superscript(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '^') return ITEM_NULL;
+    if (text[*pos] != '^') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     (*pos)++; // Skip ^
@@ -1271,11 +1271,11 @@ static Item parse_superscript(Input *input, const char* text, int* pos) {
     
     if (content_end == content_start) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* sup_elem = create_markdown_element(input, "sup");
-    if (!sup_elem) return ITEM_NULL;
+    if (!sup_elem) return {.item = ITEM_NULL};
     
     // Extract content
     int content_len = content_end - content_start;
@@ -1294,7 +1294,7 @@ static Item parse_superscript(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_subscript(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '~' || text[*pos + 1] == '~') return ITEM_NULL; // Not ~ or ~~
+    if (text[*pos] != '~' || text[*pos + 1] == '~') return {.item = ITEM_NULL}; // Not ~ or ~~
     
     int start_pos = *pos;
     (*pos)++; // Skip ~
@@ -1319,11 +1319,11 @@ static Item parse_subscript(Input *input, const char* text, int* pos) {
     
     if (content_end == content_start) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* sub_elem = create_markdown_element(input, "sub");
-    if (!sub_elem) return ITEM_NULL;
+    if (!sub_elem) return {.item = ITEM_NULL};
     
     // Extract content
     int content_len = content_end - content_start;
@@ -1347,7 +1347,7 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     int start = *pos;
     
     if (start >= len || text[start] != '$') {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Skip opening $
@@ -1365,13 +1365,13 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     }
     
     if (math_end >= len || text[math_end] != '$') {
-        return ITEM_NULL; // No closing $
+        return {.item = ITEM_NULL}; // No closing $
     }
     
     // Extract math content
     int content_len = math_end - math_start;
     if (content_len <= 0) {
-        return ITEM_NULL; // Empty math expression
+        return {.item = ITEM_NULL}; // Empty math expression
     }
     
     char* math_content = malloc(content_len + 1);
@@ -1384,14 +1384,14 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     StrBuf* saved_sb = input->sb;
     
     // Temporarily reset for math parsing
-    input->root = ITEM_NULL;
+    input->root = {.item = ITEM_NULL};
     
     // Parse the math content using our math parser
     parse_math(input, math_content, "latex");
     
     // Create wrapper element
     Element* math_elem = create_markdown_element(input, "math");
-    if (math_elem && input->root != ITEM_NULL && input->root != ITEM_ERROR) {
+    if (math_elem && input->root .item != ITEM_NULL && input->root .item != ITEM_ERROR) {
         // Add the parsed math as child
         list_push((List*)math_elem, input->root);
         ((TypeElmt*)math_elem->type)->content_length = 1;
@@ -1413,7 +1413,7 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     // Restore input state
     input->root = saved_root;
     input->sb = saved_sb;
-    free(math_content);    return ITEM_NULL;
+    free(math_content);    return {.item = ITEM_NULL};
 }
 
 // Parse display math expression: $$math$$
@@ -1422,7 +1422,7 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     int start = *pos;
     
     if (start + 1 >= len || text[start] != '$' || text[start + 1] != '$') {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Skip opening $$
@@ -1443,13 +1443,13 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     }
     
     if (math_end + 1 >= len || text[math_end] != '$' || text[math_end + 1] != '$') {
-        return ITEM_NULL; // No closing $$
+        return {.item = ITEM_NULL}; // No closing $$
     }
     
     // Extract math content
     int content_len = math_end - math_start;
     if (content_len <= 0) {
-        return ITEM_NULL; // Empty math expression
+        return {.item = ITEM_NULL}; // Empty math expression
     }
     
     char* math_content = malloc(content_len + 1);
@@ -1462,14 +1462,14 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     StrBuf* saved_sb = input->sb;
     
     // Temporarily reset for math parsing
-    input->root = ITEM_NULL;
+    input->root = {.item = ITEM_NULL};
     
     // Parse the math content using our math parser
     parse_math(input, math_content, "latex");
     
     // Create wrapper element
     Element* math_elem = create_markdown_element(input, "displaymath");
-    if (math_elem && input->root != ITEM_NULL && input->root != ITEM_ERROR) {
+    if (math_elem && input->root .item != ITEM_NULL && input->root .item != ITEM_ERROR) {
         // Add the parsed math as child
         list_push((List*)math_elem, input->root);
         ((TypeElmt*)math_elem->type)->content_length = 1;
@@ -1491,7 +1491,7 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     // Restore input state
     input->root = saved_root;
     input->sb = saved_sb;
-    free(math_content);    return ITEM_NULL;
+    free(math_content);    return {.item = ITEM_NULL};
 }
 
 // GitHub Emoji Shortcode Mapping
@@ -1924,7 +1924,7 @@ static const EmojiMapping emoji_mappings[] = {
 };
 
 static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
-    if (text[*pos] != ':') return ITEM_NULL;
+    if (text[*pos] != ':') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     (*pos)++; // Skip opening :
@@ -1935,21 +1935,21 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
         // Only allow letters, numbers, underscores, and hyphens in shortcodes
         if (!isalnum(text[*pos]) && text[*pos] != '_' && text[*pos] != '-') {
             *pos = start_pos;
-            return ITEM_NULL;
+            return {.item = ITEM_NULL};
         }
         (*pos)++;
     }
     
     if (text[*pos] != ':') {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Extract shortcode
     int shortcode_len = *pos - shortcode_start;
     if (shortcode_len == 0) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     char* shortcode = malloc(shortcode_len + 3); // +3 for : : \0
@@ -1974,14 +1974,14 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
     if (emoji_unicode == NULL) {
         // If not found, reset position and return null
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Create an emoji element for the unicode emoji
     Element* emoji_elem = create_markdown_element(input, "emoji");
     if (!emoji_elem) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Add the unicode emoji as text content
@@ -1996,7 +1996,7 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""));
     }
     
     int len = strlen(text);
@@ -2004,7 +2004,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // Create a span to hold mixed content
     Element* span = create_markdown_element(input, "span");
-    if (!span) return s2it(create_string(input, text));
+    if (!span) return {.item = s2it(create_string(input, text));
     
     StrBuf* text_buffer = strbuf_new_cap(256);
     
@@ -2025,7 +2025,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item emphasis = parse_emphasis(input, text, &pos, ch);
-            if (emphasis != ITEM_NULL) {
+            if (emphasis .item != ITEM_NULL) {
                 list_push((List*)span, emphasis);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2044,7 +2044,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             
             // Try strikethrough first
             Item strikethrough = parse_strikethrough(input, text, &pos);
-            if (strikethrough != ITEM_NULL) {
+            if (strikethrough .item != ITEM_NULL) {
                 list_push((List*)span, strikethrough);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2052,7 +2052,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             
             // Try subscript
             Item subscript = parse_subscript(input, text, &pos);
-            if (subscript != ITEM_NULL) {
+            if (subscript .item != ITEM_NULL) {
                 list_push((List*)span, subscript);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2070,7 +2070,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item superscript = parse_superscript(input, text, &pos);
-            if (superscript != ITEM_NULL) {
+            if (superscript .item != ITEM_NULL) {
                 list_push((List*)span, superscript);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2088,7 +2088,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item code_span = parse_code_span(input, text, &pos);
-            if (code_span != ITEM_NULL) {
+            if (code_span .item != ITEM_NULL) {
                 list_push((List*)span, code_span);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2106,7 +2106,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item link = parse_link(input, text, &pos);
-            if (link != ITEM_NULL) {
+            if (link .item != ITEM_NULL) {
                 list_push((List*)span, link);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2126,7 +2126,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             // Check for display math ($$...$$) first
             if (pos + 1 < len && text[pos + 1] == '$') {
                 Item display_math = parse_math_display(input, text, &pos);
-                if (display_math != ITEM_NULL) {
+                if (display_math .item != ITEM_NULL) {
                     list_push((List*)span, display_math);
                     ((TypeElmt*)span->type)->content_length++;
                     continue;
@@ -2134,7 +2134,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             } else {
                 // Try inline math ($...$)
                 Item inline_math = parse_math_inline(input, text, &pos);
-                if (inline_math != ITEM_NULL) {
+                if (inline_math .item != ITEM_NULL) {
                     list_push((List*)span, inline_math);
                     ((TypeElmt*)span->type)->content_length++;
                     continue;
@@ -2154,7 +2154,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             
             // Try emoji shortcode
             Item emoji = parse_emoji_shortcode(input, text, &pos);
-            if (emoji != ITEM_NULL) {
+            if (emoji .item != ITEM_NULL) {
                 list_push((List*)span, emoji);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -2191,7 +2191,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     const char* line = lines[*current_line];
     
     if (!line || is_empty_line(line)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Try table first (before other checks)
@@ -2232,7 +2232,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 static Item parse_markdown_content(Input *input, char** lines, int line_count) {
     // Create the root document element according to schema
     Element* doc = create_markdown_element(input, "doc");
-    if (!doc) return ITEM_NULL;
+    if (!doc) return {.item = ITEM_NULL};
     
     // Add version attribute to doc
     add_attribute_to_element(input, doc, "version", "1.0");
@@ -2267,7 +2267,7 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count) {
         
         Item element = parse_block_element(input, lines, &current_line, line_count);
         
-        if (element != ITEM_NULL) {
+        if (element .item != ITEM_NULL) {
             list_push((List*)body, element);
             ((TypeElmt*)body->type)->content_length++;
         } else {

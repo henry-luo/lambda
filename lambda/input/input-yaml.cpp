@@ -33,30 +33,30 @@ void trim_string_inplace(char* str) {
 }
 
 Item parse_scalar_value(Input *input, const char* str) {
-    if (!str) return ITEM_NULL;
+    if (!str) return {.item = ITEM_NULL};
     
     char* copy = strdup(str);
     trim_string_inplace(copy);
     
     if (strlen(copy) == 0) {
         free(copy);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Check for null
     if (strcmp(copy, "null") == 0 || strcmp(copy, "~") == 0) {
         free(copy);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Check for boolean
     if (strcmp(copy, "true") == 0 || strcmp(copy, "yes") == 0) {
         free(copy);
-        return b2it(true);
+        return {.item = b2it(true);
     }
     if (strcmp(copy, "false") == 0 || strcmp(copy, "no") == 0) {
         free(copy);
-        return b2it(false);
+        return {.item = b2it(false);
     }
     
     // Check for number
@@ -74,11 +74,11 @@ Item parse_scalar_value(Input *input, const char* str) {
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
         if (err != MEM_POOL_ERR_OK) {
             free(copy);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *dval = float_val;
         free(copy);
-        return d2it(dval);
+        return {.item = d2it(dval);
     }
     
     // Handle quoted strings
@@ -91,17 +91,17 @@ Item parse_scalar_value(Input *input, const char* str) {
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + len + 1, (void**)&str_result);
         if (err != MEM_POOL_ERR_OK) {
             free(copy);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         str_result->len = len;
         str_result->ref_cnt = 0;
         strcpy(str_result->chars, copy + 1);
         
         free(copy);
-        return s2it(str_result);
+        return {.item = s2it(str_result);
         
         free(copy);
-        return s2it(str);
+        return {.item = s2it(str);
     }
     
     // Default to string
@@ -110,14 +110,14 @@ Item parse_scalar_value(Input *input, const char* str) {
     MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + len + 1, (void**)&str_result);
     if (err != MEM_POOL_ERR_OK) {
         free(copy);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     str_result->len = len;
     str_result->ref_cnt = 0;
     strcpy(str_result->chars, copy);
     
     free(copy);
-    return s2it(str_result);
+    return {.item = s2it(str_result);
 }
 
 // Parse flow array like [item1, item2, item3]
@@ -153,8 +153,7 @@ Array* parse_flow_array(Input *input, const char* str) {
         trim_string_inplace(token);
         if (strlen(token) > 0) {
             Item item = parse_scalar_value(input, token);
-            LambdaItem lambda_item = {.item = item};
-            array_append(array, lambda_item, input->pool);
+            array_append(array, item, input->pool);
         }
         
         token = next;
@@ -166,7 +165,7 @@ Array* parse_flow_array(Input *input, const char* str) {
 
 // Parse YAML content
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent) {
-    if (*current_line >= total_lines) { return ITEM_NULL; }
+    if (*current_line >= total_lines) { return {.item = ITEM_NULL}; }
 
     char* line = lines[*current_line];
     
@@ -176,7 +175,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
     
     // If we've dedented, return
     if (indent < target_indent) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     char* content = line + indent;
@@ -184,7 +183,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
     // Check for array item
     if (content[0] == '-' && (content[1] == ' ' || content[1] == '\0')) {
         Array* array = array_pooled(input->pool);
-        if (!array) return ITEM_ERROR;
+        if (!array) return {.item = ITEM_ERROR};
         
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -215,8 +214,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
                 item = parse_yaml_content(input, lines, current_line, total_lines, target_indent + 2);
             }
             
-            LambdaItem lambda_item = {.item = item};
-            array_append(array, lambda_item, input->pool);
+            array_append(array, item, input->pool);
         }
         
         return (Item)array;
@@ -226,7 +224,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
     char* colon_pos = strstr(content, ":");
     if (colon_pos && (colon_pos[1] == ' ' || colon_pos[1] == '\0')) {
         Map* map = map_pooled(input->pool);
-        if (!map) return ITEM_ERROR;
+        if (!map) return {.item = ITEM_ERROR};
         
         while (*current_line < total_lines) {
             line = lines[*current_line];
@@ -278,8 +276,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
             }
             
             // Add to map using shared function
-            LambdaItem lambda_value = (LambdaItem)value;
-            map_put(map, key, lambda_value, input);
+            map_put(map, key, value, input);
         }        
         return (Item)map;
     }
@@ -391,17 +388,14 @@ void parse_yaml(Input *input, const char* yaml_str) {
                 }
                 
                 // Add first document to array
-                LambdaItem first_item = {.item = final_result};
-                array_append(documents, first_item, input->pool);
+                array_append(documents, final_result, input->pool);
                 
                 // Add current document to array
-                LambdaItem current_item = {.item = doc_result};
-                array_append(documents, current_item, input->pool);
+                array_append(documents, doc_result, input->pool);
                 parsed_doc_count++;
             } else {
                 // Third+ document - add to existing array
-                LambdaItem lambda_item = {.item = doc_result};
-                array_append(documents, lambda_item, input->pool);
+                array_append(documents, doc_result, input->pool);
                 parsed_doc_count++;
             }
         }

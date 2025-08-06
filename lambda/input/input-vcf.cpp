@@ -91,7 +91,7 @@ static void parse_property_parameters(Input *input, const char **vcf, Map* param
         }
         
         if (param_value) {
-            LambdaItem value = (LambdaItem)s2it(param_value);
+            Item value = {.item = s2it(param_value)};
             map_put(params_map, param_name, value, input);
         }
     }
@@ -174,7 +174,7 @@ static Map* parse_structured_name(Input *input, const char* value) {
             String* field_value = strbuf_to_string(sb);
             if (field_value && field_value->len > 0) {
                 String* field_key = input_create_string(input, field_names[i]);
-                LambdaItem value_item = (LambdaItem)s2it(field_value);
+                Item value_item = {.item = s2it(field_value)};
                 map_put(name_map, field_key, value_item, input);
             }
         }
@@ -209,7 +209,7 @@ static Map* parse_address(Input *input, const char* value) {
             String* field_value = strbuf_to_string(sb);
             if (field_value && field_value->len > 0) {
                 String* field_key = input_create_string(input, field_names[i]);
-                LambdaItem value_item = (LambdaItem)s2it(field_value);
+                Item value_item = {.item = s2it(field_value)};
                 map_put(addr_map, field_key, value_item, input);
             }
         }
@@ -294,14 +294,14 @@ void parse_vcf(Input* input, const char* vcf_string) {
         if (!in_vcard) continue;
         
         // Store raw property in properties map
-        LambdaItem prop_value = (LambdaItem)s2it(property_value);
+        Item prop_value = {.item = s2it(property_value)};
         map_put(properties_map, property_name, prop_value, input);
         
         // Handle common properties with special processing
         if (strcmp(property_name->chars, "fn") == 0) {
             // Full Name - store as top-level field
             String* fn_key = input_create_string(input, "full_name");
-            LambdaItem fn_value = (LambdaItem)s2it(property_value);
+            Item fn_value = {.item = s2it(property_value)};
             map_put(contact_map, fn_key, fn_value, input);
         }
         else if (strcmp(property_name->chars, "n") == 0) {
@@ -309,20 +309,20 @@ void parse_vcf(Input* input, const char* vcf_string) {
             Map* name_struct = parse_structured_name(input, property_value->chars);
             if (name_struct) {
                 String* name_key = input_create_string(input, "name");
-                LambdaItem name_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(name_struct));
+                Item name_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(name_struct));
                 map_put(contact_map, name_key, name_value, input);
             }
         }
         else if (strcmp(property_name->chars, "email") == 0) {
             // Email - store as top-level field
             String* email_key = input_create_string(input, "email");
-            LambdaItem email_value = (LambdaItem)s2it(property_value);
+            Item email_value = {.item = s2it(property_value)};
             map_put(contact_map, email_key, email_value, input);
         }
         else if (strcmp(property_name->chars, "tel") == 0) {
             // Phone - store as top-level field
             String* phone_key = input_create_string(input, "phone");
-            LambdaItem phone_value = (LambdaItem)s2it(property_value);
+            Item phone_value = {.item = s2it(property_value)};
             map_put(contact_map, phone_key, phone_value, input);
         }
         else if (strcmp(property_name->chars, "adr") == 0) {
@@ -330,51 +330,51 @@ void parse_vcf(Input* input, const char* vcf_string) {
             Map* addr_struct = parse_address(input, property_value->chars);
             if (addr_struct) {
                 String* addr_key = input_create_string(input, "address");
-                LambdaItem addr_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(addr_struct));
+                Item addr_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(addr_struct));
                 map_put(contact_map, addr_key, addr_value, input);
             }
         }
         else if (strcmp(property_name->chars, "org") == 0) {
             // Organization - store as top-level field
             String* org_key = input_create_string(input, "organization");
-            LambdaItem org_value = (LambdaItem)s2it(property_value);
+            Item org_value = {.item = s2it(property_value)};
             map_put(contact_map, org_key, org_value, input);
         }
         else if (strcmp(property_name->chars, "title") == 0) {
             // Job Title - store as top-level field
             String* title_key = input_create_string(input, "title");
-            LambdaItem title_value = (LambdaItem)s2it(property_value);
+            Item title_value = {.item = s2it(property_value)};
             map_put(contact_map, title_key, title_value, input);
         }
         else if (strcmp(property_name->chars, "note") == 0) {
             // Note - store as top-level field
             String* note_key = input_create_string(input, "note");
-            LambdaItem note_value = (LambdaItem)s2it(property_value);
+            Item note_value = {.item = s2it(property_value)};
             map_put(contact_map, note_key, note_value, input);
         }
         else if (strcmp(property_name->chars, "url") == 0) {
             // URL - store as top-level field
             String* url_key = input_create_string(input, "url");
-            LambdaItem url_value = (LambdaItem)s2it(property_value);
+            Item url_value = {.item = s2it(property_value)};
             map_put(contact_map, url_key, url_value, input);
         }
         else if (strcmp(property_name->chars, "bday") == 0) {
             // Birthday - store as top-level field
             String* bday_key = input_create_string(input, "birthday");
-            LambdaItem bday_value = (LambdaItem)s2it(property_value);
+            Item bday_value = {.item = s2it(property_value)};
             map_put(contact_map, bday_key, bday_value, input);
         }
         else if (strcmp(property_name->chars, "version") == 0) {
             // vCard Version - store as top-level field
             String* version_key = input_create_string(input, "version");
-            LambdaItem version_value = (LambdaItem)s2it(property_value);
+            Item version_value = {.item = s2it(property_value)};
             map_put(contact_map, version_key, version_value, input);
         }
     }
     
     // Store properties map in contact
     String* properties_key = input_create_string(input, "properties");
-    LambdaItem properties_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map));
+    Item properties_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map));
     map_put(contact_map, properties_key, properties_value, input);
     
     // Set the contact map as the root of the input

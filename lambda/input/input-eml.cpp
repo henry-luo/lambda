@@ -239,7 +239,7 @@ void parse_eml(Input* input, const char* eml_string) {
         normalize_header_name(header_name->chars);
         
         // Store header in headers map
-        LambdaItem value = (LambdaItem)s2it(header_value);
+        Item value = {.item = s2it(header_value)};
         map_put(headers_map, header_name, value, input);
         
         // Also store common headers as top-level fields for easier access
@@ -247,7 +247,7 @@ void parse_eml(Input* input, const char* eml_string) {
             String* from_email = extract_email_address(input, header_value->chars);
             if (from_email) {
                 String* from_key = input_create_string(input, "from");
-                LambdaItem from_value = (LambdaItem)s2it(from_email);
+                Item from_value = {.item = s2it(from_email)};
                 map_put(email_map, from_key, from_value, input);
             }
         }
@@ -255,33 +255,33 @@ void parse_eml(Input* input, const char* eml_string) {
             String* to_email = extract_email_address(input, header_value->chars);
             if (to_email) {
                 String* to_key = input_create_string(input, "to");
-                LambdaItem to_value = (LambdaItem)s2it(to_email);
+                Item to_value = {.item = s2it(to_email)};
                 map_put(email_map, to_key, to_value, input);
             }
         }
         else if (strcmp(header_name->chars, "subject") == 0) {
             String* subject_key = input_create_string(input, "subject");
-            LambdaItem subject_value = (LambdaItem)s2it(header_value);
+            Item subject_value = {.item = s2it(header_value)};
             map_put(email_map, subject_key, subject_value, input);
         }
         else if (strcmp(header_name->chars, "date") == 0) {
             String* date_parsed = parse_date_value(input, header_value->chars);
             if (date_parsed) {
                 String* date_key = input_create_string(input, "date");
-                LambdaItem date_value = (LambdaItem)s2it(date_parsed);
+                Item date_value = {.item = s2it(date_parsed)};
                 map_put(email_map, date_key, date_value, input);
             }
         }
         else if (strcmp(header_name->chars, "message-id") == 0) {
             String* msgid_key = input_create_string(input, "message_id");
-            LambdaItem msgid_value = (LambdaItem)s2it(header_value);
+            Item msgid_value = {.item = s2it(header_value)};
             map_put(email_map, msgid_key, msgid_value, input);
         }
     }
     
     // Store headers map in email
     String* headers_key = input_create_string(input, "headers");
-    LambdaItem headers_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(headers_map));
+    Item headers_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(headers_map));
     map_put(email_map, headers_key, headers_value, input);
     
     // At this point, eml should be positioned at the start of the body
@@ -298,7 +298,7 @@ void parse_eml(Input* input, const char* eml_string) {
         String* body_string = strbuf_to_string(body_sb);
         if (body_string) {
             String* body_key = input_create_string(input, "body");
-            LambdaItem body_value = (LambdaItem)s2it(body_string);
+            Item body_value = {.item = s2it(body_string)};
             map_put(email_map, body_key, body_value, input);
         }
     }

@@ -101,13 +101,13 @@ static bool is_horizontal_rule(const char* line) {
 
 static Item parse_heading(Input *input, const char* line) {
     int level;
-    if (!is_heading(line, &level)) return ITEM_NULL;
+    if (!is_heading(line, &level)) return {.item = ITEM_NULL};
     
     // Create header element with proper HTML tag (h1-h6)
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", level);
     Element* header = create_mediawiki_element(input, tag_name);
-    if (!header) return ITEM_NULL;
+    if (!header) return {.item = ITEM_NULL};
     
     // Add level attribute as required by schema
     char level_str[10];
@@ -127,7 +127,7 @@ static Item parse_heading(Input *input, const char* line) {
         content[end - start] = '\0';
         
         Item text_content = parse_inline_content(input, content);
-        if (text_content != ITEM_NULL) {
+        if (text_content .item != ITEM_NULL) {
             list_push((List*)header, text_content);
             ((TypeElmt*)header->type)->content_length++;
         }
@@ -147,7 +147,7 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
     int level;
     
     if (!is_list_item(lines[*current_line], &marker, &level)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Determine list type
@@ -157,11 +157,11 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
         case '#': list_tag = "ol"; break;
         case ':': list_tag = "dl"; break; // Definition list
         case ';': list_tag = "dl"; break; // Definition list
-        default: return ITEM_NULL;
+        default: return {.item = ITEM_NULL};
     }
     
     Element* list = create_mediawiki_element(input, list_tag);
-    if (!list) return ITEM_NULL;
+    if (!list) return {.item = ITEM_NULL};
     
     while (*current_line < total_lines) {
         const char* line = lines[*current_line];
@@ -196,7 +196,7 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
                 Element* paragraph = create_mediawiki_element(input, "p");
                 if (paragraph) {
                     Item text_content = parse_inline_content(input, content);
-                    if (text_content != ITEM_NULL) {
+                    if (text_content .item != ITEM_NULL) {
                         list_push((List*)paragraph, text_content);
                         ((TypeElmt*)paragraph->type)->content_length++;
                     }
@@ -206,7 +206,7 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
             } else {
                 // Definition lists can have direct content
                 Item text_content = parse_inline_content(input, content);
-                if (text_content != ITEM_NULL) {
+                if (text_content .item != ITEM_NULL) {
                     list_push((List*)list_item, text_content);
                     ((TypeElmt*)list_item->type)->content_length++;
                 }
@@ -224,11 +224,11 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
 }
 
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_table_start(lines[*current_line])) return ITEM_NULL;
+    if (!is_table_start(lines[*current_line])) return {.item = ITEM_NULL};
     
     // Create table element
     Element* table = create_mediawiki_element(input, "table");
-    if (!table) return ITEM_NULL;
+    if (!table) return {.item = ITEM_NULL};
     
     (*current_line)++; // Skip {|
     
@@ -272,7 +272,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                         Element* paragraph = create_mediawiki_element(input, "p");
                         if (paragraph) {
                             Item content = parse_inline_content(input, cell_content);
-                            if (content != ITEM_NULL) {
+                            if (content .item != ITEM_NULL) {
                                 list_push((List*)paragraph, content);
                                 ((TypeElmt*)paragraph->type)->content_length++;
                             }
@@ -312,17 +312,17 @@ static Item parse_paragraph(Input *input, const char* line) {
     char* content = trim_whitespace(line);
     if (!content || strlen(content) == 0) {
         free(content);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* paragraph = create_mediawiki_element(input, "p");
     if (!paragraph) {
         free(content);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Item text_content = parse_inline_content(input, content);
-    if (text_content != ITEM_NULL) {
+    if (text_content .item != ITEM_NULL) {
         list_push((List*)paragraph, text_content);
         ((TypeElmt*)paragraph->type)->content_length++;
     }
@@ -333,7 +333,7 @@ static Item parse_paragraph(Input *input, const char* line) {
 
 // Inline parsing functions
 static Item parse_bold_italic(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '\'') return ITEM_NULL;
+    if (text[*pos] != '\'') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     int quote_count = 0;
@@ -346,7 +346,7 @@ static Item parse_bold_italic(Input *input, const char* text, int* pos) {
     
     if (quote_count < 2) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     int content_start = *pos;
@@ -374,7 +374,7 @@ static Item parse_bold_italic(Input *input, const char* text, int* pos) {
     
     if (content_end == -1) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Determine element type
@@ -388,7 +388,7 @@ static Item parse_bold_italic(Input *input, const char* text, int* pos) {
     }
     
     Element* format_elem = create_mediawiki_element(input, tag_name);
-    if (!format_elem) return ITEM_NULL;
+    if (!format_elem) return {.item = ITEM_NULL};
     
     // Extract content
     int content_len = content_end - content_start;
@@ -409,7 +409,7 @@ static Item parse_bold_italic(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_link(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '[' || text[*pos + 1] != '[') return ITEM_NULL;
+    if (text[*pos] != '[' || text[*pos + 1] != '[') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     *pos += 2; // Skip [[
@@ -440,11 +440,11 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     if (link_end == -1) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* link_elem = create_mediawiki_element(input, "a");
-    if (!link_elem) return ITEM_NULL;
+    if (!link_elem) return {.item = ITEM_NULL};
     
     // Extract link target
     int link_len = link_end - link_start;
@@ -478,7 +478,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_external_link(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '[') return ITEM_NULL;
+    if (text[*pos] != '[') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     (*pos)++; // Skip [
@@ -509,11 +509,11 @@ static Item parse_external_link(Input *input, const char* text, int* pos) {
     
     if (url_end == -1) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* link_elem = create_mediawiki_element(input, "a");
-    if (!link_elem) return ITEM_NULL;
+    if (!link_elem) return {.item = ITEM_NULL};
     
     // Extract URL
     int url_len = url_end - url_start;
@@ -547,7 +547,7 @@ static Item parse_external_link(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_template(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '{' || text[*pos + 1] != '{') return ITEM_NULL;
+    if (text[*pos] != '{' || text[*pos + 1] != '{') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     *pos += 2; // Skip {{
@@ -573,12 +573,12 @@ static Item parse_template(Input *input, const char* text, int* pos) {
     
     if (content_end == -1) {
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // For now, treat templates as code spans
     Element* template_elem = create_mediawiki_element(input, "code");
-    if (!template_elem) return ITEM_NULL;
+    if (!template_elem) return {.item = ITEM_NULL};
     
     // Extract template content
     int content_len = content_end - content_start + 1;
@@ -598,7 +598,7 @@ static Item parse_template(Input *input, const char* text, int* pos) {
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""));
     }
     
     int len = strlen(text);
@@ -606,7 +606,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // Create a span to hold mixed content
     Element* span = create_mediawiki_element(input, "span");
-    if (!span) return s2it(create_string(input, text));
+    if (!span) return {.item = s2it(create_string(input, text));
     
     StrBuf* text_buffer = strbuf_new_cap(256);
     
@@ -627,7 +627,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item bold_italic = parse_bold_italic(input, text, &pos);
-            if (bold_italic != ITEM_NULL) {
+            if (bold_italic .item != ITEM_NULL) {
                 list_push((List*)span, bold_italic);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -646,7 +646,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             
             // Try internal link first
             Item internal_link = parse_link(input, text, &pos);
-            if (internal_link != ITEM_NULL) {
+            if (internal_link .item != ITEM_NULL) {
                 list_push((List*)span, internal_link);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -654,7 +654,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             
             // Try external link
             Item external_link = parse_external_link(input, text, &pos);
-            if (external_link != ITEM_NULL) {
+            if (external_link .item != ITEM_NULL) {
                 list_push((List*)span, external_link);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -672,7 +672,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item template = parse_template(input, text, &pos);
-            if (template != ITEM_NULL) {
+            if (template .item != ITEM_NULL) {
                 list_push((List*)span, template);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -698,7 +698,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // If span has no content, return empty string
     if (((TypeElmt*)span->type)->content_length == 0) {
-        return s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""));
     }
     
     // If span has only one text child, return just the text
@@ -714,7 +714,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     const char* line = lines[*current_line];
     
     if (!line || is_empty_line(line)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Try different block types
@@ -745,7 +745,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 static Item parse_mediawiki_content(Input *input, char** lines, int line_count) {
     // Create the root document element according to schema
     Element* doc = create_mediawiki_element(input, "doc");
-    if (!doc) return ITEM_NULL;
+    if (!doc) return {.item = ITEM_NULL};
     
     // Add version attribute to doc
     add_attribute_to_element(input, doc, "version", "1.0");
@@ -777,7 +777,7 @@ static Item parse_mediawiki_content(Input *input, char** lines, int line_count) 
         
         Item element = parse_block_element(input, lines, &current_line, line_count);
         
-        if (element != ITEM_NULL) {
+        if (element .item != ITEM_NULL) {
             list_push((List*)body, element);
             ((TypeElmt*)body->type)->content_length++;
         } else {

@@ -291,34 +291,34 @@ static Item parse_number(Input *input, const char **toml) {
     if (strncmp(*toml, "inf", 3) == 0) {
         double *dval;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = INFINITY;
         *toml += 3;
-        return d2it(dval);
+        return {.item = d2it(dval);
     }
     if (strncmp(*toml, "-inf", 4) == 0) {
         double *dval;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = -INFINITY;
         *toml += 4;
-        return d2it(dval);
+        return {.item = d2it(dval);
     }
     if (strncmp(*toml, "nan", 3) == 0) {
         double *dval;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = NAN;
         *toml += 3;
-        return d2it(dval);
+        return {.item = d2it(dval);
     }
     if (strncmp(*toml, "-nan", 4) == 0) {
         double *dval;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = NAN;
         *toml += 4;
-        return d2it(dval);
+        return {.item = d2it(dval);
     }
     
     // Handle hex, octal, binary integers
@@ -358,10 +358,10 @@ static Item parse_number(Input *input, const char **toml) {
     if (is_float) {
         double *dval;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *dval = strtod(start, &end);
         *toml = end;
-        return d2it(dval);
+        return {.item = d2it(dval);
     } else {
         long val = strtol(start, &end, 10);
         *toml = end;
@@ -387,8 +387,7 @@ static Array* parse_array(Input *input, const char **toml, int *line_num) {
         if (value == ITEM_ERROR) {
             return NULL;
         }
-        LambdaItem item = {.item = value};
-        array_append(arr, item, input->pool);
+        array_append(arr, value, input->pool);
 
         skip_whitespace_and_comments(toml, line_num);
         
@@ -443,8 +442,7 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
             return NULL;
         }
         
-        LambdaItem lambda_value = {.item = value};
-        map_put(mp, key, lambda_value, input);
+        map_put(mp, key, value, input);
 
         skip_whitespace(toml);
         if (**toml == '}') { 
@@ -493,40 +491,40 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
         case 't':
             if (strncmp(*toml, "true", 4) == 0 && !isalnum(*(*toml + 4))) {
                 *toml += 4;
-                return b2it(true);
+                return {.item = b2it(true);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case 'f':
             if (strncmp(*toml, "false", 5) == 0 && !isalnum(*(*toml + 5))) {
                 *toml += 5;
-                return b2it(false);
+                return {.item = b2it(false);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case 'i':
             if (strncmp(*toml, "inf", 3) == 0) {
                 return parse_number(input, toml);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case 'n':
             if (strncmp(*toml, "nan", 3) == 0) {
                 return parse_number(input, toml);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case '-':
             if (*((*toml) + 1) == 'i' || *((*toml) + 1) == 'n' || isdigit(*((*toml) + 1))) {
                 return parse_number(input, toml);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case '+':
             if (isdigit(*((*toml) + 1))) {
                 return parse_number(input, toml);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         default:
             if ((**toml >= '0' && **toml <= '9')) {
                 return parse_number(input, toml);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
     }
 }
 
@@ -566,8 +564,7 @@ static Map* find_or_create_section(Input *input, Map* root_map, const char* sect
     if (!section_map) return NULL;
     
     // Add section to root map
-    LambdaItem section_value = {.item = (Item)section_map};
-    map_put(root_map, key, section_value, input);
+    map_put(root_map, key, {.item = (uint64_t)section_map}, input);
 
     return section_map;
 }
@@ -624,8 +621,7 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
             nested_map = map_pooled(input->pool);
             if (!nested_map) return NULL;
             
-            LambdaItem table_value = {.item = (Item)nested_map};
-            map_put(current_map, key, table_value, input);
+            map_put(current_map, key, (Item)nested_map, input);
         }
         
         current_map = nested_map;
@@ -677,7 +673,7 @@ void parse_toml(Input* input, const char* toml_string) {
 
     Map* root_map = map_pooled(input->pool);
     if (!root_map) { return; }
-    input->root = (Item)root_map;
+    input->root = {.item = (uint64_t)root_map};
 
     const char *toml = toml_string;
     int line_num = 1;
@@ -732,8 +728,7 @@ void parse_toml(Input* input, const char* toml_string) {
             continue;
         }
         
-        LambdaItem lambda_value = {.item = value};
-        map_put(current_table, key, lambda_value, input);
+        map_put(current_table, key, value, input);
         
         skip_line(&toml, &line_num);
     }

@@ -406,7 +406,7 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
         
         // Double-check that attr_value is not NULL before using it
         if (attr_value) {
-            LambdaItem value = (LambdaItem)s2it(attr_value);
+            Item value = {.item = s2it(attr_value)};
             elmt_put(element, attr_name, value, input->pool);
         }
         
@@ -506,12 +506,12 @@ static Item parse_element(Input *input, const char **html) {
     
     if (parse_depth > 15) {  // Reduced limit for better debugging
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     if (**html != '<') {
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Skip comments
@@ -524,7 +524,7 @@ static Item parse_element(Input *input, const char **html) {
             return result;
         }
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Skip DOCTYPE
@@ -537,7 +537,7 @@ static Item parse_element(Input *input, const char **html) {
             return result;
         }
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Skip processing instructions
@@ -550,7 +550,7 @@ static Item parse_element(Input *input, const char **html) {
             return result;
         }
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Skip CDATA
@@ -563,7 +563,7 @@ static Item parse_element(Input *input, const char **html) {
             return result;
         }
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     (*html)++; // Skip <
@@ -576,26 +576,26 @@ static Item parse_element(Input *input, const char **html) {
         }
         if (**html) (*html)++; // Skip >
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     String* tag_name = parse_tag_name(input, html);
     if (!tag_name || tag_name->len == 0) {
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Create element using shared function
     Element* element = input_create_element(input, tag_name->chars);
     if (!element) {
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse attributes directly into the element
     if (!parse_attributes(input, element, html)) {
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Check for self-closing tag
@@ -607,7 +607,7 @@ static Item parse_element(Input *input, const char **html) {
     
     if (**html != '>') {
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*html)++; // Skip >
     
@@ -651,8 +651,8 @@ static Item parse_element(Input *input, const char **html) {
                 strbuf_full_reset(content_sb);
                 
                 if (content_string->len > 0) {
-                    LambdaItem content_item = (LambdaItem)s2it(content_string);
-                    list_push((List*)element, content_item.item);
+                    Item content_item = {.item = s2it(content_string)};
+                    list_push((List*)element, content_item);
                 }
             } else {
                 strbuf_full_reset(content_sb);
@@ -692,7 +692,7 @@ static Item parse_element(Input *input, const char **html) {
                             // If we hit an error, try to recover by skipping this character
                             if (**html) (*html)++;
                             break;
-                        } else if (child != ITEM_NULL) {
+                        } else if (child .item != ITEM_NULL) {
                             list_push((List*)element, child);
                         }
                         
@@ -736,8 +736,8 @@ static Item parse_element(Input *input, const char **html) {
                             }
                             
                             if (has_non_whitespace) {
-                                LambdaItem text_item = (LambdaItem)s2it(text_string);
-                                list_push((List*)element, text_item.item);
+                                Item text_item = {.item = s2it(text_string)};
+                                list_push((List*)element, text_item);
                             }
                         } else {
                             strbuf_full_reset(text_sb);
@@ -773,7 +773,7 @@ static Item parse_element(Input *input, const char **html) {
     
     parse_depth--;
     
-    return (Item)element;
+    return {.item = (uint64_t)element};
 }
 
 void parse_html(Input* input, const char* html_string) {

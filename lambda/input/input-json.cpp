@@ -60,11 +60,11 @@ static String* parse_string(Input *input, const char **json) {
 static Item parse_number(Input *input, const char **json) {
     double *dval;
     MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
     char* end;
     *dval = strtod(*json, &end);
     *json = end;
-    return d2it(dval);
+    return {.item = d2it(dval)};
 }
 
 static Array* parse_array(Input *input, const char **json) {
@@ -77,7 +77,7 @@ static Array* parse_array(Input *input, const char **json) {
     if (**json == ']') { (*json)++;  return arr; }
 
     while (**json) {
-        LambdaItem item = {.item = parse_value(input, json)};
+        Item item = parse_value(input, json);
         array_append(arr, item, input->pool);
 
         skip_whitespace(json);
@@ -112,7 +112,7 @@ static Map* parse_object(Input *input, const char **json) {
         (*json)++;
         skip_whitespace(json);
 
-        LambdaItem value = (LambdaItem)parse_value(input, json);
+        Item value = parse_value(input, json);
         map_put(mp, key, value, input);
 
         skip_whitespace(json);
@@ -128,35 +128,36 @@ static Item parse_value(Input *input, const char **json) {
     skip_whitespace(json);
     switch (**json) {
         case '{':
-            return (Item)parse_object(input, json);
+            return {.item = (uint64_t)parse_object(input, json)};
         case '[':
-            return (Item)parse_array(input, json);
-        case '"':
+            return {.item = (uint64_t)parse_array(input, json)};
+        case '"': {
             String* str = parse_string(input, json);
-            return str ? (str == &EMPTY_STRING ? ITEM_NULL : s2it(str)): (Item)NULL;
+            return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = 0};
+        }
         case 't':
             if (strncmp(*json, "true", 4) == 0) {
                 *json += 4;
-                return b2it(true);
+                return {.item = b2it(true)};
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case 'f':
             if (strncmp(*json, "false", 5) == 0) {
                 *json += 5;
-                return b2it(false);
+                return {.item = b2it(false)};
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         case 'n':
             if (strncmp(*json, "null", 4) == 0) {
                 *json += 4;
-                return ITEM_NULL;
+                return {.item = ITEM_NULL};
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         default:
             if ((**json >= '0' && **json <= '9') || **json == '-') {
                 return parse_number(input, json);
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
     }
 }
 

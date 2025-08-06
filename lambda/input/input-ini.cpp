@@ -119,7 +119,7 @@ static int case_insensitive_compare(const char* s1, const char* s2, size_t n) {
 
 static Item parse_typed_value(Input *input, String* value_str) {
     if (!value_str || value_str->len == 0) {
-        return s2it(value_str);
+        return {.item = s2it(value_str)};
     }
     char* str = value_str->chars;  size_t len = value_str->len;
     // check for boolean values (case insensitive)
@@ -127,19 +127,19 @@ static Item parse_typed_value(Input *input, String* value_str) {
         (len == 3 && case_insensitive_compare(str, "yes", 3) == 0) ||
         (len == 2 && case_insensitive_compare(str, "on", 2) == 0) ||
         (len == 1 && str[0] == '1')) {
-        return b2it(true);
+        return {.item = b2it(true)};
     }
     if ((len == 5 && case_insensitive_compare(str, "false", 5) == 0) ||
         (len == 2 && case_insensitive_compare(str, "no", 2) == 0) ||
         (len == 3 && case_insensitive_compare(str, "off", 3) == 0) ||
         (len == 1 && str[0] == '0')) {
-        return b2it(false);
+        return {.item = b2it(false)};
     }
     // check for null/empty values
     if ((len == 4 && case_insensitive_compare(str, "null", 4) == 0) ||
         (len == 3 && case_insensitive_compare(str, "nil", 3) == 0) ||
         (len == 5 && case_insensitive_compare(str, "empty", 5) == 0)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // try to parse as number
@@ -168,7 +168,7 @@ static Item parse_typed_value(Input *input, String* value_str) {
     
     if (is_number && len > 0) {
         // Create null-terminated string for parsing
-        char* temp_str = pool_calloc(input->pool, len + 1);
+        char* temp_str = (char*)pool_calloc(input->pool, len + 1);
         if (temp_str) {
             memcpy(temp_str, str, len);
             temp_str[len] = '\0';
@@ -182,7 +182,7 @@ static Item parse_typed_value(Input *input, String* value_str) {
                     if (err == MEM_POOL_ERR_OK) {
                         *dval_ptr = dval;
                         pool_variable_free(input->pool, temp_str);
-                        return d2it(dval_ptr);
+                        return {.item = d2it(dval_ptr)};
                     }
                 }
             } else {
@@ -194,7 +194,7 @@ static Item parse_typed_value(Input *input, String* value_str) {
                     if (err == MEM_POOL_ERR_OK) {
                         *lval_ptr = lval;
                         pool_variable_free(input->pool, temp_str);
-                        return l2it(lval_ptr);
+                        return {.item = l2it(lval_ptr)};
                     }
                 }
             }
@@ -202,7 +202,7 @@ static Item parse_typed_value(Input *input, String* value_str) {
             pool_variable_free(input->pool, temp_str);
         }
     }
-    return s2it(value_str);
+    return {.item = s2it(value_str)};
 }
 
 static Map* parse_section(Input *input, const char **ini, String* section_name) {
@@ -238,8 +238,8 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
         (*ini)++; // skip '='
         
         String* value_str = parse_raw_value(input, ini);
-        Item value = value_str ? ( value_str == &EMPTY_STRING ? ITEM_NULL : parse_typed_value(input, value_str)) : (Item)NULL;
-        map_put(section_map, key, (LambdaItem)value, input);
+        Item value = value_str ? ( value_str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : parse_typed_value(input, value_str)) : (Item){.item = 0};
+        map_put(section_map, key, value, input);
 
         skip_to_newline(ini);
     }
@@ -252,7 +252,7 @@ void parse_ini(Input* input, const char* ini_string) {
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);
     if (!root_map) { return; }
-    input->root = (Item)root_map;
+    input->root = {.item = (uint64_t)root_map};
     
     const char *current = ini_string;
     String* current_section_name = NULL;
@@ -282,7 +282,7 @@ void parse_ini(Input* input, const char* ini_string) {
             if (section_map && section_map->type && ((TypeMap*)section_map->type)->length > 0) {
                 // add section to root map
                 map_put(root_map, current_section_name, 
-                    (LambdaItem)(Item)section_map, input);
+                    {.item = (uint64_t)section_map}, input);
             }
         } else {
             // key-value pair outside of any section (global)
@@ -300,7 +300,7 @@ void parse_ini(Input* input, const char* ini_string) {
                     if (global_section && global_section->type && ((TypeMap*)global_section->type)->length > 0) {
                         // Add global section to root map
                         map_put(root_map, global_name, 
-                            (LambdaItem)(Item)global_section, input);
+                            {.item = (uint64_t)global_section}, input);
                     }
                 }
             } else {

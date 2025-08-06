@@ -86,13 +86,13 @@ static void advance_safely(const char **pdf, int max_advance) {
 static Item parse_pdf_number(Input *input, const char **pdf) {
     double *dval;
     MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
     
     char* end;
     *dval = strtod(*pdf, &end);
     *pdf = end;
     
-    return d2it(dval);
+    return {.item = d2it(dval);
 }
 
 static Array* parse_pdf_array(Input *input, const char **pdf) {
@@ -107,8 +107,8 @@ static Array* parse_pdf_array(Input *input, const char **pdf) {
     int item_count = 0;
     while (**pdf && **pdf != ']' && item_count < 10) { // reduced limit for safety
         Item obj = parse_pdf_object(input, pdf);
-        if (obj != ITEM_ERROR && obj != ITEM_NULL) {
-            LambdaItem lambda_obj = {.item = obj};
+        if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
+            Item lambda_obj = {.item = obj};
             array_append(arr, lambda_obj, input->pool);
             item_count++;
         }
@@ -147,8 +147,8 @@ static Map* parse_pdf_dictionary(Input *input, const char **pdf) {
         
         // parse value
         Item value = parse_pdf_object(input, pdf);
-        if (value != ITEM_ERROR && value != ITEM_NULL) {
-            LambdaItem lambda_value = {.item = value};
+        if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
+            Item lambda_value = {.item = value};
             map_put(dict, key, lambda_value, input);
             pair_count++;
         }
@@ -303,14 +303,14 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
     if (call_count > 10) {
         printf("Warning: too many parse calls, stopping recursion\n");
         call_count--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     skip_whitespace_and_comments(pdf);
     
     if (!**pdf) {
         call_count--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Item result = ITEM_ERROR;
@@ -357,7 +357,7 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
         const char* saved_pos = *pdf;
         // Try to parse as indirect reference first
         Item ref = parse_pdf_indirect_ref(input, pdf);
-        if (ref != ITEM_ERROR) {
+        if (ref .item != ITEM_ERROR) {
             result = ref;
         } else {
             // if not a reference, parse as number
@@ -384,7 +384,7 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
             if (strncmp(*pdf, "stream", 6) == 0) {
                 // Parse as stream with dictionary
                 Item stream = parse_pdf_stream(input, pdf, dict);
-                result = stream != ITEM_ERROR ? stream : (Item)dict;
+                result = stream .item != ITEM_ERROR ? stream : (Item)dict;
             } else {
                 // Just a dictionary
                 *pdf = saved_pos;
@@ -412,24 +412,24 @@ static Item parse_pdf_indirect_ref(Input *input, const char **pdf) {
     
     // Parse object number
     obj_num = strtol(*pdf, &end, 10);
-    if (end == *pdf) return ITEM_ERROR; // no conversion
+    if (end == *pdf) return {.item = ITEM_ERROR}; // no conversion
     
     *pdf = end;
     skip_whitespace_and_comments(pdf);
-    if (!**pdf) return ITEM_ERROR;
+    if (!**pdf) return {.item = ITEM_ERROR};
     
     // Parse generation number
     gen_num = strtol(*pdf, &end, 10);
-    if (end == *pdf) return ITEM_ERROR; // no conversion
+    if (end == *pdf) return {.item = ITEM_ERROR}; // no conversion
     
     *pdf = end;
     skip_whitespace_and_comments(pdf);
-    if (**pdf != 'R') return ITEM_ERROR;
+    if (**pdf != 'R') return {.item = ITEM_ERROR};
     (*pdf)++; // skip R
     
     // Create a map to represent the indirect reference (more serializable than custom struct)
     Map* ref_map = map_pooled(input->pool);
-    if (!ref_map) return ITEM_ERROR;
+    if (!ref_map) return {.item = ITEM_ERROR};
     
     // Store type identifier
     String* type_key;
@@ -446,7 +446,7 @@ static Item parse_pdf_indirect_ref(Input *input, const char **pdf) {
             type_value->len = 12;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(ref_map, type_key, type_item, input);
         }
     }
@@ -463,7 +463,7 @@ static Item parse_pdf_indirect_ref(Input *input, const char **pdf) {
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_val);
         if (err == MEM_POOL_ERR_OK) {
             *obj_val = (double)obj_num;
-            LambdaItem obj_item = {.item = d2it(obj_val)};
+            Item obj_item = {.item = d2it(obj_val)};
             map_put(ref_map, obj_key, obj_item, input);
         }
     }
@@ -480,7 +480,7 @@ static Item parse_pdf_indirect_ref(Input *input, const char **pdf) {
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&gen_val);
         if (err == MEM_POOL_ERR_OK) {
             *gen_val = (double)gen_num;
-            LambdaItem gen_item = {.item = d2it(gen_val)};
+            Item gen_item = {.item = d2it(gen_val)};
             map_put(ref_map, gen_key, gen_item, input);
         }
     }
@@ -494,20 +494,20 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
     
     // Parse object number
     obj_num = strtol(*pdf, &end, 10);
-    if (end == *pdf) return ITEM_ERROR;
+    if (end == *pdf) return {.item = ITEM_ERROR};
     
     *pdf = end;
     skip_whitespace_and_comments(pdf);
     
     // Parse generation number
     gen_num = strtol(*pdf, &end, 10);
-    if (end == *pdf) return ITEM_ERROR;
+    if (end == *pdf) return {.item = ITEM_ERROR};
     
     *pdf = end;
     skip_whitespace_and_comments(pdf);
     
     // Check for "obj" keyword
-    if (strncmp(*pdf, "obj", 3) != 0) return ITEM_ERROR;
+    if (strncmp(*pdf, "obj", 3) != 0) return {.item = ITEM_ERROR};
     *pdf += 3;
     skip_whitespace_and_comments(pdf);
     
@@ -539,7 +539,7 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
             type_value->len = 15;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(obj_map, type_key, type_item, input);
         }
     }
@@ -556,7 +556,7 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_val);
         if (err == MEM_POOL_ERR_OK) {
             *obj_val = (double)obj_num;
-            LambdaItem obj_item = {.item = d2it(obj_val)};
+            Item obj_item = {.item = d2it(obj_val)};
             map_put(obj_map, obj_key, obj_item, input);
         }
     }
@@ -573,13 +573,13 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&gen_val);
         if (err == MEM_POOL_ERR_OK) {
             *gen_val = (double)gen_num;
-            LambdaItem gen_item = {.item = d2it(gen_val)};
+            Item gen_item = {.item = d2it(gen_val)};
             map_put(obj_map, gen_key, gen_item, input);
         }
     }
     
     // Store content
-    if (content != ITEM_ERROR && content != ITEM_NULL) {
+    if (content .item != ITEM_ERROR && content .item != ITEM_NULL) {
         String* content_key;
         err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&content_key);
         if (err == MEM_POOL_ERR_OK) {
@@ -587,7 +587,7 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
             content_key->len = 7;
             content_key->ref_cnt = 0;
             
-            LambdaItem content_item = {.item = content};
+            Item content_item = {.item = content};
             map_put(obj_map, content_key, content_item, input);
         }
     }
@@ -596,14 +596,14 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
 
 static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
     // expects stream data after dictionary
-    if (strncmp(*pdf, "stream", 6) != 0) return ITEM_ERROR;
+    if (strncmp(*pdf, "stream", 6) != 0) return {.item = ITEM_ERROR};
     
     *pdf += 6; // skip stream
     skip_whitespace_and_comments(pdf);
     
     // find end of stream
     const char* end_stream = strstr(*pdf, "endstream");
-    if (!end_stream) return ITEM_ERROR;
+    if (!end_stream) return {.item = ITEM_ERROR};
     
     // calculate data length
     int data_length = end_stream - *pdf;
@@ -613,7 +613,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
     
     // Create a map to represent the stream (more serializable than custom struct)
     Map* stream_map = map_pooled(input->pool);
-    if (!stream_map) return ITEM_ERROR;
+    if (!stream_map) return {.item = ITEM_ERROR};
     
     // Store type identifier
     String* type_key;
@@ -630,7 +630,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
             type_value->len = 6;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(stream_map, type_key, type_item, input);
         }
     }
@@ -644,7 +644,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
             dict_key->len = 10;
             dict_key->ref_cnt = 0;
             
-            LambdaItem dict_item = {.item = (Item)dict};
+            Item dict_item = {.item = (Item)dict};
             map_put(stream_map, dict_key, dict_item, input);
         }
     }
@@ -661,7 +661,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&length_val);
         if (err == MEM_POOL_ERR_OK) {
             *length_val = (double)data_length;
-            LambdaItem length_item = {.item = d2it(length_val)};
+            Item length_item = {.item = d2it(length_val)};
             map_put(stream_map, length_key, length_item, input);
         }
     }
@@ -682,20 +682,20 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
             stream_data->len = data_length;
             stream_data->ref_cnt = 0;
             
-            LambdaItem data_item = {.item = s2it(stream_data)};
+            Item data_item = {.item = s2it(stream_data)};
             map_put(stream_map, data_key, data_item, input);
             
             // Add content analysis for potential content streams
             if (data_length > 10 && data_length < 2000) { // Only analyze reasonably sized streams
                 Item content_analysis = analyze_pdf_content_stream(input, *pdf, data_length);
-                if (content_analysis != ITEM_NULL) {
+                if (content_analysis .item != ITEM_NULL) {
                     String* analysis_key;
                     err = pool_variable_alloc(input->pool, sizeof(String) + 9, (void**)&analysis_key);
                     if (err == MEM_POOL_ERR_OK) {
                         strcpy(analysis_key->chars, "analysis");
                         analysis_key->len = 8;
                         analysis_key->ref_cnt = 0;
-                        LambdaItem analysis_item = {.item = content_analysis};
+                        Item analysis_item = {.item = content_analysis};
                         map_put(stream_map, analysis_key, analysis_item, input);
                     }
                 }
@@ -709,14 +709,14 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
 
 static Item parse_pdf_xref_table(Input *input, const char **pdf) {
     // expects "xref" followed by cross-reference entries
-    if (strncmp(*pdf, "xref", 4) != 0) return ITEM_ERROR;
+    if (strncmp(*pdf, "xref", 4) != 0) return {.item = ITEM_ERROR};
     
     *pdf += 4; // skip "xref"
     skip_whitespace_and_comments(pdf);
     
     // Create a map to represent the xref table
     Map* xref_map = map_pooled(input->pool);
-    if (!xref_map) return ITEM_ERROR;
+    if (!xref_map) return {.item = ITEM_ERROR};
     
     // Store type identifier
     String* type_key;
@@ -733,7 +733,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
             type_value->len = 10;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(xref_map, type_key, type_item, input);
         }
     }
@@ -796,7 +796,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
                                                 err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_val);
                                                 if (err == MEM_POOL_ERR_OK) {
                                                     *obj_val = (double)(start_num + i);
-                                                    LambdaItem obj_item = {.item = d2it(obj_val)};
+                                                    Item obj_item = {.item = d2it(obj_val)};
                                                     map_put(entry_map, obj_key, obj_item, input);
                                                 }
                                             }
@@ -813,7 +813,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
                                                 err = pool_variable_alloc(input->pool, sizeof(double), (void**)&offset_val);
                                                 if (err == MEM_POOL_ERR_OK) {
                                                     *offset_val = (double)offset;
-                                                    LambdaItem offset_item = {.item = d2it(offset_val)};
+                                                    Item offset_item = {.item = d2it(offset_val)};
                                                     map_put(entry_map, offset_key, offset_item, input);
                                                 }
                                             }
@@ -833,12 +833,12 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
                                                     flag_val->chars[1] = '\0';
                                                     flag_val->len = 1;
                                                     flag_val->ref_cnt = 0;
-                                                    LambdaItem flag_item = {.item = s2it(flag_val)};
+                                                    Item flag_item = {.item = s2it(flag_val)};
                                                     map_put(entry_map, flag_key, flag_item, input);
                                                 }
                                             }
                                             
-                                            LambdaItem entry_item = {.item = (Item)entry_map};
+                                            Item entry_item = {.item = (Item)entry_map};
                                             array_append(entries, entry_item, input->pool);
                                             entry_count++;
                                         }
@@ -862,7 +862,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
             strcpy(entries_key->chars, "entries");
             entries_key->len = 7;
             entries_key->ref_cnt = 0;
-            LambdaItem entries_item = {.item = (Item)entries};
+            Item entries_item = {.item = (Item)entries};
             map_put(xref_map, entries_key, entries_item, input);
         }
     }
@@ -871,14 +871,14 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
 
 static Item parse_pdf_trailer(Input *input, const char **pdf) {
     // expects "trailer" followed by a dictionary
-    if (strncmp(*pdf, "trailer", 7) != 0) return ITEM_ERROR;
+    if (strncmp(*pdf, "trailer", 7) != 0) return {.item = ITEM_ERROR};
     
     *pdf += 7; // skip "trailer"
     skip_whitespace_and_comments(pdf);
     
     // Parse the trailer dictionary
     Map* trailer_dict = parse_pdf_dictionary(input, pdf);
-    if (!trailer_dict) return ITEM_ERROR;
+    if (!trailer_dict) return {.item = ITEM_ERROR};
     
     // Create a wrapper map to indicate this is a trailer
     Map* trailer_map = map_pooled(input->pool);
@@ -899,7 +899,7 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
             type_value->len = 7;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(trailer_map, type_key, type_item, input);
         }
     }
@@ -911,7 +911,7 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
         strcpy(dict_key->chars, "dictionary");
         dict_key->len = 10;
         dict_key->ref_cnt = 0;
-        LambdaItem dict_item = {.item = (Item)trailer_dict};
+        Item dict_item = {.item = (Item)trailer_dict};
         map_put(trailer_map, dict_key, dict_item, input);
     }
     return (Item)trailer_map;
@@ -919,10 +919,10 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
 
 // Analyze PDF content streams for basic information
 static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length) {
-    if (!stream_data || length <= 0) return ITEM_NULL;
+    if (!stream_data || length <= 0) return {.item = ITEM_NULL};
     
     Map* analysis_map = map_pooled(input->pool);
-    if (!analysis_map) return ITEM_NULL;
+    if (!analysis_map) return {.item = ITEM_NULL};
     
     MemPoolError err;
     // Count text objects (BT...ET blocks)
@@ -967,7 +967,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
             type_value->len = 16;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(analysis_map, type_key, type_item, input);
         }
     }
@@ -984,7 +984,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&text_count);
         if (err == MEM_POOL_ERR_OK) {
             *text_count = (double)text_objects;
-            LambdaItem text_item = {.item = d2it(text_count)};
+            Item text_item = {.item = d2it(text_count)};
             map_put(analysis_map, text_key, text_item, input);
         }
     }
@@ -1001,7 +1001,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         err = pool_variable_alloc(input->pool, sizeof(double), (void**)&draw_count);
         if (err == MEM_POOL_ERR_OK) {
             *draw_count = (double)drawing_ops;
-            LambdaItem draw_item = {.item = d2it(draw_count)};
+            Item draw_item = {.item = d2it(draw_count)};
             map_put(analysis_map, draw_key, draw_item, input);
         }
     }
@@ -1010,10 +1010,10 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
 
 // Analyze font information from font dictionaries
 static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
-    if (!font_dict) return ITEM_NULL;
+    if (!font_dict) return {.item = ITEM_NULL};
     
     Map* font_analysis = map_pooled(input->pool);
-    if (!font_analysis) return ITEM_NULL;
+    if (!font_analysis) return {.item = ITEM_NULL};
     
     MemPoolError err;
     // Extract font information from the dictionary
@@ -1031,7 +1031,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
             type_value->len = 13;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(font_analysis, type_key, type_item, input);
         }
     }
@@ -1043,7 +1043,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
         strcpy(original_key->chars, "original");
         original_key->len = 8;
         original_key->ref_cnt = 0;
-        LambdaItem original_item = {.item = (Item)font_dict};
+        Item original_item = {.item = (Item)font_dict};
         map_put(font_analysis, original_key, original_item, input);
     }
     return (Item)font_analysis;
@@ -1051,10 +1051,10 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
 
 // Extract basic page information
 static Item extract_pdf_page_info(Input *input, Map* page_dict) {
-    if (!page_dict) return ITEM_NULL;
+    if (!page_dict) return {.item = ITEM_NULL};
     
     Map* page_analysis = map_pooled(input->pool);
-    if (!page_analysis) return ITEM_NULL;
+    if (!page_analysis) return {.item = ITEM_NULL};
     
     MemPoolError err;
     // Store type
@@ -1072,7 +1072,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
             type_value->len = 12;
             type_value->ref_cnt = 0;
             
-            LambdaItem type_item = {.item = s2it(type_value)};
+            Item type_item = {.item = s2it(type_value)};
             map_put(page_analysis, type_key, type_item, input);
         }
     }
@@ -1084,7 +1084,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
         strcpy(original_key->chars, "original");
         original_key->len = 8;
         original_key->ref_cnt = 0;
-        LambdaItem original_item = {.item = (Item)page_dict};
+        Item original_item = {.item = (Item)page_dict};
         map_put(page_analysis, original_key, original_item, input);
     }
     return (Item)page_analysis;
@@ -1099,14 +1099,14 @@ void parse_pdf(Input* input, const char* pdf_string) {
     // Validate input
     if (!pdf_string || !*pdf_string) {
         printf("Error: Empty PDF content\n");
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
         printf("Error: Invalid PDF format - must start with %%PDF-\n");
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
@@ -1114,7 +1114,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     Map* pdf_info = map_pooled(input->pool);
     if (!pdf_info) {
         printf("Error: Failed to allocate PDF info map\n");
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
@@ -1147,7 +1147,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         strcpy(version_key->chars, "version");
         version_key->len = 7;
         version_key->ref_cnt = 0;
-        LambdaItem version_item = {.item = s2it(version)};
+        Item version_item = {.item = s2it(version)};
         map_put(pdf_info, version_key, version_item, input);
     }
     
@@ -1174,7 +1174,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             // Check for xref table
             if (strncmp(pdf, "xref", 4) == 0) {
                 xref_table = parse_pdf_xref_table(input, &pdf);
-                if (xref_table != ITEM_ERROR) {
+                if (xref_table .item != ITEM_ERROR) {
                     consecutive_errors = 0; // Reset error counter on success
                 }
                 continue; // Continue parsing to look for trailer
@@ -1200,8 +1200,8 @@ void parse_pdf(Input* input, const char* pdf_string) {
                 obj = parse_pdf_object(input, &pdf);
             }
             
-            if (obj != ITEM_ERROR && obj != ITEM_NULL) {
-                LambdaItem obj_item = {.item = obj};
+            if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
+                Item obj_item = {.item = obj};
                 array_append(objects, obj_item, input->pool);
                 obj_count++;
                 consecutive_errors = 0; // Reset error counter on success
@@ -1215,7 +1215,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         }
         
         // Always scan for xref and trailer sections, even if we've hit the object limit
-        if (xref_table == ITEM_NULL || trailer == ITEM_NULL) {
+        if (xref_table .item == ITEM_NULL || trailer .item == ITEM_NULL) {
             // Scan ahead for xref/trailer sections - start from current position if we haven't exceeded object limit,
             // or from the beginning if we need to do a more thorough search
             const char* scan_pdf = (obj_count >= max_objects) ? pdf_string : pdf;
@@ -1231,27 +1231,27 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     continue;
                 }
                 
-                if (xref_table == ITEM_NULL && strncmp(scan_pdf, "xref", 4) == 0) {
+                if (xref_table .item == ITEM_NULL && strncmp(scan_pdf, "xref", 4) == 0) {
                     // Check that it's a standalone keyword (not part of another word)
                     if (scan_pdf == pdf_string || isspace(*(scan_pdf - 1)) || *(scan_pdf - 1) == '\n' || *(scan_pdf - 1) == '\r') {
                         const char* xref_start = scan_pdf;
                         xref_table = parse_pdf_xref_table(input, &scan_pdf);
-                        if (xref_table != ITEM_ERROR) {
+                        if (xref_table .item != ITEM_ERROR) {
                             printf("Found and parsed xref table at offset %lld\n", (long long)(xref_start - pdf_string));
                         }
                         continue;
                     }
                 }
                 
-                if (trailer == ITEM_NULL && strncmp(scan_pdf, "trailer", 7) == 0) {
+                if (trailer .item == ITEM_NULL && strncmp(scan_pdf, "trailer", 7) == 0) {
                     // Check that it's a standalone keyword
                     if (scan_pdf == pdf_string || isspace(*(scan_pdf - 1)) || *(scan_pdf - 1) == '\n' || *(scan_pdf - 1) == '\r') {
                         const char* trailer_start = scan_pdf;
                         trailer = parse_pdf_trailer(input, &scan_pdf);
-                        if (trailer != ITEM_ERROR) {
+                        if (trailer .item != ITEM_ERROR) {
                             printf("Found and parsed trailer at offset %lld\n", (long long)(trailer_start - pdf_string));
                         }
-                        if (trailer != ITEM_ERROR) break; // Done after finding trailer
+                        if (trailer .item != ITEM_ERROR) break; // Done after finding trailer
                     }
                 }
                 
@@ -1264,12 +1264,12 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         long xref_offset = strtol(scan_pdf, (char**)&scan_pdf, 10);
                         printf("Found startxref pointing to offset %ld\n", xref_offset);
                         // If we haven't found xref yet, try looking at that specific offset
-                        if (xref_table == ITEM_NULL && xref_offset > 0 && xref_offset < scan_limit) {
+                        if (xref_table .item == ITEM_NULL && xref_offset > 0 && xref_offset < scan_limit) {
                             const char* xref_pos = pdf_string + xref_offset;
                             if (strncmp(xref_pos, "xref", 4) == 0) {
                                 const char* xref_parse_pos = xref_pos;
                                 xref_table = parse_pdf_xref_table(input, &xref_parse_pos);
-                                if (xref_table != ITEM_ERROR) {
+                                if (xref_table .item != ITEM_ERROR) {
                                     printf("Successfully parsed xref table from startxref offset\n");
                                 }
                             }
@@ -1298,33 +1298,33 @@ void parse_pdf(Input* input, const char* pdf_string) {
             strcpy(objects_key->chars, "objects");
             objects_key->len = 7;
             objects_key->ref_cnt = 0;
-            LambdaItem objects_item = {.item = (Item)objects};
+            Item objects_item = {.item = (Item)objects};
             map_put(pdf_info, objects_key, objects_item, input);
         }
     }
     
     // Store xref table if found
-    if (xref_table != ITEM_NULL) {
+    if (xref_table .item != ITEM_NULL) {
         String* xref_key;
         err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&xref_key);
         if (err == MEM_POOL_ERR_OK) {
             strcpy(xref_key->chars, "xref_table");
             xref_key->len = 10;
             xref_key->ref_cnt = 0;
-            LambdaItem xref_item = {.item = xref_table};
+            Item xref_item = {.item = xref_table};
             map_put(pdf_info, xref_key, xref_item, input);
         }
     }
     
     // Store trailer if found
-    if (trailer != ITEM_NULL) {
+    if (trailer .item != ITEM_NULL) {
         String* trailer_key;
         err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&trailer_key);
         if (err == MEM_POOL_ERR_OK) {
             strcpy(trailer_key->chars, "trailer");
             trailer_key->len = 7;
             trailer_key->ref_cnt = 0;
-            LambdaItem trailer_item = {.item = trailer};
+            Item trailer_item = {.item = trailer};
             map_put(pdf_info, trailer_key, trailer_item, input);
         }
     }
@@ -1352,7 +1352,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_count_val);
                     if (err == MEM_POOL_ERR_OK) {
                         *obj_count_val = objects ? (double)objects->length : 0.0;
-                        LambdaItem obj_count_item = {.item = d2it(obj_count_val)};
+                        Item obj_count_item = {.item = d2it(obj_count_val)};
                         map_put(stats_map, obj_count_key, obj_count_item, input);
                     }
                 }
@@ -1364,7 +1364,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     strcpy(has_xref_key->chars, "has_xref");
                     has_xref_key->len = 8;
                     has_xref_key->ref_cnt = 0;
-                    LambdaItem has_xref_item = {.item = b2it(xref_table != ITEM_NULL)};
+                    Item has_xref_item = {.item = b2it(xref_table .item != ITEM_NULL)};
                     map_put(stats_map, has_xref_key, has_xref_item, input);
                 }
                 
@@ -1375,7 +1375,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     strcpy(has_trailer_key->chars, "has_trailer");
                     has_trailer_key->len = 11;
                     has_trailer_key->ref_cnt = 0;
-                    LambdaItem has_trailer_item = {.item = b2it(trailer != ITEM_NULL)};
+                    Item has_trailer_item = {.item = b2it(trailer .item != ITEM_NULL)};
                     map_put(stats_map, has_trailer_key, has_trailer_item, input);
                 }
                 
@@ -1405,7 +1405,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     err = pool_variable_alloc(input->pool, sizeof(double), (void**)&stream_count_val);
                     if (err == MEM_POOL_ERR_OK) {
                         *stream_count_val = (double)stream_count;
-                        LambdaItem stream_count_item = {.item = d2it(stream_count_val)};
+                        Item stream_count_item = {.item = d2it(stream_count_val)};
                         map_put(stats_map, stream_count_key, stream_count_item, input);
                     }
                 }
@@ -1422,26 +1422,26 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     Array* features_array = array_pooled(input->pool);
                     if (features_array) {
                         // Add features based on what we've found
-                        if (xref_table != ITEM_NULL) {
+                        if (xref_table .item != ITEM_NULL) {
                             String* xref_feature;
                             err = pool_variable_alloc(input->pool, sizeof(String) + 20, (void**)&xref_feature);
                             if (err == MEM_POOL_ERR_OK) {
                                 strcpy(xref_feature->chars, "cross_reference_table");
                                 xref_feature->len = 19;
                                 xref_feature->ref_cnt = 0;
-                                LambdaItem xref_feature_item = {.item = s2it(xref_feature)};
+                                Item xref_feature_item = {.item = s2it(xref_feature)};
                                 array_append(features_array, xref_feature_item, input->pool);
                             }
                         }
                         
-                        if (trailer != ITEM_NULL) {
+                        if (trailer .item != ITEM_NULL) {
                             String* trailer_feature;
                             err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&trailer_feature);
                             if (err == MEM_POOL_ERR_OK) {
                                 strcpy(trailer_feature->chars, "trailer");
                                 trailer_feature->len = 7;
                                 trailer_feature->ref_cnt = 0;
-                                LambdaItem trailer_feature_item = {.item = s2it(trailer_feature)};
+                                Item trailer_feature_item = {.item = s2it(trailer_feature)};
                                 array_append(features_array, trailer_feature_item, input->pool);
                             }
                         }
@@ -1452,17 +1452,17 @@ void parse_pdf(Input* input, const char* pdf_string) {
                             strcpy(objects_feature->chars, "indirect_objects");
                             objects_feature->len = 15;
                             objects_feature->ref_cnt = 0;
-                            LambdaItem objects_feature_item = {.item = s2it(objects_feature)};
+                            Item objects_feature_item = {.item = s2it(objects_feature)};
                             array_append(features_array, objects_feature_item, input->pool);
                         }
                         
-                        LambdaItem features_item = {.item = (Item)features_array};
+                        Item features_item = {.item = (Item)features_array};
                         map_put(stats_map, features_key, features_item, input);
                     }
                 }
             }
             
-            LambdaItem stats_item = {.item = (Item)stats_map};
+            Item stats_item = {.item = (Item)stats_map};
             map_put(pdf_info, stats_key, stats_item, input);
         }
     }

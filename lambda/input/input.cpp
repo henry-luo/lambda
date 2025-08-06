@@ -52,7 +52,7 @@ ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id
 }
 
 extern TypeMap EmptyMap;
-void map_put(Map* mp, String* key, LambdaItem value, Input *input) {
+void map_put(Map* mp, String* key, Item value, Input *input) {
     TypeMap *map_type = (TypeMap*)mp->type;
     if (map_type == &EmptyMap) {
         // alloc map type and data chunk
@@ -137,7 +137,7 @@ Element* input_create_element(Input *input, const char* tag_name) {
 }
 
 extern TypeElmt EmptyElmt;
-void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* pool) {
+void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
     assert(elmt->type != &EmptyElmt);
     TypeId type_id = get_type_id(value);
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
@@ -193,14 +193,14 @@ void elmt_put(Element* elmt, String* key, LambdaItem value, VariableMemPool* poo
 }
 
 Input* input_new(lxb_url_t* abs_url) {
-    Input* input = malloc(sizeof(Input));
+    Input* input = (Input*)malloc(sizeof(Input));
     input->url = abs_url;
     size_t grow_size = 1024;  // 1k
     size_t tolerance_percent = 20;
     MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
     if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
     input->type_list = arraylist_new(16);
-    input->root = ITEM_NULL;
+    input->root = {.item = ITEM_NULL};
     return input;
 }
 
@@ -299,7 +299,7 @@ char* input_trim_whitespace(const char* str) {
     
     // Create trimmed copy
     int len = end - str + 1;
-    char* result = malloc(len + 1);
+    char* result = (char*)malloc(len + 1);
     strncpy(result, str, len);
     result[len] = '\0';
     
@@ -335,7 +335,7 @@ char** input_split_lines(const char* text, int* line_count) {
     }
     
     // Allocate array
-    char** lines = malloc(*line_count * sizeof(char*));
+    char** lines = (char**)malloc(*line_count * sizeof(char*));
     
     // Split into lines
     int line_index = 0;
@@ -345,7 +345,7 @@ char** input_split_lines(const char* text, int* line_count) {
     while (*ptr && line_index < *line_count) {
         if (*ptr == '\n') {
             int len = ptr - line_start;
-            lines[line_index] = malloc(len + 1);
+            lines[line_index] = (char*)malloc(len + 1);
             strncpy(lines[line_index], line_start, len);
             lines[line_index][len] = '\0';
             line_index++;
@@ -357,7 +357,7 @@ char** input_split_lines(const char* text, int* line_count) {
     // Handle last line if it doesn't end with newline
     if (line_index < *line_count && line_start < ptr) {
         int len = ptr - line_start;
-        lines[line_index] = malloc(len + 1);
+        lines[line_index] = (char*)malloc(len + 1);
         strncpy(lines[line_index], line_start, len);
         lines[line_index][len] = '\0';
         line_index++;
@@ -382,7 +382,7 @@ void input_add_attribute_to_element(Input *input, Element* element, const char* 
     String* key = input_create_string(input, attr_name);
     String* value = input_create_string(input, attr_value);
     if (!key || !value) return;
-    LambdaItem lambda_value = (LambdaItem)s2it(value);
+    Item lambda_value = {.item = s2it(value)};
     elmt_put(element, key, lambda_value, input->pool);
 }
 
@@ -390,7 +390,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     // Create key string
     String* key = input_create_string(input, attr_name);
     if (!key) return;
-    elmt_put(element, key, (LambdaItem)attr_value, input->pool);
+    elmt_put(element, key, attr_value, input->pool);
 }
 
 Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor) {
@@ -401,7 +401,7 @@ Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String*
         // Auto-detect MIME type
         MimeDetector* detector = mime_detector_init();
         if (detector) {
-            const char* detected_mime = detect_mime_type(detector, abs_url->path.str.data, source, strlen(source));
+            const char* detected_mime = detect_mime_type(detector, (const char*)abs_url->path.str.data, source, strlen(source));
             if (detected_mime) {
                 effective_type = mime_to_parser_type(detected_mime);
                 printf("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
@@ -426,7 +426,7 @@ Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String*
         String *str = (String*)malloc(sizeof(String) + strlen(source) + 1);
         str->len = strlen(source);  str->ref_cnt = 0;
         strcpy(str->chars, source);
-        input->root = s2it(str);
+        input->root = {.item = s2it(str)};
     }
     else {
         input = input_new(abs_url);

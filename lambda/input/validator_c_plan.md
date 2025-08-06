@@ -258,7 +258,7 @@ ValidationResult* validate_citations(Item document, ValidationContext* context) 
     ValidationResult* result = create_validation_result(context->pool);
     
     // Extract document structure (reuse existing item access functions)
-    if (get_type_id((LambdaItem){.item = document}) != LMD_TYPE_ELEMENT) {
+    if (get_type_id(document) != LMD_TYPE_ELEMENT) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected document element", 
             context->path, context->pool));

@@ -225,13 +225,13 @@ static bool is_grid_table_line(const char* line) {
 }
 
 static Item parse_heading(Input *input, char** lines, int* current_line, int total_lines) {
-    if (*current_line >= total_lines - 1) return ITEM_NULL;
+    if (*current_line >= total_lines - 1) return {.item = ITEM_NULL};
     
     const char* title_line = lines[*current_line];
     const char* underline = lines[*current_line + 1];
     
     char marker;
-    if (!is_heading_underline(underline, &marker)) return ITEM_NULL;
+    if (!is_heading_underline(underline, &marker)) return {.item = ITEM_NULL};
     
     // determine heading level based on marker
     int level = 1;
@@ -249,7 +249,7 @@ static Item parse_heading(Input *input, char** lines, int* current_line, int tot
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", level);
     Element* header = create_rst_element(input, tag_name);
-    if (!header) return ITEM_NULL;
+    if (!header) return {.item = ITEM_NULL};
     
     // Add level attribute as required by PandocSchema
     char level_str[10];
@@ -260,7 +260,7 @@ static Item parse_heading(Input *input, char** lines, int* current_line, int tot
     char* content = trim_whitespace(title_line);
     if (content && strlen(content) > 0) {
         Item text_content = parse_inline_content(input, content);
-        if (text_content != ITEM_NULL) {
+        if (text_content .item != ITEM_NULL) {
             list_push((List*)header, text_content);
             ((TypeElmt*)header->type)->content_length++;
         }
@@ -277,10 +277,10 @@ static Item parse_transition(Input *input) {
 }
 
 static Item parse_bullet_list(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_bullet_list_item(lines[*current_line])) return ITEM_NULL;
+    if (!is_bullet_list_item(lines[*current_line])) return {.item = ITEM_NULL};
     
     Element* list = create_rst_element(input, "ul");
-    if (!list) return ITEM_NULL;
+    if (!list) return {.item = ITEM_NULL};
     
     // Add bullet-style attribute according to PandocSchema
     char bullet_char = lines[*current_line][count_leading_spaces(lines[*current_line])];
@@ -311,7 +311,7 @@ static Item parse_bullet_list(Input *input, char** lines, int* current_line, int
             Element* paragraph = create_rst_element(input, "p");
             if (paragraph) {
                 Item text_content = parse_inline_content(input, content);
-                if (text_content != ITEM_NULL) {
+                if (text_content .item != ITEM_NULL) {
                     list_push((List*)paragraph, text_content);
                     ((TypeElmt*)paragraph->type)->content_length++;
                 }
@@ -340,7 +340,7 @@ static Item parse_bullet_list(Input *input, char** lines, int* current_line, int
                 char* continued = trim_whitespace(next_line);
                 if (continued && strlen(continued) > 0) {
                     Item continued_content = parse_inline_content(input, continued);
-                    if (continued_content != ITEM_NULL) {
+                    if (continued_content .item != ITEM_NULL) {
                         list_push((List*)list_item, continued_content);
                         ((TypeElmt*)list_item->type)->content_length++;
                     }
@@ -360,10 +360,10 @@ static Item parse_enumerated_list(Input *input, char** lines, int* current_line,
     char enum_type;
     int number;
     
-    if (!is_enumerated_list_item(lines[*current_line], &enum_type, &number)) return ITEM_NULL;
+    if (!is_enumerated_list_item(lines[*current_line], &enum_type, &number)) return {.item = ITEM_NULL};
     
     Element* list = create_rst_element(input, "ol");
-    if (!list) return ITEM_NULL;
+    if (!list) return {.item = ITEM_NULL};
     
     // Add attributes according to PandocSchema
     char start_str[20];
@@ -432,7 +432,7 @@ static Item parse_enumerated_list(Input *input, char** lines, int* current_line,
             Element* paragraph = create_rst_element(input, "p");
             if (paragraph) {
                 Item text_content = parse_inline_content(input, content);
-                if (text_content != ITEM_NULL) {
+                if (text_content .item != ITEM_NULL) {
                     list_push((List*)paragraph, text_content);
                     ((TypeElmt*)paragraph->type)->content_length++;
                 }
@@ -452,10 +452,10 @@ static Item parse_enumerated_list(Input *input, char** lines, int* current_line,
 }
 
 static Item parse_definition_list(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_definition_list_item(lines[*current_line])) return ITEM_NULL;
+    if (!is_definition_list_item(lines[*current_line])) return {.item = ITEM_NULL};
     
     Element* def_list = create_rst_element(input, "dl");
-    if (!def_list) return ITEM_NULL;
+    if (!def_list) return {.item = ITEM_NULL};
     
     while (*current_line < total_lines && is_definition_list_item(lines[*current_line])) {
         const char* term_line = lines[*current_line];
@@ -467,7 +467,7 @@ static Item parse_definition_list(Input *input, char** lines, int* current_line,
         char* term_content = trim_whitespace(term_line);
         if (term_content && strlen(term_content) > 0) {
             Item term_text = parse_inline_content(input, term_content);
-            if (term_text != ITEM_NULL) {
+            if (term_text .item != ITEM_NULL) {
                 list_push((List*)dt, term_text);
                 ((TypeElmt*)dt->type)->content_length++;
             }
@@ -490,7 +490,7 @@ static Item parse_definition_list(Input *input, char** lines, int* current_line,
             char* def_content = trim_whitespace(def_line);
             if (def_content && strlen(def_content) > 0) {
                 Item def_text = parse_inline_content(input, def_content);
-                if (def_text != ITEM_NULL) {
+                if (def_text .item != ITEM_NULL) {
                     list_push((List*)dd, def_text);
                     ((TypeElmt*)dd->type)->content_length++;
                 }
@@ -521,12 +521,12 @@ static Item parse_literal_block(Input *input, char** lines, int* current_line, i
         ends_with_double_colon = len >= 2 && trimmed[len-2] == ':' && trimmed[len-1] == ':';
         free(trimmed);
         
-        if (!ends_with_double_colon) return ITEM_NULL;
+        if (!ends_with_double_colon) return {.item = ITEM_NULL};
     }
     
     // Create code element directly (following updated schema - no pre wrapper)
     Element* code_block = create_rst_element(input, "code");
-    if (!code_block) return ITEM_NULL;
+    if (!code_block) return {.item = ITEM_NULL};
     
     (*current_line)++;
     
@@ -591,10 +591,10 @@ static Item parse_literal_block(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_comment(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_comment_line(lines[*current_line])) return ITEM_NULL;
+    if (!is_comment_line(lines[*current_line])) return {.item = ITEM_NULL};
     
     Element* comment = create_rst_element(input, "comment");
-    if (!comment) return ITEM_NULL;
+    if (!comment) return {.item = ITEM_NULL};
     
     const char* line = lines[*current_line];
     int spaces = count_leading_spaces(line);
@@ -616,7 +616,7 @@ static Item parse_comment(Input *input, char** lines, int* current_line, int tot
 }
 
 static Item parse_directive(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_directive_line(lines[*current_line])) return ITEM_NULL;
+    if (!is_directive_line(lines[*current_line])) return {.item = ITEM_NULL};
     
     const char* line = lines[*current_line];
     int spaces = count_leading_spaces(line);
@@ -642,7 +642,7 @@ static Item parse_directive(Input *input, char** lines, int* current_line, int t
     Element* directive = create_rst_element(input, "directive");
     if (!directive) {
         free(directive_name);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     add_attribute_to_element(input, directive, "name", directive_name);
@@ -674,7 +674,7 @@ static Item parse_directive(Input *input, char** lines, int* current_line, int t
         char* content = trim_whitespace(content_line);
         if (content && strlen(content) > 0) {
             Item content_item = parse_inline_content(input, content);
-            if (content_item != ITEM_NULL) {
+            if (content_item .item != ITEM_NULL) {
                 list_push((List*)directive, content_item);
                 ((TypeElmt*)directive->type)->content_length++;
             }
@@ -688,7 +688,7 @@ static Item parse_directive(Input *input, char** lines, int* current_line, int t
 }
 
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_table_separator(lines[*current_line])) return ITEM_NULL;
+    if (!is_table_separator(lines[*current_line])) return {.item = ITEM_NULL};
     
     // simple table format:
     // ====== ====== ======
@@ -698,7 +698,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     // ====== ====== ======
     
     Element* table = create_rst_element(input, "table");
-    if (!table) return ITEM_NULL;
+    if (!table) return {.item = ITEM_NULL};
     
     (*current_line)++; // skip first separator
     
@@ -722,7 +722,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                 Element* th = create_rst_element(input, "th");
                 if (th) {
                     Item cell_content = parse_inline_content(input, token);
-                    if (cell_content != ITEM_NULL) {
+                    if (cell_content .item != ITEM_NULL) {
                         list_push((List*)th, cell_content);
                         ((TypeElmt*)th->type)->content_length++;
                     }
@@ -770,7 +770,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                     Element* td = create_rst_element(input, "td");
                     if (td) {
                         Item cell_content = parse_inline_content(input, token);
-                        if (cell_content != ITEM_NULL) {
+                        if (cell_content .item != ITEM_NULL) {
                             list_push((List*)td, cell_content);
                             ((TypeElmt*)td->type)->content_length++;
                         }
@@ -807,17 +807,17 @@ static Item parse_paragraph(Input *input, const char* line) {
     char* content = trim_whitespace(line);
     if (!content || strlen(content) == 0) {
         free(content);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* paragraph = create_rst_element(input, "p");
     if (!paragraph) {
         free(content);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Item text_content = parse_inline_content(input, content);
-    if (text_content != ITEM_NULL) {
+    if (text_content .item != ITEM_NULL) {
         list_push((List*)paragraph, text_content);
         ((TypeElmt*)paragraph->type)->content_length++;
     }
@@ -828,7 +828,7 @@ static Item parse_paragraph(Input *input, const char* line) {
 
 // inline parsing functions
 static Item parse_emphasis(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '*') return ITEM_NULL;
+    if (text[*pos] != '*') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     int star_count = 0;
@@ -839,7 +839,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos) {
         (*pos)++;
     }
     
-    if (star_count == 0) return ITEM_NULL;
+    if (star_count == 0) return {.item = ITEM_NULL};
     
     int content_start = *pos;
     int content_end = -1;
@@ -867,13 +867,13 @@ static Item parse_emphasis(Input *input, const char* text, int* pos) {
     if (content_end == -1) {
         // no closing marker found, revert
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // create element
     const char* tag_name = (star_count >= 2) ? "strong" : "em";
     Element* emphasis_elem = create_rst_element(input, tag_name);
-    if (!emphasis_elem) return ITEM_NULL;
+    if (!emphasis_elem) return {.item = ITEM_NULL};
     
     // extract content between markers
     int content_len = content_end - content_start;
@@ -883,7 +883,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos) {
     
     if (strlen(content) > 0) {
         Item text_content = parse_inline_content(input, content);
-        if (text_content != ITEM_NULL) {
+        if (text_content .item != ITEM_NULL) {
             list_push((List*)emphasis_elem, text_content);
             ((TypeElmt*)emphasis_elem->type)->content_length++;
         }
@@ -894,7 +894,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_literal(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '`' || text[*pos + 1] != '`') return ITEM_NULL;
+    if (text[*pos] != '`' || text[*pos + 1] != '`') return {.item = ITEM_NULL};
     
     int start_pos = *pos;
     *pos += 2; // skip opening ``
@@ -915,11 +915,11 @@ static Item parse_literal(Input *input, const char* text, int* pos) {
     if (content_end == -1) {
         // no closing marker found, revert
         *pos = start_pos;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     Element* code_elem = create_rst_element(input, "code");
-    if (!code_elem) return ITEM_NULL;
+    if (!code_elem) return {.item = ITEM_NULL};
     
     // extract content between markers
     int content_len = content_end - content_start;
@@ -938,7 +938,7 @@ static Item parse_literal(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_reference(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '_' || *pos == 0) return ITEM_NULL;
+    if (text[*pos] != '_' || *pos == 0) return {.item = ITEM_NULL};
     
     // find start of reference (work backwards)
     int ref_start = *pos - 1;
@@ -955,7 +955,7 @@ static Item parse_reference(Input *input, const char* text, int* pos) {
     Element* ref_elem = create_rst_element(input, "a");
     if (!ref_elem) {
         free(ref_text);
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     add_attribute_to_element(input, ref_elem, "href", ref_text);
@@ -973,7 +973,7 @@ static Item parse_reference(Input *input, const char* text, int* pos) {
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""));
     }
     
     int len = strlen(text);
@@ -981,7 +981,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // create a span to hold mixed content
     Element* span = create_rst_element(input, "span");
-    if (!span) return s2it(create_string(input, text));
+    if (!span) return {.item = s2it(create_string(input, text));
     
     StrBuf* text_buffer = strbuf_new_cap(256);
     
@@ -1002,7 +1002,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item emphasis = parse_emphasis(input, text, &pos);
-            if (emphasis != ITEM_NULL) {
+            if (emphasis .item != ITEM_NULL) {
                 list_push((List*)span, emphasis);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -1020,7 +1020,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item literal = parse_literal(input, text, &pos);
-            if (literal != ITEM_NULL) {
+            if (literal .item != ITEM_NULL) {
                 list_push((List*)span, literal);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -1038,7 +1038,7 @@ static Item parse_inline_content(Input *input, const char* text) {
             }
             
             Item reference = parse_reference(input, text, &pos);
-            if (reference != ITEM_NULL) {
+            if (reference .item != ITEM_NULL) {
                 list_push((List*)span, reference);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
@@ -1075,7 +1075,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     const char* line = lines[*current_line];
     
     if (!line || is_empty_line(line)) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // try heading (need to check next line for underline)
@@ -1117,7 +1117,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 static Item parse_rst_content(Input *input, char** lines, int line_count) {
     // Create the root document element according to schema
     Element* doc = create_rst_element(input, "doc");
-    if (!doc) return ITEM_NULL;
+    if (!doc) return {.item = ITEM_NULL};
     
     // Add version attribute to doc
     add_attribute_to_element(input, doc, "version", "1.0");
@@ -1149,7 +1149,7 @@ static Item parse_rst_content(Input *input, char** lines, int line_count) {
         
         Item element = parse_block_element(input, lines, &current_line, line_count);
         
-        if (element != ITEM_NULL) {
+        if (element .item != ITEM_NULL) {
             list_push((List*)body, element);
             ((TypeElmt*)body->type)->content_length++;
         } else {

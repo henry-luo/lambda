@@ -201,7 +201,7 @@ static Array* parse_color_table(Input *input, const char **rtf) {
                     color->blue = cw.parameter;
                 }
                 
-                LambdaItem color_item = {.item = (Item)color};
+                Item color_item = {.item = (Item)color};
                 array_append(colors, color_item, input->pool);
             }
         } else if (**rtf == ';') {
@@ -244,7 +244,7 @@ static Array* parse_font_table(Input *input, const char **rtf) {
                     (*rtf)++; // Skip semicolon
                 }
                 
-                LambdaItem font_item = {.item = (Item)font};
+                Item font_item = {.item = (Item)font};
                 array_append(fonts, font_item, input->pool);
             }
         } else {
@@ -263,19 +263,19 @@ static Map* parse_document_properties(Input *input, const char **rtf) {
         if (**rtf == '\\') {
             RTFControlWord cw = parse_control_word(input, rtf);
             if (cw.keyword) {
-                LambdaItem value;
+                Item value;
                 
                 if (cw.has_parameter) {
                     double *dval;
                     MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
                     if (err == MEM_POOL_ERR_OK) {
                         *dval = (double)cw.parameter;
-                        value = (LambdaItem)d2it(dval);
+                        value = d2it(dval);
                     } else {
-                        value = (LambdaItem)ITEM_NULL;
+                        value = ITEM_NULL;
                     }
                 } else {
-                    value = (LambdaItem)b2it(true);
+                    value = b2it(true);
                 }
                 map_put(props, cw.keyword, value, input);
             }
@@ -288,7 +288,7 @@ static Map* parse_document_properties(Input *input, const char **rtf) {
 
 static Item parse_rtf_group(Input *input, const char **rtf) {
     if (**rtf != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     (*rtf)++; // Skip opening brace
@@ -296,7 +296,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     
     // Create a group object (map)
     Map* group = map_pooled(input->pool);
-    if (!group) return ITEM_ERROR;
+    if (!group) return {.item = ITEM_ERROR};
     
     Array* content = array_pooled(input->pool);
     if (!content) return (Item)group;
@@ -312,7 +312,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                 if (strcmp(cw.keyword->chars, "colortbl") == 0) {
                     Array* colors = parse_color_table(input, rtf);
                     if (colors) {
-                        LambdaItem color_table = {.item = (Item)colors};
+                        Item color_table = {.item = (Item)colors};
                         
                         String* key;
                         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&key);
@@ -326,7 +326,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
                     Array* fonts = parse_font_table(input, rtf);
                     if (fonts) {
-                        LambdaItem font_table = {.item = (Item)fonts};
+                        Item font_table = {.item = (Item)fonts};
                         
                         String* key;
                         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&key);
@@ -339,18 +339,18 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                     }
                 } else {
                     // Store formatting information
-                    LambdaItem value;
+                    Item value;
                     if (cw.has_parameter) {
                         double *dval;
                         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
                         if (err == MEM_POOL_ERR_OK) {
                             *dval = (double)cw.parameter;
-                            value = (LambdaItem)d2it(dval);
+                            value = d2it(dval);
                         } else {
-                            value = (LambdaItem)ITEM_NULL;
+                            value = ITEM_NULL;
                         }
                     } else {
-                        value = (LambdaItem)b2it(true);
+                        value = b2it(true);
                     }
                     map_put(formatting, cw.keyword, value, input);
                 }
@@ -358,15 +358,15 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
         } else if (**rtf == '{') {
             // Nested group
             Item nested = parse_rtf_group(input, rtf);
-            if (nested != ITEM_ERROR && nested != ITEM_NULL) {
-                LambdaItem nested_item = {.item = nested};
+            if (nested .item != ITEM_ERROR && nested .item != ITEM_NULL) {
+                Item nested_item = {.item = nested};
                 array_append(content, nested_item, input->pool);
             }
         } else {
             // Text content
             String* text = parse_rtf_string(input, rtf, '{');
             if (text && text->len > 0) {
-                LambdaItem text_item = {.item = s2it(text)};
+                Item text_item = {.item = s2it(text)};
                 array_append(content, text_item, input->pool);
             }
         }
@@ -380,7 +380,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     
     // Add content and formatting to group
     if (content->length > 0) {
-        LambdaItem content_item = {.item = (Item)content};
+        Item content_item = {.item = (Item)content};
         
         String* content_key;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&content_key);
@@ -393,7 +393,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     }
     
     if (((TypeMap*)formatting->type)->length > 0) {
-        LambdaItem format_item = {.item = (Item)formatting};
+        Item format_item = {.item = (Item)formatting};
         
         String* format_key;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&format_key);
@@ -414,7 +414,7 @@ static Item parse_rtf_content(Input *input, const char **rtf) {
         return parse_rtf_group(input, rtf);
     }
     
-    return ITEM_ERROR;
+    return {.item = ITEM_ERROR};
 }
 
 void parse_rtf(Input* input, const char* rtf_string) {
@@ -427,14 +427,14 @@ void parse_rtf(Input* input, const char* rtf_string) {
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
         printf("Error: Invalid RTF format - must start with {\\rtf\n");
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
     // Create document root to hold all groups
     Array* document = array_pooled(input->pool);
     if (!document) {
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
@@ -445,8 +445,8 @@ void parse_rtf(Input* input, const char* rtf_string) {
         
         if (*rtf == '{') {
             Item group = parse_rtf_group(input, &rtf);
-            if (group != ITEM_ERROR && group != ITEM_NULL) {
-                LambdaItem group_item = {.item = group};
+            if (group .item != ITEM_ERROR && group .item != ITEM_NULL) {
+                Item group_item = {.item = group};
                 array_append(document, group_item, input->pool);
             }
         } else {

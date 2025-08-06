@@ -69,7 +69,7 @@ static Item parse_man_section_header(Input *input, const char* line) {
         content = line;
     }
     
-    if (!header) return ITEM_NULL;
+    if (!header) return {.item = ITEM_NULL};
     
     // Skip whitespace
     while (*content && *content == ' ') content++;
@@ -89,7 +89,7 @@ static Item parse_man_section_header(Input *input, const char* line) {
 
 static Item parse_man_paragraph(Input *input, const char* text) {
     Element* paragraph = create_man_element(input, "p");
-    if (!paragraph) return ITEM_NULL;
+    if (!paragraph) return {.item = ITEM_NULL};
     
     // Parse inline content
     Item inline_content = parse_man_inline(input, text);
@@ -101,7 +101,7 @@ static Item parse_man_paragraph(Input *input, const char* text) {
 
 static Item parse_man_formatted_text(Input *input, const char* line, const char* tag_name) {
     Element* element = create_man_element(input, tag_name);
-    if (!element) return ITEM_NULL;
+    if (!element) return {.item = ITEM_NULL};
     
     // Skip the directive and whitespace
     const char* content = line + 3; // Skip ".B " or ".I "
@@ -119,13 +119,13 @@ static Item parse_man_formatted_text(Input *input, const char* line, const char*
         if (trimmed_content) free(trimmed_content);
     }
     
-    return (Item)element;
+    return {.item = (uint64_t)element};
 }
 
 static Item parse_man_list_item(Input *input, char** lines, int* current_line, int total_lines) {
     const char* line = lines[*current_line];
     Element* list_item = create_man_element(input, "li");
-    if (!list_item) return ITEM_NULL;
+    if (!list_item) return {.item = ITEM_NULL};
     
     if (strncmp(line, ".IP", 3) == 0) {
         // Indented paragraph with optional tag
@@ -177,7 +177,7 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
         
         // Add content as paragraph
         Item content_item = parse_man_paragraph(input, content_line);
-        if (content_item != ITEM_NULL) {
+        if (content_item .item != ITEM_NULL) {
             list_push((List*)list_item, content_item);
             ((TypeElmt*)list_item->type)->content_length++;
         }
@@ -189,7 +189,7 @@ static Item parse_man_list_item(Input *input, char** lines, int* current_line, i
 }
 
 static Item parse_man_inline(Input *input, const char* text) {
-    if (!text || strlen(text) == 0) return ITEM_NULL;
+    if (!text || strlen(text) == 0) return {.item = ITEM_NULL};
     
     // Check if text contains any formatting characters (man pages use backslashes for formatting)
     bool has_formatting = false;
@@ -204,11 +204,11 @@ static Item parse_man_inline(Input *input, const char* text) {
     
     // If no formatting, just return the text as a string properly boxed as Item
     if (!has_formatting) {
-        return s2it(create_string(input, text));
+        return {.item = s2it(create_string(input, text));
     }
     
     Element* container = create_man_element(input, "span");
-    if (!container) return s2it(create_string(input, text));
+    if (!container) return {.item = s2it(create_string(input, text));
     
     const char* ptr = text;
     const char* start = text;
@@ -291,21 +291,21 @@ static Item parse_man_inline(Input *input, const char* text) {
     
     // If container is empty, return a simple string
     if (((TypeElmt*)container->type)->content_length == 0) {
-        return s2it(create_string(input, text));
+        return {.item = s2it(create_string(input, text));
     }
     
     return (Item)container;
 }
 
 static Item parse_man_block(Input *input, char** lines, int* current_line, int total_lines) {
-    if (*current_line >= total_lines) return ITEM_NULL;
+    if (*current_line >= total_lines) return {.item = ITEM_NULL};
     
     const char* line = lines[*current_line];
     
     // Skip empty lines
     if (is_empty_line(line)) {
         (*current_line)++;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Check for different block types
@@ -318,7 +318,7 @@ static Item parse_man_block(Input *input, char** lines, int* current_line, int t
     if (is_man_paragraph_break(line)) {
         // Just skip paragraph breaks - they're formatting hints
         (*current_line)++;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     if (is_man_bold_directive(line)) {
@@ -340,7 +340,7 @@ static Item parse_man_block(Input *input, char** lines, int* current_line, int t
     if (is_man_indent_directive(line)) {
         // Skip indent directives for now
         (*current_line)++;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Default: treat as paragraph if it's not a directive
@@ -352,13 +352,13 @@ static Item parse_man_block(Input *input, char** lines, int* current_line, int t
     
     // Skip unknown directives
     (*current_line)++;
-    return ITEM_NULL;
+    return {.item = ITEM_NULL};
 }
 
 static Item parse_man_content(Input *input, char** lines, int line_count) {
     // Create the root document element according to schema
     Element* doc = create_man_element(input, "doc");
-    if (!doc) return ITEM_NULL;
+    if (!doc) return {.item = ITEM_NULL};
     
     // Add version attribute to doc (required by schema)
     add_attribute_to_element(input, doc, "version", "1.0");
@@ -382,7 +382,7 @@ static Item parse_man_content(Input *input, char** lines, int line_count) {
     int current_line = 0;
     while (current_line < line_count) {
         Item block = parse_man_block(input, lines, &current_line, line_count);
-        if (block != ITEM_NULL) {
+        if (block .item != ITEM_NULL) {
             list_push((List*)body, block);
             ((TypeElmt*)body->type)->content_length++;
         }
@@ -400,7 +400,7 @@ static Item parse_man_content(Input *input, char** lines, int line_count) {
 
 void parse_man(Input* input, const char* man_string) {
     if (!input || !man_string) {
-        input->root = ITEM_NULL;
+        input->root = {.item = ITEM_NULL};
         return;
     }
     
@@ -412,7 +412,7 @@ void parse_man(Input* input, const char* man_string) {
     char** lines = split_lines(man_string, &line_count);
     
     if (!lines || line_count == 0) {
-        input->root = ITEM_NULL;
+        input->root = {.item = ITEM_NULL};
         return;
     }
     

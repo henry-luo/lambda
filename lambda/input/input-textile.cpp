@@ -105,7 +105,7 @@ static char* parse_textile_modifiers(const char* line, int* start_pos) {
             while (line[pos] && line[pos] != ' ') pos++;
             mod_len = pos - mod_start;
             if (mod_len > 0) {
-                modifiers = malloc(mod_len + 1);
+                modifiers = (char*)malloc(mod_len + 1);
                 strncpy(modifiers, line + mod_start, mod_len);
                 modifiers[mod_len] = '\0';
             }
@@ -123,12 +123,12 @@ static char* parse_textile_modifiers(const char* line, int* start_pos) {
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""))};
     }
     
     // Create a container element for mixed content
     Element* container = create_textile_element(input, "span");
-    if (!container) return ITEM_NULL;
+    if (!container) return {.item = ITEM_NULL};
     
     const char* ptr = text;
     const char* start = text;
@@ -143,22 +143,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add bold element
                 Element* bold = create_textile_element(input, "b");
-                char* bold_text = malloc(end - (ptr + 2) + 1);
+                char* bold_text = (char*)malloc(end - (ptr + 2) + 1);
                 strncpy(bold_text, ptr + 2, end - (ptr + 2));
                 bold_text[end - (ptr + 2)] = '\0';
                 String* bold_str = create_string(input, bold_text);
-                add_attribute_item_to_element(input, bold, "text", s2it(bold_str));
-                add_attribute_item_to_element(input, container, "bold", (Item)bold);
+                add_attribute_item_to_element(input, bold, "text", {.item = s2it(bold_str));
+                add_attribute_item_to_element(input, container, "bold", {.item = (uint64_t)bold});
                 free(bold_text);
                 
                 ptr = end + 2;
@@ -171,22 +171,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add strong element
                 Element* strong = create_textile_element(input, "strong");
-                char* strong_text = malloc(end - (ptr + 1) + 1);
+                char* strong_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(strong_text, ptr + 1, end - (ptr + 1));
                 strong_text[end - (ptr + 1)] = '\0';
                 String* strong_str = create_string(input, strong_text);
-                add_attribute_item_to_element(input, strong, "text", s2it(strong_str));
-                add_attribute_item_to_element(input, container, "strong", (Item)strong);
+                add_attribute_item_to_element(input, strong, "text", {.item = s2it(strong_str));
+                add_attribute_item_to_element(input, container, "strong", {.item = (uint64_t)strong});
                 free(strong_text);
                 
                 ptr = end + 1;
@@ -199,22 +199,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add italic element
                 Element* italic = create_textile_element(input, "i");
-                char* italic_text = malloc(end - (ptr + 2) + 1);
+                char* italic_text = (char*)malloc(end - (ptr + 2) + 1);
                 strncpy(italic_text, ptr + 2, end - (ptr + 2));
                 italic_text[end - (ptr + 2)] = '\0';
                 String* italic_str = create_string(input, italic_text);
-                add_attribute_item_to_element(input, italic, "text", s2it(italic_str));
-                add_attribute_item_to_element(input, container, "italic", (Item)italic);
+                add_attribute_item_to_element(input, italic, "text", {.item = s2it(italic_str));
+                add_attribute_item_to_element(input, container, "italic", {.item = (uint64_t)italic});
                 free(italic_text);
                 
                 ptr = end + 2;
@@ -227,22 +227,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add emphasis element
                 Element* em = create_textile_element(input, "em");
-                char* em_text = malloc(end - (ptr + 1) + 1);
+                char* em_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(em_text, ptr + 1, end - (ptr + 1));
                 em_text[end - (ptr + 1)] = '\0';
                 String* em_str = create_string(input, em_text);
-                add_attribute_item_to_element(input, em, "text", s2it(em_str));
-                add_attribute_item_to_element(input, container, "emphasis", (Item)em);
+                add_attribute_item_to_element(input, em, "text", {.item = s2it(em_str));
+                add_attribute_item_to_element(input, container, "emphasis", {.item = (uint64_t)em});
                 free(em_text);
                 
                 ptr = end + 1;
@@ -255,22 +255,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add code element
                 Element* code = create_textile_element(input, "code");
-                char* code_text = malloc(end - (ptr + 1) + 1);
+                char* code_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(code_text, ptr + 1, end - (ptr + 1));
                 code_text[end - (ptr + 1)] = '\0';
                 String* code_str = create_string(input, code_text);
-                add_attribute_item_to_element(input, code, "text", s2it(code_str));
-                add_attribute_item_to_element(input, container, "code", (Item)code);
+                add_attribute_item_to_element(input, code, "text", {.item = s2it(code_str));
+                add_attribute_item_to_element(input, container, "code", {.item = (uint64_t)code});
                 free(code_text);
                 
                 ptr = end + 1;
@@ -283,22 +283,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add superscript element
                 Element* sup = create_textile_element(input, "sup");
-                char* sup_text = malloc(end - (ptr + 1) + 1);
+                char* sup_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(sup_text, ptr + 1, end - (ptr + 1));
                 sup_text[end - (ptr + 1)] = '\0';
                 String* sup_str = create_string(input, sup_text);
-                add_attribute_item_to_element(input, sup, "text", s2it(sup_str));
-                add_attribute_item_to_element(input, container, "superscript", (Item)sup);
+                add_attribute_item_to_element(input, sup, "text", {.item = s2it(sup_str));
+                add_attribute_item_to_element(input, container, "superscript", {.item = (uint64_t)sup});
                 free(sup_text);
                 
                 ptr = end + 1;
@@ -311,22 +311,22 @@ static Item parse_inline_content(Input *input, const char* text) {
             if (end) {
                 // Add preceding text
                 if (ptr > start) {
-                    char* before = malloc(ptr - start + 1);
+                    char* before = (char*)malloc(ptr - start + 1);
                     strncpy(before, start, ptr - start);
                     before[ptr - start] = '\0';
                     String* before_str = create_string(input, before);
-                    add_attribute_item_to_element(input, container, "text", s2it(before_str));
+                    add_attribute_item_to_element(input, container, "text", {.item = s2it(before_str));
                     free(before);
                 }
                 
                 // Add subscript element
                 Element* sub = create_textile_element(input, "sub");
-                char* sub_text = malloc(end - (ptr + 1) + 1);
+                char* sub_text = (char*)malloc(end - (ptr + 1) + 1);
                 strncpy(sub_text, ptr + 1, end - (ptr + 1));
                 sub_text[end - (ptr + 1)] = '\0';
                 String* sub_str = create_string(input, sub_text);
-                add_attribute_item_to_element(input, sub, "text", s2it(sub_str));
-                add_attribute_item_to_element(input, container, "subscript", (Item)sub);
+                add_attribute_item_to_element(input, sub, "text", {.item = s2it(sub_str));
+                add_attribute_item_to_element(input, container, "subscript", {.item = (uint64_t)sub});
                 free(sub_text);
                 
                 ptr = end + 1;
@@ -342,19 +342,19 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // Add any remaining text
     if (ptr > start) {
-        char* remaining = malloc(ptr - start + 1);
+        char* remaining = (char*)malloc(ptr - start + 1);
         strncpy(remaining, start, ptr - start);
         remaining[ptr - start] = '\0';
         String* remaining_str = create_string(input, remaining);
-        add_attribute_item_to_element(input, container, "text", s2it(remaining_str));
+        add_attribute_item_to_element(input, container, "text", {.item = s2it(remaining_str));
         free(remaining);
     }
     
-    return (Item)container;
+    return {.item = (uint64_t)container};
 }
 
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines) {
-    if (*current_line >= total_lines) return ITEM_NULL;
+    if (*current_line >= total_lines) return {.item = ITEM_NULL};
     
     const char* line = lines[*current_line];
     int level;
@@ -363,13 +363,13 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     // Skip empty lines
     if (is_empty_line(line)) {
         (*current_line)++;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Check for headings (h1. to h6.)
     if (is_textile_heading(line, &level)) {
         Element* heading = create_textile_element(input, "heading");
-        if (!heading) return ITEM_NULL;
+        if (!heading) return {.item = ITEM_NULL};
         
         add_attribute_to_element(input, heading, "level", (level == 1) ? "1" : 
                                 (level == 2) ? "2" : (level == 3) ? "3" : 
@@ -388,13 +388,13 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
         add_attribute_item_to_element(input, heading, "content", inline_content);
         
         (*current_line)++;
-        return (Item)heading;
+        return {.item = (uint64_t)heading};
     }
     
     // Check for block code (bc. or bc..)
     if (is_textile_block_code(line)) {
         Element* code_block = create_textile_element(input, "code_block");
-        if (!code_block) return ITEM_NULL;
+        if (!code_block) return {.item = ITEM_NULL};
         
         bool extended = strncmp(line, "bc..", 4) == 0;
         add_attribute_to_element(input, code_block, "extended", extended ? "true" : "false");
@@ -409,7 +409,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
         
         const char* content = line + start_pos;
         String* code_content = create_string(input, content);
-        add_attribute_item_to_element(input, code_block, "content", s2it(code_content));
+        add_attribute_item_to_element(input, code_block, "content", {.item = s2it(code_content));
         
         (*current_line)++;
         
@@ -426,18 +426,18 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
                 }
                 
                 String* line_content = create_string(input, next_line);
-                add_attribute_item_to_element(input, code_block, "line", s2it(line_content));
+                add_attribute_item_to_element(input, code_block, "line", {.item = s2it(line_content));
                 (*current_line)++;
             }
         }
         
-        return (Item)code_block;
+        return {.item = (uint64_t)Item};
     }
     
     // Check for block quotes (bq. or bq..)
     if (is_textile_block_quote(line)) {
         Element* quote_block = create_textile_element(input, "blockquote");
-        if (!quote_block) return ITEM_NULL;
+        if (!quote_block) return {.item = ITEM_NULL};
         
         bool extended = strncmp(line, "bq..", 4) == 0;
         add_attribute_to_element(input, quote_block, "extended", extended ? "true" : "false");
@@ -474,13 +474,13 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
             }
         }
         
-        return (Item)quote_block;
+        return {.item = (uint64_t)Item};
     }
     
     // Check for pre-formatted text (pre.)
     if (is_textile_pre(line)) {
         Element* pre_block = create_textile_element(input, "pre");
-        if (!pre_block) return ITEM_NULL;
+        if (!pre_block) return {.item = ITEM_NULL};
         
         // Parse modifiers and extract content
         int start_pos = 0;
@@ -492,7 +492,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
         
         const char* content = line + start_pos;
         String* pre_content = create_string(input, content);
-        add_attribute_item_to_element(input, pre_block, "content", s2it(pre_content));
+        add_attribute_item_to_element(input, pre_block, "content", {.item = s2it(pre_content));
         
         (*current_line)++;
         return (Item)pre_block;
@@ -501,11 +501,11 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     // Check for comments (###.)
     if (is_textile_comment(line)) {
         Element* comment = create_textile_element(input, "comment");
-        if (!comment) return ITEM_NULL;
+        if (!comment) return {.item = ITEM_NULL};
         
         const char* content = line + 4; // Skip "###."
         String* comment_content = create_string(input, content);
-        add_attribute_item_to_element(input, comment, "content", s2it(comment_content));
+        add_attribute_item_to_element(input, comment, "content", {.item = s2it(comment_content));
         
         (*current_line)++;
         return (Item)comment;
@@ -514,14 +514,14 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     // Check for notextile blocks
     if (is_textile_notextile(line)) {
         Element* notextile = create_textile_element(input, "notextile");
-        if (!notextile) return ITEM_NULL;
+        if (!notextile) return {.item = ITEM_NULL};
         
         bool extended = strncmp(line, "notextile..", 11) == 0;
         const char* content = extended ? line + 11 : line + 10;
         while (*content && isspace(*content)) content++;
         
         String* raw_content = create_string(input, content);
-        add_attribute_item_to_element(input, notextile, "content", s2it(raw_content));
+        add_attribute_item_to_element(input, notextile, "content", {.item = s2it(raw_content));
         add_attribute_to_element(input, notextile, "extended", extended ? "true" : "false");
         
         (*current_line)++;
@@ -531,7 +531,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     // Check for list items
     if (is_textile_list_item(line, &list_type)) {
         Element* list_item = create_textile_element(input, "list_item");
-        if (!list_item) return ITEM_NULL;
+        if (!list_item) return {.item = ITEM_NULL};
         
         const char* type_str = (list_type == '*') ? "bulleted" : 
                               (list_type == '#') ? "numbered" : 
@@ -549,12 +549,12 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
             const char* def_sep = strstr(content, ":=");
             if (def_sep) {
                 // Term
-                char* term = malloc(def_sep - content + 1);
+                char* term = (char*)malloc(def_sep - content + 1);
                 strncpy(term, content, def_sep - content);
                 term[def_sep - content] = '\0';
                 char* trimmed_term = trim_whitespace(term);
                 String* term_str = create_string(input, trimmed_term);
-                add_attribute_item_to_element(input, list_item, "term", s2it(term_str));
+                add_attribute_item_to_element(input, list_item, "term", {.item = s2it(term_str));
                 free(term);
                 free(trimmed_term);
                 
@@ -575,7 +575,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     
     // Default: treat as paragraph
     Element* paragraph = create_textile_element(input, "paragraph");
-    if (!paragraph) return ITEM_NULL;
+    if (!paragraph) return {.item = ITEM_NULL};
     
     // Check if it starts with "p." explicitly
     const char* content = line;
@@ -598,14 +598,14 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 
 static Item parse_textile_content(Input *input, char** lines, int line_count) {
     Element* document = create_textile_element(input, "document");
-    if (!document) return ITEM_NULL;
+    if (!document) return {.item = ITEM_NULL};
     
     add_attribute_to_element(input, document, "format", "textile");
     
     int current_line = 0;
     while (current_line < line_count) {
         Item block = parse_block_element(input, lines, &current_line, line_count);
-        if (block != ITEM_NULL) {
+        if (block .item != ITEM_NULL) {
             // Add block to document with a unique key
             char key[32];
             snprintf(key, sizeof(key), "block_%d", current_line);
@@ -630,7 +630,7 @@ void parse_textile(Input* input, const char* textile_string) {
     char** lines = split_lines(textile_string, &line_count);
     if (!lines) {
         // Create empty document
-        input->root = s2it(create_string(input, ""));
+        input->root = {.item = s2it(create_string(input, ""));
         return;
     }
     

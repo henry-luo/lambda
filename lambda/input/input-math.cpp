@@ -703,7 +703,7 @@ static Item parse_math_number(Input *input, const char **math) {
     
     if (sb->length <= sizeof(uint32_t)) {
         strbuf_full_reset(sb);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     String *num_string = (String*)sb->str;
@@ -745,10 +745,10 @@ static Item parse_math_identifier(Input *input, const char **math) {
     }
     
     // Check if we have valid content (same pattern as command parsing)
-    if (sb->length <= sizeof(uint32_t)) { strbuf_full_reset(sb);  return ITEM_ERROR; }
+    if (sb->length <= sizeof(uint32_t)) { strbuf_full_reset(sb);  return {.item = ITEM_ERROR}; }
 
     String *id_string = strbuf_to_string(sb);
-    Item symbol_item = y2it(id_string);
+    Item symbol_item = {.item = y2it(id_string)};
 
     // Check for prime notation after the identifier
     skip_math_whitespace(math);
@@ -794,7 +794,7 @@ static Item parse_math_identifier(Input *input, const char **math) {
         // Create derivative element
         Element* derivative_element = create_math_element(input, element_name);
         if (!derivative_element) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         // Add the base identifier as the first child
@@ -828,7 +828,7 @@ static Item parse_latex_frac(Input *input, const char **math) {
     // expect opening brace for numerator
     if (**math != '{') {
         printf("DEBUG: parse_latex_frac failed - expected '{', got '%c'\n", **math);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
@@ -837,14 +837,14 @@ static Item parse_latex_frac(Input *input, const char **math) {
     Item numerator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (numerator == ITEM_ERROR) {
         printf("DEBUG: Numerator parsing failed\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     printf("DEBUG: Numerator parsed successfully\n");
     
     // expect closing brace
     if (**math != '}') {
         printf("DEBUG: Expected '}' after numerator, got '%c'\n", **math);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
@@ -853,7 +853,7 @@ static Item parse_latex_frac(Input *input, const char **math) {
     // expect opening brace for denominator
     if (**math != '{') {
         printf("DEBUG: Expected '{' for denominator, got '%c'\n", **math);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
@@ -862,21 +862,21 @@ static Item parse_latex_frac(Input *input, const char **math) {
     Item denominator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (denominator == ITEM_ERROR) {
         printf("DEBUG: Denominator parsing failed\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     printf("DEBUG: Denominator parsed successfully\n");
     
     // expect closing brace
     if (**math != '}') {
         printf("DEBUG: Expected '}' after denominator, got '%c'\n", **math);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create fraction expression element
     Element* frac_element = create_math_element(input, "frac");
     if (!frac_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add numerator and denominator as children (no op attribute needed)
@@ -895,26 +895,26 @@ static Item parse_latex_sqrt(Input *input, const char **math) {
     
     // expect opening brace
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse expression inside sqrt
     Item inner_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (inner_expr == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create sqrt expression element
     Element* sqrt_element = create_math_element(input, "sqrt");
     if (!sqrt_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add inner expression as child (no op attribute needed)
@@ -936,25 +936,25 @@ static Item parse_latex_superscript(Input *input, const char **math, Item base) 
         (*math)++; // skip {
         exponent = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (exponent == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         if (**math != '}') {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         (*math)++; // skip }
     } else {
         // single character superscript ^x
         exponent = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         if (exponent == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
     }
     
     // create power expression element
     Element* pow_element = create_math_element(input, "pow");
     if (!pow_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add base and exponent as children (no op attribute needed)
@@ -977,25 +977,25 @@ static Item parse_latex_subscript(Input *input, const char **math, Item base) {
         (*math)++; // skip {
         subscript = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (subscript == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         if (**math != '}') {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         (*math)++; // skip }
     } else {
         // single character subscript _x
         subscript = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         if (subscript == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
     }
     
     // create subscript expression element
     Element* sub_element = create_math_element(input, "subscript");
     if (!sub_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add base and subscript as children (no op attribute needed)
@@ -1022,7 +1022,7 @@ static Item parse_latex_gather(Input *input, const char **math);
 // parse latex command starting with backslash
 static Item parse_latex_command(Input *input, const char **math) {
     if (**math != '\\') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Check for \begin{environment} syntax first
@@ -1084,7 +1084,7 @@ static Item parse_latex_command(Input *input, const char **math) {
     if (sb->length <= sizeof(uint32_t)) {
         strbuf_full_reset(sb);
         printf("ERROR: Empty or invalid LaTeX command\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     String *cmd_string = (String*)sb->str;
@@ -1248,7 +1248,7 @@ static Item parse_latex_command(Input *input, const char **math) {
     
     // Should never reach here
     strbuf_full_reset(sb);
-    return ITEM_ERROR;
+    return {.item = ITEM_ERROR};
 }
 
 // parse typst power expression with ^ operator  
@@ -1258,13 +1258,13 @@ static Item parse_typst_power(Input *input, const char **math, MathFlavor flavor
     
     Item exponent = parse_math_primary(input, math, flavor);
     if (exponent == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // create power expression element
     Element* pow_element = create_math_element(input, "pow");
     if (!pow_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add base and exponent as children (no op attribute needed)
@@ -1284,7 +1284,7 @@ static Item parse_typst_fraction(Input *input, const char **math, MathFlavor fla
     
     // Expect "frac("
     if (strncmp(*math, "frac(", 5) != 0) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     *math += 5; // skip "frac("
     
@@ -1293,14 +1293,14 @@ static Item parse_typst_fraction(Input *input, const char **math, MathFlavor fla
     // Parse numerator
     Item numerator = parse_math_expression(input, math, flavor);
     if (numerator == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
     
     // Expect comma
     if (**math != ',') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip comma
     
@@ -1309,21 +1309,21 @@ static Item parse_typst_fraction(Input *input, const char **math, MathFlavor fla
     // Parse denominator
     Item denominator = parse_math_expression(input, math, flavor);
     if (denominator == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
     
     // Expect closing parenthesis
     if (**math != ')') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip )
     
     // Create fraction element
     Element* frac_element = create_math_element(input, "frac");
     if (!frac_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     list_push((List*)frac_element, numerator);
@@ -1338,7 +1338,7 @@ static Item parse_typst_fraction(Input *input, const char **math, MathFlavor fla
 static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name) {
     // Expect opening parenthesis
     if (**math != '(') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip (
     
@@ -1347,7 +1347,7 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
     // Create function element
     Element* func_element = create_math_element(input, func_name);
     if (!func_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse arguments (comma-separated)
@@ -1357,10 +1357,10 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
             
             Item arg = parse_math_expression(input, math, flavor);
             if (arg == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
-            if (arg != ITEM_NULL) {
+            if (arg .item != ITEM_NULL) {
                 list_push((List*)func_element, arg);
             }
             
@@ -1376,7 +1376,7 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
     
     // Expect closing parenthesis
     if (**math != ')') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip )
     
@@ -1400,13 +1400,13 @@ static Item parse_ascii_power(Input *input, const char **math, MathFlavor flavor
     
     Item exponent = parse_math_primary(input, math, flavor);
     if (exponent == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // create power expression element
     Element* pow_element = create_math_element(input, "pow");
     if (!pow_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add base and exponent as children (no op attribute needed)
@@ -1424,7 +1424,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
     skip_math_whitespace(math);
     
     if (!**math) {
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     switch (flavor) {
@@ -1454,7 +1454,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     // Create function name copy
                     String* func_name_string = strbuf_to_string(sb);
                     if (!func_name_string) {
-                        return ITEM_ERROR;
+                        return {.item = ITEM_ERROR};
                     }
                     
                     strbuf_full_reset(sb);
@@ -1473,7 +1473,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 // Create a paren_group element to preserve grouping
                 Element* paren_element = create_math_element(input, "paren_group");
                 if (!paren_element) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 
                 // Add the expression as a child
@@ -1490,7 +1490,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 // Create inner product element
                 Element* inner_product_element = create_math_element(input, "inner_product");
                 if (!inner_product_element) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 
                 // Parse expressions inside the angle brackets
@@ -1499,10 +1499,10 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     
                     Item arg = parse_math_expression(input, math, flavor);
                     if (arg == ITEM_ERROR) {
-                        return ITEM_ERROR;
+                        return {.item = ITEM_ERROR};
                     }
                     
-                    if (arg != ITEM_NULL) {
+                    if (arg .item != ITEM_NULL) {
                         list_push((List*)inner_product_element, arg);
                     }
                     
@@ -1517,7 +1517,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 
                 // Expect closing angle bracket
                 if (**math != '>') {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 (*math)++; // skip >
                 
@@ -1535,11 +1535,11 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 // Create a bracket group element to preserve square bracket notation
                 Element* bracket_element = create_math_element(input, "bracket_group");
                 if (!bracket_element) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 
                 Item expr = parse_math_expression(input, math, flavor);
-                if (expr != ITEM_ERROR && expr != ITEM_NULL) {
+                if (expr .item != ITEM_ERROR && expr .item != ITEM_NULL) {
                     list_push((List*)bracket_element, expr);
                 }
                 
@@ -1578,7 +1578,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     
                     if (sb->length <= sizeof(uint32_t)) {
                         strbuf_full_reset(sb);
-                        return ITEM_ERROR;
+                        return {.item = ITEM_ERROR};
                     }
                     
                     String *func_string = (String*)sb->str;
@@ -1623,7 +1623,7 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                         const char* saved_pos = *math;
                         strbuf_full_reset(sb);
                         Item result = parse_function_call(input, math, flavor, func_name_copy);
-                        if (result != ITEM_ERROR) {
+                        if (result .item != ITEM_ERROR) {
                             return result;
                         } else {
                             // If function call parsing fails, restore position and treat as identifier
@@ -1646,14 +1646,14 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
             break;
     }
     
-    return ITEM_ERROR;
+    return {.item = ITEM_ERROR};
 }
 
 // parse binary operation - use operator name as element name
 static Item create_binary_expr(Input *input, const char* op_name, Item left, Item right) {
     Element* expr_element = create_math_element(input, op_name);
     if (!expr_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add operands as children (no op attribute needed)
@@ -1674,7 +1674,7 @@ static Item parse_math_expression(Input *input, const char **math, MathFlavor fl
 // parse relational expressions (=, <, >, leq, geq, etc.)
 static Item parse_relational_expression(Input *input, const char **math, MathFlavor flavor) {
     Item left = parse_addition_expression(input, math, flavor);
-    if (left == ITEM_ERROR || left == ITEM_NULL) {
+    if (left == ITEM_ERROR || left .item == ITEM_NULL) {
         return left;
     }
     
@@ -1755,12 +1755,12 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         
         Item right = parse_addition_expression(input, math, flavor);
         if (right == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         left = create_binary_expr(input, op_name, left, right);
         if (left == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
@@ -1779,14 +1779,14 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
         skip_math_whitespace(math);
         
         Item operand = parse_multiplication_expression(input, math, flavor);
-        if (operand == ITEM_ERROR || operand == ITEM_NULL) {
-            return ITEM_ERROR;
+        if (operand == ITEM_ERROR || operand .item == ITEM_NULL) {
+            return {.item = ITEM_ERROR};
         }
         
         // Create a unary minus element
         Element* neg_element = create_math_element(input, "neg");
         if (!neg_element) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         list_push((List*)neg_element, operand);
@@ -1806,12 +1806,12 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
             
             Item right = parse_multiplication_expression(input, math, flavor);
             if (right == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
             left = create_binary_expr(input, op_name, left, right);
             if (left == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
             skip_math_whitespace(math);
@@ -1821,7 +1821,7 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
     }
     
     Item left = parse_multiplication_expression(input, math, flavor);
-    if (left == ITEM_ERROR || left == ITEM_NULL) {
+    if (left == ITEM_ERROR || left .item == ITEM_NULL) {
         return left;
     }
     
@@ -1836,12 +1836,12 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
         
         Item right = parse_multiplication_expression(input, math, flavor);
         if (right == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         left = create_binary_expr(input, op_name, left, right);
         if (left == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
@@ -1853,7 +1853,7 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
 // parse multiplication and division (higher precedence than + and -)
 static Item parse_multiplication_expression(Input *input, const char **math, MathFlavor flavor) {
     Item left = parse_power_expression(input, math, flavor);
-    if (left == ITEM_ERROR || left == ITEM_NULL) {
+    if (left == ITEM_ERROR || left .item == ITEM_NULL) {
         return left;
     }
     
@@ -1889,17 +1889,17 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         if (right == ITEM_ERROR) {
             if (explicit_op) {
                 // If we found an explicit operator, this is a real error
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             } else {
                 // If it was implicit multiplication and failed, just stop parsing more terms
                 break;
             }
         }
         
-        if (right == ITEM_NULL) {
+        if (right .item == ITEM_NULL) {
             if (explicit_op) {
                 // Explicit operator requires a right operand
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             } else {
                 // No more terms for implicit multiplication
                 break;
@@ -1908,7 +1908,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         
         left = create_binary_expr(input, op_name, left, right);
         if (left == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
@@ -1920,7 +1920,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
 // parse power expressions (^ and ** operators) - right associative
 static Item parse_power_expression(Input *input, const char **math, MathFlavor flavor) {
     Item left = parse_primary_with_postfix(input, math, flavor);
-    if (left == ITEM_ERROR || left == ITEM_NULL) {
+    if (left == ITEM_ERROR || left .item == ITEM_NULL) {
         return left;
     }
     
@@ -1935,13 +1935,13 @@ static Item parse_power_expression(Input *input, const char **math, MathFlavor f
             // Power is right-associative, so we recursively call parse_power_expression
             Item right = parse_power_expression(input, math, flavor);
             if (right == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
             // create power expression element
             Element* pow_element = create_math_element(input, "pow");
             if (!pow_element) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
             // add base and exponent as children
@@ -1959,13 +1959,13 @@ static Item parse_power_expression(Input *input, const char **math, MathFlavor f
             // Power is right-associative, so we recursively call parse_power_expression
             Item right = parse_power_expression(input, math, flavor);
             if (right == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
             // create power expression element
             Element* pow_element = create_math_element(input, "pow");
             if (!pow_element) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
             // add base and exponent as children
@@ -1985,7 +1985,7 @@ static Item parse_power_expression(Input *input, const char **math, MathFlavor f
 // parse primary expression with postfix operators (superscript, subscript)
 static Item parse_primary_with_postfix(Input *input, const char **math, MathFlavor flavor) {
     Item left = parse_math_primary(input, math, flavor);
-    if (left == ITEM_ERROR || left == ITEM_NULL) {
+    if (left == ITEM_ERROR || left .item == ITEM_NULL) {
         return left;
     }
     
@@ -2000,14 +2000,14 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 (*math)++; // skip ^
                 left = parse_latex_superscript(input, math, left);
                 if (left == ITEM_ERROR) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 processed = true;
             } else if (**math == '_') {
                 (*math)++; // skip _
                 left = parse_latex_subscript(input, math, left);
                 if (left == ITEM_ERROR) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 processed = true;
             }
@@ -2016,7 +2016,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             if (**math == '\'') {
                 left = parse_prime_notation(input, math, left);
                 if (left == ITEM_ERROR) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 processed = true;
             }
@@ -2026,7 +2026,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 list_push((List*)factorial_element, left);
                 ((TypeElmt*)factorial_element->type)->content_length = ((List*)factorial_element)->length;
@@ -2038,7 +2038,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 (*math)++; // skip ^
                 left = parse_typst_power(input, math, flavor, left);
                 if (left == ITEM_ERROR) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 processed = true;
             }
@@ -2047,7 +2047,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             if (**math == '\'') {
                 left = parse_prime_notation(input, math, left);
                 if (left == ITEM_ERROR) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 processed = true;
             }
@@ -2057,7 +2057,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 list_push((List*)factorial_element, left);
                 ((TypeElmt*)factorial_element->type)->content_length = ((List*)factorial_element)->length;
@@ -2069,7 +2069,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             if (**math == '\'') {
                 left = parse_prime_notation(input, math, left);
                 if (left == ITEM_ERROR) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 processed = true;
             }
@@ -2079,7 +2079,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
-                    return ITEM_ERROR;
+                    return {.item = ITEM_ERROR};
                 }
                 list_push((List*)factorial_element, left);
                 ((TypeElmt*)factorial_element->type)->content_length = ((List*)factorial_element)->length;
@@ -2112,7 +2112,7 @@ static Item parse_latex_function(Input *input, const char **math, const char* fu
         
         arg = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (arg == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
@@ -2123,14 +2123,14 @@ static Item parse_latex_function(Input *input, const char **math, const char* fu
         // parse the next primary expression as the argument
         arg = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
         if (arg == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
     }
     
     // create function expression
     Element* func_element = create_math_element(input, func_name);
     if (!func_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add argument as child (no op attribute needed)
@@ -2146,7 +2146,7 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
     // Create the sum/prod element
     Element* op_element = create_math_element(input, op_name);
     if (!op_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse optional subscript (lower limit)
@@ -2159,16 +2159,16 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
             (*math)++; // skip {
             lower_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (lower_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             if (**math != '}') {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             (*math)++; // skip }
         } else {
             lower_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
             if (lower_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
         }
         
@@ -2187,16 +2187,16 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
             (*math)++; // skip {
             upper_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (upper_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             if (**math != '}') {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             (*math)++; // skip }
         } else {
             upper_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
             if (upper_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
         }
         
@@ -2214,8 +2214,8 @@ static Item parse_latex_sum_or_prod(Input *input, const char **math, const char*
     if (**math && **math != '}' && **math != '$') {
         printf("DEBUG: Attempting to parse summand (regular parser)...\n");
         Item summand = parse_multiplication_expression(input, math, MATH_FLAVOR_LATEX);
-        printf("DEBUG: Summand parsing result: %s\n", (summand == ITEM_ERROR) ? "ERROR" : (summand == ITEM_NULL) ? "NULL" : "SUCCESS");
-        if (summand != ITEM_ERROR && summand != ITEM_NULL) {
+        printf("DEBUG: Summand parsing result: %s\n", (summand == ITEM_ERROR) ? "ERROR" : (summand .item == ITEM_NULL) ? "NULL" : "SUCCESS");
+        if (summand .item != ITEM_ERROR && summand .item != ITEM_NULL) {
             // Add summand as the third child (after lower and upper limits)
             list_push((List*)op_element, summand);
             printf("DEBUG: Added summand to sum element (total children: %zu)\n", ((List*)op_element)->length);
@@ -2235,7 +2235,7 @@ static Item parse_latex_integral(Input *input, const char **math) {
     // Create the integral element
     Element* int_element = create_math_element(input, "int");
     if (!int_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse optional subscript (lower limit)
@@ -2248,16 +2248,16 @@ static Item parse_latex_integral(Input *input, const char **math) {
             (*math)++; // skip {
             lower_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (lower_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             if (**math != '}') {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             (*math)++; // skip }
         } else {
             lower_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
             if (lower_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
         }
         
@@ -2275,16 +2275,16 @@ static Item parse_latex_integral(Input *input, const char **math) {
             (*math)++; // skip {
             upper_limit = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (upper_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             if (**math != '}') {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             (*math)++; // skip }
         } else {
             upper_limit = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
             if (upper_limit == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
         }
         
@@ -2294,7 +2294,7 @@ static Item parse_latex_integral(Input *input, const char **math) {
     
     // Parse the integrand expression
     Item integrand = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
-    if (integrand != ITEM_ERROR && integrand != ITEM_NULL) {
+    if (integrand .item != ITEM_ERROR && integrand .item != ITEM_NULL) {
         list_push((List*)int_element, integrand);
     }
     
@@ -2309,7 +2309,7 @@ static Item parse_latex_limit(Input *input, const char **math) {
     // Create the limit element
     Element* lim_element = create_math_element(input, "lim");
     if (!lim_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse subscript (limit expression like x \to 0)
@@ -2322,16 +2322,16 @@ static Item parse_latex_limit(Input *input, const char **math) {
             (*math)++; // skip {
             limit_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (limit_expr == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             if (**math != '}') {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             (*math)++; // skip }
         } else {
             limit_expr = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
             if (limit_expr == ITEM_ERROR) {
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
         }
         
@@ -2341,7 +2341,7 @@ static Item parse_latex_limit(Input *input, const char **math) {
     
     // Parse the function expression
     Item func_expr = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
-    if (func_expr != ITEM_ERROR && func_expr != ITEM_NULL) {
+    if (func_expr .item != ITEM_ERROR && func_expr .item != ITEM_NULL) {
         list_push((List*)lim_element, func_expr);
     }
     
@@ -2365,7 +2365,7 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
     // Simplified matrix syntax: \matrix{content}
     if (**math != '{') {
         printf("ERROR: Expected '{' after matrix command\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
@@ -2373,14 +2373,14 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
     Element* matrix_element = create_math_element(input, matrix_type);
     if (!matrix_element) {
         printf("ERROR: Failed to create matrix element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse matrix rows (separated by \\)
     Element* current_row = create_math_element(input, "row");
     if (!current_row) {
         printf("ERROR: Failed to create matrix row element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     int row_count = 0;
@@ -2411,7 +2411,7 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
             current_row = create_math_element(input, "row");
             if (!current_row) {
                 printf("ERROR: Failed to create matrix row element\n");
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             skip_math_whitespace(math);
             continue;
@@ -2429,10 +2429,10 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
         Item cell = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (cell == ITEM_ERROR) {
             printf("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
-        if (cell != ITEM_NULL) {
+        if (cell .item != ITEM_NULL) {
             list_push((List*)current_row, cell);
         }
         
@@ -2441,7 +2441,7 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
     
     if (**math != '}') {
         printf("ERROR: Expected '}' to close matrix\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
@@ -2475,7 +2475,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     // Skip \begin{
     if (strncmp(*math, "\\begin{", 7) != 0) {
         printf("ERROR: Expected \\begin{ for matrix environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     *math += 7;
     
@@ -2487,7 +2487,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     
     if (**math != '}') {
         printf("ERROR: Expected '}' after \\begin{environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     size_t env_len = *math - env_start;
@@ -2507,7 +2507,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     Element* matrix_element = create_math_element(input, matrix_type);
     if (!matrix_element) {
         printf("ERROR: Failed to create matrix environment element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, matrix_element, "env", "true");
@@ -2516,7 +2516,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     Element* current_row = create_math_element(input, "row");
     if (!current_row) {
         printf("ERROR: Failed to create matrix row element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     int row_count = 0;
@@ -2552,7 +2552,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
             current_row = create_math_element(input, "row");
             if (!current_row) {
                 printf("ERROR: Failed to create matrix row element\n");
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             skip_math_whitespace(math);
             continue;
@@ -2570,10 +2570,10 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
         Item cell = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (cell == ITEM_ERROR) {
             printf("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
-        if (cell != ITEM_NULL) {
+        if (cell .item != ITEM_NULL) {
             list_push((List*)current_row, cell);
         }
         
@@ -2583,7 +2583,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     // Parse \end{environment}
     if (strncmp(*math, "\\end{", 5) != 0) {
         printf("ERROR: Expected \\end{%s} to close matrix environment\n", matrix_type);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     *math += 5;
     
@@ -2595,7 +2595,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
     
     if (**math != '}') {
         printf("ERROR: Expected '}' after \\end{environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     size_t end_env_len = *math - end_env_start;
@@ -2606,7 +2606,7 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
         strncpy(end_env_name, end_env_start, end_env_len < 31 ? end_env_len : 31);
         end_env_name[end_env_len < 31 ? end_env_len : 31] = '\0';
         printf("ERROR: Mismatched environment: \\begin{%s} but \\end{%s}\n", matrix_type, end_env_name);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add the last row if it has content
@@ -2643,12 +2643,12 @@ static Item parse_latex_cases(Input *input, const char **math) {
         // Skip \begin{cases}
         if (strncmp(*math, "\\begin{cases}", 13) != 0) {
             printf("ERROR: Expected \\begin{cases} for cases environment\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *math += 13;
     } else {
         printf("ERROR: Expected \\begin{cases} for cases environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
@@ -2657,7 +2657,7 @@ static Item parse_latex_cases(Input *input, const char **math) {
     Element* cases_element = create_math_element(input, "cases");
     if (!cases_element) {
         printf("ERROR: Failed to create cases element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, cases_element, "env", "true");
@@ -2678,17 +2678,17 @@ static Item parse_latex_cases(Input *input, const char **math) {
         Element* case_row = create_math_element(input, "case");
         if (!case_row) {
             printf("ERROR: Failed to create case row element\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         // Parse the expression (left side of &)
         Item expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (expr == ITEM_ERROR) {
             printf("ERROR: Failed to parse case expression at case %d\n", case_count + 1);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
-        if (expr != ITEM_NULL) {
+        if (expr .item != ITEM_NULL) {
             list_push((List*)case_row, expr);
         }
         
@@ -2703,10 +2703,10 @@ static Item parse_latex_cases(Input *input, const char **math) {
             Item condition = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (condition == ITEM_ERROR) {
                 printf("ERROR: Failed to parse case condition at case %d\n", case_count + 1);
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
-            if (condition != ITEM_NULL) {
+            if (condition .item != ITEM_NULL) {
                 list_push((List*)case_row, condition);
             }
         }
@@ -2744,12 +2744,12 @@ static Item parse_latex_equation(Input *input, const char **math) {
         // Skip \begin{equation}
         if (strncmp(*math, "\\begin{equation}", 16) != 0) {
             printf("ERROR: Expected \\begin{equation} for equation environment\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *math += 16;
     } else {
         printf("ERROR: Expected \\begin{equation} for equation environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
@@ -2758,7 +2758,7 @@ static Item parse_latex_equation(Input *input, const char **math) {
     Element* eq_element = create_math_element(input, "equation");
     if (!eq_element) {
         printf("ERROR: Failed to create equation element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, eq_element, "env", "true");
@@ -2770,7 +2770,7 @@ static Item parse_latex_equation(Input *input, const char **math) {
     
     if (!content_end) {
         printf("ERROR: Expected \\end{equation} to close equation environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Create a temporary null-terminated string for the content
@@ -2778,7 +2778,7 @@ static Item parse_latex_equation(Input *input, const char **math) {
     char* temp_content = malloc(content_length + 1);
     if (!temp_content) {
         printf("ERROR: Failed to allocate memory for equation content\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     strncpy(temp_content, content_start, content_length);
     temp_content[content_length] = '\0';
@@ -2790,10 +2790,10 @@ static Item parse_latex_equation(Input *input, const char **math) {
     
     if (content == ITEM_ERROR) {
         printf("ERROR: Failed to parse equation content\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
-    if (content != ITEM_NULL) {
+    if (content .item != ITEM_NULL) {
         list_push((List*)eq_element, content);
     }
     
@@ -2803,7 +2803,7 @@ static Item parse_latex_equation(Input *input, const char **math) {
     // Parse \end{equation}
     if (strncmp(*math, "\\end{equation}", 14) != 0) {
         printf("ERROR: Expected \\end{equation} to close equation environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     *math += 14;
     
@@ -2820,12 +2820,12 @@ static Item parse_latex_align(Input *input, const char **math) {
         // Skip \begin{align}
         if (strncmp(*math, "\\begin{align}", 13) != 0) {
             printf("ERROR: Expected \\begin{align} for align environment\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *math += 13;
     } else {
         printf("ERROR: Expected \\begin{align} for align environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
@@ -2834,7 +2834,7 @@ static Item parse_latex_align(Input *input, const char **math) {
     Element* align_element = create_math_element(input, "align");
     if (!align_element) {
         printf("ERROR: Failed to create align element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, align_element, "env", "true");
@@ -2856,17 +2856,17 @@ static Item parse_latex_align(Input *input, const char **math) {
         Element* eq_row = create_math_element(input, "equation");
         if (!eq_row) {
             printf("ERROR: Failed to create align row element\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         // Parse left side of alignment
         Item left_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (left_expr == ITEM_ERROR) {
             printf("ERROR: Failed to parse left side of align equation %d\n", eq_count + 1);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
-        if (left_expr != ITEM_NULL) {
+        if (left_expr .item != ITEM_NULL) {
             list_push((List*)eq_row, left_expr);
         }
         
@@ -2881,10 +2881,10 @@ static Item parse_latex_align(Input *input, const char **math) {
             Item right_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (right_expr == ITEM_ERROR) {
                 printf("ERROR: Failed to parse right side of align equation %d\n", eq_count + 1);
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
-            if (right_expr != ITEM_NULL) {
+            if (right_expr .item != ITEM_NULL) {
                 list_push((List*)eq_row, right_expr);
             }
         }
@@ -2925,12 +2925,12 @@ static Item parse_latex_aligned(Input *input, const char **math) {
         // Skip \begin{aligned}
         if (strncmp(*math, "\\begin{aligned}", 15) != 0) {
             printf("ERROR: Expected \\begin{aligned} for aligned environment\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *math += 15;
     } else {
         printf("ERROR: Expected \\begin{aligned} for aligned environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
@@ -2939,7 +2939,7 @@ static Item parse_latex_aligned(Input *input, const char **math) {
     Element* aligned_element = create_math_element(input, "aligned");
     if (!aligned_element) {
         printf("ERROR: Failed to create aligned element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, aligned_element, "env", "true");
@@ -2961,17 +2961,17 @@ static Item parse_latex_aligned(Input *input, const char **math) {
         Element* eq_row = create_math_element(input, "equation");
         if (!eq_row) {
             printf("ERROR: Failed to create aligned row element\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         // Parse left side of alignment
         Item left_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (left_expr == ITEM_ERROR) {
             printf("ERROR: Failed to parse left side of aligned equation %d\n", eq_count + 1);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
-        if (left_expr != ITEM_NULL) {
+        if (left_expr .item != ITEM_NULL) {
             list_push((List*)eq_row, left_expr);
         }
         
@@ -2986,10 +2986,10 @@ static Item parse_latex_aligned(Input *input, const char **math) {
             Item right_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
             if (right_expr == ITEM_ERROR) {
                 printf("ERROR: Failed to parse right side of aligned equation %d\n", eq_count + 1);
-                return ITEM_ERROR;
+                return {.item = ITEM_ERROR};
             }
             
-            if (right_expr != ITEM_NULL) {
+            if (right_expr .item != ITEM_NULL) {
                 list_push((List*)eq_row, right_expr);
             }
         }
@@ -3030,12 +3030,12 @@ static Item parse_latex_gather(Input *input, const char **math) {
         // Skip \begin{gather}
         if (strncmp(*math, "\\begin{gather}", 14) != 0) {
             printf("ERROR: Expected \\begin{gather} for gather environment\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *math += 14;
     } else {
         printf("ERROR: Expected \\begin{gather} for gather environment\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
@@ -3044,7 +3044,7 @@ static Item parse_latex_gather(Input *input, const char **math) {
     Element* gather_element = create_math_element(input, "gather");
     if (!gather_element) {
         printf("ERROR: Failed to create gather element\n");
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, gather_element, "env", "true");
@@ -3067,17 +3067,17 @@ static Item parse_latex_gather(Input *input, const char **math) {
         Element* eq_element = create_math_element(input, "equation");
         if (!eq_element) {
             printf("ERROR: Failed to create gather equation element\n");
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         // Parse the equation content
         Item eq_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (eq_expr == ITEM_ERROR) {
             printf("ERROR: Failed to parse gather equation %d\n", eq_count + 1);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
-        if (eq_expr != ITEM_NULL) {
+        if (eq_expr .item != ITEM_NULL) {
             list_push((List*)eq_element, eq_expr);
         }
         
@@ -3216,7 +3216,7 @@ static Item parse_latex_abs(Input *input, const char **math) {
         // Parse the inner expression
         inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (inner == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
@@ -3224,7 +3224,7 @@ static Item parse_latex_abs(Input *input, const char **math) {
         // Expect closing brace
         if (**math != '}') {
             printf("ERROR: Expected } for absolute value, found: %.10s\n", *math);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         (*math)++; // skip closing brace
         
@@ -3232,7 +3232,7 @@ static Item parse_latex_abs(Input *input, const char **math) {
         // This is \left| format, parse until \right|
         inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (inner == ITEM_ERROR) {
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
@@ -3240,7 +3240,7 @@ static Item parse_latex_abs(Input *input, const char **math) {
         // Expect \right|
         if (strncmp(*math, "\\right|", 7) != 0) {
             printf("ERROR: Expected \\right| for absolute value, found: %.10s\n", *math);
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
         }
         *math += 7;
     }
@@ -3248,7 +3248,7 @@ static Item parse_latex_abs(Input *input, const char **math) {
     // Create abs element
     Element* abs_element = create_math_element(input, "abs");
     if (!abs_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     list_push((List*)abs_element, inner);
@@ -3264,7 +3264,7 @@ static Item parse_latex_ceil_floor(Input *input, const char **math, const char* 
     // Parse the inner expression - no braces expected, just parse until the closing delimiter
     Item inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (inner == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
@@ -3276,13 +3276,13 @@ static Item parse_latex_ceil_floor(Input *input, const char **math, const char* 
         *math += 7;
     } else {
         printf("ERROR: Expected closing delimiter for %s, found: %.10s\n", func_name, *math);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Create function element
     Element* func_element = create_math_element(input, func_name);
     if (!func_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     list_push((List*)func_element, inner);
@@ -3304,7 +3304,7 @@ static Item parse_prime_notation(Input *input, const char **math, Item base) {
     // Create prime element
     Element* prime_element = create_math_element(input, "prime");
     if (!prime_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add base expression
@@ -3328,19 +3328,19 @@ static Item parse_latex_binomial(Input *input, const char **math) {
     
     // expect opening brace for first argument
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse first argument (n)
     Item n = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (n == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
@@ -3348,26 +3348,26 @@ static Item parse_latex_binomial(Input *input, const char **math) {
     
     // expect opening brace for second argument
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse second argument (k)
     Item k = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (k == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create binomial expression element
     Element* binom_element = create_math_element(input, "binom");
     if (!binom_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add n and k as children
@@ -3393,26 +3393,26 @@ static Item parse_latex_vector(Input *input, const char **math) {
     
     // expect opening brace
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse vector content
     Item vector_content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (vector_content == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create vector expression element
     Element* vec_element = create_math_element(input, "vec");
     if (!vec_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add vector content as child
@@ -3430,26 +3430,26 @@ static Item parse_latex_accent(Input *input, const char **math, const char* acce
     
     // expect opening brace
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse accented content
     Item accented_content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (accented_content == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create accent expression element
     Element* accent_element = create_math_element(input, accent_type);
     if (!accent_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add accented content as child
@@ -3466,7 +3466,7 @@ static Item parse_latex_arrow(Input *input, const char **math, const char* arrow
     // Most arrow commands don't take arguments, they're just symbols
     Element* arrow_element = create_math_element(input, arrow_type);
     if (!arrow_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add arrow direction as attribute
@@ -3492,26 +3492,26 @@ static Item parse_latex_overunder(Input *input, const char **math, const char* c
     
     // expect opening brace
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse content
     Item content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (content == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create over/under expression element
     Element* construct_element = create_math_element(input, construct_type);
     if (!construct_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add content as child
@@ -3529,7 +3529,7 @@ static Item parse_latex_overunder(Input *input, const char **math, const char* c
 static Item parse_relation_operator(Input *input, const char **math, const char* op_name) {
     Element* op_element = create_math_element(input, op_name);
     if (!op_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
@@ -3579,7 +3579,7 @@ static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavo
 static Item create_math_element_with_attributes(Input *input, const char* element_name, const char* symbol, const char* description) {
     Element* element = create_math_element(input, element_name);
     if (!element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     if (symbol) {
@@ -3590,7 +3590,7 @@ static Item create_math_element_with_attributes(Input *input, const char* elemen
         add_attribute_to_element(input, element, "description", description);
     }
     
-    return (Item)element;
+    return {.item = (uint64_t)element};
 }
 
 // Group parser: Basic operators
@@ -3611,7 +3611,7 @@ static Item parse_function(Input *input, const char **math, MathFlavor flavor, c
 static Item parse_special_symbol(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* symbol_element = create_math_element(input, def->element_name);
     if (!symbol_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add symbol attributes
@@ -3763,7 +3763,7 @@ static Item parse_logic(Input *input, const char **math, MathFlavor flavor, cons
 static Item parse_number_set(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* set_element = create_math_element(input, def->element_name);
     if (!set_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add set attributes
@@ -3806,7 +3806,7 @@ static Item parse_geometry(Input *input, const char **math, MathFlavor flavor, c
 static Item parse_calculus(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* calc_element = create_math_element(input, def->element_name);
     if (!calc_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, calc_element, "symbol", def->unicode_symbol);
@@ -3816,7 +3816,7 @@ static Item parse_calculus(Input *input, const char **math, MathFlavor flavor, c
     if (def->has_arguments && def->argument_count == 1) {
         skip_math_whitespace(math);
         Item arg = parse_math_primary(input, math, flavor);
-        if (arg != ITEM_ERROR) {
+        if (arg .item != ITEM_ERROR) {
             list_push((List*)calc_element, arg);
         }
     }
@@ -3829,7 +3829,7 @@ static Item parse_calculus(Input *input, const char **math, MathFlavor flavor, c
 static Item parse_algebra(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* alg_element = create_math_element(input, def->element_name);
     if (!alg_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, alg_element, "symbol", def->unicode_symbol);
@@ -3840,7 +3840,7 @@ static Item parse_algebra(Input *input, const char **math, MathFlavor flavor, co
         for (int i = 0; i < def->argument_count; i++) {
             skip_math_whitespace(math);
             Item arg = parse_math_primary(input, math, flavor);
-            if (arg != ITEM_ERROR) {
+            if (arg .item != ITEM_ERROR) {
                 list_push((List*)alg_element, arg);
             }
         }
@@ -3854,7 +3854,7 @@ static Item parse_algebra(Input *input, const char **math, MathFlavor flavor, co
 static Item parse_typography(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* typo_element = create_math_element(input, def->element_name);
     if (!typo_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, typo_element, "style", def->element_name);
@@ -3864,7 +3864,7 @@ static Item parse_typography(Input *input, const char **math, MathFlavor flavor,
     if (def->has_arguments) {
         skip_math_whitespace(math);
         Item content = parse_math_primary(input, math, flavor);
-        if (content != ITEM_ERROR) {
+        if (content .item != ITEM_ERROR) {
             list_push((List*)typo_element, content);
         }
     }
@@ -3884,7 +3884,7 @@ static Item parse_environment(Input *input, const char **math, MathFlavor flavor
 static Item parse_spacing(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* space_element = create_math_element(input, def->element_name);
     if (!space_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, space_element, "type", def->element_name);
@@ -3899,7 +3899,7 @@ static Item parse_spacing(Input *input, const char **math, MathFlavor flavor, co
 static Item parse_modular(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* mod_element = create_math_element(input, def->element_name);
     if (!mod_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, mod_element, "operator", def->element_name);
@@ -3911,7 +3911,7 @@ static Item parse_modular(Input *input, const char **math, MathFlavor flavor, co
         for (int i = 0; i < def->argument_count; i++) {
             skip_math_whitespace(math);
             Item arg = parse_math_primary(input, math, flavor);
-            if (arg != ITEM_ERROR) {
+            if (arg .item != ITEM_ERROR) {
                 list_push((List*)mod_element, arg);
             }
         }
@@ -3924,7 +3924,7 @@ static Item parse_modular(Input *input, const char **math, MathFlavor flavor, co
 static Item parse_circled_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* op_element = create_math_element(input, def->element_name);
     if (!op_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, op_element, "operator", def->element_name);
@@ -3939,7 +3939,7 @@ static Item parse_circled_operator(Input *input, const char **math, MathFlavor f
 static Item parse_boxed_operator(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* op_element = create_math_element(input, def->element_name);
     if (!op_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, op_element, "operator", def->element_name);
@@ -3954,7 +3954,7 @@ static Item parse_boxed_operator(Input *input, const char **math, MathFlavor fla
 static Item parse_extended_arrow(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* arrow_element = create_math_element(input, def->element_name);
     if (!arrow_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, arrow_element, "arrow", def->element_name);
@@ -3969,7 +3969,7 @@ static Item parse_extended_arrow(Input *input, const char **math, MathFlavor fla
 static Item parse_extended_relation(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     Element* rel_element = create_math_element(input, def->element_name);
     if (!rel_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, rel_element, "relation", def->element_name);
@@ -4007,9 +4007,9 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     Item result = parse_math_expression(input, &math, flavor);
     printf("parse_math_expression returned: %llu (0x%llx)\n", result, result);
     
-    if (result == ITEM_ERROR || result == ITEM_NULL) {
+    if (result == ITEM_ERROR || result .item == ITEM_NULL) {
         printf("Result is error or null, setting input->root to ITEM_ERROR\n");
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
@@ -4023,19 +4023,19 @@ static Item parse_latex_frac_style(Input *input, const char **math, const char* 
     
     // expect opening brace for numerator
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse numerator
     Item numerator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (numerator == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
@@ -4043,26 +4043,26 @@ static Item parse_latex_frac_style(Input *input, const char **math, const char* 
     
     // expect opening brace for denominator
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse denominator
     Item denominator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (denominator == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create fraction expression element with style
     Element* frac_element = create_math_element(input, "frac");
     if (!frac_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add style attribute
@@ -4084,26 +4084,26 @@ static Item parse_latex_root(Input *input, const char **math, const char* index)
     
     // expect opening brace
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse expression inside root
     Item inner_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (inner_expr == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create root expression element
     Element* root_element = create_math_element(input, "root");
     if (!root_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add index as attribute
@@ -4124,19 +4124,19 @@ static Item parse_latex_root_with_index(Input *input, const char **math) {
     
     // expect opening brace for index
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse index
     Item index = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (index == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
@@ -4144,7 +4144,7 @@ static Item parse_latex_root_with_index(Input *input, const char **math) {
     
     // expect \of
     if (strncmp(*math, "\\of", 3) != 0) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     *math += 3;
     
@@ -4152,26 +4152,26 @@ static Item parse_latex_root_with_index(Input *input, const char **math) {
     
     // expect opening brace for radicand
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse radicand
     Item radicand = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (radicand == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create root expression element
     Element* root_element = create_math_element(input, "root");
     if (!root_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add index and radicand as children
@@ -4189,25 +4189,25 @@ static Item parse_latex_phantom(Input *input, const char **math, const char* pha
     skip_math_whitespace(math);
     
     if (**math != '{') {
-        return ITEM_ERROR; // phantom commands require braces
+        return {.item = ITEM_ERROR}; // phantom commands require braces
     }
     (*math)++; // skip {
     
     // Parse the content inside the phantom
     Item content = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (content == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     if (**math != '}') {
-        return ITEM_ERROR; // missing closing brace
+        return {.item = ITEM_ERROR}; // missing closing brace
     }
     (*math)++; // skip }
     
     // Create phantom element
     Element* phantom_element = create_math_element(input, "phantom");
     if (!phantom_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add type attribute (phantom, vphantom, hphantom)
@@ -4229,7 +4229,7 @@ static Item parse_derivative(Input *input, const char **math, MathFlavor flavor,
     
     // Check if the pattern matches
     if (strncmp(*math, pattern, pattern_length) != 0) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     *math += pattern_length; // consume the pattern
@@ -4237,7 +4237,7 @@ static Item parse_derivative(Input *input, const char **math, MathFlavor flavor,
     // Create derivative element
     Element* derivative_element = create_math_element(input, "derivative");
     if (!derivative_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add type attribute based on prime count
@@ -4264,7 +4264,7 @@ static Item parse_derivative(Input *input, const char **math, MathFlavor flavor,
 static Item parse_inner_product(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     // Check for opening angle bracket
     if (**math != '<') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip <
     
@@ -4273,14 +4273,14 @@ static Item parse_inner_product(Input *input, const char **math, MathFlavor flav
     // Parse the first operand
     Item left_operand = parse_math_expression(input, math, flavor);
     if (left_operand == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
     
     // Check for comma separator
     if (**math != ',') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip comma
     
@@ -4289,21 +4289,21 @@ static Item parse_inner_product(Input *input, const char **math, MathFlavor flav
     // Parse the second operand
     Item right_operand = parse_math_expression(input, math, flavor);
     if (right_operand == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_math_whitespace(math);
     
     // Check for closing angle bracket
     if (**math != '>') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip >
     
     // Create inner product element
     Element* inner_product_element = create_math_element(input, "inner-product");
     if (!inner_product_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add operands as children
@@ -4322,19 +4322,19 @@ static Item parse_partial_derivative_frac(Input *input, const char **math) {
     
     // expect opening brace for numerator
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse numerator (should contain \partial expressions)
     Item numerator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (numerator == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
@@ -4342,26 +4342,26 @@ static Item parse_partial_derivative_frac(Input *input, const char **math) {
     
     // expect opening brace for denominator
     if (**math != '{') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip {
     
     // parse denominator (should contain \partial expressions)
     Item denominator = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
     if (denominator == ITEM_ERROR) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // expect closing brace
     if (**math != '}') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     (*math)++; // skip }
     
     // create partial derivative fraction element
     Element* partial_frac_element = create_math_element(input, "partial_derivative");
     if (!partial_frac_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // add type attribute
@@ -4384,7 +4384,7 @@ static Item parse_partial_derivative(Input *input, const char **math, MathFlavor
     
     // Check if the pattern matches
     if (strncmp(*math, pattern, pattern_length) != 0) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     *math += pattern_length; // consume the pattern
@@ -4392,7 +4392,7 @@ static Item parse_partial_derivative(Input *input, const char **math, MathFlavor
     // Create partial derivative element
     Element* partial_element = create_math_element(input, "partial_derivative");
     if (!partial_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add type attribute
@@ -4415,7 +4415,7 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
     // Create operator element
     Element* op_element = create_math_element(input, def->element_name);
     if (!op_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add type attribute
@@ -4438,7 +4438,7 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
             lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         }
         
-        if (lower_bound != ITEM_ERROR) {
+        if (lower_bound .item != ITEM_ERROR) {
             list_push((List*)op_element, lower_bound);
         }
     }
@@ -4461,7 +4461,7 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
             upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         }
         
-        if (upper_bound != ITEM_ERROR) {
+        if (upper_bound .item != ITEM_ERROR) {
             list_push((List*)op_element, upper_bound);
         }
     }
@@ -4491,9 +4491,9 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
             summand = parse_power_expression(input, math, MATH_FLAVOR_LATEX);
         }
         
-        printf("DEBUG: Summand parsing result: %s\n", (summand == ITEM_ERROR) ? "ERROR" : (summand == ITEM_NULL) ? "NULL" : "SUCCESS");
+        printf("DEBUG: Summand parsing result: %s\n", (summand == ITEM_ERROR) ? "ERROR" : (summand .item == ITEM_NULL) ? "NULL" : "SUCCESS");
         printf("DEBUG: Summand value: %lu (0x%lx)\n", (unsigned long)summand, (unsigned long)summand);
-        if (summand != ITEM_ERROR && summand != ITEM_NULL) {
+        if (summand .item != ITEM_ERROR && summand .item != ITEM_NULL) {
             // Add summand as the third child (after lower and upper bounds)
             list_push((List*)op_element, summand);
             printf("DEBUG: Added summand to sum element (total children: %zu)\n", ((List*)op_element)->length);
@@ -4516,7 +4516,7 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
     // Create integral element
     Element* integral_element = create_math_element(input, def->element_name);
     if (!integral_element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Add type attribute
@@ -4544,7 +4544,7 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
             lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         }
         
-        if (lower_bound != ITEM_ERROR) {
+        if (lower_bound .item != ITEM_ERROR) {
             // Create subscript element
             Element* subscript_element = create_math_element(input, "subscript");
             if (subscript_element) {
@@ -4574,7 +4574,7 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
             upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         }
         
-        if (upper_bound != ITEM_ERROR) {
+        if (upper_bound .item != ITEM_ERROR) {
             // Create superscript element
             Element* superscript_element = create_math_element(input, "pow");
             if (superscript_element) {

@@ -91,8 +91,8 @@ void parse_csv(Input* input, const char* csv_string) {
         
         while (*csv && *csv != '\n' && *csv != '\r') {
             String *field = parse_csv_field(input, &csv, separator);
-            Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : (Item)NULL;
-            array_append(headers, (LambdaItem)item, input->pool);
+            Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : {.item = 0};
+            array_append(headers, item, input->pool);
             if (*csv == separator) csv++;
         }
         
@@ -112,15 +112,15 @@ void parse_csv(Input* input, const char* csv_string) {
             int field_index = 0;
             while (*csv && *csv != '\n' && *csv != '\r') {
                 String *field = parse_csv_field(input, &csv, separator);
-                Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : (Item)NULL;
+                Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : {.item = 0};
                 
                 // Get header name for this field
                 if (field_index < headers->length) {
-                    LambdaItem header_item = (LambdaItem)headers->items[field_index];
-                    if (header_item.item != ITEM_NULL) {
-                        String* key = (String*)get_pointer(header_item.item);
+                    Item header_item = headers->items[field_index];
+                    if (header_item .item != ITEM_NULL) {
+                        String* key = (String*)get_pointer(header_item);
                         if (key && key != &EMPTY_STRING) {
-                            map_put(row_map, key, (LambdaItem)item, input);
+                            map_put(row_map, key, item, input);
                         }
                     }
                 }
@@ -128,7 +128,7 @@ void parse_csv(Input* input, const char* csv_string) {
                 field_index++;
                 if (*csv == separator) csv++;
             }
-            array_append(rows, (LambdaItem)(Item)row_map, input->pool);
+            array_append(rows, (Item)row_map, input->pool);
         } else {
             // Create an array for each row (original behavior)
             Array *fields = array_pooled(input->pool);
@@ -136,11 +136,11 @@ void parse_csv(Input* input, const char* csv_string) {
             
             while (*csv && *csv != '\n' && *csv != '\r') {
                 String *field = parse_csv_field(input, &csv, separator);
-                Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : (Item)NULL;
-                array_append(fields, (LambdaItem)item, input->pool);
+                Item item = field ? (field == &EMPTY_STRING ? ITEM_NULL : s2it(field)) : {.item = 0};
+                array_append(fields, item, input->pool);
                 if (*csv == separator) csv++;
             }
-            array_append(rows, (LambdaItem)(Item)fields, input->pool);
+            array_append(rows, (Item)fields, input->pool);
         }
         
         // Skip newline

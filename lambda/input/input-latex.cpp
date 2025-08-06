@@ -95,7 +95,7 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
         if (**latex == ']') (*latex)++; // Skip ]
         
         if (opt_arg && opt_arg->len > 0) {
-            LambdaItem arg_item = (LambdaItem)s2it(opt_arg);
+            Item arg_item = {.item = s2it(opt_arg)};
             array_append(args, arg_item, input->pool);
         }
         skip_whitespace(latex);
@@ -137,7 +137,7 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
             arg_string->ref_cnt = 0;
             strbuf_full_reset(arg_sb);
             
-            LambdaItem arg_item = (LambdaItem)s2it(arg_string);
+            Item arg_item = {.item = s2it(arg_string)};
             array_append(args, arg_item, input->pool);
         } else {
             strbuf_full_reset(arg_sb);
@@ -151,27 +151,27 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
 
 static Item parse_latex_command(Input *input, const char **latex) {
     if (**latex != '\\') {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     (*latex)++; // Skip backslash
     
     String* cmd_name = parse_command_name(input, latex);
     if (!cmd_name || cmd_name->len == 0) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Handle \end{} commands - these are handled implicitly by environment parsing
     if (strcmp(cmd_name->chars, "end") == 0) {
         // Skip \end{} commands as they are handled by the environment parser
         Array* end_args = parse_command_arguments(input, latex);
-        return ITEM_NULL; // Don't create an element for \end commands
+        return {.item = ITEM_NULL}; // Don't create an element for \end commands
     }
     
     // Create element for the command
     Element* element = create_latex_element(input, cmd_name->chars);
     if (!element) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse arguments
@@ -181,12 +181,12 @@ static Item parse_latex_command(Input *input, const char **latex) {
     if (strcmp(cmd_name->chars, "begin") == 0) {
         // This is an environment begin - create element with environment name as tag
         if (args && args->length > 0) {
-            String* env_name = (String*)args->items[0];
+            String* env_name = (String*)args->items[0].item;
             
             // Create a new element with the environment name instead
             element = create_latex_element(input, env_name->chars);
             if (!element) {
-                return ITEM_ERROR;
+                return ItemError;
             }
             
             // Don't add arguments to the element for environments
@@ -233,11 +233,11 @@ static Item parse_latex_command(Input *input, const char **latex) {
                     if (content_string->len > 0) {
                         if (is_math_env) {
                             // Parse math content using our math parser
-                            Input* math_input = input_new(input->url);
+                            Input* math_input = input_new((lxb_url_t*)input->url);
                             if (math_input) {
                                 parse_math(math_input, content_string->chars, "latex");
                                 
-                                if (math_input->root != ITEM_NULL) {
+                                if (math_input->root .item != ITEM_NULL) {
                                     // Add the parsed math as child
                                     list_push((List*)element, math_input->root);
                                     
@@ -249,8 +249,8 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                     free(math_input);
                                 } else {
                                     // Fallback to raw text if math parsing fails
-                                    LambdaItem content_item = (LambdaItem)s2it(content_string);
-                                    list_push((List*)element, content_item.item);
+                                    Item content_item = {.item = s2it(content_string)};
+                                    list_push((List*)element, content_item);
                                     
                                     // Clean up temporary input
                                     if (math_input->type_list) {
@@ -261,13 +261,13 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                 }
                             } else {
                                 // Fallback to raw text if input creation fails
-                                LambdaItem content_item = (LambdaItem)s2it(content_string);
-                                list_push((List*)element, content_item.item);
+                                Item content_item = {.item = s2it(content_string)};
+                                list_push((List*)element, content_item);
                             }
                         } else {
                             // For raw text environments, add as-is
-                            LambdaItem content_item = (LambdaItem)s2it(content_string);
-                            list_push((List*)element, content_item.item);
+                            Item content_item = {.item = s2it(content_string)};
+                            list_push((List*)element, content_item);
                         }
                     }
                 } else {
@@ -290,7 +290,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                     // Parse content within the environment
                     if (**latex == '\\') {
                         Item child = parse_latex_command(input, latex);
-                        if (child != ITEM_ERROR && child != ITEM_NULL) {
+                        if (child .item != ITEM_ERROR && child .item != ITEM_NULL) {
                             list_push((List*)element, child);
                         }
                     } else if (**latex == '%') {
@@ -362,8 +362,8 @@ static Item parse_latex_command(Input *input, const char **latex) {
                             }
                             
                             if (has_non_whitespace) {
-                                LambdaItem text_item = (LambdaItem)s2it(text_string);
-                                list_push((List*)element, text_item.item);
+                                Item text_item = {.item = s2it(text_string)};
+                                list_push((List*)element, text_item);
                             }
                         } else {
                             strbuf_full_reset(text_sb);
@@ -386,7 +386,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
     // Set content length based on element's list length
     ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
     
-    return (Item)element;
+    return {.item = (uint64_t)element};
 }
 
 static Item parse_latex_element(Input *input, const char **latex) {
@@ -395,14 +395,14 @@ static Item parse_latex_element(Input *input, const char **latex) {
     
     if (parse_depth > 20) {  // Reasonable depth limit for LaTeX
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     skip_whitespace(latex);
     
     if (!**latex) {
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Skip comments
@@ -415,7 +415,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             return result;
         }
         parse_depth--;
-        return ITEM_NULL;
+        return {.item = ITEM_NULL};
     }
     
     // Parse LaTeX commands
@@ -467,7 +467,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             
             if (math_string->len > 0) {
                 // Create temporary input for math parsing
-                Input* math_input = input_new(input->url);
+                Input* math_input = input_new((lxb_url_t*)input->url);
                 if (math_input) {
                     // Parse the math content using our math parser
                     parse_math(math_input, math_string->chars, "latex");
@@ -475,7 +475,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                     // Create wrapper element for the math
                     const char* math_name = display_math ? "displaymath" : "math";
                     Element* element = create_latex_element(input, math_name);
-                    if (element && math_input->root != ITEM_NULL) {
+                    if (element && math_input->root .item != ITEM_NULL) {
                         // Add the parsed math as child
                         list_push((List*)element, math_input->root);
                         ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
@@ -490,7 +490,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                         
                         strbuf_full_reset(math_sb);
                         parse_depth--;
-                        return (Item)element;
+                        return {.item = (uint64_t)element};
                     }
                     
                     // Cleanup on failure
@@ -505,7 +505,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
         
         strbuf_full_reset(math_sb);
         parse_depth--;
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse regular text content with escape handling
@@ -569,14 +569,14 @@ static Item parse_latex_element(Input *input, const char **latex) {
         
         if (has_non_whitespace) {
             parse_depth--;
-            return (Item)s2it(text_string);
+            return {.item = s2it(text_string)};
         }
     } else {
         strbuf_full_reset(text_sb);
     }
     
     parse_depth--;
-    return ITEM_NULL;
+    return {.item = ITEM_NULL};
 }
 
 void parse_latex(Input* input, const char* latex_string) {
@@ -588,7 +588,7 @@ void parse_latex(Input* input, const char* latex_string) {
     Element* root_element = create_latex_element(input, "latex_document");
     if (!root_element) {
         printf("DEBUG: Failed to create root element\n");
-        input->root = ITEM_ERROR;
+        input->root = {.item = ITEM_ERROR};
         return;
     }
     
@@ -600,10 +600,10 @@ void parse_latex(Input* input, const char* latex_string) {
         printf("DEBUG: Parsing element %d, current position: '%.50s...'\n", element_count, latex);
         
         Item element = parse_latex_element(input, &latex);
-        if (element != ITEM_NULL && element != ITEM_ERROR) {
+        if (element .item != ITEM_NULL && element .item != ITEM_ERROR) {
             list_push((List*)root_element, element);
             printf("DEBUG: Added element %d to root\n", element_count);
-        } else if (element == ITEM_ERROR) {
+        } else if (element.item == ITEM_ERROR) {
             printf("DEBUG: Error parsing element %d\n", element_count);
             break;
         } else {
@@ -616,6 +616,6 @@ void parse_latex(Input* input, const char* latex_string) {
     printf("DEBUG: Parsed %d elements total\n", element_count);
     ((TypeElmt*)root_element->type)->content_length = ((List*)root_element)->length;
     
-    input->root = (Item)root_element;
+    input->root = {.item = (uint64_t)root_element};
     printf("DEBUG: LaTeX parsing completed\n");
 }

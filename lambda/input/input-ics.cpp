@@ -91,7 +91,7 @@ static void parse_property_parameters(Input *input, const char **ics, Map* param
         }
         
         if (param_value) {
-            LambdaItem value = (LambdaItem)s2it(param_value);
+            Item value = {.item = s2it(param_value)};
             map_put(params_map, param_name, value, input);
         }
     }
@@ -175,7 +175,7 @@ static Map* parse_datetime(Input *input, const char* value) {
         if (sb->length > sizeof(uint32_t)) {
             String* year_str = strbuf_to_string(sb);
             String* year_key = input_create_string(input, "year");
-            map_put(dt_map, year_key, (LambdaItem)s2it(year_str), input);
+            map_put(dt_map, year_key, s2it(year_str), input);
         }
         
         // Parse month (2 digits)
@@ -190,7 +190,7 @@ static Map* parse_datetime(Input *input, const char* value) {
         if (sb->length > sizeof(uint32_t)) {
             String* month_str = strbuf_to_string(sb);
             String* month_key = input_create_string(input, "month");
-            map_put(dt_map, month_key, (LambdaItem)s2it(month_str), input);
+            map_put(dt_map, month_key, s2it(month_str), input);
         }
         
         // Parse day (2 digits)
@@ -205,7 +205,7 @@ static Map* parse_datetime(Input *input, const char* value) {
         if (sb->length > sizeof(uint32_t)) {
             String* day_str = strbuf_to_string(sb);
             String* day_key = input_create_string(input, "day");
-            map_put(dt_map, day_key, (LambdaItem)s2it(day_str), input);
+            map_put(dt_map, day_key, s2it(day_str), input);
         }
         
         // Check for time part (T separator)
@@ -224,7 +224,7 @@ static Map* parse_datetime(Input *input, const char* value) {
             if (sb->length > sizeof(uint32_t)) {
                 String* hour_str = strbuf_to_string(sb);
                 String* hour_key = input_create_string(input, "hour");
-                map_put(dt_map, hour_key, (LambdaItem)s2it(hour_str), input);
+                map_put(dt_map, hour_key, s2it(hour_str), input);
             }
             
             // Parse minute (2 digits)
@@ -239,7 +239,7 @@ static Map* parse_datetime(Input *input, const char* value) {
             if (sb->length > sizeof(uint32_t)) {
                 String* minute_str = strbuf_to_string(sb);
                 String* minute_key = input_create_string(input, "minute");
-                map_put(dt_map, minute_key, (LambdaItem)s2it(minute_str), input);
+                map_put(dt_map, minute_key, s2it(minute_str), input);
             }
             
             // Parse second (2 digits)
@@ -254,14 +254,14 @@ static Map* parse_datetime(Input *input, const char* value) {
             if (sb->length > sizeof(uint32_t)) {
                 String* second_str = strbuf_to_string(sb);
                 String* second_key = input_create_string(input, "second");
-                map_put(dt_map, second_key, (LambdaItem)s2it(second_str), input);
+                map_put(dt_map, second_key, s2it(second_str), input);
             }
             
             // Check for timezone (Z for UTC)
             if (*ptr == 'Z') {
                 String* tz_key = input_create_string(input, "timezone");
                 String* tz_value = input_create_string(input, "UTC");
-                map_put(dt_map, tz_key, (LambdaItem)s2it(tz_value), input);
+                map_put(dt_map, tz_key, s2it(tz_value), input);
             }
         }
     }
@@ -325,7 +325,7 @@ static Map* parse_duration(Input *input, const char* value) {
         }
         
         if (key && num_str) {
-            map_put(dur_map, key, (LambdaItem)s2it(num_str), input);
+            map_put(dur_map, key, s2it(num_str), input);
         }
     }
     
@@ -431,7 +431,7 @@ void parse_ics(Input* input, const char* ics_string) {
                     // Store component type
                     String* type_key = input_create_string(input, "type");
                     if (type_key) {
-                        map_put(current_component, type_key, (LambdaItem)s2it(current_component_type), input);
+                        map_put(current_component, type_key, s2it(current_component_type), input);
                     }
                 }
             }
@@ -446,7 +446,7 @@ void parse_ics(Input* input, const char* ics_string) {
                 // End of current component
                 if (current_component_props) {
                     String* props_key = input_create_string(input, "properties");
-                    LambdaItem props_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(current_component_props));
+                    Item props_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(current_component_props));
                     map_put(current_component, props_key, props_value, input);
                 }
                 
@@ -464,7 +464,7 @@ void parse_ics(Input* input, const char* ics_string) {
         if (!in_calendar) continue;
         
         // Store property based on current context
-        LambdaItem prop_value = (LambdaItem)s2it(property_value);
+        Item prop_value = {.item = s2it(property_value)};
         
         if (current_component && current_component_props) {
             // We're inside a component, store in component properties
@@ -483,7 +483,7 @@ void parse_ics(Input* input, const char* ics_string) {
                 String* start_key = input_create_string(input, "start_time");
                 Map* dt_struct = parse_datetime(input, property_value->chars);
                 if (dt_struct) {
-                    LambdaItem dt_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(dt_struct));
+                    Item dt_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(dt_struct));
                     map_put(current_component, start_key, dt_value, input);
                 } else {
                     map_put(current_component, start_key, prop_value, input);
@@ -493,7 +493,7 @@ void parse_ics(Input* input, const char* ics_string) {
                 String* end_key = input_create_string(input, "end_time");
                 Map* dt_struct = parse_datetime(input, property_value->chars);
                 if (dt_struct) {
-                    LambdaItem dt_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(dt_struct));
+                    Item dt_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(dt_struct));
                     map_put(current_component, end_key, dt_value, input);
                 } else {
                     map_put(current_component, end_key, prop_value, input);
@@ -503,7 +503,7 @@ void parse_ics(Input* input, const char* ics_string) {
                 String* duration_key = input_create_string(input, "duration");
                 Map* dur_struct = parse_duration(input, property_value->chars);
                 if (dur_struct) {
-                    LambdaItem dur_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(dur_struct));
+                    Item dur_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(dur_struct));
                     map_put(current_component, duration_key, dur_value, input);
                 } else {
                     map_put(current_component, duration_key, prop_value, input);
@@ -559,12 +559,12 @@ void parse_ics(Input* input, const char* ics_string) {
     
     // Store components list in calendar
     String* components_key = input_create_string(input, "components");
-    LambdaItem components_value = (LambdaItem)((((uint64_t)LMD_TYPE_LIST)<<56) | (uint64_t)(components_list));
+    Item components_value = ((((uint64_t)LMD_TYPE_LIST)<<56) | (uint64_t)(components_list));
     map_put(calendar_map, components_key, components_value, input);
     
     // Store properties map in calendar
     String* properties_key = input_create_string(input, "properties");
-    LambdaItem properties_value = (LambdaItem)((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map));
+    Item properties_value = ((((uint64_t)LMD_TYPE_MAP)<<56) | (uint64_t)(properties_map));
     map_put(calendar_map, properties_key, properties_value, input);
     
     // Set the calendar map as the root of the input

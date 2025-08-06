@@ -135,7 +135,7 @@ static String* parse_unquoted_identifier(Input *input, const char **mark) {
 }
 
 static Item parse_binary(Input *input, const char **mark) {
-    if (**mark != 'b' || *(*mark + 1) != '\'') return ITEM_ERROR;
+    if (**mark != 'b' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
     
     *mark += 2; // Skip b'
     skip_whitespace(mark);
@@ -195,7 +195,7 @@ static Item parse_binary(Input *input, const char **mark) {
 }
 
 static Item parse_datetime(Input *input, const char **mark) {
-    if (**mark != 't' || *(*mark + 1) != '\'') return ITEM_ERROR;
+    if (**mark != 't' || *(*mark + 1) != '\'') return {.item = ITEM_ERROR};
     
     *mark += 2; // Skip t'
     skip_whitespace(mark);
@@ -219,7 +219,7 @@ static Item parse_datetime(Input *input, const char **mark) {
 static Item parse_number(Input *input, const char **mark) {
     double *dval;
     MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
     
     char* end;
     *dval = strtod(*mark, &end);
@@ -231,7 +231,7 @@ static Item parse_number(Input *input, const char **mark) {
         // For now, treat as regular double - could enhance for true decimal support
     }
     
-    return d2it(dval);
+    return {.item = d2it(dval);
 }
 
 static Array* parse_array(Input *input, const char **mark) {
@@ -248,7 +248,7 @@ static Array* parse_array(Input *input, const char **mark) {
     }
 
     while (**mark) {
-        LambdaItem item = {.item = parse_value(input, mark)};
+        Item item = parse_value(input, mark);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
@@ -279,7 +279,7 @@ static Array* parse_list(Input *input, const char **mark) {
     }
 
     while (**mark) {
-        LambdaItem item = {.item = parse_value(input, mark)};
+        Item item = parse_value(input, mark);
         array_append(arr, item, input->pool);
 
         skip_comments(mark);
@@ -328,7 +328,7 @@ static Map* parse_map(Input *input, const char **mark) {
         (*mark)++;
         skip_comments(mark);
 
-        LambdaItem value = (LambdaItem)parse_value(input, mark);
+        Item value = parse_value(input, mark);
         map_put(mp, key, value, input);
 
         skip_comments(mark);
@@ -426,7 +426,7 @@ static Element* parse_element(Input *input, const char **mark) {
     // Parse content - content can be separated by semicolons, newlines, or just whitespace
     while (**mark && **mark != '>') {
         Item content_item = parse_content(input, mark);
-        if (content_item != ITEM_ERROR && content_item != ITEM_NULL) {
+        if (content_item .item != ITEM_ERROR && content_item .item != ITEM_NULL) {
             // Add content to element
             list_push((List*)element, content_item);
             ((TypeElmt*)element->type)->content_length++;
@@ -470,7 +470,7 @@ static Item parse_value(Input *input, const char **mark) {
         case '<':
             return (Item)parse_element(input, mark);
         case '"':
-            return s2it(parse_string(input, mark));
+            return {.item = s2it(parse_string(input, mark));
         case '\'':
             {
                 String* sym = parse_symbol(input, mark);
@@ -486,37 +486,37 @@ static Item parse_value(Input *input, const char **mark) {
                 return parse_datetime(input, mark);
             } else if (strncmp(*mark, "true", 4) == 0) {
                 *mark += 4;
-                return b2it(true);
+                return {.item = b2it(true);
             }
             goto UNQUOTED_IDENTIFIER;
         case 'f':
             if (strncmp(*mark, "false", 5) == 0) {
                 *mark += 5;
-                return b2it(false);
+                return {.item = b2it(false);
             }
             goto UNQUOTED_IDENTIFIER;
         case 'n':
             if (strncmp(*mark, "null", 4) == 0) {
                 *mark += 4;
-                return ITEM_NULL;
+                return {.item = ITEM_NULL};
             } else if (strncmp(*mark, "nan", 3) == 0) {
                 *mark += 3;
-                return d2it(&(double){NAN});
+                return {.item = d2it(&(double){NAN});
             }
             goto UNQUOTED_IDENTIFIER;
         case 'i':
             if (strncmp(*mark, "inf", 3) == 0) {
                 *mark += 3;
-                return d2it(&(double){INFINITY});
+                return {.item = d2it(&(double){INFINITY});
             }
             goto UNQUOTED_IDENTIFIER;
         case '-':
             if (strncmp(*mark, "-inf", 4) == 0) {
                 *mark += 4;
-                return d2it(&(double){-INFINITY});
+                return {.item = d2it(&(double){-INFINITY});
             } else if (strncmp(*mark, "-nan", 4) == 0) {
                 *mark += 4;
-                return d2it(&(double){-NAN});
+                return {.item = d2it(&(double){-NAN});
             }
             // Fall through to number parsing
         default:
@@ -530,7 +530,7 @@ static Item parse_value(Input *input, const char **mark) {
                 String* id = parse_unquoted_identifier(input, mark);
                 return id ? y2it(id) : ITEM_ERROR;
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
     }
 }
 

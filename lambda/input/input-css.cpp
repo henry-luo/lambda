@@ -64,7 +64,7 @@ static bool is_css_hex_digit(char c) {
 // CSS Stylesheet parsing functions
 static Item parse_css_stylesheet(Input *input, const char **css) {
     Element* stylesheet = input_create_element(input, "stylesheet");
-    if (!stylesheet) return ITEM_ERROR;
+    if (!stylesheet) return {.item = ITEM_ERROR};
     
     skip_css_comments(css);
     
@@ -80,7 +80,7 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
     g_all_rules = rules;
     
     if (!rules || !keyframes || !media_queries || !supports_queries || !font_faces || !other_at_rules) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse all rules and categorize them
@@ -115,26 +115,25 @@ static Item parse_css_stylesheet(Input *input, const char **css) {
         }
         
         Item rule = parse_css_rule(input, css);
-        if (rule != ITEM_ERROR) {
-            LambdaItem lambda_item = {.item = rule};
+        if (rule .item != ITEM_ERROR) {
             
             if (is_at_rule && at_rule_name) {
                 // Categorize at-rules
                 if (strcmp(at_rule_name, "keyframes") == 0) {
-                    array_append(keyframes, lambda_item, input->pool);
+                    array_append(keyframes, rule, input->pool);
                 } else if (strcmp(at_rule_name, "media") == 0) {
-                    array_append(media_queries, lambda_item, input->pool);
+                    array_append(media_queries, rule, input->pool);
                 } else if (strcmp(at_rule_name, "supports") == 0) {
-                    array_append(supports_queries, lambda_item, input->pool);
+                    array_append(supports_queries, rule, input->pool);
                 } else if (strcmp(at_rule_name, "font-face") == 0) {
-                    array_append(font_faces, lambda_item, input->pool);
+                    array_append(font_faces, rule, input->pool);
                 } else {
-                    array_append(other_at_rules, lambda_item, input->pool);
+                    array_append(other_at_rules, rule, input->pool);
                 }
                 free((void*)at_rule_name); // Free the allocated name buffer
             } else {
                 // Regular CSS rule
-                array_append(rules, lambda_item, input->pool);
+                array_append(rules, rule, input->pool);
             }
         } else {
             // Skip invalid rule content until next rule or end
@@ -184,9 +183,8 @@ static Array* parse_css_rules(Input *input, const char **css) {
         
         printf("Parsing CSS rule\n");
         Item rule = parse_css_rule(input, css);
-        if (rule != ITEM_ERROR) {
-            LambdaItem item = {.item = rule};
-            array_append(rules, item, input->pool);
+        if (rule .item != ITEM_ERROR) {
+            array_append(rules, rule, input->pool);
         } else {
             // Skip invalid rule content until next rule or end
             while (**css && **css != '}' && **css != '@') {
@@ -214,7 +212,7 @@ static Item parse_css_rule(Input *input, const char **css) {
 }
 
 static Item parse_css_at_rule(Input *input, const char **css) {
-    if (**css != '@') return ITEM_ERROR;
+    if (**css != '@') return {.item = ITEM_ERROR};
     
     (*css)++; // Skip @
     
@@ -226,10 +224,10 @@ static Item parse_css_at_rule(Input *input, const char **css) {
     }
     
     String* at_rule_name = strbuf_to_string(sb);
-    if (!at_rule_name) return ITEM_ERROR;
+    if (!at_rule_name) return {.item = ITEM_ERROR};
     
     Element* at_rule = input_create_element(input, "at-rule");
-    if (!at_rule) return ITEM_ERROR;
+    if (!at_rule) return {.item = ITEM_ERROR};
     
     input_add_attribute_to_element(input, at_rule, "name", at_rule_name->chars);
     
@@ -285,13 +283,12 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                     if (**css == '}') break;
                     
                     Item nested_rule = parse_css_rule(input, css);
-                    if (nested_rule != ITEM_ERROR) {
-                        LambdaItem item = {.item = nested_rule};
-                        array_append(nested_rules, item, input->pool);
+                    if (nested_rule .item != ITEM_ERROR) {
+                        array_append(nested_rules, nested_rule, input->pool);
                         
                         // Also add nested rule to global rules array
                         if (g_all_rules) {
-                            array_append(g_all_rules, item, input->pool);
+                            array_append(g_all_rules, nested_rule, input->pool);
                             printf("DEBUG: Added nested rule to global rules array\n");
                         }
                     } else {
@@ -392,8 +389,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                                 (*css)++; // Skip closing brace
                             }
                             
-                            LambdaItem keyframe_item = {.item = (Item)keyframe_rule};
-                            array_append(keyframe_rules, keyframe_item, input->pool);
+                            array_append(keyframe_rules, (Item)keyframe_rule, input->pool);
                         }
                     }
                     
@@ -464,7 +460,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
 
 static Item parse_css_qualified_rule(Input *input, const char **css) {
     Element* rule = input_create_element(input, "rule");
-    if (!rule) return ITEM_ERROR;
+    if (!rule) return {.item = ITEM_ERROR};
     
     // Parse selectors
     printf("Parsing CSS qualified rule\n");
@@ -547,9 +543,8 @@ static Array* parse_css_selectors(Input *input, const char **css) {
         if (**css == '{') break;
         
         Item selector = parse_css_selector(input, css);
-        if (selector != ITEM_ERROR) {
-            LambdaItem item = {.item = selector};
-            array_append(selectors, item, input->pool);
+        if (selector .item != ITEM_ERROR) {
+            array_append(selectors, selector, input->pool);
         }
         
         skip_css_comments(css);
@@ -620,7 +615,7 @@ static Item parse_css_selector(Input *input, const char **css) {
         }
     }
     
-    return ITEM_ERROR;
+    return {.item = ITEM_ERROR};
 }
 
 static Array* parse_css_declarations(Input *input, const char **css) {
@@ -632,9 +627,8 @@ static Array* parse_css_declarations(Input *input, const char **css) {
         if (**css == '}') break;
         
         Item declaration = parse_css_declaration(input, css);
-        if (declaration != ITEM_ERROR) {
-            LambdaItem item = {.item = declaration};
-            array_append(declarations, item, input->pool);
+        if (declaration .item != ITEM_ERROR) {
+            array_append(declarations, declaration, input->pool);
         }
         
         skip_css_comments(css);
@@ -658,19 +652,19 @@ static Item parse_css_declaration(Input *input, const char **css) {
         (*css)++;
     }
     String* property_str = strbuf_to_string(sb);
-    if (!property_str) return ITEM_ERROR;
+    if (!property_str) return {.item = ITEM_ERROR};
     printf("Parsing CSS property: %s\n", property_str->chars);
     
     char* property_trimmed = input_trim_whitespace(property_str->chars);
     if (!property_trimmed || strlen(property_trimmed) == 0) {
         if (property_trimmed) free(property_trimmed);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     Element* declaration = input_create_element(input, "declaration");
     if (!declaration) {
         free(property_trimmed);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     input_add_attribute_to_element(input, declaration, "property", property_trimmed);
@@ -702,7 +696,7 @@ static Item parse_css_declaration(Input *input, const char **css) {
 static Item parse_css_string(Input *input, const char **css) {
     printf("Parsing CSS string\n");
     char quote = **css;
-    if (quote != '"' && quote != '\'') return ITEM_ERROR;
+    if (quote != '"' && quote != '\'') return {.item = ITEM_ERROR};
     
     StrBuf* sb = input->sb;
     (*css)++; // Skip opening quote
@@ -762,7 +756,7 @@ static Item parse_css_string(Input *input, const char **css) {
 }
 
 static Item parse_css_url(Input *input, const char **css) {
-    if (strncmp(*css, "url(", 4) != 0) return ITEM_ERROR;
+    if (strncmp(*css, "url(", 4) != 0) return {.item = ITEM_ERROR};
     
     *css += 4; // Skip "url("
     skip_css_whitespace(css);
@@ -797,7 +791,7 @@ static Item parse_css_url(Input *input, const char **css) {
     
     // Create url element with the URL as content
     Element* url_element = input_create_element(input, "url");
-    if (url_element && url_value != ITEM_ERROR) {
+    if (url_element && url_value .item != ITEM_ERROR) {
         // Add URL as content - for now just store as attribute
         input_add_attribute_item_to_element(input, url_element, "href", url_value);
     }
@@ -827,7 +821,7 @@ static Item parse_css_color(Input *input, const char **css) {
         }
         // Clear buffer even on error path
         strbuf_to_string(sb);
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Check for CSS3 color functions (rgba, hsla, etc.)
@@ -866,19 +860,19 @@ static Item parse_css_color(Input *input, const char **css) {
         strbuf_to_string(sb); // Clear buffer
     }
     
-    return ITEM_ERROR;
+    return {.item = ITEM_ERROR};
 }
 
 static Item parse_css_number(Input *input, const char **css) {
     double *dval;
     MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return ITEM_ERROR;
+    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
     
     char* end;
     *dval = strtod(*css, &end);
     *css = end;
     
-    return d2it(dval);
+    return {.item = d2it(dval);
 }
 
 static Item parse_css_measure(Input *input, const char **css) {
@@ -912,7 +906,7 @@ static Item parse_css_measure(Input *input, const char **css) {
         // Clear buffer before returning error
         strbuf_to_string(sb);
         *css = start; // Reset
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Parse unit part
@@ -969,7 +963,7 @@ static Item parse_css_measure(Input *input, const char **css) {
 }
 
 static Item parse_css_identifier(Input *input, const char **css) {
-    if (!is_css_identifier_start(**css)) return ITEM_ERROR;
+    if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
     
     StrBuf* sb = input->sb;
     
@@ -1007,7 +1001,7 @@ static Item parse_css_identifier(Input *input, const char **css) {
     
     String* id_str = strbuf_to_string(sb);
     if (!id_str) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     // Convert CSS keyword values to Lambda symbols using y2it()
@@ -1032,9 +1026,8 @@ static Array* parse_css_function_params(Input *input, const char **css) {
         const char* start_pos = *css; // track position to detect infinite loops
         
         Item param = parse_css_value(input, css);
-        if (param != ITEM_ERROR) {
-            LambdaItem item = {.item = param};
-            array_append(params, item, input->pool);
+        if (param .item != ITEM_ERROR) {
+            array_append(params, param, input->pool);
         } else {
             // if we can't parse a value and haven't advanced, skip one character to avoid infinite loop
             if (*css == start_pos) {
@@ -1073,7 +1066,7 @@ static Array* parse_css_function_params(Input *input, const char **css) {
 // Helper function to flatten single-element arrays  
 static Item flatten_single_array(Array* arr) {
     if (!arr) {
-        return ITEM_ERROR;
+        return {.item = ITEM_ERROR};
     }
     
     if (arr->length != 1) {
@@ -1086,7 +1079,7 @@ static Item flatten_single_array(Array* arr) {
     Item single_item = list_get((List*)arr, 0);
     
     // Debug: check what type we're flattening
-    if (single_item != ITEM_ERROR) {
+    if (single_item .item != ITEM_ERROR) {
         printf("Flattening single array item, type: %llu\n", single_item >> 56);
         
         // For container types (like Elements), the type is determined by the container's type_id field
@@ -1105,7 +1098,7 @@ static Item flatten_single_array(Array* arr) {
 
 static Item parse_css_function(Input *input, const char **css) {
     // Parse function name
-    if (!is_css_identifier_start(**css)) return ITEM_ERROR;
+    if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
     
     StrBuf* sb = input->sb;
     while (is_css_identifier_char(**css)) {
@@ -1121,7 +1114,7 @@ static Item parse_css_function(Input *input, const char **css) {
     }
     
     String* func_name = strbuf_to_string(sb);
-    if (!func_name) return ITEM_ERROR;
+    if (!func_name) return {.item = ITEM_ERROR};
     
     printf("Parsing CSS function: %s\n", func_name->chars);
     
@@ -1136,7 +1129,7 @@ static Item parse_css_function(Input *input, const char **css) {
     
     // Create Lambda element with function name as element name
     Element* func_element = input_create_element(input, func_name->chars);
-    if (!func_element) return ITEM_ERROR;
+    if (!func_element) return {.item = ITEM_ERROR};
     
     // Add parameters as child content using list_push
     if (params && params->length > 0) {
@@ -1164,9 +1157,8 @@ static Array* parse_css_value_list(Input *input, const char **css) {
         const char* start_pos = *css; // Track position to detect infinite loops
         
         Item value = parse_css_value(input, css);
-        if (value != ITEM_ERROR) {
-            LambdaItem item = {.item = value};
-            array_append(values, item, input->pool);
+        if (value .item != ITEM_ERROR) {
+            array_append(values, value, input->pool);
         } else {
             // If we can't parse a value and haven't advanced, skip one character to avoid infinite loop
             if (*css == start_pos) {
@@ -1209,7 +1201,7 @@ static Array* parse_css_value_list(Input *input, const char **css) {
 static Item parse_css_value(Input *input, const char **css) {
     skip_css_comments(css);
     
-    if (!**css) return ITEM_ERROR;
+    if (!**css) return {.item = ITEM_ERROR};
     
     // Try to parse different CSS value types
     switch (**css) {
@@ -1293,14 +1285,14 @@ static Item parse_css_value(Input *input, const char **css) {
                 } else {
                     // Check if it's a color first
                     Item color_result = parse_css_color(input, css);
-                    if (color_result != ITEM_ERROR) {
+                    if (color_result .item != ITEM_ERROR) {
                         return color_result;
                     }
                     // Otherwise parse as identifier
                     return parse_css_identifier(input, css);
                 }
             }
-            return ITEM_ERROR;
+            return {.item = ITEM_ERROR};
     }
 }
 
@@ -1322,7 +1314,7 @@ void parse_css(Input* input, const char* css_string) {
             input_add_attribute_item_to_element(input, empty_stylesheet, "rules", (Item)empty_rules);
             input->root = (Item)empty_stylesheet;
         } else {
-            input->root = ITEM_ERROR;
+            input->root = {.item = ITEM_ERROR};
         }
     }
 }

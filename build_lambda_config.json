@@ -1,11 +1,16 @@
 {
     "output": "lambda.exe",
-    "source_dirs":[],
+    "source_dirs":[
+    ],
     "_source_dirs": [
         "lambda/input",
         "lambda/format"
     ],
     "source_files": [
+        "lambda/input/input.cpp",
+        "lambda/input/input-json.cpp",
+        "lambda/input/input-ini.cpp",
+        "lambda/input/input-xml.cpp",
         "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
         "lib/strbuf.c",
