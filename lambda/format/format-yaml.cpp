@@ -110,7 +110,7 @@ static void format_array_items(StrBuf* sb, Array* arr, int indent_level) {
         
         // use the direct item access like TOML formatter
         Item item = arr->items[i];
-        TypeId item_type = (TypeId)(item >> 56);
+        TypeId item_type = (TypeId)(get_type_id(item));
         
         // for complex types, add proper indentation
         if (item_type == LMD_TYPE_MAP || item_type == LMD_TYPE_ELEMENT || 
@@ -205,7 +205,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
         return;
     }
     
-    TypeId type_id = get_type_id((LambdaItem)item);
+    TypeId type_id = get_type_id(item);
     
     switch (type_id) {
         case LMD_TYPE_NULL:
@@ -338,7 +338,7 @@ String* format_yaml(VariableMemPool* pool, Item root_item) {
         return NULL;
     }
     
-    TypeId root_type = get_type_id((LambdaItem)root_item);
+    TypeId root_type = get_type_id(root_item);
     
     // Check if root is an array that might represent multiple YAML documents
     if (root_type == LMD_TYPE_ARRAY || root_type == LMD_TYPE_LIST) {

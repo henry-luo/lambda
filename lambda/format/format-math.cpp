@@ -325,7 +325,7 @@ static const MathFormatDef modular[] = {
 
 // Helper function to check if an item represents a single character/digit
 static bool is_single_character_item(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);    
+    TypeId type = get_type_id(item);    
     if (type == LMD_TYPE_INT) {
         int val = get_int_value(item);
         return val >= 0 && val <= 9;
@@ -352,7 +352,7 @@ static int implicit_mul_depth = 0;  // Track nesting depth of implicit_mul
 static bool in_compact_context = false;  // Track when we're in subscript/superscript context
 
 static bool item_contains_integral(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_SYMBOL) {
         String* str = (String*)get_pointer(item);
@@ -362,7 +362,7 @@ static bool item_contains_integral(Item item) {
             }
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item;  // item is already the raw pointer for elements
+        Element* elem = (Element*)get_pointer(item);  // item is already the raw pointer for elements
         
         // Check if this element is an integral
         TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -389,9 +389,9 @@ static bool item_contains_integral(Item item) {
 
 // Helper function to check if an item is a LaTeX command element
 static bool item_is_latex_command(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item;
+        Element* elem = (Element*)get_pointer(item);
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -418,9 +418,9 @@ static bool item_is_latex_command(Item item) {
 
 // Helper function to check if an item is a logical quantifier
 static bool item_is_quantifier(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item;
+        Element* elem = (Element*)get_pointer(item);
         if (elem && elem->type) {
             // Get the element type to access the name
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -439,10 +439,10 @@ static bool item_is_quantifier(Item item) {
 
 // Helper function to check if an item contains only symbols (including nested implicit_mul of symbols)
 static bool item_contains_only_symbols(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item;
+        Element* elem = (Element*)get_pointer(item);
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -468,9 +468,9 @@ static bool item_contains_only_symbols(Item item) {
 
 // Helper function to check if an item is a symbol element (like Greek letters, special symbols)
 static bool item_is_symbol_element(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item;
+        Element* elem = (Element*)get_pointer(item);
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -498,11 +498,11 @@ static bool item_is_symbol_element(Item item) {
 
 // Helper function to check if an item is an identifier or variable (single letters, strings)
 static bool item_is_identifier_or_variable(Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     
     // Check if it's a string (variable/identifier)
     if (type == LMD_TYPE_STRING) {
-        String* str = (String*)item;
+        String* str = (String*)get_pointer(item);
         if (str && str->len > 0) {
             // Consider single letters as variables
             if (str->len == 1 && isalpha(str->chars[0])) {
@@ -524,7 +524,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's a symbol (LMD_TYPE_SYMBOL = 9) that represents a variable
     if (type == LMD_TYPE_SYMBOL) {
-        String* sym = (String*)item;  // Symbol is typedef for String
+        String* sym = (String*)get_pointer(item);  // Symbol is typedef for String
         if (sym && sym->len > 0) {
             // Consider single-letter symbols as variables
             if (sym->len == 1 && isalpha(sym->chars[0])) {
@@ -546,7 +546,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's an element that represents a variable (single letter)
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item;
+        Element* elem = (Element*)get_pointer(item);
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -691,7 +691,7 @@ static void format_math_children_with_template(StrBuf* sb, List* children, const
             
             if (child_index >= 0 && child_index < child_count) {
                 Item child_item = children->items[child_index];
-                printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)child_item);
+                printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)get_pointer(child_item));
                 format_math_item(sb, child_item, flavor, depth + 1);
             } else {
                 printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
@@ -950,15 +950,15 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                 // Special case: add space between different element types
                 // but avoid double-spacing operators that already have spacing
                 else {
-                    TypeId prev_type = get_type_id((LambdaItem)prev);
-                    TypeId curr_type = get_type_id((LambdaItem)curr);
+                    TypeId prev_type = get_type_id(prev);
+                    TypeId curr_type = get_type_id(curr);
                     
                     // Check if either element is a spaced operator (like cdot, times)
                     bool prev_is_spaced_operator = false;
                     bool curr_is_spaced_operator = false;
                     
                     if (prev_type == LMD_TYPE_ELEMENT) {
-                        Element* elem = (Element*)prev;
+                        Element* elem = (Element*)get_pointer(prev);
                         if (elem && elem->type) {
                             TypeElmt* elmt_type = (TypeElmt*)elem->type;
                             if (elmt_type && elmt_type->name.str) {
@@ -990,8 +990,8 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                             bool prev_is_frac = false;
                             bool curr_is_bracket = false;
                             
-                            Element* prev_elem = (Element*)prev;
-                            Element* curr_elem = (Element*)curr;
+                            Element* prev_elem = (Element*)get_pointer(prev);
+                            Element* curr_elem = (Element*)get_pointer(curr);
                             
                             if (prev_elem && prev_elem->type) {
                                 TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
@@ -1213,10 +1213,10 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
 
 // Format a math item (could be element, string, number, etc.)
 static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=%p\n", depth, (int)type, (void*)item);
+    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=%p\n", depth, (int)type, (void*)get_pointer(item));
     fprintf(stderr, "DEBUG format_math_item: sb before - length=%zu, str='%s'\n", 
             sb->length, sb->str ? sb->str : "(null)");
     #endif
@@ -1316,7 +1316,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
 String* format_math_latex(VariableMemPool* pool, Item root_item) {
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: Starting with pool=%p, root_item=%p\n", 
-            (void*)pool, (void*)root_item);
+            (void*)pool, (void*)get_pointer(root_item));
     #endif
     
     StrBuf* sb = strbuf_new_pooled(pool);

@@ -172,22 +172,21 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
     // Safety check for null pointer
     if (!sb) return;
     
-    // Check if item is null (0)
-    if (item == 0) {
+    // Check if item is null
+    if ((item.item == ITEM_NULL)) {
         if (!tag_name) tag_name = "value";
         strbuf_append_format(sb, "<%s/>", tag_name);
         return;
     }
     
-    // Additional safety check for LambdaItem structure
-    LambdaItem lambda_item = (LambdaItem)item;
-    if (lambda_item.type_id == 0 && lambda_item.raw_pointer == NULL) {
+    // Additional safety check for Item structure
+    if (get_type_id(item) == 0 && get_pointer(item) == NULL) {
         if (!tag_name) tag_name = "value";
         strbuf_append_format(sb, "<%s/>", tag_name);
         return;
     }
     
-    TypeId type = get_type_id(lambda_item);
+    TypeId type = get_type_id(item);
     
     if (!tag_name) tag_name = "value";
     
@@ -217,7 +216,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         break;
     }
     case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)item;
+        Array* arr = (Array*)get_pointer(item);
         if (arr) {
             strbuf_append_format(sb, "<%s>", tag_name);
             format_array(sb, arr, "item");
@@ -228,7 +227,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         break;
     }
     case LMD_TYPE_MAP: {
-        Map* mp = (Map*)item;
+        Map* mp = (Map*)get_pointer(item);
         if (mp) {
             format_map(sb, mp, tag_name);
         } else {
@@ -237,7 +236,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* element = (Element*)item;
+        Element* element = (Element*)get_pointer(item);
         if (!element || !element->type) {
             strbuf_append_format(sb, "<%s/>", tag_name);
             break;
@@ -282,7 +281,7 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
     StrBuf* sb = strbuf_new_pooled(pool);
     if (!sb) return NULL;
     
-    printf("format_xml: root_item %p\n", (void*)root_item);
+    printf("format_xml: root_item %p\n", (void*)get_pointer(root_item));
     
     // Add XML declaration
     strbuf_append_str(sb, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");

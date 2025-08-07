@@ -4,9 +4,9 @@
 #include "../lambda-data.hpp"
 
 // Common macros for extracting values from Lambda Items
-#define get_pointer(item) ((void*)((item) & 0x00FFFFFFFFFFFFFF))
-#define get_bool_value(item) ((bool)((item) & 0xFF))
-#define get_int_value(item) ((int)(((LambdaItem)item).long_val))
+#define get_pointer(x) ((void*)((x).item & 0x00FFFFFFFFFFFFFF))
+#define get_bool_value(x) ((bool)((x).item & 0xFF))
+#define get_int_value(x) ((int)it2l(x))
 
 // Common function declarations
 Item create_item_from_field_data(void* field_data, TypeId type_id);

@@ -45,7 +45,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
         return;
     }
     
-    TypeId type_id = (TypeId)(item >> 56);
+    TypeId type_id = (TypeId)(get_type_id(item));
     
     switch (type_id) {
         case LMD_TYPE_BOOL: {
@@ -67,7 +67,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_ARRAY:  case LMD_TYPE_LIST:{
-            Array* arr = (Array*)item;
+            Array* arr = (Array*)get_pointer(item);
             if (arr && arr->length > 0) {
                 strbuf_append_str(sb, "[");
                 format_array_items(sb, arr, depth + 1);
@@ -78,7 +78,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_MAP: {
-            Map* map = (Map*)item;
+            Map* map = (Map*)get_pointer(item);
             if (map && map->type && map->data) {
                 format_inline_table(sb, map, depth + 1);
             } else {
@@ -283,7 +283,7 @@ String* format_toml(VariableMemPool* pool, Item root_item) {
     strbuf_append_str(sb, "\n");
     
     // handle root item - try as map first
-    Map* map = (Map*)root_item;
+    Map* map = (Map*)get_pointer(root_item);
     
     if (map && map->data && map->type) {
         TypeMap* type_map = (TypeMap*)map->type;
@@ -299,7 +299,7 @@ String* format_toml(VariableMemPool* pool, Item root_item) {
         }
     } else {
         // try using central format_item function for non-map roots
-        TypeId type = (TypeId)(root_item >> 56);
+        TypeId type = get_type_id(root_item);
         if (type != 0) {
             strbuf_append_format(sb, "# Root type: %d\n", (int)type);
             strbuf_append_str(sb, "root_value = ");
@@ -307,7 +307,7 @@ String* format_toml(VariableMemPool* pool, Item root_item) {
             strbuf_append_str(sb, "\n");
         } else {
             strbuf_append_str(sb, "# Unable to determine root type\n");
-            strbuf_append_format(sb, "# Raw value: 0x%llx\n", (unsigned long long)root_item);
+            strbuf_append_format(sb, "# Raw value: 0x%llx\n", (unsigned long long)root_item.item);
             strbuf_append_str(sb, "status = \"unable_to_format\"\n");
         }
     }

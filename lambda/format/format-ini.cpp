@@ -108,7 +108,7 @@ static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name
 
 // centralized function to format any Lambda Item for INI format
 static void format_item(StrBuf* sb, Item item, const char* key_name) {
-    TypeId type_id = get_type_id((LambdaItem)item);
+    TypeId type_id = get_type_id(item);
     
     switch (type_id) {
         case LMD_TYPE_NULL:
@@ -143,7 +143,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
                     }
                     
                     Item arr_item = arr->items[i];
-                    TypeId arr_type = get_type_id((LambdaItem)arr_item);
+                    TypeId arr_type = get_type_id(arr_item);
                     
                     // only format simple values in arrays for INI
                     if (is_simple_value(arr_type)) {
@@ -194,7 +194,7 @@ String* format_ini(VariableMemPool* pool, Item root_item) {
     // add lowercase comment as requested
     strbuf_append_str(sb, "; ini formatted output\n");
     
-    TypeId root_type = get_type_id((LambdaItem)root_item);
+    TypeId root_type = get_type_id(root_item);
     
     if (root_type == LMD_TYPE_MAP) {
         // root is a map - format as sections

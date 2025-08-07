@@ -2,46 +2,28 @@
 
 // Create a Lambda Item from raw field data with proper type tagging
 Item create_item_from_field_data(void* field_data, TypeId type_id) {
-    Item item = 0;
-    
     switch (type_id) {
         case LMD_TYPE_BOOL:
-            item = *(bool*)field_data ? 1 : 0;
-            item |= ((uint64_t)LMD_TYPE_BOOL << 56);
-            break;
+            return {.item = b2it(*(bool*)field_data)};
         case LMD_TYPE_INT:
-            item = *(int64_t*)field_data;
-            item |= ((uint64_t)LMD_TYPE_INT << 56);
-            break;
+            return {.item = l2it(*(int64_t*)field_data)};
         case LMD_TYPE_FLOAT:
-            item = (uint64_t)field_data;
-            item |= ((uint64_t)LMD_TYPE_FLOAT << 56);
-            break;
+            return {.item = d2it((double*)field_data)};
         case LMD_TYPE_STRING:
-            item = (uint64_t)*(void**)field_data;
-            item |= ((uint64_t)LMD_TYPE_STRING << 56);
-            break;
+            return {.item = s2it((String*)*(void**)field_data)};
         case LMD_TYPE_ARRAY:
-            item = (uint64_t)*(void**)field_data;
-            item |= ((uint64_t)LMD_TYPE_ARRAY << 56);
-            break;
+            return {.item = (uint64_t)*(void**)field_data};
         case LMD_TYPE_MAP:
-            item = (uint64_t)*(void**)field_data;
-            item |= ((uint64_t)LMD_TYPE_MAP << 56);
-            break;
+            return {.item = (uint64_t)*(void**)field_data};
         default:
             // fallback for unknown types
-            item = (uint64_t)field_data;
-            item |= ((uint64_t)type_id << 56);
-            break;
+            return {.item = (uint64_t)field_data};
     }
-    
-    return item;
 }
 
 // Common number formatting function
 void format_number(StrBuf* sb, Item item) {
-    TypeId type = get_type_id((LambdaItem)item);
+    TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_INT) {
         int val = get_int_value(item);
