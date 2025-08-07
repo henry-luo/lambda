@@ -361,9 +361,7 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
             (*html)++;
         }
         
-        if (sb->length == sizeof(uint32_t)) {
-            // No attribute name found
-            strbuf_full_reset(sb);
+        if (sb->length == sizeof(uint32_t)) { // No attribute name found
             break;
         }
         
@@ -374,34 +372,9 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
         if (**html == '=') {
             (*html)++; // Skip =
             attr_value = parse_attribute_value(input, html);
-            
-            // Check if parse_attribute_value returned NULL
-            if (!attr_value) {
-                // Create empty string as fallback
-                StrBuf* fallback_sb = input->sb;
-                if (!fallback_sb || !fallback_sb->str) {
-                    return false;
-                }
-                
-                String *empty_string = (String*)fallback_sb->str;
-                empty_string->len = 0;
-                empty_string->ref_cnt = 0;
-                strbuf_full_reset(fallback_sb);
-                attr_value = empty_string;
-            }
         } else {
             // Boolean attribute (no value)
-            StrBuf* empty_sb = input->sb;
-            
-            if (!empty_sb || !empty_sb->str) {
-                return false;
-            }
-            
-            String *empty_string = (String*)empty_sb->str;
-            empty_string->len = 0;
-            empty_string->ref_cnt = 0;
-            strbuf_full_reset(empty_sb);
-            attr_value = empty_string;
+            attr_value = NULL;
         }
         
         // Double-check that attr_value is not NULL before using it
@@ -622,7 +595,7 @@ static Item parse_element(Input *input, const char **html) {
         // Handle raw text elements (script, style, textarea, etc.) specially
         if (is_raw_text_element(tag_name->chars)) {
             StrBuf* content_sb = input->sb;
-            strbuf_full_reset(content_sb); // Ensure clean state
+            strbuf_reset(content_sb); // Ensure clean state
             
             // For raw text elements, we need to find the exact closing tag
             // and preserve all content as-is, including HTML tags within
@@ -642,20 +615,12 @@ static Item parse_element(Input *input, const char **html) {
             }
             
             // Check if we hit the safety limit
-            if (content_chars >= max_content_chars) {
-                strbuf_full_reset(content_sb);
-            } else if (content_sb->length > sizeof(uint32_t)) {
-                String *content_string = (String*)content_sb->str;
-                content_string->len = content_sb->length - sizeof(uint32_t);
-                content_string->ref_cnt = 0;
-                strbuf_full_reset(content_sb);
-                
-                if (content_string->len > 0) {
-                    Item content_item = {.item = s2it(content_string)};
-                    list_push((List*)element, content_item);
-                }
+            if (content_chars < max_content_chars && content_sb->length > sizeof(uint32_t)) {
+                String *content_string = strbuf_to_string(content_sb);
+                Item content_item = {.item = s2it(content_string)};
+                list_push((List*)element, content_item);
             } else {
-                strbuf_full_reset(content_sb);
+                strbuf_reset(content_sb);
             }
         } else {
             // regular content parsing for non-raw-text elements
@@ -706,12 +671,11 @@ static Item parse_element(Input *input, const char **html) {
                     if (**html && !isspace(**html)) {
                         // Start building text content
                         StrBuf* text_sb = input->sb;
-                        strbuf_full_reset(text_sb);
+                        strbuf_reset(text_sb);
                         
                         // Collect text until we hit '<' or closing tag
                         int text_chars = 0;
-                        const int max_text_chars = 1000; // Limit text content size
-                        
+                        const int max_text_chars = 10000; // Limit text content size
                         while (**html && **html != '<' && text_chars < max_text_chars &&
                                strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
                             strbuf_append_char(text_sb, **html);
@@ -721,10 +685,7 @@ static Item parse_element(Input *input, const char **html) {
                         
                         // Create text string if we have content
                         if (text_chars > 0) {
-                            String *text_string = (String*)text_sb->str;
-                            text_string->len = text_sb->length - sizeof(uint32_t);
-                            text_string->ref_cnt = 0;
-                            strbuf_full_reset(text_sb);
+                            String *text_string = strbuf_to_string(text_sb);
                             
                             // Only add non-whitespace text
                             bool has_non_whitespace = false;
@@ -739,8 +700,6 @@ static Item parse_element(Input *input, const char **html) {
                                 Item text_item = {.item = s2it(text_string)};
                                 list_push((List*)element, text_item);
                             }
-                        } else {
-                            strbuf_full_reset(text_sb);
                         }
                     } else {
                         // Skip whitespace

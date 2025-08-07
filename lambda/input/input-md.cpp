@@ -25,7 +25,6 @@ static bool is_table_separator(const char* line);
 #define is_empty_line input_is_empty_line
 #define count_leading_chars input_count_leading_chars
 #define trim_whitespace input_trim_whitespace
-#define create_string input_create_string
 #define split_lines input_split_lines
 #define free_lines input_free_lines
 #define create_markdown_element input_create_element
@@ -1986,22 +1985,13 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_inline_content(Input *input, const char* text) {
-    if (!text || strlen(text) == 0) {
-        strbuf_reset(input->sb);
-        return {.item = s2it(strbuf_to_string(input->sb))};
-    }
+    if (!text || strlen(text) == 0) { return ItemNull; }
     
     int len = strlen(text);
     int pos = 0;
     
     // Create a span to hold mixed content
     Element* span = create_markdown_element(input, "span");
-    if (!span) {
-        strbuf_reset(input->sb);
-        strbuf_append_str(input->sb, text);
-        return {.item = s2it(strbuf_to_string(input->sb))};
-    }
-    
     // Save current buffer state
     StrBuf* saved_sb = input->sb;
     StrBuf* text_buffer = strbuf_new_pooled(input->pool);
@@ -2062,7 +2052,6 @@ static Item parse_inline_content(Input *input, const char* text) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
-                strbuf_reset(text_buffer);
             }
             
             Item superscript = parse_superscript(input, text, &pos);
