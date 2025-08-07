@@ -26,6 +26,7 @@ void parse_vcf(Input* input, const char* vcf_string);
 void parse_ics(Input* input, const char* ics_string);
 void parse_textile(Input* input, const char* textile_string);
 void parse_mark(Input* input, const char* mark_string);
+void parse_org(Input* input, const char* org_string);
 void parse_css(Input* input, const char* css_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
 
@@ -491,6 +492,9 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
         }
         else if (strcmp(effective_type, "mark") == 0) {
             parse_mark(input, source);
+        }
+        else if (strcmp(effective_type, "org") == 0) {
+            parse_org(input, source);
         }
         else if (strcmp(effective_type, "css") == 0) {
             parse_css(input, source);

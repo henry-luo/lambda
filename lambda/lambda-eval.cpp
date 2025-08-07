@@ -158,9 +158,7 @@ void expand_list(List *list) {
 
 void list_push(List *list, Item item) {
     if (!item.item) { return; }  // NULL value
-    if (item.type_id == LMD_TYPE_NULL) {
-        return;  // skip NULL value
-    }
+    if (item.type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (item.type_id == LMD_TYPE_RAW_POINTER) {
         TypeId type_id = *((uint8_t*)item.raw_pointer);
         // nest list is flattened
@@ -218,10 +216,8 @@ Item list_fill(List *list, int count, ...) {
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
+        printf("list_fill item %d\n", i);
         Item itm = {.item = va_arg(args, uint64_t)};
-        if (itm.type_id == LMD_TYPE_NULL) {
-            continue;  // skip NULL value
-        }
         list_push(list, itm);
     }
     va_end(args);
@@ -861,10 +857,9 @@ Item fn_input(Item url, Item type) {
         return ItemNull;  // todo: push error
     }
     
-    // Input *input = input_data(context, url_str, type_str, flavor_str);
+    Input *input = input_data(context, url_str, type_str, flavor_str);
     // todo: input should be cached in context
-    // return (input && input->root) ? input->root : ItemNull;
-    return ItemNull;
+    return (input && input->root.item) ? input->root : ItemNull;
 }
 
 void fn_print(Item item) {
@@ -874,7 +869,7 @@ void fn_print(Item item) {
     }
 }
 
-String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
+extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
 
 String* fn_format(Item item, Item type) {
     TypeId type_id = get_type_id(type);
@@ -932,12 +927,11 @@ String* fn_format(Item item, Item type) {
     }
     
     // printf("format item type: %s, flavor: %s\n", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
-    // String* result = format_data(item, type_str, flavor_str, context->heap->pool);
-    // if (result) {
-    //     arraylist_append(context->heap->entries, (void*)s2it(result));
-    // }
-    // return result;
-    return NULL;
+    String* result = format_data(item, type_str, flavor_str, context->heap->pool);
+    if (result) {
+         arraylist_append(context->heap->entries, (void*)s2it(result));
+    }
+    return result;
 }
 
 #include "../lib/utf.h"

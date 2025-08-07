@@ -25,6 +25,7 @@
         "lambda/input/input-vcf.cpp",
         "lambda/input/input-textile.cpp",
         "lambda/input/input-mark.cpp",
+        "lambda/input/input-org.cpp",
         "lambda/input/input-adoc.cpp",
         "lambda/input/input-math.cpp",
         "lambda/input/input-rst.cpp",

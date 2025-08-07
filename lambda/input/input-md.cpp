@@ -713,10 +713,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     }
     
     // Create string content
-    String *content_str = (String*)sb->str;
-    content_str->len = sb->length - sizeof(uint32_t);
-    content_str->ref_cnt = 0;
-    strbuf_full_reset(sb);
+    String *content_str = strbuf_to_string(sb);
     
     // Add content to element
     if (content_str->len > 0) {
@@ -861,7 +858,7 @@ static Item parse_blockquote(Input *input, char** lines, int* current_line, int 
     Element* blockquote = create_markdown_element(input, "blockquote");
     if (!blockquote) return {.item = ITEM_NULL};
     
-    StrBuf* content_buffer = strbuf_new_cap(512);
+    strbuf_reset(input->sb);
     bool first_line = true;
     
     // Collect all blockquote lines
@@ -876,19 +873,19 @@ static Item parse_blockquote(Input *input, char** lines, int* current_line, int 
         
         // Add line content
         if (!first_line) {
-            strbuf_append_char(content_buffer, '\n');
+            strbuf_append_char(input->sb, '\n');
         }
         
-        strbuf_append_str(content_buffer, line + pos);
+        strbuf_append_str(input->sb, line + pos);
         first_line = false;
         (*current_line)++;
     }
     
     // Parse the collected content as markdown
-    if (content_buffer->length > 0) {
-        strbuf_append_char(content_buffer, '\0');
+    if (input->sb->length > 0) {
+        strbuf_append_char(input->sb, '\0');
         int sub_line_count;
-        char** sub_lines = split_lines(content_buffer->str, &sub_line_count);
+        char** sub_lines = split_lines(input->sb->str, &sub_line_count);
         
         int sub_current_line = 0;
         while (sub_current_line < sub_line_count) {
@@ -909,7 +906,6 @@ static Item parse_blockquote(Input *input, char** lines, int* current_line, int 
         free_lines(sub_lines, sub_line_count);
     }
     
-    strbuf_free(content_buffer);
     return {.item = (uint64_t)blockquote};
 }
 
@@ -1047,24 +1043,23 @@ static Item parse_code_span(Input *input, const char* text, int* pos) {
     
     // Extract content between backticks
     int content_len = content_end - content_start;
-    char* content = (char*)malloc(content_len + 1);
-    strncpy(content, text + content_start, content_len);
-    content[content_len] = '\0';
+    
+    // Reset the buffer and use it to construct the content
+    strbuf_reset(input->sb);
     
     // Trim single spaces from start and end if both are spaces
-    char* trimmed_content = content;
-    if (content_len >= 2 && content[0] == ' ' && content[content_len - 1] == ' ') {
-        trimmed_content = content + 1;
-        content[content_len - 1] = '\0';
+    if (content_len >= 2 && text[content_start] == ' ' && text[content_end - 1] == ' ') {
+        strbuf_append_str_n(input->sb, text + content_start + 1, content_len - 2);
+    } else {
+        strbuf_append_str_n(input->sb, text + content_start, content_len);
     }
     
-    String* code_str = create_string(input, trimmed_content);
+    String* code_str = strbuf_to_string(input->sb);
     if (code_str) {
         list_push((List*)code_elem, {.item = s2it(code_str)});
         ((TypeElmt*)code_elem->type)->content_length++;
     }
     
-    free(content);
     return {.item = (uint64_t)code_elem};
 }
 
@@ -1277,19 +1272,16 @@ static Item parse_superscript(Input *input, const char* text, int* pos) {
     Element* sup_elem = create_markdown_element(input, "sup");
     if (!sup_elem) return {.item = ITEM_NULL};
     
-    // Extract content
-    int content_len = content_end - content_start;
-    char* content = (char*)malloc(content_len + 1);
-    strncpy(content, text + content_start, content_len);
-    content[content_len] = '\0';
+    // Extract content using the buffer
+    strbuf_reset(input->sb);
+    strbuf_append_str_n(input->sb, text + content_start, content_end - content_start);
     
-    String* sup_str = create_string(input, content);
+    String* sup_str = strbuf_to_string(input->sb);
     if (sup_str) {
         list_push((List*)sup_elem, {.item = s2it(sup_str)});
         ((TypeElmt*)sup_elem->type)->content_length++;
     }
     
-    free(content);
     return {.item = (uint64_t)sup_elem};
 }
 
@@ -1325,19 +1317,16 @@ static Item parse_subscript(Input *input, const char* text, int* pos) {
     Element* sub_elem = create_markdown_element(input, "sub");
     if (!sub_elem) return {.item = ITEM_NULL};
     
-    // Extract content
-    int content_len = content_end - content_start;
-    char* content = (char*)malloc(content_len + 1);
-    strncpy(content, text + content_start, content_len);
-    content[content_len] = '\0';
+    // Extract content using the buffer
+    strbuf_reset(input->sb);
+    strbuf_append_str_n(input->sb, text + content_start, content_end - content_start);
     
-    String* sub_str = create_string(input, content);
+    String* sub_str = strbuf_to_string(input->sb);
     if (sub_str) {
         list_push((List*)sub_elem, {.item = s2it(sub_str)});
         ((TypeElmt*)sub_elem->type)->content_length++;
     }
     
-    free(content);
     return {.item = (uint64_t)sub_elem};
 }
 
@@ -1985,7 +1974,9 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
     }
     
     // Add the unicode emoji as text content
-    String* emoji_str = create_string(input, emoji_unicode);
+    strbuf_reset(input->sb);
+    strbuf_append_str(input->sb, emoji_unicode);
+    String* emoji_str = strbuf_to_string(input->sb);
     if (emoji_str) {
         list_push((List*)emoji_elem, {.item = s2it(emoji_str)});
         ((TypeElmt*)emoji_elem->type)->content_length++;
@@ -1996,7 +1987,8 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return {.item = s2it(create_string(input, ""))};
+        strbuf_reset(input->sb);
+        return {.item = s2it(strbuf_to_string(input->sb))};
     }
     
     int len = strlen(text);
@@ -2004,9 +1996,16 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // Create a span to hold mixed content
     Element* span = create_markdown_element(input, "span");
-    if (!span) return {.item = s2it(create_string(input, text))};
+    if (!span) {
+        strbuf_reset(input->sb);
+        strbuf_append_str(input->sb, text);
+        return {.item = s2it(strbuf_to_string(input->sb))};
+    }
     
-    StrBuf* text_buffer = strbuf_new_cap(256);
+    // Save current buffer state
+    StrBuf* saved_sb = input->sb;
+    StrBuf* text_buffer = strbuf_new_pooled(input->pool);
+    input->sb = text_buffer;
     
     while (pos < len) {
         char ch = text[pos];
@@ -2015,8 +2014,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         if (ch == '*' || ch == '_') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2033,8 +2031,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         } else if (ch == '~') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2060,8 +2057,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         } else if (ch == '^') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2078,8 +2074,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         } else if (ch == '`') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2096,8 +2091,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         } else if (ch == '[') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2114,8 +2108,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         } else if (ch == '$') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2143,8 +2136,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         } else if (ch == ':') {
             // Flush any accumulated text
             if (text_buffer->length > 0) {
-                strbuf_append_char(text_buffer, '\0');
-                String* text_str = create_string(input, text_buffer->str);
+                String* text_str = strbuf_to_string(text_buffer);
                 if (text_str && text_str->len > 0) {
                     list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
@@ -2168,15 +2160,15 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // Flush any remaining text
     if (text_buffer->length > 0) {
-        strbuf_append_char(text_buffer, '\0');
-        String* text_str = create_string(input, text_buffer->str);
+        String* text_str = strbuf_to_string(text_buffer);
         if (text_str && text_str->len > 0) {
             list_push((List*)span, {.item = s2it(text_str)});
             ((TypeElmt*)span->type)->content_length++;
         }
     }
     
-    strbuf_free(text_buffer);
+    // Restore the saved buffer
+    input->sb = saved_sb;
     
     // If span has only one text child, return just the text
     if (((TypeElmt*)span->type)->content_length == 1) {
