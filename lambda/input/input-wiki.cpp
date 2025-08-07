@@ -122,7 +122,7 @@ static Item parse_heading(Input *input, const char* line) {
     while (end > start && line[end-1] == ' ') end--; // Skip spaces before closing =
     
     if (end > start) {
-        char* content = malloc(end - start + 1);
+        char* content = (char*)malloc(end - start + 1);
         strncpy(content, line + start, end - start);
         content[end - start] = '\0';
         
@@ -134,12 +134,12 @@ static Item parse_heading(Input *input, const char* line) {
         free(content);
     }
     
-    return (Item)header;
+    return {.item = (uint64_t)header};
 }
 
 static Item parse_horizontal_rule(Input *input) {
     Element* hr = create_mediawiki_element(input, "hr");
-    return (Item)hr;
+    return {.item = (uint64_t)hr};
 }
 
 static Item parse_list(Input *input, char** lines, int* current_line, int total_lines) {
@@ -200,7 +200,7 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
                         list_push((List*)paragraph, text_content);
                         ((TypeElmt*)paragraph->type)->content_length++;
                     }
-                    list_push((List*)list_item, (Item)paragraph);
+                    list_push((List*)list_item, {.item = (uint64_t)paragraph});
                     ((TypeElmt*)list_item->type)->content_length++;
                 }
             } else {
@@ -214,13 +214,13 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
         }
         free(content);
         
-        list_push((List*)list, (Item)list_item);
+        list_push((List*)list, {.item = (uint64_t)list_item});
         ((TypeElmt*)list->type)->content_length++;
         
         (*current_line)++;
     }
     
-    return (Item)list;
+    return {.item = (uint64_t)list};
 }
 
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines) {
@@ -233,7 +233,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     (*current_line)++; // Skip {|
     
     Element* tbody = create_mediawiki_element(input, "tbody");
-    if (!tbody) return (Item)table;
+    if (!tbody) return {.item = (uint64_t)table};
     
     Element* current_row = NULL;
     
@@ -250,7 +250,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
         if (trimmed[0] == '|' && trimmed[1] == '-') {
             // Table row separator - start new row
             if (current_row) {
-                list_push((List*)tbody, (Item)current_row);
+                list_push((List*)tbody, {.item = (uint64_t)current_row});
                 ((TypeElmt*)tbody->type)->content_length++;
             }
             current_row = create_mediawiki_element(input, "tr");
@@ -276,11 +276,11 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                                 list_push((List*)paragraph, content);
                                 ((TypeElmt*)paragraph->type)->content_length++;
                             }
-                            list_push((List*)cell, (Item)paragraph);
+                            list_push((List*)cell, {.item = (uint64_t)paragraph});
                             ((TypeElmt*)cell->type)->content_length++;
                         }
                     }
-                    list_push((List*)current_row, (Item)cell);
+                    list_push((List*)current_row, {.item = (uint64_t)cell});
                     ((TypeElmt*)current_row->type)->content_length++;
                 }
             }
@@ -292,7 +292,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     
     // Add final row if exists
     if (current_row) {
-        list_push((List*)tbody, (Item)current_row);
+        list_push((List*)tbody, {.item = (uint64_t)current_row});
         ((TypeElmt*)tbody->type)->content_length++;
     }
     
@@ -301,11 +301,11 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     }
     
     if (((TypeElmt*)tbody->type)->content_length > 0) {
-        list_push((List*)table, (Item)tbody);
+        list_push((List*)table, {.item = (uint64_t)tbody});
         ((TypeElmt*)table->type)->content_length++;
     }
     
-    return (Item)table;
+    return {.item = (uint64_t)table};
 }
 
 static Item parse_paragraph(Input *input, const char* line) {
@@ -328,7 +328,7 @@ static Item parse_paragraph(Input *input, const char* line) {
     }
     
     free(content);
-    return (Item)paragraph;
+    return {.item = (uint64_t)paragraph};
 }
 
 // Inline parsing functions
@@ -392,20 +392,20 @@ static Item parse_bold_italic(Input *input, const char* text, int* pos) {
     
     // Extract content
     int content_len = content_end - content_start;
-    char* content = malloc(content_len + 1);
+    char* content = (char*)malloc(content_len + 1);
     strncpy(content, text + content_start, content_len);
     content[content_len] = '\0';
     
     if (strlen(content) > 0) {
         String* text_str = create_string(input, content);
         if (text_str) {
-            list_push((List*)format_elem, s2it(text_str));
+            list_push((List*)format_elem, {.item = s2it(text_str)});
             ((TypeElmt*)format_elem->type)->content_length++;
         }
     }
     
     free(content);
-    return (Item)format_elem;
+    return {.item = (uint64_t)format_elem};
 }
 
 static Item parse_link(Input *input, const char* text, int* pos) {
@@ -448,7 +448,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     // Extract link target
     int link_len = link_end - link_start;
-    char* link_target = malloc(link_len + 1);
+    char* link_target = (char*)malloc(link_len + 1);
     strncpy(link_target, text + link_start, link_len);
     link_target[link_len] = '\0';
     add_attribute_to_element(input, link_elem, "href", link_target);
@@ -457,7 +457,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     char* display_text;
     if (display_start != -1 && display_end != -1) {
         int display_len = display_end - display_start;
-        display_text = malloc(display_len + 1);
+        display_text = (char*)malloc(display_len + 1);
         strncpy(display_text, text + display_start, display_len);
         display_text[display_len] = '\0';
     } else {
@@ -467,14 +467,14 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     if (strlen(display_text) > 0) {
         String* text_str = create_string(input, display_text);
         if (text_str) {
-            list_push((List*)link_elem, s2it(text_str));
+            list_push((List*)link_elem, {.item = s2it(text_str)});
             ((TypeElmt*)link_elem->type)->content_length++;
         }
     }
     
     free(link_target);
     free(display_text);
-    return (Item)link_elem;
+    return {.item = (uint64_t)link_elem};
 }
 
 static Item parse_external_link(Input *input, const char* text, int* pos) {
@@ -517,7 +517,7 @@ static Item parse_external_link(Input *input, const char* text, int* pos) {
     
     // Extract URL
     int url_len = url_end - url_start;
-    char* url = malloc(url_len + 1);
+    char* url = (char*)malloc(url_len + 1);
     strncpy(url, text + url_start, url_len);
     url[url_len] = '\0';
     add_attribute_to_element(input, link_elem, "href", url);
@@ -526,7 +526,7 @@ static Item parse_external_link(Input *input, const char* text, int* pos) {
     char* display_text;
     if (display_start != -1 && display_end != -1) {
         int display_len = display_end - display_start;
-        display_text = malloc(display_len + 1);
+        display_text = (char*)malloc(display_len + 1);
         strncpy(display_text, text + display_start, display_len);
         display_text[display_len] = '\0';
     } else {
@@ -536,14 +536,14 @@ static Item parse_external_link(Input *input, const char* text, int* pos) {
     if (strlen(display_text) > 0) {
         String* text_str = create_string(input, display_text);
         if (text_str) {
-            list_push((List*)link_elem, s2it(text_str));
+            list_push((List*)link_elem, {.item = s2it(text_str)});
             ((TypeElmt*)link_elem->type)->content_length++;
         }
     }
     
     free(url);
     free(display_text);
-    return (Item)link_elem;
+    return {.item = (uint64_t)link_elem};
 }
 
 static Item parse_template(Input *input, const char* text, int* pos) {
@@ -582,23 +582,23 @@ static Item parse_template(Input *input, const char* text, int* pos) {
     
     // Extract template content
     int content_len = content_end - content_start + 1;
-    char* content = malloc(content_len + 1);
+    char* content = (char*)malloc(content_len + 1);
     strncpy(content, text + content_start, content_len);
     content[content_len] = '\0';
     
     String* template_str = create_string(input, content);
     if (template_str) {
-        list_push((List*)template_elem, s2it(template_str));
+        list_push((List*)template_elem, {.item = s2it(template_str)});
         ((TypeElmt*)template_elem->type)->content_length++;
     }
     
     free(content);
-    return (Item)template_elem;
+    return {.item = (uint64_t)template_elem};
 }
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return {.item = s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""))};
     }
     
     int len = strlen(text);
@@ -606,7 +606,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // Create a span to hold mixed content
     Element* span = create_mediawiki_element(input, "span");
-    if (!span) return {.item = s2it(create_string(input, text));
+    if (!span) return {.item = s2it(create_string(input, text))};
     
     StrBuf* text_buffer = strbuf_new_cap(256);
     
@@ -620,7 +620,7 @@ static Item parse_inline_content(Input *input, const char* text) {
                 strbuf_append_char(text_buffer, '\0');
                 String* text_str = create_string(input, text_buffer->str);
                 if (text_str && text_str->len > 0) {
-                    list_push((List*)span, s2it(text_str));
+                    list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
                 strbuf_reset(text_buffer);
@@ -638,7 +638,7 @@ static Item parse_inline_content(Input *input, const char* text) {
                 strbuf_append_char(text_buffer, '\0');
                 String* text_str = create_string(input, text_buffer->str);
                 if (text_str && text_str->len > 0) {
-                    list_push((List*)span, s2it(text_str));
+                    list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
                 strbuf_reset(text_buffer);
@@ -665,15 +665,15 @@ static Item parse_inline_content(Input *input, const char* text) {
                 strbuf_append_char(text_buffer, '\0');
                 String* text_str = create_string(input, text_buffer->str);
                 if (text_str && text_str->len > 0) {
-                    list_push((List*)span, s2it(text_str));
+                    list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
                 strbuf_reset(text_buffer);
             }
             
-            Item template = parse_template(input, text, &pos);
-            if (template .item != ITEM_NULL) {
-                list_push((List*)span, template);
+            Item template_item = parse_template(input, text, &pos);
+            if (template_item .item != ITEM_NULL) {
+                list_push((List*)span, template_item);
                 ((TypeElmt*)span->type)->content_length++;
                 continue;
             }
@@ -689,7 +689,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         strbuf_append_char(text_buffer, '\0');
         String* text_str = create_string(input, text_buffer->str);
         if (text_str && text_str->len > 0) {
-            list_push((List*)span, s2it(text_str));
+            list_push((List*)span, {.item = s2it(text_str)});
             ((TypeElmt*)span->type)->content_length++;
         }
     }
@@ -698,7 +698,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // If span has no content, return empty string
     if (((TypeElmt*)span->type)->content_length == 0) {
-        return {.item = s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""))};
     }
     
     // If span has only one text child, return just the text
@@ -707,7 +707,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         return list_get(span_list, 0);
     }
     
-    return (Item)span;
+    return {.item = (uint64_t)span};
 }
 
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines) {
@@ -752,19 +752,19 @@ static Item parse_mediawiki_content(Input *input, char** lines, int line_count) 
     
     // Create meta element for metadata
     Element* meta = create_mediawiki_element(input, "meta");
-    if (!meta) return (Item)doc;
+    if (!meta) return {.item = (uint64_t)doc};
     
     // Add basic metadata attributes
     add_attribute_to_element(input, meta, "title", "MediaWiki Document");
     add_attribute_to_element(input, meta, "language", "en");
     
     // Add meta to doc
-    list_push((List*)doc, (Item)meta);
+    list_push((List*)doc, {.item = (uint64_t)meta});
     ((TypeElmt*)doc->type)->content_length++;
     
     // Create body element for content
     Element* body = create_mediawiki_element(input, "body");
-    if (!body) return (Item)doc;
+    if (!body) return {.item = (uint64_t)doc};
     
     int current_line = 0;
     
@@ -787,10 +787,10 @@ static Item parse_mediawiki_content(Input *input, char** lines, int line_count) 
     }
     
     // Add body to doc
-    list_push((List*)doc, (Item)body);
+    list_push((List*)doc, {.item = (uint64_t)body});
     ((TypeElmt*)doc->type)->content_length++;
     
-    return (Item)doc;
+    return {.item = (uint64_t)doc};
 }
 
 void parse_mediawiki(Input* input, const char* mediawiki_string) {

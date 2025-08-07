@@ -201,7 +201,7 @@ static Array* parse_color_table(Input *input, const char **rtf) {
                     color->blue = cw.parameter;
                 }
                 
-                Item color_item = {.item = (Item)color};
+                Item color_item = {.item = (uint64_t)color};
                 array_append(colors, color_item, input->pool);
             }
         } else if (**rtf == ';') {
@@ -244,7 +244,7 @@ static Array* parse_font_table(Input *input, const char **rtf) {
                     (*rtf)++; // Skip semicolon
                 }
                 
-                Item font_item = {.item = (Item)font};
+                Item font_item = {.item = (uint64_t)font};
                 array_append(fonts, font_item, input->pool);
             }
         } else {
@@ -270,12 +270,12 @@ static Map* parse_document_properties(Input *input, const char **rtf) {
                     MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
                     if (err == MEM_POOL_ERR_OK) {
                         *dval = (double)cw.parameter;
-                        value = d2it(dval);
+                        value = {.item = d2it(dval)};
                     } else {
-                        value = ITEM_NULL;
+                        value = {.item = ITEM_NULL};
                     }
                 } else {
-                    value = b2it(true);
+                    value = {.item = b2it(true)};
                 }
                 map_put(props, cw.keyword, value, input);
             }
@@ -299,10 +299,10 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     if (!group) return {.item = ITEM_ERROR};
     
     Array* content = array_pooled(input->pool);
-    if (!content) return (Item)group;
+    if (!content) return {.item = (uint64_t)group};
     
     Map* formatting = map_pooled(input->pool);
-    if (!formatting) return (Item)group;
+    if (!formatting) return {.item = (uint64_t)group};
     
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
@@ -312,7 +312,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                 if (strcmp(cw.keyword->chars, "colortbl") == 0) {
                     Array* colors = parse_color_table(input, rtf);
                     if (colors) {
-                        Item color_table = {.item = (Item)colors};
+                        Item color_table = {.item = (uint64_t)colors};
                         
                         String* key;
                         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&key);
@@ -326,7 +326,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                 } else if (strcmp(cw.keyword->chars, "fonttbl") == 0) {
                     Array* fonts = parse_font_table(input, rtf);
                     if (fonts) {
-                        Item font_table = {.item = (Item)fonts};
+                        Item font_table = {.item = (uint64_t)fonts};
                         
                         String* key;
                         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&key);
@@ -345,12 +345,12 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                         MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
                         if (err == MEM_POOL_ERR_OK) {
                             *dval = (double)cw.parameter;
-                            value = d2it(dval);
+                            value = {.item = d2it(dval)};
                         } else {
-                            value = ITEM_NULL;
+                            value = {.item = ITEM_NULL};
                         }
                     } else {
-                        value = b2it(true);
+                        value = {.item = b2it(true)};
                     }
                     map_put(formatting, cw.keyword, value, input);
                 }
@@ -359,8 +359,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
             // Nested group
             Item nested = parse_rtf_group(input, rtf);
             if (nested .item != ITEM_ERROR && nested .item != ITEM_NULL) {
-                Item nested_item = {.item = nested};
-                array_append(content, nested_item, input->pool);
+                array_append(content, nested, input->pool);
             }
         } else {
             // Text content
@@ -380,7 +379,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     
     // Add content and formatting to group
     if (content->length > 0) {
-        Item content_item = {.item = (Item)content};
+        Item content_item = {.item = (uint64_t)content};
         
         String* content_key;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&content_key);
@@ -393,7 +392,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     }
     
     if (((TypeMap*)formatting->type)->length > 0) {
-        Item format_item = {.item = (Item)formatting};
+        Item format_item = {.item = (uint64_t)formatting};
         
         String* format_key;
         MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&format_key);
@@ -404,7 +403,7 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
             map_put(group, format_key, format_item, input);
         }
     }
-    return (Item)group;
+    return {.item = (uint64_t)group};
 }
 
 static Item parse_rtf_content(Input *input, const char **rtf) {
@@ -446,8 +445,7 @@ void parse_rtf(Input* input, const char* rtf_string) {
         if (*rtf == '{') {
             Item group = parse_rtf_group(input, &rtf);
             if (group .item != ITEM_ERROR && group .item != ITEM_NULL) {
-                Item group_item = {.item = group};
-                array_append(document, group_item, input->pool);
+                array_append(document, group, input->pool);
             }
         } else {
             // Skip unknown content
@@ -455,5 +453,5 @@ void parse_rtf(Input* input, const char* rtf_string) {
         }
     }
     
-    input->root = (Item)document;
+    input->root = {.item = (uint64_t)document};
 }

@@ -334,11 +334,11 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
     // check for boolean values
     else if (strncmp(*pdf, "true", 4) == 0 && (!isalnum(*(*pdf + 4)))) {
         *pdf += 4;
-        result = {.item = b2it(true)});
+        result = {.item = b2it(true)};
     }
     else if (strncmp(*pdf, "false", 5) == 0 && (!isalnum(*(*pdf + 5)))) {
         *pdf += 5;
-        result = {.item = b2it(false)});
+        result = {.item = b2it(false)};
     }
     // check for names
     else if (**pdf == '/') {
@@ -370,7 +370,7 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
     // check for simple arrays (limited depth)
     else if (**pdf == '[' && call_count <= 3) {
         Array* arr = parse_pdf_array(input, pdf);
-        result = arr ? (Item){.item = (uint64_t)arr} : ITEM_ERROR;
+        result = arr ? (Item){.item = (uint64_t)arr} : (Item){.item = ITEM_ERROR};
     }
     // check for simple dictionaries (limited depth) 
     else if (**pdf == '<' && *(*pdf + 1) == '<' && call_count <= 3) {
@@ -642,7 +642,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
             dict_key->len = 10;
             dict_key->ref_cnt = 0;
             
-            Item dict_item = {.item = (Item){.item = (uint64_t)dict}};
+            Item dict_item = {.item = (uint64_t)dict};
             map_put(stream_map, dict_key, dict_item, input);
         }
     }
@@ -836,7 +836,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
                                                 }
                                             }
                                             
-                                            Item entry_item = {.item = (Item)entry_map};
+                                            Item entry_item = {.item = (uint64_t)entry_map};
                                             array_append(entries, entry_item, input->pool);
                                             entry_count++;
                                         }
@@ -860,7 +860,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
             strcpy(entries_key->chars, "entries");
             entries_key->len = 7;
             entries_key->ref_cnt = 0;
-            Item entries_item = {.item = (Item)entries};
+            Item entries_item = {.item = (uint64_t)entries};
             map_put(xref_map, entries_key, entries_item, input);
         }
     }
@@ -909,7 +909,7 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
         strcpy(dict_key->chars, "dictionary");
         dict_key->len = 10;
         dict_key->ref_cnt = 0;
-        Item dict_item = {.item = (Item)trailer_dict};
+        Item dict_item = {.item = (uint64_t)trailer_dict};
         map_put(trailer_map, dict_key, dict_item, input);
     }
     return {.item = (uint64_t)trailer_map};
@@ -1041,7 +1041,7 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
         strcpy(original_key->chars, "original");
         original_key->len = 8;
         original_key->ref_cnt = 0;
-        Item original_item = {.item = (Item)font_dict};
+        Item original_item = {.item = (uint64_t)font_dict};
         map_put(font_analysis, original_key, original_item, input);
     }
     return {.item = (uint64_t)font_analysis};
@@ -1082,7 +1082,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
         strcpy(original_key->chars, "original");
         original_key->len = 8;
         original_key->ref_cnt = 0;
-        Item original_item = {.item = (Item)page_dict};
+        Item original_item = {.item = (uint64_t)page_dict};
         map_put(page_analysis, original_key, original_item, input);
     }
     return {.item = (uint64_t)page_analysis};
@@ -1121,7 +1121,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     StrBuf* version_sb = strbuf_new_pooled(input->pool);
     if (!version_sb) {
         printf("Error: Failed to allocate version buffer\n");
-        input->root = (Item)pdf_info;
+        input->root = {.item = (uint64_t)pdf_info};
         return;
     }
     
@@ -1153,8 +1153,8 @@ void parse_pdf(Input* input, const char* pdf_string) {
     
     // Parse a few simple objects safely, and look for xref/trailer
     Array* objects = array_pooled(input->pool);
-    Item xref_table = ITEM_NULL;
-    Item trailer = ITEM_NULL;
+    Item xref_table = {.item = ITEM_NULL};
+    Item trailer = {.item = ITEM_NULL};
     
     if (objects) {
         int obj_count = 0;
@@ -1166,7 +1166,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             skip_whitespace_and_comments(&pdf);
             if (!*pdf) break;
             
-            Item obj = ITEM_NULL;
+            Item obj = {.item = ITEM_NULL};
             const char* position_before_parse = pdf;
             
             // Check for xref table
@@ -1188,7 +1188,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             if (isdigit(*pdf)) {
                 const char* saved_pos = pdf;
                 obj = parse_pdf_indirect_object(input, &pdf);
-                if (obj == ITEM_ERROR) {
+                if (obj .item == ITEM_ERROR) {
                     // if not an indirect object, try regular object parsing
                     pdf = saved_pos;
                     obj = parse_pdf_object(input, &pdf);
@@ -1295,7 +1295,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             strcpy(objects_key->chars, "objects");
             objects_key->len = 7;
             objects_key->ref_cnt = 0;
-            Item objects_item = {.item = (Item)objects};
+            Item objects_item = {.item = (uint64_t)objects};
             map_put(pdf_info, objects_key, objects_item, input);
         }
     }
@@ -1308,8 +1308,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             strcpy(xref_key->chars, "xref_table");
             xref_key->len = 10;
             xref_key->ref_cnt = 0;
-            Item xref_item = {.item = xref_table};
-            map_put(pdf_info, xref_key, xref_item, input);
+            map_put(pdf_info, xref_key, xref_table, input);
         }
     }
     
@@ -1321,8 +1320,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             strcpy(trailer_key->chars, "trailer");
             trailer_key->len = 7;
             trailer_key->ref_cnt = 0;
-            Item trailer_item = {.item = trailer};
-            map_put(pdf_info, trailer_key, trailer_item, input);
+            map_put(pdf_info, trailer_key, trailer, input);
         }
     }
 
@@ -1453,15 +1451,15 @@ void parse_pdf(Input* input, const char* pdf_string) {
                             array_append(features_array, objects_feature_item, input->pool);
                         }
                         
-                        Item features_item = {.item = (Item)features_array};
+                        Item features_item = {.item = (uint64_t)features_array};
                         map_put(stats_map, features_key, features_item, input);
                     }
                 }
             }
             
-            Item stats_item = {.item = (Item)stats_map};
+            Item stats_item = {.item = (uint64_t)stats_map};
             map_put(pdf_info, stats_key, stats_item, input);
         }
     }
-    input->root = (Item)pdf_info;
+    input->root = {.item = (uint64_t)pdf_info};
 }

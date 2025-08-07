@@ -268,12 +268,12 @@ static Item parse_heading(Input *input, char** lines, int* current_line, int tot
     free(content);
     
     *current_line += 2; // skip title and underline
-    return (Item)header;
+    return {.item = (uint64_t)header};
 }
 
 static Item parse_transition(Input *input) {
     Element* hr = create_rst_element(input, "hr");
-    return (Item)hr;
+    return {.item = (uint64_t)hr};
 }
 
 static Item parse_bullet_list(Input *input, char** lines, int* current_line, int total_lines) {
@@ -315,13 +315,13 @@ static Item parse_bullet_list(Input *input, char** lines, int* current_line, int
                     list_push((List*)paragraph, text_content);
                     ((TypeElmt*)paragraph->type)->content_length++;
                 }
-                list_push((List*)list_item, (Item)paragraph);
+                list_push((List*)list_item, {.item = (uint64_t)paragraph});
                 ((TypeElmt*)list_item->type)->content_length++;
             }
         }
         free(content);
         
-        list_push((List*)list, (Item)list_item);
+        list_push((List*)list, {.item = (uint64_t)list_item});
         ((TypeElmt*)list->type)->content_length++;
         
         (*current_line)++;
@@ -353,7 +353,7 @@ static Item parse_bullet_list(Input *input, char** lines, int* current_line, int
         }
     }
     
-    return (Item)list;
+    return {.item = (uint64_t)list};
 }
 
 static Item parse_enumerated_list(Input *input, char** lines, int* current_line, int total_lines) {
@@ -436,19 +436,19 @@ static Item parse_enumerated_list(Input *input, char** lines, int* current_line,
                     list_push((List*)paragraph, text_content);
                     ((TypeElmt*)paragraph->type)->content_length++;
                 }
-                list_push((List*)list_item, (Item)paragraph);
+                list_push((List*)list_item, {.item = (uint64_t)paragraph});
                 ((TypeElmt*)list_item->type)->content_length++;
             }
         }
         free(content);
         
-        list_push((List*)list, (Item)list_item);
+        list_push((List*)list, {.item = (uint64_t)list_item});
         ((TypeElmt*)list->type)->content_length++;
         
         (*current_line)++;
     }
     
-    return (Item)list;
+    return {.item = (uint64_t)list};
 }
 
 static Item parse_definition_list(Input *input, char** lines, int* current_line, int total_lines) {
@@ -474,7 +474,7 @@ static Item parse_definition_list(Input *input, char** lines, int* current_line,
         }
         free(term_content);
         
-        list_push((List*)def_list, (Item)dt);
+        list_push((List*)def_list, {.item = (uint64_t)dt});
         ((TypeElmt*)def_list->type)->content_length++;
         
         (*current_line)++;
@@ -497,14 +497,14 @@ static Item parse_definition_list(Input *input, char** lines, int* current_line,
             }
             free(def_content);
             
-            list_push((List*)def_list, (Item)dd);
+            list_push((List*)def_list, {.item = (uint64_t)dd});
             ((TypeElmt*)def_list->type)->content_length++;
             
             (*current_line)++;
         }
     }
     
-    return (Item)def_list;
+    return {.item = (uint64_t)def_list};
 }
 
 static Item parse_literal_block(Input *input, char** lines, int* current_line, int total_lines) {
@@ -583,11 +583,11 @@ static Item parse_literal_block(Input *input, char** lines, int* current_line, i
     
     // add content as text
     if (content_str->len > 0) {
-        list_push((List*)code_block, s2it(content_str));
+        list_push((List*)code_block, {.item = s2it(content_str)});
         ((TypeElmt*)code_block->type)->content_length++;
     }
     
-    return (Item)code_block;
+    return {.item = (uint64_t)code_block};
 }
 
 static Item parse_comment(Input *input, char** lines, int* current_line, int total_lines) {
@@ -605,14 +605,14 @@ static Item parse_comment(Input *input, char** lines, int* current_line, int tot
     if (content && strlen(content) > 0) {
         String* comment_text = create_string(input, content);
         if (comment_text) {
-            list_push((List*)comment, s2it(comment_text));
+            list_push((List*)comment, {.item = s2it(comment_text)});
             ((TypeElmt*)comment->type)->content_length++;
         }
     }
     free(content);
     
     (*current_line)++;
-    return (Item)comment;
+    return {.item = (uint64_t)comment};
 }
 
 static Item parse_directive(Input *input, char** lines, int* current_line, int total_lines) {
@@ -628,7 +628,7 @@ static Item parse_directive(Input *input, char** lines, int* current_line, int t
     while (*ptr && !isspace(*ptr) && *ptr != ':') ptr++;
     
     int name_len = ptr - name_start;
-    char* directive_name = malloc(name_len + 1);
+    char* directive_name = (char*)malloc(name_len + 1);
     strncpy(directive_name, name_start, name_len);
     directive_name[name_len] = '\0';
     
@@ -684,7 +684,7 @@ static Item parse_directive(Input *input, char** lines, int* current_line, int t
         (*current_line)++;
     }
     
-    return (Item)directive;
+    return {.item = (uint64_t)directive};
 }
 
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines) {
@@ -702,7 +702,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
     
     (*current_line)++; // skip first separator
     
-    if (*current_line >= total_lines) return (Item)table;
+    if (*current_line >= total_lines) return {.item = (uint64_t)table};
     
     // parse header row
     const char* header_line = lines[*current_line];
@@ -726,7 +726,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                         list_push((List*)th, cell_content);
                         ((TypeElmt*)th->type)->content_length++;
                     }
-                    list_push((List*)header_row, (Item)th);
+                    list_push((List*)header_row, {.item = (uint64_t)th});
                     ((TypeElmt*)header_row->type)->content_length++;
                 }
                 token = strtok(NULL, " \t");
@@ -734,10 +734,10 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             
             free(header_copy);
             
-            list_push((List*)thead, (Item)header_row);
+            list_push((List*)thead, {.item = (uint64_t)header_row});
             ((TypeElmt*)thead->type)->content_length++;
             
-            list_push((List*)table, (Item)thead);
+            list_push((List*)table, {.item = (uint64_t)thead});
             ((TypeElmt*)table->type)->content_length++;
         }
         
@@ -774,7 +774,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                             list_push((List*)td, cell_content);
                             ((TypeElmt*)td->type)->content_length++;
                         }
-                        list_push((List*)row, (Item)td);
+                        list_push((List*)row, {.item = (uint64_t)td});
                         ((TypeElmt*)row->type)->content_length++;
                     }
                     token = strtok(NULL, " \t");
@@ -782,7 +782,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
                 
                 free(row_copy);
                 
-                list_push((List*)tbody, (Item)row);
+                list_push((List*)tbody, {.item = (uint64_t)row});
                 ((TypeElmt*)tbody->type)->content_length++;
             }
             
@@ -790,7 +790,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
         }
         
         if (((TypeElmt*)tbody->type)->content_length > 0) {
-            list_push((List*)table, (Item)tbody);
+            list_push((List*)table, {.item = (uint64_t)tbody});
             ((TypeElmt*)table->type)->content_length++;
         }
         
@@ -800,7 +800,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
         }
     }
     
-    return (Item)table;
+    return {.item = (uint64_t)table};
 }
 
 static Item parse_paragraph(Input *input, const char* line) {
@@ -823,7 +823,7 @@ static Item parse_paragraph(Input *input, const char* line) {
     }
     
     free(content);
-    return (Item)paragraph;
+    return {.item = (uint64_t)paragraph};
 }
 
 // inline parsing functions
@@ -877,7 +877,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos) {
     
     // extract content between markers
     int content_len = content_end - content_start;
-    char* content = malloc(content_len + 1);
+    char* content = (char*)malloc(content_len + 1);
     strncpy(content, text + content_start, content_len);
     content[content_len] = '\0';
     
@@ -890,7 +890,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos) {
     }
     
     free(content);
-    return (Item)emphasis_elem;
+    return {.item = (uint64_t)emphasis_elem};
 }
 
 static Item parse_literal(Input *input, const char* text, int* pos) {
@@ -923,18 +923,18 @@ static Item parse_literal(Input *input, const char* text, int* pos) {
     
     // extract content between markers
     int content_len = content_end - content_start;
-    char* content = malloc(content_len + 1);
+    char* content = (char*)malloc(content_len + 1);
     strncpy(content, text + content_start, content_len);
     content[content_len] = '\0';
     
     String* code_str = create_string(input, content);
     if (code_str) {
-        list_push((List*)code_elem, s2it(code_str));
+        list_push((List*)code_elem, {.item = s2it(code_str)});
         ((TypeElmt*)code_elem->type)->content_length++;
     }
     
     free(content);
-    return (Item)code_elem;
+    return {.item = (uint64_t)code_elem};
 }
 
 static Item parse_reference(Input *input, const char* text, int* pos) {
@@ -948,7 +948,7 @@ static Item parse_reference(Input *input, const char* text, int* pos) {
     
     // extract reference text
     int ref_len = *pos - ref_start;
-    char* ref_text = malloc(ref_len + 1);
+    char* ref_text = (char*)malloc(ref_len + 1);
     strncpy(ref_text, text + ref_start, ref_len);
     ref_text[ref_len] = '\0';
     
@@ -962,18 +962,18 @@ static Item parse_reference(Input *input, const char* text, int* pos) {
     
     String* link_text = create_string(input, ref_text);
     if (link_text) {
-        list_push((List*)ref_elem, s2it(link_text));
+        list_push((List*)ref_elem, {.item = s2it(link_text)});
         ((TypeElmt*)ref_elem->type)->content_length++;
     }
     
     free(ref_text);
     (*pos)++; // skip _
-    return (Item)ref_elem;
+    return {.item = (uint64_t)ref_elem};
 }
 
 static Item parse_inline_content(Input *input, const char* text) {
     if (!text || strlen(text) == 0) {
-        return {.item = s2it(create_string(input, ""));
+        return {.item = s2it(create_string(input, ""))};
     }
     
     int len = strlen(text);
@@ -981,7 +981,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // create a span to hold mixed content
     Element* span = create_rst_element(input, "span");
-    if (!span) return {.item = s2it(create_string(input, text));
+    if (!span) return {.item = s2it(create_string(input, text))};
     
     StrBuf* text_buffer = strbuf_new_cap(256);
     
@@ -995,7 +995,7 @@ static Item parse_inline_content(Input *input, const char* text) {
                 strbuf_append_char(text_buffer, '\0');
                 String* text_str = create_string(input, text_buffer->str);
                 if (text_str && text_str->len > 0) {
-                    list_push((List*)span, s2it(text_str));
+                    list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
                 strbuf_reset(text_buffer);
@@ -1013,7 +1013,7 @@ static Item parse_inline_content(Input *input, const char* text) {
                 strbuf_append_char(text_buffer, '\0');
                 String* text_str = create_string(input, text_buffer->str);
                 if (text_str && text_str->len > 0) {
-                    list_push((List*)span, s2it(text_str));
+                    list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
                 strbuf_reset(text_buffer);
@@ -1031,7 +1031,7 @@ static Item parse_inline_content(Input *input, const char* text) {
                 strbuf_append_char(text_buffer, '\0');
                 String* text_str = create_string(input, text_buffer->str);
                 if (text_str && text_str->len > 0) {
-                    list_push((List*)span, s2it(text_str));
+                    list_push((List*)span, {.item = s2it(text_str)});
                     ((TypeElmt*)span->type)->content_length++;
                 }
                 strbuf_reset(text_buffer);
@@ -1055,7 +1055,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         strbuf_append_char(text_buffer, '\0');
         String* text_str = create_string(input, text_buffer->str);
         if (text_str && text_str->len > 0) {
-            list_push((List*)span, s2it(text_str));
+            list_push((List*)span, {.item = s2it(text_str)});
             ((TypeElmt*)span->type)->content_length++;
         }
     }
@@ -1068,7 +1068,7 @@ static Item parse_inline_content(Input *input, const char* text) {
         return list_get(span_list, 0);
     }
     
-    return (Item)span;
+    return {.item = (uint64_t)span};
 }
 
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines) {
@@ -1124,19 +1124,19 @@ static Item parse_rst_content(Input *input, char** lines, int line_count) {
     
     // Create meta element for metadata
     Element* meta = create_rst_element(input, "meta");
-    if (!meta) return (Item)doc;
+    if (!meta) return {.item = (uint64_t)doc};
     
     // Add basic metadata attributes
     add_attribute_to_element(input, meta, "title", "reStructuredText Document");
     add_attribute_to_element(input, meta, "language", "en");
     
     // Add meta to doc
-    list_push((List*)doc, (Item)meta);
+    list_push((List*)doc, {.item = (uint64_t)meta});
     ((TypeElmt*)doc->type)->content_length++;
     
     // Create body element for content
     Element* body = create_rst_element(input, "body");
-    if (!body) return (Item)doc;
+    if (!body) return {.item = (uint64_t)doc};
     
     int current_line = 0;
     
@@ -1159,10 +1159,10 @@ static Item parse_rst_content(Input *input, char** lines, int line_count) {
     }
     
     // Add body to doc
-    list_push((List*)doc, (Item)body);
+    list_push((List*)doc, {.item = (uint64_t)body});
     ((TypeElmt*)doc->type)->content_length++;
     
-    return (Item)doc;
+    return {.item = (uint64_t)doc};
 }
 
 void parse_rst(Input* input, const char* rst_string) {
