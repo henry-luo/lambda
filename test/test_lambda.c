@@ -106,12 +106,12 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     runtime_cleanup(&runtime);
 }
 
-Test(lambda_tests, test_value_ls) {
-    test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
-}
-
 Test(lambda_tests, test_single_ls) {
     test_lambda_script_against_file("test/lambda/single.ls", "test/lambda/single.txt");
+}
+
+Test(lambda_tests, test_value_ls) {
+    test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
 }
 
 Test(lambda_tests, test_sys_fn_ls) {
