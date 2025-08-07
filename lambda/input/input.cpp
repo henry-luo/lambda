@@ -395,7 +395,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, attr_value, input->pool);
 }
 
-Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor) {
+extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor) {
     const char* effective_type = NULL;
     
     // Determine the effective type to use
@@ -507,7 +507,7 @@ Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String*
     return input;
 }
 
-Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {
+extern "C" Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {
     printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
     lxb_url_t* abs_url = parse_url(cwd, url->chars);
     if (!abs_url) { printf("Failed to parse URL\n");  return NULL; }

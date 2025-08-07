@@ -5,10 +5,22 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>  // for getcwd and chdir
-#include "../lambda/lambda-data.hpp"
+#include "../lambda/lambda.h"
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
+#include "../lib/strbuf.h"
+#include "../lib/mem-pool/include/mem_pool.h"
 #include <lexbor/url/url.h>
+
+// Include the Input struct definition (matching lambda-data.hpp)
+typedef struct Input {
+    void* url;
+    void* path;
+    VariableMemPool* pool; // memory pool
+    ArrayList* type_list;  // list of types
+    Item root;
+    StrBuf* sb;
+} Input;
 
 // Forward declarations
 Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor);

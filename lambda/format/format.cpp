@@ -60,7 +60,7 @@ void format_number(StrBuf* sb, Item item) {
     }
 }
 
-String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool) {
+extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool) {
     String* result = NULL;
     
     // If type is null, try to auto-detect from item type
