@@ -327,11 +327,11 @@ static const MathFormatDef modular[] = {
 static bool is_single_character_item(Item item) {
     TypeId type = get_type_id(item);    
     if (type == LMD_TYPE_INT) {
-        int val = get_int_value(item);
+        int val = item.int_val;
         return val >= 0 && val <= 9;
     } else if (type == LMD_TYPE_SYMBOL || type == LMD_TYPE_STRING) {
-        // Use the existing get_pointer macro to extract the pointer
-        String* str = (String*)get_pointer(item);
+        // Extract the pointer from the item
+        String* str = (String*)item.pointer;
         bool result = str && str->len == 1;
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG: is_single_character_item - STRING/SYMBOL len=%d, result=%s\n", str ? str->len : -1, result ? "true" : "false");
@@ -355,14 +355,14 @@ static bool item_contains_integral(Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_SYMBOL) {
-        String* str = (String*)get_pointer(item);
+        String* str = (String*)item.pointer;
         if (str && str->chars) {
             if (strcmp(str->chars, "integral") == 0) {
                 return true;
             }
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)get_pointer(item);  // item is already the raw pointer for elements
+        Element* elem = (Element*)item.pointer;
         
         // Check if this element is an integral
         TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -391,7 +391,7 @@ static bool item_contains_integral(Item item) {
 static bool item_is_latex_command(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)get_pointer(item);
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -420,7 +420,7 @@ static bool item_is_latex_command(Item item) {
 static bool item_is_quantifier(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)get_pointer(item);
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             // Get the element type to access the name
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -442,7 +442,7 @@ static bool item_contains_only_symbols(Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)get_pointer(item);
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -470,7 +470,7 @@ static bool item_contains_only_symbols(Item item) {
 static bool item_is_symbol_element(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)get_pointer(item);
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -502,7 +502,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's a string (variable/identifier)
     if (type == LMD_TYPE_STRING) {
-        String* str = (String*)get_pointer(item);
+        String* str = (String*)item.pointer;
         if (str && str->len > 0) {
             // Consider single letters as variables
             if (str->len == 1 && isalpha(str->chars[0])) {
@@ -524,7 +524,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's a symbol (LMD_TYPE_SYMBOL = 9) that represents a variable
     if (type == LMD_TYPE_SYMBOL) {
-        String* sym = (String*)get_pointer(item);  // Symbol is typedef for String
+        String* sym = (String*)item.pointer;  // Symbol is typedef for String
         if (sym && sym->len > 0) {
             // Consider single-letter symbols as variables
             if (sym->len == 1 && isalpha(sym->chars[0])) {
@@ -546,7 +546,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's an element that represents a variable (single letter)
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)get_pointer(item);
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -691,7 +691,7 @@ static void format_math_children_with_template(StrBuf* sb, List* children, const
             
             if (child_index >= 0 && child_index < child_count) {
                 Item child_item = children->items[child_index];
-                printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)get_pointer(child_item));
+                printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)child_item.pointer);
                 format_math_item(sb, child_item, flavor, depth + 1);
             } else {
                 printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
@@ -958,7 +958,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                     bool curr_is_spaced_operator = false;
                     
                     if (prev_type == LMD_TYPE_ELEMENT) {
-                        Element* elem = (Element*)get_pointer(prev);
+                        Element* elem = (Element*)prev.pointer;
                         if (elem && elem->type) {
                             TypeElmt* elmt_type = (TypeElmt*)elem->type;
                             if (elmt_type && elmt_type->name.str) {
@@ -990,8 +990,8 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
                             bool prev_is_frac = false;
                             bool curr_is_bracket = false;
                             
-                            Element* prev_elem = (Element*)get_pointer(prev);
-                            Element* curr_elem = (Element*)get_pointer(curr);
+                            Element* prev_elem = (Element*)prev.pointer;
+                            Element* curr_elem = (Element*)curr.pointer;
                             
                             if (prev_elem && prev_elem->type) {
                                 TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
@@ -1216,7 +1216,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
     TypeId type = get_type_id(item);
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=%p\n", depth, (int)type, (void*)get_pointer(item));
+    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=%p\n", depth, (int)type, (void*)item.pointer);
     fprintf(stderr, "DEBUG format_math_item: sb before - length=%zu, str='%s'\n", 
             sb->length, sb->str ? sb->str : "(null)");
     #endif
@@ -1226,7 +1226,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             #ifdef DEBUG_MATH_FORMAT
             fprintf(stderr, "DEBUG format_math_item: Processing ELEMENT\n");
             #endif
-            Element* elem = (Element*)get_pointer(item);
+            Element* elem = (Element*)item.pointer;
             format_math_element(sb, elem, flavor, depth);
             break;
         }
@@ -1234,7 +1234,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             #ifdef DEBUG_MATH_FORMAT
             fprintf(stderr, "DEBUG format_math_item: Processing SYMBOL\n");
             #endif
-            String* str = (String*)get_pointer(item);
+            String* str = (String*)item.pointer;
             if (str) {
                 #ifdef DEBUG_MATH_FORMAT
                 fprintf(stderr, "DEBUG format_math_item: SYMBOL string='%s', len=%d\n", str->chars, str->len);
@@ -1247,7 +1247,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             #ifdef DEBUG_MATH_FORMAT
             fprintf(stderr, "DEBUG format_math_item: Processing STRING\n");
             #endif
-            String* str = (String*)get_pointer(item);
+            String* str = (String*)item.pointer;
             if (str) {
                 #ifdef DEBUG_MATH_FORMAT
                 fprintf(stderr, "DEBUG format_math_item: STRING string='%s', len=%d\n", str->chars, str->len);
@@ -1257,7 +1257,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             break;
         }
         case LMD_TYPE_INT: {
-            int val = get_int_value(item);
+            int val = item.int_val;
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%d", val);
             strbuf_append_str(sb, num_buf);
@@ -1267,7 +1267,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             #ifdef DEBUG_MATH_FORMAT
             fprintf(stderr, "DEBUG format_math_item: Processing INT64\n");
             #endif
-            long* val_ptr = (long*)get_pointer(item);
+            long* val_ptr = (long*)item.pointer;
             if (val_ptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%ld", *val_ptr);
@@ -1282,7 +1282,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             #ifdef DEBUG_MATH_FORMAT
             fprintf(stderr, "DEBUG format_math_item: Processing FLOAT\n");
             #endif
-            double* val_ptr = (double*)get_pointer(item);
+            double* val_ptr = (double*)item.pointer;
             if (val_ptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%g", *val_ptr);
@@ -1316,7 +1316,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
 String* format_math_latex(VariableMemPool* pool, Item root_item) {
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: Starting with pool=%p, root_item=%p\n", 
-            (void*)pool, (void*)get_pointer(root_item));
+            (void*)pool, (void*)root_item.pointer);
     #endif
     
     StrBuf* sb = strbuf_new_pooled(pool);

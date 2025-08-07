@@ -26,13 +26,13 @@ void format_number(StrBuf* sb, Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_INT) {
-        int val = get_int_value(item);
+        int val = item.int_val;
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", val);
         strbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_FLOAT) {
         // Double stored as pointer
-        double* dptr = (double*)get_pointer(item);
+        double* dptr = (double*)item.pointer;
         if (dptr) {
             char num_buf[32];
             // Check for special values
@@ -49,7 +49,7 @@ void format_number(StrBuf* sb, Item item) {
         }
     } else if (type == LMD_TYPE_INT64) {
         // 64-bit integer stored as pointer
-        long* lptr = (long*)get_pointer(item);
+        long* lptr = (long*)item.pointer;
         if (lptr) {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);

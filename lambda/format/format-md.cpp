@@ -203,7 +203,7 @@ static void format_list(StrBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item item = list->items[i];
             if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-                Element* li_elem = (Element*)get_pointer(item);
+                Element* li_elem = (Element*)item.pointer;
                 TypeElmt* li_type = (TypeElmt*)li_elem->type;
                 
                 if (li_type && li_type->name.str && strcmp(li_type->name.str, "li") == 0) {
@@ -254,7 +254,7 @@ static void format_table(StrBuf* sb, Element* elem) {
     for (long i = 0; i < table->length; i++) {
         Item section_item = table->items[i];
         if (get_type_id(section_item) == LMD_TYPE_ELEMENT) {
-            Element* section = (Element*)get_pointer(section_item);
+            Element* section = (Element*)section_item.pointer;
             TypeElmt* section_type = (TypeElmt*)section->type;
             
             if (!section_type || !section_type->name.str) continue;
@@ -266,7 +266,7 @@ static void format_table(StrBuf* sb, Element* elem) {
                 for (long j = 0; j < section_list->length; j++) {
                     Item row_item = section_list->items[j];
                     if (get_type_id(row_item) == LMD_TYPE_ELEMENT) {
-                        Element* row = (Element*)get_pointer(row_item);
+                        Element* row = (Element*)row_item.pointer;
                         format_table_row(sb, row, is_header);
                         
                         // Add separator row after header
@@ -291,7 +291,7 @@ static void format_table_row(StrBuf* sb, Element* row, bool is_header) {
             strbuf_append_char(sb, ' ');
             Item cell_item = row_list->items[i];
             if (get_type_id(cell_item) == LMD_TYPE_ELEMENT) {
-                Element* cell = (Element*)get_pointer(cell_item);
+                Element* cell = (Element*)cell_item.pointer;
                 format_element_children(sb, cell);
             }
             strbuf_append_str(sb, " |");
@@ -329,7 +329,7 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
             TypeId type = get_type_id(child_item);
             
             if (type == LMD_TYPE_ELEMENT) {
-                Element* child_elem = (Element*)get_pointer(child_item);
+                Element* child_elem = (Element*)child_item.pointer;
                 TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
                 if (child_elem_type && child_elem_type->name.str) {
                     const char* elem_name = child_elem_type->name.str;
@@ -345,7 +345,7 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
                 }
             } else if (type == LMD_TYPE_STRING) {
                 // Check if it's just whitespace
-                String* str = (String*)get_pointer(child_item);
+                String* str = (String*)child_item.pointer;
                 if (str && str->chars) {
                     for (int j = 0; j < str->len; j++) {
                         if (!isspace(str->chars[j])) {
@@ -446,7 +446,7 @@ static bool is_block_element(Item item) {
     TypeId type = get_type_id(item);
     if (type != LMD_TYPE_ELEMENT) return false;
     
-    Element* elem = (Element*)get_pointer(item);
+    Element* elem = (Element*)item.pointer;
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return false;
     
@@ -469,7 +469,7 @@ static int get_heading_level(Item item) {
     TypeId type = get_type_id(item);
     if (type != LMD_TYPE_ELEMENT) return 0;
     
-    Element* elem = (Element*)get_pointer(item);
+    Element* elem = (Element*)item.pointer;
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return 0;
     
@@ -585,19 +585,19 @@ static void format_item(StrBuf* sb, Item item) {
         // Skip null items in markdown formatting
         break;
     case LMD_TYPE_STRING: {
-        String* str = (String*)get_pointer(item);
+        String* str = (String*)item.pointer;
         if (str) { format_text(sb, str); }
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* elem = (Element*)get_pointer(item);
+        Element* elem = (Element*)item.pointer;
         if (elem) {
             format_element(sb, elem);
         }
         break;
     }
     case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)get_pointer(item);
+        Array* arr = (Array*)item.pointer;
         if (arr && arr->length > 0) {
             for (long i = 0; i < arr->length; i++) {
                 format_item(sb, arr->items[i]);

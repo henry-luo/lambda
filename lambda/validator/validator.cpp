@@ -11,9 +11,6 @@
 #include <memory>
 #include <string>
 
-// Macro to extract pointer from Item
-#define get_pointer(x) ((void*)((x).item & 0x00FFFFFFFFFFFFFF))
-
 // ==================== Hashmap Entry Structures ====================
 
 struct SchemaEntry {
@@ -274,7 +271,7 @@ ValidationResult* validate_array(SchemaValidator* validator, Item item, TypeSche
     }
     
     SchemaArray* array_schema = (SchemaArray*)schema->schema_data;
-    List* list = (List*)get_pointer(item);
+    List* list = (List*)item.pointer;
     
     // Check occurrence constraints
     if (array_schema->occurrence == '+' && list->length == 0) {
@@ -327,7 +324,7 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     }
     
     SchemaMap* map_schema = (SchemaMap*)schema->schema_data;
-    Map* map = (Map*)get_pointer(item);
+    Map* map = (Map*)item.pointer;
     
     // Validate required fields and check types
     SchemaMapField* field = map_schema->fields;
@@ -391,7 +388,7 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
     }
     
     SchemaElement* element_schema = (SchemaElement*)schema->schema_data;
-    Element* element = (Element*)get_pointer(item);
+    Element* element = (Element*)item.pointer;
     
     // Check element tag matches
     if (element->type) {
@@ -804,7 +801,7 @@ TypeSchema* create_union_schema(List* types, VariableMemPool* pool) {
     
     for (int i = 0; i < union_data->type_count; i++) {
         Item type_item = list_get(types, i);
-        union_data->types[i] = (TypeSchema*)get_pointer(type_item);
+        union_data->types[i] = (TypeSchema*)type_item.pointer;
     }
     
     schema->schema_data = union_data;

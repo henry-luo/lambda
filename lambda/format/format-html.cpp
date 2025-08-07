@@ -208,7 +208,7 @@ static void format_item(StrBuf* sb, Item item, int depth) {
         format_number(sb, item);
         break;
     case LMD_TYPE_STRING: {
-        String* str = (String*)get_pointer(item);
+        String* str = (String*)item.pointer;
         if (str) {
             format_html_string(sb, str);
         }

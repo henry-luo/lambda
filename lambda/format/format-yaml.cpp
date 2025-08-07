@@ -212,7 +212,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             strbuf_append_str(sb, "null");
             break;
         case LMD_TYPE_BOOL: {
-            bool val = get_bool_value(item);
+            bool val = item.bool_val;
             strbuf_append_str(sb, val ? "true" : "false");
             break;
         }
@@ -223,7 +223,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             format_number(sb, item);
             break;
         case LMD_TYPE_STRING: {
-            String* str = (String*)get_pointer(item);
+            String* str = (String*)item.pointer;
             if (str) {
                 format_yaml_string(sb, str);
             } else {
@@ -232,7 +232,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             break;
         }
         case LMD_TYPE_SYMBOL: {
-            String* str = (String*)get_pointer(item);
+            String* str = (String*)item.pointer;
             if (str) {
                 // Symbols in YAML should be formatted as plain strings or quoted if needed
                 format_yaml_string(sb, str);
@@ -242,7 +242,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             break;
         }
         case LMD_TYPE_BINARY: {
-            String* bin_str = (String*)get_pointer(item);
+            String* bin_str = (String*)item.pointer;
             if (bin_str) {
                 // Format binary data as base64 encoded YAML block scalar
                 strbuf_append_str(sb, "!!binary |\n");
@@ -256,7 +256,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             break;
         }
         case LMD_TYPE_DTIME: {
-            String* dt_str = (String*)get_pointer(item);
+            String* dt_str = (String*)item.pointer;
             if (dt_str) {
                 // Check if the datetime string needs quotes or is ISO format
                 if (strchr(dt_str->chars, ' ') || strchr(dt_str->chars, 'T')) {
@@ -273,12 +273,12 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
         }
         case LMD_TYPE_ARRAY:
         case LMD_TYPE_LIST: {
-            Array* arr = (Array*)get_pointer(item);
+            Array* arr = (Array*)item.pointer;
             format_array_items(sb, arr, indent_level);
             break;
         }
         case LMD_TYPE_MAP: {
-            Map* mp = (Map*)get_pointer(item);
+            Map* mp = (Map*)item.pointer;
             if (mp && mp->type) {
                 TypeMap* map_type = (TypeMap*)mp->type;
                 format_map_items(sb, map_type, mp->data, indent_level);
@@ -288,7 +288,7 @@ static void format_item(StrBuf* sb, Item item, int indent_level) {
             break;
         }
         case LMD_TYPE_ELEMENT: {
-            Element* element = (Element*)get_pointer(item);
+            Element* element = (Element*)item.pointer;
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
             // for yaml, represent element as an object with special "$" key for tag name
@@ -342,7 +342,7 @@ String* format_yaml(VariableMemPool* pool, Item root_item) {
     
     // Check if root is an array that might represent multiple YAML documents
     if (root_type == LMD_TYPE_ARRAY || root_type == LMD_TYPE_LIST) {
-        Array* arr = (Array*)get_pointer(root_item);
+        Array* arr = (Array*)root_item.pointer;
         if (arr && arr->length > 1) {
             // Treat as multi-document YAML
             for (long i = 0; i < arr->length; i++) {

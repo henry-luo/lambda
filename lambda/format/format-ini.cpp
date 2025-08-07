@@ -115,7 +115,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
             // empty value in INI
             break;
         case LMD_TYPE_BOOL: {
-            bool val = get_bool_value(item);
+            bool val = item.bool_val;
             strbuf_append_str(sb, val ? "true" : "false");
             break;
         }
@@ -126,7 +126,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
             break;
         case LMD_TYPE_STRING:
         case LMD_TYPE_SYMBOL: {
-            String* str = (String*)get_pointer(item);
+            String* str = (String*)item.pointer;
             if (str) {
                 format_ini_string(sb, str);
             }
@@ -135,7 +135,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
         case LMD_TYPE_ARRAY:
         case LMD_TYPE_LIST: {
             // arrays in INI are typically comma-separated values
-            Array* arr = (Array*)get_pointer(item);
+            Array* arr = (Array*)item.pointer;
             if (arr && arr->length > 0) {
                 for (long i = 0; i < arr->length; i++) {
                     if (i > 0) {
@@ -161,7 +161,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
             break;
         }
         case LMD_TYPE_ELEMENT: {
-            Element* element = (Element*)get_pointer(item);
+            Element* element = (Element*)item.pointer;
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
             // represent element as its tag name
@@ -198,7 +198,7 @@ String* format_ini(VariableMemPool* pool, Item root_item) {
     
     if (root_type == LMD_TYPE_MAP) {
         // root is a map - format as sections
-        Map* root_map = (Map*)get_pointer(root_item);
+        Map* root_map = (Map*)root_item.pointer;
         if (root_map && root_map->type && root_map->data) {
             TypeMap* map_type = (TypeMap*)root_map->type;
             

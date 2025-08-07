@@ -82,7 +82,7 @@ static void format_item(StrBuf* sb, Item item) {
         strbuf_append_str(sb, "null");
         break;
     case LMD_TYPE_BOOL: {
-        bool val = get_bool_value(item);
+        bool val = item.bool_val;
         strbuf_append_str(sb, val ? "true" : "false");
         break;
     }
@@ -92,7 +92,7 @@ static void format_item(StrBuf* sb, Item item) {
         format_number(sb, item);
         break;
     case LMD_TYPE_STRING: {
-        String* str = (String*)get_pointer(item);
+        String* str = (String*)item.pointer;
         if (str) {
             format_string(sb, str);
         } else {
@@ -101,17 +101,17 @@ static void format_item(StrBuf* sb, Item item) {
         break;
     }
     case LMD_TYPE_ARRAY: {
-        Array* arr = (Array*)get_pointer(item);
-        format_array(sb, arr);
+        Array* arr = (Array*)item.pointer;
+        strbuf_append_str(sb, "[");
         break;
     }
     case LMD_TYPE_MAP: {
-        Map* mp = (Map*)get_pointer(item);
+        Map* mp = (Map*)item.pointer;
         format_map(sb, mp);
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* element = (Element*)get_pointer(item);
+        Element* element = (Element*)item.pointer;
         TypeElmt* elmt_type = (TypeElmt*)element->type;
         
         strbuf_append_format(sb, "\n{\"$\":\"%.*s\"", (int)elmt_type->name.length, elmt_type->name.str);
@@ -149,7 +149,7 @@ String* format_json(VariableMemPool* pool, Item root_item) {
     StrBuf* sb = strbuf_new_pooled(pool);
     if (!sb) return NULL;
     
-    printf("format_json: root_item %p\n", get_pointer(root_item));
+    printf("format_json: root_item %p\n", (void*)root_item.pointer);
     format_item(sb, root_item);
     
     return strbuf_to_string(sb);

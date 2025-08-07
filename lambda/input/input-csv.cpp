@@ -1,8 +1,5 @@
 #include "input.h"
 
-// Helper macro to extract pointer from Item
-#define get_pointer(x) ((void*)((x).item & 0x00FFFFFFFFFFFFFF))
-
 // Helper: detect separator character (comma or tab)
 char detect_csv_separator(const char* csv_string) {
     // Look at the first line to detect separator
@@ -118,7 +115,7 @@ void parse_csv(Input* input, const char* csv_string) {
                 if (field_index < headers->length) {
                     Item header_item = headers->items[field_index];
                     if (header_item .item != ITEM_NULL) {
-                        String* key = (String*)get_pointer(header_item);
+                        String* key = (String*)header_item.pointer;
                         if (key && key != &EMPTY_STRING) {
                             map_put(row_map, key, item, input);
                         }

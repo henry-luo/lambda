@@ -49,7 +49,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
     
     switch (type_id) {
         case LMD_TYPE_BOOL: {
-            bool value = get_bool_value(item);
+            bool value = item.bool_val;
             strbuf_append_str(sb, value ? "true" : "false");
             break;
         }
@@ -58,7 +58,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
-            String* str = (String*)get_pointer(item);
+            String* str = (String*)item.pointer;
             strbuf_append_str(sb, "\"");
             if (str && str->len > 0) {
                 strbuf_append_str(sb, str->chars);
@@ -67,7 +67,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_ARRAY:  case LMD_TYPE_LIST:{
-            Array* arr = (Array*)get_pointer(item);
+            Array* arr = (Array*)item.pointer;
             if (arr && arr->length > 0) {
                 strbuf_append_str(sb, "[");
                 format_array_items(sb, arr, depth + 1);
@@ -78,7 +78,7 @@ static void format_item(StrBuf* sb, Item item, const char* parent_context, int d
             break;
         }
         case LMD_TYPE_MAP: {
-            Map* map = (Map*)get_pointer(item);
+            Map* map = (Map*)item.pointer;
             if (map && map->type && map->data) {
                 format_inline_table(sb, map, depth + 1);
             } else {
@@ -283,7 +283,7 @@ String* format_toml(VariableMemPool* pool, Item root_item) {
     strbuf_append_str(sb, "\n");
     
     // handle root item - try as map first
-    Map* map = (Map*)get_pointer(root_item);
+    Map* map = (Map*)root_item.pointer;
     
     if (map && map->data && map->type) {
         TypeMap* type_map = (TypeMap*)map->type;
