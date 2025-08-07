@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>  // for getcwd and chdir
+#include <assert.h>
 
 // Include C header and declare extern C functions from the lambda project
 #include "../lambda/lambda.h"
@@ -15,6 +16,7 @@ typedef struct Runtime Runtime;
 extern void runtime_init(Runtime* runtime);
 extern void runtime_cleanup(Runtime* runtime);
 extern uint64_t run_script_at(Runtime *runtime, char* script_path);
+extern void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
 
 // Simple C-compatible Runtime structure definition
 // This should match the actual Runtime structure
@@ -75,44 +77,32 @@ void trim_trailing_whitespace(char* str) {
 }
 
 // Helper function to test a lambda script against expected output
-void test_lambda_script_against_file(const char* script_path, const char* expected_output_path) {
-    // Save current directory
-    char original_cwd[1024];
-    getcwd(original_cwd, sizeof(original_cwd));
-    
-    // Check if we're already in project root or in test directory
-    // If we're in test directory, go up one level
-    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
-        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
-        // We're in the test directory, change to project root
-        chdir("..");
-    }
-    // If we're already in project root, stay there
-    
+void test_lambda_script_against_file(const char* script_path, const char* expected_output_path) { 
     // Initialize runtime
     Runtime runtime;
-    runtime_init(&runtime);
-    runtime.current_dir = "";
+    runtime_init(&runtime);  runtime.current_dir = "";
     
     // Run the script
     uint64_t ret = run_script_at(&runtime, (char*)script_path);
-    
-    // For now, just check that we don't get an error
-    // Since we can't easily access print_item from C, we'll just verify
-    // the script runs without crashing and doesn't return the error value
-    
+    StrBuf* output_buf = strbuf_new_cap(1024);
+    format_item(output_buf, ret, 0, NULL);
+        
     // Read expected output to verify the file exists
     char* expected_output = read_file_to_string(expected_output_path);
-    
-    // Restore original directory
-    chdir(original_cwd);
     
     cr_assert_neq(expected_output, NULL, "Failed to read expected output file: %s", expected_output_path);
     
     // Check that the script ran without error (assuming 0 means error)
     cr_assert_neq(ret, 0, "Lambda script returned error. Script: %s", script_path);
+
+    // Verify the expected output matches the actual output
+    cr_assert_eq(strcmp(expected_output, output_buf->str), 0,
+                 "Output does not match expected output for script: %s\nExpected:\n%s\nGot:\n%s",
+                 script_path, expected_output, output_buf->str);
+    printf("expect length: %d, got length: %d\n", (int)strlen(expected_output), (int)strlen(output_buf->str));
+    assert(strlen(expected_output) == output_buf->length);
     
-    free(expected_output);
+    free(expected_output);  strbuf_free(output_buf);
     runtime_cleanup(&runtime);
 }
 

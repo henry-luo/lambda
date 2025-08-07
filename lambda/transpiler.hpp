@@ -268,6 +268,7 @@ void runner_cleanup(Runner* runner);
 Item run_script(Runtime *runtime, const char* source, char* script_path);
 Item run_script_at(Runtime *runtime, char* script_path);
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
+extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
 
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);

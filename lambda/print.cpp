@@ -115,29 +115,13 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
     }
 
     ShapeEntry *field = map_type->shape;
-    ShapeEntry *visited_fields[500]; // Track visited fields to detect cycles
-    int visited_count = 0;
-    
     for (int i = 0; i < map_type->length; i++) {
         // Safety check for valid field pointer
         if (!field || (uintptr_t)field < 0x1000) {
             strbuf_append_str(strbuf, "[invalid field pointer]");
             break;
         }
-        // Check for circular reference
-        for (int j = 0; j < visited_count; j++) {
-            if (field == visited_fields[j]) {
-                strbuf_append_str(strbuf, "[circular reference]");
-                return;
-            }
-        }
-        
-        // Add to visited list
-        if (visited_count < 500) {
-            visited_fields[visited_count++] = field;
-        }
-        
-        if (i) strbuf_append_char(strbuf, ',');
+        if (i) strbuf_append_str(strbuf, ", ");
         if (!field) {
             strbuf_append_str(strbuf, "[null field shape]");
             break; // exit loop if field is null
@@ -341,12 +325,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_LIST: {
         List *list = item.list;
         // printf("print list: %p, length: %ld\n", list, list->length);
-        strbuf_append_char(strbuf, '(');
+        if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
-            if (i) strbuf_append_char(strbuf, ',');
+            if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
             print_item(strbuf, list->items[i], depth + 1);
         }
-        strbuf_append_char(strbuf, ')');
+        if (depth) strbuf_append_char(strbuf, ')');
         break;
     }
     case LMD_TYPE_RANGE: {
@@ -360,7 +344,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         // printf("print array: %p, length: %ld\n", array, array->length);
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_char(strbuf, ',');
+            if (i) strbuf_append_str(strbuf, ", ");
             print_item(strbuf, array->items[i], depth + 1);
         }
         strbuf_append_char(strbuf, ']');
@@ -370,7 +354,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_char(strbuf, '[');
         ArrayLong *array = item.array_long;
         for (int i = 0; i < array->length; i++) {
-            if (i) strbuf_append_char(strbuf, ',');
+            if (i) strbuf_append_str(strbuf, ", ");
             strbuf_append_format(strbuf, "%ld", array->items[i]);
         }
         strbuf_append_char(strbuf, ']');
@@ -389,13 +373,19 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         TypeElmt *elmt_type = (TypeElmt*)element->type;
         // printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
         //     elmt_type->length, elmt_type->content_length, element->length);
-        strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
-        print_named_items_with_depth(strbuf, (TypeMap*)elmt_type, element->data, depth + 1);
+        strbuf_append_format(strbuf, "<%.*s", (int)elmt_type->name.length, elmt_type->name.str);
+
+        // print attributes
+        if (elmt_type->length) { 
+            strbuf_append_char(strbuf, ' ');
+            print_named_items_with_depth(strbuf, (TypeMap*)elmt_type, element->data, depth + 1);
+        }
+        
         // print content
         if (element->length) {
-            strbuf_append_char(strbuf, ';');
+            strbuf_append_str(strbuf, elmt_type->length ? "; ":" ");
             for (long i = 0; i < element->length; i++) {
-                if (i) strbuf_append_char(strbuf, ';');
+                if (i) strbuf_append_str(strbuf, "; ");
                 print_item(strbuf, element->items[i], depth + 1);
             }
         }
@@ -415,6 +405,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
     }
+}
+
+void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
+    print_item(strbuf, item, depth, indent);
 }
 
 // print the type of the AST node

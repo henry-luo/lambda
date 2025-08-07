@@ -1787,8 +1787,8 @@ SUITE_JOB_PIDS+=($!)
 SUITE_RESULT_FILES+=("$VALIDATOR_RESULT_FILE")
 SUITE_TYPES+=("VALIDATOR")
 
-# Re-enable strict error handling now that all background jobs are started
-set -e
+# Keep strict error handling disabled during result collection to ensure we collect all results
+# We'll re-enable it after processing all test suite results
 
 echo ""
 print_status "⏳ Waiting for all test suites to complete..."
@@ -1857,6 +1857,9 @@ done
 
 # Cleanup temporary directory
 rm -rf "$SUITE_TEMP_DIR"
+
+# Re-enable strict error handling now that we've collected all results
+set -e
 
 echo ""
 print_success "🎉 All test suites completed!"
@@ -2002,29 +2005,6 @@ else
     echo "   Total Passed: $total_passed_tests"
     echo "   Total Failed: $total_failed_tests"
     echo ""
-    print_status "💡 Breakdown by Suite:"
-    
-    # Dynamic breakdown by suite
-    for i in "${!TEST_SUITE_ORDER[@]}"; do
-        suite_type="${TEST_SUITE_ORDER[$i]}"
-        suite_failed="${TEST_SUITE_FAILED[$i]}"
-        
-        if [ "$suite_type" = "LIBRARY" ]; then
-            echo "   Library test failures: $suite_failed"
-        elif [ "$suite_type" = "INPUT" ]; then
-            echo "   Input processing test failures: $suite_failed"
-        elif [ "$suite_type" = "VALIDATOR" ]; then
-            echo "   Validator test failures: $suite_failed"
-        elif [ "$suite_type" = "MIR" ]; then
-            echo "   MIR JIT test failures: $suite_failed"
-        elif [ "$suite_type" = "LAMBDA" ]; then
-            echo "   Lambda Runtime test failures: $suite_failed"
-        fi
-    done
-    
-    echo ""
-    print_warning "⚠️  Review failed tests above for details"
-    print_status "📋 See lambda/validator/validator.md for comprehensive test coverage information" 
-    echo ""
+   
     exit 1
 fi
