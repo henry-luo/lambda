@@ -85,7 +85,7 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     // Run the script
     uint64_t ret = run_script_at(&runtime, (char*)script_path);
     StrBuf* output_buf = strbuf_new_cap(1024);
-    format_item(output_buf, ret, 0, NULL);
+    format_item(output_buf, ret, 0, " ");
         
     // Read expected output to verify the file exists
     char* expected_output = read_file_to_string(expected_output_path);

@@ -321,22 +321,22 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_ERROR: {
         strbuf_append_str(strbuf, "ERROR");
         break;
-    }       
+    }
+    case LMD_TYPE_RANGE: {
+        Range *range = item.range;
+        // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
+        strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
+        break;
+    }    
     case LMD_TYPE_LIST: {
         List *list = item.list;
         // printf("print list: %p, length: %ld\n", list, list->length);
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
-            print_item(strbuf, list->items[i], depth + 1);
+            print_item(strbuf, list->items[i], depth + 1, indent);
         }
         if (depth) strbuf_append_char(strbuf, ')');
-        break;
-    }
-    case LMD_TYPE_RANGE: {
-        Range *range = item.range;
-        // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
-        strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
         break;
     }
     case LMD_TYPE_ARRAY: {
@@ -345,7 +345,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_str(strbuf, ", ");
-            print_item(strbuf, array->items[i], depth + 1);
+            print_item(strbuf, array->items[i], depth + 1, indent);
         }
         strbuf_append_char(strbuf, ']');
         break;
@@ -371,8 +371,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_ELEMENT: {
         Element *element = item.element;
         TypeElmt *elmt_type = (TypeElmt*)element->type;
-        // printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
-        //     elmt_type->length, elmt_type->content_length, element->length);
         strbuf_append_format(strbuf, "<%.*s", (int)elmt_type->name.length, elmt_type->name.str);
 
         // print attributes
@@ -383,10 +381,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         
         // print content
         if (element->length) {
-            strbuf_append_str(strbuf, elmt_type->length ? "; ":" ");
+            strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
-                if (i) strbuf_append_str(strbuf, "; ");
-                print_item(strbuf, element->items[i], depth + 1);
+                if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
+                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
+                print_item(strbuf, element->items[i], depth + 1, indent);
             }
         }
         strbuf_append_char(strbuf, '>');
