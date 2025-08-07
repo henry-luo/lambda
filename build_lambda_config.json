@@ -65,12 +65,10 @@
         "lambda/format/format-yaml.cpp",
         "lambda/lambda-eval.cpp",
         "lambda/lambda-mem.cpp",
+        "lambda/validator/validate.cpp",
+        "lambda/validator/validator.cpp",
+        "lambda/validator/schema_parser.cpp",
         "lambda/main.cpp"
-    ],
-    "_extr_source":[
-        "lambda/validator/validate.c",
-        "lambda/validator/validator.c",
-        "lambda/validator/schema_parser.c"
     ],
     "libraries": [
         {

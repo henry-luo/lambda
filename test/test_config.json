@@ -1,19 +1,21 @@
 {
-  "extra":[    {
+  "tests": [
+    {
       "suite": "validator",
       "name": "🔍 Validator Tests",
       "sources": ["test/test_validator.c"],
-      "dependencies": [],
-      "binaries": ["test/test_validator"],
+      "dependencies": ["build_lambda_config.json"],
+      "binaries": ["test/test_validator.exe"],
       "type": "validator",
-      "special_flags": "-Iinclude -Ilambda -Ilambda/validator",
+      "special_flags": "-Iinclude -Ilambda -Ilambda/validator -fms-extensions",
+      "uses_build_config": true,
       "environment": {
         "TEST_DIR_PATH": "$PWD/test/lambda/validator",
         "LAMBDA_EXE_PATH": "$PWD/lambda.exe"
       },
-      "requires_lambda_exe": true
-    }],
-  "tests": [
+      "requires_lambda_exe": true,
+      "parallel": true
+    },
     {
       "suite": "library",
       "name": "📚 Library Tests",

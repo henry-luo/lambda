@@ -15,7 +15,7 @@ ValidationResult* validate_citations(Item document, ValidationContext* context) 
     ValidationResult* result = create_validation_result(context->pool);
     
     // Check if document is an element
-    TypeId doc_type = get_type_id((LambdaItem){.item = document});
+    TypeId doc_type = get_type_id(document);
     if (doc_type != LMD_TYPE_MAP) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected document to be a map", 
@@ -59,7 +59,7 @@ ValidationResult* validate_single_citation(Item citation, List* references, Vali
     ValidationResult* result = create_validation_result(context->pool);
     
     // Check if citation is an element
-    TypeId cite_type = get_type_id((LambdaItem){.item = citation});
+    TypeId cite_type = get_type_id(citation);
     if (cite_type != LMD_TYPE_ELEMENT) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected citation to be an element", 
@@ -79,7 +79,7 @@ ValidationResult* validate_single_citation(Item citation, List* references, Vali
     }
     
     // Check if ref exists in references
-    TypeId ref_type = get_type_id((LambdaItem){.item = ref_attr});
+    TypeId ref_type = get_type_id(ref_attr);
     if (ref_type != LMD_TYPE_STRING) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Citation ref must be a string", 
@@ -93,11 +93,11 @@ ValidationResult* validate_single_citation(Item citation, List* references, Vali
     // Search for reference in references list
     for (long i = 0; i < references->length; i++) {
         Item ref_item = list_get(references, i);
-        if (get_type_id((LambdaItem){.item = ref_item}) == LMD_TYPE_MAP) {
+        if (get_type_id(ref_item) == LMD_TYPE_MAP) {
             Map* ref_map = (Map*)ref_item;
             Item ref_id = map_get(ref_map, s2it(create_string("id", 2, context->pool)));
             
-            if (ref_id != ITEM_NULL && get_type_id((LambdaItem){.item = ref_id}) == LMD_TYPE_STRING) {
+            if (ref_id != ITEM_NULL && get_type_id(ref_id) == LMD_TYPE_STRING) {
                 String* id_string = (String*)ref_id;
                 if (string_equals(ref_string, id_string)) {
                     found = true;
@@ -121,14 +121,14 @@ ValidationResult* validate_single_citation(Item citation, List* references, Vali
 List* extract_references_from_meta(Item meta, VariableMemPool* pool) {
     List* references = list_new(pool);
     
-    if (get_type_id((LambdaItem){.item = meta}) != LMD_TYPE_MAP) {
+    if (get_type_id(meta) != LMD_TYPE_MAP) {
         return references;
     }
     
     Map* meta_map = (Map*)meta;
     Item refs_item = map_get(meta_map, s2it(create_string("references", 10, pool)));
     
-    if (refs_item != ITEM_NULL && get_type_id((LambdaItem){.item = refs_item}) == LMD_TYPE_LIST) {
+    if (refs_item != ITEM_NULL && get_type_id(refs_item) == LMD_TYPE_LIST) {
         List* refs_list = (List*)refs_item;
         
         // Copy references to new list
@@ -196,7 +196,7 @@ ValidationResult* check_header_sequence(List* headers, ValidationContext* contex
 ValidationResult* validate_table_consistency(Item table, ValidationContext* context) {
     ValidationResult* result = create_validation_result(context->pool);
     
-    if (get_type_id((LambdaItem){.item = table}) != LMD_TYPE_ELEMENT) {
+    if (get_type_id(table) != LMD_TYPE_ELEMENT) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected table to be an element", 
             context->path, context->pool));
@@ -217,7 +217,7 @@ ValidationResult* validate_table_consistency(Item table, ValidationContext* cont
     }
     
     // Check that headers is a list
-    if (get_type_id((LambdaItem){.item = headers_item}) != LMD_TYPE_LIST) {
+    if (get_type_id(headers_item) != LMD_TYPE_LIST) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Table headers must be a list", 
             context->path, context->pool));
@@ -225,7 +225,7 @@ ValidationResult* validate_table_consistency(Item table, ValidationContext* cont
     }
     
     // Check that rows is a list
-    if (get_type_id((LambdaItem){.item = rows_item}) != LMD_TYPE_LIST) {
+    if (get_type_id(rows_item) != LMD_TYPE_LIST) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Table rows must be a list", 
             context->path, context->pool));
@@ -241,14 +241,14 @@ ValidationResult* validate_table_consistency(Item table, ValidationContext* cont
     for (long i = 0; i < rows_list->length; i++) {
         Item row_item = list_get(rows_list, i);
         
-        if (get_type_id((LambdaItem){.item = row_item}) != LMD_TYPE_MAP) {
+        if (get_type_id(row_item) != LMD_TYPE_MAP) {
             continue; // Skip non-map rows
         }
         
         Map* row_map = (Map*)row_item;
         Item cells_item = map_get(row_map, s2it(create_string("cells", 5, context->pool)));
         
-        if (cells_item != ITEM_NULL && get_type_id((LambdaItem){.item = cells_item}) == LMD_TYPE_LIST) {
+        if (cells_item != ITEM_NULL && get_type_id(cells_item) == LMD_TYPE_LIST) {
             List* cells_list = (List*)cells_item;
             
             if (cells_list->length != expected_columns) {
@@ -273,7 +273,7 @@ ValidationResult* validate_table_consistency(Item table, ValidationContext* cont
 ValidationResult* validate_metadata_completeness(Item meta, ValidationContext* context) {
     ValidationResult* result = create_validation_result(context->pool);
     
-    if (get_type_id((LambdaItem){.item = meta}) != LMD_TYPE_MAP) {
+    if (get_type_id(meta) != LMD_TYPE_MAP) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected metadata to be a map", 
             context->path, context->pool));

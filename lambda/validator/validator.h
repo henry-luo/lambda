@@ -10,11 +10,12 @@
  * Integrates with existing Lambda transpiler infrastructure.
  */
 
-#include "../transpiler.h"
+#include "../transpiler.hpp"
+#include "../../lib/hashmap.h"
 
 #ifdef __cplusplus
-#include "../../lib/hashmap.hpp"
-using namespace hashmap_cpp;
+// #include "../../lib/hashmap.hpp"
+// using namespace hashmap_cpp;
 extern "C" {
 #endif
 
@@ -182,10 +183,6 @@ typedef struct ValidationContext {
     PathSegment* path;             // Current validation path
     HashMap* schema_registry;      // Registry of schema types (C version for compatibility)
     HashMap* visited;              // Circular reference detection (C version for compatibility)
-#ifdef __cplusplus
-    hashmap_cpp::HashMap<StrView, TypeSchema*>* schema_registry_cpp; // C++ hashmap for schemas
-    hashmap_cpp::HashMap<StrView, bool>* visited_cpp;               // C++ hashmap for visited tracking
-#endif
     CustomValidator* custom_validators; // Custom validators
     ValidationOptions options;     // Validation options
     int current_depth;             // Current validation depth
@@ -269,9 +266,6 @@ TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry);
 // Main validator structure
 typedef struct SchemaValidator {
     HashMap* schemas;              // Loaded schemas by name (C version for compatibility)
-#ifdef __cplusplus
-    hashmap_cpp::HashMap<StrView, TypeSchema*>* schemas_cpp; // C++ hashmap for schemas
-#endif
     VariableMemPool* pool;         // Memory pool
     ValidationContext* context;    // Default validation context
     CustomValidator* custom_validators; // Registered custom validators

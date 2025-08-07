@@ -105,7 +105,7 @@ List* suggest_similar_names(const char* name, List* available_names, VariableMem
     for (long i = 0; i < available_names->length; i++) {
         Item name_item = list_get(available_names, i);
         
-        if (get_type_id((LambdaItem){.item = name_item}) == LMD_TYPE_STRING) {
+        if (get_type_id(name_item) == LMD_TYPE_STRING) {
             String* candidate = (String*)name_item;
             
             // Check for similar names (simple heuristic)
@@ -212,7 +212,7 @@ String* format_error_with_context(ValidationError* error, VariableMemPool* pool)
         
         for (long i = 0; i < error->suggestions->length && i < 3; i++) {
             Item suggestion = list_get(error->suggestions, i);
-            if (get_type_id((LambdaItem){.item = suggestion}) == LMD_TYPE_STRING) {
+            if (get_type_id(suggestion) == LMD_TYPE_STRING) {
                 String* suggestion_str = (String*)suggestion;
                 if (i > 0) {
                     strncat(buffer, ", ", sizeof(buffer) - strlen(buffer) - 1);

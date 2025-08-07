@@ -13,6 +13,7 @@ extern "C" {
     Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
 }
 
+extern "C" {
 void run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     printf("Lambda Validator v1.0\n");
     if (input_format) {
@@ -80,7 +81,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     
     // Parse data file using input parsing functions
     printf("Parsing data file...\n");
-    Item data_item = ITEM_ERROR;
+    Item data_item = {.item = ITEM_ERROR};
 
     // Convert file path to file:// URL
     char cwd_path[1024];
@@ -119,7 +120,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         
         // Use parse_url to create the URL (pass NULL for base to use absolute path)
         Input* input = input_from_url(url_string, type_string, NULL, NULL);
-        if (input && input->root != ITEM_ERROR) {
+        if (input && input->root.item != ITEM_ERROR) {
             data_item = input->root;
             printf("Successfully parsed input file with format '%s'\n", 
                     input_format ? input_format : "auto-detect");
@@ -132,7 +133,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         if (type_string) free(type_string);
     }
     
-    if (data_item == ITEM_ERROR) {
+    if (data_item.item == ITEM_ERROR) {
         printf("Error: Failed to parse data file\n");
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
@@ -142,7 +143,6 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     
     // Validate using the loaded schema
     printf("Validating data...\n");
-    LambdaItem lambda_item = {.item = data_item};
     ValidationResult* result = validate_document(validator, data_item, root_type);
     
     if (!result) {
@@ -191,4 +191,5 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     schema_validator_destroy(validator);
     pool_variable_destroy(pool);
     free(schema_contents);
+}
 }

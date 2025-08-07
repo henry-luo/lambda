@@ -6,83 +6,68 @@
  */
 
 #include "validator.h"
-#include "../lib/hashmap.hpp"
 #include <cstring>
 #include <cassert>
 #include <memory>
 #include <string>
 
-// Use the C++ hashmap namespace
-using namespace hashmap_cpp;
+// Macro to extract pointer from Item
+#define get_pointer(x) ((void*)((x).item & 0x00FFFFFFFFFFFFFF))
 
 // ==================== Hashmap Entry Structures ====================
 
 struct SchemaEntry {
     StrView name;
     TypeSchema* schema;
-    
-    bool operator==(const SchemaEntry& other) const {
-        return name.length == other.name.length && 
-               memcmp(name.str, other.name.str, name.length) == 0;
-    }
 };
 
 struct VisitedEntry {
     StrView key;
     bool visited;
-    
-    bool operator==(const VisitedEntry& other) const {
-        return key.length == other.key.length && 
-               memcmp(key.str, other.key.str, key.length) == 0;
-    }
 };
 
-// Hash functions for C++ hashmap
-namespace std {
-    template<>
-    struct hash<SchemaEntry> {
-        size_t operator()(const SchemaEntry& entry) const {
-            // Use MurmurHash-like approach
-            size_t hash_val = 0;
-            for (size_t i = 0; i < entry.name.length; ++i) {
-                hash_val = hash_val * 31 + entry.name.str[i];
-            }
-            return hash_val;
-        }
-    };
-    
-    template<>
-    struct hash<VisitedEntry> {
-        size_t operator()(const VisitedEntry& entry) const {
-            size_t hash_val = 0;
-            for (size_t i = 0; i < entry.key.length; ++i) {
-                hash_val = hash_val * 31 + entry.key.str[i];
-            }
-            return hash_val;
-        }
-    };
+// ==================== Hashmap Helper Functions ====================
+
+// Hash function for StrView keys
+uint64_t strview_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const StrView* key = (const StrView*)item;
+    return hashmap_sip(key->str, key->length, seed0, seed1);
 }
 
-// ==================== Hashmap Helper Functions ====================
+// Compare function for StrView keys  
+int strview_compare(const void *a, const void *b, void *udata) {
+    const StrView* key_a = (const StrView*)a;
+    const StrView* key_b = (const StrView*)b;
+    
+    if (key_a->length != key_b->length) {
+        return (key_a->length < key_b->length) ? -1 : 1;
+    }
+    return memcmp(key_a->str, key_b->str, key_a->length);
+}
 
 // ==================== Schema Validator Creation ====================
 
 SchemaValidator* schema_validator_create(VariableMemPool* pool) {
     SchemaValidator* validator = (SchemaValidator*)pool_calloc(pool, sizeof(SchemaValidator));
+    if (!validator) return nullptr;
     
     validator->pool = pool;
     
-    // Create C++ hashmap instances using proper construction
-    auto schemas_result = hashmap_cpp::HashMap<StrView, TypeSchema*>::create();
-    if (!schemas_result) {
+    // Create C hashmap for schemas 
+    validator->schemas = hashmap_new(
+        sizeof(SchemaEntry), 16, 0, 1,
+        strview_hash, strview_compare, nullptr, pool
+    );
+    
+    if (!validator->schemas) {
         return nullptr;
     }
     
-    // Allocate space and move construct
-    void* schemas_mem = pool_alloc(pool, sizeof(hashmap_cpp::HashMap<StrView, TypeSchema*>));
-    validator->schemas_cpp = new(schemas_mem) hashmap_cpp::HashMap<StrView, TypeSchema*>(std::move(*schemas_result));
-    
     validator->context = (ValidationContext*)pool_calloc(pool, sizeof(ValidationContext));
+    if (!validator->context) {
+        return nullptr;
+    }
+    
     validator->custom_validators = nullptr;
     
     // Initialize default options
@@ -95,15 +80,17 @@ SchemaValidator* schema_validator_create(VariableMemPool* pool) {
     // Initialize validation context
     validator->context->pool = pool;
     validator->context->path = nullptr;
-    validator->context->schema_registry_cpp = validator->schemas_cpp;
+    validator->context->schema_registry = validator->schemas;
     
-    auto visited_result = hashmap_cpp::HashMap<StrView, bool>::create();
-    if (!visited_result) {
+    // Create visited tracking hashmap
+    validator->context->visited = hashmap_new(
+        sizeof(VisitedEntry), 16, 0, 1,
+        strview_hash, strview_compare, nullptr, pool
+    );
+    
+    if (!validator->context->visited) {
         return nullptr;
     }
-    
-    void* visited_mem = pool_alloc(pool, sizeof(hashmap_cpp::HashMap<StrView, bool>));
-    validator->context->visited_cpp = new(visited_mem) hashmap_cpp::HashMap<StrView, bool>(std::move(*visited_result));
     
     validator->context->custom_validators = nullptr;
     validator->context->options = validator->default_options;
@@ -115,12 +102,12 @@ SchemaValidator* schema_validator_create(VariableMemPool* pool) {
 void schema_validator_destroy(SchemaValidator* validator) {
     if (!validator) return;
     
-    // Explicitly destroy C++ objects
-    if (validator->schemas_cpp) {
-        validator->schemas_cpp->~HashMap();
+    // Cleanup hashmaps
+    if (validator->schemas) {
+        hashmap_free(validator->schemas);
     }
-    if (validator->context && validator->context->visited_cpp) {
-        validator->context->visited_cpp->~HashMap();
+    if (validator->context && validator->context->visited) {
+        hashmap_free(validator->context->visited);
     }
     // Note: memory pool cleanup handled by caller
 }
@@ -140,10 +127,11 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
         return -1;
     }
     
-    // Store schema in C++ hashmap registry
+    // Store schema in C hashmap registry
     StrView name_view = strview_from_cstr(schema_name);
-    auto insert_result = validator->schemas_cpp->emplace(name_view, schema);
-    if (!insert_result || !insert_result->second) {
+    SchemaEntry entry = { .name = name_view, .schema = schema };
+    const void* result = hashmap_set(validator->schemas, &entry);
+    if (result == NULL && hashmap_oom(validator->schemas)) {
         schema_parser_destroy(parser);
         return -1;
     }
@@ -240,7 +228,7 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
     
     SchemaPrimitive* prim_schema = (SchemaPrimitive*)schema->schema_data;
     TypeId expected_type = prim_schema->primitive_type;
-    TypeId actual_type = get_type_id((LambdaItem){.item = item});
+    TypeId actual_type = get_type_id(item);
     
     if (!is_compatible_type(actual_type, expected_type)) {
         char error_msg[256];
@@ -277,7 +265,7 @@ ValidationResult* validate_array(SchemaValidator* validator, Item item, TypeSche
         return result;
     }
     
-    TypeId actual_type = get_type_id((LambdaItem){.item = item});
+    TypeId actual_type = get_type_id(item);
     if (actual_type != LMD_TYPE_ARRAY && actual_type != LMD_TYPE_LIST) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected array or list", 
@@ -286,7 +274,7 @@ ValidationResult* validate_array(SchemaValidator* validator, Item item, TypeSche
     }
     
     SchemaArray* array_schema = (SchemaArray*)schema->schema_data;
-    List* list = (List*)item;
+    List* list = (List*)get_pointer(item);
     
     // Check occurrence constraints
     if (array_schema->occurrence == '+' && list->length == 0) {
@@ -330,7 +318,7 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
         return result;
     }
     
-    TypeId actual_type = get_type_id((LambdaItem){.item = item});
+    TypeId actual_type = get_type_id(item);
     if (actual_type != LMD_TYPE_MAP) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected map", 
@@ -339,15 +327,15 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     }
     
     SchemaMap* map_schema = (SchemaMap*)schema->schema_data;
-    Map* map = (Map*)item;
+    Map* map = (Map*)get_pointer(item);
     
     // Validate required fields and check types
     SchemaMapField* field = map_schema->fields;
     while (field) {
-        Item field_key = s2it(string_from_strview(field->name, ctx->pool));
+        Item field_key = {.item = s2it(string_from_strview(field->name, ctx->pool))};
         Item field_value = map_get(map, field_key);
         
-        if (field_value == ITEM_NULL) {
+        if (field_value.item == ITEM_NULL) {
             if (field->required) {
                 char error_msg[256];
                 snprintf(error_msg, sizeof(error_msg), 
@@ -394,7 +382,7 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
         return result;
     }
     
-    TypeId actual_type = get_type_id((LambdaItem){.item = item});
+    TypeId actual_type = get_type_id(item);
     if (actual_type != LMD_TYPE_ELEMENT) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected element", 
@@ -403,7 +391,7 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
     }
     
     SchemaElement* element_schema = (SchemaElement*)schema->schema_data;
-    Element* element = (Element*)item;
+    Element* element = (Element*)get_pointer(item);
     
     // Check element tag matches
     if (element->type) {
@@ -432,10 +420,10 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
         SchemaMapField* required_attr = element_schema->attributes;
         while (required_attr) {
             // Check if required attribute exists
-            Item attr_key = s2it(string_from_strview(required_attr->name, ctx->pool));
+            Item attr_key = {.item = s2it(string_from_strview(required_attr->name, ctx->pool))};
             Item attr_value = elmt_get(element, attr_key);
             
-            if (attr_value == ITEM_NULL) {
+            if (attr_value.item == ITEM_NULL) {
                 if (required_attr->required) {
                     char error_msg[256];
                     snprintf(error_msg, sizeof(error_msg), 
@@ -556,7 +544,7 @@ ValidationResult* validate_occurrence(SchemaValidator* validator, Item item, Typ
     
     switch (occur_schema->modifier) {
         case '?': // Optional
-            if (item == ITEM_NULL) {
+            if (item.item == ITEM_NULL) {
                 // Null is valid for optional types
                 return result;
             }
@@ -591,7 +579,7 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     }
     
     // Resolve the reference
-    TypeSchema* resolved = resolve_reference_cpp(schema, ctx->schema_registry_cpp);
+    TypeSchema* resolved = resolve_reference(schema, ctx->schema_registry);
     if (!resolved) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
@@ -604,8 +592,9 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     }
     
     // Check for circular references
-    auto visited_lookup = ctx->visited_cpp->find(schema->name);
-    if (visited_lookup != ctx->visited_cpp->end() && (*visited_lookup).second) {
+    VisitedEntry lookup = { .key = schema->name, .visited = false };
+    const VisitedEntry* visited_entry = (const VisitedEntry*)hashmap_get(ctx->visited, &lookup);
+    if (visited_entry && visited_entry->visited) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_CIRCULAR_REFERENCE, "Circular type reference detected", 
             ctx->path, ctx->pool));
@@ -613,13 +602,15 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     }
     
     // Mark as visited and validate
-    ctx->visited_cpp->insert_or_assign(schema->name, true);
+    VisitedEntry entry = { .key = schema->name, .visited = true };
+    hashmap_set(ctx->visited, &entry);
     
     validation_result_destroy(result);
     result = validate_item(validator, item, resolved, ctx);
     
     // Unmark as visited
-    ctx->visited_cpp->insert_or_assign(schema->name, false);
+    VisitedEntry unmark_entry = { .key = schema->name, .visited = false };
+    hashmap_set(ctx->visited, &unmark_entry);
     
     return result;
 }
@@ -639,7 +630,7 @@ ValidationResult* validate_literal(Item item, TypeSchema* schema, ValidationCont
     SchemaLiteral* literal_schema = (SchemaLiteral*)schema->schema_data;
     
     // Compare items directly
-    if (item != literal_schema->literal_value) {
+    if (item.item != literal_schema->literal_value.item) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Value does not match literal", 
             ctx->path, ctx->pool));
@@ -710,7 +701,7 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
     error->message = string_from_strview(strview_from_cstr(message), pool);
     error->path = path;
     error->expected = NULL;
-    error->actual = ITEM_NULL;
+    error->actual = (Item){.item = ITEM_NULL};
     error->suggestions = NULL;
     error->next = NULL;
     return error;
@@ -766,18 +757,8 @@ TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry) {
     }
     
     SchemaEntry lookup = { .name = ref_schema->name };
-    const SchemaEntry* entry = hashmap_get(registry, &lookup);
+    const SchemaEntry* entry = (const SchemaEntry*)hashmap_get(registry, &lookup);
     return entry ? entry->schema : nullptr;
-}
-
-// C++ hashmap version
-TypeSchema* resolve_reference_cpp(TypeSchema* ref_schema, hashmap_cpp::HashMap<StrView, TypeSchema*>* registry) {
-    if (!ref_schema || ref_schema->schema_type != LMD_SCHEMA_REFERENCE) {
-        return nullptr;
-    }
-    
-    auto found = registry->find(ref_schema->name);
-    return found != registry->end() ? (*found).second : nullptr;
 }
 
 // ==================== Missing Implementation Functions ====================
@@ -822,7 +803,8 @@ TypeSchema* create_union_schema(List* types, VariableMemPool* pool) {
         sizeof(TypeSchema*) * union_data->type_count);
     
     for (int i = 0; i < union_data->type_count; i++) {
-        union_data->types[i] = (TypeSchema*)list_get(types, i);
+        Item type_item = list_get(types, i);
+        union_data->types[i] = (TypeSchema*)get_pointer(type_item);
     }
     
     schema->schema_data = union_data;
@@ -1229,7 +1211,7 @@ LambdaValidationResult* lambda_validate_string(LambdaValidator* validator, const
     
     // Parse document (this would need to be implemented based on the document format)
     // For now, create a placeholder item
-    Item document_item = ITEM_NULL;
+    Item document_item = {.item = ITEM_NULL};
     
     ValidationResult* internal_result = validate_document(validator->internal_validator, document_item, schema_name);
     return convert_validation_result(internal_result, validator->pool);
@@ -1348,8 +1330,9 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document, c
     lookup_name.str = schema_name;
     lookup_name.length = strlen(schema_name);
     
-    auto found_schema = validator->schemas_cpp->find(lookup_name);
-    if (found_schema == validator->schemas_cpp->end()) {
+    SchemaEntry lookup = { .name = lookup_name };
+    const SchemaEntry* found_entry = (const SchemaEntry*)hashmap_get(validator->schemas, &lookup);
+    if (!found_entry) {
         // If schema not found, fall back to a basic validation
         printf("Warning: Schema '%s' not found, using basic validation\n", schema_name);
         TypeSchema* fallback_schema = create_primitive_schema(LMD_TYPE_ANY, validator->pool);
@@ -1360,5 +1343,5 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document, c
     }
     
     // Use the actual loaded schema for validation
-    return validate_item(validator, document, (*found_schema).second, validator->context);
+    return validate_item(validator, document, found_entry->schema, validator->context);
 }

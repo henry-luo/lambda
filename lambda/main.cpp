@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
-// #include "validator/validator.h"
+// Forward declare the validation function to avoid C++ compilation issues
+extern "C" void run_validation(const char *data_file, const char *schema_file, const char *input_format);
 #include "input/input.h"
 #include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
@@ -413,7 +414,7 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        // run_validation(data_file, schema_file, input_format);
+        run_validation(data_file, schema_file, input_format);
         return 0;
     }
     

@@ -13,8 +13,10 @@
 #include <stdio.h>
 
 // External function declarations
-TSParser* lambda_parser(void);
-TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+extern "C" {
+    TSParser* lambda_parser(void);
+    TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+}
 
 // Helper macro for node source access
 #define schema_node_source(parser, node) {.str = (parser)->current_source + ts_node_start_byte(node), \
@@ -352,7 +354,7 @@ TypeSchema* build_union_schema(SchemaParser* parser, TSNode node) {
     type_list->items = (Item*)pool_calloc(parser->pool, sizeof(Item) * types->length);
     
     for (int i = 0; i < types->length; i++) {
-        type_list->items[i] = (Item)types->data[i];
+        type_list->items[i] = (Item){.item = (uint64_t)types->data[i]};
     }
     
     arraylist_free(types);
@@ -652,7 +654,7 @@ TypeSchema* build_binary_type_schema(SchemaParser* parser, TSNode node) {
         type_list->items = (Item*)pool_calloc(parser->pool, sizeof(Item) * types->length);
         
         for (int i = 0; i < types->length; i++) {
-            type_list->items[i] = (Item)types->data[i];
+            type_list->items[i] = (Item){.item = (uint64_t)types->data[i]};
         }
         
         arraylist_free(types);
