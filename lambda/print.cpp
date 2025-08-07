@@ -1,7 +1,8 @@
 
 #include "transpiler.hpp"
 
-#define MAX_DEPTH 500
+#define MAX_DEPTH 2000
+#define MAX_FIELD_COUNT 10000
 
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
@@ -98,7 +99,6 @@ void writeType(Transpiler* tp, Type *type) {
 }
 
 void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth);
-void print_item_with_depth(StrBuf *strbuf, Item item, int depth);
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
     print_named_items_with_depth(strbuf, map_type, map_data, 0);
@@ -107,14 +107,9 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
 void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth) {
     // Prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
-    
-    if (!map_type) {
-        strbuf_append_str(strbuf, "[null map_type]");
-        return;
-    }
-
+    if (!map_type) { strbuf_append_str(strbuf, "[null map_type]");  return; }
     // Safety check for map_type length
-    if (map_type->length < 0 || map_type->length > 10000) {
+    if (map_type->length < 0 || map_type->length > MAX_FIELD_COUNT) {
         strbuf_append_str(strbuf, "[invalid map_type length]");
         return;
     }
@@ -129,7 +124,6 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             strbuf_append_str(strbuf, "[invalid field pointer]");
             break;
         }
-        
         // Check for circular reference
         for (int j = 0; j < visited_count; j++) {
             if (field == visited_fields[j]) {
@@ -224,206 +218,202 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
-                print_item_with_depth(strbuf, *(Item*)data, depth + 1);
+                print_item(strbuf, *(Item*)data, depth + 1);
                 break;
             default:
                 strbuf_append_format(strbuf, "unknown");
             }
         }
         
-advance_field:
+        advance_field:
         ShapeEntry *next_field = field->next;
-        
-        // Safety check for next field pointer
-        if (next_field && (uintptr_t)next_field < 0x1000) {
-            break;
-        }
-        
         field = next_field;
         
         // Additional safety check: if we've reached the end early
-        if (!field && i < map_type->length - 1) {
+        if (!field) {
+            printf("missing next field\n");
             break;
         }
     }
 }
 
-void print_item_with_depth(StrBuf *strbuf, Item item, int depth);
-
-void print_item(StrBuf *strbuf, Item item) {
-    print_item_with_depth(strbuf, item, 0);
-}
-
-void print_item_with_depth(StrBuf *strbuf, Item item, int depth) {
+void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!item.item) { strbuf_append_str(strbuf, "null"); return; }
 
-    if (item.type_id) { // packed value
-        TypeId type_id = item.type_id;
-        if (type_id == LMD_TYPE_NULL) {
-            strbuf_append_str(strbuf, "null");
-        } 
-        else if (type_id == LMD_TYPE_BOOL) {
-            strbuf_append_str(strbuf, item.bool_val ? "true" : "false");
+    TypeId type_id = get_type_id(item);
+    switch (type_id) { // packed value
+    case LMD_TYPE_NULL:
+        strbuf_append_str(strbuf, "null");
+        break;
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(strbuf, item.bool_val ? "true" : "false");
+        break;
+    case LMD_TYPE_INT:
+        strbuf_append_format(strbuf, "%d", item.int_val);
+        break;
+    case LMD_TYPE_INT64: {
+        long long_val = *(long*)item.pointer;
+        strbuf_append_format(strbuf, "%ld", long_val);
+        break;
+    }
+    case LMD_TYPE_FLOAT: {
+        double num = *(double*)item.pointer;
+        int exponent;
+        double mantissa = frexp(num, &exponent);
+        if (-20 < exponent && exponent < 30) {
+            strbuf_append_format(strbuf, "%.10f", num);
+            // trim trailing zeros
+            char *end = strbuf->str + strbuf->length - 1;
+            while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
+            // if it ends with a dot, remove that too
+            if (*end == '.') { *end-- = '\0'; }
+            strbuf->length = end - strbuf->str + 1;
         }
-        else if (type_id == LMD_TYPE_INT) {
-            int int_val = item.int_val;
-            strbuf_append_format(strbuf, "%d", int_val);
-        }
-        else if (type_id == LMD_TYPE_INT64) {
-            long long_val = *(long*)item.pointer;
-            strbuf_append_format(strbuf, "%ld", long_val);
-        }
-        else if (type_id == LMD_TYPE_FLOAT) {
-            double num = *(double*)item.pointer;
-            int exponent;
-            double mantissa = frexp(num, &exponent);
-            if (-20 < exponent && exponent < 30) {
-                strbuf_append_format(strbuf, "%.10f", num);
-                // trim trailing zeros
-                char *end = strbuf->str + strbuf->length - 1;
-                while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
-                // if it ends with a dot, remove that too
-                if (*end == '.') { *end-- = '\0'; }
-                strbuf->length = end - strbuf->str + 1;
+        else if (-30 < exponent && exponent <= -20) {
+            strbuf_append_format(strbuf, "%.g", num);
+            // remove the zero in exponent, like 'e07'
+            char *end = strbuf->str + strbuf->length - 1;
+            if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
+                *(end-1) = *end;  *end = '\0';
+                strbuf->length = end - strbuf->str; 
             }
-            else if (-30 < exponent && exponent <= -20) {
-                strbuf_append_format(strbuf, "%.g", num);
-                // remove the zero in exponent, like 'e07'
-                char *end = strbuf->str + strbuf->length - 1;
-                if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
-                    *(end-1) = *end;  *end = '\0';
-                    strbuf->length = end - strbuf->str; 
-                }
-            }
-            else {
-                strbuf_append_format(strbuf, "%g", num);
-            }
-        }
-        else if (type_id == LMD_TYPE_DECIMAL) {
-            mpf_t *num = (mpf_t*)item.pointer;
-            char buf[128];
-            
-#ifdef CROSS_COMPILE
-            // For cross-compilation, check if full GMP I/O is available
-            if (HAS_GMP_IO()) {
-                // Use full GMP formatting
-                gmp_sprintf(buf, "%.Ff", *num);
-            } else {
-                // Fall back to double precision - convert mpf_t to double
-                double num_double = mpf_get_d(*num);
-                snprintf(buf, sizeof(buf), "%.15g", num_double);
-            }
-#else
-            // Native compilation - use full GMP
-            gmp_sprintf(buf, "%.Ff", *num);
-#endif
-            strbuf_append_str(strbuf, buf);
-        }
-        else if (type_id == LMD_TYPE_STRING) {
-            String *string = (String*)item.pointer;
-            assert(strlen(string->chars) == string->len && "asserting tring length");
-            // todo: escape the string
-            if (string && string->chars) strbuf_append_format(strbuf, "\"%s\"", string->chars);
-            else strbuf_append_str(strbuf, "\"\"");
-        }
-        else if (type_id == LMD_TYPE_SYMBOL) {
-            String *string = (String*)item.pointer;
-            assert(strlen(string->chars) == string->len && "asserting symbol length");
-            // todo: escape the symbol chars
-            if (string && string->chars) strbuf_append_format(strbuf, "'%s'", string->chars);
-            else strbuf_append_str(strbuf, "''");
-        } 
-        else if (type_id == LMD_TYPE_DTIME) {
-            String *string = (String*)item.pointer;
-            if (string && string->chars) strbuf_append_format(strbuf, "t'%s'", string->chars);
-            else strbuf_append_str(strbuf, "t''");
-        }
-        else if (type_id == LMD_TYPE_BINARY) {
-            String *string = (String*)item.pointer;
-            if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
-            else strbuf_append_str(strbuf, "b''");
-        }
-        else if (type_id == LMD_TYPE_ERROR) {
-            strbuf_append_str(strbuf, "ERROR");
         }
         else {
-            strbuf_append_format(strbuf, "unknown type:: %d", type_id);
-        }        
+            strbuf_append_format(strbuf, "%g", num);
+        }
+        break;
     }
-    else { // pointer types
-        TypeId type_id = item.container->type_id;
-        if (type_id == LMD_TYPE_LIST) {
-            List *list = item.list;
-            // printf("print list: %p, length: %ld\n", list, list->length);
-            strbuf_append_char(strbuf, '(');
-            for (int i = 0; i < list->length; i++) {
-                if (i) strbuf_append_char(strbuf, ',');
-                print_item_with_depth(strbuf, list->items[i], depth + 1);
-            }
-            strbuf_append_char(strbuf, ')');
+    case LMD_TYPE_DECIMAL: {
+        mpf_t *num = (mpf_t*)item.pointer;
+        char buf[128];
+        
+        #ifdef CROSS_COMPILE
+        // For cross-compilation, check if full GMP I/O is available
+        if (HAS_GMP_IO()) {
+            // Use full GMP formatting
+            gmp_sprintf(buf, "%.Ff", *num);
+        } else {
+            // Fall back to double precision - convert mpf_t to double
+            double num_double = mpf_get_d(*num);
+            snprintf(buf, sizeof(buf), "%.15g", num_double);
         }
-        else if (type_id == LMD_TYPE_RANGE) {
-            Range *range = item.range;
-            // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
-            strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
+        #else
+        // Native compilation - use full GMP
+        gmp_sprintf(buf, "%.Ff", *num);
+        #endif
+        strbuf_append_str(strbuf, buf);
+        break;
+    }
+    case LMD_TYPE_STRING: {
+        String *string = (String*)item.pointer;
+        assert(strlen(string->chars) == string->len && "asserting tring length");
+        // todo: escape the string
+        if (string && string->chars) strbuf_append_format(strbuf, "\"%s\"", string->chars);
+        else strbuf_append_str(strbuf, "\"\"");
+        break;
+    }
+    case LMD_TYPE_SYMBOL: {
+        String *string = (String*)item.pointer;
+        assert(strlen(string->chars) == string->len && "asserting symbol length");
+        // todo: escape the symbol chars
+        if (string && string->chars) strbuf_append_format(strbuf, "'%s'", string->chars);
+        else strbuf_append_str(strbuf, "''");
+        break;
+    }
+    case LMD_TYPE_DTIME: {
+        String *string = (String*)item.pointer;
+        if (string && string->chars) strbuf_append_format(strbuf, "t'%s'", string->chars);
+        else strbuf_append_str(strbuf, "t''");
+        break;
+    }
+    case LMD_TYPE_BINARY: {
+        String *string = (String*)item.pointer;
+        if (string && string->chars) strbuf_append_format(strbuf, "b'%s'", string->chars);
+        else strbuf_append_str(strbuf, "b''");
+        break;
+    }
+    case LMD_TYPE_ERROR: {
+        strbuf_append_str(strbuf, "ERROR");
+        break;
+    }       
+    case LMD_TYPE_LIST: {
+        List *list = item.list;
+        // printf("print list: %p, length: %ld\n", list, list->length);
+        strbuf_append_char(strbuf, '(');
+        for (int i = 0; i < list->length; i++) {
+            if (i) strbuf_append_char(strbuf, ',');
+            print_item(strbuf, list->items[i], depth + 1);
         }
-        else if (type_id == LMD_TYPE_ARRAY) {
-            Array *array = item.array;
-            // printf("print array: %p, length: %ld\n", array, array->length);
-            strbuf_append_char(strbuf, '[');
-            for (int i = 0; i < array->length; i++) {
-                if (i) strbuf_append_char(strbuf, ',');
-                print_item_with_depth(strbuf, array->items[i], depth + 1);
-            }
-            strbuf_append_char(strbuf, ']');
-        }        
-        else if (type_id == LMD_TYPE_ARRAY_INT) {
-            strbuf_append_char(strbuf, '[');
-            ArrayLong *array = item.array_long;
-            for (int i = 0; i < array->length; i++) {
-                if (i) strbuf_append_char(strbuf, ',');
-                strbuf_append_format(strbuf, "%ld", array->items[i]);
-            }
-            strbuf_append_char(strbuf, ']');            
+        strbuf_append_char(strbuf, ')');
+        break;
+    }
+    case LMD_TYPE_RANGE: {
+        Range *range = item.range;
+        // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
+        strbuf_append_format(strbuf, "%ld to %ld", range->start, range->end);
+        break;
+    }
+    case LMD_TYPE_ARRAY: {
+        Array *array = item.array;
+        // printf("print array: %p, length: %ld\n", array, array->length);
+        strbuf_append_char(strbuf, '[');
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_char(strbuf, ',');
+            print_item(strbuf, array->items[i], depth + 1);
         }
-        else if (type_id == LMD_TYPE_MAP) {
-            Map *map = item.map;
-            TypeMap *map_type = (TypeMap*)map->type;
-            strbuf_append_char(strbuf, '{');
-            print_named_items_with_depth(strbuf, map_type, map->data, depth + 1);
-            strbuf_append_char(strbuf, '}');
+        strbuf_append_char(strbuf, ']');
+        break;
+    }
+    case LMD_TYPE_ARRAY_INT: {
+        strbuf_append_char(strbuf, '[');
+        ArrayLong *array = item.array_long;
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_char(strbuf, ',');
+            strbuf_append_format(strbuf, "%ld", array->items[i]);
         }
-        else if (type_id == LMD_TYPE_ELEMENT) {
-            Element *element = item.element;
-            TypeElmt *elmt_type = (TypeElmt*)element->type;
-            // printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
-            //     elmt_type->length, elmt_type->content_length, element->length);
-            strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
-            print_named_items(strbuf, (TypeMap*)elmt_type, element->data);
-            // print content
-            if (elmt_type->length) { strbuf_append_char(strbuf, ';'); }
+        strbuf_append_char(strbuf, ']');
+        break;       
+    }
+    case LMD_TYPE_MAP: {
+        Map *map = item.map;
+        TypeMap *map_type = (TypeMap*)map->type;
+        strbuf_append_char(strbuf, '{');
+        print_named_items_with_depth(strbuf, map_type, map->data, depth + 1);
+        strbuf_append_char(strbuf, '}');
+        break;
+    }
+    case LMD_TYPE_ELEMENT: {
+        Element *element = item.element;
+        TypeElmt *elmt_type = (TypeElmt*)element->type;
+        // printf("print element, attr len: %ld, content len: %ld, actual content len: %ld\n", 
+        //     elmt_type->length, elmt_type->content_length, element->length);
+        strbuf_append_format(strbuf, "<%.*s ", (int)elmt_type->name.length, elmt_type->name.str);
+        print_named_items_with_depth(strbuf, (TypeMap*)elmt_type, element->data, depth + 1);
+        // print content
+        if (element->length) {
+            strbuf_append_char(strbuf, ';');
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_char(strbuf, ';');
-                print_item(strbuf, element->items[i]);
-            }            
-            strbuf_append_char(strbuf, '>');
+                print_item(strbuf, element->items[i], depth + 1);
+            }
         }
-        else if (type_id == LMD_TYPE_FUNC) {
-            strbuf_append_str(strbuf, "function");
-        }
-        else if (type_id == LMD_TYPE_FUNC) {
-            Function *func = item.function;
-            strbuf_append_format(strbuf, "fn %p", func);
-        }
-        else if (type_id == LMD_TYPE_TYPE) {
-            TypeType *type = (TypeType*)item.type;
-            strbuf_append_format(strbuf, "type %s", type_info[type->type->type_id].name);
-        }
-        else {
-            strbuf_append_format(strbuf, "unknown type! %d", type_id);
-        }
+        strbuf_append_char(strbuf, '>');
+        break;
+    }
+    case LMD_TYPE_FUNC: {
+        Function *func = item.function;
+        // TypeFunc *func_type = (TypeFunc*)func->fn;
+        strbuf_append_format(strbuf, "[fn %p]", func);  // (int)func->name.length, func->name.str);
+        break;
+    }
+    case LMD_TYPE_TYPE: {
+        TypeType *type = (TypeType*)item.type;
+        strbuf_append_format(strbuf, "[type %s]", type_info[type->type->type_id].name);
+    }
+    default:
+        strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
     }
 }
 

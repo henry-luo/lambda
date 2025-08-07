@@ -19,7 +19,7 @@ Formatters convert Lambda data structures (Items) into specific output formats. 
 **Primary Reference**: See `data_struct.md` for comprehensive documentation on Lambda data structures, types, and memory layout.
 - **Type Detection**: Always use `get_type_id()` function from `LambdaItem` struct
 - **Data Extraction**: Extract data pointer based on TypeId
-- **Reference Implementation**: Always consult `print_item_with_depth()` for correct patterns
+- **Reference Implementation**: Always consult `print_item()` for correct patterns
 
 1. **Main Formatter Function**: `String* format_<name>(VariableMemPool* pool, Item root_item)`
 2. **Registration**: Add to `format_data()` dispatcher in `format.c`
@@ -35,4 +35,4 @@ Formatters convert Lambda data structures (Items) into specific output formats. 
 - **Direct Traversal**: `format-yaml.c` - Updated direct traversal implementation
 - **Latest Best Practices**: `format-toml.c` - Most recent implementation with proper Lambda type handling
 - **Registration**: `format.c` - Add new formatters to `format_data()`
-- **Lambda Type Reference**: `print.c` - See `print_item_with_depth()` for authoritative type handling
+- **Lambda Type Reference**: `print.c` - See `print_item()` for authoritative type handling
