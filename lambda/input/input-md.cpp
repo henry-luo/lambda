@@ -1849,16 +1849,21 @@ static Item parse_link(Input *input, const char* text, int* pos) {
 
 // Simple inline content parser that demonstrates clean buffer usage
 static Item parse_inline_content(Input *input, const char* text) {
-    if (!text || strlen(text) == 0) { return {.item = ITEM_NULL}; }
+    if (!text || strlen(text) == 0) { 
+        return {.item = ITEM_NULL}; 
+    }
     
     int len = strlen(text);
     int pos = 0;
     
     // Create a span to hold mixed content
     Element* span = create_markdown_element(input, "span");
-    if (!span) return {.item = ITEM_NULL};
+    if (!span) {
+        return {.item = ITEM_NULL};
+    }
     
     StrBuf* sb = input->sb;
+    strbuf_reset(sb);
     
     while (pos < len) {
         char ch = text[pos];
@@ -2250,10 +2255,13 @@ static Item parse_paragraph(Input *input, char** lines, int* current_line, int t
         return {.item = ITEM_NULL};
     }
     
+    // Convert content to string BEFORE creating element (which uses the same sb)
+    String* content = strbuf_to_string(sb);
+    
+    // Now create the paragraph element (safe to use sb now)
     Element* p = create_markdown_element(input, "p");
     if (!p) return {.item = ITEM_NULL};
     
-    String* content = strbuf_to_string(sb);
     if (content && content->len > 0) {
         Item inline_content = parse_inline_content(input, content->chars);
         if (inline_content.item != ITEM_NULL) {

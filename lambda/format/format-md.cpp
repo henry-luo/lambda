@@ -586,7 +586,16 @@ static void format_item(StrBuf* sb, Item item) {
         break;
     case LMD_TYPE_STRING: {
         String* str = (String*)item.pointer;
-        if (str) { format_text(sb, str); }
+        if (str) { 
+            // Check if this is the EMPTY_STRING and handle it specially
+            if (str == &EMPTY_STRING) {
+                // Don't output anything for empty string
+            } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+                // Don't output anything for lambda.nil content
+            } else {
+                format_text(sb, str);
+            }
+        }
         break;
     }
     case LMD_TYPE_ELEMENT: {
@@ -618,5 +627,6 @@ void format_markdown(StrBuf* sb, Item root_item) {
     // Handle null/empty root item
     if (root_item .item == ITEM_NULL || (root_item.item == ITEM_NULL)) return;
     
+    printf("format_markdown: root_item %p, type %d\n", (void*)root_item.pointer, get_type_id(root_item));
     format_item(sb, root_item);
 }

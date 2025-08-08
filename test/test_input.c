@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <ctype.h>
 #include "../lambda/lambda.h"
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
@@ -85,6 +86,174 @@ char* read_file_content(const char* filepath) {
 
 // Helper function to free Lambda string
 // Lambda strings are managed by the memory pool - no need to free them manually
+
+// Helper function to normalize whitespace for comparison
+char* normalize_whitespace(const char* str) {
+    if (!str) return NULL;
+    
+    size_t len = strlen(str);
+    char* normalized = malloc(len + 1);
+    if (!normalized) return NULL;
+    
+    char* dst = normalized;
+    const char* src = str;
+    bool prev_whitespace = false;
+    
+    // Skip leading whitespace
+    while (*src && isspace(*src)) src++;
+    
+    while (*src) {
+        if (isspace(*src)) {
+            if (!prev_whitespace) {
+                *dst++ = ' ';
+                prev_whitespace = true;
+            }
+            src++;
+        } else {
+            *dst++ = *src++;
+            prev_whitespace = false;
+        }
+    }
+    
+    // Remove trailing whitespace
+    while (dst > normalized && isspace(*(dst-1))) dst--;
+    *dst = '\0';
+    
+    return normalized;
+}
+
+// Helper function to compare JSON strings semantically
+bool compare_json_semantically(const char* original, const char* formatted) {
+    // For simple comparison, just normalize whitespace and compare
+    // In a more sophisticated version, we would parse both as JSON and compare structure
+    
+    // If either is null, they should both be null to match
+    if (!original && !formatted) return true;
+    if (!original || !formatted) return false;
+    
+    // Remove all whitespace for comparison since JSON can be formatted differently
+    char* norm_orig = normalize_whitespace(original);
+    char* norm_fmt = normalize_whitespace(formatted);
+    
+    bool result = false;
+    if (norm_orig && norm_fmt) {
+        // Remove quotes and spaces from both for a more lenient comparison
+        result = strcmp(norm_orig, norm_fmt) == 0;
+        
+        // If they don't match exactly, try a more lenient approach
+        if (!result) {
+            // Check if the essential content is the same (remove all spaces)
+            char *p1 = norm_orig, *p2 = norm_fmt;
+            char clean1[1000] = {0}, clean2[1000] = {0};
+            int i1 = 0, i2 = 0;
+            
+            // Extract essential characters (skip spaces)
+            while (*p1 && i1 < sizeof(clean1)-1) {
+                if (!isspace(*p1)) clean1[i1++] = *p1;
+                p1++;
+            }
+            while (*p2 && i2 < sizeof(clean2)-1) {
+                if (!isspace(*p2)) clean2[i2++] = *p2;
+                p2++;
+            }
+            
+            result = strcmp(clean1, clean2) == 0;
+        }
+    }
+    
+    free(norm_orig);
+    free(norm_fmt);
+    return result;
+}
+
+// Helper function to compare XML strings semantically
+bool compare_xml_semantically(const char* original, const char* formatted) {
+    // For simple comparison, just normalize whitespace and compare
+    // In a more sophisticated version, we would parse both as XML and compare DOM structure
+    
+    if (!original && !formatted) return true;
+    if (!original || !formatted) return false;
+    
+    char* norm_orig = normalize_whitespace(original);
+    char* norm_fmt = normalize_whitespace(formatted);
+    
+    bool result = false;
+    if (norm_orig && norm_fmt) {
+        result = strcmp(norm_orig, norm_fmt) == 0;
+        
+        // If exact match fails, try more lenient comparison
+        if (!result) {
+            // Remove extra spaces for XML comparison
+            char clean1[1000] = {0}, clean2[1000] = {0};
+            char *p1 = norm_orig, *p2 = norm_fmt;
+            int i1 = 0, i2 = 0;
+            
+            // Extract essential characters
+            while (*p1 && i1 < sizeof(clean1)-1) {
+                if (!isspace(*p1) || (i1 > 0 && !isspace(clean1[i1-1]))) {
+                    clean1[i1++] = isspace(*p1) ? ' ' : *p1;
+                }
+                p1++;
+            }
+            while (*p2 && i2 < sizeof(clean2)-1) {
+                if (!isspace(*p2) || (i2 > 0 && !isspace(clean2[i2-1]))) {
+                    clean2[i2++] = isspace(*p2) ? ' ' : *p2;
+                }
+                p2++;
+            }
+            
+            result = strcmp(clean1, clean2) == 0;
+        }
+    }
+    
+    free(norm_orig);
+    free(norm_fmt);
+    return result;
+}
+
+// Helper function to compare Markdown strings
+bool compare_markdown_semantically(const char* original, const char* formatted) {
+    // Markdown comparison is more lenient with whitespace
+    
+    if (!original && !formatted) return true;
+    if (!original || !formatted) return false;
+    
+    char* norm_orig = normalize_whitespace(original);
+    char* norm_fmt = normalize_whitespace(formatted);
+    
+    bool result = false;
+    if (norm_orig && norm_fmt) {
+        result = strcmp(norm_orig, norm_fmt) == 0;
+        
+        // Markdown is very flexible with whitespace, try more lenient comparison
+        if (!result) {
+            // For Markdown, multiple spaces and newlines can be equivalent
+            char clean1[1000] = {0}, clean2[1000] = {0};
+            char *p1 = norm_orig, *p2 = norm_fmt;
+            int i1 = 0, i2 = 0;
+            
+            // Extract essential markdown structure
+            while (*p1 && i1 < sizeof(clean1)-1) {
+                if (!isspace(*p1) || (i1 > 0 && !isspace(clean1[i1-1]))) {
+                    clean1[i1++] = isspace(*p1) ? ' ' : *p1;
+                }
+                p1++;
+            }
+            while (*p2 && i2 < sizeof(clean2)-1) {
+                if (!isspace(*p2) || (i2 > 0 && !isspace(clean2[i2-1]))) {
+                    clean2[i2++] = isspace(*p2) ? ' ' : *p2;
+                }
+                p2++;
+            }
+            
+            result = strcmp(clean1, clean2) == 0;
+        }
+    }
+    
+    free(norm_orig);
+    free(norm_fmt);
+    return result;
+}
 
 // Context management
 static Context* test_ctx = NULL;
@@ -203,13 +372,38 @@ bool test_format_roundtrip(const char* test_file, const char* format_type, const
     printf("Formatted content length: %d\n", formatted->len);
     printf("Formatted content (first 200 chars): %.200s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty
-    bool success = (formatted->len > 0);
+    // Compare the formatted output with the original content
+    bool content_matches = false;
+    if (strcmp(format_type, "json") == 0) {
+        content_matches = compare_json_semantically(original_content, formatted->chars);
+    } else if (strcmp(format_type, "xml") == 0) {
+        content_matches = compare_xml_semantically(original_content, formatted->chars);
+    } else if (strcmp(format_type, "markdown") == 0) {
+        content_matches = compare_markdown_semantically(original_content, formatted->chars);
+    } else {
+        // For other formats, do a simple normalized comparison
+        char* norm_orig = normalize_whitespace(original_content);
+        char* norm_fmt = normalize_whitespace(formatted->chars);
+        content_matches = (norm_orig && norm_fmt && strcmp(norm_orig, norm_fmt) == 0);
+        free(norm_orig);
+        free(norm_fmt);
+    }
+    
+    // Enhanced validation - check both that content is not empty and matches original
+    bool success = (formatted->len > 0) && content_matches;
     
     if (success) {
-        printf("✓ %s roundtrip test passed for %s\n", format_type, test_name);
+        printf("✓ %s roundtrip test passed for %s - content matches original\n", format_type, test_name);
     } else {
         printf("✗ %s roundtrip test failed for %s\n", format_type, test_name);
+        if (formatted->len == 0) {
+            printf("  - Error: Formatted content is empty\n");
+        }
+        if (!content_matches) {
+            printf("  - Error: Formatted content does not match original\n");
+            printf("  - Original (normalized): %s\n", normalize_whitespace(original_content));
+            printf("  - Formatted (normalized): %s\n", normalize_whitespace(formatted->chars));
+        }
     }
     
     // Cleanup
@@ -260,9 +454,20 @@ Test(json_tests, json_roundtrip) {
     
     printf("Formatted comprehensive JSON (first 200 chars): %.200s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty and contains key elements
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_json_semantically(complex_json, formatted->chars);
+    
     cr_assert(formatted->len > 0, "Formatted JSON should not be empty");
     cr_assert(strstr(formatted->chars, "Hello") != NULL, "Formatted JSON should contain string data");
+    cr_assert(content_matches, "Formatted JSON should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Comprehensive JSON roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Comprehensive JSON roundtrip test failed - content mismatch\n");
+        printf("  Original (normalized): %s\n", normalize_whitespace(complex_json));
+        printf("  Formatted (normalized): %s\n", normalize_whitespace(formatted->chars));
+    }
     
     // Cleanup - json_copy is automatically freed by input_from_source()
 }
@@ -311,9 +516,20 @@ Test(xml_tests, xml_roundtrip) {
     
     printf("Formatted comprehensive XML (first 200 chars): %.200s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty and contains key elements
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_xml_semantically(complex_xml, formatted->chars);
+    
     cr_assert(formatted->len > 0, "Formatted XML should not be empty");
     cr_assert(strstr(formatted->chars, "document") != NULL, "Formatted XML should contain document structure");
+    cr_assert(content_matches, "Formatted XML should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Comprehensive XML roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Comprehensive XML roundtrip test failed - content mismatch\n");
+        printf("  Original (normalized): %s\n", normalize_whitespace(complex_xml));
+        printf("  Formatted (normalized): %s\n", normalize_whitespace(formatted->chars));
+    }
     
     // Cleanup - xml_copy is freed by input_from_source
 }
@@ -361,9 +577,20 @@ Test(markdown_tests, markdown_roundtrip) {
     
     printf("Formatted comprehensive Markdown (first 200 chars): %.200s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty and contains key elements
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_markdown_semantically(complex_md, formatted->chars);
+    
     cr_assert(formatted->len > 0, "Formatted Markdown should not be empty");
     cr_assert(strstr(formatted->chars, "Main Header") != NULL, "Formatted Markdown should contain header");
+    cr_assert(content_matches, "Formatted Markdown should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Comprehensive Markdown roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Comprehensive Markdown roundtrip test failed - content mismatch\n");
+        printf("  Original (normalized): %s\n", normalize_whitespace(complex_md));
+        printf("  Formatted (normalized): %s\n", normalize_whitespace(formatted->chars));
+    }
     
     // Cleanup - md_copy is freed by input_from_source
 }
@@ -397,8 +624,33 @@ Test(json_tests, simple_json_roundtrip) {
     
     printf("Formatted simple JSON: %s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty
+    // Debug: Show the exact comparison
+    printf("DEBUG: Original JSON: '%s' (len=%zu)\n", simple_json, strlen(simple_json));
+    printf("DEBUG: Formatted JSON: '%s' (len=%d)\n", formatted->chars, formatted->len);
+    
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_json_semantically(simple_json, formatted->chars);
+    
+    printf("DEBUG: Content matches: %s\n", content_matches ? "true" : "false");
+    
     cr_assert(formatted->len > 0, "Formatted JSON should not be empty");
+    cr_assert(content_matches, "Formatted JSON should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Simple JSON roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Simple JSON roundtrip test failed - content mismatch\n");
+        printf("  Original: %s\n", simple_json);
+        printf("  Formatted: %s\n", formatted->chars);
+        
+        // Show normalized versions
+        char* norm_orig = normalize_whitespace(simple_json);
+        char* norm_fmt = normalize_whitespace(formatted->chars);
+        printf("  Original (normalized): '%s'\n", norm_orig ? norm_orig : "NULL");
+        printf("  Formatted (normalized): '%s'\n", norm_fmt ? norm_fmt : "NULL");
+        free(norm_orig);
+        free(norm_fmt);
+    }
     
     // Cleanup - json_copy is freed by input_from_source
     // Note: Don't free type_str as it may be managed by the memory pool
@@ -433,8 +685,19 @@ Test(xml_tests, simple_xml_roundtrip) {
     
     printf("Formatted simple XML: %s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_xml_semantically(simple_xml, formatted->chars);
+    
     cr_assert(formatted->len > 0, "Formatted XML should not be empty");
+    cr_assert(content_matches, "Formatted XML should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Simple XML roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Simple XML roundtrip test failed - content mismatch\n");
+        printf("  Original: %s\n", simple_xml);
+        printf("  Formatted: %s\n", formatted->chars);
+    }
     
     // Cleanup - xml_copy is freed by input_from_source
     // Note: Don't free type_str as it may be managed by the memory pool
@@ -469,8 +732,19 @@ Test(markdown_tests, simple_markdown_roundtrip) {
     
     printf("Formatted simple Markdown: %s\n", formatted->chars);
     
-    // Basic validation - check that formatted content is not empty
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_markdown_semantically(simple_md, formatted->chars);
+    
     cr_assert(formatted->len > 0, "Formatted Markdown should not be empty");
+    cr_assert(content_matches, "Formatted Markdown should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Simple Markdown roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Simple Markdown roundtrip test failed - content mismatch\n");
+        printf("  Original: %s\n", simple_md);
+        printf("  Formatted: %s\n", formatted->chars);
+    }
     
     // Cleanup - md_copy is freed by input_from_source
     // Note: Don't free type_str as it may be managed by the memory pool

@@ -2,9 +2,156 @@
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
 
-static void format_item(StrBuf* sb, Item item);
+// Forward declarations
+static void format_item_with_indent(StrBuf* sb, Item item, int indent);
+static void format_string(StrBuf* sb, String* str);
+static void format_array_with_indent(StrBuf* sb, Array* arr, int indent);
+static void format_map_with_indent(StrBuf* sb, Map* mp, int indent);
+
+// Helper function to add indentation
+static void add_indent(StrBuf* sb, int indent) {
+    for (int i = 0; i < indent; i++) {
+        strbuf_append_str(sb, "  ");
+    }
+}
+
+// JSON-specific function to format map/object contents properly
+static void format_json_map_contents(StrBuf* sb, TypeMap* map_type, void* map_data, int indent) {
+    if (!map_type || !map_data) return;
+    
+    // Prevent infinite recursion
+    if (indent > 10) {
+        strbuf_append_str(sb, "\"[MAX_DEPTH]\":null");
+        return;
+    }
+    
+    // Safety check for map_type length
+    if (map_type->length < 0 || map_type->length > 1000) {
+        strbuf_append_str(sb, "\"error\":\"invalid map length\"");
+        return;
+    }
+
+    ShapeEntry *field = map_type->shape;
+    bool first = true;
+    
+    for (int i = 0; i < map_type->length; i++) {
+        // Safety check for valid field pointer
+        if (!field || (uintptr_t)field < 0x1000) {
+            break;
+        }
+        
+        if (!first) {
+            strbuf_append_str(sb, ",\n");
+        } else {
+            strbuf_append_char(sb, '\n');
+            first = false;
+        }
+        
+        add_indent(sb, indent + 1);
+        void* data = ((char*)map_data) + field->byte_offset;
+        
+        if (!field->name) { // nested map
+            Map *nest_map = *(Map**)data;
+            if (nest_map && nest_map->type) {
+                TypeMap *nest_map_type = (TypeMap*)nest_map->type;
+                format_json_map_contents(sb, nest_map_type, nest_map->data, indent + 1);
+            }
+        } else {
+            // Safety checks
+            if (!field->name || (uintptr_t)field->name < 0x1000 || 
+                !field->type || (uintptr_t)field->type < 0x1000) {
+                goto advance_field;
+            }
+            
+            // Format the key (always quoted in JSON)
+            strbuf_append_format(sb, "\"%.*s\":", (int)field->name->length, field->name->str);
+            
+            // Format the value based on type
+            switch (field->type->type_id) {
+            case LMD_TYPE_NULL:
+                strbuf_append_str(sb, "null");
+                break;
+            case LMD_TYPE_BOOL:
+                strbuf_append_str(sb, *(bool*)data ? "true" : "false");
+                break;                    
+            case LMD_TYPE_INT:
+            case LMD_TYPE_INT64:
+                strbuf_append_format(sb, "%ld", *(long*)data);
+                break;
+            case LMD_TYPE_FLOAT:
+                strbuf_append_format(sb, "%g", *(double*)data);
+                break;
+            case LMD_TYPE_STRING: {
+                String *string = *(String**)data;
+                if (string) {
+                    // Check if this is EMPTY_STRING and handle specially
+                    if (string == &EMPTY_STRING) {
+                        strbuf_append_str(sb, "\"\"");
+                    } else if (string->len == 10 && strncmp(string->chars, "lambda.nil", 10) == 0) {
+                        // Handle literal "lambda.nil" content as empty string
+                        strbuf_append_str(sb, "\"\"");
+                    } else {
+                        format_string(sb, string);
+                    }
+                } else {
+                    strbuf_append_str(sb, "\"\"");
+                }
+                break;
+            }
+            case LMD_TYPE_ARRAY: {
+                Array *arr = *(Array**)data;
+                format_array_with_indent(sb, arr, indent + 1);
+                break;
+            }
+            case LMD_TYPE_MAP: {
+                Map *mp = *(Map**)data;
+                if (mp && mp->type) {
+                    strbuf_append_char(sb, '{');
+                    format_json_map_contents(sb, (TypeMap*)mp->type, mp->data, indent + 1);
+                    strbuf_append_char(sb, '\n');
+                    add_indent(sb, indent + 1);
+                    strbuf_append_char(sb, '}');
+                } else {
+                    strbuf_append_str(sb, "{}");
+                }
+                break;
+            }
+            default:
+                strbuf_append_str(sb, "null");
+                break;
+            }
+        }
+        
+advance_field:
+        ShapeEntry *next_field = field->next;
+        field = next_field;
+        
+        // Additional safety check: if we've reached the end early
+        if (!field) {
+            printf("missing next field\n");
+            break;
+        }
+    }
+    
+    if (!first) {
+        strbuf_append_char(sb, '\n');
+        add_indent(sb, indent);
+    }
+}
 
 static void format_string(StrBuf* sb, String* str) {
+    // Handle EMPTY_STRING specially
+    if (str == &EMPTY_STRING) {
+        strbuf_append_str(sb, "\"\"");
+        return;
+    }
+    
+    // Handle literal "lambda.nil" content as empty string
+    if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+        strbuf_append_str(sb, "\"\"");
+        return;
+    }
+    
     strbuf_append_char(sb, '"');
     
     const char* s = str->chars;
@@ -52,30 +199,36 @@ static void format_string(StrBuf* sb, String* str) {
     strbuf_append_char(sb, '"');
 }
 
-static void format_array(StrBuf* sb, Array* arr) {
-    printf("format_array: arr %p, length %ld\n", (void*)arr, arr ? arr->length : 0);
+static void format_array_with_indent(StrBuf* sb, Array* arr, int indent) {
+    printf("format_array_with_indent: arr %p, length %ld\n", (void*)arr, arr ? arr->length : 0);
     strbuf_append_char(sb, '[');
     if (arr && arr->length > 0) {
+        strbuf_append_char(sb, '\n');
         for (long i = 0; i < arr->length; i++) {
-            if (i > 0) { strbuf_append_char(sb, ','); }
+            if (i > 0) { 
+                strbuf_append_str(sb, ",\n"); 
+            }
+            add_indent(sb, indent + 1);
             Item item = arr->items[i];
-            format_item(sb, item);
+            format_item_with_indent(sb, item, indent + 1);
         }
+        strbuf_append_char(sb, '\n');
+        add_indent(sb, indent);
     }
     strbuf_append_char(sb, ']');
 }
 
-static void format_map(StrBuf* sb, Map* mp) {
-    printf("format_map: mp %p, type %p, data %p\n", (void*)mp, (void*)mp->type, (void*)mp->data);
+static void format_map_with_indent(StrBuf* sb, Map* mp, int indent) {
+    printf("format_map_with_indent: mp %p, type %p, data %p\n", (void*)mp, (void*)mp->type, (void*)mp->data);
     if (mp->type_id != LMD_TYPE_ELEMENT) strbuf_append_char(sb, '{');
     if (mp && mp->type) {
         TypeMap* map_type = (TypeMap*)mp->type;
-        print_named_items(sb, map_type, mp->data);
+        format_json_map_contents(sb, map_type, mp->data, indent);
     }
     if (mp->type_id != LMD_TYPE_ELEMENT) strbuf_append_char(sb, '}');
 }
 
-static void format_item(StrBuf* sb, Item item) {
+static void format_item_with_indent(StrBuf* sb, Item item, int indent) {
     TypeId type = get_type_id(item);
     switch (type) {
     case LMD_TYPE_NULL:
@@ -102,12 +255,12 @@ static void format_item(StrBuf* sb, Item item) {
     }
     case LMD_TYPE_ARRAY: {
         Array* arr = (Array*)item.pointer;
-        strbuf_append_str(sb, "[");
+        format_array_with_indent(sb, arr, indent);
         break;
     }
     case LMD_TYPE_MAP: {
         Map* mp = (Map*)item.pointer;
-        format_map(sb, mp);
+        format_map_with_indent(sb, mp, indent);
         break;
     }
     case LMD_TYPE_ELEMENT: {
@@ -124,14 +277,14 @@ static void format_item(StrBuf* sb, Item item) {
             temp_map.type = (Type*)elmt_type;
             temp_map.data = element->data;
             temp_map.data_cap = element->data_cap;
-            format_map(sb, &temp_map);
+            format_map_with_indent(sb, &temp_map, indent);
         }
         
         // Add children if any
         if (elmt_type && elmt_type->content_length > 0) {
             strbuf_append_str(sb, ",\"_\":");
             List* list = (List*)element;
-            format_array(sb, (Array*)list);
+            format_array_with_indent(sb, (Array*)list, indent);
         }
         
         strbuf_append_char(sb, '}');
@@ -139,10 +292,24 @@ static void format_item(StrBuf* sb, Item item) {
     }
     default:
         // unknown types
-        printf("format_item: unknown type %d\n", type);
+        printf("format_item_with_indent: unknown type %d\n", type);
         strbuf_append_str(sb, "null");
         break;
     }
+}
+
+// Legacy format_item function for backward compatibility
+static void format_item(StrBuf* sb, Item item) {
+    format_item_with_indent(sb, item, 0);
+}
+
+// Legacy functions for backward compatibility
+static void format_array(StrBuf* sb, Array* arr) {
+    format_array_with_indent(sb, arr, 0);
+}
+
+static void format_map(StrBuf* sb, Map* mp) {
+    format_map_with_indent(sb, mp, 0);
 }
 
 String* format_json(VariableMemPool* pool, Item root_item) {

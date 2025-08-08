@@ -507,7 +507,7 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
             printf("Unknown input type: %s\n", effective_type);
         }
     }
-    free(source);
+    // Note: Don't free(source) here - it's the caller's responsibility
     return input;
 }
 
