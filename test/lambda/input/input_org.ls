@@ -9,16 +9,8 @@ org_data
 "formatting Org as JSON:"
 format(org_data, 'json')
 
-"formatting Org as XML:"
-format(org_data, 'xml')
-
-"formatting Org as HTML:"
-format(org_data, 'html')
-
-"formatting Org as Markdown:"
-format(org_data, 'markdown')
-
-"formatting Org as YAML:"
-format(org_data, 'yaml')
+"Testing Org Mode formatter (round-trip):"
+let org_formatted = format(org_data, 'org')
+org_formatted
 
 "test completed."

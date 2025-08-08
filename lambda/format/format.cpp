@@ -110,6 +110,9 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
     else if (strcmp(type->chars, "ini") == 0) {
         result = format_ini(pool, item);
     }
+    else if (strcmp(type->chars, "org") == 0) {
+        result = format_org_string(pool, item);
+    }
     else if (strcmp(type->chars, "math") == 0) {
         // Math type with flavor support
         if (!flavor || strcmp(flavor->chars, "latex") == 0) {

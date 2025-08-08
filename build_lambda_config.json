@@ -60,6 +60,7 @@
         "lambda/format/format-json.cpp",
         "lambda/format/format-math.cpp",
         "lambda/format/format-md.cpp",
+        "lambda/format/format-org.cpp",
         "lambda/format/format-rst.cpp",
         "lambda/format/format-toml.cpp",
         "lambda/format/format-xml.cpp",

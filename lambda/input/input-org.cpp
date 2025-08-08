@@ -1,836 +1,1138 @@
 #include "input.h"
 #include <string.h>
+#include <ctype.h>
 
-// Forward declarations for recursive parsing
-static Item parse_org_content(Input *input, char** lines, int line_count);
-static Item parse_org_block_element(Input *input, char** lines, int* current_line, int total_lines);
-static Item parse_org_inline_content(Input *input, const char* text);
-static Item parse_org_list(Input *input, char** lines, int* current_line, int total_lines);
-static Item parse_org_table(Input *input, char** lines, int* current_line, int total_lines);
-static Element* parse_org_properties(Input *input, char** lines, int line_count);
-static void parse_org_property_line(Input *input, const char* line, Element* props);
+// Forward declarations
+static Element* parse_inline_text(Input* input, const char* text);
 
 // Use common utility functions from input.h
-#define skip_whitespace input_skip_whitespace
-#define is_whitespace_char input_is_whitespace_char
-#define is_empty_line input_is_empty_line
-#define count_leading_chars input_count_leading_chars
-#define trim_whitespace input_trim_whitespace
 #define create_string input_create_string
-#define split_lines input_split_lines
-#define free_lines input_free_lines
 #define create_org_element input_create_element
-#define add_attribute_to_element input_add_attribute_to_element
-#define add_attribute_item_to_element input_add_attribute_item_to_element
 
-// Org Mode specific parsing functions
-static bool is_org_heading(const char* line, int* level) {
-    int star_count = count_leading_chars(line, '*');
-    if (star_count >= 1 && (line[star_count] == '\0' || is_whitespace_char(line[star_count]))) {
-        if (level) *level = star_count;
+// Helper function to count leading stars
+static int count_leading_stars(const char* line) {
+    int count = 0;
+    while (line[count] == '*') {
+        count++;
+    }
+    // Make sure there's a space after the stars for a valid heading
+    if (count > 0 && line[count] == ' ') {
+        return count;
+    }
+    return 0;
+}
+
+// Helper function to check if line starts with list marker
+static bool is_list_item(const char* line) {
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Check for unordered list markers (-, +, *)
+    if ((*line == '-' || *line == '+' || *line == '*') && 
+        (line[1] == ' ' || line[1] == '\t')) {
         return true;
     }
-    return false;
-}
-
-static bool is_org_directive(const char* line) {
-    const char* trimmed = line;
-    while (*trimmed && is_whitespace_char(*trimmed)) trimmed++;
-    return strncmp(trimmed, "#+", 2) == 0;
-}
-
-static bool is_org_list_item(const char* line, bool* is_ordered, bool* has_checkbox) {
-    const char* ptr = line;
-    int indent = 0;
     
-    // Count indentation
-    while (*ptr && is_whitespace_char(*ptr)) {
-        indent++;
-        ptr++;
-    }
-    
-    // Check for unordered list markers
-    if (*ptr == '-' || *ptr == '+' || *ptr == '*') {
-        *is_ordered = false;
-        ptr++;
-        if (*ptr == '\0' || is_whitespace_char(*ptr)) {
-            // Check for checkbox
-            while (*ptr && is_whitespace_char(*ptr)) ptr++;
-            if (*ptr == '[') {
-                ptr++;
-                if (*ptr == ' ' || *ptr == 'X' || *ptr == '-') {
-                    if (*(ptr+1) == ']') {
-                        *has_checkbox = true;
-                    }
-                }
-            }
+    // Check for ordered list (number followed by . or ))
+    if (isdigit(*line)) {
+        line++;
+        while (isdigit(*line)) line++;
+        if ((*line == '.' || (*line == ')' && line[1] == ')')) &&
+            (line[1] == ' ' || line[1] == '\t')) {
             return true;
         }
     }
     
-    // Check for ordered list markers (numbers followed by . or ))
-    if (isdigit(*ptr)) {
-        while (isdigit(*ptr)) ptr++;
-        if (*ptr == '.' || *ptr == ')') {
-            ptr++;
-            if (*ptr == '\0' || is_whitespace_char(*ptr)) {
-                *is_ordered = true;
-                return true;
+    return false;
+}
+
+// Helper function to check if line starts with directive
+static bool is_directive(const char* line) {
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Check for #+
+    if (line[0] == '#' && line[1] == '+') {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is BEGIN_SRC
+static bool is_begin_src(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for BEGIN_SRC
+    if (strncmp(line, "BEGIN_SRC", 9) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is END_SRC
+static bool is_end_src(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for END_SRC
+    if (strncmp(line, "END_SRC", 7) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to extract language from BEGIN_SRC line
+static const char* extract_src_language(const char* line) {
+    // Skip to BEGIN_SRC
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    line += 9; // skip BEGIN_SRC
+    
+    // Skip whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Return the language (or empty string)
+    return line;
+}
+
+// Helper function to check if line is BEGIN_QUOTE
+static bool is_begin_quote(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for BEGIN_QUOTE
+    if (strncmp(line, "BEGIN_QUOTE", 11) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is END_QUOTE
+static bool is_end_quote(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for END_QUOTE
+    if (strncmp(line, "END_QUOTE", 9) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is BEGIN_EXAMPLE
+static bool is_begin_example(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for BEGIN_EXAMPLE
+    if (strncmp(line, "BEGIN_EXAMPLE", 13) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is END_EXAMPLE
+static bool is_end_example(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for END_EXAMPLE
+    if (strncmp(line, "END_EXAMPLE", 11) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is BEGIN_VERSE
+static bool is_begin_verse(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for BEGIN_VERSE
+    if (strncmp(line, "BEGIN_VERSE", 11) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is END_VERSE
+static bool is_end_verse(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for END_VERSE
+    if (strncmp(line, "END_VERSE", 9) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is BEGIN_CENTER
+static bool is_begin_center(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for BEGIN_CENTER
+    if (strncmp(line, "BEGIN_CENTER", 12) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is END_CENTER
+static bool is_end_center(const char* line) {
+    if (!is_directive(line)) return false;
+    
+    // Skip leading whitespace and #+
+    while (*line == ' ' || *line == '\t') line++;
+    line += 2; // skip #+
+    
+    // Check for END_CENTER
+    if (strncmp(line, "END_CENTER", 10) == 0) {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is a drawer start (:NAME:)
+static bool is_drawer_start(const char* line, char* drawer_name, size_t name_size) {
+    if (!line || line[0] != ':') return false;
+    
+    const char* end_colon = strchr(line + 1, ':');
+    if (!end_colon) return false;
+    
+    // Check if it's just :END: (which is drawer end, not start)
+    if (strncmp(line, ":END:", 5) == 0) return false;
+    
+    // Extract drawer name
+    size_t len = end_colon - (line + 1);
+    if (len == 0 || len >= name_size) return false;
+    
+    strncpy(drawer_name, line + 1, len);
+    drawer_name[len] = '\0';
+    
+    // Check if there's only whitespace after the closing colon
+    const char* after = end_colon + 1;
+    while (*after && (*after == ' ' || *after == '\t')) after++;
+    
+    return (*after == '\0' || *after == '\n');
+}
+
+// Helper function to check if line is drawer end (:END:)
+static bool is_drawer_end(const char* line) {
+    if (!line) return false;
+    
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    if (strncmp(line, ":END:", 5) != 0) return false;
+    
+    // Check if there's only whitespace after :END:
+    line += 5;
+    while (*line && (*line == ' ' || *line == '\t')) line++;
+    
+    return (*line == '\0' || *line == '\n');
+}
+
+// Helper function to check if line contains a scheduling keyword (SCHEDULED, DEADLINE, CLOSED)
+static bool is_scheduling_line(const char* line, char** keyword, char** timestamp) {
+    if (!line) return false;
+    
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    const char* keywords[] = {"SCHEDULED:", "DEADLINE:", "CLOSED:"};
+    const char* keyword_names[] = {"scheduled", "deadline", "closed"};
+    
+    for (int i = 0; i < 3; i++) {
+        int len = strlen(keywords[i]);
+        if (strncmp(line, keywords[i], len) == 0) {
+            *keyword = strdup(keyword_names[i]);
+            
+            // Find timestamp after the keyword
+            const char* ts_start = line + len;
+            while (*ts_start == ' ' || *ts_start == '\t') ts_start++;
+            
+            if (*ts_start == '<' || *ts_start == '[') {
+                const char* ts_end = strchr(ts_start + 1, (*ts_start == '<') ? '>' : ']');
+                if (ts_end) {
+                    *timestamp = strndup(ts_start, ts_end - ts_start + 1);
+                    return true;
+                }
+            }
+            
+            free(*keyword);
+            return false;
+        }
+    }
+    
+    return false;
+}
+
+// Helper function to parse timestamp in text (e.g., <2024-01-15 Mon 10:00>)
+static Element* parse_timestamp(Input* input, const char* timestamp_str) {
+    if (!timestamp_str || (timestamp_str[0] != '<' && timestamp_str[0] != '[')) return NULL;
+    
+    Element* timestamp = create_org_element(input, "timestamp");
+    if (!timestamp) return NULL;
+    
+    // Add the timestamp content
+    String* ts_string = create_string(input, timestamp_str);
+    if (ts_string) {
+        list_push((List*)timestamp, {.item = s2it(ts_string)});
+        ((TypeElmt*)timestamp->type)->content_length++;
+    }
+    
+    return timestamp;
+}
+
+// Helper function to create scheduling element
+static Element* create_scheduling(Input* input, const char* keyword, const char* timestamp_str) {
+    Element* scheduling = create_org_element(input, "scheduling");
+    if (!scheduling) return NULL;
+    
+    // Add keyword element
+    Element* keyword_elem = create_org_element(input, "keyword");
+    if (keyword_elem) {
+        String* keyword_string = create_string(input, keyword);
+        if (keyword_string) {
+            list_push((List*)keyword_elem, {.item = s2it(keyword_string)});
+            ((TypeElmt*)keyword_elem->type)->content_length++;
+            list_push((List*)scheduling, {.item = (uint64_t)keyword_elem});
+            ((TypeElmt*)scheduling->type)->content_length++;
+        }
+    }
+    
+    // Add timestamp element
+    Element* timestamp = parse_timestamp(input, timestamp_str);
+    if (timestamp) {
+        list_push((List*)scheduling, {.item = (uint64_t)timestamp});
+        ((TypeElmt*)scheduling->type)->content_length++;
+    }
+    
+    return scheduling;
+}
+
+// Helper function to check if line is a BEGIN block
+static bool is_begin_block(const char* line, const char* block_type) {
+    if (!is_directive(line)) return false;
+    
+    // Check for #+BEGIN_BLOCKTYPE pattern
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "#+BEGIN_%s", block_type);
+    
+    // Convert to uppercase for comparison
+    char line_upper[256];
+    size_t line_len = strlen(line);
+    if (line_len >= sizeof(line_upper)) return false;
+    
+    for (size_t i = 0; i < line_len && i < sizeof(line_upper) - 1; i++) {
+        line_upper[i] = toupper(line[i]);
+    }
+    line_upper[line_len] = '\0';
+    
+    return strstr(line_upper, pattern) == line_upper;
+}
+
+// Helper function to check if line is an END block
+static bool is_end_block(const char* line, const char* block_type) {
+    if (!is_directive(line)) return false;
+    
+    // Check for #+END_BLOCKTYPE pattern
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "#+END_%s", block_type);
+    
+    // Convert to uppercase for comparison
+    char line_upper[256];
+    size_t line_len = strlen(line);
+    if (line_len >= sizeof(line_upper)) return false;
+    
+    for (size_t i = 0; i < line_len && i < sizeof(line_upper) - 1; i++) {
+        line_upper[i] = toupper(line[i]);
+    }
+    line_upper[line_len] = '\0';
+    
+    return strstr(line_upper, pattern) == line_upper;
+}
+
+// Helper function to check if line is a drawer start
+static bool is_drawer_start(const char* line) {
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Check if line starts with : and ends with :
+    if (*line != ':') return false;
+    
+    const char* end = line + strlen(line) - 1;
+    while (end > line && (*end == ' ' || *end == '\t' || *end == '\n')) end--;
+    
+    return *end == ':' && end > line;
+}
+
+// Helper function to parse heading with TODO keywords and tags
+static void parse_heading_advanced(const char* title, char** todo, char** actual_title, char** tags) {
+    *todo = NULL;
+    *actual_title = NULL;
+    *tags = NULL;
+    
+    if (!title) return;
+    
+    // Skip leading whitespace
+    while (*title == ' ' || *title == '\t') title++;
+    
+    const char* start = title;
+    const char* current = title;
+    
+    // Check for TODO keywords
+    const char* todo_keywords[] = {"TODO", "DONE", "NEXT", "WAITING", "CANCELLED", NULL};
+    for (int i = 0; todo_keywords[i]; i++) {
+        size_t keyword_len = strlen(todo_keywords[i]);
+        if (strncmp(current, todo_keywords[i], keyword_len) == 0 &&
+            (current[keyword_len] == ' ' || current[keyword_len] == '\t' || current[keyword_len] == '\0')) {
+            *todo = strndup(current, keyword_len);
+            current += keyword_len;
+            while (*current == ' ' || *current == '\t') current++;
+            break;
+        }
+    }
+    
+    // Find tags (at the end, format :tag1:tag2:)
+    const char* tag_start = strrchr(current, ':');
+    const char* title_end = current + strlen(current);
+    
+    if (tag_start && tag_start > current) {
+        // Check if this looks like tags (ends with :)
+        const char* check = title_end - 1;
+        while (check > tag_start && (*check == ' ' || *check == '\t' || *check == '\n')) check--;
+        
+        if (*check == ':') {
+            // Find the start of tags (first : in the sequence)
+            const char* tags_start = tag_start;
+            while (tags_start > current && *(tags_start - 1) != ' ' && *(tags_start - 1) != '\t') {
+                tags_start--;
+                if (*tags_start == ':') tag_start = tags_start;
+            }
+            
+            if (tag_start > current) {
+                *tags = strndup(tag_start, title_end - tag_start);
+                title_end = tag_start;
+                // Remove trailing whitespace from title
+                while (title_end > current && (*(title_end - 1) == ' ' || *(title_end - 1) == '\t')) {
+                    title_end--;
+                }
             }
         }
     }
     
-    return false;
-}
-
-static bool is_org_table_row(const char* line) {
-    const char* trimmed = line;
-    while (*trimmed && is_whitespace_char(*trimmed)) trimmed++;
-    return *trimmed == '|';
-}
-
-static bool is_org_block_begin(const char* line, char* block_type) {
-    const char* trimmed = line;
-    while (*trimmed && is_whitespace_char(*trimmed)) trimmed++;
-    
-    if (strncasecmp(trimmed, "#+BEGIN_", 8) == 0) {
-        trimmed += 8;
-        int i = 0;
-        while (*trimmed && !is_whitespace_char(*trimmed) && i < 63) {
-            block_type[i++] = *trimmed;
-            trimmed++;
-        }
-        block_type[i] = '\0';
-        return true;
+    // Extract the actual title
+    if (title_end > current) {
+        *actual_title = strndup(current, title_end - current);
     }
-    return false;
 }
 
-static bool is_org_block_end(const char* line, const char* block_type) {
-    const char* trimmed = line;
-    while (*trimmed && is_whitespace_char(*trimmed)) trimmed++;
+// Helper function to create a code block element
+static Element* create_code_block(Input* input, const char* language, const char** lines, int line_count) {
+    Element* code_block = create_org_element(input, "code_block");
+    if (!code_block) return NULL;
     
-    if (strncasecmp(trimmed, "#+END_", 6) == 0) {
-        trimmed += 6;
-        return strncasecmp(trimmed, block_type, strlen(block_type)) == 0;
-    }
-    return false;
-}
-
-// Parse Org heading
-static Item parse_org_heading(Input *input, const char* line) {
-    int level;
-    if (!is_org_heading(line, &level)) {
-        return {.item = ITEM_NULL};
-    }
-    
-    Element* heading = create_org_element(input, "heading");
-    if (!heading) return {.item = ITEM_NULL};
-    
-    // Add level attribute
-    char level_str[16];
-    snprintf(level_str, sizeof(level_str), "%d", level);
-    add_attribute_to_element(input, heading, "level", level_str);
-    
-    // Parse heading text (skip stars and whitespace)
-    const char* text_start = line + level;
-    while (*text_start && is_whitespace_char(*text_start)) text_start++;
-    
-    // Look for TODO keywords
-    const char* todo_keywords[] = {"TODO", "DONE", "IN-PROGRESS", "CANCELLED", NULL};
-    char* heading_text = strdup(text_start);
-    char* todo_keyword = NULL;
-    
-    for (int i = 0; todo_keywords[i]; i++) {
-        size_t kw_len = strlen(todo_keywords[i]);
-        if (strncmp(text_start, todo_keywords[i], kw_len) == 0 && 
-            (text_start[kw_len] == '\0' || is_whitespace_char(text_start[kw_len]))) {
-            todo_keyword = strdup(todo_keywords[i]);
-            text_start += kw_len;
-            while (*text_start && is_whitespace_char(*text_start)) text_start++;
-            free(heading_text);
-            heading_text = strdup(text_start);
-            break;
+    // Add language attribute
+    if (language && strlen(language) > 0) {
+        String* lang_string = create_string(input, language);
+        if (lang_string) {
+            Element* lang_elem = create_org_element(input, "language");
+            if (lang_elem) {
+                list_push((List*)lang_elem, {.item = s2it(lang_string)});
+                ((TypeElmt*)lang_elem->type)->content_length++;
+                list_push((List*)code_block, {.item = (uint64_t)lang_elem});
+                ((TypeElmt*)code_block->type)->content_length++;
+            }
         }
     }
     
-    if (todo_keyword) {
-        add_attribute_to_element(input, heading, "todo", todo_keyword);
-        free(todo_keyword);
+    // Add content lines
+    for (int i = 0; i < line_count; i++) {
+        String* content_string = create_string(input, lines[i]);
+        if (content_string) {
+            Element* content_elem = create_org_element(input, "content");
+            if (content_elem) {
+                list_push((List*)content_elem, {.item = s2it(content_string)});
+                ((TypeElmt*)content_elem->type)->content_length++;
+                list_push((List*)code_block, {.item = (uint64_t)content_elem});
+                ((TypeElmt*)code_block->type)->content_length++;
+            }
+        }
     }
     
-    // Parse inline content from heading text
-    Item text_content = parse_org_inline_content(input, heading_text);
-    if (text_content.item != ITEM_NULL) {
-        list_push((List*)heading, text_content);
-        ((TypeElmt*)heading->type)->content_length++;
-    }
-    
-    free(heading_text);
-    return {.item = (uint64_t)heading};
+    return code_block;
 }
 
-// Parse Org directive (#+KEY: value)
-static Item parse_org_directive(Input *input, const char* line) {
-    if (!is_org_directive(line)) {
-        return {.item = ITEM_NULL};
-    }
+// Helper function to create a quote block element
+static Element* create_quote_block(Input* input, const char** lines, int line_count) {
+    Element* quote_block = create_org_element(input, "quote_block");
+    if (!quote_block) return NULL;
     
-    const char* ptr = line;
-    while (*ptr && is_whitespace_char(*ptr)) ptr++;
-    ptr += 2; // skip #+
-    
-    // Extract directive name
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    
-    while (*ptr && *ptr != ':' && !is_whitespace_char(*ptr)) {
-        strbuf_append_char(sb, tolower(*ptr));
-        ptr++;
-    }
-    
-    if (*ptr != ':') return {.item = ITEM_NULL};
-    
-    String* directive_name = strbuf_to_string(sb);
-    if (!directive_name) return {.item = ITEM_NULL};
-    
-    ptr++; // skip ':'
-    while (*ptr && is_whitespace_char(*ptr)) ptr++;
-    
-    // Extract directive value
-    String* directive_value = create_string(input, ptr);
-    
-    Element* directive = create_org_element(input, "directive");
-    if (!directive) return {.item = ITEM_NULL};
-    
-    add_attribute_to_element(input, directive, "name", directive_name->chars);
-    add_attribute_to_element(input, directive, "value", directive_value->chars);
-    
-    return {.item = (uint64_t)directive};
-}
-
-// Parse Org block (#+BEGIN_TYPE ... #+END_TYPE)
-static Item parse_org_block(Input *input, char** lines, int* current_line, int total_lines) {
-    char block_type[64];
-    if (!is_org_block_begin(lines[*current_line], block_type)) {
-        return {.item = ITEM_NULL};
-    }
-    
-    Element* block = create_org_element(input, "block");
-    if (!block) return {.item = ITEM_NULL};
-    
-    // Convert block type to lowercase
-    for (int i = 0; block_type[i]; i++) {
-        block_type[i] = tolower(block_type[i]);
-    }
-    add_attribute_to_element(input, block, "type", block_type);
-    
-    (*current_line)++; // skip BEGIN line
-    
-    // Collect block content
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    
-    while (*current_line < total_lines) {
-        if (is_org_block_end(lines[*current_line], block_type)) {
-            (*current_line)++; // skip END line
-            break;
+    // Add content lines as paragraphs with inline formatting
+    for (int i = 0; i < line_count; i++) {
+        if (strlen(lines[i]) == 0) continue; // Skip empty lines
+        
+        Element* paragraph = create_org_element(input, "paragraph");
+        if (!paragraph) continue;
+        
+        // Parse inline formatting in the content
+        Element* inline_content = parse_inline_text(input, lines[i]);
+        if (inline_content && ((List*)inline_content)->length > 0) {
+            // Use the inline content if it has elements
+            List* inline_list = (List*)inline_content;
+            for (long j = 0; j < inline_list->length; j++) {
+                Item inline_item = inline_list->items[j];
+                list_push((List*)paragraph, inline_item);
+                ((TypeElmt*)paragraph->type)->content_length++;
+            }
+        } else {
+            // Fallback to simple string content
+            String* content_string = create_string(input, lines[i]);
+            if (content_string) {
+                list_push((List*)paragraph, {.item = s2it(content_string)});
+                ((TypeElmt*)paragraph->type)->content_length++;
+            }
         }
         
-        if (sb->length > sizeof(uint32_t)) {
-            strbuf_append_char(sb, '\n');
-        }
-        strbuf_append_str(sb, lines[*current_line]);
-        (*current_line)++;
+        list_push((List*)quote_block, {.item = (uint64_t)paragraph});
+        ((TypeElmt*)quote_block->type)->content_length++;
     }
     
-    if (sb->length > sizeof(uint32_t)) {
-        String* block_content = strbuf_to_string(sb);
-        if (block_content) {
-            Item content_item = {.item = s2it(block_content)};
-            list_push((List*)block, content_item);
+    return quote_block;
+}
+
+// Helper function to create a generic block element (example, verse, center)
+static Element* create_generic_block(Input* input, const char* block_type, const char** lines, int line_count, bool preserve_formatting) {
+    // Create block element with the specified type
+    char block_element_name[64];
+    snprintf(block_element_name, sizeof(block_element_name), "%s_block", block_type);
+    
+    Element* block = create_org_element(input, block_element_name);
+    if (!block) return NULL;
+    
+    // Add content lines
+    for (int i = 0; i < line_count; i++) {
+        if (!preserve_formatting && strlen(lines[i]) == 0) continue; // Skip empty lines for some blocks
+        
+        if (preserve_formatting || strcmp(block_type, "example") == 0) {
+            // For example and verse blocks, preserve as-is without inline formatting
+            String* content_string = create_string(input, lines[i]);
+            if (content_string) {
+                Element* content_elem = create_org_element(input, "content");
+                if (content_elem) {
+                    list_push((List*)content_elem, {.item = s2it(content_string)});
+                    ((TypeElmt*)content_elem->type)->content_length++;
+                    list_push((List*)block, {.item = (uint64_t)content_elem});
+                    ((TypeElmt*)block->type)->content_length++;
+                }
+            }
+        } else {
+            // For center blocks, parse as paragraph with inline formatting
+            Element* paragraph = create_org_element(input, "paragraph");
+            if (!paragraph) continue;
+            
+            // Parse inline formatting in the content
+            Element* inline_content = parse_inline_text(input, lines[i]);
+            if (inline_content && ((List*)inline_content)->length > 0) {
+                // Use the inline content if it has elements
+                List* inline_list = (List*)inline_content;
+                for (long j = 0; j < inline_list->length; j++) {
+                    Item inline_item = inline_list->items[j];
+                    list_push((List*)paragraph, inline_item);
+                    ((TypeElmt*)paragraph->type)->content_length++;
+                }
+            } else {
+                // Fallback to simple string content
+                String* content_string = create_string(input, lines[i]);
+                if (content_string) {
+                    list_push((List*)paragraph, {.item = s2it(content_string)});
+                    ((TypeElmt*)paragraph->type)->content_length++;
+                }
+            }
+            
+            list_push((List*)block, {.item = (uint64_t)paragraph});
             ((TypeElmt*)block->type)->content_length++;
         }
     }
     
-    return {.item = (uint64_t)block};
+    return block;
 }
 
-// Parse Org list
-static Item parse_org_list(Input *input, char** lines, int* current_line, int total_lines) {
-    bool is_ordered, has_checkbox;
-    if (!is_org_list_item(lines[*current_line], &is_ordered, &has_checkbox)) {
-        return {.item = ITEM_NULL};
-    }
+// Helper function to create a drawer element
+static Element* create_drawer(Input* input, const char* drawer_name, const char** lines, int line_count) {
+    Element* drawer = create_org_element(input, "drawer");
+    if (!drawer) return NULL;
     
-    Element* list = create_org_element(input, is_ordered ? "ordered_list" : "unordered_list");
-    if (!list) return {.item = ITEM_NULL};
-    
-    int base_indent = 0;
-    const char* first_line = lines[*current_line];
-    while (*first_line && is_whitespace_char(*first_line)) {
-        base_indent++;
-        first_line++;
-    }
-    
-    while (*current_line < total_lines) {
-        const char* line = lines[*current_line];
-        bool line_is_ordered, line_has_checkbox;
-        
-        if (is_empty_line(line)) {
-            (*current_line)++;
-            continue;
+    // Add drawer name
+    String* name_string = create_string(input, drawer_name);
+    if (name_string) {
+        Element* name_elem = create_org_element(input, "name");
+        if (name_elem) {
+            list_push((List*)name_elem, {.item = s2it(name_string)});
+            ((TypeElmt*)name_elem->type)->content_length++;
+            list_push((List*)drawer, {.item = (uint64_t)name_elem});
+            ((TypeElmt*)drawer->type)->content_length++;
         }
+    }
+    
+    // Add content lines (as simple text for now - could be enhanced to parse properties)
+    for (int i = 0; i < line_count; i++) {
+        if (strlen(lines[i]) == 0) continue; // Skip empty lines
         
-        if (!is_org_list_item(line, &line_is_ordered, &line_has_checkbox)) {
-            // Check if it's a continuation line (more indented than list item)
-            int line_indent = 0;
-            const char* ptr = line;
-            while (*ptr && is_whitespace_char(*ptr)) {
-                line_indent++;
-                ptr++;
+        String* content_string = create_string(input, lines[i]);
+        if (content_string) {
+            Element* content_elem = create_org_element(input, "content");
+            if (content_elem) {
+                list_push((List*)content_elem, {.item = s2it(content_string)});
+                ((TypeElmt*)content_elem->type)->content_length++;
+                list_push((List*)drawer, {.item = (uint64_t)content_elem});
+                ((TypeElmt*)drawer->type)->content_length++;
             }
+        }
+    }
+    
+    return drawer;
+}
+
+// Helper function to create a directive element
+static Element* create_directive(Input* input, const char* line) {
+    Element* directive = create_org_element(input, "directive");
+    if (!directive) return NULL;
+    
+    String* content_string = create_string(input, line);
+    if (content_string) {
+        list_push((List*)directive, {.item = s2it(content_string)});
+        ((TypeElmt*)directive->type)->content_length++;
+    }
+    
+    return directive;
+}
+
+// Helper function to parse inline formatting in text
+static Element* parse_inline_text(Input* input, const char* text) {
+    if (!text) return NULL;
+    
+    Element* text_container = create_org_element(input, "text_content");
+    if (!text_container) return NULL;
+    
+    const char* current = text;
+    const char* start = text;
+    
+    while (*current) {
+        // Look for inline formatting markers
+        if (*current == '*' || *current == '/' || *current == '=' || 
+            *current == '~' || *current == '+' || *current == '_') {
             
-            if (line_indent > base_indent + 2 && *ptr) {
-                // This is a continuation of the previous list item
-                (*current_line)++;
-                continue;
-            } else {
-                // End of list
-                break;
-            }
-        }
-        
-        // Parse list item
-        Element* list_item = create_org_element(input, "list_item");
-        if (!list_item) {
-            (*current_line)++;
-            continue;
-        }
-        
-        // Find the start of item text
-        const char* ptr = line;
-        while (*ptr && is_whitespace_char(*ptr)) ptr++;
-        
-        // Skip list marker
-        if (isdigit(*ptr)) {
-            while (isdigit(*ptr)) ptr++;
-            if (*ptr == '.' || *ptr == ')') ptr++;
-        } else if (*ptr == '-' || *ptr == '+' || *ptr == '*') {
-            ptr++;
-        }
-        
-        while (*ptr && is_whitespace_char(*ptr)) ptr++;
-        
-        // Handle checkbox
-        char checkbox_state = ' ';
-        if (*ptr == '[') {
-            ptr++;
-            if (*ptr == ' ' || *ptr == 'X' || *ptr == '-') {
-                checkbox_state = *ptr;
-                ptr++;
-                if (*ptr == ']') {
-                    ptr++;
-                    while (*ptr && is_whitespace_char(*ptr)) ptr++;
+            // Add any plain text before the marker
+            if (current > start) {
+                size_t plain_len = current - start;
+                char* plain_text = (char*)malloc(plain_len + 1);
+                if (plain_text) {
+                    strncpy(plain_text, start, plain_len);
+                    plain_text[plain_len] = '\0';
                     
-                    char state_str[2] = {checkbox_state, '\0'};
-                    add_attribute_to_element(input, list_item, "checkbox", state_str);
+                    Element* plain = create_org_element(input, "plain_text");
+                    if (plain) {
+                        String* plain_string = create_string(input, plain_text);
+                        if (plain_string) {
+                            list_push((List*)plain, {.item = s2it(plain_string)});
+                            ((TypeElmt*)plain->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)plain});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                    }
+                    free(plain_text);
                 }
             }
-        }
-        
-        // Parse item content
-        Item item_content = parse_org_inline_content(input, ptr);
-        if (item_content.item != ITEM_NULL) {
-            list_push((List*)list_item, item_content);
-            ((TypeElmt*)list_item->type)->content_length++;
-        }
-        
-        // Add item to list
-        list_push((List*)list, {.item = (uint64_t)list_item});
-        ((TypeElmt*)list->type)->content_length++;
-        
-        (*current_line)++;
-    }
-    
-    return {.item = (uint64_t)list};
-}
-
-// Parse Org table
-static Item parse_org_table(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_org_table_row(lines[*current_line])) {
-        return {.item = ITEM_NULL};
-    }
-    
-    Element* table = create_org_element(input, "table");
-    if (!table) return {.item = ITEM_NULL};
-    
-    while (*current_line < total_lines && is_org_table_row(lines[*current_line])) {
-        const char* line = lines[*current_line];
-        
-        // Skip separator rows (|---+---|)
-        bool is_separator = true;
-        const char* ptr = line;
-        while (*ptr) {
-            if (*ptr != '|' && *ptr != '-' && *ptr != '+' && !is_whitespace_char(*ptr)) {
-                is_separator = false;
-                break;
+            
+            // Find matching closing marker
+            char marker = *current;
+            const char* marker_start = current;
+            current++; // skip opening marker
+            
+            // Find closing marker (not at word boundary)
+            const char* content_start = current;
+            while (*current && *current != marker) {
+                current++;
             }
-            ptr++;
-        }
-        
-        if (!is_separator) {
-            Element* row = create_org_element(input, "table_row");
-            if (row) {
-                // Parse table cells
-                ptr = line;
-                while (*ptr && is_whitespace_char(*ptr)) ptr++;
-                if (*ptr == '|') ptr++; // skip leading |
-                
-                StrBuf* sb = input->sb;
-                
-                while (*ptr) {
-                    strbuf_reset(sb);
+            
+            if (*current == marker && current > content_start) {
+                // Found matching closing marker
+                size_t content_len = current - content_start;
+                char* content_text = (char*)malloc(content_len + 1);
+                if (content_text) {
+                    strncpy(content_text, content_start, content_len);
+                    content_text[content_len] = '\0';
                     
-                    // Read cell content until next |
-                    while (*ptr && *ptr != '|') {
-                        strbuf_append_char(sb, *ptr);
-                        ptr++;
+                    // Create formatted element
+                    const char* format_type = "plain_text";
+                    switch (marker) {
+                        case '*': format_type = "bold"; break;
+                        case '/': format_type = "italic"; break;
+                        case '=': format_type = "verbatim"; break;
+                        case '~': format_type = "code"; break;
+                        case '+': format_type = "strikethrough"; break;
+                        case '_': format_type = "underline"; break;
                     }
                     
-                    if (sb->length > sizeof(uint32_t)) {
-                        String* cell_content = strbuf_to_string(sb);
-                        if (cell_content) {
-                            // Trim whitespace from cell content
-                            char* trimmed = trim_whitespace(cell_content->chars);
-                            if (trimmed) {
-                                String* trimmed_content = create_string(input, trimmed);
-                                free(trimmed);
-                                
-                                Element* cell = create_org_element(input, "table_cell");
-                                if (cell && trimmed_content) {
-                                    Item cell_text = {.item = s2it(trimmed_content)};
-                                    list_push((List*)cell, cell_text);
-                                    ((TypeElmt*)cell->type)->content_length++;
-                                    
-                                    list_push((List*)row, {.item = (uint64_t)cell});
-                                    ((TypeElmt*)row->type)->content_length++;
+                    Element* formatted = create_org_element(input, format_type);
+                    if (formatted) {
+                        String* content_string = create_string(input, content_text);
+                        if (content_string) {
+                            list_push((List*)formatted, {.item = s2it(content_string)});
+                            ((TypeElmt*)formatted->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)formatted});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                    }
+                    free(content_text);
+                }
+                current++; // skip closing marker
+                start = current;
+            } else {
+                // No matching closing marker, treat as plain text
+                current = marker_start + 1;
+            }
+        } else if (*current == '[' && *(current + 1) == '[') {
+            // Handle links [[URL][description]] or [[URL]]
+            
+            // Add any plain text before the link
+            if (current > start) {
+                size_t plain_len = current - start;
+                char* plain_text = (char*)malloc(plain_len + 1);
+                if (plain_text) {
+                    strncpy(plain_text, start, plain_len);
+                    plain_text[plain_len] = '\0';
+                    
+                    Element* plain = create_org_element(input, "plain_text");
+                    if (plain) {
+                        String* plain_string = create_string(input, plain_text);
+                        if (plain_string) {
+                            list_push((List*)plain, {.item = s2it(plain_string)});
+                            ((TypeElmt*)plain->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)plain});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                    }
+                    free(plain_text);
+                }
+            }
+            
+            // Parse link
+            const char* link_start = current;
+            current += 2; // skip [[
+            const char* url_start = current;
+            
+            // Find end of URL (] or ][)
+            while (*current && *current != ']') {
+                current++;
+            }
+            
+            if (*current == ']') {
+                size_t url_len = current - url_start;
+                char* url = (char*)malloc(url_len + 1);
+                if (url) {
+                    strncpy(url, url_start, url_len);
+                    url[url_len] = '\0';
+                    
+                    current++; // skip ]
+                    char* description = NULL;
+                    
+                    // Check for description [description]
+                    if (*current == '[') {
+                        current++; // skip [
+                        const char* desc_start = current;
+                        while (*current && *current != ']') {
+                            current++;
+                        }
+                        if (*current == ']') {
+                            size_t desc_len = current - desc_start;
+                            description = (char*)malloc(desc_len + 1);
+                            if (description) {
+                                strncpy(description, desc_start, desc_len);
+                                description[desc_len] = '\0';
+                            }
+                            current++; // skip ]
+                        }
+                    }
+                    
+                    if (*current == ']') {
+                        current++; // skip final ]
+                        
+                        // Create link element
+                        Element* link = create_org_element(input, "link");
+                        if (link) {
+                            Element* url_elem = create_org_element(input, "url");
+                            if (url_elem) {
+                                String* url_string = create_string(input, url);
+                                if (url_string) {
+                                    list_push((List*)url_elem, {.item = s2it(url_string)});
+                                    ((TypeElmt*)url_elem->type)->content_length++;
+                                    list_push((List*)link, {.item = (uint64_t)url_elem});
+                                    ((TypeElmt*)link->type)->content_length++;
                                 }
                             }
+                            
+                            if (description) {
+                                Element* desc_elem = create_org_element(input, "description");
+                                if (desc_elem) {
+                                    String* desc_string = create_string(input, description);
+                                    if (desc_string) {
+                                        list_push((List*)desc_elem, {.item = s2it(desc_string)});
+                                        ((TypeElmt*)desc_elem->type)->content_length++;
+                                        list_push((List*)link, {.item = (uint64_t)desc_elem});
+                                        ((TypeElmt*)link->type)->content_length++;
+                                    }
+                                }
+                            }
+                            
+                            list_push((List*)text_container, {.item = (uint64_t)link});
+                            ((TypeElmt*)text_container->type)->content_length++;
                         }
-                    }
-                    
-                    if (*ptr == '|') ptr++; // skip |
-                }
-                
-                list_push((List*)table, {.item = (uint64_t)row});
-                ((TypeElmt*)table->type)->content_length++;
-            }
-        }
-        
-        (*current_line)++;
-    }
-    
-    return {.item = (uint64_t)table};
-}
-
-// Parse inline formatting and links
-static Item parse_org_inline_content(Input *input, const char* text) {
-    if (!text || !*text) return {.item = ITEM_NULL};
-    
-    Element* content = create_org_element(input, "text");
-    if (!content) return {.item = ITEM_NULL};
-    
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    
-    const char* ptr = text;
-    while (*ptr) {
-        // Handle Org links [[url][description]] or [[url]]
-        if (*ptr == '[' && *(ptr+1) == '[') {
-            // Flush any accumulated text
-            if (sb->length > sizeof(uint32_t)) {
-                String* text_content = strbuf_to_string(sb);
-                if (text_content) {
-                    list_push((List*)content, {.item = s2it(text_content)});
-                    ((TypeElmt*)content->type)->content_length++;
-                }
-                strbuf_reset(sb);
-            }
-            
-            ptr += 2; // skip [[
-            
-            // Find the end of the link
-            const char* link_start = ptr;
-            const char* link_end = strstr(ptr, "]]");
-            if (link_end) {
-                // Check if there's a description part [url][description]
-                const char* desc_start = strstr(link_start, "][");
-                
-                Element* link = create_org_element(input, "link");
-                if (link) {
-                    if (desc_start && desc_start < link_end) {
-                        // Link with description
-                        char* url = strndup(link_start, desc_start - link_start);
-                        desc_start += 2; // skip ][
-                        char* description = strndup(desc_start, link_end - desc_start);
-                        
-                        add_attribute_to_element(input, link, "url", url);
-                        String* desc_string = create_string(input, description);
-                        if (desc_string) {
-                            list_push((List*)link, {.item = s2it(desc_string)});
-                            ((TypeElmt*)link->type)->content_length++;
-                        }
-                        
-                        free(url);
-                        free(description);
+                        start = current;
                     } else {
-                        // Link without description
-                        char* url = strndup(link_start, link_end - link_start);
-                        add_attribute_to_element(input, link, "url", url);
-                        
-                        String* url_string = create_string(input, url);
-                        if (url_string) {
-                            list_push((List*)link, {.item = s2it(url_string)});
-                            ((TypeElmt*)link->type)->content_length++;
+                        // Invalid link format, treat as plain text
+                        current = link_start + 1;
+                    }
+                    
+                    free(url);
+                    free(description);
+                }
+            } else {
+                // No closing ]], treat as plain text
+                current = link_start + 1;
+            }
+        } else if ((*current == '<' || *current == '[') && 
+                  (isdigit(*(current + 1)) || *(current + 1) == ' ')) {
+            // Handle timestamps <2024-01-15 Mon> or [2024-01-15 Mon]
+            
+            // Add any plain text before the timestamp
+            if (current > start) {
+                size_t plain_len = current - start;
+                char* plain_text = (char*)malloc(plain_len + 1);
+                if (plain_text) {
+                    strncpy(plain_text, start, plain_len);
+                    plain_text[plain_len] = '\0';
+                    
+                    Element* plain = create_org_element(input, "plain_text");
+                    if (plain) {
+                        String* plain_string = create_string(input, plain_text);
+                        if (plain_string) {
+                            list_push((List*)plain, {.item = s2it(plain_string)});
+                            ((TypeElmt*)plain->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)plain});
+                            ((TypeElmt*)text_container->type)->content_length++;
                         }
-                        
-                        free(url);
+                    }
+                    free(plain_text);
+                }
+            }
+            
+            // Parse timestamp
+            char closing_char = (*current == '<') ? '>' : ']';
+            const char* ts_start = current;
+            current++; // skip opening bracket
+            
+            // Find closing bracket
+            while (*current && *current != closing_char) {
+                current++;
+            }
+            
+            if (*current == closing_char) {
+                current++; // skip closing bracket
+                size_t ts_len = current - ts_start;
+                char* timestamp_str = (char*)malloc(ts_len + 1);
+                if (timestamp_str) {
+                    strncpy(timestamp_str, ts_start, ts_len);
+                    timestamp_str[ts_len] = '\0';
+                    
+                    Element* timestamp = parse_timestamp(input, timestamp_str);
+                    if (timestamp) {
+                        list_push((List*)text_container, {.item = (uint64_t)timestamp});
+                        ((TypeElmt*)text_container->type)->content_length++;
                     }
                     
-                    list_push((List*)content, {.item = (uint64_t)link});
-                    ((TypeElmt*)content->type)->content_length++;
+                    free(timestamp_str);
                 }
-                
-                ptr = link_end + 2; // skip ]]
-                continue;
+                start = current;
+            } else {
+                // No closing bracket, treat as plain text
+                current = ts_start + 1;
             }
-        }
-        
-        // Handle bold text *text*
-        if (*ptr == '*' && *(ptr+1) != ' ' && *(ptr+1) != '\0') {
-            const char* end_ptr = strchr(ptr+1, '*');
-            if (end_ptr && end_ptr != ptr+1) {
-                // Flush any accumulated text
-                if (sb->length > sizeof(uint32_t)) {
-                    String* text_content = strbuf_to_string(sb);
-                    if (text_content) {
-                        list_push((List*)content, {.item = s2it(text_content)});
-                        ((TypeElmt*)content->type)->content_length++;
-                    }
-                    strbuf_reset(sb);
-                }
-                
-                // Create bold element
-                Element* bold = create_org_element(input, "bold");
-                if (bold) {
-                    char* bold_text = strndup(ptr+1, end_ptr - ptr - 1);
-                    String* bold_string = create_string(input, bold_text);
-                    if (bold_string) {
-                        list_push((List*)bold, {.item = s2it(bold_string)});
-                        ((TypeElmt*)bold->type)->content_length++;
-                    }
-                    free(bold_text);
-                    
-                    list_push((List*)content, {.item = (uint64_t)bold});
-                    ((TypeElmt*)content->type)->content_length++;
-                }
-                
-                ptr = end_ptr + 1;
-                continue;
-            }
-        }
-        
-        // Handle italic text /text/
-        if (*ptr == '/' && *(ptr+1) != ' ' && *(ptr+1) != '\0') {
-            const char* end_ptr = strchr(ptr+1, '/');
-            if (end_ptr && end_ptr != ptr+1) {
-                // Flush any accumulated text
-                if (sb->length > sizeof(uint32_t)) {
-                    String* text_content = strbuf_to_string(sb);
-                    if (text_content) {
-                        list_push((List*)content, {.item = s2it(text_content)});
-                        ((TypeElmt*)content->type)->content_length++;
-                    }
-                    strbuf_reset(sb);
-                }
-                
-                // Create italic element
-                Element* italic = create_org_element(input, "italic");
-                if (italic) {
-                    char* italic_text = strndup(ptr+1, end_ptr - ptr - 1);
-                    String* italic_string = create_string(input, italic_text);
-                    if (italic_string) {
-                        list_push((List*)italic, {.item = s2it(italic_string)});
-                        ((TypeElmt*)italic->type)->content_length++;
-                    }
-                    free(italic_text);
-                    
-                    list_push((List*)content, {.item = (uint64_t)italic});
-                    ((TypeElmt*)content->type)->content_length++;
-                }
-                
-                ptr = end_ptr + 1;
-                continue;
-            }
-        }
-        
-        // Handle code text =text=
-        if (*ptr == '=' && *(ptr+1) != ' ' && *(ptr+1) != '\0') {
-            const char* end_ptr = strchr(ptr+1, '=');
-            if (end_ptr && end_ptr != ptr+1) {
-                // Flush any accumulated text
-                if (sb->length > sizeof(uint32_t)) {
-                    String* text_content = strbuf_to_string(sb);
-                    if (text_content) {
-                        list_push((List*)content, {.item = s2it(text_content)});
-                        ((TypeElmt*)content->type)->content_length++;
-                    }
-                    strbuf_reset(sb);
-                }
-                
-                // Create code element
-                Element* code = create_org_element(input, "code");
-                if (code) {
-                    char* code_text = strndup(ptr+1, end_ptr - ptr - 1);
-                    String* code_string = create_string(input, code_text);
-                    if (code_string) {
-                        list_push((List*)code, {.item = s2it(code_string)});
-                        ((TypeElmt*)code->type)->content_length++;
-                    }
-                    free(code_text);
-                    
-                    list_push((List*)content, {.item = (uint64_t)code});
-                    ((TypeElmt*)content->type)->content_length++;
-                }
-                
-                ptr = end_ptr + 1;
-                continue;
-            }
-        }
-        
-        // Handle verbatim text ~text~
-        if (*ptr == '~' && *(ptr+1) != ' ' && *(ptr+1) != '\0') {
-            const char* end_ptr = strchr(ptr+1, '~');
-            if (end_ptr && end_ptr != ptr+1) {
-                // Flush any accumulated text
-                if (sb->length > sizeof(uint32_t)) {
-                    String* text_content = strbuf_to_string(sb);
-                    if (text_content) {
-                        list_push((List*)content, {.item = s2it(text_content)});
-                        ((TypeElmt*)content->type)->content_length++;
-                    }
-                    strbuf_reset(sb);
-                }
-                
-                // Create verbatim element
-                Element* verbatim = create_org_element(input, "verbatim");
-                if (verbatim) {
-                    char* verbatim_text = strndup(ptr+1, end_ptr - ptr - 1);
-                    String* verbatim_string = create_string(input, verbatim_text);
-                    if (verbatim_string) {
-                        list_push((List*)verbatim, {.item = s2it(verbatim_string)});
-                        ((TypeElmt*)verbatim->type)->content_length++;
-                    }
-                    free(verbatim_text);
-                    
-                    list_push((List*)content, {.item = (uint64_t)verbatim});
-                    ((TypeElmt*)content->type)->content_length++;
-                }
-                
-                ptr = end_ptr + 1;
-                continue;
-            }
-        }
-        
-        // Regular character
-        strbuf_append_char(sb, *ptr);
-        ptr++;
-    }
-    
-    // Flush any remaining text
-    if (sb->length > sizeof(uint32_t)) {
-        String* text_content = strbuf_to_string(sb);
-        if (text_content) {
-            list_push((List*)content, {.item = s2it(text_content)});
-            ((TypeElmt*)content->type)->content_length++;
-        }
-    }
-    
-    return {.item = (uint64_t)content};
-}
-
-// Parse a paragraph (regular text)
-static Item parse_org_paragraph(Input *input, char** lines, int* current_line, int total_lines) {
-    Element* paragraph = create_org_element(input, "paragraph");
-    if (!paragraph) return {.item = ITEM_NULL};
-    
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    
-    while (*current_line < total_lines) {
-        const char* line = lines[*current_line];
-        
-        // Stop at empty lines, headings, lists, tables, blocks, or directives
-        if (is_empty_line(line) || 
-            is_org_heading(line, NULL) ||
-            is_org_directive(line) ||
-            is_org_list_item(line, NULL, NULL) ||
-            is_org_table_row(line) ||
-            is_org_block_begin(line, NULL)) {
-            break;
-        }
-        
-        if (sb->length > sizeof(uint32_t)) {
-            strbuf_append_char(sb, ' ');
-        }
-        strbuf_append_str(sb, line);
-        (*current_line)++;
-    }
-    
-    if (sb->length > sizeof(uint32_t)) {
-        String* paragraph_text = strbuf_to_string(sb);
-        if (paragraph_text) {
-            Item text_content = parse_org_inline_content(input, paragraph_text->chars);
-            if (text_content.item != ITEM_NULL) {
-                list_push((List*)paragraph, text_content);
-                ((TypeElmt*)paragraph->type)->content_length++;
-            }
-        }
-    }
-    
-    return {.item = (uint64_t)paragraph};
-}
-
-// Parse a single block element
-static Item parse_org_block_element(Input *input, char** lines, int* current_line, int total_lines) {
-    if (*current_line >= total_lines) {
-        return {.item = ITEM_NULL};
-    }
-    
-    const char* line = lines[*current_line];
-    
-    // Skip empty lines
-    if (is_empty_line(line)) {
-        (*current_line)++;
-        return {.item = ITEM_NULL};
-    }
-    
-    // Try parsing different block types
-    if (is_org_heading(line, NULL)) {
-        Item heading = parse_org_heading(input, line);
-        (*current_line)++;
-        return heading;
-    }
-    
-    if (is_org_directive(line)) {
-        Item directive = parse_org_directive(input, line);
-        (*current_line)++;
-        return directive;
-    }
-    
-    if (is_org_block_begin(line, NULL)) {
-        return parse_org_block(input, lines, current_line, total_lines);
-    }
-    
-    if (is_org_list_item(line, NULL, NULL)) {
-        return parse_org_list(input, lines, current_line, total_lines);
-    }
-    
-    if (is_org_table_row(line)) {
-        return parse_org_table(input, lines, current_line, total_lines);
-    }
-    
-    // Default to paragraph
-    return parse_org_paragraph(input, lines, current_line, total_lines);
-}
-
-// Parse properties from directive lines
-static Element* parse_org_properties(Input *input, char** lines, int line_count) {
-    Element* properties = create_org_element(input, "properties");
-    if (!properties) return NULL;
-    
-    for (int i = 0; i < line_count; i++) {
-        if (is_org_directive(lines[i])) {
-            parse_org_property_line(input, lines[i], properties);
-        }
-    }
-    
-    return properties;
-}
-
-// Parse a single property line  
-static void parse_org_property_line(Input *input, const char* line, Element* props) {
-    if (!is_org_directive(line)) return;
-    
-    const char* ptr = line;
-    while (*ptr && is_whitespace_char(*ptr)) ptr++;
-    ptr += 2; // skip #+
-    
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    
-    // Extract property name
-    while (*ptr && *ptr != ':' && !is_whitespace_char(*ptr)) {
-        strbuf_append_char(sb, tolower(*ptr));
-        ptr++;
-    }
-    
-    if (*ptr != ':') return;
-    
-    String* prop_name = strbuf_to_string(sb);
-    if (!prop_name) return;
-    
-    ptr++; // skip ':'
-    while (*ptr && is_whitespace_char(*ptr)) ptr++;
-    
-    // Extract property value
-    String* prop_value = create_string(input, ptr);
-    if (prop_value) {
-        Item value_item = {.item = s2it(prop_value)};
-        map_put((Map*)props, prop_name, value_item, input);
-    }
-}
-
-// Main Org content parsing function
-static Item parse_org_content(Input *input, char** lines, int line_count) {
-    Element* doc = create_org_element(input, "org_document");
-    if (!doc) return {.item = ITEM_NULL};
-    
-    // Parse properties from the beginning of the document
-    Element* properties = parse_org_properties(input, lines, line_count);
-    if (properties && ((TypeElmt*)properties->type)->content_length > 0) {
-        list_push((List*)doc, {.item = (uint64_t)properties});
-        ((TypeElmt*)doc->type)->content_length++;
-    }
-    
-    // Parse document body
-    Element* body = create_org_element(input, "body");
-    if (!body) return {.item = ITEM_NULL};
-    
-    int current_line = 0;
-    while (current_line < line_count) {
-        Item element = parse_org_block_element(input, lines, &current_line, line_count);
-        
-        if (element.item != ITEM_NULL) {
-            list_push((List*)body, element);
-            ((TypeElmt*)body->type)->content_length++;
         } else {
-            // If no element was parsed, advance to avoid infinite loop
-            if (current_line < line_count) {
-                current_line++;
+            current++;
+        }
+    }
+    
+    // Add any remaining plain text
+    if (current > start) {
+        size_t plain_len = current - start;
+        char* plain_text = (char*)malloc(plain_len + 1);
+        if (plain_text) {
+            strncpy(plain_text, start, plain_len);
+            plain_text[plain_len] = '\0';
+            
+            Element* plain = create_org_element(input, "plain_text");
+            if (plain) {
+                String* plain_string = create_string(input, plain_text);
+                if (plain_string) {
+                    list_push((List*)plain, {.item = s2it(plain_string)});
+                    ((TypeElmt*)plain->type)->content_length++;
+                    list_push((List*)text_container, {.item = (uint64_t)plain});
+                    ((TypeElmt*)text_container->type)->content_length++;
+                }
+            }
+            free(plain_text);
+        }
+    }
+    
+    return text_container;
+}
+
+// Helper function to check if line is a table row
+static bool is_table_row(const char* line) {
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Check if line starts with | (table row)
+    if (*line == '|') {
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to check if line is a table separator
+static bool is_table_separator(const char* line) {
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Check if line starts with | and contains mostly - and +
+    if (*line == '|') {
+        line++;
+        while (*line) {
+            if (*line != '-' && *line != '+' && *line != '|' && 
+                *line != ' ' && *line != '\t') {
+                return false;
+            }
+            line++;
+        }
+        return true;
+    }
+    
+    return false;
+}
+
+// Helper function to parse table cells from a line
+static int parse_table_cells(const char* line, char*** cells) {
+    if (!line || !cells) return 0;
+    
+    // Skip leading whitespace and |
+    while (*line == ' ' || *line == '\t') line++;
+    if (*line == '|') line++;
+    
+    // Count cells first
+    int cell_count = 0;
+    const char* temp = line;
+    while (*temp) {
+        if (*temp == '|') cell_count++;
+        temp++;
+    }
+    
+    if (cell_count == 0) return 0;
+    
+    // Allocate cell array
+    *cells = (char**)malloc(cell_count * sizeof(char*));
+    if (!*cells) return 0;
+    
+    // Extract cells
+    int current_cell = 0;
+    const char* cell_start = line;
+    const char* cell_end = line;
+    
+    while (*cell_end && current_cell < cell_count) {
+        if (*cell_end == '|' || *cell_end == '\0') {
+            // Extract cell content
+            size_t cell_len = cell_end - cell_start;
+            char* cell_content = (char*)malloc(cell_len + 1);
+            if (cell_content) {
+                strncpy(cell_content, cell_start, cell_len);
+                cell_content[cell_len] = '\0';
+                
+                // Trim whitespace
+                char* start = cell_content;
+                char* end = cell_content + cell_len - 1;
+                while (*start == ' ' || *start == '\t') start++;
+                while (end > start && (*end == ' ' || *end == '\t')) end--;
+                *(end + 1) = '\0';
+                
+                (*cells)[current_cell] = strdup(start);
+                free(cell_content);
+            }
+            current_cell++;
+            cell_start = cell_end + 1;
+        }
+        cell_end++;
+    }
+    
+    return current_cell;
+}
+
+// Helper function to create a table row element
+static Element* create_table_row(Input* input, char** cells, int cell_count, bool is_header) {
+    Element* row = create_org_element(input, is_header ? "table_header_row" : "table_row");
+    if (!row) return NULL;
+    
+    for (int i = 0; i < cell_count; i++) {
+        if (cells[i]) {
+            Element* cell = create_org_element(input, "table_cell");
+            if (cell) {
+                String* cell_string = create_string(input, cells[i]);
+                if (cell_string) {
+                    list_push((List*)cell, {.item = s2it(cell_string)});
+                    ((TypeElmt*)cell->type)->content_length++;
+                    list_push((List*)row, {.item = (uint64_t)cell});
+                    ((TypeElmt*)row->type)->content_length++;
+                }
             }
         }
     }
     
-    // Add body to document
-    list_push((List*)doc, {.item = (uint64_t)body});
-    ((TypeElmt*)doc->type)->content_length++;
-    
-    return {.item = (uint64_t)doc};
+    return row;
 }
 
-// Main Org Mode parsing function
+// Helper function to create a table element
+static Element* create_table(Input* input, Element** rows, int row_count) {
+    Element* table = create_org_element(input, "table");
+    if (!table) return NULL;
+    
+    for (int i = 0; i < row_count; i++) {
+        if (rows[i]) {
+            list_push((List*)table, {.item = (uint64_t)rows[i]});
+            ((TypeElmt*)table->type)->content_length++;
+        }
+    }
+    
+    return table;
+}
+
+// Helper function to create a heading element
+static Element* create_heading(Input* input, int level, const char* title) {
+    Element* heading = create_org_element(input, "heading");
+    if (!heading) return NULL;
+    
+    // Add level attribute (we'll store it as a simple numeric string for now)
+    char level_str[8];
+    snprintf(level_str, sizeof(level_str), "%d", level);
+    String* level_string = create_string(input, level_str);
+    if (level_string) {
+        Element* level_elem = create_org_element(input, "level");
+        if (level_elem) {
+            list_push((List*)level_elem, {.item = s2it(level_string)});
+            ((TypeElmt*)level_elem->type)->content_length++;
+            list_push((List*)heading, {.item = (uint64_t)level_elem});
+            ((TypeElmt*)heading->type)->content_length++;
+        }
+    }
+    
+    // Parse advanced heading features (TODO, title, tags)
+    char* todo = NULL;
+    char* actual_title = NULL;
+    char* tags = NULL;
+    
+    parse_heading_advanced(title, &todo, &actual_title, &tags);
+    
+    // Add TODO keyword if present
+    if (todo) {
+        String* todo_string = create_string(input, todo);
+        if (todo_string) {
+            Element* todo_elem = create_org_element(input, "todo");
+            if (todo_elem) {
+                list_push((List*)todo_elem, {.item = s2it(todo_string)});
+                ((TypeElmt*)todo_elem->type)->content_length++;
+                list_push((List*)heading, {.item = (uint64_t)todo_elem});
+                ((TypeElmt*)heading->type)->content_length++;
+            }
+        }
+        free(todo);
+    }
+    
+    // Add title (use actual_title if parsed, otherwise original title)
+    const char* title_to_use = actual_title ? actual_title : title;
+    String* title_string = create_string(input, title_to_use);
+    if (title_string) {
+        Element* title_elem = create_org_element(input, "title");
+        if (title_elem) {
+            list_push((List*)title_elem, {.item = s2it(title_string)});
+            ((TypeElmt*)title_elem->type)->content_length++;
+            list_push((List*)heading, {.item = (uint64_t)title_elem});
+            ((TypeElmt*)heading->type)->content_length++;
+        }
+    }
+    
+    // Add tags if present
+    if (tags) {
+        String* tags_string = create_string(input, tags);
+        if (tags_string) {
+            Element* tags_elem = create_org_element(input, "tags");
+            if (tags_elem) {
+                list_push((List*)tags_elem, {.item = s2it(tags_string)});
+                ((TypeElmt*)tags_elem->type)->content_length++;
+                list_push((List*)heading, {.item = (uint64_t)tags_elem});
+                ((TypeElmt*)heading->type)->content_length++;
+            }
+        }
+        free(tags);
+    }
+    
+    if (actual_title) free(actual_title);
+    
+    return heading;
+}
+
+// Enhanced Org Mode parsing function
 void parse_org(Input* input, const char* org_string) {
     if (!org_string || !input) return;
     
@@ -838,11 +1140,536 @@ void parse_org(Input* input, const char* org_string) {
     input->sb = strbuf_new_pooled(input->pool);
     if (!input->sb) return;
     
-    int line_count;
-    char** lines = split_lines(org_string, &line_count);
-    if (!lines) return;
+    // Create document structure
+    Element* doc = create_org_element(input, "org_document");
+    if (!doc) return;
     
-    input->root = parse_org_content(input, lines, line_count);
+    // Split content into lines for parsing
+    const char* line_start = org_string;
+    const char* line_end;
     
-    free_lines(lines, line_count);
+    while (*line_start) {
+        // Find end of current line
+        line_end = line_start;
+        while (*line_end && *line_end != '\n') {
+            line_end++;
+        }
+        
+        // Create null-terminated line string
+        size_t line_len = line_end - line_start;
+        char* line = (char*)malloc(line_len + 1);
+        if (!line) break;
+        
+        strncpy(line, line_start, line_len);
+        line[line_len] = '\0';
+        
+        // Skip empty lines for now
+        if (line_len > 0 && line[0] != '\0') {
+            // Check if this is a code block start
+            if (is_begin_src(line)) {
+                // Extract language
+                const char* language = extract_src_language(line);
+                char lang_buffer[64] = {0};
+                if (language && strlen(language) > 0) {
+                    // Remove trailing whitespace/newline
+                    size_t lang_len = strlen(language);
+                    while (lang_len > 0 && (language[lang_len-1] == ' ' || 
+                           language[lang_len-1] == '\t' || language[lang_len-1] == '\n')) {
+                        lang_len--;
+                    }
+                    if (lang_len > 0 && lang_len < sizeof(lang_buffer)) {
+                        strncpy(lang_buffer, language, lang_len);
+                        lang_buffer[lang_len] = '\0';
+                    }
+                }
+                
+                // Collect code block lines until END_SRC
+                const char** code_lines = (const char**)malloc(1000 * sizeof(char*)); // max 1000 lines
+                int code_line_count = 0;
+                
+                // Move to next line
+                free(line);
+                if (*line_end == '\n') {
+                    line_start = line_end + 1;
+                } else {
+                    break;
+                }
+                
+                // Collect code lines
+                while (*line_start && code_line_count < 1000) {
+                    line_end = line_start;
+                    while (*line_end && *line_end != '\n') {
+                        line_end++;
+                    }
+                    
+                    line_len = line_end - line_start;
+                    line = (char*)malloc(line_len + 1);
+                    if (!line) break;
+                    
+                    strncpy(line, line_start, line_len);
+                    line[line_len] = '\0';
+                    
+                    // Check if this is the end of the code block
+                    if (is_end_src(line)) {
+                        free(line);
+                        break;
+                    }
+                    
+                    // Store the code line
+                    code_lines[code_line_count] = line;
+                    code_line_count++;
+                    
+                    // Move to next line
+                    if (*line_end == '\n') {
+                        line_start = line_end + 1;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Create code block element
+                Element* code_block = create_code_block(input, lang_buffer[0] ? lang_buffer : NULL, 
+                                                      code_lines, code_line_count);
+                if (code_block) {
+                    list_push((List*)doc, {.item = (uint64_t)code_block});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                
+                // Free code lines
+                for (int i = 0; i < code_line_count; i++) {
+                    free((void*)code_lines[i]);
+                }
+                free(code_lines);
+                
+                // Move to next line
+                if (*line_end == '\n') {
+                    line_start = line_end + 1;
+                } else {
+                    break;
+                }
+                continue;
+            }
+            
+            // Check if this is a quote block start
+            if (is_begin_quote(line)) {
+                // Collect quote block lines until END_QUOTE
+                const char** quote_lines = (const char**)malloc(1000 * sizeof(char*)); // max 1000 lines
+                int quote_line_count = 0;
+                
+                // Move to next line
+                free(line);
+                if (*line_end == '\n') {
+                    line_start = line_end + 1;
+                } else {
+                    break;
+                }
+                
+                // Collect quote content lines
+                while (*line_start && quote_line_count < 1000) {
+                    line_end = line_start;
+                    while (*line_end && *line_end != '\n') {
+                        line_end++;
+                    }
+                    
+                    line_len = line_end - line_start;
+                    line = (char*)malloc(line_len + 1);
+                    if (!line) break;
+                    
+                    strncpy(line, line_start, line_len);
+                    line[line_len] = '\0';
+                    
+                    // Check if this is the end of the quote block
+                    if (is_end_quote(line)) {
+                        free(line);
+                        break;
+                    }
+                    
+                    // Store the quote line
+                    quote_lines[quote_line_count] = line;
+                    quote_line_count++;
+                    
+                    // Move to next line
+                    if (*line_end == '\n') {
+                        line_start = line_end + 1;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Create quote block element
+                Element* quote_block = create_quote_block(input, quote_lines, quote_line_count);
+                if (quote_block) {
+                    list_push((List*)doc, {.item = (uint64_t)quote_block});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                
+                // Free quote lines
+                for (int i = 0; i < quote_line_count; i++) {
+                    free((void*)quote_lines[i]);
+                }
+                free(quote_lines);
+                
+                // Move to next line
+                if (*line_end == '\n') {
+                    line_start = line_end + 1;
+                } else {
+                    break;
+                }
+                continue;
+            }
+            
+            // Check if this is an example block start
+            if (is_begin_example(line)) {
+                const char** block_lines = (const char**)malloc(1000 * sizeof(char*));
+                int block_line_count = 0;
+                
+                free(line);
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                
+                while (*line_start && block_line_count < 1000) {
+                    line_end = line_start;
+                    while (*line_end && *line_end != '\n') line_end++;
+                    line_len = line_end - line_start;
+                    line = (char*)malloc(line_len + 1);
+                    if (!line) break;
+                    strncpy(line, line_start, line_len);
+                    line[line_len] = '\0';
+                    
+                    if (is_end_example(line)) {
+                        free(line);
+                        break;
+                    }
+                    
+                    block_lines[block_line_count++] = line;
+                    if (*line_end == '\n') line_start = line_end + 1; else break;
+                }
+                
+                Element* example_block = create_generic_block(input, "example", block_lines, block_line_count, true);
+                if (example_block) {
+                    list_push((List*)doc, {.item = (uint64_t)example_block});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                
+                for (int i = 0; i < block_line_count; i++) {
+                    free((void*)block_lines[i]);
+                }
+                free(block_lines);
+                
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                continue;
+            }
+            
+            // Check if this is a verse block start
+            if (is_begin_verse(line)) {
+                const char** block_lines = (const char**)malloc(1000 * sizeof(char*));
+                int block_line_count = 0;
+                
+                free(line);
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                
+                while (*line_start && block_line_count < 1000) {
+                    line_end = line_start;
+                    while (*line_end && *line_end != '\n') line_end++;
+                    line_len = line_end - line_start;
+                    line = (char*)malloc(line_len + 1);
+                    if (!line) break;
+                    strncpy(line, line_start, line_len);
+                    line[line_len] = '\0';
+                    
+                    if (is_end_verse(line)) {
+                        free(line);
+                        break;
+                    }
+                    
+                    block_lines[block_line_count++] = line;
+                    if (*line_end == '\n') line_start = line_end + 1; else break;
+                }
+                
+                Element* verse_block = create_generic_block(input, "verse", block_lines, block_line_count, true);
+                if (verse_block) {
+                    list_push((List*)doc, {.item = (uint64_t)verse_block});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                
+                for (int i = 0; i < block_line_count; i++) {
+                    free((void*)block_lines[i]);
+                }
+                free(block_lines);
+                
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                continue;
+            }
+            
+            // Check if this is a center block start
+            if (is_begin_center(line)) {
+                const char** block_lines = (const char**)malloc(1000 * sizeof(char*));
+                int block_line_count = 0;
+                
+                free(line);
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                
+                while (*line_start && block_line_count < 1000) {
+                    line_end = line_start;
+                    while (*line_end && *line_end != '\n') line_end++;
+                    line_len = line_end - line_start;
+                    line = (char*)malloc(line_len + 1);
+                    if (!line) break;
+                    strncpy(line, line_start, line_len);
+                    line[line_len] = '\0';
+                    
+                    if (is_end_center(line)) {
+                        free(line);
+                        break;
+                    }
+                    
+                    block_lines[block_line_count++] = line;
+                    if (*line_end == '\n') line_start = line_end + 1; else break;
+                }
+                
+                Element* center_block = create_generic_block(input, "center", block_lines, block_line_count, false);
+                if (center_block) {
+                    list_push((List*)doc, {.item = (uint64_t)center_block});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                
+                for (int i = 0; i < block_line_count; i++) {
+                    free((void*)block_lines[i]);
+                }
+                free(block_lines);
+                
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                continue;
+            }
+            
+            // Check if this is a drawer start
+            char drawer_name[64];
+            if (is_drawer_start(line, drawer_name, sizeof(drawer_name))) {
+                const char** drawer_lines = (const char**)malloc(1000 * sizeof(char*));
+                int drawer_line_count = 0;
+                
+                free(line);
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                
+                while (*line_start && drawer_line_count < 1000) {
+                    line_end = line_start;
+                    while (*line_end && *line_end != '\n') line_end++;
+                    line_len = line_end - line_start;
+                    line = (char*)malloc(line_len + 1);
+                    if (!line) break;
+                    strncpy(line, line_start, line_len);
+                    line[line_len] = '\0';
+                    
+                    if (is_drawer_end(line)) {
+                        free(line);
+                        break;
+                    }
+                    
+                    drawer_lines[drawer_line_count++] = line;
+                    if (*line_end == '\n') line_start = line_end + 1; else break;
+                }
+                
+                Element* drawer = create_drawer(input, drawer_name, drawer_lines, drawer_line_count);
+                if (drawer) {
+                    list_push((List*)doc, {.item = (uint64_t)drawer});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                
+                for (int i = 0; i < drawer_line_count; i++) {
+                    free((void*)drawer_lines[i]);
+                }
+                free(drawer_lines);
+                
+                if (*line_end == '\n') line_start = line_end + 1; else break;
+                continue;
+            }
+            
+            // Check if this is a heading
+            int heading_level = count_leading_stars(line);
+            if (heading_level > 0) {
+                // Extract title (skip stars and space)
+                const char* title = line + heading_level + 1;
+                Element* heading = create_heading(input, heading_level, title);
+                if (heading) {
+                    list_push((List*)doc, {.item = (uint64_t)heading});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+            } else {
+                // Check for other types of lines
+                char* sched_keyword = NULL;
+                char* sched_timestamp = NULL;
+                if (is_scheduling_line(line, &sched_keyword, &sched_timestamp)) {
+                    // Handle standalone scheduling lines
+                    Element* scheduling = create_scheduling(input, sched_keyword, sched_timestamp);
+                    if (scheduling) {
+                        list_push((List*)doc, {.item = (uint64_t)scheduling});
+                        ((TypeElmt*)doc->type)->content_length++;
+                    }
+                    free(sched_keyword);
+                    free(sched_timestamp);
+                } else if (is_list_item(line)) {
+                // Create list item element
+                Element* list_item = create_org_element(input, "list_item");
+                if (list_item) {
+                    String* content_string = create_string(input, line);
+                    if (content_string) {
+                        list_push((List*)list_item, {.item = s2it(content_string)});
+                        ((TypeElmt*)list_item->type)->content_length++;
+                        list_push((List*)doc, {.item = (uint64_t)list_item});
+                        ((TypeElmt*)doc->type)->content_length++;
+                    }
+                }
+            } else if (is_directive(line)) {
+                // Create directive element
+                Element* directive = create_directive(input, line);
+                if (directive) {
+                    list_push((List*)doc, {.item = (uint64_t)directive});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+            } else if (is_table_row(line)) {
+                // Start collecting table rows
+                Element* table_rows[100];  // Max 100 rows
+                int row_count = 0;
+                bool first_row_is_header = false;
+                
+                // Process current line first
+                char** cells;
+                int cell_count = parse_table_cells(line, &cells);
+                
+                if (cell_count > 0) {
+                    Element* row = create_table_row(input, cells, cell_count, false);  // Will update if header
+                    if (row) {
+                        table_rows[row_count++] = row;
+                    }
+                    
+                    // Free cell strings
+                    for (int j = 0; j < cell_count; j++) {
+                        free(cells[j]);
+                    }
+                    free(cells);
+                }
+                
+                // Look ahead for more table rows
+                const char* next_line_start = line_end;
+                if (*next_line_start == '\n') next_line_start++;
+                
+                while (*next_line_start && row_count < 100) {
+                    // Find the next line
+                    const char* next_line_end = next_line_start;
+                    while (*next_line_end && *next_line_end != '\n') {
+                        next_line_end++;
+                    }
+                    
+                    if (next_line_end == next_line_start) break; // Empty line ends table
+                    
+                    // Create null-terminated line string
+                    size_t next_line_len = next_line_end - next_line_start;
+                    char* next_line = (char*)malloc(next_line_len + 1);
+                    if (!next_line) break;
+                    
+                    strncpy(next_line, next_line_start, next_line_len);
+                    next_line[next_line_len] = '\0';
+                    
+                    if (!is_table_row(next_line)) {
+                        free(next_line);
+                        break;
+                    }
+                    
+                    if (is_table_separator(next_line)) {
+                        // Mark first row as header if this is a separator
+                        if (row_count == 1) {
+                            first_row_is_header = true;
+                        }
+                        free(next_line);
+                        // Move past separator
+                        line_start = (*next_line_end == '\n') ? next_line_end + 1 : next_line_end;
+                        next_line_start = line_start;
+                        continue;
+                    }
+                    
+                    // Parse table row
+                    char** next_cells;
+                    int next_cell_count = parse_table_cells(next_line, &next_cells);
+                    
+                    if (next_cell_count > 0) {
+                        Element* next_row = create_table_row(input, next_cells, next_cell_count, false);
+                        if (next_row) {
+                            table_rows[row_count++] = next_row;
+                        }
+                        
+                        // Free cell strings
+                        for (int j = 0; j < next_cell_count; j++) {
+                            free(next_cells[j]);
+                        }
+                        free(next_cells);
+                    }
+                    
+                    free(next_line);
+                    
+                    // Move to next line
+                    line_start = (*next_line_end == '\n') ? next_line_end + 1 : next_line_end;
+                    next_line_start = line_start;
+                }
+                
+                // Update first row to be header if needed
+                if (first_row_is_header && row_count > 0 && table_rows[0]) {
+                    // Update the type name to indicate header
+                    TypeElmt* type = (TypeElmt*)table_rows[0]->type;
+                    if (type && type->name.length > 0) {
+                        // Need to replace the type name - this is a bit tricky
+                        // For now, we'll rely on the formatter to detect header rows
+                    }
+                }
+                
+                // Create table from collected rows
+                if (row_count > 0) {
+                    Element* table = create_table(input, table_rows, row_count);
+                    if (table) {
+                        list_push((List*)doc, {.item = (uint64_t)table});
+                        ((TypeElmt*)doc->type)->content_length++;
+                    }
+                }
+                
+                // Continue from where we left off
+                continue;
+            } else {
+                // Regular paragraph text - enhance with inline parsing
+                Element* paragraph = create_org_element(input, "paragraph");
+                if (paragraph) {
+                    // Try to parse inline formatting
+                    Element* inline_content = parse_inline_text(input, line);
+                    if (inline_content && ((List*)inline_content)->length > 0) {
+                        // Use the inline content if it has elements
+                        List* inline_list = (List*)inline_content;
+                        for (long j = 0; j < inline_list->length; j++) {
+                            Item inline_item = inline_list->items[j];
+                            list_push((List*)paragraph, inline_item);
+                            ((TypeElmt*)paragraph->type)->content_length++;
+                        }
+                    } else {
+                        // Fallback to simple string content
+                        String* content_string = create_string(input, line);
+                        if (content_string) {
+                            list_push((List*)paragraph, {.item = s2it(content_string)});
+                            ((TypeElmt*)paragraph->type)->content_length++;
+                        }
+                    }
+                    
+                    list_push((List*)doc, {.item = (uint64_t)paragraph});
+                    ((TypeElmt*)doc->type)->content_length++;
+                }
+                }
+            }
+        }
+        
+        free(line);
+        
+        // Move to next line
+        if (*line_end == '\n') {
+            line_start = line_end + 1;
+        } else {
+            break;
+        }
+    }
+    
+    input->root = {.item = (uint64_t)doc};
 }
