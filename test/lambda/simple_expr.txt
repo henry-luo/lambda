@@ -1,11 +1,28 @@
 6.5
 1.5
 6.5
+true
+"string"
+"Numeric exprs: ============"
 100.5
 10.4
+-77
+12
+5
+1.25
 2.5
 2
 27
 8
+"Comparison exprs: ============"
 true
-"string"
+false
+true
+true
+false
+true
+"Logic exprs: ============"
+false
+true
+true
+false
