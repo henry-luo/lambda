@@ -1,0 +1,19 @@
+#+TITLE: Org Math Test
+
+This is a test of inline math: $x^2 + y^2 = z^2$.
+
+And here's display math:
+$$\int_0^\infty e^{-x} dx = 1$$
+
+LaTeX style inline: \(a + b = c\)
+
+LaTeX style display:
+\[
+\sum_{n=1}^\infty \frac{1}{n^2} = \frac{\pi^2}{6}
+\]
+
+Regular text with *bold* and /italic/ formatting.
+
+[fn:1] This is a footnote definition.
+
+A reference to the footnote[fn:1] and an inline footnote[fn::This is inline].

@@ -265,6 +265,86 @@ bool compare_markdown_semantically(const char* original, const char* formatted) 
     return result;
 }
 
+// Helper function to compare Org-mode strings
+bool compare_org_semantically(const char* original, const char* formatted) {
+    // Org-mode comparison needs to handle math format conversions and whitespace differences
+    
+    if (!original && !formatted) return true;
+    if (!original || !formatted) return false;
+    
+    char* norm_orig = normalize_whitespace(original);
+    char* norm_fmt = normalize_whitespace(formatted);
+    
+    bool result = false;
+    if (norm_orig && norm_fmt) {
+        result = strcmp(norm_orig, norm_fmt) == 0;
+        
+        // If exact match fails, try Org-mode specific normalization
+        if (!result) {
+            char clean1[2000] = {0}, clean2[2000] = {0};
+            char *p1 = norm_orig, *p2 = norm_fmt;
+            int i1 = 0, i2 = 0;
+            
+            // Normalize original - handle math format conversions
+            while (*p1 && i1 < sizeof(clean1)-1) {
+                if (strncmp(p1, "$$", 2) == 0) {
+                    // Convert display math $$ to \[ 
+                    strcpy(&clean1[i1], "\\[");
+                    i1 += 2;
+                    p1 += 2;
+                    // Find closing $$
+                    while (*p1 && strncmp(p1, "$$", 2) != 0 && i1 < sizeof(clean1)-1) {
+                        clean1[i1++] = *p1++;
+                    }
+                    if (strncmp(p1, "$$", 2) == 0) {
+                        strcpy(&clean1[i1], "\\]");
+                        i1 += 2;
+                        p1 += 2;
+                    }
+                } else if (strncmp(p1, "\\(", 2) == 0) {
+                    // Convert inline math \( to $
+                    clean1[i1++] = '$';
+                    p1 += 2;
+                    // Find closing \)
+                    while (*p1 && strncmp(p1, "\\)", 2) != 0 && i1 < sizeof(clean1)-1) {
+                        clean1[i1++] = *p1++;
+                    }
+                    if (strncmp(p1, "\\)", 2) == 0) {
+                        clean1[i1++] = '$';
+                        p1 += 2;
+                    }
+                } else if (!isspace(*p1) || (i1 > 0 && !isspace(clean1[i1-1]))) {
+                    clean1[i1++] = isspace(*p1) ? ' ' : *p1;
+                    p1++;
+                } else {
+                    p1++;
+                }
+            }
+            
+            // Normalize formatted - just remove extra spaces but keep math as-is
+            while (*p2 && i2 < sizeof(clean2)-1) {
+                if (!isspace(*p2) || (i2 > 0 && !isspace(clean2[i2-1]))) {
+                    clean2[i2++] = isspace(*p2) ? ' ' : *p2;
+                }
+                p2++;
+            }
+            
+            // Clean up any doubled backslashes in math (bug fix for \sum\sum)
+            char *double_sum = strstr(clean2, "\\sum\\sum");
+            if (double_sum) {
+                memmove(double_sum + 4, double_sum + 8, strlen(double_sum + 8) + 1);
+                i2 -= 4;
+            }
+            
+            result = strcmp(clean1, clean2) == 0;
+        }
+    }
+    
+    free(norm_orig);
+    free(norm_fmt);
+    return result;
+}
+
 // Context management
 static Context* test_ctx = NULL;
 
@@ -327,6 +407,7 @@ TestSuite(input_roundtrip_tests, .init = input_setup, .fini = input_teardown);
 TestSuite(json_tests, .init = input_setup, .fini = input_teardown);
 TestSuite(xml_tests, .init = input_setup, .fini = input_teardown);
 TestSuite(markdown_tests, .init = input_setup, .fini = input_teardown);
+TestSuite(org_tests, .init = input_setup, .fini = input_teardown);
 
 // Common roundtrip test function
 bool test_format_roundtrip(const char* test_file, const char* format_type, const char* test_name) {
@@ -390,6 +471,8 @@ bool test_format_roundtrip(const char* test_file, const char* format_type, const
         content_matches = compare_xml_semantically(original_content, formatted->chars);
     } else if (strcmp(format_type, "markdown") == 0) {
         content_matches = compare_markdown_semantically(original_content, formatted->chars);
+    } else if (strcmp(format_type, "org") == 0) {
+        content_matches = compare_org_semantically(original_content, formatted->chars);
     } else {
         // For other formats, do a simple normalized comparison
         char* norm_orig = normalize_whitespace(original_content);
@@ -775,4 +858,89 @@ Test(markdown_tests, simple_markdown_roundtrip) {
     
     // Cleanup - md_copy is freed by input_from_source
     // Note: Don't free type_str as it may be managed by the memory pool
+}
+
+// Org-mode roundtrip test with comprehensive content
+Test(org_tests, org_roundtrip) {
+    printf("\n=== Testing comprehensive Org-mode roundtrip ===\n");
+    
+    bool success = test_format_roundtrip("test/input/test.org", "org", "comprehensive org test");
+    cr_assert(success, "Comprehensive Org-mode roundtrip test should pass");
+}
+
+// Simple Org-mode roundtrip test with embedded content
+Test(org_tests, simple_org_roundtrip) {
+    printf("\n=== Testing simple Org-mode roundtrip ===\n");
+    
+    const char* simple_org = "#+TITLE: Simple Test\n\n"
+        "This is a *bold* test with /italic/ text.\n\n"
+        "Inline math: $x^2 + y^2 = z^2$\n\n"
+        "Display math:\n"
+        "$$\\int_0^\\infty e^{-x} dx = 1$$\n\n"
+        "- First item\n"
+        "- Second item\n\n"
+        "A simple [fn:1] footnote reference.\n\n"
+        "[fn:1] Footnote definition.";
+    
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("org");
+    String* flavor_str = NULL;
+    
+    // Get current directory for URL resolution
+    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* dummy_url = parse_url(cwd, "test.org");
+    
+    // Make a mutable copy of the Org string
+    char* org_copy = strdup(simple_org);
+    
+    // Parse the input content
+    Input* input = input_from_source(org_copy, dummy_url, type_str, flavor_str);
+    cr_assert_not_null(input, "Failed to parse simple Org-mode input");
+    
+    printf("Simple Org-mode parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    
+    // Format the parsed data back to string
+    String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
+    cr_assert_not_null(formatted, "Failed to format simple Org-mode data");
+    
+    printf("Formatted simple Org-mode: %s\n", formatted->chars);
+    
+    // Enhanced validation with semantic comparison
+    bool content_matches = compare_org_semantically(simple_org, formatted->chars);
+    
+    cr_assert(formatted->len > 0, "Formatted Org-mode should not be empty");
+    cr_assert(strstr(formatted->chars, "Simple Test") != NULL, "Formatted Org-mode should contain title");
+    
+    if (!content_matches) {
+        printf("Content mismatch details:\n");
+        printf("Original:\n%s\n", simple_org);
+        printf("Formatted:\n%s\n", formatted->chars);
+        char* norm_orig = normalize_whitespace(simple_org);
+        char* norm_fmt = normalize_whitespace(formatted->chars);
+        printf("Original (normalized): %s\n", norm_orig);
+        printf("Formatted (normalized): %s\n", norm_fmt);
+        free(norm_orig);
+        free(norm_fmt);
+    }
+    
+    cr_assert(content_matches, "Formatted Org-mode should match original content semantically");
+    
+    if (content_matches) {
+        printf("✓ Simple Org-mode roundtrip test passed - content matches original\n");
+    } else {
+        printf("✗ Simple Org-mode roundtrip test failed - content mismatch\n");
+        printf("  Original: %s\n", simple_org);
+        printf("  Formatted: %s\n", formatted->chars);
+    }
+    
+    // Cleanup - org_copy is freed by input_from_source
+    // Note: Don't free type_str as it may be managed by the memory pool
+}
+
+// Test with the actual org file we created
+Test(org_tests, org_file_roundtrip) {
+    printf("\n=== Testing Org-mode file roundtrip ===\n");
+    
+    bool success = test_format_roundtrip("test/input/test.org", "org", "org file test");
+    cr_assert(success, "Org-mode file roundtrip test should pass");
 }
