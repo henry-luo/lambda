@@ -9,6 +9,7 @@ static void format_math_display(StrBuf* sb, Element* elem);
 static void format_item(StrBuf* sb, Item item);
 static void format_element(StrBuf* sb, Element* elem);
 static void format_element_children(StrBuf* sb, Element* elem);
+static void format_element_children_raw(StrBuf* sb, Element* elem);
 static void format_table_row(StrBuf* sb, Element* row, bool is_header);
 static void format_table_separator(StrBuf* sb, Element* header_row);
 
@@ -36,6 +37,20 @@ static String* get_attribute(Element* elem, const char* attr_name) {
         field = field->next;
     }
     return NULL;
+}
+
+// Format raw text (no escaping - for code blocks, etc.)
+static void format_raw_text(StrBuf* sb, String* str) {
+    if (!sb || !str || str->len == 0) return;
+    
+    // Check if this is the EMPTY_STRING and handle it specially
+    if (str == &EMPTY_STRING) {
+        return; // Don't output anything for empty string
+    } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+        return; // Don't output anything for lambda.nil content
+    } else {
+        strbuf_append_str_n(sb, str->chars, str->len);
+    }
 }
 
 // Format plain text (escape markdown special characters)
@@ -134,12 +149,12 @@ static void format_code(StrBuf* sb, Element* elem) {
         strbuf_append_str(sb, "```");
         strbuf_append_str(sb, lang_attr->chars);
         strbuf_append_char(sb, '\n');
-        format_element_children(sb, elem);
+        format_element_children_raw(sb, elem); // Use raw formatter for code content
         strbuf_append_str(sb, "\n```\n");
     } else {
         // Inline code
         strbuf_append_char(sb, '`');
-        format_element_children(sb, elem);
+        format_element_children_raw(sb, elem); // Use raw formatter for code content
         strbuf_append_char(sb, '`');
     }
 }
@@ -316,6 +331,16 @@ static void format_table_separator(StrBuf* sb, Element* header_row) {
     strbuf_append_char(sb, '\n');
 }
 
+// Format blockquote elements  
+static void format_blockquote(StrBuf* sb, Element* elem) {
+    if (!elem) return;
+    
+    // Format as blockquote with > prefix
+    strbuf_append_str(sb, "> ");
+    format_element_children(sb, elem);
+    strbuf_append_char(sb, '\n');
+}
+
 // Format paragraph elements
 static void format_paragraph(StrBuf* sb, Element* elem) {
     // Check if this paragraph contains only displaymath or inline math elements
@@ -459,6 +484,7 @@ static bool is_block_element(Item item) {
     return (strcmp(tag_name, "p") == 0 ||
             strcmp(tag_name, "ul") == 0 ||
             strcmp(tag_name, "ol") == 0 ||
+            strcmp(tag_name, "blockquote") == 0 ||
             strcmp(tag_name, "table") == 0 ||
             strcmp(tag_name, "hr") == 0 ||
             strcmp(tag_name, "displaymath") == 0);
@@ -491,6 +517,27 @@ static int get_heading_level(Item item) {
     return 0;
 }
 
+static void format_element_children_raw(StrBuf* sb, Element* elem) {
+    // Format children without escaping (for code blocks)
+    List* list = (List*)elem;
+    if (list->length == 0) return;
+    
+    for (long i = 0; i < list->length; i++) {
+        Item child_item = list->items[i];
+        TypeId type = get_type_id(child_item);
+        
+        if (type == LMD_TYPE_STRING) {
+            String* str = (String*)child_item.pointer;
+            if (str) {
+                format_raw_text(sb, str);
+            }
+        } else {
+            // For non-strings, use regular formatting
+            format_item(sb, child_item);
+        }
+    }
+}
+
 static void format_element_children(StrBuf* sb, Element* elem) {
     // Element extends List, so access content through List interface
     List* list = (List*)elem;
@@ -521,8 +568,20 @@ static void format_element_children(StrBuf* sb, Element* elem) {
                 strbuf_append_char(sb, '\n');
             }
             else if (current_is_block && next_heading_level > 0) {
-                // Block element followed by heading: add blank line
-                strbuf_append_char(sb, '\n');
+                // Block element followed by heading: paragraphs already add \n\n, so no extra needed
+                // For other blocks that don't add their own spacing, add blank line
+                TypeId current_type = get_type_id(child_item);
+                if (current_type == LMD_TYPE_ELEMENT) {
+                    Element* current_elem = (Element*)child_item.pointer;
+                    TypeElmt* current_elem_type = (TypeElmt*)current_elem->type;
+                    if (current_elem_type && current_elem_type->name.str) {
+                        const char* tag_name = current_elem_type->name.str;
+                        // Only add newline for blocks that don't add their own spacing
+                        if (strcmp(tag_name, "p") != 0 && strcmp(tag_name, "hr") != 0) {
+                            strbuf_append_char(sb, '\n');
+                        }
+                    }
+                }
             }
         }
     }
@@ -542,6 +601,8 @@ static void format_element(StrBuf* sb, Element* elem) {
         format_heading(sb, elem);
     } else if (strcmp(tag_name, "p") == 0) {
         format_paragraph(sb, elem);
+    } else if (strcmp(tag_name, "blockquote") == 0) {
+        format_blockquote(sb, elem);
     } else if (strcmp(tag_name, "strong") == 0 || strcmp(tag_name, "em") == 0) {
         format_emphasis(sb, elem);
     } else if (strcmp(tag_name, "code") == 0) {

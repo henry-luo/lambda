@@ -507,7 +507,7 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
             printf("Unknown input type: %s\n", effective_type);
         }
     }
-    // Note: Don't free(source) here - it's the caller's responsibility
+    // Note: don't free(source) here - it's the caller's responsibility
     return input;
 }
 
@@ -521,7 +521,9 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, lxb_
         lxb_url_destroy(abs_url);
         return NULL;
     }
-    return input_from_source(source, abs_url, type, flavor);
+    Input* input = input_from_source(source, abs_url, type, flavor);
+    free(source);  // Free the source string after parsing
+    return input;
 }
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {

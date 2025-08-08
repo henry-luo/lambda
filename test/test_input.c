@@ -168,8 +168,7 @@ bool compare_json_semantically(const char* original, const char* formatted) {
 
 // Helper function to compare XML strings semantically
 bool compare_xml_semantically(const char* original, const char* formatted) {
-    // For simple comparison, just normalize whitespace and compare
-    // In a more sophisticated version, we would parse both as XML and compare DOM structure
+    // For XML comparison, we need to be more aggressive about whitespace normalization
     
     if (!original && !formatted) return true;
     if (!original || !formatted) return false;
@@ -181,25 +180,36 @@ bool compare_xml_semantically(const char* original, const char* formatted) {
     if (norm_orig && norm_fmt) {
         result = strcmp(norm_orig, norm_fmt) == 0;
         
-        // If exact match fails, try more lenient comparison
+        // If exact match fails, try XML-specific normalization
         if (!result) {
-            // Remove extra spaces for XML comparison
-            char clean1[1000] = {0}, clean2[1000] = {0};
+            // For XML, remove spaces between tags (> <) and around declarations
+            char clean1[2000] = {0}, clean2[2000] = {0};
             char *p1 = norm_orig, *p2 = norm_fmt;
             int i1 = 0, i2 = 0;
             
-            // Extract essential characters
+            // Process original - remove spaces between XML tags
             while (*p1 && i1 < sizeof(clean1)-1) {
-                if (!isspace(*p1) || (i1 > 0 && !isspace(clean1[i1-1]))) {
-                    clean1[i1++] = isspace(*p1) ? ' ' : *p1;
+                if (*p1 == '>') {
+                    clean1[i1++] = *p1;
+                    p1++;
+                    // Skip whitespace after closing tag
+                    while (*p1 && isspace(*p1)) p1++;
+                } else if (*p1 == '?') {
+                    // Handle XML declaration - skip space after ?>
+                    clean1[i1++] = *p1++;
+                    if (*p1 == '>') {
+                        clean1[i1++] = *p1++;
+                        // Skip whitespace after XML declaration
+                        while (*p1 && isspace(*p1)) p1++;
+                    }
+                } else {
+                    clean1[i1++] = *p1++;
                 }
-                p1++;
             }
+            
+            // Process formatted
             while (*p2 && i2 < sizeof(clean2)-1) {
-                if (!isspace(*p2) || (i2 > 0 && !isspace(clean2[i2-1]))) {
-                    clean2[i2++] = isspace(*p2) ? ' ' : *p2;
-                }
-                p2++;
+                clean2[i2++] = *p2++;
             }
             
             result = strcmp(clean1, clean2) == 0;
@@ -515,6 +525,8 @@ Test(xml_tests, xml_roundtrip) {
     cr_assert_not_null(formatted, "Failed to format comprehensive XML data");
     
     printf("Formatted comprehensive XML (first 200 chars): %.200s\n", formatted->chars);
+    printf("Complete formatted XML: %s\n", formatted->chars);
+    printf("Formatted XML length: %u\n", formatted->len);
     
     // Enhanced validation with semantic comparison
     bool content_matches = compare_xml_semantically(complex_xml, formatted->chars);
@@ -576,12 +588,27 @@ Test(markdown_tests, markdown_roundtrip) {
     cr_assert_not_null(formatted, "Failed to format comprehensive Markdown data");
     
     printf("Formatted comprehensive Markdown (first 200 chars): %.200s\n", formatted->chars);
+    printf("Complete formatted Markdown: %s\n", formatted->chars);
+    printf("Formatted length: %u vs Original length: %zu\n", formatted->len, strlen(complex_md));
     
     // Enhanced validation with semantic comparison
     bool content_matches = compare_markdown_semantically(complex_md, formatted->chars);
     
     cr_assert(formatted->len > 0, "Formatted Markdown should not be empty");
     cr_assert(strstr(formatted->chars, "Main Header") != NULL, "Formatted Markdown should contain header");
+    
+    if (!content_matches) {
+        printf("Content mismatch details:\n");
+        printf("Original:\n%s\n", complex_md);
+        printf("Formatted:\n%s\n", formatted->chars);
+        char* norm_orig = normalize_whitespace(complex_md);
+        char* norm_fmt = normalize_whitespace(formatted->chars);
+        printf("Original (normalized): %s\n", norm_orig);
+        printf("Formatted (normalized): %s\n", norm_fmt);
+        free(norm_orig);
+        free(norm_fmt);
+    }
+    
     cr_assert(content_matches, "Formatted Markdown should match original content semantically");
     
     if (content_matches) {

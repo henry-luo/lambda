@@ -161,18 +161,9 @@ bool is_raw_text_environment(const char* env_name) {
     return false;
 }
 
-void skip_common_whitespace(const char **text) {
-    int whitespace_count = 0;
-    const int max_whitespace = 1000; // safety limit
-    
-    while (**text && (**text == ' ' || **text == '\n' || **text == '\r' || **text == '\t') && 
-           whitespace_count < max_whitespace) {
-        (*text)++;
-        whitespace_count++;
-    }
-    
-    if (whitespace_count >= max_whitespace) {
-        printf("WARNING: Hit whitespace limit, possible infinite loop in skip_common_whitespace\n");
+void skip_common_whitespace(const char **math) {
+    while (**math && (**math == ' ' || **math == '\t' || **math == '\n' || **math == '\r')) {
+        (*math)++;
     }
 }
 

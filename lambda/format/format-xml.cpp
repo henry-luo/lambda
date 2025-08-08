@@ -101,6 +101,58 @@ static void format_map_attributes(StrBuf* sb, TypeMap* map_type, void* map_data)
     }
 }
 
+static void format_attributes(StrBuf* sb, TypeMap* map_type, void* map_data) {
+    if (!map_type || !map_data || !map_type->shape) return;
+    printf("format_attributes: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
+    
+    ShapeEntry* field = map_type->shape;
+    for (int i = 0; i < map_type->length && field; i++) {
+        if (field->name && field->type) {
+            void* data = ((char*)map_data) + field->byte_offset;
+            TypeId field_type = field->type->type_id;
+            
+            // Debug: print field information
+            printf("Field %d: name length=%lld, name str='%.*s', type=%d\n", 
+                   i, (long long)field->name->length, (int)field->name->length, field->name->str, field_type);
+            
+            // Only output simple types as attributes, skip null values
+            if (is_simple_type(field_type) && field_type != LMD_TYPE_NULL) {
+                strbuf_append_char(sb, ' ');
+                strbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
+                
+                if (field_type == LMD_TYPE_STRING) {
+                    String* str = *(String**)data;
+                    if (str && str != &EMPTY_STRING) {
+                        // Also check for literal "lambda.nil" content
+                        if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
+                            // Output empty string for "lambda.nil"
+                        } else {
+                            format_xml_string(sb, str);
+                        }
+                    }
+                } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
+                    long int_val = *(long*)data;
+                    char num_buf[32];
+                    snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
+                    strbuf_append_str(sb, num_buf);
+                } else if (field_type == LMD_TYPE_FLOAT) {
+                    double float_val = *(double*)data;
+                    char num_buf[32];
+                    snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
+                    strbuf_append_str(sb, num_buf);
+                } else if (field_type == LMD_TYPE_BOOL) {
+                    bool bool_val = *(bool*)data;
+                    strbuf_append_str(sb, bool_val ? "true" : "false");
+                }
+                // else // leave out null or unsupported types
+                
+                strbuf_append_char(sb, '"');
+            }
+        }
+        field = field->next;
+    }
+}
+
 static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
     if (!map_type || !map_data || !map_type->shape) return;
     printf("format_map_elements: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
@@ -109,30 +161,31 @@ static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
     for (int i = 0; i < map_type->length && field; i++) {
         if (field->name && field->type) {
             void* data = ((char*)map_data) + field->byte_offset;
-            
             TypeId field_type = field->type->type_id;
             
             // Debug: print field information
             printf("Field %d: name length=%lld, name str='%.*s', type=%d\n", 
                    i, (long long)field->name->length, (int)field->name->length, field->name->str, field_type);
             
-            // For XML roundtrip, output ALL fields as child elements (not just complex types)
-            if (field_type == LMD_TYPE_NULL) {
-                // Create empty element for null
-                strbuf_append_char(sb, '<');
-                strbuf_append_format(sb, "%.*s", (int)field->name->length, field->name->str);
-                strbuf_append_str(sb, "/>");
-            } else {
-                // Create a proper null-terminated tag name
-                printf("format field: %d\n", field_type);
-                StrBuf* tag_buf = strbuf_new();
-                strbuf_append_format(tag_buf, "%.*s", (int)field->name->length, field->name->str);
-                char* tag_name = tag_buf->str;
-                
-                Item item_data = *(Item*)data;
-                format_item(sb, item_data, tag_name);
-                
-                strbuf_free(tag_buf);
+            // Only output complex types as child elements (not simple attributes)
+            if (!is_simple_type(field_type)) {
+                if (field_type == LMD_TYPE_NULL) {
+                    // Create empty element for null
+                    strbuf_append_char(sb, '<');
+                    strbuf_append_format(sb, "%.*s", (int)field->name->length, field->name->str);
+                    strbuf_append_str(sb, "/>");
+                } else {
+                    // Create a proper null-terminated tag name
+                    printf("format field: %d\n", field_type);
+                    StrBuf* tag_buf = strbuf_new();
+                    strbuf_append_format(tag_buf, "%.*s", (int)field->name->length, field->name->str);
+                    char* tag_name = tag_buf->str;
+                    
+                    Item item_data = *(Item*)data;
+                    format_item(sb, item_data, tag_name);
+                    
+                    strbuf_free(tag_buf);
+                }
             }
         }
         field = field->next;
@@ -278,14 +331,15 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         
         strbuf_append_char(sb, '<');
         strbuf_append_str(sb, element_name);
-        strbuf_append_char(sb, '>');
         
-        // Handle structured element data (attributes/fields as map)
+        // Handle attributes (simple types from element fields)
         if (elmt_type->length > 0 && element->data) {
-            printf("format_item: element has %ld fields, formatting as map\n", elmt_type->length);
+            printf("format_item: element has %ld fields, checking for attributes\n", elmt_type->length);
             TypeMap* map_type = (TypeMap*)elmt_type;
-            format_map_elements(sb, map_type, element->data);
+            format_attributes(sb, map_type, element->data);
         }
+        
+        strbuf_append_char(sb, '>');
         
         // Handle element content (text/child elements as list)
         if (elmt_type->content_length > 0) {
@@ -342,10 +396,71 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
     
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
     
-    // Don't add XML declaration for roundtrip tests - let the original content determine this
-    // strbuf_append_str(sb, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    // Check if we have an XML document structure with declaration
+    bool has_xml_declaration = false;
+    Item actual_root = root_item;
     
-    format_item(sb, root_item, "root");
+    if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
+        Element* root_element = (Element*)root_item.pointer;
+        if (root_element && root_element->type) {
+            TypeElmt* root_type = (TypeElmt*)root_element->type;
+            
+            // Check if this element has child elements
+            if (root_type->content_length > 0) {
+                List* root_as_list = (List*)root_element;
+                
+                // Check if first child is XML declaration
+                if (root_as_list->length > 0) {
+                    Item first_child = root_as_list->items[0];
+                    if (get_type_id(first_child) == LMD_TYPE_ELEMENT) {
+                        Element* first_elem = (Element*)first_child.pointer;
+                        if (first_elem && first_elem->type) {
+                            TypeElmt* first_type = (TypeElmt*)first_elem->type;
+                            if (first_type->name.length == 4 && 
+                                strncmp(first_type->name.str, "?xml", 4) == 0) {
+                                has_xml_declaration = true;
+                                
+                                // Format XML declaration first
+                                format_item(sb, first_child, NULL);
+                                
+                                // If there's a second child, use it as the real root
+                                if (root_as_list->length > 1) {
+                                    actual_root = root_as_list->items[1];
+                                    printf("format_xml: found XML declaration, using second child as root\n");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Format the actual root element
+    const char* tag_name = NULL;
+    if (get_type_id(actual_root) == LMD_TYPE_ELEMENT) {
+        Element* element = (Element*)actual_root.pointer;
+        if (element && element->type) {
+            TypeElmt* elmt_type = (TypeElmt*)element->type;
+            if (elmt_type->name.length > 0 && elmt_type->name.str) {
+                char* element_name = strndup(elmt_type->name.str, elmt_type->name.length);
+                tag_name = element_name;
+                printf("format_xml: using element name '%s'\n", tag_name);
+            }
+        }
+    }
+    
+    if (!tag_name) {
+        tag_name = "root";
+        printf("format_xml: using default name 'root'\n");
+    }
+    
+    format_item(sb, actual_root, tag_name);
+    
+    // Free the allocated element name if we created one
+    if (tag_name && strcmp(tag_name, "root") != 0) {
+        free((char*)tag_name);
+    }
     
     return strbuf_to_string(sb);
 }
