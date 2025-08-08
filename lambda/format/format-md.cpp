@@ -60,6 +60,11 @@ static void format_text(StrBuf* sb, String* str) {
     const char* s = str->chars;
     size_t len = str->len;
     
+    // Only debug when processing LaTeX-like content
+    if (strstr(s, "frac") || strstr(s, "[x") || strchr(s, '$')) {
+        printf("DEBUG format_text: Processing text='%s' (len=%zu)\n", s, len);
+    }
+    
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         switch (c) {
@@ -445,16 +450,30 @@ static void format_math_display(StrBuf* sb, Element* elem) {
     // The parsed math AST should be the first child of the displaymath element
     if (element_list->length > 0) {
         Item math_item = element_list->items[0];
+        TypeId math_type = get_type_id(math_item);
         
-        // Use heap-allocated memory pool for formatting
+        if (math_type == LMD_TYPE_STRING) {
+            // Raw string content - output as-is
+            String* math_string = (String*)math_item.pointer;
+            if (math_string && math_string->len > 0) {
+                strbuf_append_str(sb, "$$");
+                strbuf_append_str_n(sb, math_string->chars, math_string->len);
+                strbuf_append_str(sb, "$$");
+                return;
+            }
+        }
+        
+        // Fallback: Use heap-allocated memory pool for formatting parsed math AST
         VariableMemPool* pool = NULL;
         if (pool_variable_init(&pool, 8192, 50) == MEM_POOL_ERR_OK) {
             String* latex_output = format_math_latex(pool, math_item);
             
             if (latex_output && latex_output->len > 0) {
+                printf("DEBUG format_math_display: latex_output='%s'\n", latex_output->chars);
                 strbuf_append_str(sb, "$$");
                 strbuf_append_str(sb, latex_output->chars);
                 strbuf_append_str(sb, "$$");
+                printf("DEBUG format_math_display: sb content after append='%.*s'\n", (int)sb->length, sb->str);
             } else {
                 // Fallback if math formatting fails
                 strbuf_append_str(sb, "$$");
@@ -596,6 +615,8 @@ static void format_element(StrBuf* sb, Element* elem) {
     
     const char* tag_name = elem_type->name.str;
     
+    printf("DEBUG format_element: processing element '%s'\n", tag_name);
+    
     // Handle different element types
     if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
         format_heading(sb, elem);
@@ -619,9 +640,27 @@ static void format_element(StrBuf* sb, Element* elem) {
         strbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "math") == 0) {
         // Inline math element
+        printf("DEBUG format_element: found math element\n");
         format_math_inline(sb, elem);
     } else if (strcmp(tag_name, "displaymath") == 0) {
         // Display math element or math code block
+        printf("DEBUG format_element: found displaymath element\n");
+        
+        // Debug: Check the children of the displaymath element
+        List* list = (List*)elem;
+        printf("DEBUG format_element: displaymath has %ld children\n", list->length);
+        for (long i = 0; i < list->length; i++) {
+            Item child = list->items[i];
+            TypeId child_type = get_type_id(child);
+            printf("DEBUG format_element: displaymath child %ld has type %d\n", i, child_type);
+            if (child_type == LMD_TYPE_STRING) {
+                String* str = (String*)child.pointer;
+                if (str && str->len > 0) {
+                    printf("DEBUG format_element: displaymath child %ld string: '%.50s'\n", i, str->chars);
+                }
+            }
+        }
+        
         format_math_display(sb, elem);
         // Note: No newline appended after displaymath to avoid extra whitespace
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
@@ -633,6 +672,7 @@ static void format_element(StrBuf* sb, Element* elem) {
         return;
     } else {
         // for unknown elements, just format children
+        printf("DEBUG format_element: unknown element '%s', formatting children\n", tag_name);
         format_element_children(sb, elem);
     }
 }
@@ -640,6 +680,16 @@ static void format_element(StrBuf* sb, Element* elem) {
 // Format any item to markdown
 static void format_item(StrBuf* sb, Item item) {
     TypeId type = get_type_id(item);
+    
+    // Only debug when processing elements or strings that might contain math
+    if (type == LMD_TYPE_STRING) {
+        String* str = (String*)item.pointer;
+        if (str && (strstr(str->chars, "frac") || strstr(str->chars, "[x") || strchr(str->chars, '$'))) {
+            printf("DEBUG format_item: type=%d (STRING), text='%s'\n", type, str->chars);
+        }
+    } else if (type == LMD_TYPE_ELEMENT) {
+        printf("DEBUG format_item: type=%d (ELEMENT), pointer=%llu\n", type, item.pointer);
+    }
     
     switch (type) {
     case LMD_TYPE_NULL:

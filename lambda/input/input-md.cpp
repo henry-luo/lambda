@@ -34,10 +34,15 @@ static bool is_table_separator(const char* line);
 
 // Helper function to create string from buffer content
 static String* create_string_from_buffer(Input* input, const char* text, int start, int len) {
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    strbuf_append_str_n(sb, text + start, len);
-    return strbuf_to_string(sb);
+    // Allocate string from pool instead of using shared StrBuf
+    String* str = (String*)pool_calloc(input->pool, sizeof(String) + len);
+    if (!str) return &EMPTY_STRING;
+    
+    str->len = len;
+    str->ref_cnt = 0;
+    memcpy(str->chars, text + start, len);
+    
+    return str;
 }
 
 // Helper function to trim and create string from buffer
@@ -1568,9 +1573,10 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     
     // Parse the math content using our math parser
     parse_math(input, math_content->chars, "latex");
-    
+
     // Create wrapper element
     Element* math_elem = create_markdown_element(input, "displaymath");
+    
     if (math_elem && input->root.item != ITEM_NULL && input->root.item != ITEM_ERROR) {
         // Add the parsed math as child
         list_push((List*)math_elem, input->root);
@@ -2561,6 +2567,32 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     // Check for tables
     if (is_table_row(line) && *current_line + 1 < total_lines && is_table_separator(lines[*current_line + 1])) {
         return parse_table(input, lines, current_line, total_lines);
+    }
+    
+    // Check for display math blocks ($$...$$)
+    if (strncmp(line, "$$", 2) == 0) {
+        // Find the closing $$
+        const char* start = line + 2; // Skip opening $$
+        const char* end = strstr(start, "$$");
+        
+        if (end && end > start) {
+            // Extract math content
+            int content_len = end - start;
+            
+            // Create displaymath element with the raw math content
+            Element* math_elem = create_markdown_element(input, "displaymath");
+            if (math_elem) {
+                // Create a string with the math content and add it as a child
+                String* math_content = create_string_from_buffer(input, line, 2, content_len);
+                if (math_content) {
+                    list_push((List*)math_elem, {.item = s2it(math_content)});
+                    increment_element_content_length(math_elem);
+                    
+                    (*current_line)++;
+                    return {.item = (uint64_t)math_elem};
+                }
+            }
+        }
     }
     
     // Default to paragraph

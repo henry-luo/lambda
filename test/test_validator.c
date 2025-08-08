@@ -540,7 +540,7 @@ Test(validator_tests, html_comprehensive_validation) {
 
 Test(validator_tests, markdown_comprehensive_validation) {
     test_cli_validation_helper("test/lambda/validator/test_comprehensive.md",
-                              "test/lambda/validator/schema_comprehensive.ls", 
+                              "test/lambda/validator/schema_comprehensive_markdown.ls", 
                               "markdown", true);
 }
 
