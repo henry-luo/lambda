@@ -1574,8 +1574,11 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     // Parse the math content using our math parser
     parse_math(input, math_content->chars, "latex");
 
-    // Create wrapper element
-    Element* math_elem = create_markdown_element(input, "displaymath");
+    // Create wrapper element with type="block"
+    Element* math_elem = create_markdown_element(input, "math");
+    if (math_elem) {
+        add_attribute_to_element(input, math_elem, "type", "block");
+    }
     
     if (math_elem && input->root.item != ITEM_NULL && input->root.item != ITEM_ERROR) {
         // Add the parsed math as child
@@ -2157,9 +2160,10 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     // Add content to element
     if (content_str && content_str->len > 0) {
         if (is_math_block) {
-            // Change element type to displaymath for math blocks
-            Element* math_elem = create_markdown_element(input, "displaymath");
+            // Change element type to math with type="code" for math blocks
+            Element* math_elem = create_markdown_element(input, "math");
             if (math_elem) {
+                add_attribute_to_element(input, math_elem, "type", "code");
                 add_attribute_to_element(input, math_elem, "language", "math");
                 list_push((List*)math_elem, {.item = s2it(content_str)});
                 increment_element_content_length(math_elem);
@@ -2579,9 +2583,10 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
             // Extract math content
             int content_len = end - start;
             
-            // Create displaymath element with the raw math content
-            Element* math_elem = create_markdown_element(input, "displaymath");
+            // Create math element with type="block" for display math
+            Element* math_elem = create_markdown_element(input, "math");
             if (math_elem) {
+                add_attribute_to_element(input, math_elem, "type", "block");
                 // Create a string with the math content and add it as a child
                 String* math_content = create_string_from_buffer(input, line, 2, content_len);
                 if (math_content) {

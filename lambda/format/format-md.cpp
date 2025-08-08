@@ -5,6 +5,7 @@
 String* format_math_latex(VariableMemPool* pool, Item root_item);
 static void format_math_inline(StrBuf* sb, Element* elem);
 static void format_math_display(StrBuf* sb, Element* elem);
+static void format_math_code_block(StrBuf* sb, Element* elem);
 
 static void format_item(StrBuf* sb, Item item);
 static void format_element(StrBuf* sb, Element* elem);
@@ -348,10 +349,10 @@ static void format_blockquote(StrBuf* sb, Element* elem) {
 
 // Format paragraph elements
 static void format_paragraph(StrBuf* sb, Element* elem) {
-    // Check if this paragraph contains only displaymath or inline math elements
+    // Check if this paragraph contains only display math or inline math elements
     List* list = (List*)elem;
-    bool only_displaymath = true;
-    bool only_math_elements = true;  // includes both inline math and displaymath
+    bool only_display_math = true;
+    bool only_math_elements = true;  // includes both inline math and display math
     
     if (list->length > 0) {
         for (long i = 0; i < list->length; i++) {
@@ -363,14 +364,19 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
                 TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
                 if (child_elem_type && child_elem_type->name.str) {
                     const char* elem_name = child_elem_type->name.str;
-                    if (strcmp(elem_name, "displaymath") != 0) {
-                        only_displaymath = false;
-                    }
-                    if (strcmp(elem_name, "math") != 0 && strcmp(elem_name, "displaymath") != 0) {
+                    if (strcmp(elem_name, "math") == 0) {
+                        // Check if it's display math (type="block" or type="code")
+                        String* type_attr = get_attribute(child_elem, "type");
+                        if (!type_attr || (strcmp(type_attr->chars, "block") != 0 && strcmp(type_attr->chars, "code") != 0)) {
+                            only_display_math = false;
+                        }
+                        // All math elements are still math elements
+                    } else {
+                        only_display_math = false;
                         only_math_elements = false;
                     }
                 } else {
-                    only_displaymath = false;
+                    only_display_math = false;
                     only_math_elements = false;
                 }
             } else if (type == LMD_TYPE_STRING) {
@@ -379,15 +385,15 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
                 if (str && str->chars) {
                     for (int j = 0; j < str->len; j++) {
                         if (!isspace(str->chars[j])) {
-                            only_displaymath = false;
+                            only_display_math = false;
                             only_math_elements = false;
                             break;
                         }
                     }
                 }
-                if (!only_displaymath && !only_math_elements) break;
+                if (!only_display_math && !only_math_elements) break;
             } else {
-                only_displaymath = false;
+                only_display_math = false;
                 only_math_elements = false;
                 break;
             }
@@ -447,7 +453,7 @@ static void format_math_display(StrBuf* sb, Element* elem) {
     List* element_list = (List*)elem;
     
     // Get the math content from the first child
-    // The parsed math AST should be the first child of the displaymath element
+    // The parsed math AST should be the first child of the math element
     if (element_list->length > 0) {
         Item math_item = element_list->items[0];
         TypeId math_type = get_type_id(math_item);
@@ -469,11 +475,9 @@ static void format_math_display(StrBuf* sb, Element* elem) {
             String* latex_output = format_math_latex(pool, math_item);
             
             if (latex_output && latex_output->len > 0) {
-                printf("DEBUG format_math_display: latex_output='%s'\n", latex_output->chars);
                 strbuf_append_str(sb, "$$");
                 strbuf_append_str(sb, latex_output->chars);
                 strbuf_append_str(sb, "$$");
-                printf("DEBUG format_math_display: sb content after append='%.*s'\n", (int)sb->length, sb->str);
             } else {
                 // Fallback if math formatting fails
                 strbuf_append_str(sb, "$$");
@@ -485,6 +489,44 @@ static void format_math_display(StrBuf* sb, Element* elem) {
         }
     }
 }
+
+// Format math code block (```math)
+static void format_math_code_block(StrBuf* sb, Element* elem) {
+    if (!elem) return;
+    
+    List* element_list = (List*)elem;
+    String* lang_attr = get_attribute(elem, "language");
+    
+    // Use the language attribute, defaulting to "math"
+    const char* language = (lang_attr && lang_attr->len > 0) ? lang_attr->chars : "math";
+    
+    // Get the math content from the first child (should be raw string)
+    if (element_list->length > 0) {
+        Item math_item = element_list->items[0];
+        TypeId math_type = get_type_id(math_item);
+        
+        if (math_type == LMD_TYPE_STRING) {
+            // Raw string content - output as code block
+            String* math_string = (String*)math_item.pointer;
+            if (math_string && math_string->len > 0) {
+                strbuf_append_str(sb, "```");
+                strbuf_append_str(sb, language);
+                strbuf_append_char(sb, '\n');
+                strbuf_append_str_n(sb, math_string->chars, math_string->len);
+                strbuf_append_str(sb, "\n```");
+                return;
+            }
+        }
+    }
+    
+    // Fallback if no content found
+    strbuf_append_str(sb, "```");
+    strbuf_append_str(sb, language);
+    strbuf_append_str(sb, "\n");
+    strbuf_append_str(sb, "math");
+    strbuf_append_str(sb, "\n```");
+}
+
 // Helper function to check if an element is a block-level element
 static bool is_block_element(Item item) {
     TypeId type = get_type_id(item);
@@ -500,13 +542,22 @@ static bool is_block_element(Item item) {
     if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) return true;
     
     // Check for other block elements
-    return (strcmp(tag_name, "p") == 0 ||
-            strcmp(tag_name, "ul") == 0 ||
-            strcmp(tag_name, "ol") == 0 ||
-            strcmp(tag_name, "blockquote") == 0 ||
-            strcmp(tag_name, "table") == 0 ||
-            strcmp(tag_name, "hr") == 0 ||
-            strcmp(tag_name, "displaymath") == 0);
+    if (strcmp(tag_name, "p") == 0 ||
+        strcmp(tag_name, "ul") == 0 ||
+        strcmp(tag_name, "ol") == 0 ||
+        strcmp(tag_name, "blockquote") == 0 ||
+        strcmp(tag_name, "table") == 0 ||
+        strcmp(tag_name, "hr") == 0) {
+        return true;
+    }
+    
+    // Check for math elements with display types
+    if (strcmp(tag_name, "math") == 0) {
+        String* type_attr = get_attribute(elem, "type");
+        return (type_attr && (strcmp(type_attr->chars, "block") == 0 || strcmp(type_attr->chars, "code") == 0));
+    }
+    
+    return false;
 }
 
 // Helper function to get heading level from an element
@@ -639,30 +690,19 @@ static void format_element(StrBuf* sb, Element* elem) {
         format_table(sb, elem);
         strbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "math") == 0) {
-        // Inline math element
-        printf("DEBUG format_element: found math element\n");
-        format_math_inline(sb, elem);
-    } else if (strcmp(tag_name, "displaymath") == 0) {
-        // Display math element or math code block
-        printf("DEBUG format_element: found displaymath element\n");
+        // Math element - check type attribute to determine formatting
+        String* type_attr = get_attribute(elem, "type");
         
-        // Debug: Check the children of the displaymath element
-        List* list = (List*)elem;
-        printf("DEBUG format_element: displaymath has %ld children\n", list->length);
-        for (long i = 0; i < list->length; i++) {
-            Item child = list->items[i];
-            TypeId child_type = get_type_id(child);
-            printf("DEBUG format_element: displaymath child %ld has type %d\n", i, child_type);
-            if (child_type == LMD_TYPE_STRING) {
-                String* str = (String*)child.pointer;
-                if (str && str->len > 0) {
-                    printf("DEBUG format_element: displaymath child %ld string: '%.50s'\n", i, str->chars);
-                }
-            }
+        if (type_attr && strcmp(type_attr->chars, "block") == 0) {
+            // Display math ($$math$$)
+            format_math_display(sb, elem);
+        } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
+            // Math code block (```math)
+            format_math_code_block(sb, elem);
+        } else {
+            // Inline math ($math$) - default when no type or unknown type
+            format_math_inline(sb, elem);
         }
-        
-        format_math_display(sb, elem);
-        // Note: No newline appended after displaymath to avoid extra whitespace
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
                strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
         // Just format children for document root, body, and span containers
