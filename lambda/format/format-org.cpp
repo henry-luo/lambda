@@ -5,6 +5,7 @@
 static void format_inline_element(StrBuf* sb, Element* elem);
 static void format_scheduling(StrBuf* sb, Element* elem);
 static void format_timestamp(StrBuf* sb, Element* elem);
+static void format_footnote_definition(StrBuf* sb, Element* elem);
 
 // Simple helper to append a string to the buffer
 static void append_string(StrBuf* sb, const char* str) {
@@ -253,6 +254,155 @@ static void format_inline_element(StrBuf* sb, Element* elem) {
         }
         
         append_string(sb, "]]");
+    } else if (strcmp(type_name, "footnote_reference") == 0) {
+        // Format footnote reference: [fn:name]
+        append_string(sb, "[fn:");
+        
+        String* name = NULL;
+        List* list = (List*)elem;
+        for (long i = 0; i < list->length; i++) {
+            Item child_item = list->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                Element* child = (Element*)child_item.pointer;
+                const char* child_type = get_element_type_name(child);
+                
+                if (child_type && strcmp(child_type, "name") == 0) {
+                    name = get_first_string_content(child);
+                    break;
+                }
+            }
+        }
+        
+        if (name) {
+            append_string(sb, name->chars);
+        }
+        append_string(sb, "]");
+    } else if (strcmp(type_name, "inline_footnote") == 0) {
+        // Format inline footnote: [fn:name:definition] or [fn::definition]
+        append_string(sb, "[fn:");
+        
+        String* name = NULL;
+        Element* definition_elem = NULL;
+        
+        List* list = (List*)elem;
+        for (long i = 0; i < list->length; i++) {
+            Item child_item = list->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                Element* child = (Element*)child_item.pointer;
+                const char* child_type = get_element_type_name(child);
+                
+                if (child_type && strcmp(child_type, "name") == 0) {
+                    name = get_first_string_content(child);
+                } else if (child_type && strcmp(child_type, "definition") == 0) {
+                    definition_elem = child;
+                }
+            }
+        }
+        
+        if (name && strlen(name->chars) > 0) {
+            append_string(sb, name->chars);
+        }
+        append_string(sb, ":");
+        
+        if (definition_elem) {
+            // Format the definition content (may contain inline formatting)
+            List* def_list = (List*)definition_elem;
+            for (long i = 0; i < def_list->length; i++) {
+                Item def_item = def_list->items[i];
+                if (get_type_id(def_item) == LMD_TYPE_STRING) {
+                    String* str = (String*)def_item.pointer;
+                    if (str && str != &EMPTY_STRING) {
+                        append_string(sb, str->chars);
+                    }
+                } else if (get_type_id(def_item) == LMD_TYPE_ELEMENT) {
+                    Element* def_child = (Element*)def_item.pointer;
+                    format_inline_element(sb, def_child);
+                }
+            }
+        }
+        append_string(sb, "]");
+    } else if (strcmp(type_name, "inline_math") == 0) {
+        // Format inline math: $content$
+        String* raw_content = NULL;
+        
+        // Look for raw_content element
+        List* list = (List*)elem;
+        for (long i = 0; i < list->length; i++) {
+            Item child_item = list->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                Element* child = (Element*)child_item.pointer;
+                const char* child_type = get_element_type_name(child);
+                
+                if (child_type && strcmp(child_type, "raw_content") == 0) {
+                    raw_content = get_first_string_content(child);
+                    break;
+                }
+            }
+        }
+        
+        // Determine delimiter based on content (could be $ or \(...\))
+        bool use_latex_style = false;
+        if (raw_content && raw_content->chars) {
+            // Simple heuristic: if it contains backslash commands, use LaTeX style
+            if (strchr(raw_content->chars, '\\')) {
+                use_latex_style = true;
+            }
+        }
+        
+        if (use_latex_style) {
+            append_string(sb, "\\(");
+            if (raw_content) {
+                append_string(sb, raw_content->chars);
+            }
+            append_string(sb, "\\)");
+        } else {
+            append_string(sb, "$");
+            if (raw_content) {
+                append_string(sb, raw_content->chars);
+            }
+            append_string(sb, "$");
+        }
+    } else if (strcmp(type_name, "display_math") == 0) {
+        // Format display math: $$content$$ or \[...\]
+        String* raw_content = NULL;
+        
+        // Look for raw_content element
+        List* list = (List*)elem;
+        for (long i = 0; i < list->length; i++) {
+            Item child_item = list->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                Element* child = (Element*)child_item.pointer;
+                const char* child_type = get_element_type_name(child);
+                
+                if (child_type && strcmp(child_type, "raw_content") == 0) {
+                    raw_content = get_first_string_content(child);
+                    break;
+                }
+            }
+        }
+        
+        // Determine delimiter based on content
+        bool use_latex_style = false;
+        if (raw_content && raw_content->chars) {
+            // Use LaTeX style if it contains backslash commands or is complex
+            if (strchr(raw_content->chars, '\\') || strlen(raw_content->chars) > 20) {
+                use_latex_style = true;
+            }
+        }
+        
+        if (use_latex_style) {
+            append_string(sb, "\\[");
+            if (raw_content) {
+                append_string(sb, raw_content->chars);
+            }
+            append_string(sb, "\\]");
+        } else {
+            append_string(sb, "$$");
+            if (raw_content) {
+                append_string(sb, raw_content->chars);
+            }
+            append_string(sb, "$$");
+        }
     } else if (strcmp(type_name, "timestamp") == 0) {
         format_timestamp(sb, elem);
     } else if (strcmp(type_name, "text_content") == 0) {
@@ -548,6 +698,56 @@ static void format_timestamp(StrBuf* sb, Element* elem) {
     }
 }
 
+// Format a footnote definition element
+static void format_footnote_definition(StrBuf* sb, Element* elem) {
+    if (!elem) return;
+    
+    String* name = NULL;
+    Element* content_elem = NULL;
+    
+    // Extract footnote name and content
+    List* list = (List*)elem;
+    for (long i = 0; i < list->length; i++) {
+        Item child_item = list->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            Element* child = (Element*)child_item.pointer;
+            const char* child_type = get_element_type_name(child);
+            
+            if (child_type && strcmp(child_type, "name") == 0) {
+                name = get_first_string_content(child);
+            } else if (child_type && strcmp(child_type, "content") == 0) {
+                content_elem = child;
+            }
+        }
+    }
+    
+    // Format as [fn:name] content
+    append_string(sb, "[fn:");
+    if (name) {
+        append_string(sb, name->chars);
+    }
+    append_string(sb, "] ");
+    
+    // Format the content (may contain inline formatting)
+    if (content_elem) {
+        List* content_list = (List*)content_elem;
+        for (long i = 0; i < content_list->length; i++) {
+            Item content_item = content_list->items[i];
+            if (get_type_id(content_item) == LMD_TYPE_STRING) {
+                String* str = (String*)content_item.pointer;
+                if (str && str != &EMPTY_STRING) {
+                    append_string(sb, str->chars);
+                }
+            } else if (get_type_id(content_item) == LMD_TYPE_ELEMENT) {
+                Element* content_child = (Element*)content_item.pointer;
+                format_inline_element(sb, content_child);
+            }
+        }
+    }
+    
+    append_string(sb, "\n");
+}
+
 // Format a directive element
 static void format_directive(StrBuf* sb, Element* elem) {
     if (!elem) return;
@@ -668,6 +868,12 @@ static void format_org_element(StrBuf* sb, Element* elem) {
         format_scheduling(sb, elem);
     } else if (strcmp(type_name, "timestamp") == 0) {
         format_timestamp(sb, elem);
+    } else if (strcmp(type_name, "footnote_definition") == 0) {
+        format_footnote_definition(sb, elem);
+    } else if (strcmp(type_name, "display_math") == 0) {
+        // Handle display math as block-level element
+        format_inline_element(sb, elem);
+        append_string(sb, "\n");
     } else if (strcmp(type_name, "directive") == 0) {
         format_directive(sb, elem);
     } else if (strcmp(type_name, "table") == 0) {

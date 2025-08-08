@@ -1,3 +1,3 @@
-0.5 + 3 * 2
-(let a=0.5, let b=2, 
-a + 3 * b, a + 3 * 2, 0.5 + 3 * b, 0.5 + 3 * 2, a, b)
+let org_data = input('./temp/test.org', 'org')
+let org_formatted = format(org_data, 'log')
+org_formatted

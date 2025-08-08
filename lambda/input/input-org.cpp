@@ -650,6 +650,166 @@ static Element* create_directive(Input* input, const char* line) {
     return directive;
 }
 
+// Helper function to check if line is a footnote definition
+static bool is_footnote_definition(const char* line, char** footnote_name, char** footnote_content) {
+    if (!line) return false;
+    
+    // Skip leading whitespace
+    while (*line == ' ' || *line == '\t') line++;
+    
+    // Check for [fn:name] pattern at start of line
+    if (line[0] != '[' || line[1] != 'f' || line[2] != 'n' || line[3] != ':') {
+        return false;
+    }
+    
+    const char* name_start = line + 4;
+    const char* name_end = name_start;
+    
+    // Find end of footnote name (closing ])
+    while (*name_end && *name_end != ']') {
+        name_end++;
+    }
+    
+    if (*name_end != ']' || name_end == name_start) return false;
+    
+    // Extract footnote name
+    size_t name_len = name_end - name_start;
+    *footnote_name = (char*)malloc(name_len + 1);
+    if (!*footnote_name) return false;
+    
+    strncpy(*footnote_name, name_start, name_len);
+    (*footnote_name)[name_len] = '\0';
+    
+    // Skip ] and any whitespace to get to content
+    const char* content_start = name_end + 1;
+    while (*content_start == ' ' || *content_start == '\t') content_start++;
+    
+    // Extract footnote content (rest of the line)
+    if (*content_start) {
+        *footnote_content = strdup(content_start);
+    } else {
+        *footnote_content = strdup("");
+    }
+    
+    return true;
+}
+
+// Helper function to create a footnote definition element
+static Element* create_footnote_definition(Input* input, const char* name, const char* content) {
+    Element* footnote_def = create_org_element(input, "footnote_definition");
+    if (!footnote_def) return NULL;
+    
+    // Add footnote name
+    String* name_string = create_string(input, name);
+    if (name_string) {
+        Element* name_elem = create_org_element(input, "name");
+        if (name_elem) {
+            list_push((List*)name_elem, {.item = s2it(name_string)});
+            ((TypeElmt*)name_elem->type)->content_length++;
+            list_push((List*)footnote_def, {.item = (uint64_t)name_elem});
+            ((TypeElmt*)footnote_def->type)->content_length++;
+        }
+    }
+    
+    // Add footnote content (parse as inline text for formatting)
+    if (content && strlen(content) > 0) {
+        Element* content_elem = create_org_element(input, "content");
+        if (content_elem) {
+            Element* inline_content = parse_inline_text(input, content);
+            if (inline_content && ((List*)inline_content)->length > 0) {
+                // Use the inline content if it has elements
+                List* inline_list = (List*)inline_content;
+                for (long j = 0; j < inline_list->length; j++) {
+                    Item inline_item = inline_list->items[j];
+                    list_push((List*)content_elem, inline_item);
+                    ((TypeElmt*)content_elem->type)->content_length++;
+                }
+            } else {
+                // Fallback to simple string content
+                String* content_string = create_string(input, content);
+                if (content_string) {
+                    list_push((List*)content_elem, {.item = s2it(content_string)});
+                    ((TypeElmt*)content_elem->type)->content_length++;
+                }
+            }
+            
+            list_push((List*)footnote_def, {.item = (uint64_t)content_elem});
+            ((TypeElmt*)footnote_def->type)->content_length++;
+        }
+    }
+    
+    return footnote_def;
+}
+
+// Helper function to create a footnote reference element
+static Element* create_footnote_reference(Input* input, const char* name) {
+    Element* footnote_ref = create_org_element(input, "footnote_reference");
+    if (!footnote_ref) return NULL;
+    
+    // Add footnote name
+    String* name_string = create_string(input, name);
+    if (name_string) {
+        Element* name_elem = create_org_element(input, "name");
+        if (name_elem) {
+            list_push((List*)name_elem, {.item = s2it(name_string)});
+            ((TypeElmt*)name_elem->type)->content_length++;
+            list_push((List*)footnote_ref, {.item = (uint64_t)name_elem});
+            ((TypeElmt*)footnote_ref->type)->content_length++;
+        }
+    }
+    
+    return footnote_ref;
+}
+
+// Helper function to create an inline footnote element
+static Element* create_inline_footnote(Input* input, const char* name, const char* definition) {
+    Element* inline_footnote = create_org_element(input, "inline_footnote");
+    if (!inline_footnote) return NULL;
+    
+    // Add footnote name (optional, can be empty for anonymous footnotes)
+    if (name && strlen(name) > 0) {
+        String* name_string = create_string(input, name);
+        if (name_string) {
+            Element* name_elem = create_org_element(input, "name");
+            if (name_elem) {
+                list_push((List*)name_elem, {.item = s2it(name_string)});
+                ((TypeElmt*)name_elem->type)->content_length++;
+                list_push((List*)inline_footnote, {.item = (uint64_t)name_elem});
+                ((TypeElmt*)inline_footnote->type)->content_length++;
+            }
+        }
+    }
+    
+    // Add footnote definition
+    if (definition && strlen(definition) > 0) {
+        Element* def_elem = create_org_element(input, "definition");
+        if (def_elem) {
+            Element* inline_content = parse_inline_text(input, definition);
+            if (inline_content && ((List*)inline_content)->length > 0) {
+                // Use the inline content if it has elements
+                List* inline_list = (List*)inline_content;
+                for (long j = 0; j < inline_list->length; j++) {
+                    Item inline_item = inline_list->items[j];
+                    list_push((List*)def_elem, inline_item);
+                    ((TypeElmt*)def_elem->type)->content_length++;
+                }
+            } else {
+                // Fallback to simple string content
+                String* def_string = create_string(input, definition);
+                if (def_string) {
+                    list_push((List*)def_elem, {.item = s2it(def_string)});
+                    ((TypeElmt*)def_elem->type)->content_length++;
+                }
+            }
+            
+            list_push((List*)inline_footnote, {.item = (uint64_t)def_elem});
+            ((TypeElmt*)inline_footnote->type)->content_length++;
+        }
+    }
+    
+    return inline_footnote;
+}
+
 // Helper function to parse inline formatting in text
 static Element* parse_inline_text(Input* input, const char* text) {
     if (!text) return NULL;
@@ -734,6 +894,203 @@ static Element* parse_inline_text(Input* input, const char* text) {
             } else {
                 // No matching closing marker, treat as plain text
                 current = marker_start + 1;
+            }
+        } else if (*current == '$') {
+            // Handle math expressions $...$ or $$...$$
+            
+            // Add any plain text before the math
+            if (current > start) {
+                size_t plain_len = current - start;
+                char* plain_text = (char*)malloc(plain_len + 1);
+                if (plain_text) {
+                    strncpy(plain_text, start, plain_len);
+                    plain_text[plain_len] = '\0';
+                    
+                    Element* plain = create_org_element(input, "plain_text");
+                    if (plain) {
+                        String* plain_string = create_string(input, plain_text);
+                        if (plain_string) {
+                            list_push((List*)plain, {.item = s2it(plain_string)});
+                            ((TypeElmt*)plain->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)plain});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                    }
+                    free(plain_text);
+                }
+            }
+            
+            // Check for display math $$...$$
+            bool is_display_math = (*(current + 1) == '$');
+            const char* math_start = current;
+            const char* math_delimiter = is_display_math ? "$$" : "$";
+            int delimiter_len = is_display_math ? 2 : 1;
+            
+            current += delimiter_len; // skip opening delimiter(s)
+            const char* content_start = current;
+            
+            // Find closing delimiter
+            while (*current) {
+                if (*current == '$') {
+                    if (is_display_math && *(current + 1) == '$') {
+                        // Found closing $$
+                        break;
+                    } else if (!is_display_math) {
+                        // Found closing $
+                        break;
+                    }
+                }
+                current++;
+            }
+            
+            if (*current == '$' && (!is_display_math || *(current + 1) == '$')) {
+                // Found valid closing delimiter
+                size_t content_len = current - content_start;
+                char* math_content = (char*)malloc(content_len + 1);
+                if (math_content) {
+                    strncpy(math_content, content_start, content_len);
+                    math_content[content_len] = '\0';
+                    
+                    // Create math element using input-math.cpp
+                    Input* math_input = input_new((lxb_url_t*)input->url);
+                    if (math_input) {
+                        parse_math(math_input, math_content, "latex");
+                        
+                        if (math_input->root.item != ITEM_ERROR && math_input->root.item != ITEM_NULL) {
+                            // Create container for the parsed math
+                            Element* math_elem = create_org_element(input, is_display_math ? "display_math" : "inline_math");
+                            if (math_elem) {
+                                // Add the raw math content as an attribute
+                                String* raw_content = create_string(input, math_content);
+                                if (raw_content) {
+                                    Element* raw_elem = create_org_element(input, "raw_content");
+                                    if (raw_elem) {
+                                        list_push((List*)raw_elem, {.item = s2it(raw_content)});
+                                        ((TypeElmt*)raw_elem->type)->content_length++;
+                                        list_push((List*)math_elem, {.item = (uint64_t)raw_elem});
+                                        ((TypeElmt*)math_elem->type)->content_length++;
+                                    }
+                                }
+                                
+                                // Add the parsed math AST
+                                Element* ast_elem = create_org_element(input, "math_ast");
+                                if (ast_elem) {
+                                    list_push((List*)ast_elem, math_input->root);
+                                    ((TypeElmt*)ast_elem->type)->content_length++;
+                                    list_push((List*)math_elem, {.item = (uint64_t)ast_elem});
+                                    ((TypeElmt*)math_elem->type)->content_length++;
+                                }
+                                
+                                list_push((List*)text_container, {.item = (uint64_t)math_elem});
+                                ((TypeElmt*)text_container->type)->content_length++;
+                            }
+                        }
+                    }
+                    free(math_content);
+                }
+                
+                current += delimiter_len; // skip closing delimiter(s)
+                start = current;
+            } else {
+                // No valid closing delimiter, treat as plain text
+                current = math_start + 1;
+            }
+        } else if (*current == '\\' && (*(current + 1) == '(' || *(current + 1) == '[')) {
+            // Handle LaTeX-style math \(...\) or \[...\]
+            
+            // Add any plain text before the math
+            if (current > start) {
+                size_t plain_len = current - start;
+                char* plain_text = (char*)malloc(plain_len + 1);
+                if (plain_text) {
+                    strncpy(plain_text, start, plain_len);
+                    plain_text[plain_len] = '\0';
+                    
+                    Element* plain = create_org_element(input, "plain_text");
+                    if (plain) {
+                        String* plain_string = create_string(input, plain_text);
+                        if (plain_string) {
+                            list_push((List*)plain, {.item = s2it(plain_string)});
+                            ((TypeElmt*)plain->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)plain});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                    }
+                    free(plain_text);
+                }
+            }
+            
+            bool is_display_math = (*(current + 1) == '[');
+            const char* open_delimiter = is_display_math ? "\\[" : "\\(";
+            const char* close_delimiter = is_display_math ? "\\]" : "\\)";
+            const char* math_start = current;
+            
+            current += 2; // skip opening delimiter
+            const char* content_start = current;
+            
+            // Find closing delimiter
+            while (*current && *(current + 1)) {
+                if (*current == '\\' && 
+                    ((!is_display_math && *(current + 1) == ')') ||
+                     (is_display_math && *(current + 1) == ']'))) {
+                    break;
+                }
+                current++;
+            }
+            
+            if (*current == '\\' && 
+                ((!is_display_math && *(current + 1) == ')') ||
+                 (is_display_math && *(current + 1) == ']'))) {
+                // Found valid closing delimiter
+                size_t content_len = current - content_start;
+                char* math_content = (char*)malloc(content_len + 1);
+                if (math_content) {
+                    strncpy(math_content, content_start, content_len);
+                    math_content[content_len] = '\0';
+                    
+                    // Create math element using input-math.cpp
+                    Input* math_input = input_new((lxb_url_t*)input->url);
+                    if (math_input) {
+                        parse_math(math_input, math_content, "latex");
+                        
+                        if (math_input->root.item != ITEM_ERROR && math_input->root.item != ITEM_NULL) {
+                            // Create container for the parsed math
+                            Element* math_elem = create_org_element(input, is_display_math ? "display_math" : "inline_math");
+                            if (math_elem) {
+                                // Add the raw math content
+                                String* raw_content = create_string(input, math_content);
+                                if (raw_content) {
+                                    Element* raw_elem = create_org_element(input, "raw_content");
+                                    if (raw_elem) {
+                                        list_push((List*)raw_elem, {.item = s2it(raw_content)});
+                                        ((TypeElmt*)raw_elem->type)->content_length++;
+                                        list_push((List*)math_elem, {.item = (uint64_t)raw_elem});
+                                        ((TypeElmt*)math_elem->type)->content_length++;
+                                    }
+                                }
+                                
+                                // Add the parsed math AST
+                                Element* ast_elem = create_org_element(input, "math_ast");
+                                if (ast_elem) {
+                                    list_push((List*)ast_elem, math_input->root);
+                                    ((TypeElmt*)ast_elem->type)->content_length++;
+                                    list_push((List*)math_elem, {.item = (uint64_t)ast_elem});
+                                    ((TypeElmt*)math_elem->type)->content_length++;
+                                }
+                                
+                                list_push((List*)text_container, {.item = (uint64_t)math_elem});
+                                ((TypeElmt*)text_container->type)->content_length++;
+                            }
+                        }
+                    }
+                    free(math_content);
+                }
+                
+                current += 2; // skip closing delimiter
+                start = current;
+            } else {
+                // No valid closing delimiter, treat as plain text
+                current = math_start + 1;
             }
         } else if (*current == '[' && *(current + 1) == '[') {
             // Handle links [[URL][description]] or [[URL]]
@@ -900,6 +1257,122 @@ static Element* parse_inline_text(Input* input, const char* text) {
             } else {
                 // No closing bracket, treat as plain text
                 current = ts_start + 1;
+            }
+        } else if (*current == '[' && *(current + 1) == 'f' && 
+                  *(current + 2) == 'n' && *(current + 3) == ':') {
+            // Handle footnotes [fn:name], [fn:name:definition], or [fn::definition]
+            
+            // Add any plain text before the footnote
+            if (current > start) {
+                size_t plain_len = current - start;
+                char* plain_text = (char*)malloc(plain_len + 1);
+                if (plain_text) {
+                    strncpy(plain_text, start, plain_len);
+                    plain_text[plain_len] = '\0';
+                    
+                    Element* plain = create_org_element(input, "plain_text");
+                    if (plain) {
+                        String* plain_string = create_string(input, plain_text);
+                        if (plain_string) {
+                            list_push((List*)plain, {.item = s2it(plain_string)});
+                            ((TypeElmt*)plain->type)->content_length++;
+                            list_push((List*)text_container, {.item = (uint64_t)plain});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                    }
+                    free(plain_text);
+                }
+            }
+            
+            // Parse footnote
+            const char* footnote_start = current;
+            current += 4; // skip [fn:
+            const char* name_start = current;
+            
+            // Find first : or ] to determine footnote type
+            while (*current && *current != ':' && *current != ']') {
+                current++;
+            }
+            
+            if (*current == ':') {
+                // This is either [fn:name:definition] or [fn::definition]
+                size_t name_len = current - name_start;
+                char* name = NULL;
+                if (name_len > 0) {
+                    name = (char*)malloc(name_len + 1);
+                    if (name) {
+                        strncpy(name, name_start, name_len);
+                        name[name_len] = '\0';
+                    }
+                }
+                
+                current++; // skip :
+                const char* def_start = current;
+                
+                // Find closing ]
+                while (*current && *current != ']') {
+                    current++;
+                }
+                
+                if (*current == ']') {
+                    size_t def_len = current - def_start;
+                    char* definition = NULL;
+                    if (def_len > 0) {
+                        definition = (char*)malloc(def_len + 1);
+                        if (definition) {
+                            strncpy(definition, def_start, def_len);
+                            definition[def_len] = '\0';
+                        }
+                    }
+                    
+                    current++; // skip ]
+                    
+                    // Create inline footnote
+                    Element* inline_footnote = create_inline_footnote(input, 
+                        name ? name : "", definition ? definition : "");
+                    if (inline_footnote) {
+                        list_push((List*)text_container, {.item = (uint64_t)inline_footnote});
+                        ((TypeElmt*)text_container->type)->content_length++;
+                    }
+                    
+                    free(name);
+                    free(definition);
+                    start = current;
+                } else {
+                    // No closing ], treat as plain text
+                    current = footnote_start + 1;
+                    free(name);
+                }
+            } else if (*current == ']') {
+                // This is [fn:name] - a footnote reference
+                size_t name_len = current - name_start;
+                if (name_len > 0) {
+                    char* name = (char*)malloc(name_len + 1);
+                    if (name) {
+                        strncpy(name, name_start, name_len);
+                        name[name_len] = '\0';
+                        
+                        current++; // skip ]
+                        
+                        // Create footnote reference
+                        Element* footnote_ref = create_footnote_reference(input, name);
+                        if (footnote_ref) {
+                            list_push((List*)text_container, {.item = (uint64_t)footnote_ref});
+                            ((TypeElmt*)text_container->type)->content_length++;
+                        }
+                        
+                        free(name);
+                        start = current;
+                    } else {
+                        current = footnote_start + 1;
+                    }
+                } else {
+                    // Empty name, treat as plain text
+                    current = footnote_start + 1;
+                }
+            } else {
+                // Invalid footnote format, treat as plain text
+                current = footnote_start + 1;
             }
         } else {
             current++;
@@ -1497,6 +1970,9 @@ void parse_org(Input* input, const char* org_string) {
                 // Check for other types of lines
                 char* sched_keyword = NULL;
                 char* sched_timestamp = NULL;
+                char* footnote_name = NULL;
+                char* footnote_content = NULL;
+                
                 if (is_scheduling_line(line, &sched_keyword, &sched_timestamp)) {
                     // Handle standalone scheduling lines
                     Element* scheduling = create_scheduling(input, sched_keyword, sched_timestamp);
@@ -1506,6 +1982,15 @@ void parse_org(Input* input, const char* org_string) {
                     }
                     free(sched_keyword);
                     free(sched_timestamp);
+                } else if (is_footnote_definition(line, &footnote_name, &footnote_content)) {
+                    // Handle footnote definitions
+                    Element* footnote_def = create_footnote_definition(input, footnote_name, footnote_content);
+                    if (footnote_def) {
+                        list_push((List*)doc, {.item = (uint64_t)footnote_def});
+                        ((TypeElmt*)doc->type)->content_length++;
+                    }
+                    free(footnote_name);
+                    free(footnote_content);
                 } else if (is_list_item(line)) {
                 // Create list item element
                 Element* list_item = create_org_element(input, "list_item");

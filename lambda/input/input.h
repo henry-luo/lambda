@@ -20,6 +20,9 @@ Element* input_create_element(Input *input, const char* tag_name);
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value);
 
+// Math parsing functions (from input-math.cpp)
+void parse_math(Input* input, const char* math_string, const char* flavor_str);
+
 // YAML parsing utility functions (from input-yaml.c)
 void trim_string_inplace(char* str);
 Item parse_scalar_value(Input *input, const char* str);
