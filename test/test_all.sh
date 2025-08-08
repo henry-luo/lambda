@@ -9,6 +9,7 @@ set -e  # Exit on any error
 TARGET_TEST=""
 SHOW_HELP=false
 RAW_OUTPUT=false
+KEEP_EXE=false
 
 # Parse arguments
 for arg in "$@"; do
@@ -19,6 +20,10 @@ for arg in "$@"; do
             ;;
         --raw)
             RAW_OUTPUT=true
+            shift
+            ;;
+        --keep-exe)
+            KEEP_EXE=true
             shift
             ;;
         --help|-h)
@@ -41,6 +46,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Options:"
     echo "  --target=TEST     Run a specific test suite"
     echo "  --raw             Run test executable directly without shell wrapper"
+    echo "  --keep-exe        Keep test executables after running (don't delete)"
     echo "  --help, -h        Show this help message"
     echo ""
     echo "Available test targets:"
@@ -439,7 +445,7 @@ run_validator_suite_impl() {
     VALIDATOR_PASSED_TESTS=$((total_tests - failed_tests))
     
     # Cleanup
-    if [ -f "$binary" ]; then
+    if [ -f "$binary" ] && [ "$KEEP_EXE" = false ]; then
         rm "$binary"
     fi
     
@@ -674,7 +680,7 @@ run_parallel_suite_impl() {
                 echo "TEST_OUTPUT_END" >> "$result_file"
                 
                 # Cleanup
-                if [ -f "$test_binary" ]; then
+                if [ -f "$test_binary" ] && [ "$KEEP_EXE" = false ]; then
                     rm "$test_binary"
                 fi
                 
@@ -1424,7 +1430,7 @@ run_individual_test() {
     fi
     
     # Clean up binary
-    if [ -f "$binary_path" ]; then
+    if [ -f "$binary_path" ] && [ "$KEEP_EXE" = false ]; then
         rm "$binary_path"
     fi
     
@@ -1508,9 +1514,10 @@ run_target_test() {
             ;;
         "input")
             if [ "$RAW_OUTPUT" = true ]; then
-                print_error "--raw option is not supported with suite targets"
-                print_status "Use --raw with individual tests like: --target=math --raw"
-                return 1
+                # For input suite, we'll run the input roundtrip test with raw output
+                # since mime_detect and math already have their own individual targets
+                run_individual_test "input" "input"
+                return $?
             fi
             print_status "🚀 Running Input Processing Tests Suite"
             run_input_tests
