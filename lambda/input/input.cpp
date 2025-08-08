@@ -40,6 +40,24 @@ String* strbuf_to_string(StrBuf *sb) {
     return &EMPTY_STRING;
 }
 
+// Helper function to create string from char content
+String* create_input_string(Input* input, const char* text, int start, int len) {
+    // Allocate string from pool instead of using shared StrBuf
+    String* str = (String*)pool_calloc(input->pool, sizeof(String) + len);
+    if (!str) return &EMPTY_STRING;
+    str->len = len;
+    str->ref_cnt = 0;
+    memcpy(str->chars, text + start, len);
+    return str;
+}
+
+String* input_create_string(Input *input, const char* text) {
+    if (!text) return NULL;
+    strbuf_reset(input->sb);
+    strbuf_append_str(input->sb, text);
+    return strbuf_to_string(input->sb);
+}
+
 ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
     StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
@@ -307,13 +325,6 @@ char* input_trim_whitespace(const char* str) {
     result[len] = '\0';
     
     return result;
-}
-
-String* input_create_string(Input *input, const char* text) {
-    if (!text) return NULL;
-    strbuf_reset(input->sb);
-    strbuf_append_str(input->sb, text);
-    return strbuf_to_string(input->sb);
 }
 
 char** input_split_lines(const char* text, int* line_count) {

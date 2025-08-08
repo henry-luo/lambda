@@ -4,6 +4,9 @@
 // Input creation and management
 Input* input_new(lxb_url_t* abs_url);
 
+String* create_input_string(Input* input, const char* text, int start, int len);
+String* input_create_string(Input *input, const char* text);
+
 // Common input utility functions
 void map_put(Map* mp, String* key, Item value, Input *input);
 void input_skip_whitespace(const char **text);
@@ -11,7 +14,6 @@ bool input_is_whitespace_char(char c);
 bool input_is_empty_line(const char* line);
 int input_count_leading_chars(const char* str, char ch);
 char* input_trim_whitespace(const char* str);
-String* input_create_string(Input *input, const char* text);
 char** input_split_lines(const char* text, int* line_count);
 void input_free_lines(char** lines, int line_count);
 Element* input_create_element(Input *input, const char* tag_name);

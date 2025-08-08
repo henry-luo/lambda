@@ -32,19 +32,6 @@ static bool is_table_separator(const char* line);
 #define add_attribute_to_element input_add_attribute_to_element
 #define add_attribute_item_to_element input_add_attribute_item_to_element
 
-// Helper function to create string from buffer content
-static String* create_string_from_buffer(Input* input, const char* text, int start, int len) {
-    // Allocate string from pool instead of using shared StrBuf
-    String* str = (String*)pool_calloc(input->pool, sizeof(String) + len);
-    if (!str) return &EMPTY_STRING;
-    
-    str->len = len;
-    str->ref_cnt = 0;
-    memcpy(str->chars, text + start, len);
-    
-    return str;
-}
-
 // Helper function to trim and create string from buffer
 static String* create_trimmed_string(Input* input, const char* text) {
     StrBuf* sb = input->sb;
@@ -458,7 +445,7 @@ static void parse_yaml_line(Input *input, const char* line, Element* meta) {
     
     // Extract key using buffer
     int key_len = colon - line_trimmed->chars;
-    String* key = create_string_from_buffer(input, line_trimmed->chars, 0, key_len);
+    String* key = create_input_string(input, line_trimmed->chars, 0, key_len);
     key = create_trimmed_string(input, key->chars);
     
     // Extract value using buffer
@@ -470,7 +457,7 @@ static void parse_yaml_line(Input *input, const char* line, Element* meta) {
         if (value->len >= 2 && 
             ((value->chars[0] == '"' && value->chars[value->len-1] == '"') ||
              (value->chars[0] == '\'' && value->chars[value->len-1] == '\''))) {
-            String* unquoted = create_string_from_buffer(input, value->chars, 1, value->len - 2);
+            String* unquoted = create_input_string(input, value->chars, 1, value->len - 2);
             value = unquoted;
         }
         
@@ -1258,7 +1245,7 @@ static const EmojiMapping emoji_mappings[] = {
 };
 
 static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
-    if (text[*pos] != ':') return {.item = ITEM_NULL};
+    if (text[*pos] != ':') return ItemNull;
     
     int start_pos = *pos;
     (*pos)++; // Skip opening :
@@ -1269,21 +1256,21 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
         // Only allow letters, numbers, underscores, and hyphens in shortcodes
         if (!isalnum(text[*pos]) && text[*pos] != '_' && text[*pos] != '-') {
             *pos = start_pos;
-            return {.item = ITEM_NULL};
+            return ItemNull;
         }
         (*pos)++;
     }
     
     if (text[*pos] != ':') {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Extract shortcode using buffer
     int shortcode_len = *pos - shortcode_start;
     if (shortcode_len == 0) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     StrBuf* sb = input->sb;
@@ -1307,14 +1294,14 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
     if (emoji_unicode == NULL) {
         // If not found, reset position and return null
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Create an emoji element for the unicode emoji
     Element* emoji_elem = create_markdown_element(input, "emoji");
     if (!emoji_elem) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Add the unicode emoji as text content using buffer
@@ -1330,7 +1317,7 @@ static Item parse_emoji_shortcode(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_strikethrough(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '~' || text[*pos + 1] != '~') return {.item = ITEM_NULL};
+    if (text[*pos] != '~' || text[*pos + 1] != '~') return ItemNull;
     
     int start_pos = *pos;
     *pos += 2; // Skip ~~
@@ -1350,14 +1337,14 @@ static Item parse_strikethrough(Input *input, const char* text, int* pos) {
     
     if (content_end == -1) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     Element* strike_elem = create_markdown_element(input, "s");
-    if (!strike_elem) return {.item = ITEM_NULL};
+    if (!strike_elem) return ItemNull;
     
     // Extract content using buffer
-    String* content = create_string_from_buffer(input, text, content_start, content_end - content_start);
+    String* content = create_input_string(input, text, content_start, content_end - content_start);
     
     if (content && content->len > 0) {
         Item text_content = parse_inline_content(input, content->chars);
@@ -1371,7 +1358,7 @@ static Item parse_strikethrough(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_superscript(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '^') return {.item = ITEM_NULL};
+    if (text[*pos] != '^') return ItemNull;
     
     int start_pos = *pos;
     (*pos)++; // Skip ^
@@ -1396,14 +1383,14 @@ static Item parse_superscript(Input *input, const char* text, int* pos) {
     
     if (content_end == content_start) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     Element* sup_elem = create_markdown_element(input, "sup");
-    if (!sup_elem) return {.item = ITEM_NULL};
+    if (!sup_elem) return ItemNull;
     
     // Extract content using the buffer
-    String* content = create_string_from_buffer(input, text, content_start, content_end - content_start);
+    String* content = create_input_string(input, text, content_start, content_end - content_start);
     
     if (content) {
         list_push((List*)sup_elem, {.item = s2it(content)});
@@ -1414,7 +1401,7 @@ static Item parse_superscript(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_subscript(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '~' || text[*pos + 1] == '~') return {.item = ITEM_NULL}; // Not ~ or ~~
+    if (text[*pos] != '~' || text[*pos + 1] == '~') return ItemNull; // Not ~ or ~~
     
     int start_pos = *pos;
     (*pos)++; // Skip ~
@@ -1439,14 +1426,14 @@ static Item parse_subscript(Input *input, const char* text, int* pos) {
     
     if (content_end == content_start) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     Element* sub_elem = create_markdown_element(input, "sub");
-    if (!sub_elem) return {.item = ITEM_NULL};
+    if (!sub_elem) return ItemNull;
     
     // Extract content using the buffer
-    String* content = create_string_from_buffer(input, text, content_start, content_end - content_start);
+    String* content = create_input_string(input, text, content_start, content_end - content_start);
     
     if (content) {
         list_push((List*)sub_elem, {.item = s2it(content)});
@@ -1461,7 +1448,7 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     int start = *pos;
     
     if (start >= len || text[start] != '$') {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Skip opening $
@@ -1479,16 +1466,16 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     }
     
     if (math_end >= len || text[math_end] != '$') {
-        return {.item = ITEM_NULL}; // No closing $
+        return ItemNull; // No closing $
     }
     
     // Extract math content
     int content_len = math_end - math_start;
     if (content_len <= 0) {
-        return {.item = ITEM_NULL}; // Empty math expression
+        return ItemNull; // Empty math expression
     }
     
-    String* math_content = create_string_from_buffer(input, text, math_start, content_len);
+    String* math_content = create_input_string(input, text, math_start, content_len);
     
     // Parse the math content using the same input context (reuse memory pool)
     // Save current input state
@@ -1496,7 +1483,7 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     StrBuf* saved_sb = input->sb;
     
     // Temporarily reset for math parsing
-    input->root = {.item = ITEM_NULL};
+    input->root = ItemNull;
     
     // Parse the math content using our math parser
     parse_math(input, math_content->chars, "latex");
@@ -1522,7 +1509,7 @@ static Item parse_math_inline(Input *input, const char* text, int* pos) {
     // Restore input state
     input->root = saved_root;
     input->sb = saved_sb;
-    return {.item = ITEM_NULL};
+    return ItemNull;
 }
 
 // Parse display math expression: $$math$$
@@ -1531,7 +1518,7 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     int start = *pos;
     
     if (start + 1 >= len || text[start] != '$' || text[start + 1] != '$') {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Skip opening $$
@@ -1552,16 +1539,16 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     }
     
     if (math_end + 1 >= len || text[math_end] != '$' || text[math_end + 1] != '$') {
-        return {.item = ITEM_NULL}; // No closing $$
+        return ItemNull; // No closing $$
     }
     
     // Extract math content
     int content_len = math_end - math_start;
     if (content_len <= 0) {
-        return {.item = ITEM_NULL}; // Empty math expression
+        return ItemNull; // Empty math expression
     }
     
-    String* math_content = create_string_from_buffer(input, text, math_start, content_len);
+    String* math_content = create_input_string(input, text, math_start, content_len);
     
     // Parse the math content using the same input context (reuse memory pool)
     // Save current input state
@@ -1569,7 +1556,7 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     StrBuf* saved_sb = input->sb;
     
     // Temporarily reset for math parsing
-    input->root = {.item = ITEM_NULL};
+    input->root = ItemNull;
     
     // Parse the math content using our math parser
     parse_math(input, math_content->chars, "latex");
@@ -1599,13 +1586,13 @@ static Item parse_math_display(Input *input, const char* text, int* pos) {
     // Restore input state
     input->root = saved_root;
     input->sb = saved_sb;
-    return {.item = ITEM_NULL};
+    return ItemNull;
 }
 
 // Rewritten string-based parsing functions using proper strbuf patterns
 
 static Item parse_emphasis(Input *input, const char* text, int* pos, char marker) {
-    if (text[*pos] != marker) return {.item = ITEM_NULL};
+    if (text[*pos] != marker) return ItemNull;
     
     int start_pos = *pos;
     int marker_count = 0;
@@ -1619,7 +1606,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
     // Need at least 1 marker, max 2 for emphasis
     if (marker_count == 0 || marker_count > 2) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     int content_start = *pos;
@@ -1648,16 +1635,16 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
     if (content_end == -1) {
         // No closing marker found, revert
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Create element
     const char* tag_name = (marker_count >= 2) ? "strong" : "em";
     Element* emphasis_elem = create_markdown_element(input, tag_name);
-    if (!emphasis_elem) return {.item = ITEM_NULL};
+    if (!emphasis_elem) return ItemNull;
     
     // Extract content between markers using buffer
-    String* content = create_string_from_buffer(input, text, content_start, content_end - content_start);
+    String* content = create_input_string(input, text, content_start, content_end - content_start);
     
     if (content && content->len > 0) {
         Item text_content = parse_inline_content(input, content->chars);
@@ -1671,7 +1658,7 @@ static Item parse_emphasis(Input *input, const char* text, int* pos, char marker
 }
 
 static Item parse_code_span(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '`') return {.item = ITEM_NULL};
+    if (text[*pos] != '`') return ItemNull;
     
     int start_pos = *pos;
     int backtick_count = 0;
@@ -1708,11 +1695,11 @@ static Item parse_code_span(Input *input, const char* text, int* pos) {
     if (content_end == -1) {
         // No closing backticks found, revert
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     Element* code_elem = create_markdown_element(input, "code");
-    if (!code_elem) return {.item = ITEM_NULL};
+    if (!code_elem) return ItemNull;
     
     // Extract content between backticks using buffer
     StrBuf* sb = input->sb;
@@ -1737,7 +1724,7 @@ static Item parse_code_span(Input *input, const char* text, int* pos) {
 }
 
 static Item parse_link(Input *input, const char* text, int* pos) {
-    if (text[*pos] != '[') return {.item = ITEM_NULL};
+    if (text[*pos] != '[') return ItemNull;
     
     int start_pos = *pos;
     (*pos)++; // Skip opening [
@@ -1752,7 +1739,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     if (text[*pos] != ']') {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     link_text_end = *pos;
@@ -1761,7 +1748,7 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     // Check for ( to start URL
     if (text[*pos] != '(') {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     (*pos)++; // Skip (
@@ -1825,25 +1812,25 @@ static Item parse_link(Input *input, const char* text, int* pos) {
     
     if (url_end == -1) {
         *pos = start_pos;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Create link element
     Element* link_elem = create_markdown_element(input, "a");
-    if (!link_elem) return {.item = ITEM_NULL};
+    if (!link_elem) return ItemNull;
     
     // Extract and add href attribute using buffer
-    String* url = create_string_from_buffer(input, text, url_start, url_end - url_start);
+    String* url = create_input_string(input, text, url_start, url_end - url_start);
     add_attribute_to_element(input, link_elem, "href", url->chars);
     
     // Add title attribute if present
     if (found_title && title_start != -1 && title_end != -1) {
-        String* title = create_string_from_buffer(input, text, title_start, title_end - title_start);
+        String* title = create_input_string(input, text, title_start, title_end - title_start);
         add_attribute_to_element(input, link_elem, "title", title->chars);
     }
     
     // Extract and parse link text using buffer
-    String* link_text = create_string_from_buffer(input, text, link_text_start, link_text_end - link_text_start);
+    String* link_text = create_input_string(input, text, link_text_start, link_text_end - link_text_start);
     
     if (link_text && link_text->len > 0) {
         Item text_content = parse_inline_content(input, link_text->chars);
@@ -1858,19 +1845,13 @@ static Item parse_link(Input *input, const char* text, int* pos) {
 
 // Simple inline content parser that demonstrates clean buffer usage
 static Item parse_inline_content(Input *input, const char* text) {
-    if (!text || strlen(text) == 0) { 
-        return {.item = ITEM_NULL}; 
-    }
-    
+    if (!text || strlen(text) == 0) { return ItemNull; }
+
     int len = strlen(text);
     int pos = 0;
     
     // Create a span to hold mixed content
     Element* span = create_markdown_element(input, "span");
-    if (!span) {
-        return {.item = ITEM_NULL};
-    }
-    
     StrBuf* sb = input->sb;
     strbuf_reset(sb);
     
@@ -2033,7 +2014,7 @@ static Item parse_inline_content(Input *input, const char* text) {
     
     // If span has no content, return null
     if (((List*)span)->length == 0) {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // If span has only one text item, return it directly
@@ -2047,7 +2028,7 @@ static Item parse_inline_content(Input *input, const char* text) {
 // Additional missing parse functions - rewritten with proper buffer usage
 
 static Item parse_header(Input *input, const char* line) {
-    if (!is_atx_heading(line)) return {.item = ITEM_NULL};
+    if (!is_atx_heading(line)) return ItemNull;
     
     int hash_count = count_leading_chars(line, '#');
     
@@ -2061,7 +2042,7 @@ static Item parse_header(Input *input, const char* line) {
     char tag_name[10];
     snprintf(tag_name, sizeof(tag_name), "h%d", hash_count);
     Element* header = create_markdown_element(input, tag_name);
-    if (!header) return {.item = ITEM_NULL};
+    if (!header) return ItemNull;
     
     // Add level attribute as required by PandocSchema
     char level_str[10];
@@ -2093,7 +2074,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     int fence_length;
     
     if (!is_fenced_code_block_start(lines[*current_line], &fence_char, &fence_length)) {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Extract info string (language) using buffer
@@ -2104,11 +2085,7 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
     String* info_string = create_trimmed_string(input, info_start);
     
     // Create code element directly (no pre wrapper)
-    Element* code_block = create_markdown_element(input, "code");
-    if (!code_block) {
-        return {.item = ITEM_NULL};
-    }
-    
+    Element* code_block = create_markdown_element(input, "code");    
     // Add language attribute if present
     if (info_string && info_string->len > 0) {
         add_attribute_to_element(input, code_block, "language", info_string->chars);
@@ -2180,11 +2157,11 @@ static Item parse_code_block(Input *input, char** lines, int* current_line, int 
 
 static Item parse_blockquote(Input *input, char** lines, int* current_line, int total_lines) {
     if (!is_blockquote(lines[*current_line])) {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     Element* blockquote = create_markdown_element(input, "blockquote");
-    if (!blockquote) return {.item = ITEM_NULL};
+    if (!blockquote) return ItemNull;
     
     StrBuf* sb = input->sb;
     strbuf_reset(sb);
@@ -2262,7 +2239,7 @@ static Item parse_paragraph(Input *input, char** lines, int* current_line, int t
     }
     
     if (sb->length <= sizeof(uint32_t)) { // No content
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Convert content to string BEFORE creating element (which uses the same sb)
@@ -2270,7 +2247,7 @@ static Item parse_paragraph(Input *input, char** lines, int* current_line, int t
     
     // Now create the paragraph element (safe to use sb now)
     Element* p = create_markdown_element(input, "p");
-    if (!p) return {.item = ITEM_NULL};
+    if (!p) return ItemNull;
     
     if (content && content->len > 0) {
         Item inline_content = parse_inline_content(input, content->chars);
@@ -2290,12 +2267,12 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
     int start_number;
     
     if (!is_list_marker(lines[*current_line], &is_ordered, &start_number)) {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     const char* list_tag = is_ordered ? "ol" : "ul";
     Element* list_elem = create_markdown_element(input, list_tag);
-    if (!list_elem) return {.item = ITEM_NULL};
+    if (!list_elem) return ItemNull;
     
     // Add start attribute for ordered lists if not starting at 1
     if (is_ordered && start_number != 1) {
@@ -2355,11 +2332,11 @@ static Item parse_list(Input *input, char** lines, int* current_line, int total_
 
 // Complete table parsing implementation
 static Item parse_table(Input *input, char** lines, int* current_line, int total_lines) {
-    if (!is_table_row(lines[*current_line])) return {.item = ITEM_NULL};
+    if (!is_table_row(lines[*current_line])) return ItemNull;
     
     // Check if next line is separator
     if (*current_line + 1 >= total_lines || !is_table_separator(lines[*current_line + 1])) {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Parse alignment from separator line
@@ -2373,7 +2350,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Create colgroup for column specifications
@@ -2402,7 +2379,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Create thead
@@ -2413,7 +2390,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     Element* header_row = create_markdown_element(input, "tr");
@@ -2423,7 +2400,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
             for (int i = 0; i < alignment_count; i++) free(alignments[i]);
             free(alignments);
         }
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Add header cells
@@ -2525,7 +2502,7 @@ static Item parse_table(Input *input, char** lines, int* current_line, int total
 // Complete parse_block_element implementation
 static Item parse_block_element(Input *input, char** lines, int* current_line, int total_lines) {
     if (*current_line >= total_lines || !lines[*current_line]) {
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     const char* line = lines[*current_line];
@@ -2533,7 +2510,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
     // Skip empty lines
     if (is_empty_line(line)) {
         (*current_line)++;
-        return {.item = ITEM_NULL};
+        return ItemNull;
     }
     
     // Check for ATX headers
@@ -2588,7 +2565,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
             if (math_elem) {
                 add_attribute_to_element(input, math_elem, "type", "block");
                 // Create a string with the math content and add it as a child
-                String* math_content = create_string_from_buffer(input, line, 2, content_len);
+                String* math_content = create_input_string(input, line, 2, content_len);
                 if (math_content) {
                     list_push((List*)math_elem, {.item = s2it(math_content)});
                     increment_element_content_length(math_elem);
@@ -2608,7 +2585,7 @@ static Item parse_block_element(Input *input, char** lines, int* current_line, i
 static Item parse_markdown_content(Input *input, char** lines, int line_count) {
     // Create the root document element
     Element* doc = create_markdown_element(input, "doc");
-    if (!doc) return {.item = ITEM_NULL};
+    if (!doc) return ItemNull;
     
     // Add version attribute to doc
     add_attribute_to_element(input, doc, "version", "1.0");
