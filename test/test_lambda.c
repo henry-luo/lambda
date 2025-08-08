@@ -114,6 +114,10 @@ Test(lambda_tests, test_value_ls) {
     test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
 }
 
+Test(lambda_tests, test_simple_expr_ls) {
+    test_lambda_script_against_file("test/lambda/simple_expr.ls", "test/lambda/simple_expr.txt");
+}
+
 Test(lambda_tests, test_sys_fn_ls) {
     test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
 }

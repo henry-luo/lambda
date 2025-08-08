@@ -688,6 +688,11 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
+    TSNode type_node = ts_node_child_by_field_id(let_node, FIELD_DECLARE);
+    return build_assign_expr(tp, type_node);
+}
+
 AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, 
         symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
@@ -1377,8 +1382,9 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_unary_expr(tp, expr_node);
     case SYM_BINARY_EXPR:
         return build_binary_expr(tp, expr_node);
+    case SYM_LET_EXPR:
+        return build_let_expr(tp, expr_node);
     case SYM_LET_STAM:  case SYM_PUB_STAM:
-        // todo: full type def support 
         return build_let_stam(tp, expr_node, symbol);
     case SYM_FOR_EXPR:
         return build_for_expr(tp, expr_node);

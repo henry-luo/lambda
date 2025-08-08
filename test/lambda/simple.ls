@@ -1,2 +1,3 @@
-let csv = input('test/input/test.csv', 'csv');
-csv[0]
+0.5 + 3 * 2
+(let a=0.5, let b=2, 
+a + 3 * b, a + 3 * 2, 0.5 + 3 * b, 0.5 + 3 * 2, a, b)

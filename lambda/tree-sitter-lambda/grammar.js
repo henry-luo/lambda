@@ -178,7 +178,6 @@ module.exports = grammar({
     'binary_pow',
     'binary_times',
     'binary_plus',
-    'binary_shift',
     'binary_compare',
     'binary_relation',
     'binary_eq',
@@ -190,10 +189,11 @@ module.exports = grammar({
     'set_exclude',    // like -
     'set_union',      // like or
     'is_in',
-    $.assign_expr,
     $.if_expr,
     $.for_expr,
+    $.let_expr,
     $.fn_expr,
+    $.assign_expr
   ],
   [
     $.fn_type,
@@ -337,9 +337,8 @@ module.exports = grammar({
       $._content_expr
     ),
 
-    list: $ => seq('(', 
-      choice($._expression, $.assign_expr), 
-      repeat(seq(',', choice($._expression, $.assign_expr))), ')'
+    list: $ => seq(
+      '(', $._expression, repeat(seq(',', $._expression)), ')'
     ),
 
     // Literals and Containers
@@ -377,14 +376,14 @@ module.exports = grammar({
     ),
 
     // expr excluding comparison exprs
-    _attr_expr: $ => prec.left(choice(
+    _attr_expr: $ => choice(
       $.primary_expr,
       $.unary_expr,
       alias($.attr_binary_expr, $.binary_expr),
       $.if_expr,
       $.for_expr,
       $.fn_expr,
-    )),
+    ),
 
     attr: $ => seq(
       field('name', choice($.string, $.symbol, $.identifier)), // string accepted for JSON compatibility
@@ -410,14 +409,15 @@ module.exports = grammar({
       '(', $._expression, ')',
     ),
 
-    _expression: $ => prec.left(choice(
+    _expression: $ => choice(
       $.primary_expr,
       $.unary_expr,
       $.binary_expr,
+      $.let_expr,
       $.if_expr,
       $.for_expr,
       $.fn_expr,
-    )),
+    ),
 
     // prec(50) to make primary_expr higher priority than content
     primary_expr: $ => prec(50, choice(
@@ -543,6 +543,10 @@ module.exports = grammar({
       field('name', $.identifier), 
       optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
     ),
+
+    let_expr: $ => seq(
+      'let', field('declare', $.assign_expr)
+    ),    
     
     let_stam: $ => seq(
       'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
