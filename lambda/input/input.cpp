@@ -43,19 +43,18 @@ String* strbuf_to_string(StrBuf *sb) {
 // Helper function to create string from char content
 String* create_input_string(Input* input, const char* text, int start, int len) {
     // Allocate string from pool instead of using shared StrBuf
-    String* str = (String*)pool_calloc(input->pool, sizeof(String) + len);
+    String* str = (String*)pool_calloc(input->pool, sizeof(String) + len + 1);
     if (!str) return &EMPTY_STRING;
     str->len = len;
     str->ref_cnt = 0;
     memcpy(str->chars, text + start, len);
+    str->chars[len] = '\0';  // Null-terminate the string
     return str;
 }
 
 String* input_create_string(Input *input, const char* text) {
     if (!text) return NULL;
-    strbuf_reset(input->sb);
-    strbuf_append_str(input->sb, text);
-    return strbuf_to_string(input->sb);
+    return create_input_string(input, text, 0, strlen(text));
 }
 
 ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
