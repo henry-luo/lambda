@@ -138,12 +138,10 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 strbuf_append_str(strbuf, "[invalid field name]");
                 goto advance_field;
             }
-            
             if (!field->type || (uintptr_t)field->type < 0x1000) {
                 strbuf_append_str(strbuf, "[invalid field type]");
                 goto advance_field;
             }
-            
             // Safety check for type_id range
             if (field->type->type_id < 0 || field->type->type_id > 50) {
                 strbuf_append_str(strbuf, "[invalid type_id]");
@@ -202,6 +200,8 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
+            case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
+                printf("print named item: %p, type: %d\n", data, field->type->type_id);
                 print_item(strbuf, *(Item*)data, depth + 1);
                 break;
             default:
@@ -224,7 +224,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
 void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
-    if (!item.item) { strbuf_append_str(strbuf, "null"); return; }
+    if (!item.item) { strbuf_append_str(strbuf, "NULL"); return; }
 
     TypeId type_id = get_type_id(item);
     switch (type_id) { // packed value
@@ -419,7 +419,14 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_TYPE: {
         TypeType *type = (TypeType*)item.type;
-        strbuf_append_format(strbuf, "[type %s]", type_info[type->type->type_id].name);
+        printf("print type: %p, type_id: %d\n", type, type->type->type_id);
+        char* type_name = type_info[type->type->type_id].name;
+        if (type->type->type_id == LMD_TYPE_NULL) {
+            strbuf_append_format(strbuf, "[type %s]", type_name);
+        } else {
+            strbuf_append_str(strbuf, type_name);
+        }
+        break;
     }
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);

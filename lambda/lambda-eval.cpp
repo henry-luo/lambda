@@ -295,7 +295,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 container->ref_cnt++;
                 break;
             }
-            case LMD_TYPE_FUNC:  case LMD_TYPE_ANY: {
+            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:  case LMD_TYPE_ANY: {
                 void *arr = va_arg(args, void*);
                 *(void**)field_ptr = arr;
                 break;
