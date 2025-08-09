@@ -221,6 +221,7 @@ Input* input_new(lxb_url_t* abs_url) {
     if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
     input->type_list = arraylist_new(16);
     input->root = {.item = ITEM_NULL};
+    input->sb = strbuf_new_pooled(input->pool);  // Always allocate StrBuf
     return input;
 }
 

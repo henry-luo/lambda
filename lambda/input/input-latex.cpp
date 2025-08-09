@@ -108,7 +108,7 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
         // For required arguments, we need to handle nested braces
         int brace_depth = 1;
         StrBuf* arg_sb = input->sb;
-        strbuf_full_reset(arg_sb);
+        strbuf_reset(arg_sb);
         
         while (**latex && brace_depth > 0) {
             if (**latex == '{') {
@@ -235,7 +235,13 @@ static Item parse_latex_command(Input *input, const char **latex) {
                             // Parse math content using our math parser
                             Input* math_input = input_new((lxb_url_t*)input->url);
                             if (math_input) {
+                                // Reset our StrBuf before calling math parser
+                                strbuf_reset(input->sb);
+                                
                                 parse_math(math_input, content_string->chars, "latex");
+                                
+                                // Reset our StrBuf after calling math parser
+                                strbuf_reset(input->sb);
                                 
                                 if (math_input->root .item != ITEM_NULL) {
                                     // Add the parsed math as child
@@ -469,8 +475,14 @@ static Item parse_latex_element(Input *input, const char **latex) {
                 // Create temporary input for math parsing
                 Input* math_input = input_new((lxb_url_t*)input->url);
                 if (math_input) {
+                    // Reset our StrBuf before calling math parser
+                    strbuf_reset(input->sb);
+                    
                     // Parse the math content using our math parser
                     parse_math(math_input, math_string->chars, "latex");
+                    
+                    // Reset our StrBuf after calling math parser
+                    strbuf_reset(input->sb);
                     
                     // Create wrapper element for the math
                     const char* math_name = display_math ? "displaymath" : "math";
@@ -581,7 +593,8 @@ static Item parse_latex_element(Input *input, const char **latex) {
 
 void parse_latex(Input* input, const char* latex_string) {
     printf("DEBUG: Starting LaTeX parsing...\n");
-    input->sb = strbuf_new_pooled(input->pool);
+    // Reuse the StrBuf from input_new() - don't create a new one
+    strbuf_reset(input->sb);
     const char *latex = latex_string;
     
     // Create root document element

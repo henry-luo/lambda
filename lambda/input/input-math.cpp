@@ -3985,7 +3985,8 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     }
     printf("\n");
     
-    input->sb = strbuf_new_pooled(input->pool);
+    // Reuse the StrBuf from input_new() - don't create a new one
+    strbuf_reset(input->sb);
     const char *math = math_string;
     
     MathFlavor flavor = get_math_flavor(flavor_str);

@@ -2634,7 +2634,7 @@ static Item parse_markdown_content(Input *input, char** lines, int line_count) {
 
 // Entry point function
 void parse_markdown(Input* input, const char* markdown_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    strbuf_reset(input->sb);  // Reuse StrBuf from input_new()
     int line_count;
     char** lines = split_lines(markdown_string, &line_count);
     input->root = parse_markdown_content(input, lines, line_count);
