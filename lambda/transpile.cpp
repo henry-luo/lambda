@@ -610,6 +610,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 }
 
 void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
+    // todo: also need to check index type to be numeric
     if (field_node->object->type->type_id == LMD_TYPE_ARRAY_INT) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");

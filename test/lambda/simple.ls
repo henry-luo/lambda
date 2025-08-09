@@ -1,3 +1,2 @@
-let org_data = input('./temp/test.org', 'org')
-let org_formatted = format(org_data, 'log')
-org_formatted
+let arr = [1, "str", true]
+[arr[-1], arr[0], arr[1], arr[2], arr[3]];

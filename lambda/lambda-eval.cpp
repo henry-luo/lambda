@@ -89,7 +89,11 @@ Array* array_fill(Array* arr, int count, ...) {
 }
 
 Item array_get(Array *array, int index) {
-    if (index < 0 || index >= array->length) { return ItemNull; }
+    printf("array_get: index: %d, length: %ld\n", index, array->length);
+    if (index < 0 || index >= array->length) {
+        printf("array_get: index out of bounds: %d\n", index);
+        return ItemNull;
+    }
     Item item = array->items[index];
     switch (item.type_id) {
     case LMD_TYPE_INT64: {
@@ -974,6 +978,7 @@ Item fn_index(Item item, Item index_item) {
         return ItemNull;
     }
 
+    printf("fn_index item index: %ld\n", index);
     TypeId type_id = get_type_id(item);
     switch (type_id) {
     case LMD_TYPE_RANGE: {

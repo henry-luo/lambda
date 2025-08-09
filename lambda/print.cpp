@@ -511,7 +511,7 @@ void print_ast_node(AstNode *node, int indent) {
             ((AstIdentNode*)node)->name.str, format_type(node->type), node->type->is_const);
         break;
     case AST_NODE_PRIMARY:
-        printf("[primary expr:%s,const:%d]\n", format_type(node->type), node->type->is_const);
+        printf("[primary expr:%s,const:%d]\n", format_type(node->type), node->type ? node->type->is_const : -1);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(((AstPrimaryNode*)node)->expr, indent + 1);
         } else {

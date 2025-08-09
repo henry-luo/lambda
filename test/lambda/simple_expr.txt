@@ -70,3 +70,5 @@ element
 {c:1, a:1, b:102, d:[true, null], e:<elmt a:1, b:2>, f:int, g:2}
 "Member exprs: ============"
 [1, 102, null, [true, null], true, 2, <elmt a:1, b:2>, 1, 2, int, null, 1, 102, null, [true, null], <elmt a:1, b:2>, int, null]
+"Index exprs: ============"
+[null, 1, "str", true, null]

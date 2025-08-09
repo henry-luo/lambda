@@ -27,8 +27,8 @@ let m = {'a': 1, "b": c + 2, d:[true, null], e: <elmt a: 1, b: 2>, f:int}
 "Member exprs: ============"
 [m.a,  m.b,  m.c,  m.d,  m.d[0],  len(m.d),  m.e,  m.e.a,  m.e.b,  m.f,  m.g,
 m["a"],  m["b"],  m["c"],  m["d"],  m["e"],  m["f"],  m["g"]]
-// "Index exprs: ============"
-// let arr = [1, 2, 3]
-// arr[-1];  arr[0];  arr[1];  arr[2];  arr[3];
+"Index exprs: ============"
+let arr = [1, "str", true]
+[arr[-1],  arr[0],  arr[1],  arr[2],  arr[3]];
 
 // todo: negative cases, e.g. 1 + "str", 1 + null, etc.

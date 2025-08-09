@@ -197,7 +197,8 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     ast_node->field = build_expr(tp, field_node);
 
     if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
-        ast_node->type = ((TypeArray*)ast_node->object->type)->nested;
+        Type* nested = ((TypeArray*)ast_node->object->type)->nested;
+        ast_node->type = nested ? nested : &TYPE_ANY;
     }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
         ast_node->type = &TYPE_ANY;  // todo: derive field type
