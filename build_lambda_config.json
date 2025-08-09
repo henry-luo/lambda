@@ -55,6 +55,7 @@
         "lambda/pack.cpp",
         "lambda/print.cpp",
         "lambda/format/format.cpp",
+        "lambda/format/format-css.cpp",
         "lambda/format/format-html.cpp",
         "lambda/format/format-ini.cpp",
         "lambda/format/format-json.cpp",
