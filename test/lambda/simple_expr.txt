@@ -73,4 +73,4 @@ element
 "elmt:"
 [1, {d:t'2025-12-01'}, 3, null, null, "text", 'symbol', [1, 2, 3], null]
 "Index exprs: ============"
-[null, 1, "str", true, null]
+[null, 1, "str", true, null, "str", null]

@@ -611,18 +611,20 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 
 void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // todo: also need to check index type to be numeric
-    if (field_node->object->type->type_id == LMD_TYPE_ARRAY_INT) {
+    TypeId object_type = field_node->object->type->type_id;
+    TypeId field_type = field_node->field->type->type_id;
+    if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");
         transpile_expr(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ']');
         return;
     }
-    else if (field_node->object->type->type_id == LMD_TYPE_ARRAY) {
+    else if (object_type == LMD_TYPE_ARRAY && field_type == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "array_get(");
         transpile_expr(tp, field_node->object);
     }    
-    else if (field_node->object->type->type_id == LMD_TYPE_LIST) {
+    else if (object_type == LMD_TYPE_LIST && field_type == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);
     }    
