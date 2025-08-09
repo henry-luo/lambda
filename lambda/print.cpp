@@ -338,10 +338,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         else strbuf_append_str(strbuf, "b''");
         break;
     }
-    case LMD_TYPE_ERROR: {
-        strbuf_append_str(strbuf, "ERROR");
-        break;
-    }
     case LMD_TYPE_RANGE: {
         Range *range = item.range;
         // printf("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
@@ -428,6 +424,13 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         }
         break;
     }
+    case LMD_TYPE_ERROR: {
+        strbuf_append_str(strbuf, "error");
+        break;
+    }    
+    case LMD_TYPE_ANY:
+        strbuf_append_str(strbuf, "any");
+        break;
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
     }

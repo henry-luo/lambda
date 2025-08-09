@@ -361,44 +361,54 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
+            printf("map_get found field: %.*s, type: %d, ptr: %p\n", 
+                (int)field->name->length, field->name->str, type_id, field_ptr);
             switch (type_id) {
-                case LMD_TYPE_NULL:
-                    return ItemNull;
-                case LMD_TYPE_BOOL:
-                    return {.item = b2it(*(bool*)field_ptr)};
-                case LMD_TYPE_INT:
-                    return {.item = i2it(*(int*)field_ptr)};
-                case LMD_TYPE_INT64: {
-                    long lval = *(long*)field_ptr;
-                    return push_l(lval);
-                }
-                case LMD_TYPE_FLOAT: {
-                    double dval = *(double*)field_ptr;
-                    return push_d(dval);
-                }
-                case LMD_TYPE_DTIME:
-                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
-                    return {.item = k2it(*(char**)field_ptr)};
-                case LMD_TYPE_STRING:
-                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
-                    return {.item = s2it(*(char**)field_ptr)};
-                case LMD_TYPE_SYMBOL:
-                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
-                    return {.item = y2it(*(char**)field_ptr)};
-                case LMD_TYPE_BINARY:
-                    //hashmap_set(context->data_owners, &(DataOwner){.data = field_ptr, .owner = map});
-                    return {.item = x2it(*(char**)field_ptr)};
-                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
-                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:
-                    return {.raw_pointer = field_ptr};
-                default:
-                    printf("unknown type %d\n", type_id);
-                    return ItemError;
+            case LMD_TYPE_NULL:
+                return ItemNull;
+            case LMD_TYPE_BOOL:
+                return {.item = b2it(*(bool*)field_ptr)};
+            case LMD_TYPE_INT:
+                return {.item = i2it(*(int*)field_ptr)};
+            case LMD_TYPE_INT64: {
+                long lval = *(long*)field_ptr;
+                return push_l(lval);
+            }
+            case LMD_TYPE_FLOAT: {
+                double dval = *(double*)field_ptr;
+                return push_d(dval);
+            }
+            case LMD_TYPE_DECIMAL: {
+                printf("decimal not supported yet\n");
+                return ItemError;
+            }
+            case LMD_TYPE_STRING:
+                return {.item = s2it(*(char**)field_ptr)};
+            case LMD_TYPE_SYMBOL:
+                return {.item = y2it(*(char**)field_ptr)};
+            case LMD_TYPE_DTIME:
+                return {.item = k2it(*(char**)field_ptr)};
+            case LMD_TYPE_BINARY:
+                return {.item = x2it(*(char**)field_ptr)};
+                
+            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+                Container* container = *(Container**)field_ptr;
+                printf("map_get container: %p, type_id: %d\n", container, container->type_id);
+                // assert(container->type_id == type_id);
+                return {.raw_pointer = container};
+            }
+            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+                return {.raw_pointer = *(void**)field_ptr};
+            default:
+                printf("unknown type %d\n", type_id);
+                return ItemError;
             }
         }
         field = field->next;
     }
     *is_found = false;
+    printf("map_get: key %s not found\n", key);
     return ItemNull;
 }
 
