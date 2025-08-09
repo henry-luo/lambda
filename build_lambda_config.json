@@ -32,6 +32,7 @@
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-pdf.cpp",
         "lambda/input/input-wiki.cpp",
+        "lambda/input/input-markup.cpp",
         "lambda/input/mime-detect.c",
         "lambda/input/mime-types.c",
         "lambda/tree-sitter-lambda/src/parser.c",

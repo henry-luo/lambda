@@ -29,6 +29,7 @@ void parse_mark(Input* input, const char* mark_string);
 void parse_org(Input* input, const char* org_string);
 void parse_css(Input* input, const char* css_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
+Item input_markup(Input *input, const char* content);
 
 String* strbuf_to_string(StrBuf *sb) {
     String *string = (String*)sb->str;
@@ -513,6 +514,9 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
             parse_math(input, source, math_flavor);
+        }
+        else if (strcmp(effective_type, "markup") == 0) {
+            input->root = input_markup(input, source);
         }
         else {
             printf("Unknown input type: %s\n", effective_type);

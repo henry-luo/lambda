@@ -119,6 +119,32 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
     else if (strcmp(type->chars, "org") == 0) {
         result = format_org_string(pool, item);
     }
+    else if (strcmp(type->chars, "markup") == 0) {
+        // Markup type with flavor-based format selection
+        if (!flavor || strcmp(flavor->chars, "standard") == 0 || strcmp(flavor->chars, "markdown") == 0) {
+            // Default to Markdown format
+            StrBuf* sb = strbuf_new_pooled(pool);
+            format_markdown(sb, item);
+            result = strbuf_to_string(sb);
+            strbuf_free(sb);
+        }
+        else if (strcmp(flavor->chars, "rst") == 0) {
+            StrBuf* sb = strbuf_new_pooled(pool);
+            format_rst(sb, item);
+            result = strbuf_to_string(sb);
+            strbuf_free(sb);
+        }
+        else if (strcmp(flavor->chars, "org") == 0) {
+            result = format_org_string(pool, item);
+        }
+        else {
+            printf("Unsupported markup flavor: %s, defaulting to markdown\n", flavor->chars);
+            StrBuf* sb = strbuf_new_pooled(pool);
+            format_markdown(sb, item);
+            result = strbuf_to_string(sb);
+            strbuf_free(sb);
+        }
+    }
     else if (strcmp(type->chars, "math") == 0) {
         // Math type with flavor support
         if (!flavor || strcmp(flavor->chars, "latex") == 0) {

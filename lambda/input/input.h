@@ -27,3 +27,6 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str);
 void trim_string_inplace(char* str);
 Item parse_scalar_value(Input *input, const char* str);
 Array* parse_flow_array(Input *input, const char* str);
+
+// Unified markup parsing functions (from input-markup.cpp)
+Item input_markup(Input *input, const char* content);
