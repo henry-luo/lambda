@@ -17,8 +17,8 @@
 "len of array:"
 3
 "len of map:"
-2
+0
 "len of element:"
-2
+1
 "len of element:"
 0

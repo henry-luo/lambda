@@ -422,7 +422,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         printf("print type: %p, type_id: %d\n", type, type->type->type_id);
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
-            strbuf_append_format(strbuf, "[type %s]", type_name);
+            strbuf_append_format(strbuf, "type.%s", type_name);
         } else {
             strbuf_append_str(strbuf, type_name);
         }

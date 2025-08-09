@@ -26,3 +26,45 @@ false
 true
 true
 false
+'Type exprs: ============'
+int
+float
+string
+bool
+symbol
+any
+function
+type
+type.null
+int
+float
+string
+bool
+symbol
+type
+array
+array
+list
+map
+element
+'Len exprs: ============'
+0
+0
+0
+3
+0
+6
+0
+10
+3
+3
+0
+1
+"Dynamic container exprs: ============"
+[1, 0.5, 3]
+3
+2
+5
+{a:1, b:102}
+<elmt a:1, b:2, c:{d:6, e:float}>
+{c:1, a:1, b:102, d:2}

@@ -212,11 +212,10 @@ void list_push(List *list, Item item) {
 }
 
 Item list_fill(List *list, int count, ...) {
-    printf("list_fill cnt: %d\n", count);
+    // printf("list_fill cnt: %d\n", count);
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
-        printf("list_fill item %d\n", i);
         Item itm = {.item = va_arg(args, uint64_t)};
         list_push(list, itm);
     }
@@ -997,7 +996,7 @@ Item fn_member(Item item, Item key) {
     }
 }
 
-// length function for item
+// length of an item's content, relates to indexed access, i.e. item[index] 
 Item fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     printf("fn_len item: %d\n", type_id);
@@ -1016,16 +1015,12 @@ Item fn_len(Item item) {
         size = item.array_long->length;
         break;
     case LMD_TYPE_MAP: {
-        TypeMap *map_type = (TypeMap*)item.map->type;
-        // returns the num of fields in the map
-        size = map_type ? map_type->length : 0;
+        size = 0;
         break;
     }
     case LMD_TYPE_ELEMENT: {
         Element *elmt = item.element;
-        TypeElmt *elmt_type = (TypeElmt*)elmt->type;
-        // returns the num of fields in the element
-        size = (elmt_type ? elmt_type->length : 0) + elmt->length;
+        size = elmt->length;
         break;
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
