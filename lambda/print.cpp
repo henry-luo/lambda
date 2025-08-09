@@ -66,11 +66,24 @@ void writeType(Transpiler* tp, Type *type) {
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "double");
         break;
+    case LMD_TYPE_DECIMAL:
+        strbuf_append_str(tp->code_buf, "mpf_t*");
+        break;    
     case LMD_TYPE_STRING:
         strbuf_append_str(tp->code_buf, "char*");
         break;
     case LMD_TYPE_BINARY:
         strbuf_append_str(tp->code_buf, "uint8_t*");
+        break;
+    case LMD_TYPE_SYMBOL:
+        strbuf_append_str(tp->code_buf, "char*");
+        break;
+    case LMD_TYPE_DTIME:
+        strbuf_append_str(tp->code_buf, "char*");
+        break;
+
+    case LMD_TYPE_RANGE:
+        strbuf_append_str(tp->code_buf, "Range*");
         break;
     case LMD_TYPE_LIST:
         strbuf_append_str(tp->code_buf, "List*");
@@ -86,6 +99,9 @@ void writeType(Transpiler* tp, Type *type) {
     }
     case LMD_TYPE_MAP:
         strbuf_append_str(tp->code_buf, "Map*");
+        break;
+    case LMD_TYPE_ELEMENT:
+        strbuf_append_str(tp->code_buf, "Element*");
         break;
     case LMD_TYPE_FUNC:
         strbuf_append_str(tp->code_buf, "Function*");

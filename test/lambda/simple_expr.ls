@@ -27,6 +27,9 @@ let m = {'a': 1, "b": c + 2, d:[true, null], e: <elmt a: 1, b: 2>, f:int}
 "Member exprs: ============"
 [m.a,  m.b,  m.c,  m.d,  m.d[0],  len(m.d),  m.e,  m.e.a,  m.e.b,  m.f,  m.g,
 m["a"],  m["b"],  m["c"],  m["d"],  m["e"],  m["f"],  m["g"]]
+"elmt:"
+let elm = <elmt a: 1, b:{d:t'2025-12-01'}, c: 3; "text"; 'symbol'; [1,2,3]>
+[elm.a,  elm.b,  elm.c,  elm.d,  elm[-1], elm[0],  elm[1],  elm[2],  elm[3]]
 "Index exprs: ============"
 let arr = [1, "str", true]
 [arr[-1],  arr[0],  arr[1],  arr[2],  arr[3]];

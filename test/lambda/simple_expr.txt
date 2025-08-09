@@ -70,5 +70,7 @@ element
 {c:1, a:1, b:102, d:[true, null], e:<elmt a:1, b:2>, f:int, g:2}
 "Member exprs: ============"
 [1, 102, null, [true, null], true, 2, <elmt a:1, b:2>, 1, 2, int, null, 1, 102, null, [true, null], <elmt a:1, b:2>, int, null]
+"elmt:"
+[1, {d:t'2025-12-01'}, 3, null, null, "text", 'symbol', [1, 2, 3], null]
 "Index exprs: ============"
 [null, 1, "str", true, null]
