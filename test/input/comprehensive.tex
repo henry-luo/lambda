@@ -1,0 +1,260 @@
+% Comprehensive LaTeX test document
+\documentclass[12pt,a4paper,twoside]{article}
+
+% Package imports with options
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amsfonts,amssymb}
+\usepackage{graphicx}
+\usepackage[colorlinks=true,linkcolor=blue]{hyperref}
+\usepackage{geometry}
+\usepackage{fancyhdr}
+
+% Document metadata
+\title{Comprehensive LaTeX Test Document}
+\author{Test Author \and Second Author}
+\date{\today}
+
+% Custom commands
+\newcommand{\mycommand}[1]{\textbf{#1}}
+\newenvironment{myenv}{\begin{center}}{\end{center}}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\begin{abstract}
+This comprehensive test document contains various LaTeX constructs including advanced formatting, mathematical expressions, tables, figures, cross-references, and special environments. The purpose is to test the robustness of the LaTeX parser and formatter implementation.
+\end{abstract}
+
+\section{Introduction}
+
+This document tests various LaTeX features. We start with basic text formatting and progress to more complex constructs.
+
+\subsection{Text Formatting}
+
+Here we demonstrate various text formatting options:
+\begin{itemize}
+    \item \textbf{Bold text} and \textit{italic text}
+    \item \texttt{Monospace text} and \underline{underlined text}
+    \item \emph{Emphasized text} and \textsf{Sans serif text}
+    \item \textsc{Small caps} and \textsl{Slanted text}
+    \item \verb|Verbatim text| with special characters
+\end{itemize}
+
+\subsection{Font Sizes and Styles}
+
+Different font sizes:
+{\tiny Tiny text} {\scriptsize Script size} {\footnotesize Footnote size} {\small Small text} Normal size {\large Large text} {\Large Larger text} {\LARGE Even larger} {\huge Huge text} {\Huge Enormous text}
+
+\section{Lists and Enumerations}
+
+\subsection{Unordered Lists}
+
+\begin{itemize}
+    \item First level item
+    \begin{itemize}
+        \item Second level item
+        \item Another second level item
+        \begin{itemize}
+            \item Third level item
+            \item Another third level item
+        \end{itemize}
+    \end{itemize}
+    \item Back to first level
+\end{itemize}
+
+\subsection{Ordered Lists}
+
+\begin{enumerate}
+    \item First numbered item
+    \item Second numbered item
+    \begin{enumerate}
+        \item Nested numbered item
+        \item Another nested item
+    \end{enumerate}
+    \item Third numbered item
+\end{enumerate}
+
+\subsection{Description Lists}
+
+\begin{description}
+    \item[Term 1] Definition of the first term
+    \item[Term 2] Definition of the second term with more detailed explanation
+    \item[Long Term Name] Definition with a longer term name
+\end{description}
+
+\section{Mathematical Expressions}
+
+\subsection{Inline Mathematics}
+
+Simple inline math: $x + y = z$, $\alpha + \beta = \gamma$, and $\sum_{i=1}^{n} x_i$.
+
+More complex inline expressions: $\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}$ and $\frac{\partial f}{\partial x} = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}$.
+
+\subsection{Display Mathematics}
+
+Simple display equation:
+$$E = mc^2$$
+
+Numbered equation:
+\begin{equation}
+\label{eq:quadratic}
+ax^2 + bx + c = 0
+\end{equation}
+
+The solutions to equation \ref{eq:quadratic} are:
+\begin{equation}
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+\end{equation}
+
+Multi-line equations:
+\begin{align}
+f(x) &= ax^2 + bx + c \\
+f'(x) &= 2ax + b \\
+f''(x) &= 2a
+\end{align}
+
+Matrix example:
+$$
+\begin{pmatrix}
+a & b & c \\
+d & e & f \\
+g & h & i
+\end{pmatrix}
+\begin{pmatrix}
+x \\
+y \\
+z
+\end{pmatrix}
+=
+\begin{pmatrix}
+ax + by + cz \\
+dx + ey + fz \\
+gx + hy + iz
+\end{pmatrix}
+$$
+
+\section{Tables}
+
+\subsection{Simple Table}
+
+\begin{center}
+\begin{tabular}{|l|c|r|}
+\hline
+Left & Center & Right \\
+\hline
+Item 1 & 100 & \$10.00 \\
+Item 2 & 200 & \$20.00 \\
+Item 3 & 300 & \$30.00 \\
+\hline
+\textbf{Total} & \textbf{600} & \textbf{\$60.00} \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Complex Table}
+
+\begin{table}[htbp]
+\centering
+\caption{Sample data table with various formatting}
+\label{tab:sample}
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Category} & \textbf{Value A} & \textbf{Value B} & \textbf{Total} \\
+\hline
+Category 1 & 10.5 & 20.3 & 30.8 \\
+Category 2 & 15.2 & 25.7 & 40.9 \\
+Category 3 & 12.8 & 18.4 & 31.2 \\
+\hline
+\textbf{Sum} & \textbf{38.5} & \textbf{64.4} & \textbf{102.9} \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Special Environments}
+
+\subsection{Quotations}
+
+Regular quote environment:
+\begin{quote}
+This is a quote environment that is used for shorter quotations. The text is indented from both margins.
+\end{quote}
+
+Quotation environment:
+\begin{quotation}
+This is a quotation environment used for longer quotations. Like the quote environment, it indents the text, but it also indents the first line of each paragraph.
+\end{quotation}
+
+\subsection{Verbatim Text}
+
+\begin{verbatim}
+This is verbatim text where
+    whitespace is preserved
+and special characters like \, {, }, $, %, #, &, _ work normally.
+Code example:
+    for (int i = 0; i < n; i++) {
+        printf("Hello, World!\n");
+    }
+\end{verbatim}
+
+\subsection{Center Environment}
+
+\begin{center}
+This text is centered.
+
+Multiple lines can be centered
+in the same environment.
+\end{center}
+
+\section{Cross-References and Citations}
+
+See equation \ref{eq:quadratic} on page \pageref{eq:quadratic}.
+Also refer to table \ref{tab:sample} for sample data.
+
+\section{Special Characters and Symbols}
+
+LaTeX special characters: \& \% \$ \# \_ \{ \} \textbackslash
+
+Mathematical symbols: $\alpha, \beta, \gamma, \delta, \epsilon, \phi, \psi, \omega$
+
+Arrows: $\leftarrow, \rightarrow, \leftrightarrow, \Leftarrow, \Rightarrow, \Leftrightarrow$
+
+Set symbols: $\in, \notin, \subset, \supset, \cap, \cup, \emptyset, \infty$
+
+\section{Advanced Features}
+
+\subsection{Footnotes}
+
+This text has a footnote\footnote{This is a footnote with additional information.} and another one\footnote{This is another footnote with more details about the topic.}.
+
+\subsection{Custom Commands}
+
+Using custom command: \mycommand{This text is processed by a custom command}.
+
+\subsection{Line Breaks and Spacing}
+
+Force line break here \\
+and continue on next line.
+
+Add some vertical space:
+
+\vspace{1cm}
+
+Text after vertical space.
+
+Horizontal space: Text\hspace{2cm}with horizontal space.
+
+\subsection{Comments}
+
+This is visible text.
+% This is a comment that should not appear in output
+More visible text after comment.
+
+\section{Conclusion}
+
+This comprehensive test document covers most common LaTeX constructs and should thoroughly test the parser and formatter implementation. The document includes text formatting, mathematical expressions, tables, lists, special environments, cross-references, and various other LaTeX features.
+
+\end{document}

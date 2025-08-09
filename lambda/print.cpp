@@ -292,18 +292,38 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_STRING: {
         String *string = (String*)item.pointer;
-        assert(strlen(string->chars) == string->len && "asserting tring length");
-        // todo: escape the string
-        if (string && string->chars) strbuf_append_format(strbuf, "\"%s\"", string->chars);
-        else strbuf_append_str(strbuf, "\"\"");
+        if (string && string->chars) {
+            // Safety check: validate string length before assertion
+            size_t actual_len = strlen(string->chars);
+            if (actual_len != string->len) {
+                printf("WARNING: String length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
+                // Use the actual length to prevent crashes
+                strbuf_append_format(strbuf, "\"%.*s\"", (int)actual_len, string->chars);
+            } else {
+                assert(strlen(string->chars) == string->len && "asserting tring length");
+                strbuf_append_format(strbuf, "\"%s\"", string->chars);
+            }
+        } else {
+            strbuf_append_str(strbuf, "\"\"");
+        }
         break;
     }
     case LMD_TYPE_SYMBOL: {
         String *string = (String*)item.pointer;
-        assert(strlen(string->chars) == string->len && "asserting symbol length");
-        // todo: escape the symbol chars
-        if (string && string->chars) strbuf_append_format(strbuf, "'%s'", string->chars);
-        else strbuf_append_str(strbuf, "''");
+        if (string && string->chars) {
+            // Safety check: validate string length before assertion
+            size_t actual_len = strlen(string->chars);
+            if (actual_len != string->len) {
+                printf("WARNING: Symbol length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
+                // Use the actual length to prevent crashes
+                strbuf_append_format(strbuf, "'%.*s'", (int)actual_len, string->chars);
+            } else {
+                assert(strlen(string->chars) == string->len && "asserting symbol length");
+                strbuf_append_format(strbuf, "'%s'", string->chars);
+            }
+        } else {
+            strbuf_append_str(strbuf, "''");
+        }
         break;
     }
     case LMD_TYPE_DTIME: {

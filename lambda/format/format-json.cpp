@@ -253,6 +253,15 @@ static void format_item_with_indent(StrBuf* sb, Item item, int indent) {
         }
         break;
     }
+    case LMD_TYPE_SYMBOL: {
+        String* str = (String*)item.pointer;
+        if (str) {
+            format_string(sb, str);
+        } else {
+            strbuf_append_str(sb, "null");
+        }
+        break;
+    }
     case LMD_TYPE_ARRAY: {
         Array* arr = (Array*)item.pointer;
         format_array_with_indent(sb, arr, indent);
