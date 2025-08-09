@@ -37,6 +37,14 @@ static Item parse_code_span(MarkupParser* parser, const char** text);
 static Item parse_link(MarkupParser* parser, const char** text);
 static Item parse_image(MarkupParser* parser, const char** text);
 
+// Phase 4: Advanced inline element parsers
+static Item parse_strikethrough(MarkupParser* parser, const char** text);
+static Item parse_superscript(MarkupParser* parser, const char** text);
+static Item parse_subscript(MarkupParser* parser, const char** text);
+static Item parse_emoji_shortcode(MarkupParser* parser, const char** text);
+static Item parse_inline_math(MarkupParser* parser, const char** text);
+static Item parse_small_caps(MarkupParser* parser, const char** text);
+
 // Phase 2: Utility functions
 static BlockType detect_block_type(const char* line);
 static int get_header_level(const char* line);
@@ -795,7 +803,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     }
     
     // For simple text without markup, return as string
-    if (!strpbrk(text, "*_`[!~\\")) {
+    if (!strpbrk(text, "*_`[!~\\$:^")) {
         String* content = input_create_string(parser->input, text);
         return (Item){.item = s2it(content)};
     }
@@ -876,6 +884,107 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             if (image_item.item != ITEM_ERROR && image_item.item != ITEM_UNDEFINED) {
                 list_push((List*)span, image_item);
                 increment_element_content_length(span);
+            }
+        }
+        // Phase 4: Enhanced inline parsing
+        else if (*pos == '~' && *(pos+1) == '~') {
+            // Flush text and parse strikethrough
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            const char* old_pos = pos;
+            Item strikethrough_item = parse_strikethrough(parser, &pos);
+            if (strikethrough_item.item != ITEM_ERROR && strikethrough_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, strikethrough_item);
+                increment_element_content_length(span);
+            } else if (pos == old_pos) {
+                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                pos++;
+            }
+        }
+        else if (*pos == '^') {
+            // Flush text and parse superscript
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            const char* old_pos = pos;
+            Item superscript_item = parse_superscript(parser, &pos);
+            if (superscript_item.item != ITEM_ERROR && superscript_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, superscript_item);
+                increment_element_content_length(span);
+            } else if (pos == old_pos) {
+                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                pos++;
+            }
+        }
+        else if (*pos == '~' && *(pos+1) != '~') {
+            // Flush text and parse subscript
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            const char* old_pos = pos;
+            Item subscript_item = parse_subscript(parser, &pos);
+            if (subscript_item.item != ITEM_ERROR && subscript_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, subscript_item);
+                increment_element_content_length(span);
+            } else if (pos == old_pos) {
+                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                pos++;
+            }
+        }
+        else if (*pos == ':') {
+            // Flush text and try to parse emoji shortcode
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            const char* old_pos = pos;
+            Item emoji_item = parse_emoji_shortcode(parser, &pos);
+            if (emoji_item.item != ITEM_ERROR && emoji_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, emoji_item);
+                increment_element_content_length(span);
+            } else if (pos == old_pos) {
+                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                pos++;
+            }
+        }
+        else if (*pos == '$') {
+            // Flush text and parse inline math
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            const char* old_pos = pos;
+            Item math_item = parse_inline_math(parser, &pos);
+            if (math_item.item != ITEM_ERROR && math_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, math_item);
+                increment_element_content_length(span);
+            } else if (pos == old_pos) {
+                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                pos++;
             }
         }
         else {
@@ -1392,4 +1501,330 @@ static bool is_table_row(const char* line) {
     
     // Simple check for pipe character (more sophisticated table detection possible)
     return (*pos == '|' || strchr(pos, '|') != NULL);
+}
+
+// Phase 4: Advanced inline element parsers
+
+// Parse strikethrough text (~~text~~)
+static Item parse_strikethrough(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    
+    // Check for opening ~~
+    if (*start != '~' || *(start+1) != '~') {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = start + 2;
+    const char* content_start = pos;
+    
+    // Find closing ~~
+    while (*pos && !(*pos == '~' && *(pos+1) == '~')) {
+        pos++;
+    }
+    
+    if (!*pos || *(pos+1) != '~') {
+        // No closing ~~, not strikethrough
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract content between ~~
+    size_t content_len = pos - content_start;
+    if (content_len == 0) {
+        *text = pos + 2; // Skip closing ~~
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // Create strikethrough element
+    Element* s_elem = create_element(parser->input, "s");
+    if (!s_elem) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Create content string
+    char* content = (char*)malloc(content_len + 1);
+    if (!content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    strncpy(content, content_start, content_len);
+    content[content_len] = '\0';
+    
+    // Parse nested inline content
+    Item nested_content = parse_inline_spans(parser, content);
+    if (nested_content.item != ITEM_ERROR && nested_content.item != ITEM_UNDEFINED) {
+        list_push((List*)s_elem, nested_content);
+        increment_element_content_length(s_elem);
+    }
+    
+    free(content);
+    *text = pos + 2; // Skip closing ~~
+    
+    return (Item){.item = (uint64_t)s_elem};
+}
+
+// Parse superscript (^text^)
+static Item parse_superscript(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    
+    // Check for opening ^
+    if (*start != '^') {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = start + 1;
+    const char* content_start = pos;
+    
+    // Find closing ^ (but not at the beginning)
+    while (*pos && *pos != '^' && !isspace(*pos)) {
+        pos++;
+    }
+    
+    if (*pos != '^' || pos == content_start) {
+        // No proper closing ^ or empty content
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract content between ^
+    size_t content_len = pos - content_start;
+    
+    // Create superscript element
+    Element* sup_elem = create_element(parser->input, "sup");
+    if (!sup_elem) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Create content string
+    char* content = (char*)malloc(content_len + 1);
+    if (!content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    strncpy(content, content_start, content_len);
+    content[content_len] = '\0';
+    
+    // Add content as string (superscripts are usually simple)
+    String* content_str = input_create_string(parser->input, content);
+    if (content_str) {
+        Item text_item = {.item = s2it(content_str)};
+        list_push((List*)sup_elem, text_item);
+        increment_element_content_length(sup_elem);
+    }
+    
+    free(content);
+    *text = pos + 1; // Skip closing ^
+    
+    return (Item){.item = (uint64_t)sup_elem};
+}
+
+// Parse subscript (~text~)
+static Item parse_subscript(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    
+    // Check for opening ~
+    if (*start != '~') {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = start + 1;
+    const char* content_start = pos;
+    
+    // Find closing ~ (but not at the beginning)
+    while (*pos && *pos != '~' && !isspace(*pos)) {
+        pos++;
+    }
+    
+    if (*pos != '~' || pos == content_start) {
+        // No proper closing ~ or empty content
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract content between ~
+    size_t content_len = pos - content_start;
+    
+    // Create subscript element
+    Element* sub_elem = create_element(parser->input, "sub");
+    if (!sub_elem) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Create content string
+    char* content = (char*)malloc(content_len + 1);
+    if (!content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    strncpy(content, content_start, content_len);
+    content[content_len] = '\0';
+    
+    // Add content as string (subscripts are usually simple)
+    String* content_str = input_create_string(parser->input, content);
+    if (content_str) {
+        Item text_item = {.item = s2it(content_str)};
+        list_push((List*)sub_elem, text_item);
+        increment_element_content_length(sub_elem);
+    }
+    
+    free(content);
+    *text = pos + 1; // Skip closing ~
+    
+    return (Item){.item = (uint64_t)sub_elem};
+}
+
+// Emoji shortcode mapping table (subset of GitHub emojis)
+static const struct {
+    const char* shortcode;
+    const char* emoji;
+} emoji_map[] = {
+    // Common emotions
+    {":smile:", "😄"}, {":grinning:", "😀"}, {":laughing:", "😆"}, {":joy:", "😂"},
+    {":wink:", "😉"}, {":blush:", "😊"}, {":heart_eyes:", "😍"}, {":kissing_heart:", "😘"},
+    {":worried:", "😟"}, {":frowning:", "☹️"}, {":cry:", "😢"}, {":sob:", "😭"},
+    
+    // Common symbols
+    {":heart:", "❤️"}, {":star:", "⭐"}, {":fire:", "🔥"}, {":zap:", "⚡"},
+    {":100:", "💯"}, {":heavy_check_mark:", "✔️"}, {":x:", "❌"}, {":exclamation:", "❗"},
+    
+    // GitHub specific
+    {":octocat:", "🐙"}, {":shipit:", "🚀"}, {":bowtie:", "👔"},
+    
+    // Programming/Tech
+    {":computer:", "💻"}, {":bug:", "🐛"}, {":gear:", "⚙️"}, {":wrench:", "🔧"},
+    {":hammer:", "🔨"}, {":electric_plug:", "🔌"}, {":bulb:", "💡"}, {":lock:", "🔒"},
+    {":key:", "🔑"}, {":mag:", "🔍"},
+    
+    // Gestures
+    {":thumbsup:", "👍"}, {":thumbsdown:", "👎"}, {":clap:", "👏"}, {":wave:", "👋"},
+    {":point_right:", "👉"}, {":point_left:", "👈"}, {":point_up:", "👆"}, {":point_down:", "👇"},
+    
+    // Objects  
+    {":phone:", "📱"}, {":camera:", "📷"}, {":book:", "📖"}, {":pencil:", "✏️"},
+    {":memo:", "📝"}, {":email:", "✉️"}, {":mailbox:", "📮"}, {":inbox_tray:", "📥"},
+    
+    {NULL, NULL}  // End marker
+};
+
+// Parse emoji shortcode (:emoji:)
+static Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    
+    // Check for opening :
+    if (*start != ':') {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = start + 1;
+    const char* content_start = pos;
+    
+    // Find closing : (look for word characters and underscores)
+    while (*pos && (isalnum(*pos) || *pos == '_')) {
+        pos++;
+    }
+    
+    if (*pos != ':' || pos == content_start) {
+        // No proper closing : or empty content
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract shortcode between :
+    size_t shortcode_len = (pos + 1) - start; // Include both :
+    char* shortcode = (char*)malloc(shortcode_len + 1);
+    if (!shortcode) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    strncpy(shortcode, start, shortcode_len);
+    shortcode[shortcode_len] = '\0';
+    
+    // Look up emoji in table
+    const char* emoji_char = NULL;
+    for (int i = 0; emoji_map[i].shortcode; i++) {
+        if (strcmp(shortcode, emoji_map[i].shortcode) == 0) {
+            emoji_char = emoji_map[i].emoji;
+            break;
+        }
+    }
+    
+    free(shortcode);
+    
+    if (!emoji_char) {
+        // Unknown emoji shortcode
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Create emoji element
+    Element* emoji_elem = create_element(parser->input, "emoji");
+    if (!emoji_elem) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Add emoji character as content
+    String* emoji_str = input_create_string(parser->input, emoji_char);
+    if (emoji_str) {
+        Item emoji_item = {.item = s2it(emoji_str)};
+        list_push((List*)emoji_elem, emoji_item);
+        increment_element_content_length(emoji_elem);
+    }
+    
+    *text = pos + 1; // Skip closing :
+    
+    return (Item){.item = (uint64_t)emoji_elem};
+}
+
+// Parse inline math ($expression$)
+static Item parse_inline_math(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    
+    // Check for opening $
+    if (*start != '$') {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = start + 1;
+    const char* content_start = pos;
+    
+    // Find closing $ (but don't allow empty content)
+    while (*pos && *pos != '$') {
+        pos++;
+    }
+    
+    if (*pos != '$' || pos == content_start) {
+        // No proper closing $ or empty content
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract content between $
+    size_t content_len = pos - content_start;
+    
+    // Create math element
+    Element* math_elem = create_element(parser->input, "math");
+    if (!math_elem) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Add type attribute for inline math
+    add_attribute_to_element(parser->input, math_elem, "type", "inline");
+    
+    // Create content string
+    char* content = (char*)malloc(content_len + 1);
+    if (!content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    strncpy(content, content_start, content_len);
+    content[content_len] = '\0';
+    
+    // Add math content as string
+    String* math_str = input_create_string(parser->input, content);
+    if (math_str) {
+        Item math_item = {.item = s2it(math_str)};
+        list_push((List*)math_elem, math_item);
+        increment_element_content_length(math_elem);
+    }
+    
+    free(content);
+    *text = pos + 1; // Skip closing $
+    
+    return (Item){.item = (uint64_t)math_elem};
+}
+
+// Parse small caps (placeholder for future implementation)
+static Item parse_small_caps(MarkupParser* parser, const char** text) {
+    // Small caps could be implemented as HTML <span style="font-variant: small-caps">
+    // This is a placeholder for future implementation
+    return (Item){.item = ITEM_UNDEFINED};
 }

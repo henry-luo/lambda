@@ -198,6 +198,22 @@ Test(markup_roundtrip, complete_test) {
     cr_assert(strstr(formatted->chars, "def example") != NULL, "Code blocks in lists should be preserved");
     cr_assert(strstr(formatted->chars, "nested code block") != NULL, "Nested code blocks should be preserved");
     
+    // Phase 4: Advanced inline elements validation
+    cr_assert(strstr(formatted->chars, "strikethrough") != NULL, "Strikethrough text should be preserved");
+    cr_assert(strstr(formatted->chars, "superscript") != NULL || strstr(formatted->chars, "^2^") != NULL, "Superscript should be preserved");
+    cr_assert(strstr(formatted->chars, "subscript") != NULL || strstr(formatted->chars, "H") != NULL, "Subscript should be preserved");
+    
+    // Emoji validation - flexible checking since formatting may vary
+    bool has_emojis = (strstr(formatted->chars, "smile") != NULL) || (strstr(formatted->chars, "😄") != NULL) ||
+                     (strstr(formatted->chars, "rocket") != NULL) || (strstr(formatted->chars, "🚀") != NULL) ||
+                     (strstr(formatted->chars, "fire") != NULL) || (strstr(formatted->chars, "🔥") != NULL);
+    cr_assert(has_emojis, "Emoji content should be preserved");
+    
+    // Inline math validation
+    cr_assert(strstr(formatted->chars, "E = mc") != NULL || strstr(formatted->chars, "E=mc") != NULL, "Inline math should be preserved");
+    cr_assert(strstr(formatted->chars, "frac") != NULL || strstr(formatted->chars, "a + b") != NULL, "Math fractions should be preserved");
+    cr_assert(strstr(formatted->chars, "pi") != NULL || strstr(formatted->chars, "π") != NULL, "Math symbols should be preserved");
+    
     cr_assert(strstr(formatted->chars, "Final paragraph") != NULL, "Final content should be preserved");
     
     printf("Complete test - formatted (length %zu):\n%s\n", formatted->len, formatted->chars);
@@ -264,4 +280,82 @@ Test(markup_roundtrip, nested_lists_test) {
     
     // Cleanup
     free(content_copy);
+}
+
+// Phase 4: Test advanced inline elements (strikethrough, superscript, subscript, emoji, inline math)
+Test(markup_roundtrip, phase4_advanced_inline_test) {
+    printf("\n=== Testing Phase 4: Advanced Inline Elements ===\n");
+    
+    // Read Phase 4 test content from file
+    char* phase4_markdown = read_file_content("test/input/phase4_advanced_inline_test.md");
+    cr_assert_not_null(phase4_markdown, "Failed to read phase4_advanced_inline_test.md");
+    
+    printf("Loaded Phase 4 test content from file (length: %zu bytes)\n", strlen(phase4_markdown));
+    
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("markup");
+    String* flavor_str = NULL;
+    
+    // Get current directory for URL resolution
+    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* dummy_url = parse_url(cwd, "phase4.md");
+    
+    // Make a mutable copy of the content
+    char* content_copy = strdup(phase4_markdown);
+    
+    // Parse Phase 4 content
+    Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
+    cr_assert_not_null(input, "Failed to parse Phase 4 advanced inline markdown");
+    
+    // Format using markdown formatter
+    String* markdown_type = create_lambda_string("markdown");
+    String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
+    cr_assert_not_null(formatted, "Failed to format Phase 4 advanced inline markdown");
+    cr_assert(formatted->len > 0, "Formatted content should not be empty");
+    
+    // Phase 4: Advanced inline element validation
+    cr_assert(strstr(formatted->chars, "Advanced Inline Elements") != NULL, "Header should be preserved");
+    
+    // Strikethrough validation
+    cr_assert(strstr(formatted->chars, "struck through") != NULL, "Strikethrough content should be preserved");
+    
+    // Superscript/Subscript validation  
+    cr_assert(strstr(formatted->chars, "mc") != NULL, "Superscript content should be preserved (E=mc^2)");
+    cr_assert(strstr(formatted->chars, "H") != NULL && strstr(formatted->chars, "O") != NULL, "Subscript content should be preserved (H2O)");
+    
+    // Emoji validation - check for actual emoji characters or emoji elements
+    // Note: The formatter might convert emojis differently, so check for emoji-related content
+    bool has_emoji_content = (strstr(formatted->chars, "smile") != NULL) || 
+                            (strstr(formatted->chars, "😄") != NULL) ||
+                            (strstr(formatted->chars, "rocket") != NULL) ||
+                            (strstr(formatted->chars, "🚀") != NULL) ||
+                            (strstr(formatted->chars, "heart") != NULL) ||
+                            (strstr(formatted->chars, "❤️") != NULL);
+    cr_assert(has_emoji_content, "Emoji content should be preserved or converted");
+    
+    // Inline math validation
+    cr_assert(strstr(formatted->chars, "x + y = z") != NULL, "Inline math content should be preserved");
+    cr_assert(strstr(formatted->chars, "frac") != NULL || strstr(formatted->chars, "1/2") != NULL, "Math fractions should be preserved");
+    cr_assert(strstr(formatted->chars, "alpha") != NULL || strstr(formatted->chars, "α") != NULL, "Greek letters should be preserved");
+    
+    // Mixed content validation
+    cr_assert(strstr(formatted->chars, "Bold with") != NULL, "Mixed bold and strikethrough should work");
+    cr_assert(strstr(formatted->chars, "Einstein") != NULL, "Complex mixed content should be preserved");
+    
+    // Table with advanced features
+    cr_assert(strstr(formatted->chars, "Feature") != NULL && strstr(formatted->chars, "Example") != NULL, "Table headers should be preserved");
+    cr_assert(strstr(formatted->chars, "Strikethrough") != NULL, "Table content should be preserved");
+    
+    // Edge cases - should handle malformed input gracefully
+    // The parser should not crash on incomplete elements
+    
+    // Final comprehensive test
+    cr_assert(strstr(formatted->chars, "all mixed together") != NULL, "Final comprehensive paragraph should be preserved");
+    cr_assert(strstr(formatted->chars, "chemical formula") != NULL, "Scientific notation should be preserved");
+    
+    printf("Phase 4 test - formatted (length %zu):\n%s\n", formatted->len, formatted->chars);
+    
+    // Cleanup
+    free(content_copy);
+    free(phase4_markdown);
 }

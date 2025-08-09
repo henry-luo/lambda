@@ -2,9 +2,11 @@
 
 ## Sub Header
 
-Paragraph with **bold**, *italic*, and `inline code`.
+Paragraph with **bold**, *italic*, `inline code`, ~~strikethrough~~, and superscript^2^.
 
-Another paragraph with [link text](https://example.com) and ![alt text](image.jpg).
+Another paragraph with [link text](https://example.com), ![alt text](image.jpg), subscript~1~, and emoji :smile:.
+
+Inline math: $E = mc^2$ and complex expression: $\frac{a + b}{c}$.
 
 > This is a blockquote
 > with multiple lines
@@ -91,7 +93,15 @@ def hello_world():
 | Header 1 | Header 2 | Header 3 |
 |----------|----------|----------|
 | Cell 1   | **Bold** | `Code`   |
-| Cell 2   | *Italic* | [Link](http://example.com) |
+| Cell 2   | *Italic* ~~Strike~~ | [Link](http://example.com) :fire: |
+
+### Phase 4: Advanced Inline Elements
+
+Advanced formatting: H~2~O molecule, x^2^ + y^2^ = z^2^, and ~~deleted text~~.
+
+Emoji support: :rocket: :heart: :100: :thumbsup: :fire: :bug: :bulb:
+
+Inline math with subscripts: $x_1 + x_2 = \sum_{i=1}^{2} x_i$
 
 ### Math Block
 
@@ -100,5 +110,7 @@ E = mc^2
 $$
 
 ---
+
+Final paragraph with **all ~~combined~~ features**: *italic*, `code`, [links](http://example.com), images ![test](img.jpg), H~2~O, E=mc^2^, math $\pi r^2$, and emojis :smile: :rocket:!
 
 Final paragraph after horizontal rule.
