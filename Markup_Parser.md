@@ -306,8 +306,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 
 **Files to Create:**
 - `lambda/input/markup-parser.h` - Core interfaces and structures
-- `lambda/input/markup-parser.cpp` - Basic infrastructure
-- `temp/test_markup_parser_basic.ls` - Basic infrastructure test
+- `lambda/input/input-markup.cpp` - Basic infrastructure
 
 **Deliverables:**
 1. Basic parser state management
@@ -322,10 +321,6 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Basic string buffer operations
 
 ### Phase 2: Block Element Parsers (Week 2)
-
-**Files to Create:**
-- `lambda/input/markup-blocks.cpp` - Reusable block parsers
-- `temp/test_markup_blocks.ls` - Block element tests
 
 **Deliverables:**
 1. Heading parser (all formats)
@@ -342,10 +337,6 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 
 ### Phase 3: List Processing (Week 3)
 
-**Files to Update:**
-- `lambda/input/markup-blocks.cpp` - Extended list support
-- `temp/test_markup_lists.ls` - List-specific tests
-
 **Deliverables:**
 1. Multi-level list nesting
 2. Mixed ordered/unordered lists
@@ -361,10 +352,6 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 
 ### Phase 4: Inline Element Parsers (Week 4)
 
-**Files to Create:**
-- `lambda/input/markup-inline.cpp` - Reusable inline parsers
-- `temp/test_markup_inline.ls` - Inline element tests
-
 **Deliverables:**
 1. Emphasis parsing (bold, italic, combinations)
 2. Link parsing (inline, reference, automatic)
@@ -379,10 +366,6 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Entities: HTML entities, Unicode escapes
 
 ### Phase 5: Table Support (Week 5)
-
-**Files to Create:**
-- `lambda/input/markup-tables.cpp` - Table parsers
-- `temp/test_markup_tables.ls` - Table tests
 
 **Deliverables:**
 1. Simple tables (markdown/textile style)
@@ -435,25 +418,23 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Error recovery scenarios
 - Memory leak detection
 
+## Algorithm Details
+
+### List Processing Flow
+1. **Detection**: `detect_block_type()` identifies list items
+2. **Initialization**: `parse_list_structure()` creates appropriate list container
+3. **State Management**: Tracks current depth and markers in parser state
+4. **Content Parsing**: Processes immediate text and looks for nested content
+5. **Recursion**: Handles nested lists by calling `parse_list_structure()` recursively
+6. **Cleanup**: Pops state when exiting nested levels
+
+### Indentation Logic
+- **Base Indentation**: Establishes the reference level for list items
+- **Continuation Detection**: Content indented more than base belongs to current item
+- **Nesting Detection**: List items indented more than base start nested lists
+- **Termination**: Content at or below base indent ends current list
+
 ## Testing Strategy
-
-### Test File Organization
-
-```
-temp/
-├── test_markup_parser_basic.ls      # Phase 1: Infrastructure
-├── test_markup_blocks.ls            # Phase 2: Block elements  
-├── test_markup_lists.ls             # Phase 3: Lists
-├── test_markup_inline.ls            # Phase 4: Inline elements
-├── test_markup_tables.ls            # Phase 5: Tables
-├── test_markup_advanced.ls          # Phase 6: Advanced features
-└── sample_docs/                     # Sample documents for testing
-    ├── sample.md                    # Markdown samples
-    ├── sample.rst                   # reStructuredText samples
-    ├── sample.textile               # Textile samples
-    ├── sample.wiki                  # Wiki markup samples
-    └── sample.org                   # Org-mode samples
-```
 
 ### Test Coverage Goals
 

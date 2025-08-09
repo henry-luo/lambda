@@ -8,6 +8,10 @@ static Item parse_document(MarkupParser* parser);
 static Item parse_block_element(MarkupParser* parser);
 static Item parse_inline_content(MarkupParser* parser, const char* text);
 
+// Phase 3: Forward declarations for enhanced list processing
+static Item parse_list_structure(MarkupParser* parser, int base_indent);
+static Item parse_nested_list_content(MarkupParser* parser, int base_indent);
+
 // Helper function to increment element content length safely  
 static void increment_element_content_length(Element* element) {
     if (element && element->type) {
@@ -353,21 +357,94 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
     return (Item){.item = (uint64_t)para};
 }
 
-// Parse list items (-, *, +, 1., 2., etc.) - Create proper list structure
-static Item parse_list_item(MarkupParser* parser, const char* line) {
-    // Determine if this is an ordered or unordered list
-    const char* content = line;
-    skip_whitespace(&content);
+// Phase 3: Enhanced list processing with multi-level nesting
+static int get_list_indentation(const char* line) {
+    if (!line) return 0;
+    int indent = 0;
+    while (*line == ' ' || *line == '\t') {
+        if (*line == ' ') indent++;
+        else if (*line == '\t') indent += 4; // Tab counts as 4 spaces
+        line++;
+    }
+    return indent;
+}
+
+static char get_list_marker(const char* line) {
+    if (!line) return 0;
+    const char* pos = line;
+    skip_whitespace(&pos);
     
-    bool is_ordered = false;
-    if (isdigit(*content)) {
-        // Check if it's a numbered list
-        const char* temp = content;
-        while (isdigit(*temp)) temp++;
-        if (*temp == '.') {
-            is_ordered = true;
+    // Check for unordered markers
+    if (*pos == '-' || *pos == '*' || *pos == '+') {
+        return *pos;
+    }
+    
+    // Check for ordered markers (return '.' for any numbered list)
+    if (isdigit(*pos)) {
+        while (isdigit(*pos)) pos++;
+        if (*pos == '.' || *pos == ')') return '.';
+    }
+    
+    return 0;
+}
+
+static bool is_ordered_marker(char marker) {
+    return marker == '.';
+}
+
+static Item parse_nested_list_content(MarkupParser* parser, int base_indent) {
+    Element* content_container = create_element(parser->input, "div");
+    if (!content_container) return (Item){.item = ITEM_ERROR};
+    
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        
+        if (is_empty_line(line)) {
+            parser->current_line++;
+            continue;
+        }
+        
+        int line_indent = get_list_indentation(line);
+        
+        // If line is at or before base indentation and is a list item, we're done
+        if (line_indent <= base_indent && is_list_item(line)) {
+            break;
+        }
+        
+        // If line is less indented than expected, we're done with this content
+        if (line_indent < base_indent + 2) {
+            break;
+        }
+        
+        // Check if this starts a nested list
+        if (is_list_item(line)) {
+            Item nested_list = parse_list_structure(parser, line_indent);
+            if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
+                list_push((List*)content_container, nested_list);
+                increment_element_content_length(content_container);
+            }
+        } else {
+            // Parse as paragraph content
+            Item para_content = parse_paragraph(parser, line);
+            if (para_content.item != ITEM_ERROR && para_content.item != ITEM_UNDEFINED) {
+                list_push((List*)content_container, para_content);
+                increment_element_content_length(content_container);
+            }
         }
     }
+    
+    return (Item){.item = (uint64_t)content_container};
+}
+
+// Phase 3: Enhanced list structure parsing with proper nesting
+static Item parse_list_structure(MarkupParser* parser, int base_indent) {
+    if (parser->current_line >= parser->line_count) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    const char* first_line = parser->lines[parser->current_line];
+    char marker = get_list_marker(first_line);
+    bool is_ordered = is_ordered_marker(marker);
     
     // Create the appropriate list container
     Element* list = create_element(parser->input, is_ordered ? "ol" : "ul");
@@ -376,59 +453,129 @@ static Item parse_list_item(MarkupParser* parser, const char* line) {
         return (Item){.item = ITEM_ERROR};
     }
     
-    // Parse all consecutive list items
+    // Track list state for proper nesting
+    if (parser->state.list_depth < 9) {
+        parser->state.list_markers[parser->state.list_depth] = marker;
+        parser->state.list_levels[parser->state.list_depth] = base_indent;
+        parser->state.list_depth++;
+    }
+    
     while (parser->current_line < parser->line_count) {
-        const char* current_line = parser->lines[parser->current_line];
+        const char* line = parser->lines[parser->current_line];
         
-        if (is_empty_line(current_line)) {
-            // Check if there's another list item after the empty line
+        if (is_empty_line(line)) {
+            // Skip empty lines but check if list continues
             int next_line = parser->current_line + 1;
-            if (next_line < parser->line_count && is_list_item(parser->lines[next_line])) {
-                parser->current_line++; // Skip empty line
+            if (next_line >= parser->line_count) break;
+            
+            const char* next = parser->lines[next_line];
+            int next_indent = get_list_indentation(next);
+            
+            // If next line continues the list or is content for current item
+            if ((is_list_item(next) && next_indent >= base_indent) || 
+                (!is_list_item(next) && next_indent > base_indent)) {
+                parser->current_line++;
                 continue;
             } else {
                 break; // End of list
             }
         }
         
-        if (!is_list_item(current_line)) {
-            break; // Not a list item, end of list
+        int line_indent = get_list_indentation(line);
+        
+        // If this line is less indented than our base, we're done with this list
+        if (line_indent < base_indent) {
+            break;
         }
         
-        // Parse this list item
-        Element* item = create_element(parser->input, "li");
-        if (!item) break;
-        
-        // Extract content after marker
-        const char* item_content = current_line;
-        skip_whitespace(&item_content);
-        
-        // Skip list marker
-        if (is_ordered) {
-            while (isdigit(*item_content)) item_content++;
-            if (*item_content == '.') item_content++;
-        } else {
-            if (*item_content == '-' || *item_content == '*' || *item_content == '+') {
-                item_content++;
+        // If this is a list item at our level
+        if (line_indent == base_indent && is_list_item(line)) {
+            char line_marker = get_list_marker(line);
+            bool line_is_ordered = is_ordered_marker(line_marker);
+            
+            // Check if this item belongs to our list type
+            if (line_is_ordered != is_ordered) {
+                break; // Different list type, end current list
             }
+            
+            // Create list item
+            Element* item = create_element(parser->input, "li");
+            if (!item) break;
+            
+            // Extract content after marker
+            const char* item_content = line;
+            skip_whitespace(&item_content);
+            
+            // Skip list marker
+            if (line_is_ordered) {
+                while (isdigit(*item_content)) item_content++;
+                if (*item_content == '.' || *item_content == ')') item_content++;
+            } else {
+                item_content++; // Skip single character marker
+            }
+            skip_whitespace(&item_content);
+            
+            // Parse immediate inline content
+            if (*item_content) {
+                Item text_content = parse_inline_spans(parser, item_content);
+                if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)item, text_content);
+                    increment_element_content_length(item);
+                }
+            }
+            
+            parser->current_line++;
+            
+            // Look for continued content (nested lists, paragraphs)
+            Item nested_content = parse_nested_list_content(parser, base_indent);
+            if (nested_content.item != ITEM_ERROR && nested_content.item != ITEM_UNDEFINED) {
+                Element* content_div = (Element*)nested_content.item;
+                if (content_div && ((List*)content_div)->length > 0) {
+                    // Move contents from div to list item
+                    List* div_list = (List*)content_div;
+                    for (long i = 0; i < div_list->length; i++) {
+                        list_push((List*)item, div_list->items[i]);
+                        increment_element_content_length(item);
+                    }
+                }
+            }
+            
+            // Add completed list item to list
+            list_push((List*)list, (Item){.item = (uint64_t)item});
+            increment_element_content_length(list);
+            
+        } else if (line_indent > base_indent && is_list_item(line)) {
+            // This is a nested list - parse it recursively
+            Item nested_list = parse_list_structure(parser, line_indent);
+            if (nested_list.item != ITEM_ERROR && nested_list.item != ITEM_UNDEFINED) {
+                // Add nested list to the last list item if it exists
+                List* current_list = (List*)list;
+                if (current_list->length > 0) {
+                    Element* last_item = (Element*)current_list->items[current_list->length - 1].item;
+                    list_push((List*)last_item, nested_list);
+                    increment_element_content_length(last_item);
+                }
+            }
+        } else {
+            // Not a list item and not properly indented, end list
+            break;
         }
-        skip_whitespace(&item_content);
-        
-        // Parse inline content for this list item
-        Item text_content = parse_inline_spans(parser, item_content);
-        if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
-            list_push((List*)item, text_content);
-            increment_element_content_length(item);
-        }
-        
-        // Add list item to list
-        list_push((List*)list, (Item){.item = (uint64_t)item});
-        increment_element_content_length(list);
-        
-        parser->current_line++;
+    }
+    
+    // Pop list state
+    if (parser->state.list_depth > 0) {
+        parser->state.list_depth--;
+        parser->state.list_markers[parser->state.list_depth] = 0;
+        parser->state.list_levels[parser->state.list_depth] = 0;
     }
     
     return (Item){.item = (uint64_t)list};
+}
+
+// Parse list items (-, *, +, 1., 2., etc.) - Enhanced with nesting support
+static Item parse_list_item(MarkupParser* parser, const char* line) {
+    int base_indent = get_list_indentation(line);
+    return parse_list_structure(parser, base_indent);
 }
 
 // Parse code blocks (```, ```, ~~~, etc.)

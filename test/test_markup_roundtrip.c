@@ -186,6 +186,18 @@ Test(markup_roundtrip, complete_test) {
     cr_assert(strstr(formatted->chars, "Header 1") != NULL, "Table headers should be preserved");
     cr_assert(strstr(formatted->chars, "Cell 1") != NULL, "Table cells should be preserved");
     cr_assert(strstr(formatted->chars, "E = mc^2") != NULL, "Math content should be preserved");
+    
+    // Phase 3: Enhanced list validation
+    cr_assert(strstr(formatted->chars, "Top level item 1") != NULL, "Top level list items should be preserved");
+    cr_assert(strstr(formatted->chars, "Nested item 1.1") != NULL, "Nested list items should be preserved");
+    cr_assert(strstr(formatted->chars, "Deep nested 1.2.1") != NULL, "Deep nested items should be preserved");
+    cr_assert(strstr(formatted->chars, "Mixed ordered") != NULL, "Mixed list types should be preserved");
+    cr_assert(strstr(formatted->chars, "Back to numbered") != NULL, "Mixed list nesting should be preserved");
+    cr_assert(strstr(formatted->chars, "Multi-paragraph") != NULL, "List items with paragraphs should be preserved");
+    cr_assert(strstr(formatted->chars, "continuation paragraph") != NULL, "List item continuations should be preserved");
+    cr_assert(strstr(formatted->chars, "def example") != NULL, "Code blocks in lists should be preserved");
+    cr_assert(strstr(formatted->chars, "nested code block") != NULL, "Nested code blocks should be preserved");
+    
     cr_assert(strstr(formatted->chars, "Final paragraph") != NULL, "Final content should be preserved");
     
     printf("Complete test - formatted (length %zu):\n%s\n", formatted->len, formatted->chars);
@@ -193,4 +205,63 @@ Test(markup_roundtrip, complete_test) {
     // Cleanup
     free(content_copy);
     free(comprehensive_markdown);
+}
+
+// Phase 3: Test nested list processing specifically
+Test(markup_roundtrip, nested_lists_test) {
+    printf("\n=== Testing Phase 3: Nested List Processing ===\n");
+    
+    const char* nested_list_markdown = 
+        "# Nested Lists Test\n\n"
+        "1. First level item\n"
+        "   - Second level item\n"
+        "     1. Third level numbered\n"
+        "     2. Another third level\n"
+        "   - Another second level\n"
+        "2. Back to first level\n"
+        "\n"
+        "Mixed nesting:\n"
+        "- Unordered first\n"
+        "  1. Ordered second\n"
+        "  2. Another ordered\n"
+        "    - Back to unordered third\n"
+        "    - More unordered third\n"
+        "  3. Final ordered second\n"
+        "- Final unordered first\n";
+    
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("markup");
+    String* flavor_str = NULL;
+    
+    // Get current directory for URL resolution
+    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* dummy_url = parse_url(cwd, "nested.md");
+    
+    // Make a mutable copy of the content
+    char* content_copy = strdup(nested_list_markdown);
+    
+    // Parse nested list content
+    Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
+    cr_assert_not_null(input, "Failed to parse nested list markdown");
+    
+    // Format using markdown formatter
+    String* markdown_type = create_lambda_string("markdown");
+    String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
+    cr_assert_not_null(formatted, "Failed to format nested list markdown");
+    cr_assert(formatted->len > 0, "Formatted content should not be empty");
+    
+    // Validate nested structure preservation
+    cr_assert(strstr(formatted->chars, "Nested Lists Test") != NULL, "Header should be preserved");
+    cr_assert(strstr(formatted->chars, "First level item") != NULL, "First level items should be preserved");
+    cr_assert(strstr(formatted->chars, "Second level item") != NULL, "Second level items should be preserved");
+    cr_assert(strstr(formatted->chars, "Third level numbered") != NULL, "Third level items should be preserved");
+    cr_assert(strstr(formatted->chars, "Mixed nesting") != NULL, "Mixed nesting section should be preserved");
+    cr_assert(strstr(formatted->chars, "Unordered first") != NULL, "Mixed list items should be preserved");
+    cr_assert(strstr(formatted->chars, "Ordered second") != NULL, "Mixed ordered items should be preserved");
+    cr_assert(strstr(formatted->chars, "Back to unordered third") != NULL, "Deep mixed nesting should be preserved");
+    
+    printf("Nested lists test - formatted (length %zu):\n%s\n", formatted->len, formatted->chars);
+    
+    // Cleanup
+    free(content_copy);
 }
