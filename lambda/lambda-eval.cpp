@@ -946,10 +946,35 @@ String* fn_format(Item item, Item type) {
 #include "../lib/utf.h"
 
 // generic field access function for any type
-Item fn_index(Item item, long index) {
+Item fn_index(Item item, Item index_item) {
     // Determine the type and delegate to appropriate getter
-    TypeId type_id = get_type_id(item);
+    long index = -1;
+    switch (index_item.type_id) {
+    case LMD_TYPE_INT:
+        index = index_item.int_val;
+        break;
+    case LMD_TYPE_INT64:
+        index = *(long*)index_item.pointer;
+        break;
+    case LMD_TYPE_FLOAT: {
+        double dval = *(double*)index_item.pointer;
+        // check dval is an integer
+        if (dval == (long)dval) {
+            index = (long)dval;
+        } else {
+            printf("index must be an integer, got float %g\n", dval);
+            return ItemNull;  // todo: push error
+        }
+        break;
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:
+        return fn_member(item, index_item);
+    default:
+        printf("invalid index type %d\n", index_item.type_id);
+        return ItemNull;
+    }
 
+    TypeId type_id = get_type_id(item);
     switch (type_id) {
     case LMD_TYPE_RANGE: {
         Range *range = item.range;

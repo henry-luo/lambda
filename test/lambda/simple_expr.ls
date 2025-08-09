@@ -25,8 +25,8 @@ let m = {'a': 1, "b": c + 2, d:[true, null], e: <elmt a: 1, b: 2>, f:int}
 <elmt a: 1, b: 2, c:{d:1+5.0, e:type(1.0)}>
 {c:1, m, g:2} // todo: <elmt c:1, m, d:2>
 "Member exprs: ============"
-[m.a,  m.b,  m.c,  m.d,  m.d[0],  len(m.d),  m.e,  m.e.a,  m.e.b,  m.f,  m.g]
-// m["a"],  m["b"],  m["c"],  m["d"],  m["e"],  m["f"],  m["g"]]
+[m.a,  m.b,  m.c,  m.d,  m.d[0],  len(m.d),  m.e,  m.e.a,  m.e.b,  m.f,  m.g,
+m["a"],  m["b"],  m["c"],  m["d"],  m["e"],  m["f"],  m["g"]]
 // "Index exprs: ============"
 // let arr = [1, 2, 3]
 // arr[-1];  arr[0];  arr[1];  arr[2];  arr[3];

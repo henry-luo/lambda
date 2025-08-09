@@ -69,4 +69,4 @@ element
 <elmt a:1, b:2, c:{d:6, e:float}>
 {c:1, a:1, b:102, d:[true, null], e:<elmt a:1, b:2>, f:int, g:2}
 "Member exprs: ============"
-[1, 102, null, [true, null], true, 2, <elmt a:1, b:2>, 1, 2, int, null]
+[1, 102, null, [true, null], true, 2, <elmt a:1, b:2>, 1, 2, int, null, 1, 102, null, [true, null], <elmt a:1, b:2>, int, null]

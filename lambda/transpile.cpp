@@ -628,6 +628,10 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     else {
         strbuf_append_str(tp->code_buf, "fn_index(");
         transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;    
     }
     strbuf_append_char(tp->code_buf, ',');
     transpile_expr(tp, field_node->field);

@@ -242,7 +242,7 @@ Map* map_fill(Map* map, ...);
 Item map_get(Map* map, Item key);
 
 // generic field access function
-Item fn_index(Item item, long index);
+Item fn_index(Item item, Item index);
 Item fn_member(Item item, Item key);
 
 // length function
