@@ -17,6 +17,7 @@ String* format_yaml(VariableMemPool* pool, Item root_item);
 String* format_toml(VariableMemPool* pool, Item root_item);
 String* format_ini(VariableMemPool* pool, Item root_item);
 String* format_css(VariableMemPool* pool, Item root_item);
+String* format_latex(VariableMemPool* pool, Item root_item);
 void format_rst(StrBuf* sb, Item root_item);
 String* format_rst_string(VariableMemPool* pool, Item root_item);
 void format_org(StrBuf* sb, Item root_item);
