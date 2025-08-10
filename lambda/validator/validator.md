@@ -285,6 +285,8 @@ The Lambda Validator includes 137 comprehensive Criterion-based tests covering a
 - Optional fields (?), One-or-more (+), Zero-or-more (*)  
 - Union types (|), Array types ([...]), Element types (<...>)
 - Nested structures, type definitions, references, function signatures
+- Deep nested validation (child, grandchild, great-grandchild element errors)
+- Path-aware error reporting with full root-to-leaf error context
 - Constraints validation (min/max length, patterns, enumerations)
 
 **🌐 Input Formats:** 
@@ -407,12 +409,15 @@ The Lambda Validator is **fully integrated into the Lambda CLI** as a subcommand
 - **CLI Integration**: `lambda validate` subcommand with automatic schema selection
 - **Multi-Format Support**: HTML, EML, ICS, VCF, Markdown, reStructuredText, AsciiDoc, Wiki, Textile, Man pages, Mark, JSON, XML, YAML, CSV, INI, TOML, LaTeX, RTF, PDF, Plain Text input support, and auto MIME type detection.
 - **Automatic Schema Selection**: Intelligent schema selection based on file format 
+- **Deep Nested Validation**: Complete validation of nested structures with grandchild/great-grandchild element error detection and full path reporting
 - **Schema Standards Support**: Existing schema standards, like XSD, RelaxNG, JSON Schema, OpenAPI/Swagger, Yamale, can be easily mapped into Lambda schema
 - **Complete Lambda Grammar**: Uses existing Tree-sitter grammar for full syntax support
 - **Memory Management**: Proper VariableMemPool integration with error handling
 - **Test Coverage**: 137 comprehensive Criterion tests, memory-safe, clean output
 
-### 🚧 **Future Enhancement Opportunities**
+### 🚧 **Current Enhancement Status**
+- **Deep Nested Validation**: ✅ **COMPLETE** - Full grandchild/great-grandchild element error validation with comprehensive path reporting
+- **Element Schema Validation**: 🔧 **IN PROGRESS** - XML element validation parsing requires Tree-sitter grammar enhancements for `<tag>` syntax recognition
 - **Advanced Validation Rules**: Expand semantic validation beyond basic type checking
 - **Enhanced Error Context**: More precise source location information in error messages
 - **Performance Optimization**: Optimize schema parsing and validation for large documents
