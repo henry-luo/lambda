@@ -240,7 +240,7 @@ type AttrType = {
 // Core document structure types
 type Document <
     version: string,
-    <meta: Meta?>,
+    <meta: Meta>?,
     <body>
 >
 

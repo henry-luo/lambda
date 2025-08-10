@@ -7,6 +7,7 @@
 
 #include "validator.h"
 #include "../ts-enum.h"  // Include Tree-sitter symbols and field IDs
+#include "../ast.h"      // Include field constants
 #include "../../lib/arraylist.h"
 #include <string.h>
 #include <assert.h>
@@ -378,12 +379,88 @@ TypeSchema* build_array_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_map_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    // For now, create a simple string -> any map
-    // TODO: Parse actual field definitions from the map node
-    TypeSchema* key_type = create_primitive_schema(LMD_TYPE_STRING, parser->pool);
-    TypeSchema* value_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+    //printf("[SCHEMA_PARSER] DEBUG: Building map schema from node\n");
     
-    return create_map_schema(key_type, value_type, parser->pool);
+    // For runtime map nodes, we also need to parse field definitions
+    // This handles the runtime map literal syntax: { key: value, ... }
+    TypeSchema* schema = create_map_schema(
+        create_primitive_schema(LMD_TYPE_STRING, parser->pool),
+        create_primitive_schema(LMD_TYPE_ANY, parser->pool),
+        parser->pool
+    );
+    
+    SchemaMap* map_data = (SchemaMap*)schema->schema_data;
+    if (!map_data) {
+        return schema;
+    }
+    
+    // Parse map items from child nodes
+    SchemaMapField* first_field = NULL;
+    SchemaMapField* last_field = NULL;
+    int field_count = 0;
+    
+    uint32_t child_count = ts_node_child_count(node);
+    //printf("[SCHEMA_PARSER] DEBUG: Map node has %d children\n", child_count);
+    
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        TSSymbol child_symbol = ts_node_symbol(child);
+        
+        // Look for map_item nodes which should contain field definitions
+        if (child_symbol == sym_map_item) {
+            TSNode name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+            TSNode type_node = ts_node_child_by_field_id(child, FIELD_TYPE);
+            
+            // If field IDs don't work, try sequential parsing
+            if (ts_node_is_null(name_node) || ts_node_is_null(type_node)) {
+                uint32_t item_child_count = ts_node_child_count(child);
+                for (uint32_t j = 0; j < item_child_count; j++) {
+                    TSNode item_child = ts_node_child(child, j);
+                    const char* item_child_type = ts_node_type(item_child);
+                    
+                    if (strcmp(item_child_type, "identifier") == 0 && ts_node_is_null(name_node)) {
+                        name_node = item_child;
+                    } else if (j > 0 && !ts_node_is_null(name_node) && ts_node_is_null(type_node)) {
+                        if (strcmp(item_child_type, "identifier") == 0 || 
+                            strstr(item_child_type, "type") != NULL) {
+                            type_node = item_child;
+                        }
+                    }
+                }
+            }
+            
+            if (!ts_node_is_null(name_node) && !ts_node_is_null(type_node)) {
+                StrView field_name = get_node_source(parser, name_node);
+                TypeSchema* field_type = build_schema_type(parser, type_node);
+                
+                if (!field_type) {
+                    field_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+                }
+                
+                SchemaMapField* field = (SchemaMapField*)pool_calloc(parser->pool, sizeof(SchemaMapField));
+                field->name = field_name;
+                field->type = field_type;
+                field->required = true;  // Map literals assume required by default
+                field->next = NULL;
+                
+                if (!first_field) {
+                    first_field = field;
+                    last_field = field;
+                } else {
+                    last_field->next = field;
+                    last_field = field;
+                }
+                field_count++;
+            }
+        }
+    }
+    
+    map_data->fields = first_field;
+    map_data->field_count = field_count;
+    
+    //printf("[SCHEMA_PARSER] DEBUG: Map schema created with %d fields\n", field_count);
+    
+    return schema;
 }
 
 TypeSchema* build_element_schema(SchemaParser* parser, TSNode node) {
@@ -501,12 +578,114 @@ TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    // Extract key and value types from map type using field IDs
-    // TODO: Parse actual map type structure from the node
-    TypeSchema* key_type = create_primitive_schema(LMD_TYPE_STRING, parser->pool);
-    TypeSchema* value_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+        // //printf("[SCHEMA_PARSER] DEBUG: Building map type schema from node\n");    // Create map schema with proper field parsing
+    TypeSchema* schema = create_map_schema(
+        create_primitive_schema(LMD_TYPE_STRING, parser->pool), 
+        create_primitive_schema(LMD_TYPE_ANY, parser->pool), 
+        parser->pool
+    );
     
-    return create_map_schema(key_type, value_type, parser->pool);
+    SchemaMap* map_data = (SchemaMap*)schema->schema_data;
+    if (!map_data) {
+        printf("[SCHEMA_PARSER] ERROR: Failed to create map schema data\n");
+        return schema;
+    }
+    
+    // Parse field definitions from child nodes
+    SchemaMapField* first_field = NULL;
+    SchemaMapField* last_field = NULL;
+    int field_count = 0;
+    
+    uint32_t child_count = ts_node_child_count(node);
+    //printf("[SCHEMA_PARSER] DEBUG: Map type node has %d children\n", child_count);
+    
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        TSSymbol child_symbol = ts_node_symbol(child);
+        
+        //printf("[SCHEMA_PARSER] DEBUG: Child %d: symbol=%d (%s)\n", i, child_symbol, ts_node_type(child));
+        
+        // Look for map_type_item nodes which should contain field definitions
+        if (child_symbol == sym_map_type_item) {
+            //printf("[SCHEMA_PARSER] DEBUG: Found map_type_item, parsing field\n");
+            
+            // Get field name and type from the map_type_item
+            TSNode name_node = ts_node_child_by_field_id(child, FIELD_NAME);
+            TSNode type_node = ts_node_child_by_field_id(child, FIELD_TYPE);
+            
+            if (ts_node_is_null(name_node) || ts_node_is_null(type_node)) {
+                //printf("[SCHEMA_PARSER] DEBUG: Looking for fields in child nodes\n");
+                // Try to find name and type in child nodes if field IDs don't work
+                uint32_t item_child_count = ts_node_child_count(child);
+                for (uint32_t j = 0; j < item_child_count; j++) {
+                    TSNode item_child = ts_node_child(child, j);
+                    const char* item_child_type = ts_node_type(item_child);
+                    //printf("[SCHEMA_PARSER] DEBUG: Item child %d: %s\n", j, item_child_type);
+                    
+                    if (strcmp(item_child_type, "identifier") == 0 && ts_node_is_null(name_node)) {
+                        name_node = item_child;
+                    } else if (j > 0 && !ts_node_is_null(name_node) && ts_node_is_null(type_node)) {
+                        // Type should be after the identifier (and colon)
+                        if (strcmp(item_child_type, "identifier") == 0 || 
+                            strstr(item_child_type, "type") != NULL) {
+                            type_node = item_child;
+                        }
+                    }
+                }
+            }
+            
+            if (!ts_node_is_null(name_node) && !ts_node_is_null(type_node)) {
+                // Extract field name
+                StrView field_name = get_node_source(parser, name_node);
+                //printf("[SCHEMA_PARSER] DEBUG: Field name: %.*s\n", (int)field_name.length, field_name.str);
+                
+                // Parse field type
+                TypeSchema* field_type = build_schema_type(parser, type_node);
+                if (!field_type) {
+                    field_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+                }
+                
+                // Determine if field is required (assume required by default, check for optional modifiers)
+                bool required = true;
+                if (field_type && field_type->schema_type == LMD_SCHEMA_OCCURRENCE) {
+                    SchemaOccurrence* occ = (SchemaOccurrence*)field_type->schema_data;
+                    if (occ && (occ->modifier == '?' || occ->modifier == '*')) {
+                        required = false;
+                    }
+                }
+                
+                // Create SchemaMapField
+                SchemaMapField* field = (SchemaMapField*)pool_calloc(parser->pool, sizeof(SchemaMapField));
+                field->name = field_name;
+                field->type = field_type;
+                field->required = required;
+                field->next = NULL;
+                
+                // Add to fields list
+                if (!first_field) {
+                    first_field = field;
+                    last_field = field;
+                } else {
+                    last_field->next = field;
+                    last_field = field;
+                }
+                field_count++;
+                
+                //printf("[SCHEMA_PARSER] DEBUG: Added field '%.*s' (required: %s)\n", 
+                //       (int)field_name.length, field_name.str, required ? "yes" : "no");
+            } else {
+                printf("[SCHEMA_PARSER] WARNING: Could not extract name/type from map_type_item\n");
+            }
+        }
+    }
+    
+    // Update map schema with parsed fields
+    map_data->fields = first_field;
+    map_data->field_count = field_count;
+    
+    //printf("[SCHEMA_PARSER] DEBUG: Map schema created with %d fields\n", field_count);
+    
+    return schema;
 }
 
 TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {

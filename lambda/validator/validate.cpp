@@ -4,6 +4,7 @@
 #include <cstring>   // for C++ string functions
 #include <cstdio>    // for C++ stdio functions
 #include <cstdlib>   // for C++ stdlib functions
+#include "../../lib/num_stack.h"
 
 extern "C" {
     // Forward declare read_text_file from lib/file.c
@@ -26,6 +27,15 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     Runtime runtime;
     runtime_init(&runtime);
     runtime.current_dir = (char*)"./";
+    
+    // Initialize minimal Lambda context for number stack (needed by map_get when retrieving floats)
+    Context validation_context = {0};
+    validation_context.num_stack = num_stack_create(16);
+    
+    // Set the global context for Lambda evaluation functions
+    extern __thread Context* context;
+    Context* old_context = context;
+    context = &validation_context;
     
     // Track if we created a temp_runner for cleanup
     Runner* temp_runner_ptr = NULL;
@@ -191,5 +201,11 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     schema_validator_destroy(validator);
     pool_variable_destroy(pool);
     free(schema_contents);
+    
+    // Restore the original context and cleanup number stack
+    context = old_context;
+    if (validation_context.num_stack) {
+        num_stack_destroy((num_stack_t*)validation_context.num_stack);
+    }
 }
 }

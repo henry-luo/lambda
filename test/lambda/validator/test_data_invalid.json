@@ -1,0 +1,11 @@
+{
+    "person": {
+        "name": "Jane Doe",
+        "age": "invalid_age",
+        "address": {
+            "street": "456 Oak St"
+        },
+        "interests": "should be array"
+    },
+    "extra_field": "not allowed in strict mode"
+}

@@ -6,8 +6,37 @@
  */
 
 #include "validator.h"
+#include "../../lib/strbuf.h"
 #include <string.h>
 #include <assert.h>
+
+// Helper function implementations
+static void strbuf_append_cstr(StrBuf* sb, const char* str) {
+    strbuf_append_str(sb, str);
+}
+
+static void strbuf_append_string(StrBuf* sb, String* str) {
+    if (str && str->chars) {
+        strbuf_append_str_n(sb, str->chars, str->len);
+    }
+}
+
+static String* strbuf_to_string(StrBuf* sb) {
+    if (!sb || !sb->str) {
+        return NULL;
+    }
+    
+    // Create a String structure (assuming Lambda's String structure)
+    String* result = (String*)malloc(sizeof(String) + sb->length + 1);
+    if (!result) return NULL;
+    
+    result->len = sb->length;
+    result->ref_cnt = 1;
+    memcpy(result->chars, sb->str, sb->length);
+    result->chars[sb->length] = '\0';
+    
+    return result;
+}
 
 // ==================== Validation Result Management ====================
 
@@ -238,7 +267,7 @@ String* generate_validation_report(ValidationResult* result, VariableMemPool* po
         return string_from_strview(strview_from_cstr("No validation result"), pool);
     }
     
-    StrBuf* report = strbuf_new(pool);
+    StrBuf* report = strbuf_new_pooled(pool);
     
     // Header
     if (result->valid) {
@@ -307,7 +336,7 @@ String* generate_json_report(ValidationResult* result, VariableMemPool* pool) {
         return string_from_strview(strview_from_cstr("{\"error\": \"No validation result\"}"), pool);
     }
     
-    StrBuf* json = strbuf_new(pool);
+    StrBuf* json = strbuf_new_pooled(pool);
     
     strbuf_append_cstr(json, "{\n");
     strbuf_append_cstr(json, "  \"valid\": ");

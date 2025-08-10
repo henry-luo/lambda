@@ -1,0 +1,8 @@
+{
+    "person": {
+        "name": 123,
+        "age": "should_be_number",
+        "missing_required": "field"
+    },
+    "invalid_structure": true
+}

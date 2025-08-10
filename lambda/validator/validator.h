@@ -442,6 +442,32 @@ void print_validation_path(PathSegment* path);
  */
 void run_validation(const char *data_file, const char *schema_file, const char *input_format);
 
+// ==================== Enhanced Utility Functions ====================
+
+/**
+ * Get human-readable type name for a TypeId
+ * @param type_id Type ID to convert to string
+ * @return String representation of the type
+ */
+const char* get_type_name_for_id(TypeId type_id);
+
+/**
+ * Find a map field by name
+ * @param map_schema Map schema to search
+ * @param field_name Field name to find
+ * @return SchemaMapField pointer or NULL if not found
+ */
+SchemaMapField* find_map_field_by_name(SchemaMap* map_schema, StrView field_name);
+
+/**
+ * Generate field name suggestions for typos
+ * @param field_name Incorrect field name
+ * @param map_schema Map schema with valid field names
+ * @param pool Memory pool for allocations
+ * @return List of suggested field names
+ */
+List* generate_field_name_suggestions(const char* field_name, SchemaMap* map_schema, VariableMemPool* pool);
+
 #ifdef __cplusplus
 }
 #endif
