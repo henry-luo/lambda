@@ -1,0 +1,31 @@
+h1. Simple Textile Test
+
+This is a basic Textile document for quick testing.
+
+h2. Basic Formatting
+
+This paragraph has *strong text* and _emphasized text_.
+
+Some @inline code@ and normal text.
+
+h3. Lists
+
+* First item
+* Second item
+* Third item
+
+# Numbered item 1
+# Numbered item 2  
+# Numbered item 3
+
+h3. Code Block
+
+bc. function test() {
+    return "Hello Textile!";
+}
+
+h3. Block Quote
+
+bq. This is a simple block quote to test basic functionality.
+
+That concludes the simple test.

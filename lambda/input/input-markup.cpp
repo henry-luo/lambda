@@ -80,6 +80,23 @@ static bool is_org_block(const char* line);
 static bool has_yaml_frontmatter(MarkupParser* parser);
 static bool has_org_properties(MarkupParser* parser);
 
+// Textile-specific functions (from old input-textile.cpp)
+static bool is_textile_heading(const char* line, int* level);
+static bool is_textile_list_item(const char* line, char* list_type);
+static bool is_textile_block_code(const char* line);
+static bool is_textile_block_quote(const char* line);
+static bool is_textile_pre(const char* line);
+static bool is_textile_comment(const char* line);
+static bool is_textile_notextile(const char* line);
+static Item parse_textile_code_block(MarkupParser* parser, const char* line);
+static Item parse_textile_block_quote(MarkupParser* parser, const char* line);
+static Item parse_textile_pre_block(MarkupParser* parser, const char* line);
+static Item parse_textile_comment(MarkupParser* parser, const char* line);
+static Item parse_textile_notextile(MarkupParser* parser, const char* line);
+static Item parse_textile_list_item(MarkupParser* parser, const char* line);
+static Item parse_textile_inline_content(MarkupParser* parser, const char* text);
+static char* parse_textile_modifiers(const char* line, int* start_pos);
+
 // Phase 5: Forward declarations for enhanced table processing
 static Item parse_table_structure(MarkupParser* parser);
 static bool is_table_separator(const char* line);
@@ -370,6 +387,10 @@ static Item parse_block_element(MarkupParser* parser) {
                 is_rst_definition_list_definition(parser->lines[parser->current_line + 1])) {
                 return parse_rst_definition_list(parser);
             }
+            // Check if this is a Textile list item
+            if (parser->config.format == MARKUP_TEXTILE) {
+                return parse_textile_list_item(parser, line);
+            }
             return parse_list_item(parser, line);
         case BLOCK_CODE_BLOCK:
             // Check for RST literal block
@@ -377,8 +398,20 @@ static Item parse_block_element(MarkupParser* parser) {
                 (is_rst_literal_block_marker(line) || line_ends_with_double_colon(line))) {
                 return parse_rst_literal_block(parser);
             }
+            // Check for Textile block code or pre
+            if (parser->config.format == MARKUP_TEXTILE) {
+                if (is_textile_block_code(line)) {
+                    return parse_textile_code_block(parser, line);
+                } else if (is_textile_pre(line)) {
+                    return parse_textile_pre_block(parser, line);
+                }
+            }
             return parse_code_block(parser, line);
         case BLOCK_QUOTE:
+            // Check for Textile block quote
+            if (parser->config.format == MARKUP_TEXTILE && is_textile_block_quote(line)) {
+                return parse_textile_block_quote(parser, line);
+            }
             return parse_blockquote(parser, line);
         case BLOCK_TABLE:
             // Check for RST grid table
@@ -396,6 +429,14 @@ static Item parse_block_element(MarkupParser* parser) {
             parser->current_line++;
             return parse_divider(parser);
         case BLOCK_COMMENT:
+            // Check for Textile comment or notextile
+            if (parser->config.format == MARKUP_TEXTILE) {
+                if (is_textile_comment(line)) {
+                    return parse_textile_comment(parser, line);
+                } else if (is_textile_notextile(line)) {
+                    return parse_textile_notextile(parser, line);
+                }
+            }
             return parse_rst_comment(parser);
         case BLOCK_PARAGRAPH:
         default:
@@ -2003,6 +2044,34 @@ static BlockType detect_block_type(MarkupParser* parser, const char* line) {
         }
     }
     
+    // Textile-specific blocks - only detected when format is TEXTILE
+    if (parser->config.format == MARKUP_TEXTILE) {
+        if (is_textile_comment(line)) {
+            return BLOCK_COMMENT;
+        }
+        
+        if (is_textile_block_code(line)) {
+            return BLOCK_CODE_BLOCK;
+        }
+        
+        if (is_textile_block_quote(line)) {
+            return BLOCK_QUOTE;
+        }
+        
+        if (is_textile_pre(line)) {
+            return BLOCK_CODE_BLOCK;
+        }
+        
+        if (is_textile_notextile(line)) {
+            return BLOCK_COMMENT; // Treat notextile as comment-like
+        }
+        
+        char list_type = 0;
+        if (is_textile_list_item(line, &list_type)) {
+            return BLOCK_LIST_ITEM;
+        }
+    }
+    
     // Header detection (# ## ### etc. and RST underlined headers)
     if (get_header_level(parser, line) > 0) {
         return BLOCK_HEADER;
@@ -2102,6 +2171,14 @@ static int get_header_level(MarkupParser* parser, const char* line) {
                     }
                 }
             }
+        }
+    }
+    
+    // Handle Textile-style headers (h1. to h6.) - only for TEXTILE format  
+    if (parser->config.format == MARKUP_TEXTILE) {
+        int textile_level = 0;
+        if (is_textile_heading(line, &textile_level)) {
+            return textile_level;
         }
     }
     
@@ -4066,4 +4143,555 @@ static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const 
     free(ref_text);
     (*text)++; // skip _
     return (Item){.item = (uint64_t)ref_elem};
+}
+
+// ===========================================
+// Textile-specific parser functions
+// ===========================================
+
+// Helper function to check if line is a Textile heading (h1. to h6.)
+static bool is_textile_heading(const char* line, int* level) {
+    if (!line || strlen(line) < 3) return false;
+    
+    // Check for h1. to h6. patterns
+    if (line[0] == 'h' && line[1] >= '1' && line[1] <= '6' && line[2] == '.') {
+        if (level) *level = line[1] - '0';
+        return true;
+    }
+    return false;
+}
+
+// Helper function to check if line is a Textile list item
+static bool is_textile_list_item(const char* line, char* list_type) {
+    if (!line) return false;
+    
+    // Skip leading whitespace to check for indentation
+    int indent = 0;
+    while (line[indent] == ' ' || line[indent] == '\t') indent++;
+    
+    if (line[indent] == '*' && (line[indent + 1] == ' ' || line[indent + 1] == '\t')) {
+        if (list_type) *list_type = '*'; // bulleted list
+        return true;
+    }
+    if (line[indent] == '#' && (line[indent + 1] == ' ' || line[indent + 1] == '\t')) {
+        if (list_type) *list_type = '#'; // numbered list
+        return true;
+    }
+    if (line[indent] == '-' && (line[indent + 1] == ' ' || line[indent + 1] == '\t')) {
+        // Check if it's a definition list (has := in the line)
+        if (strstr(line, ":=")) {
+            if (list_type) *list_type = '-'; // definition list
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper functions for Textile block elements
+static bool is_textile_block_code(const char* line) {
+    return strncmp(line, "bc.", 3) == 0 || strncmp(line, "bc..", 4) == 0;
+}
+
+static bool is_textile_block_quote(const char* line) {
+    return strncmp(line, "bq.", 3) == 0 || strncmp(line, "bq..", 4) == 0;
+}
+
+static bool is_textile_pre(const char* line) {
+    return strncmp(line, "pre.", 4) == 0 || strncmp(line, "pre..", 5) == 0;
+}
+
+static bool is_textile_comment(const char* line) {
+    return strncmp(line, "###.", 4) == 0;
+}
+
+static bool is_textile_notextile(const char* line) {
+    return strncmp(line, "notextile.", 10) == 0 || strncmp(line, "notextile..", 11) == 0;
+}
+
+// Parse Textile modifiers (class, style, etc.)
+static char* parse_textile_modifiers(const char* line, int* start_pos) {
+    // Parse Textile formatting modifiers like (class), {style}, [lang], <>, etc.
+    // This is a simplified version - full implementation would be more complex
+    int pos = *start_pos;
+    
+    // Skip the block signature (e.g., "h1.", "p.", etc.)
+    while (line[pos] && line[pos] != '.' && !isspace(line[pos])) pos++;
+    if (line[pos] == '.') pos++; // Skip the dot
+    
+    // Look for modifiers
+    char* modifiers = NULL;
+    int mod_len = 0;
+    
+    while (line[pos] && !isalnum(line[pos])) {
+        if (line[pos] == '(' || line[pos] == '{' || line[pos] == '[' ||
+            line[pos] == '<' || line[pos] == '>' || line[pos] == '=') {
+            // Found modifier start, collect until we find the content
+            int mod_start = pos;
+            while (line[pos] && line[pos] != ' ') pos++;
+            mod_len = pos - mod_start;
+            if (mod_len > 0) {
+                modifiers = (char*)malloc(mod_len + 1);
+                strncpy(modifiers, line + mod_start, mod_len);
+                modifiers[mod_len] = '\0';
+            }
+            break;
+        }
+        pos++;
+    }
+    
+    // Skip to content
+    while (line[pos] && isspace(line[pos])) pos++;
+    *start_pos = pos;
+    
+    return modifiers;
+}
+
+// Parse Textile inline content (emphasis, strong, code, etc.)
+static Item parse_textile_inline_content(MarkupParser* parser, const char* text) {
+    if (!text || strlen(text) == 0) {
+        return (Item){.item = s2it(input_create_string(parser->input, ""))};
+    }
+    
+    // Create a container element for mixed content
+    Element* container = create_element(parser->input, "span");
+    if (!container) return (Item){.item = ITEM_NULL};
+    
+    const char* ptr = text;
+    const char* start = text;
+    
+    while (*ptr) {
+        bool found_markup = false;
+        
+        // Check for various inline formatting
+        if (*ptr == '*' && *(ptr + 1) == '*') {
+            // **bold**
+            const char* end = strstr(ptr + 2, "**");
+            if (end) {
+                // Add preceding text
+                if (ptr > start) {
+                    char* before = (char*)malloc(ptr - start + 1);
+                    strncpy(before, start, ptr - start);
+                    before[ptr - start] = '\0';
+                    String* before_str = input_create_string(parser->input, before);
+                    list_push((List*)container, (Item){.item = s2it(before_str)});
+                    increment_element_content_length(container);
+                    free(before);
+                }
+                
+                // Add bold element
+                Element* bold = create_element(parser->input, "strong");
+                char* bold_text = (char*)malloc(end - (ptr + 2) + 1);
+                strncpy(bold_text, ptr + 2, end - (ptr + 2));
+                bold_text[end - (ptr + 2)] = '\0';
+                String* bold_str = input_create_string(parser->input, bold_text);
+                list_push((List*)bold, (Item){.item = s2it(bold_str)});
+                increment_element_content_length(bold);
+                list_push((List*)container, (Item){.item = (uint64_t)bold});
+                increment_element_content_length(container);
+                free(bold_text);
+                
+                ptr = end + 2;
+                start = ptr;
+                found_markup = true;
+            }
+        } else if (*ptr == '*') {
+            // *strong*
+            const char* end = strchr(ptr + 1, '*');
+            if (end) {
+                // Add preceding text
+                if (ptr > start) {
+                    char* before = (char*)malloc(ptr - start + 1);
+                    strncpy(before, start, ptr - start);
+                    before[ptr - start] = '\0';
+                    String* before_str = input_create_string(parser->input, before);
+                    list_push((List*)container, (Item){.item = s2it(before_str)});
+                    increment_element_content_length(container);
+                    free(before);
+                }
+                
+                // Add strong element
+                Element* strong = create_element(parser->input, "strong");
+                char* strong_text = (char*)malloc(end - (ptr + 1) + 1);
+                strncpy(strong_text, ptr + 1, end - (ptr + 1));
+                strong_text[end - (ptr + 1)] = '\0';
+                String* strong_str = input_create_string(parser->input, strong_text);
+                list_push((List*)strong, (Item){.item = s2it(strong_str)});
+                increment_element_content_length(strong);
+                list_push((List*)container, (Item){.item = (uint64_t)strong});
+                increment_element_content_length(container);
+                free(strong_text);
+                
+                ptr = end + 1;
+                start = ptr;
+                found_markup = true;
+            }
+        } else if (*ptr == '_') {
+            // _emphasis_
+            const char* end = strchr(ptr + 1, '_');
+            if (end) {
+                // Add preceding text
+                if (ptr > start) {
+                    char* before = (char*)malloc(ptr - start + 1);
+                    strncpy(before, start, ptr - start);
+                    before[ptr - start] = '\0';
+                    String* before_str = input_create_string(parser->input, before);
+                    list_push((List*)container, (Item){.item = s2it(before_str)});
+                    increment_element_content_length(container);
+                    free(before);
+                }
+                
+                // Add emphasis element
+                Element* em = create_element(parser->input, "em");
+                char* em_text = (char*)malloc(end - (ptr + 1) + 1);
+                strncpy(em_text, ptr + 1, end - (ptr + 1));
+                em_text[end - (ptr + 1)] = '\0';
+                String* em_str = input_create_string(parser->input, em_text);
+                list_push((List*)em, (Item){.item = s2it(em_str)});
+                increment_element_content_length(em);
+                list_push((List*)container, (Item){.item = (uint64_t)em});
+                increment_element_content_length(container);
+                free(em_text);
+                
+                ptr = end + 1;
+                start = ptr;
+                found_markup = true;
+            }
+        } else if (*ptr == '@') {
+            // @code@
+            const char* end = strchr(ptr + 1, '@');
+            if (end) {
+                // Add preceding text
+                if (ptr > start) {
+                    char* before = (char*)malloc(ptr - start + 1);
+                    strncpy(before, start, ptr - start);
+                    before[ptr - start] = '\0';
+                    String* before_str = input_create_string(parser->input, before);
+                    list_push((List*)container, (Item){.item = s2it(before_str)});
+                    increment_element_content_length(container);
+                    free(before);
+                }
+                
+                // Add code element
+                Element* code = create_element(parser->input, "code");
+                char* code_text = (char*)malloc(end - (ptr + 1) + 1);
+                strncpy(code_text, ptr + 1, end - (ptr + 1));
+                code_text[end - (ptr + 1)] = '\0';
+                String* code_str = input_create_string(parser->input, code_text);
+                list_push((List*)code, (Item){.item = s2it(code_str)});
+                increment_element_content_length(code);
+                list_push((List*)container, (Item){.item = (uint64_t)code});
+                increment_element_content_length(container);
+                free(code_text);
+                
+                ptr = end + 1;
+                start = ptr;
+                found_markup = true;
+            }
+        } else if (*ptr == '^') {
+            // ^superscript^
+            const char* end = strchr(ptr + 1, '^');
+            if (end) {
+                // Add preceding text
+                if (ptr > start) {
+                    char* before = (char*)malloc(ptr - start + 1);
+                    strncpy(before, start, ptr - start);
+                    before[ptr - start] = '\0';
+                    String* before_str = input_create_string(parser->input, before);
+                    list_push((List*)container, (Item){.item = s2it(before_str)});
+                    increment_element_content_length(container);
+                    free(before);
+                }
+                
+                // Add superscript element
+                Element* sup = create_element(parser->input, "sup");
+                char* sup_text = (char*)malloc(end - (ptr + 1) + 1);
+                strncpy(sup_text, ptr + 1, end - (ptr + 1));
+                sup_text[end - (ptr + 1)] = '\0';
+                String* sup_str = input_create_string(parser->input, sup_text);
+                list_push((List*)sup, (Item){.item = s2it(sup_str)});
+                increment_element_content_length(sup);
+                list_push((List*)container, (Item){.item = (uint64_t)sup});
+                increment_element_content_length(container);
+                free(sup_text);
+                
+                ptr = end + 1;
+                start = ptr;
+                found_markup = true;
+            }
+        } else if (*ptr == '~') {
+            // ~subscript~
+            const char* end = strchr(ptr + 1, '~');
+            if (end) {
+                // Add preceding text
+                if (ptr > start) {
+                    char* before = (char*)malloc(ptr - start + 1);
+                    strncpy(before, start, ptr - start);
+                    before[ptr - start] = '\0';
+                    String* before_str = input_create_string(parser->input, before);
+                    list_push((List*)container, (Item){.item = s2it(before_str)});
+                    increment_element_content_length(container);
+                    free(before);
+                }
+                
+                // Add subscript element
+                Element* sub = create_element(parser->input, "sub");
+                char* sub_text = (char*)malloc(end - (ptr + 1) + 1);
+                strncpy(sub_text, ptr + 1, end - (ptr + 1));
+                sub_text[end - (ptr + 1)] = '\0';
+                String* sub_str = input_create_string(parser->input, sub_text);
+                list_push((List*)sub, (Item){.item = s2it(sub_str)});
+                increment_element_content_length(sub);
+                list_push((List*)container, (Item){.item = (uint64_t)sub});
+                increment_element_content_length(container);
+                free(sub_text);
+                
+                ptr = end + 1;
+                start = ptr;
+                found_markup = true;
+            }
+        }
+        
+        if (!found_markup) {
+            ptr++;
+        }
+    }
+    
+    // Add any remaining text
+    if (ptr > start) {
+        char* remaining = (char*)malloc(ptr - start + 1);
+        strncpy(remaining, start, ptr - start);
+        remaining[ptr - start] = '\0';
+        String* remaining_str = input_create_string(parser->input, remaining);
+        list_push((List*)container, (Item){.item = s2it(remaining_str)});
+        increment_element_content_length(container);
+        free(remaining);
+    }
+    
+    return (Item){.item = (uint64_t)container};
+}
+
+// Parse Textile code block (bc. or bc..)
+static Item parse_textile_code_block(MarkupParser* parser, const char* line) {
+    Element* code_block = create_element(parser->input, "pre");
+    if (!code_block) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    bool extended = strncmp(line, "bc..", 4) == 0;
+    add_attribute_to_element(parser->input, code_block, "extended", extended ? "true" : "false");
+    
+    // Parse modifiers and extract content
+    int start_pos = 0;
+    char* modifiers = parse_textile_modifiers(line, &start_pos);
+    if (modifiers) {
+        add_attribute_to_element(parser->input, code_block, "modifiers", modifiers);
+        free(modifiers);
+    }
+    
+    const char* content = line + start_pos;
+    String* code_content = input_create_string(parser->input, content);
+    list_push((List*)code_block, (Item){.item = s2it(code_content)});
+    increment_element_content_length(code_block);
+    
+    parser->current_line++;
+    
+    // For extended blocks, collect until we find another block signature
+    if (extended) {
+        while (parser->current_line < parser->line_count) {
+            const char* next_line = parser->lines[parser->current_line];
+            
+            // Check if this line starts a new block
+            if (is_textile_heading(next_line, NULL) || is_textile_block_code(next_line) ||
+                is_textile_block_quote(next_line) || is_textile_pre(next_line) ||
+                strncmp(next_line, "p.", 2) == 0) {
+                break;
+            }
+            
+            String* line_content = input_create_string(parser->input, next_line);
+            list_push((List*)code_block, (Item){.item = s2it(line_content)});
+            increment_element_content_length(code_block);
+            parser->current_line++;
+        }
+    }
+    
+    return (Item){.item = (uint64_t)code_block};
+}
+
+// Parse Textile block quote (bq. or bq..)
+static Item parse_textile_block_quote(MarkupParser* parser, const char* line) {
+    Element* quote_block = create_element(parser->input, "blockquote");
+    if (!quote_block) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    bool extended = strncmp(line, "bq..", 4) == 0;
+    add_attribute_to_element(parser->input, quote_block, "extended", extended ? "true" : "false");
+    
+    // Parse modifiers and extract content
+    int start_pos = 0;
+    char* modifiers = parse_textile_modifiers(line, &start_pos);
+    if (modifiers) {
+        add_attribute_to_element(parser->input, quote_block, "modifiers", modifiers);
+        free(modifiers);
+    }
+    
+    const char* content = line + start_pos;
+    Item inline_content = parse_textile_inline_content(parser, content);
+    list_push((List*)quote_block, inline_content);
+    increment_element_content_length(quote_block);
+    
+    parser->current_line++;
+    
+    // For extended blocks, collect until we find another block signature
+    if (extended) {
+        while (parser->current_line < parser->line_count) {
+            const char* next_line = parser->lines[parser->current_line];
+            
+            // Check if this line starts a new block
+            if (is_textile_heading(next_line, NULL) || is_textile_block_code(next_line) ||
+                is_textile_block_quote(next_line) || is_textile_pre(next_line) ||
+                strncmp(next_line, "p.", 2) == 0) {
+                break;
+            }
+            
+            Item line_content = parse_textile_inline_content(parser, next_line);
+            list_push((List*)quote_block, line_content);
+            increment_element_content_length(quote_block);
+            parser->current_line++;
+        }
+    }
+    
+    return (Item){.item = (uint64_t)quote_block};
+}
+
+// Parse Textile pre-formatted block (pre. or pre..)
+static Item parse_textile_pre_block(MarkupParser* parser, const char* line) {
+    Element* pre_block = create_element(parser->input, "pre");
+    if (!pre_block) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    // Parse modifiers and extract content
+    int start_pos = 0;
+    char* modifiers = parse_textile_modifiers(line, &start_pos);
+    if (modifiers) {
+        add_attribute_to_element(parser->input, pre_block, "modifiers", modifiers);
+        free(modifiers);
+    }
+    
+    const char* content = line + start_pos;
+    String* pre_content = input_create_string(parser->input, content);
+    list_push((List*)pre_block, (Item){.item = s2it(pre_content)});
+    increment_element_content_length(pre_block);
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)pre_block};
+}
+
+// Parse Textile comment (###.)
+static Item parse_textile_comment(MarkupParser* parser, const char* line) {
+    Element* comment = create_element(parser->input, "!--");  // HTML comment style
+    if (!comment) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    const char* content = line + 4; // Skip "###."
+    String* comment_content = input_create_string(parser->input, content);
+    list_push((List*)comment, (Item){.item = s2it(comment_content)});
+    increment_element_content_length(comment);
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)comment};
+}
+
+// Parse Textile notextile block
+static Item parse_textile_notextile(MarkupParser* parser, const char* line) {
+    Element* notextile = create_element(parser->input, "notextile");
+    if (!notextile) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    bool extended = strncmp(line, "notextile..", 11) == 0;
+    const char* content = extended ? line + 11 : line + 10;
+    while (*content && isspace(*content)) content++;
+    
+    String* raw_content = input_create_string(parser->input, content);
+    list_push((List*)notextile, (Item){.item = s2it(raw_content)});
+    increment_element_content_length(notextile);
+    add_attribute_to_element(parser->input, notextile, "extended", extended ? "true" : "false");
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)notextile};
+}
+
+// Parse Textile list item
+static Item parse_textile_list_item(MarkupParser* parser, const char* line) {
+    char list_type = 0;
+    if (!is_textile_list_item(line, &list_type)) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    Element* list_item = create_element(parser->input, "li");
+    if (!list_item) {
+        parser->current_line++;
+        return (Item){.item = ITEM_NULL};
+    }
+    
+    const char* type_str = (list_type == '*') ? "bulleted" : 
+                          (list_type == '#') ? "numbered" : 
+                          (list_type == '-') ? "definition" : "unknown";
+    add_attribute_to_element(parser->input, list_item, "type", type_str);
+    
+    // Find the content after the list marker
+    const char* content = line;
+    while (*content && (*content == ' ' || *content == '\t')) content++;
+    content++; // Skip the marker (* # -)
+    while (*content && (*content == ' ' || *content == '\t')) content++;
+    
+    if (list_type == '-') {
+        // Definition list - split on ":="
+        const char* def_sep = strstr(content, ":=");
+        if (def_sep) {
+            // Term
+            char* term = (char*)malloc(def_sep - content + 1);
+            strncpy(term, content, def_sep - content);
+            term[def_sep - content] = '\0';
+            char* trimmed_term = trim_whitespace(term);
+            String* term_str = input_create_string(parser->input, trimmed_term);
+            
+            Element* term_elem = create_element(parser->input, "dt");
+            list_push((List*)term_elem, (Item){.item = s2it(term_str)});
+            increment_element_content_length(term_elem);
+            list_push((List*)list_item, (Item){.item = (uint64_t)term_elem});
+            increment_element_content_length(list_item);
+            
+            free(term);
+            free(trimmed_term);
+            
+            // Definition
+            const char* definition = def_sep + 2;
+            while (*definition && isspace(*definition)) definition++;
+            
+            Element* def_elem = create_element(parser->input, "dd");
+            Item def_content = parse_textile_inline_content(parser, definition);
+            list_push((List*)def_elem, def_content);
+            increment_element_content_length(def_elem);
+            list_push((List*)list_item, (Item){.item = (uint64_t)def_elem});
+            increment_element_content_length(list_item);
+        }
+    } else {
+        // Regular list item
+        Item item_content = parse_textile_inline_content(parser, content);
+        list_push((List*)list_item, item_content);
+        increment_element_content_length(list_item);
+    }
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)list_item};
 }

@@ -22,7 +22,6 @@ void parse_man(Input* input, const char* man_string);
 void parse_eml(Input* input, const char* eml_string);
 void parse_vcf(Input* input, const char* vcf_string);
 void parse_ics(Input* input, const char* ics_string);
-void parse_textile(Input* input, const char* textile_string);
 void parse_mark(Input* input, const char* mark_string);
 void parse_org(Input* input, const char* org_string);
 void parse_css(Input* input, const char* css_string);
@@ -498,7 +497,7 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
             parse_ics(input, source);
         }
         else if (strcmp(effective_type, "textile") == 0) {
-            parse_textile(input, source);
+            input->root = input_markup(input, source);
         }
         else if (strcmp(effective_type, "mark") == 0) {
             parse_mark(input, source);

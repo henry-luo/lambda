@@ -316,7 +316,8 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     }
     
     TypeId actual_type = get_type_id(item);
-    if (actual_type != LMD_TYPE_MAP) {
+    
+    if (actual_type != LMD_TYPE_MAP && actual_type != LMD_TYPE_ELEMENT) {
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected map", 
             ctx->path, ctx->pool));
@@ -325,6 +326,10 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     
     SchemaMap* map_schema = (SchemaMap*)schema->schema_data;
     Map* map = (Map*)item.pointer;
+    
+    // NOTE: The schema parser currently has incomplete field parsing implementation
+    // This is why schema validation is too permissive - the map schema doesn't 
+    // contain the actual field definitions from the Document type
     
     // Validate required fields and check types
     SchemaMapField* field = map_schema->fields;

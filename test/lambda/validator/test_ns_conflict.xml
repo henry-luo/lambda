@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<root xmlns:ns="http://example.com/1" xmlns:ns="http://example.com/2">
+<ns:element>conflict</ns:element>
+</root>
