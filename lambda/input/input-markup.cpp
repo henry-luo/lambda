@@ -2094,35 +2094,558 @@ static Item parse_subscript(MarkupParser* parser, const char** text) {
     return (Item){.item = (uint64_t)sub_elem};
 }
 
-// Emoji shortcode mapping table (subset of GitHub emojis)
+// Comprehensive GitHub Emoji shortcode mapping table 
 static const struct {
     const char* shortcode;
     const char* emoji;
 } emoji_map[] = {
-    // Common emotions
-    {":smile:", "😄"}, {":grinning:", "😀"}, {":laughing:", "😆"}, {":joy:", "😂"},
-    {":wink:", "😉"}, {":blush:", "😊"}, {":heart_eyes:", "😍"}, {":kissing_heart:", "😘"},
-    {":worried:", "😟"}, {":frowning:", "☹️"}, {":cry:", "😢"}, {":sob:", "😭"},
+    // Smileys & Emotion
+    {":smile:", "😄"},
+    {":smiley:", "😃"},
+    {":grinning:", "😀"},
+    {":blush:", "😊"},
+    {":relaxed:", "☺️"},
+    {":wink:", "😉"},
+    {":heart_eyes:", "😍"},
+    {":kissing_heart:", "😘"},
+    {":kissing_closed_eyes:", "😚"},
+    {":stuck_out_tongue:", "😛"},
+    {":stuck_out_tongue_winking_eye:", "�"},
+    {":stuck_out_tongue_closed_eyes:", "😝"},
+    {":disappointed:", "😞"},
+    {":worried:", "�"},
+    {":angry:", "😠"},
+    {":rage:", "😡"},
+    {":cry:", "😢"},
+    {":persevere:", "😣"},
+    {":triumph:", "😤"},
+    {":disappointed_relieved:", "😥"},
+    {":frowning:", "😦"},
+    {":anguished:", "😧"},
+    {":fearful:", "😨"},
+    {":weary:", "😩"},
+    {":sleepy:", "😪"},
+    {":tired_face:", "😫"},
+    {":grimacing:", "�"},
+    {":sob:", "😭"},
+    {":open_mouth:", "😮"},
+    {":hushed:", "😯"},
+    {":cold_sweat:", "😰"},
+    {":scream:", "😱"},
+    {":astonished:", "😲"},
+    {":flushed:", "�"},
+    {":sleeping:", "😴"},
+    {":dizzy_face:", "😵"},
+    {":no_mouth:", "😶"},
+    {":mask:", "😷"},
+    {":sunglasses:", "😎"},
+    {":confused:", "😕"},
+    {":neutral_face:", "😐"},
+    {":expressionless:", "😑"},
+    {":unamused:", "😒"},
+    {":sweat_smile:", "😅"},
+    {":sweat:", "😓"},
+    {":joy:", "😂"},
+    {":laughing:", "😆"},
+    {":innocent:", "😇"},
+    {":smiling_imp:", "😈"},
+    {":imp:", "�"},
+    {":skull:", "💀"},
     
-    // Common symbols
-    {":heart:", "❤️"}, {":star:", "⭐"}, {":fire:", "🔥"}, {":zap:", "⚡"},
-    {":100:", "💯"}, {":heavy_check_mark:", "✔️"}, {":x:", "❌"}, {":exclamation:", "❗"},
+    // People & Body
+    {":wave:", "👋"},
+    {":raised_hand:", "✋"},
+    {":open_hands:", "👐"},
+    {":point_up:", "☝️"},
+    {":point_down:", "👇"},
+    {":point_left:", "👈"},
+    {":point_right:", "👉"},
+    {":raised_hands:", "🙌"},
+    {":pray:", "🙏"},
+    {":clap:", "👏"},
+    {":muscle:", "💪"},
+    {":walking:", "🚶"},
+    {":runner:", "🏃"},
+    {":dancer:", "💃"},
+    {":ok_hand:", "👌"},
+    {":thumbsup:", "�"},
+    {":thumbsdown:", "👎"},
+    {":punch:", "👊"},
+    {":fist:", "✊"},
+    {":v:", "✌️"},
+    {":hand:", "✋"},
     
-    // GitHub specific
-    {":octocat:", "🐙"}, {":shipit:", "🚀"}, {":bowtie:", "👔"},
+    // Animals & Nature
+    {":dog:", "🐶"},
+    {":cat:", "🐱"},
+    {":mouse:", "🐭"},
+    {":hamster:", "🐹"},
+    {":rabbit:", "🐰"},
+    {":bear:", "🐻"},
+    {":panda_face:", "�"},
+    {":koala:", "🐨"},
+    {":tiger:", "🐯"},
+    {":lion_face:", "🦁"},
+    {":cow:", "🐮"},
+    {":pig:", "🐷"},
+    {":pig_nose:", "🐽"},
+    {":frog:", "🐸"},
+    {":octopus:", "🐙"},
+    {":monkey_face:", "🐵"},
+    {":see_no_evil:", "🙈"},
+    {":hear_no_evil:", "🙉"},
+    {":speak_no_evil:", "🙊"},
+    {":monkey:", "🐒"},
+    {":chicken:", "🐔"},
+    {":penguin:", "🐧"},
+    {":bird:", "🐦"},
+    {":baby_chick:", "🐤"},
+    {":hatched_chick:", "🐣"},
+    {":hatching_chick:", "🐣"},
+    {":wolf:", "🐺"},
+    {":boar:", "🐗"},
+    {":horse:", "🐴"},
+    {":unicorn:", "🦄"},
+    {":bee:", "🐝"},
+    {":bug:", "🐛"},
+    {":snail:", "🐌"},
+    {":beetle:", "🐞"},
+    {":ant:", "🐜"},
+    {":spider:", "🕷️"},
+    {":scorpion:", "🦂"},
+    {":crab:", "🦀"},
+    {":snake:", "🐍"},
+    {":turtle:", "🐢"},
+    {":tropical_fish:", "🐠"},
+    {":fish:", "🐟"},
+    {":blowfish:", "🐡"},
+    {":dolphin:", "🐬"},
+    {":whale:", "🐳"},
+    {":whale2:", "🐋"},
+    {":crocodile:", "🐊"},
+    {":leopard:", "🐆"},
+    {":tiger2:", "🐅"},
+    {":water_buffalo:", "🐃"},
+    {":ox:", "🐂"},
+    {":cow2:", "🐄"},
+    {":dromedary_camel:", "🐪"},
+    {":camel:", "🐫"},
+    {":elephant:", "🐘"},
+    {":goat:", "🐐"},
+    {":ram:", "🐏"},
+    {":sheep:", "🐑"},
+    {":racehorse:", "🐎"},
+    {":pig2:", "🐖"},
+    {":rat:", "�"},
+    {":mouse2:", "🐁"},
+    {":rooster:", "🐓"},
+    {":turkey:", "🦃"},
+    {":dove:", "🕊️"},
+    {":dog2:", "🐕"},
+    {":poodle:", "🐩"},
+    {":cat2:", "🐈"},
+    {":rabbit2:", "�"},
+    {":chipmunk:", "🐿️"},
+    {":feet:", "🐾"},
+    {":dragon:", "🐉"},
+    {":dragon_face:", "🐲"},
+    
+    // Food & Drink  
+    {":green_apple:", "🍏"},
+    {":apple:", "🍎"},
+    {":pear:", "🍐"},
+    {":tangerine:", "🍊"},
+    {":lemon:", "🍋"},
+    {":banana:", "🍌"},
+    {":watermelon:", "🍉"},
+    {":grapes:", "🍇"},
+    {":strawberry:", "🍓"},
+    {":melon:", "🍈"},
+    {":cherries:", "🍒"},
+    {":peach:", "🍑"},
+    {":pineapple:", "🍍"},
+    {":tomato:", "🍅"},
+    {":eggplant:", "🍆"},
+    {":hot_pepper:", "🌶️"},
+    {":corn:", "🌽"},
+    {":sweet_potato:", "🍠"},
+    {":honey_pot:", "🍯"},
+    {":bread:", "🍞"},
+    {":cheese:", "🧀"},
+    {":poultry_leg:", "🍗"},
+    {":meat_on_bone:", "🍖"},
+    {":fried_shrimp:", "🍤"},
+    {":egg:", "🥚"},
+    {":hamburger:", "🍔"},
+    {":fries:", "🍟"},
+    {":hotdog:", "🌭"},
+    {":pizza:", "🍕"},
+    {":spaghetti:", "🍝"},
+    {":taco:", "🌮"},
+    {":burrito:", "🌯"},
+    {":ramen:", "🍜"},
+    {":stew:", "🍲"},
+    {":fish_cake:", "🍥"},
+    {":sushi:", "🍣"},
+    {":bento:", "🍱"},
+    {":curry:", "🍛"},
+    {":rice_ball:", "🍙"},
+    {":rice:", "🍚"},
+    {":rice_cracker:", "🍘"},
+    {":oden:", "🍢"},
+    {":dango:", "🍡"},
+    {":shaved_ice:", "🍧"},
+    {":ice_cream:", "🍨"},
+    {":icecream:", "🍦"},
+    {":cake:", "🍰"},
+    {":birthday:", "🎂"},
+    {":custard:", "🍮"},
+    {":candy:", "🍬"},
+    {":lollipop:", "🍭"},
+    {":chocolate_bar:", "🍫"},
+    {":popcorn:", "🍿"},
+    {":doughnut:", "🍩"},
+    {":cookie:", "🍪"},
+    {":beer:", "🍺"},
+    {":beers:", "🍻"},
+    {":wine_glass:", "🍷"},
+    {":cocktail:", "🍸"},
+    {":tropical_drink:", "🍹"},
+    {":champagne:", "🍾"},
+    {":sake:", "🍶"},
+    {":tea:", "🍵"},
+    {":coffee:", "☕"},
+    {":baby_bottle:", "🍼"},
+    {":milk:", "🥛"},
+    
+    // Activities & Sports  
+    {":soccer:", "⚽"},
+    {":basketball:", "🏀"},
+    {":football:", "🏈"},
+    {":baseball:", "⚾"},
+    {":tennis:", "🎾"},
+    {":volleyball:", "🏐"},
+    {":rugby_football:", "🏉"},
+    {":8ball:", "🎱"},
+    {":golf:", "⛳"},
+    {":golfer:", "🏌️"},
+    {":ping_pong:", "🏓"},
+    {":badminton:", "🏸"},
+    {":hockey:", "🏒"},
+    {":field_hockey:", "🏑"},
+    {":cricket:", "🏏"},
+    {":ski:", "🎿"},
+    {":skier:", "⛷️"},
+    {":snowboarder:", "🏂"},
+    {":ice_skate:", "⛸️"},
+    {":bow_and_arrow:", "🏹"},
+    {":fishing_pole_and_fish:", "🎣"},
+    {":rowboat:", "🚣"},
+    {":swimmer:", "🏊"},
+    {":surfer:", "🏄"},
+    {":bath:", "🛀"},
+    {":basketball_player:", "⛹️"},
+    {":lifter:", "🏋️"},
+    {":bicyclist:", "🚴"},
+    {":mountain_bicyclist:", "🚵"},
+    {":horse_racing:", "🏇"},
+    {":trophy:", "🏆"},
+    {":running_shirt_with_sash:", "🎽"},
+    {":medal:", "🏅"},
+    
+    // Travel & Places
+    {":red_car:", "🚗"},
+    {":taxi:", "🚕"},
+    {":blue_car:", "🚙"},
+    {":bus:", "🚌"},
+    {":trolleybus:", "🚎"},
+    {":race_car:", "🏎️"},
+    {":police_car:", "🚓"},
+    {":ambulance:", "🚑"},
+    {":fire_engine:", "🚒"},
+    {":minibus:", "🚐"},
+    {":truck:", "🚚"},
+    {":articulated_lorry:", "🚛"},
+    {":tractor:", "🚜"},
+    {":motorcycle:", "🏍️"},
+    {":bike:", "🚲"},
+    {":helicopter:", "🚁"},
+    {":airplane:", "✈️"},
+    {":rocket:", "🚀"},
+    {":satellite:", "�"},
+    {":anchor:", "⚓"},
+    {":ship:", "🚢"},
+    
+    // Objects
+    {":watch:", "⌚"},
+    {":iphone:", "📱"},
+    {":calling:", "📲"},
+    {":computer:", "�"},
+    {":keyboard:", "⌨️"},
+    {":desktop:", "🖥️"},
+    {":printer:", "�️"},
+    {":camera:", "📷"},
+    {":camera_with_flash:", "📸"},
+    {":video_camera:", "📹"},
+    {":movie_camera:", "🎥"},
+    {":tv:", "📺"},
+    {":radio:", "📻"},
+    {":microphone2:", "🎙️"},
+    {":stopwatch:", "⏱️"},
+    {":timer:", "⏲️"},
+    {":alarm_clock:", "⏰"},
+    {":clock:", "🕰️"},
+    {":hourglass_flowing_sand:", "⏳"},
+    {":hourglass:", "⌛"},
+    {":battery:", "�"},
+    {":electric_plug:", "🔌"},
+    {":bulb:", "💡"},
+    {":flashlight:", "�"},
+    {":candle:", "🕯️"},
+    {":moneybag:", "💰"},
+    {":credit_card:", "💳"},
+    {":gem:", "💎"},
+    {":scales:", "⚖️"},
+    {":wrench:", "🔧"},
+    {":hammer:", "🔨"},
+    {":tools:", "🛠️"},
+    {":pick:", "⛏️"},
+    {":nut_and_bolt:", "🔩"},
+    {":gear:", "⚙️"},
+    {":gun:", "🔫"},
+    {":bomb:", "💣"},
+    {":knife:", "🔪"},
+    {":crystal_ball:", "🔮"},
+    {":telescope:", "🔭"},
+    {":microscope:", "🔬"},
+    {":pill:", "💊"},
+    {":syringe:", "💉"},
+    {":thermometer:", "🌡️"},
+    {":toilet:", "🚽"},
+    {":shower:", "�"},
+    {":bathtub:", "🛁"},
+    
+    // Symbols
+    {":heart:", "❤️"},
+    {":orange_heart:", "🧡"},
+    {":yellow_heart:", "💛"},
+    {":green_heart:", "💚"},
+    {":blue_heart:", "�"},
+    {":purple_heart:", "💜"},
+    {":brown_heart:", "🤎"},
+    {":black_heart:", "�"},
+    {":white_heart:", "🤍"},
+    {":broken_heart:", "�"},
+    {":heart_exclamation:", "❣️"},
+    {":two_hearts:", "💕"},
+    {":revolving_hearts:", "💞"},
+    {":heartbeat:", "💓"},
+    {":heartpulse:", "💗"},
+    {":sparkling_heart:", "💖"},
+    {":cupid:", "💘"},
+    {":gift_heart:", "💝"},
+    {":heart_decoration:", "�"},
+    {":peace:", "☮️"},
+    {":cross:", "✝️"},
+    {":star_and_crescent:", "☪️"},
+    {":om_symbol:", "🕉️"},
+    {":wheel_of_dharma:", "☸️"},
+    {":star_of_david:", "✡️"},
+    {":six_pointed_star:", "🔯"},
+    {":menorah:", "🕎"},
+    {":yin_yang:", "☯️"},
+    {":orthodox_cross:", "☦️"},
+    {":place_of_worship:", "🛐"},
+    {":aries:", "♈"},
+    {":taurus:", "♉"},
+    {":gemini:", "♊"},
+    {":cancer:", "♋"},
+    {":leo:", "♌"},
+    {":virgo:", "♍"},
+    {":libra:", "♎"},
+    {":scorpius:", "♏"},
+    {":sagittarius:", "♐"},
+    {":capricorn:", "♑"},
+    {":aquarius:", "♒"},
+    {":pisces:", "♓"},
+    {":id:", "🆔"},
+    {":atom:", "⚛️"},
+    {":accept:", "🉑"},
+    {":radioactive:", "☢️"},
+    {":biohazard:", "☣️"},
+    {":mobile_phone_off:", "�"},
+    {":vibration_mode:", "📳"},
+    {":eight_pointed_black_star:", "✴️"},
+    {":vs:", "🆚"},
+    {":white_flower:", "💮"},
+    {":secret:", "㊙️"},
+    {":congratulations:", "㊗️"},
+    {":a:", "🅰️"},
+    {":b:", "🅱️"},
+    {":ab:", "🆎"},
+    {":cl:", "🆑"},
+    {":o2:", "🅾️"},
+    {":sos:", "🆘"},
+    {":x:", "❌"},
+    {":o:", "⭕"},
+    {":octagonal_sign:", "🛑"},
+    {":no_entry:", "⛔"},
+    {":name_badge:", "📛"},
+    {":no_entry_sign:", "🚫"},
+    {":100:", "💯"},
+    {":anger:", "💢"},
+    {":hotsprings:", "♨️"},
+    {":no_pedestrians:", "🚷"},
+    {":do_not_litter:", "�"},
+    {":no_bicycles:", "🚳"},
+    {":non-potable_water:", "�"},
+    {":underage:", "�"},
+    {":no_mobile_phones:", "📵"},
+    {":no_smoking:", "🚭"},
+    {":exclamation:", "❗"},
+    {":grey_exclamation:", "❕"},
+    {":question:", "❓"},
+    {":grey_question:", "❔"},
+    {":bangbang:", "‼️"},
+    {":interrobang:", "⁉️"},
+    {":low_brightness:", "🔅"},
+    {":high_brightness:", "🔆"},
+    {":warning:", "⚠️"},
+    {":children_crossing:", "🚸"},
+    {":trident:", "🔱"},
+    {":beginner:", "🔰"},
+    {":recycle:", "♻️"},
+    {":white_check_mark:", "✅"},
+    {":chart:", "�"},
+    {":sparkle:", "❇️"},
+    {":eight_spoked_asterisk:", "✳️"},
+    {":negative_squared_cross_mark:", "❎"},
+    {":globe_with_meridians:", "🌐"},
+    {":diamond_shape_with_a_dot_inside:", "�"},
+    {":m:", "Ⓜ️"},
+    {":cyclone:", "🌀"},
+    {":zzz:", "💤"},
+    {":atm:", "🏧"},
+    {":wc:", "🚾"},
+    {":wheelchair:", "♿"},
+    {":parking:", "🅿️"},
+    {":mens:", "🚹"},
+    {":womens:", "🚺"},
+    {":baby_symbol:", "🚼"},
+    {":restroom:", "🚻"},
+    {":put_litter_in_its_place:", "🚮"},
+    {":cinema:", "🎦"},
+    {":signal_strength:", "📶"},
+    {":symbols:", "�"},
+    {":information_source:", "ℹ️"},
+    {":abc:", "🔤"},
+    {":abcd:", "🔡"},
+    {":capital_abcd:", "🔠"},
+    {":ng:", "🆖"},
+    {":ok:", "🆗"},
+    {":up:", "🆙"},
+    {":cool:", "🆒"},
+    {":new:", "🆕"},
+    {":free:", "🆓"},
+    {":zero:", "0️⃣"},
+    {":one:", "1️⃣"},
+    {":two:", "2️⃣"},
+    {":three:", "3️⃣"},
+    {":four:", "4️⃣"},
+    {":five:", "5️⃣"},
+    {":six:", "6️⃣"},
+    {":seven:", "7️⃣"},
+    {":eight:", "8️⃣"},
+    {":nine:", "9️⃣"},
+    {":keycap_ten:", "�"},
+    {":hash:", "#️⃣"},
+    {":asterisk:", "*️⃣"},
+    
+    // GitHub specific  
+    {":octocat:", "🐙"},
+    {":shipit:", "🚀"},
+    {":bowtie:", "👔"},
     
     // Programming/Tech
-    {":computer:", "💻"}, {":bug:", "🐛"}, {":gear:", "⚙️"}, {":wrench:", "🔧"},
-    {":hammer:", "🔨"}, {":electric_plug:", "🔌"}, {":bulb:", "💡"}, {":lock:", "🔒"},
-    {":key:", "🔑"}, {":mag:", "🔍"},
+    {":bug:", "🐛"},
+    {":key:", "🔑"},
+    {":lock:", "🔒"},
+    {":unlock:", "🔓"},
+    {":link:", "🔗"},
+    {":paperclip:", "�"},
+    {":mag:", "🔍"},
+    {":mag_right:", "🔎"},
+    {":email:", "✉️"},
+    {":phone:", "�"},
+    {":book:", "📖"},
+    {":pencil:", "✏️"},
+    {":memo:", "📝"},
+    {":mailbox:", "📮"},
+    {":inbox_tray:", "📥"},
     
-    // Gestures
-    {":thumbsup:", "👍"}, {":thumbsdown:", "👎"}, {":clap:", "👏"}, {":wave:", "👋"},
-    {":point_right:", "👉"}, {":point_left:", "👈"}, {":point_up:", "👆"}, {":point_down:", "👇"},
-    
-    // Objects  
-    {":phone:", "📱"}, {":camera:", "📷"}, {":book:", "📖"}, {":pencil:", "✏️"},
-    {":memo:", "📝"}, {":email:", "✉️"}, {":mailbox:", "📮"}, {":inbox_tray:", "📥"},
+    // Nature symbols  
+    {":cactus:", "🌵"},
+    {":christmas_tree:", "🎄"},
+    {":evergreen_tree:", "🌲"},
+    {":deciduous_tree:", "🌳"},
+    {":palm_tree:", "🌴"},
+    {":seedling:", "🌱"},
+    {":herb:", "🌿"},
+    {":shamrock:", "☘️"},
+    {":four_leaf_clover:", "🍀"},
+    {":bamboo:", "🎍"},
+    {":tanabata_tree:", "🎋"},
+    {":leaves:", "🍃"},
+    {":fallen_leaf:", "🍂"},
+    {":maple_leaf:", "🍁"},
+    {":ear_of_rice:", "🌾"},
+    {":hibiscus:", "🌺"},
+    {":sunflower:", "🌻"},
+    {":rose:", "🌹"},
+    {":tulip:", "🌷"},
+    {":blossom:", "🌼"},
+    {":cherry_blossom:", "🌸"},
+    {":bouquet:", "💐"},
+    {":mushroom:", "🍄"},
+    {":chestnut:", "🌰"},
+    {":jack_o_lantern:", "🎃"},
+    {":shell:", "🐚"},
+    {":spider_web:", "�️"},
+    {":earth_americas:", "🌎"},
+    {":earth_africa:", "🌍"},
+    {":earth_asia:", "🌏"},
+    {":full_moon:", "🌕"},
+    {":waning_gibbous_moon:", "🌖"},
+    {":last_quarter_moon:", "🌗"},
+    {":waning_crescent_moon:", "🌘"},
+    {":new_moon:", "🌑"},
+    {":waxing_crescent_moon:", "🌒"},
+    {":first_quarter_moon:", "🌓"},
+    {":moon:", "🌔"},
+    {":new_moon_with_face:", "🌚"},
+    {":full_moon_with_face:", "🌝"},
+    {":first_quarter_moon_with_face:", "🌛"},
+    {":last_quarter_moon_with_face:", "🌜"},
+    {":sun_with_face:", "🌞"},
+    {":crescent_moon:", "🌙"},
+    {":star:", "⭐"},
+    {":star2:", "🌟"},
+    {":dizzy:", "💫"},
+    {":sparkles:", "✨"},
+    {":comet:", "☄️"},
+    {":sunny:", "☀️"},
+    {":partly_sunny:", "⛅"},
+    {":cloud:", "☁️"},
+    {":zap:", "⚡"},
+    {":fire:", "�"},
+    {":boom:", "💥"},
+    {":snowflake:", "❄️"},
+    {":snowman2:", "⛄"},
+    {":snowman:", "☃️"},
+    {":umbrella:", "☔"},
+    {":droplet:", "💧"},
+    {":sweat_drops:", "💦"},
+    {":ocean:", "🌊"},
     
     {NULL, NULL}  // End marker
 };
@@ -2611,6 +3134,78 @@ static bool has_yaml_frontmatter(MarkupParser* parser) {
     return (strcmp(first_line, "---") == 0);
 }
 
+// Parse YAML line into key-value pair
+static void parse_yaml_line(MarkupParser* parser, const char* line, Element* metadata) {
+    // Skip leading whitespace
+    while (*line && (*line == ' ' || *line == '\t')) {
+        line++;
+    }
+    
+    // Skip empty lines and comments
+    if (!*line || *line == '#') {
+        return;
+    }
+    
+    // Find colon separator
+    const char* colon = strchr(line, ':');
+    if (!colon) {
+        return; // Not a key-value line
+    }
+    
+    // Extract key
+    StrBuf* sb = parser->input->sb;
+    strbuf_reset(sb);
+    const char* key_start = line;
+    while (key_start < colon) {
+        strbuf_append_char(sb, *key_start);
+        key_start++;
+    }
+    
+    // Trim key
+    while (sb->length > 0 && (sb->str[sb->length-1] == ' ' || sb->str[sb->length-1] == '\t')) {
+        sb->length--;
+    }
+    sb->str[sb->length] = '\0';
+    
+    if (sb->length == 0) return; // Empty key
+    
+    String* key = strbuf_to_string(sb);
+    
+    // Extract value
+    const char* value_start = colon + 1;
+    while (*value_start && (*value_start == ' ' || *value_start == '\t')) {
+        value_start++;
+    }
+    
+    strbuf_reset(sb);
+    strbuf_append_str(sb, value_start);
+    
+    // Trim trailing whitespace from value
+    while (sb->length > 0 && (sb->str[sb->length-1] == ' ' || sb->str[sb->length-1] == '\t' || 
+                              sb->str[sb->length-1] == '\r' || sb->str[sb->length-1] == '\n')) {
+        sb->length--;
+    }
+    sb->str[sb->length] = '\0';
+    
+    String* value = strbuf_to_string(sb);
+    
+    // Remove quotes if present
+    if (value && value->len >= 2) {
+        if ((value->chars[0] == '"' && value->chars[value->len-1] == '"') ||
+            (value->chars[0] == '\'' && value->chars[value->len-1] == '\'')) {
+            // Create unquoted version
+            strbuf_reset(sb);
+            strbuf_append_str_n(sb, value->chars + 1, value->len - 2);
+            value = strbuf_to_string(sb);
+        }
+    }
+    
+    // Add as attribute to metadata element
+    if (key && key->len > 0 && value && value->len > 0) {
+        add_attribute_to_element(parser->input, metadata, key->chars, value->chars);
+    }
+}
+
 // Parse YAML frontmatter (---)
 static Item parse_yaml_frontmatter(MarkupParser* parser) {
     if (!has_yaml_frontmatter(parser)) {
@@ -2626,34 +3221,22 @@ static Item parse_yaml_frontmatter(MarkupParser* parser) {
     
     parser->current_line++; // Skip opening ---
     
-    // Collect YAML content until closing ---
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
-    
+    // Parse YAML lines for structured metadata
     while (parser->current_line < parser->line_count) {
         const char* line = parser->lines[parser->current_line];
         
         // Check for closing ---
         const char* pos = line;
         skip_whitespace(&pos);
-        if (strcmp(pos, "---") == 0) {
+        if (strcmp(pos, "---") == 0 || strcmp(pos, "...") == 0) {
             parser->current_line++; // Skip closing ---
             break;
         }
         
-        // Add line to YAML content
-        if (sb->length > 0) {
-            strbuf_append_char(sb, '\n');
-        }
-        strbuf_append_str(sb, line);
+        // Parse individual YAML line for key-value pairs
+        parse_yaml_line(parser, line, metadata);
         parser->current_line++;
     }
-    
-    // Add YAML content as raw text
-    String* yaml_content = strbuf_to_string(sb);
-    Item yaml_item = {.item = s2it(yaml_content)};
-    list_push((List*)metadata, yaml_item);
-    increment_element_content_length(metadata);
     
     return (Item){.item = (uint64_t)metadata};
 }

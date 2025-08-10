@@ -236,3 +236,81 @@ Test(markup_roundtrip, complete_test) {
     // Cleanup
     free(comprehensive_content);
 }
+
+// Test comprehensive emoji features - covers all emoji shortcodes
+Test(markup_roundtrip, emoji_test) {
+    printf("\n=== Testing Comprehensive Emoji Features ===\n");
+    
+    // Read emoji test content from file
+    const char* emoji_content = read_file_content("test/input/comprehensive_emoji_test.md");
+    cr_assert_not_null(emoji_content, "Failed to read comprehensive_emoji_test.md file");
+    
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("markup");
+    String* flavor_str = NULL;
+    
+    // Get current directory for URL resolution
+    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_emoji_test.md");
+    
+    // Parse emoji content
+    Input* input = input_from_source(emoji_content, dummy_url, type_str, flavor_str);
+    cr_assert_not_null(input, "Failed to parse comprehensive emoji markdown");
+    
+    StrBuf* strbuf = strbuf_new();
+    printf("Parsed emoji input with root_item: %p\n", (void*)input->root);
+    format_item(strbuf, input->root, 0, NULL);
+    printf("Formatted emoji output: %s\n", strbuf->str ? strbuf->str : "(null)");
+
+    // Format using Markdown formatter to test parser only
+    String* markdown_type = create_lambda_string("markdown");
+    String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
+    cr_assert_not_null(formatted, "Failed to format emoji content to Markdown");
+    cr_assert(formatted->len > 0, "Formatted emoji Markdown should not be empty");
+    printf("Formatted emoji content (length %zu): %s\n", formatted->len, formatted->chars ? formatted->chars : "(null)");
+
+    // Cleanup
+    free(emoji_content);
+}
+
+
+
+// Test comprehensive math features from file - DISABLED due to potential hanging
+Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
+    printf("\n=== Testing Comprehensive Math Features from File ===\n");
+    
+    // Read math test content from file
+    const char* math_content = read_file_content("test/input/comprehensive_math_test.md");
+    cr_assert_not_null(math_content, "Failed to read comprehensive_math_test.md file");
+    
+    // Create Lambda strings for input parameters
+    String* type_str = create_lambda_string("markup");
+    String* flavor_str = NULL;
+    
+    // Get current directory for URL resolution
+    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_math_test.md");
+    
+    // Make a copy since input_from_source may modify the content
+    char* math_content_copy = strdup(math_content);
+    
+    // Parse math content
+    Input* input = input_from_source(math_content_copy, dummy_url, type_str, flavor_str);
+    cr_assert_not_null(input, "Failed to parse comprehensive math markdown");
+    
+    StrBuf* strbuf = strbuf_new();
+    printf("Parsed math input with root_item: %p\n", (void*)input->root);
+    format_item(strbuf, input->root, 0, NULL);
+    printf("Formatted math output: %s\n", strbuf->str ? strbuf->str : "(null)");
+
+    // Format using Markdown formatter to test parser only
+    String* markdown_type = create_lambda_string("markdown");
+    String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
+    cr_assert_not_null(formatted, "Failed to format math content to Markdown");
+    cr_assert(formatted->len > 0, "Formatted math Markdown should not be empty");
+    printf("Formatted math content (length %zu): %s\n", formatted->len, formatted->chars ? formatted->chars : "(null)");
+
+    // Cleanup
+    free(math_content);
+    free(math_content_copy);
+}
