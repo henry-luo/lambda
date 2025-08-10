@@ -21,7 +21,6 @@
         "lambda/input/input-ics.cpp",
         "lambda/input/input-latex.cpp",
         "lambda/input/input-man.cpp",
-        "lambda/input/input-md.cpp",
         "lambda/input/input-vcf.cpp",
         "lambda/input/input-textile.cpp",
         "lambda/input/input-mark.cpp",

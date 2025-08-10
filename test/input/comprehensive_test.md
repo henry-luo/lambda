@@ -188,6 +188,8 @@ $$
 
 #### Advanced Mathematical Expressions
 
+Inline math with subscripts: $x_1 + x_2 = \sum_{i=1}^{2} x_i$
+
 ##### Big Operators and Limits
 $$\lim_{n \to \infty} \sum_{k=1}^{n} \frac{1}{k^2} = \frac{\pi^2}{6}$$
 
@@ -262,6 +264,9 @@ x - y = 2
 - Heart: :heart:
 - Rocket: :rocket:
 
+### Extended Emoji Support
+Emoji support: :rocket: :heart: :100: :thumbsup: :fire: :bug: :bulb:
+
 ## Horizontal Dividers
 
 Text before first divider
@@ -279,6 +284,45 @@ ___
 Text after last divider (three underscores)
 
 ## Nested Lists (Simpler Version)
+
+### Simple Nested Lists
+
+Complex nested list structure:
+- Top level item 1
+  - Nested item 1.1
+  - Nested item 1.2
+    - Deep nested 1.2.1
+    - Deep nested 1.2.2
+  - Nested item 1.3
+- Top level item 2
+  - Another nested item 2.1
+  - Another nested item 2.2
+
+Mixed ordered and unordered nesting:
+1. First numbered item
+   - Unnumbered sub-item
+   - Another sub-item
+     1. Back to numbered
+     2. Another numbered
+   - More sub-items
+2. Second numbered item
+   - More unnumbered items
+
+### Complex Lists with Code Blocks
+
+Lists containing code:
+- First item
+  
+  ```python
+  def example():
+      return "code in list"
+  ```
+
+- Second item with inline `code` and block code:
+  
+  ```javascript
+  console.log("nested code block");
+  ```
 
 ### Basic Nested Lists
 1. **First item** with bold text
@@ -415,5 +459,13 @@ Detailed proofs can be found in [@proofs2022, appendix B, theorem 3].
 - Very complex nested structures (list items containing blockquotes with nested lists) may cause infinite loops
 - Some edge cases with deep nesting levels need further investigation
 - Footnote and citation parsing may have implementation-specific behavior
+
+---
+
+### Final Comprehensive Test
+
+Final paragraph with **all ~~combined~~ features**: *italic*, `code`, [links](http://example.com), images ![test](img.jpg), H~2~O, E=mc^2^, math $\pi r^2$, and emojis :smile: :rocket:!
+
+Final paragraph after horizontal rule demonstrates all inline formatting features working together.
 
 This document successfully tests the core parser capabilities including footnotes and citations without triggering infinite loops.
