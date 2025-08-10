@@ -1,7 +1,7 @@
 // RST Input Test - Schema Compliance Verification
 print("Testing RST Input - Schema Compliance")
 
-let rst = input('./test/input/test.rst', 'rst')
+let rst = input('./test/input/comprehensive_test.rst', 'rst')
 
 // Display the parsed content to verify schema structure
 print("Parsed RST content:")

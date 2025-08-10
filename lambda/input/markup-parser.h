@@ -37,6 +37,7 @@ typedef enum {
     BLOCK_TABLE,
     BLOCK_MATH,
     BLOCK_DIVIDER,
+    BLOCK_COMMENT,
     // Phase 6: Advanced block types
     BLOCK_FOOTNOTE_DEF,
     BLOCK_RST_DIRECTIVE,

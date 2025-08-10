@@ -1097,7 +1097,7 @@ Test(markup_tests, markup_rst_roundtrip) {
     
     // Get current directory for URL resolution
     lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.rst");
+    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_test.rst");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(rst_content);

@@ -58,6 +58,22 @@ static Item parse_org_block(MarkupParser* parser, const char* line);
 static Item parse_yaml_frontmatter(MarkupParser* parser);
 static Item parse_org_properties(MarkupParser* parser);
 static Item parse_wiki_template(MarkupParser* parser, const char** text);
+
+// RST-specific functions (from old input-rst.cpp)
+static bool is_rst_transition_line(const char* line);
+static Item parse_rst_transition(MarkupParser* parser);
+static bool is_rst_definition_list_item(const char* line);
+static bool is_rst_definition_list_definition(const char* line);
+static Item parse_rst_definition_list(MarkupParser* parser);
+static bool is_rst_literal_block_marker(const char* line);
+static bool line_ends_with_double_colon(const char* line);
+static Item parse_rst_literal_block(MarkupParser* parser);
+static bool is_rst_comment_line(const char* line);
+static Item parse_rst_comment(MarkupParser* parser);
+static bool is_rst_grid_table_line(const char* line);
+static Item parse_rst_grid_table(MarkupParser* parser);
+static Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text);
+static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text);
 static bool is_footnote_definition(const char* line);
 static bool is_rst_directive(MarkupParser* parser, const char* line);
 static bool is_org_block(const char* line);
@@ -347,18 +363,40 @@ static Item parse_block_element(MarkupParser* parser) {
         case BLOCK_HEADER:
             return parse_header(parser, line);
         case BLOCK_LIST_ITEM:
+            // Check if this is an RST definition list
+            if (parser->config.format == MARKUP_RST && 
+                is_rst_definition_list_item(line) && 
+                parser->current_line + 1 < parser->line_count &&
+                is_rst_definition_list_definition(parser->lines[parser->current_line + 1])) {
+                return parse_rst_definition_list(parser);
+            }
             return parse_list_item(parser, line);
         case BLOCK_CODE_BLOCK:
+            // Check for RST literal block
+            if (parser->config.format == MARKUP_RST && 
+                (is_rst_literal_block_marker(line) || line_ends_with_double_colon(line))) {
+                return parse_rst_literal_block(parser);
+            }
             return parse_code_block(parser, line);
         case BLOCK_QUOTE:
             return parse_blockquote(parser, line);
         case BLOCK_TABLE:
+            // Check for RST grid table
+            if (parser->config.format == MARKUP_RST && is_rst_grid_table_line(line)) {
+                return parse_rst_grid_table(parser);
+            }
             return parse_table_structure(parser);
         case BLOCK_MATH:
             return parse_math_block(parser, line);
         case BLOCK_DIVIDER:
+            // Check for RST transition line
+            if (parser->config.format == MARKUP_RST && is_rst_transition_line(line)) {
+                return parse_rst_transition(parser);
+            }
             parser->current_line++;
             return parse_divider(parser);
+        case BLOCK_COMMENT:
+            return parse_rst_comment(parser);
         case BLOCK_PARAGRAPH:
         default:
             return parse_paragraph(parser, line);
@@ -1450,6 +1488,89 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     return (Item){.item = (uint64_t)span};
 }
 
+// Parse inline content with format-specific enhancements
+static Item parse_inline_content(MarkupParser* parser, const char* text) {
+    if (!text || !*text) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // For RST format, handle RST-specific inline elements first
+    if (parser->config.format == MARKUP_RST) {
+        // Check for double backticks literal text
+        if (text[0] == '`' && text[1] == '`') {
+            const char* pos = text;
+            Item rst_literal = parse_rst_double_backtick_literal(parser, &pos);
+            if (rst_literal.item != ITEM_UNDEFINED) {
+                // If there's more text after the literal, create a span
+                if (*pos) {
+                    Element* span = create_element(parser->input, "span");
+                    if (span) {
+                        list_push((List*)span, rst_literal);
+                        increment_element_content_length(span);
+                        
+                        Item remaining = parse_inline_content(parser, pos);
+                        if (remaining.item != ITEM_UNDEFINED) {
+                            list_push((List*)span, remaining);
+                            increment_element_content_length(span);
+                        }
+                        
+                        return (Item){.item = (uint64_t)span};
+                    }
+                }
+                return rst_literal;
+            }
+        }
+        
+        // Check for trailing underscore references
+        const char* underscore_pos = strchr(text, '_');
+        if (underscore_pos && underscore_pos > text) {
+            // Parse up to the underscore normally, then handle the reference
+            size_t prefix_len = underscore_pos - text;
+            char* prefix = (char*)malloc(prefix_len + 1);
+            if (prefix) {
+                strncpy(prefix, text, prefix_len);
+                prefix[prefix_len] = '\0';
+                
+                Element* span = create_element(parser->input, "span");
+                if (span) {
+                    // Parse prefix normally
+                    if (strlen(prefix) > 0) {
+                        Item prefix_item = parse_inline_spans(parser, prefix);
+                        if (prefix_item.item != ITEM_UNDEFINED) {
+                            list_push((List*)span, prefix_item);
+                            increment_element_content_length(span);
+                        }
+                    }
+                    
+                    // Parse the reference
+                    const char* ref_pos = underscore_pos;
+                    Item ref_item = parse_rst_trailing_underscore_reference(parser, &ref_pos);
+                    if (ref_item.item != ITEM_UNDEFINED) {
+                        list_push((List*)span, ref_item);
+                        increment_element_content_length(span);
+                    }
+                    
+                    // Parse any remaining text
+                    if (*ref_pos) {
+                        Item remaining = parse_inline_content(parser, ref_pos);
+                        if (remaining.item != ITEM_UNDEFINED) {
+                            list_push((List*)span, remaining);
+                            increment_element_content_length(span);
+                        }
+                    }
+                    
+                    free(prefix);
+                    return (Item){.item = (uint64_t)span};
+                }
+                free(prefix);
+            }
+        }
+    }
+    
+    // Default to standard inline spans parsing
+    return parse_inline_spans(parser, text);
+}
+
 // Parse bold and italic text (**bold**, *italic*, __bold__, _italic_)
 static Item parse_bold_italic(MarkupParser* parser, const char** text) {
     const char* start = *text;
@@ -1856,6 +1977,31 @@ static BlockType detect_block_type(MarkupParser* parser, const char* line) {
     
     const char* pos = line;
     skip_whitespace(&pos);
+    
+    // RST-specific blocks - only detected when format is RST
+    if (parser->config.format == MARKUP_RST) {
+        if (is_rst_transition_line(line)) {
+            return BLOCK_DIVIDER;
+        }
+        
+        if (is_rst_comment_line(line)) {
+            return BLOCK_COMMENT;
+        }
+        
+        if (is_rst_literal_block_marker(line) || line_ends_with_double_colon(line)) {
+            return BLOCK_CODE_BLOCK;
+        }
+        
+        if (is_rst_grid_table_line(line)) {
+            return BLOCK_TABLE;
+        }
+        
+        if (is_rst_definition_list_item(line) && 
+            parser->current_line + 1 < parser->line_count &&
+            is_rst_definition_list_definition(parser->lines[parser->current_line + 1])) {
+            return BLOCK_LIST_ITEM;
+        }
+    }
     
     // Header detection (# ## ### etc. and RST underlined headers)
     if (get_header_level(parser, line) > 0) {
@@ -3547,4 +3693,377 @@ static Item parse_wiki_template(MarkupParser* parser, const char** text) {
     
     *text = pos;
     return (Item){.item = (uint64_t)template_elem};
+}
+
+// ============================================================================
+// RST-Specific Features Missing from New Parser (Added from old input-rst.cpp)
+// ============================================================================
+
+// RST Transition lines (horizontal rules with ----)
+static bool is_rst_transition_line(const char* line) {
+    if (!line || strlen(line) < 4) return false;
+    
+    int dash_count = 0;
+    for (int i = 0; line[i]; i++) {
+        if (line[i] == '-') {
+            dash_count++;
+        } else if (!isspace(line[i])) {
+            return false;
+        }
+    }
+    
+    return dash_count >= 4;
+}
+
+static Item parse_rst_transition(MarkupParser* parser) {
+    Element* hr = create_element(parser->input, "hr");
+    parser->current_line++;
+    return (Item){.item = (uint64_t)hr};
+}
+
+// RST Definition Lists
+static bool is_rst_definition_list_item(const char* line) {
+    if (!line || is_empty_line(line)) return false;
+    
+    // definition term should not start with whitespace
+    if (isspace(line[0])) return false;
+    
+    // should contain text
+    for (int i = 0; line[i]; i++) {
+        if (!isspace(line[i])) return true;
+    }
+    
+    return false;
+}
+
+static bool is_rst_definition_list_definition(const char* line) {
+    if (!line) return false;
+    
+    // definition should start with indentation
+    return isspace(line[0]) && !is_empty_line(line);
+}
+
+static Item parse_rst_definition_list(MarkupParser* parser) {
+    Element* def_list = create_element(parser->input, "dl");
+    if (!def_list) return (Item){.item = ITEM_ERROR};
+    
+    while (parser->current_line < parser->line_count && 
+           is_rst_definition_list_item(parser->lines[parser->current_line])) {
+        const char* term_line = parser->lines[parser->current_line];
+        
+        // create definition term
+        Element* dt = create_element(parser->input, "dt");
+        if (!dt) break;
+        
+        char* term_content = trim_whitespace(term_line);
+        if (term_content && strlen(term_content) > 0) {
+            Item term_text = parse_inline_content(parser, term_content);
+            if (term_text.item != ITEM_UNDEFINED) {
+                list_push((List*)dt, term_text);
+                increment_element_content_length(dt);
+            }
+        }
+        free(term_content);
+        
+        list_push((List*)def_list, (Item){.item = (uint64_t)dt});
+        increment_element_content_length(def_list);
+        
+        parser->current_line++;
+        
+        // parse definition(s)
+        while (parser->current_line < parser->line_count && 
+               is_rst_definition_list_definition(parser->lines[parser->current_line])) {
+            const char* def_line = parser->lines[parser->current_line];
+            
+            Element* dd = create_element(parser->input, "dd");
+            if (!dd) break;
+            
+            char* def_content = trim_whitespace(def_line);
+            if (def_content && strlen(def_content) > 0) {
+                Item def_text = parse_inline_content(parser, def_content);
+                if (def_text.item != ITEM_UNDEFINED) {
+                    list_push((List*)dd, def_text);
+                    increment_element_content_length(dd);
+                }
+            }
+            free(def_content);
+            
+            list_push((List*)def_list, (Item){.item = (uint64_t)dd});
+            increment_element_content_length(def_list);
+            
+            parser->current_line++;
+        }
+    }
+    
+    return (Item){.item = (uint64_t)def_list};
+}
+
+// RST Literal Blocks (:: marker)
+static bool is_rst_literal_block_marker(const char* line) {
+    if (!line) return false;
+    
+    char* trimmed = trim_whitespace(line);
+    bool is_marker = (strlen(trimmed) == 2 && strcmp(trimmed, "::") == 0);
+    free(trimmed);
+    return is_marker;
+}
+
+static bool line_ends_with_double_colon(const char* line) {
+    if (!line) return false;
+    
+    char* trimmed = trim_whitespace(line);
+    int len = strlen(trimmed);
+    bool ends_with = len >= 2 && trimmed[len-2] == ':' && trimmed[len-1] == ':';
+    free(trimmed);
+    return ends_with;
+}
+
+static int count_leading_spaces(const char* str) {
+    int count = 0;
+    while (str[count] == ' ') count++;
+    return count;
+}
+
+static Item parse_rst_literal_block(MarkupParser* parser) {
+    // literal block starts with :: on its own line or at end of paragraph
+    const char* line = parser->lines[parser->current_line];
+    
+    bool is_marker_line = is_rst_literal_block_marker(line);
+    bool ends_with_double_colon = line_ends_with_double_colon(line);
+    
+    if (!is_marker_line && !ends_with_double_colon) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // Create code element directly (following updated schema - no pre wrapper)
+    Element* code_block = create_element(parser->input, "code");
+    if (!code_block) return (Item){.item = ITEM_ERROR};
+    
+    parser->current_line++;
+    
+    // collect literal content
+    StrBuf* sb = parser->input->sb;
+    strbuf_reset(sb);
+    bool first_line = true;
+    int base_indent = -1;
+    
+    while (parser->current_line < parser->line_count) {
+        const char* content_line = parser->lines[parser->current_line];
+        
+        if (is_empty_line(content_line)) {
+            if (!first_line) {
+                strbuf_append_char(sb, '\n');
+            }
+            first_line = false;
+            parser->current_line++;
+            continue;
+        }
+        
+        int indent = count_leading_spaces(content_line);
+        
+        // first non-empty line sets base indentation
+        if (base_indent == -1) {
+            base_indent = indent;
+        }
+        
+        // if line is not indented more than base, end literal block
+        if (indent < base_indent) {
+            break;
+        }
+        
+        // add line to content
+        if (!first_line) {
+            strbuf_append_char(sb, '\n');
+        }
+        
+        // add content with base indentation removed
+        const char* content_start = content_line + base_indent;
+        strbuf_append_str(sb, content_start);
+        
+        first_line = false;
+        parser->current_line++;
+    }
+    
+    // create string content
+    if (sb->length > 0) {
+        String* content_str = strbuf_to_string(sb);
+        Item content_item = {.item = s2it(content_str)};
+        list_push((List*)code_block, content_item);
+        increment_element_content_length(code_block);
+    }
+    
+    return (Item){.item = (uint64_t)code_block};
+}
+
+// RST Comments (.. comment)
+static bool is_rst_comment_line(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    return pos[0] == '.' && pos[1] == '.' && 
+           (pos[2] == ' ' || pos[2] == '\t' || pos[2] == '\0');
+}
+
+static Item parse_rst_comment(MarkupParser* parser) {
+    if (!is_rst_comment_line(parser->lines[parser->current_line])) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* comment = create_element(parser->input, "comment");
+    if (!comment) return (Item){.item = ITEM_ERROR};
+    
+    const char* line = parser->lines[parser->current_line];
+    const char* pos = line;
+    skip_whitespace(&pos);
+    pos += 2; // skip ..
+    skip_whitespace(&pos);
+    
+    char* content = trim_whitespace(pos);
+    if (content && strlen(content) > 0) {
+        String* comment_text = input_create_string(parser->input, content);
+        if (comment_text) {
+            list_push((List*)comment, (Item){.item = s2it(comment_text)});
+            increment_element_content_length(comment);
+        }
+    }
+    free(content);
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)comment};
+}
+
+// RST Grid Tables (complex table format)
+static bool is_rst_grid_table_line(const char* line) {
+    if (!line || strlen(line) < 3) return false;
+    
+    // grid table lines contain + and - or | characters
+    bool has_plus = false;
+    bool has_dash_or_pipe = false;
+    
+    for (int i = 0; line[i]; i++) {
+        if (line[i] == '+') {
+            has_plus = true;
+        } else if (line[i] == '-' || line[i] == '|') {
+            has_dash_or_pipe = true;
+        } else if (!isspace(line[i])) {
+            return false;
+        }
+    }
+    
+    return has_plus && has_dash_or_pipe;
+}
+
+static Item parse_rst_grid_table(MarkupParser* parser) {
+    // Grid table parsing would be complex, for now create a basic table
+    Element* table = create_element(parser->input, "table");
+    if (!table) return (Item){.item = ITEM_ERROR};
+    
+    add_attribute_to_element(parser->input, table, "type", "grid");
+    
+    // Skip grid table lines for now (basic implementation)
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        if (is_rst_grid_table_line(line) || is_empty_line(line)) {
+            parser->current_line++;
+        } else {
+            break;
+        }
+    }
+    
+    return (Item){.item = (uint64_t)table};
+}
+
+// Enhanced RST inline parsing for double backticks and trailing underscores
+static Item parse_rst_double_backtick_literal(MarkupParser* parser, const char** text) {
+    if (**text != '`' || *(*text + 1) != '`') {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    const char* start = *text + 2; // skip opening ``
+    const char* pos = start;
+    const char* end = NULL;
+    
+    // find closing ``
+    while (*pos != '\0' && *(pos + 1) != '\0') {
+        if (*pos == '`' && *(pos + 1) == '`') {
+            end = pos;
+            break;
+        }
+        pos++;
+    }
+    
+    if (!end) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* code_elem = create_element(parser->input, "code");
+    if (!code_elem) {
+        *text = pos + 2;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // extract content between markers
+    size_t content_len = end - start;
+    char* content = (char*)malloc(content_len + 1);
+    if (content) {
+        strncpy(content, start, content_len);
+        content[content_len] = '\0';
+        
+        String* code_str = input_create_string(parser->input, content);
+        if (code_str) {
+            list_push((List*)code_elem, (Item){.item = s2it(code_str)});
+            increment_element_content_length(code_elem);
+        }
+        free(content);
+    }
+    
+    *text = end + 2; // skip closing ``
+    return (Item){.item = (uint64_t)code_elem};
+}
+
+static Item parse_rst_trailing_underscore_reference(MarkupParser* parser, const char** text) {
+    if (**text != '_') return (Item){.item = ITEM_UNDEFINED};
+    
+    // work backwards to find start of reference
+    const char* current = *text;
+    const char* ref_start = current - 1;
+    
+    while (ref_start > parser->lines[parser->current_line] && !isspace(*(ref_start - 1))) {
+        ref_start--;
+    }
+    
+    if (ref_start >= current) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // extract reference text
+    size_t ref_len = current - ref_start;
+    char* ref_text = (char*)malloc(ref_len + 1);
+    if (!ref_text) {
+        (*text)++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    strncpy(ref_text, ref_start, ref_len);
+    ref_text[ref_len] = '\0';
+    
+    Element* ref_elem = create_element(parser->input, "a");
+    if (!ref_elem) {
+        free(ref_text);
+        (*text)++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    add_attribute_to_element(parser->input, ref_elem, "href", ref_text);
+    
+    String* link_text = input_create_string(parser->input, ref_text);
+    if (link_text) {
+        list_push((List*)ref_elem, (Item){.item = s2it(link_text)});
+        increment_element_content_length(ref_elem);
+    }
+    
+    free(ref_text);
+    (*text)++; // skip _
+    return (Item){.item = (uint64_t)ref_elem};
 }

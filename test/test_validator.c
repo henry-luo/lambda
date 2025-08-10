@@ -940,7 +940,7 @@ Test(validator_tests, asciidoc_uses_doc_schema) {
 
 Test(validator_tests, rst_uses_doc_schema) {
     // Test that RST files automatically use doc_schema.ls
-    test_auto_schema_detection_helper("test/input/test.rst",
+    test_auto_schema_detection_helper("test/input/comprehensive_test.rst",
                                      "Using document schema for rst input", 
                                      NULL, true);
 }

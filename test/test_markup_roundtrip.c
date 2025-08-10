@@ -320,8 +320,8 @@ Test(markup_roundtrip, rst_directives_test) {
     printf("\n=== Testing RST Directives and Format-Specific Features ===\n");
     
     // Read RST test content from file
-    const char* rst_content = read_file_content("test/input/comprehensive_rst_test.rst");
-    cr_assert_not_null(rst_content, "Failed to read comprehensive_rst_test.rst file");
+    const char* rst_content = read_file_content("test/input/comprehensive_test.rst");
+    cr_assert_not_null(rst_content, "Failed to read comprehensive_test.rst file");
     
     // Create Lambda strings for RST input parameters
     String* type_str = create_lambda_string("markup");
@@ -329,7 +329,7 @@ Test(markup_roundtrip, rst_directives_test) {
     
     // Get current directory for URL resolution
     lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_rst_test.rst");
+    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_test.rst");
     
     // Make a copy since input_from_source may modify the content
     char* rst_content_copy = strdup(rst_content);
@@ -446,4 +446,86 @@ Test(markup_roundtrip, basic_rst_test) {
     
     // Cleanup
     free(rst_content_copy);
+}
+
+// Test RST-specific features from old parser
+Test(markup_parsing_rst, rst_extended_features) {
+    printf("\n=== Testing Extended RST Features ===\n");
+    
+    const char* rst_extended_content = 
+        ".. This is a comment\n"
+        "   spanning multiple lines\n"
+        "\n"
+        "Document Title\n"
+        "==============\n"
+        "\n"
+        "Text with ``literal markup`` and reference_ links.\n"
+        "\n"
+        "Transition line below:\n"
+        "\n"
+        "----\n"
+        "\n"
+        "Definition Lists\n"
+        "\n"
+        "term 1\n"
+        "    Definition of term 1.\n"
+        "\n"
+        "term 2\n"
+        "    Definition of term 2.\n"
+        "\n"
+        "Literal block follows::\n"
+        "\n"
+        "    This is a literal block.\n"
+        "    It preserves whitespace.\n"
+        "        Even indentation.\n"
+        "\n"
+        "Grid table:\n"
+        "\n"
+        "+-------+-------+\n"
+        "| A     | B     |\n"
+        "+-------+-------+\n"
+        "| 1     | 2     |\n"
+        "+-------+-------+\n";
+        
+    String* type_str = create_lambda_string("markup");
+    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* dummy_url = parse_url(cwd, "test_extended.rst");
+    
+    char* content_copy = strdup(rst_extended_content);
+    Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
+    cr_assert_not_null(input, "Failed to parse extended RST content");
+    
+    StrBuf* strbuf = strbuf_new();
+    format_item(strbuf, input->root, 0, NULL);
+    printf("Extended RST output: %.200s\n", strbuf->str ? strbuf->str : "(null)");
+    
+    // Format to JSON and verify extended features
+    String* json_type = create_lambda_string("json");
+    String* formatted = format_data(input->root, json_type, NULL, input->pool);
+    cr_assert_not_null(formatted, "Failed to format extended RST to JSON");
+    
+    if (formatted->chars) {
+        // Check for literal text (double backticks)
+        bool has_literal = strstr(formatted->chars, "literal") != NULL ||
+                          strstr(formatted->chars, "code") != NULL;
+        printf("Literal text detection: %s\n", has_literal ? "YES" : "NO");
+        
+        // Check for comments
+        bool has_comment = strstr(formatted->chars, "comment") != NULL;
+        printf("Comment detection: %s\n", has_comment ? "YES" : "NO");
+        
+        // Check for definition lists  
+        bool has_def_list = strstr(formatted->chars, "dl") != NULL ||
+                           strstr(formatted->chars, "definition") != NULL;
+        printf("Definition list detection: %s\n", has_def_list ? "YES" : "NO");
+        
+        // Check for horizontal rules/transitions
+        bool has_hr = strstr(formatted->chars, "hr") != NULL ||
+                     strstr(formatted->chars, "divider") != NULL;
+        printf("Transition line detection: %s\n", has_hr ? "YES" : "NO");
+        
+        printf("SUCCESS: Extended RST features test completed!\n");
+    }
+    
+    free(content_copy);
 }

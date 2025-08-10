@@ -12,7 +12,6 @@ void parse_ini(Input* input, const char* ini_string);
 void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
-void parse_rst(Input* input, const char* rst_string);
 void parse_html(Input* input, const char* html_string);
 void parse_latex(Input* input, const char* latex_string);
 void parse_rtf(Input* input, const char* rtf_string);
@@ -466,7 +465,7 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
             input->root = input_markup(input, source);
         }
         else if (strcmp(effective_type, "rst") == 0) {
-            parse_rst(input, source);
+            input->root = input_markup(input, source);
         }
         else if (strcmp(effective_type, "html") == 0) {
             parse_html(input, source);

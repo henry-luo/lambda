@@ -101,7 +101,7 @@ Test(mime_detect_tests, test_input_files) {
         "test/input/test.yaml",
         "test/input/test.toml",
         "test/input/test.ini",
-        "test/input/test.rst",
+        "test/input/comprehensive_test.rst",
         "test/input/test.rtf",
         "test/input/test.tex",
         "test/input/no_extension",
