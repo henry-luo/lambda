@@ -184,8 +184,38 @@ void run_validation(const char *data_file, const char *schema_file, const char *
                 printf("  Error %d: %s\n", error_num, error_msg);
                 if (error->path) {
                     printf("    Path: ");
-                    // TODO: Print the validation path
-                    printf("(path information)\n");
+                    // Build path from root to leaf (reverse the linked list order)
+                    PathSegment* segments[50];  // Max 50 levels deep
+                    int segment_count = 0;
+                    PathSegment* current = error->path;
+                    
+                    // Collect all segments
+                    while (current && segment_count < 50) {
+                        segments[segment_count++] = current;
+                        current = current->next;
+                    }
+                    
+                    // Print in reverse order (root to leaf)
+                    char path_buffer[512] = "";
+                    for (int i = segment_count - 1; i >= 0; i--) {
+                        PathSegment* segment = segments[i];
+                        if (segment->type == PATH_FIELD) {
+                            strcat(path_buffer, ".");
+                            strncat(path_buffer, segment->data.field_name.str, segment->data.field_name.length);
+                        } else if (segment->type == PATH_INDEX) {
+                            char index_str[20];
+                            snprintf(index_str, sizeof(index_str), "[%ld]", segment->data.index);
+                            strcat(path_buffer, index_str);
+                        }
+                    }
+                    
+                    if (strlen(path_buffer) > 0) {
+                        printf("%s\n", path_buffer);
+                    } else {
+                        printf("(root)\n");
+                    }
+                } else {
+                    printf("    Path: (root)\n");
                 }
                 error = error->next;
                 error_num++;

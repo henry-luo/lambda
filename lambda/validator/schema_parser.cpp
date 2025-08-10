@@ -430,7 +430,13 @@ TypeSchema* build_map_schema(SchemaParser* parser, TSNode node) {
             }
             
             if (!ts_node_is_null(name_node) && !ts_node_is_null(type_node)) {
-                StrView field_name = get_node_source(parser, name_node);
+                // Extract field name and copy it to memory pool for persistence
+                StrView field_name_view = get_node_source(parser, name_node);
+                String* field_name_str = string_from_strview(field_name_view, parser->pool);
+                StrView field_name = {
+                    .str = field_name_str->chars,
+                    .length = field_name_str->len
+                };
                 TypeSchema* field_type = build_schema_type(parser, type_node);
                 
                 if (!field_type) {
@@ -635,8 +641,13 @@ TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
             }
             
             if (!ts_node_is_null(name_node) && !ts_node_is_null(type_node)) {
-                // Extract field name
-                StrView field_name = get_node_source(parser, name_node);
+                // Extract field name and copy it to memory pool for persistence
+                StrView field_name_view = get_node_source(parser, name_node);
+                String* field_name_str = string_from_strview(field_name_view, parser->pool);
+                StrView field_name = {
+                    .str = field_name_str->chars,
+                    .length = field_name_str->len
+                };
                 //printf("[SCHEMA_PARSER] DEBUG: Field name: %.*s\n", (int)field_name.length, field_name.str);
                 
                 // Parse field type
