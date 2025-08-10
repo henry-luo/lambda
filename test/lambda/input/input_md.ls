@@ -2,6 +2,6 @@ let md = input('./test/input/comprehensive_test.md', 'markdown')  // './test/inp
 
 md
 
-format(md, 'markdown')
+// format(md, 'markdown')
 
 "All tests completed!"

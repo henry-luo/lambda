@@ -243,40 +243,67 @@ Item parse_markup_content(MarkupParser* parser, const char* content) {
     return parse_document(parser);
 }
 
-// Document parsing - creates proper structure for markdown formatter
+// Document parsing - creates proper structure according to Doc Schema
 static Item parse_document(MarkupParser* parser) {
-    // Create document structure that the markdown formatter can handle
-    // Instead of a 'div' wrapper, create a 'body' container (which the formatter recognizes)
-    Element* doc = create_element(parser->input, "body");
+    // Create root document element according to schema
+    Element* doc = create_element(parser->input, "doc");
     if (!doc) {
         return (Item){.item = ITEM_ERROR};
     }
     
+    // Add version attribute as required by schema
+    add_attribute_to_element(parser->input, doc, "version", "1.0");
+    
+    // Create meta element only if there's actual metadata content
+    Element* meta = NULL;
+    
     // Phase 6: Parse metadata first (YAML frontmatter or Org properties)
     if (has_yaml_frontmatter(parser)) {
-        Item metadata = parse_yaml_frontmatter(parser);
-        if (metadata.item != ITEM_UNDEFINED && metadata.item != ITEM_ERROR) {
-            list_push((List*)doc, metadata);
-            increment_element_content_length(doc);
+        meta = create_element(parser->input, "meta");
+        if (meta) {
+            Item metadata = parse_yaml_frontmatter(parser);
+            if (metadata.item != ITEM_UNDEFINED && metadata.item != ITEM_ERROR) {
+                list_push((List*)meta, metadata);
+                increment_element_content_length(meta);
+            }
         }
     } else if (has_org_properties(parser)) {
-        Item properties = parse_org_properties(parser);
-        if (properties.item != ITEM_UNDEFINED && properties.item != ITEM_ERROR) {
-            list_push((List*)doc, properties);
-            increment_element_content_length(doc);
+        meta = create_element(parser->input, "meta");
+        if (meta) {
+            Item properties = parse_org_properties(parser);
+            if (properties.item != ITEM_UNDEFINED && properties.item != ITEM_ERROR) {
+                list_push((List*)meta, properties);
+                increment_element_content_length(meta);
+            }
         }
     }
     
-    // Parse content directly into the document
+    // Add meta element to document only if it was created and has content
+    if (meta) {
+        list_push((List*)doc, (Item){.item = (uint64_t)meta});
+        increment_element_content_length(doc);
+    }
+    
+    // Create body element for document content
+    Element* body = create_element(parser->input, "body");
+    if (!body) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Parse content into the body element
     while (parser->current_line < parser->line_count) {
         Item block = parse_block_element(parser);
         if (block.item != ITEM_UNDEFINED && block.item != ITEM_ERROR) {
             // Add block elements as children in the List structure
-            list_push((List*)doc, block);
+            list_push((List*)body, block);
             // Increment content length for proper element tracking
-            increment_element_content_length(doc);
+            increment_element_content_length(body);
         }
     }
+    
+    // Add body element to document
+    list_push((List*)doc, (Item){.item = (uint64_t)body});
+    increment_element_content_length(doc);
     
     return (Item){.item = (uint64_t)doc};
 }
