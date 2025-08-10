@@ -329,8 +329,91 @@ This comprehensive test covers implemented features that are stable:
 - Blockquotes with inline formatting ✓
 - Mixed inline formatting combinations ✓
 
+## Advanced Features Testing
+
+### Footnotes and Citations
+
+#### Basic Footnotes
+This is a sentence with a footnote[^1]. Here's another footnote reference[^2].
+
+Academic papers often use footnotes for additional information[^note1]. Multiple footnotes can appear in the same paragraph[^a][^b][^c].
+
+#### Complex Footnotes
+This footnote contains **bold text**[^bold-note]. This one has `inline code`[^code-note].
+
+Here's a footnote with a [link](https://example.com)[^link-note].
+
+#### Citations (Various Formats)
+According to Smith (2023)[^smith2023], the findings were significant.
+
+The research shows promising results [@doe2022; @johnson2021].
+
+Multiple citations can be grouped [@citation1; @citation2; @citation3].
+
+As noted in previous work [1], [2], [3], the methodology is well-established.
+
+#### Citation with Page Numbers
+The theory was first proposed [@einstein1905, pp. 123-145].
+
+See [@newton1687, chapter 3] for detailed analysis.
+
+According to [@darwin1859, p. 42], natural selection is the key mechanism.
+
+#### Footnote Definitions
+[^1]: This is the first footnote definition.
+
+[^2]: This footnote contains multiple paragraphs.
+
+    It can span several lines and include formatting like **bold** and *italic*.
+    
+    Even `code` and [links](https://example.com) work in footnotes.
+
+[^note1]: Academic footnotes often contain detailed references and additional context that would disrupt the flow of the main text.
+
+[^a]: Short footnote A.
+
+[^b]: Short footnote B with *emphasis*.
+
+[^c]: Short footnote C with `code`.
+
+[^bold-note]: This footnote definition contains **bold formatting** and shows that inline formatting works within footnote definitions.
+
+[^code-note]: This footnote shows `inline code` within the definition.
+
+[^link-note]: Footnotes can contain [external links](https://example.com) and [internal links](#advanced-features-testing).
+
+#### Bibliography-Style References
+References:
+
+[1] Smith, J. (2023). "Advanced Markup Processing". *Journal of Documentation*, 15(3), 45-67.
+
+[2] Doe, A., & Johnson, B. (2022). "Parsing Complex Structures". *Technical Review*, 8(2), 123-140.
+
+[3] Wilson, C. (2021). "Modern Text Processing". *Computing Today*, 12(4), 78-92.
+
+### Advanced Citation Formats
+
+#### Multi-Author Citations
+The collaborative study [@smith2023; @doe2022; @wilson2021] demonstrates consistent findings.
+
+#### In-Text Citations
+Smith et al. (2023) found that parsing complexity increases with nesting depth [@smith2023].
+
+The results (Johnson & Doe, 2022) support this conclusion [@johnson2022].
+
+#### Citation with Prefixes and Suffixes
+See especially [@smith2023, pp. 45-67; also @doe2022, chapter 3].
+
+Compare [@jones2020, pp. 12-15] with [@brown2021, figure 2].
+
+#### Locator-Specific Citations
+The formula appears in [@mathematics2023, equation 4.7].
+
+Detailed proofs can be found in [@proofs2022, appendix B, theorem 3].
+
 **Known Limitations:**
 - Very complex nested structures (list items containing blockquotes with nested lists) may cause infinite loops
 - Some edge cases with deep nesting levels need further investigation
+- Footnote and citation parsing may have implementation-specific behavior
 
-This document successfully tests the core parser capabilities without triggering infinite loops.
+This document successfully tests the core parser capabilities including footnotes and citations without triggering infinite loops.
