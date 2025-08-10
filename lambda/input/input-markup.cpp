@@ -59,7 +59,7 @@ static Item parse_yaml_frontmatter(MarkupParser* parser);
 static Item parse_org_properties(MarkupParser* parser);
 static Item parse_wiki_template(MarkupParser* parser, const char** text);
 static bool is_footnote_definition(const char* line);
-static bool is_rst_directive(const char* line);
+static bool is_rst_directive(MarkupParser* parser, const char* line);
 static bool is_org_block(const char* line);
 static bool has_yaml_frontmatter(MarkupParser* parser);
 static bool has_org_properties(MarkupParser* parser);
@@ -73,8 +73,8 @@ static bool is_table_continuation(const char* line);
 static Item parse_table_cell_content(MarkupParser* parser, const char* cell_text);
 
 // Phase 2: Utility functions
-static BlockType detect_block_type(const char* line);
-static int get_header_level(const char* line);
+static BlockType detect_block_type(MarkupParser* parser, const char* line);
+static int get_header_level(MarkupParser* parser, const char* line);
 static bool is_list_item(const char* line);
 static bool is_code_fence(const char* line);
 static bool is_blockquote(const char* line);
@@ -178,8 +178,13 @@ MarkupFormat detect_markup_format(const char* content, const char* filename) {
     }
     
     // Check for reStructuredText patterns
-    if (strstr(content, ".. ") || strstr(content, "===") || 
-        strstr(content, "---") || strstr(content, "~~~")) {
+    if (strstr(content, ".. ") || strstr(content, ".. _") || 
+        strstr(content, ".. code-block::") || strstr(content, ".. note::") ||
+        strstr(content, ".. warning::") || strstr(content, ".. image::") ||
+        // Check for RST-style underlined headers (lines with === --- ~~~ ^^^ etc.)
+        (strstr(content, "===") && strlen(content) > 10) || 
+        (strstr(content, "---") && strlen(content) > 10) || 
+        (strstr(content, "~~~") && strlen(content) > 10)) {
         return MARKUP_RST;
     }
     
@@ -327,7 +332,7 @@ static Item parse_block_element(MarkupParser* parser) {
         return parse_footnote_definition(parser, line);
     }
     
-    if (is_rst_directive(line)) {
+    if (is_rst_directive(parser, line)) {
         return parse_rst_directive(parser, line);
     }
     
@@ -336,7 +341,7 @@ static Item parse_block_element(MarkupParser* parser) {
     }
     
     // Detect block type
-    BlockType block_type = detect_block_type(line);
+    BlockType block_type = detect_block_type(parser, line);
     
     switch (block_type) {
         case BLOCK_HEADER:
@@ -362,7 +367,7 @@ static Item parse_block_element(MarkupParser* parser) {
 
 // Parse header elements (# Header, ## Header, etc.) - Creates HTML-like h1, h2, etc.
 static Item parse_header(MarkupParser* parser, const char* line) {
-    int level = get_header_level(line);
+    int level = get_header_level(parser, line);
     if (level == 0) {
         // Fallback to paragraph if not a valid header
         return parse_paragraph(parser, line);
@@ -382,10 +387,21 @@ static Item parse_header(MarkupParser* parser, const char* line) {
     snprintf(level_str, sizeof(level_str), "%d", level);
     add_attribute_to_element(parser->input, header, "level", level_str);
     
-    // Extract header text (skip # markers and whitespace)
+    // Extract header text (handle both Markdown and RST styles)
     const char* text = line;
-    while (*text == '#') text++;
-    skip_whitespace(&text);
+    if (*text == '#') {
+        // Markdown-style header: skip # markers and whitespace
+        while (*text == '#') text++;
+        skip_whitespace(&text);
+    } else if (parser->config.format == MARKUP_RST) {
+        // RST-style underlined header: use the entire line as text
+        // The underline will be skipped by incrementing current_line twice
+        text = line;
+        skip_whitespace(&text);
+    } else {
+        // Fallback: use the entire line
+        skip_whitespace(&text);
+    }
     
     // Parse inline content for header text and add as children
     Item content = parse_inline_spans(parser, text);
@@ -395,6 +411,23 @@ static Item parse_header(MarkupParser* parser, const char* line) {
     }
     
     parser->current_line++;
+    
+    // For RST underlined headers, also skip the underline
+    if (parser->config.format == MARKUP_RST && 
+        parser->current_line < parser->line_count) {
+        const char* next_line = parser->lines[parser->current_line];
+        const char* next_pos = next_line;
+        skip_whitespace(&next_pos);
+        
+        // Check if next line is an underline
+        char ch = *next_pos;
+        if (ch && (ch == '=' || ch == '-' || ch == '~' || 
+                  ch == '^' || ch == '+' || ch == '*')) {
+            // Skip the underline
+            parser->current_line++;
+        }
+    }
+    
     return (Item){.item = (uint64_t)header};
 }
 
@@ -418,7 +451,7 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
             break; // End of paragraph
         }
         
-        BlockType next_type = detect_block_type(current);
+        BlockType next_type = detect_block_type(parser, current);
         if (next_type != BLOCK_PARAGRAPH) {
             break; // Next line is different block type
         }
@@ -515,7 +548,7 @@ static Item parse_nested_list_content(MarkupParser* parser, int base_indent) {
             }
         } else {
             // Check what type of block this is
-            BlockType block_type = detect_block_type(line);
+            BlockType block_type = detect_block_type(parser, line);
             if (block_type == BLOCK_CODE_BLOCK) {
                 // Parse as code block directly
                 Item code_content = parse_code_block(parser, line);
@@ -1730,8 +1763,26 @@ Item input_markup(Input *input, const char* content) {
         return (Item){.item = ITEM_ERROR};
     }
     
-    // Detect format
-    MarkupFormat format = detect_markup_format(content, NULL);
+    // Extract filename from URL if available for format detection
+    const char* filename = NULL;
+    if (input->url) {
+        lxb_url_t* url = (lxb_url_t*)input->url;
+        if (url->path.str.data && url->path.str.length > 0) {
+            // Extract just the filename from the path
+            const char* path_start = (const char*)url->path.str.data;
+            size_t path_len = url->path.str.length;
+            const char* last_slash = NULL;
+            for (size_t i = 0; i < path_len; i++) {
+                if (path_start[i] == '/') {
+                    last_slash = path_start + i + 1;
+                }
+            }
+            filename = last_slash ? last_slash : path_start;
+        }
+    }
+    
+    // Detect format using both content and filename
+    MarkupFormat format = detect_markup_format(content, filename);
     const char* flavor = detect_markup_flavor(format, content);
     
     // Create parser configuration
@@ -1799,23 +1850,16 @@ static const char* detect_math_flavor(const char* content) {
 
 // Phase 2: Utility functions for enhanced parsing
 
-// Detect the type of a block element
-static BlockType detect_block_type(const char* line) {
-    if (!line || !*line) return BLOCK_PARAGRAPH;
+// Detect the type of a block element - Enhanced for RST format
+static BlockType detect_block_type(MarkupParser* parser, const char* line) {
+    if (!line || !*line || !parser) return BLOCK_PARAGRAPH;
     
     const char* pos = line;
     skip_whitespace(&pos);
     
-    // Header detection (# ## ### etc.)
-    if (*pos == '#') {
-        int count = 0;
-        while (*pos == '#' && count < 6) {
-            count++;
-            pos++;
-        }
-        if (count > 0 && (*pos == ' ' || *pos == '\t' || *pos == '\0')) {
-            return BLOCK_HEADER;
-        }
+    // Header detection (# ## ### etc. and RST underlined headers)
+    if (get_header_level(parser, line) > 0) {
+        return BLOCK_HEADER;
     }
     
     // List item detection (-, *, +, 1., 2., etc.)
@@ -1859,13 +1903,14 @@ static BlockType detect_block_type(const char* line) {
     return BLOCK_PARAGRAPH;
 }
 
-// Get header level (1-6)
-static int get_header_level(const char* line) {
-    if (!line) return 0;
+// Get header level (1-6) - Enhanced for RST underlined headers
+static int get_header_level(MarkupParser* parser, const char* line) {
+    if (!line || !parser) return 0;
     
     const char* pos = line;
     skip_whitespace(&pos);
     
+    // Handle Markdown-style headers for all formats
     int level = 0;
     while (*pos == '#' && level < 6) {
         level++;
@@ -1875,6 +1920,43 @@ static int get_header_level(const char* line) {
     // Must be followed by space or end of line
     if (level > 0 && (*pos == ' ' || *pos == '\t' || *pos == '\0')) {
         return level;
+    }
+    
+    // Handle RST-style underlined headers (only for RST format)
+    if (parser->config.format == MARKUP_RST) {
+        // Check if current line is text and next line is underline
+        if (parser->current_line + 1 < parser->line_count) {
+            const char* next_line = parser->lines[parser->current_line + 1];
+            const char* next_pos = next_line;
+            skip_whitespace(&next_pos);
+            
+            // Count underline characters
+            char underline_char = *next_pos;
+            if (underline_char && (underline_char == '=' || underline_char == '-' || 
+                                 underline_char == '~' || underline_char == '^' ||
+                                 underline_char == '+' || underline_char == '*')) {
+                int underline_count = 0;
+                while (*next_pos == underline_char) {
+                    underline_count++;
+                    next_pos++;
+                }
+                
+                // Must be at least as long as the header text (rough check)
+                size_t text_len = strlen(line);
+                if (underline_count >= (int)(text_len * 0.7)) {
+                    // Map underline characters to header levels (RST convention)
+                    switch (underline_char) {
+                        case '=': return 1;  // Main title
+                        case '-': return 2;  // Subtitle  
+                        case '~': return 3;  // Section
+                        case '^': return 4;  // Subsection
+                        case '+': return 5;  // Sub-subsection
+                        case '*': return 6;  // Paragraph
+                        default: return 2;   // Default to level 2
+                    }
+                }
+            }
+        }
     }
     
     return 0;
@@ -2984,9 +3066,12 @@ static Item parse_citation(MarkupParser* parser, const char** text) {
     return (Item){.item = (uint64_t)citation};
 }
 
-// Check if line is an RST directive (.. directive::)
-static bool is_rst_directive(const char* line) {
-    if (!line) return false;
+// Check if line is an RST directive (.. directive::) - Only for RST format
+static bool is_rst_directive(MarkupParser* parser, const char* line) {
+    if (!line || !parser) return false;
+    
+    // Only process RST directives in RST format
+    if (parser->config.format != MARKUP_RST) return false;
     
     const char* pos = line;
     skip_whitespace(&pos);
@@ -3000,7 +3085,7 @@ static bool is_rst_directive(const char* line) {
     return (*pos == ':' && *(pos+1) == ':');
 }
 
-// Parse RST directive (.. code-block:: python)
+// Parse RST directive (.. code-block:: python) - Enhanced for RST format
 static Item parse_rst_directive(MarkupParser* parser, const char* line) {
     Element* directive = create_element(parser->input, "directive");
     if (!directive) {
@@ -3022,6 +3107,24 @@ static Item parse_rst_directive(MarkupParser* parser, const char* line) {
         strncpy(name, name_start, name_len);
         name[name_len] = '\0';
         add_attribute_to_element(parser->input, directive, "type", name);
+        
+        // Add RST-specific attributes based on directive type
+        if (strcmp(name, "code-block") == 0 || strcmp(name, "code") == 0) {
+            add_attribute_to_element(parser->input, directive, "category", "code");
+        } else if (strcmp(name, "note") == 0 || strcmp(name, "warning") == 0 || 
+                   strcmp(name, "danger") == 0 || strcmp(name, "attention") == 0 ||
+                   strcmp(name, "caution") == 0 || strcmp(name, "error") == 0 ||
+                   strcmp(name, "hint") == 0 || strcmp(name, "important") == 0 ||
+                   strcmp(name, "tip") == 0) {
+            add_attribute_to_element(parser->input, directive, "category", "admonition");
+        } else if (strcmp(name, "figure") == 0 || strcmp(name, "image") == 0) {
+            add_attribute_to_element(parser->input, directive, "category", "media");
+        } else if (strcmp(name, "toctree") == 0 || strcmp(name, "contents") == 0) {
+            add_attribute_to_element(parser->input, directive, "category", "structure");
+        } else {
+            add_attribute_to_element(parser->input, directive, "category", "generic");
+        }
+        
         free(name);
     }
     
@@ -3037,6 +3140,36 @@ static Item parse_rst_directive(MarkupParser* parser, const char* line) {
     
     parser->current_line++;
     
+    // Parse directive options (lines starting with :option:)
+    while (parser->current_line < parser->line_count) {
+        const char* option_line = parser->lines[parser->current_line];
+        skip_whitespace(&option_line);
+        
+        if (*option_line == ':' && strchr(option_line + 1, ':')) {
+            // This is an option line like :linenos: or :language: python
+            const char* option_start = option_line + 1;
+            const char* option_end = strchr(option_start, ':');
+            if (option_end) {
+                size_t option_name_len = option_end - option_start;
+                char* option_name = (char*)malloc(option_name_len + 1);
+                if (option_name) {
+                    strncpy(option_name, option_start, option_name_len);
+                    option_name[option_name_len] = '\0';
+                    
+                    const char* option_value = option_end + 1;
+                    skip_whitespace(&option_value);
+                    
+                    add_attribute_to_element(parser->input, directive, option_name, 
+                                           *option_value ? option_value : "true");
+                    free(option_name);
+                }
+            }
+            parser->current_line++;
+        } else {
+            break;
+        }
+    }
+    
     // Parse directive content (indented lines)
     StrBuf* sb = parser->input->sb;
     strbuf_reset(sb);
@@ -3044,8 +3177,13 @@ static Item parse_rst_directive(MarkupParser* parser, const char* line) {
     while (parser->current_line < parser->line_count) {
         const char* content_line = parser->lines[parser->current_line];
         
-        // Check if line is indented (part of directive)
-        if (*content_line == ' ' || *content_line == '\t') {
+        // Check if line is indented (part of directive) or empty
+        if (is_empty_line(content_line)) {
+            if (sb->length > 0) {
+                strbuf_append_char(sb, '\n');
+            }
+            parser->current_line++;
+        } else if (*content_line == ' ' || *content_line == '\t') {
             if (sb->length > 0) {
                 strbuf_append_char(sb, '\n');
             }
