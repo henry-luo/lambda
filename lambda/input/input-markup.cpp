@@ -1540,24 +1540,25 @@ static Item parse_strikethrough(MarkupParser* parser, const char** text) {
         return (Item){.item = ITEM_ERROR};
     }
     
-    // Create content string
+    // Create content string  
     char* content = (char*)malloc(content_len + 1);
     if (!content) {
         return (Item){.item = ITEM_ERROR};
     }
     strncpy(content, content_start, content_len);
     content[content_len] = '\0';
-    
-    // Parse nested inline content
-    Item nested_content = parse_inline_spans(parser, content);
-    if (nested_content.item != ITEM_ERROR && nested_content.item != ITEM_UNDEFINED) {
-        list_push((List*)s_elem, nested_content);
+
+    // Add content as simple string (avoid recursive parsing for now to prevent crashes)
+    String* content_str = input_create_string(parser->input, content);
+    if (content_str) {
+        Item content_item = {.item = s2it(content_str)};
+        list_push((List*)s_elem, content_item);
         increment_element_content_length(s_elem);
     }
-    
+
     free(content);
     *text = pos + 2; // Skip closing ~~
-    
+
     return (Item){.item = (uint64_t)s_elem};
 }
 
