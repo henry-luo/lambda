@@ -110,11 +110,46 @@ You can combine ~~**bold strikethrough**~~ and ~~*italic strikethrough*~~.
 
 ### Mathematical Content
 
-#### Inline Math
-This equation $x^2 + y^2 = z^2$ is the Pythagorean theorem.
+#### Simple Inline Math Tests
+Test basic inline math: $x + y = z$ and $a = b$.
+
+More complex: $x^2 + y^2 = z^2$ is the Pythagorean theorem.
 Here's another: $\frac{-b \pm \sqrt{b^2-4ac}}{2a}$ for quadratic formula.
 
-#### Block Math
+Simple inline math: $E = mc^2$ and complex: $\int_0^1 x dx = \frac{1}{2}$.
+
+##### Advanced Inline Math Tests
+Limit notation: $\lim_{x \to 0} \frac{\sin x}{x} = 1$ and derivatives: $\frac{d}{dx}[x^n] = nx^{n-1}$.
+
+Summation and product: $\sum_{i=1}^n i = \frac{n(n+1)}{2}$ and $\prod_{i=1}^n i = n!$.
+
+Greek letters in context: The golden ratio $\phi = \frac{1 + \sqrt{5}}{2}$ satisfies $\phi^2 = \phi + 1$.
+
+Set membership: $x \in \mathbb{R}$, subset relation: $\mathbb{N} \subset \mathbb{Z} \subset \mathbb{Q} \subset \mathbb{R}$.
+
+Complex analysis: $|z|^2 = z \bar{z}$ where $z = a + bi \in \mathbb{C}$.
+
+Vector notation: $\mathbf{v} \cdot \mathbf{w} = |\mathbf{v}||\mathbf{w}|\cos\theta$.
+
+Probability: $P(A \cap B) = P(A)P(B|A)$ for dependent events.
+
+#### Simple Block Math Tests
+Basic equation:
+$$
+x + y = z
+$$
+
+Square root:
+$$
+\sqrt{x^2 + y^2} = z
+$$
+
+Fraction:
+$$
+\frac{a}{b} = c
+$$
+
+#### Standard Block Math
 $$
 \int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
 $$
@@ -122,6 +157,104 @@ $$
 $$
 \sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6}
 $$
+
+#### Complex Math (May Have Issues)
+<!-- These are the problematic ones but won't hang -->
+Aligned equations:
+$$
+\begin{aligned}
+f(x) &= ax^2 + bx + c \\
+f'(x) &= 2ax + b \\
+f''(x) &= 2a
+\end{aligned}
+$$
+
+Matrix example:
+$$
+\begin{pmatrix}
+a & b \\
+c & d
+\end{pmatrix}
+\begin{pmatrix}
+x \\
+y
+\end{pmatrix}
+=
+\begin{pmatrix}
+ax + by \\
+cx + dy
+\end{pmatrix}
+$$
+
+#### Advanced Mathematical Expressions
+
+##### Big Operators and Limits
+$$\lim_{n \to \infty} \sum_{k=1}^{n} \frac{1}{k^2} = \frac{\pi^2}{6}$$
+
+$$\prod_{p \text{ prime}} \left(1 - \frac{1}{p^2}\right) = \frac{6}{\pi^2}$$
+
+$$\int_0^\infty \frac{\sin x}{x} dx = \frac{\pi}{2}$$
+
+##### Complex Fractions and Nested Structures
+$$\frac{1}{\sqrt{2\pi}} \int_{-\infty}^{\infty} e^{-\frac{x^2}{2}} dx = 1$$
+
+$$\cfrac{1}{1+\cfrac{1}{1+\cfrac{1}{1+\cdots}}} = \frac{\sqrt{5}-1}{2}$$
+
+##### Calculus and Analysis
+$$\frac{\partial^2 u}{\partial t^2} = c^2 \nabla^2 u$$
+
+$$\oint_C \mathbf{F} \cdot d\mathbf{r} = \iint_D \left(\frac{\partial Q}{\partial x} - \frac{\partial P}{\partial y}\right) dx\,dy$$
+
+##### Set Theory and Logic
+$$A \cup B = \{x : x \in A \lor x \in B\}$$
+
+$$\forall \epsilon > 0, \exists \delta > 0 : |x - a| < \delta \Rightarrow |f(x) - f(a)| < \epsilon$$
+
+##### Number Theory
+$$\zeta(s) = \sum_{n=1}^{\infty} \frac{1}{n^s} = \prod_{p \text{ prime}} \frac{1}{1-p^{-s}}$$
+
+$$\binom{n}{k} = \frac{n!}{k!(n-k)!}$$
+
+##### Greek Letters and Special Symbols
+$$\alpha\beta\gamma\delta\epsilon\zeta\eta\theta\iota\kappa\lambda\mu$$
+
+$$\Gamma\Delta\Theta\Lambda\Xi\Pi\Sigma\Upsilon\Phi\Psi\Omega$$
+
+$$\aleph_0 < \aleph_1 < \aleph_2$$
+
+##### Complex Numbers and Trigonometry
+$$e^{i\pi} + 1 = 0$$
+
+$$\sin^2 x + \cos^2 x = 1$$
+
+$$\tan(a + b) = \frac{\tan a + \tan b}{1 - \tan a \tan b}$$
+
+##### Linear Algebra
+$$\det(A) = \sum_{\sigma \in S_n} \text{sgn}(\sigma) \prod_{i=1}^n a_{i,\sigma(i)}$$
+
+$$\mathbf{v} \times \mathbf{w} = \begin{vmatrix} \mathbf{i} & \mathbf{j} & \mathbf{k} \\ v_1 & v_2 & v_3 \\ w_1 & w_2 & w_3 \end{vmatrix}$$
+
+##### Probability and Statistics
+$$P(A|B) = \frac{P(B|A)P(A)}{P(B)}$$
+
+$$\mathbb{E}[X] = \int_{-\infty}^{\infty} x f(x) dx$$
+
+##### Physics Equations
+$$E = mc^2$$
+
+$$F = G\frac{m_1 m_2}{r^2}$$
+
+$$\nabla \times \mathbf{E} = -\frac{\partial \mathbf{B}}{\partial t}$$
+
+##### Stress Testing with Complex Nesting
+$$\sum_{n=0}^{\infty} \frac{(-1)^n}{(2n)!} x^{2n} = \cos x$$
+
+$$\int_0^1 \int_0^1 \frac{x^2 + y^2}{x^2 + y^2 + z^2} \, dx \, dy$$
+
+$$\left\{ \begin{array}{ll}
+x + y = 1 \\
+x - y = 2
+\end{array} \right.$$
 
 ### Emoji Shortcodes
 - Happy face: :smile:
