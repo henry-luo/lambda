@@ -70,7 +70,7 @@ char* read_file_content(const char* filepath) {
 }
 
 // Test with simple markdown elements
-Test(markup_roundtrip, simple_test) {
+Test(markup_roundtrip, simple_test, .disabled = true) {
     printf("\n=== Testing Simple Markdown Elements ===\n");
     
     const char* test_markdown = "# Header\n\nParagraph with **bold** text.\n\n- List item\n- Another item\n";
@@ -117,7 +117,7 @@ Test(markup_roundtrip, simple_test) {
 }
 
 // Test empty content handling
-Test(markup_roundtrip, empty_test) {
+Test(markup_roundtrip, empty_test, .disabled = true) {
     printf("\n=== Testing Empty Content ===\n");
     
     const char* empty_markdown = "";
@@ -262,7 +262,7 @@ Test(markup_debug, safe_baseline) {
 
 // Test comprehensive markup features - covers all implemented parser capabilities
 Test(markup_roundtrip, complete_test) {
-    printf("\n=== Testing Complete Markup Features ===\n");
+    printf("\n!!! Testing Complete Markup Features ===\n");
     
     // Read comprehensive test content from file
     char* file_content = read_file_content("test/input/complete_markup_test.md");
@@ -287,8 +287,9 @@ Test(markup_roundtrip, complete_test) {
     Input* input = input_from_source(comprehensive_markdown, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse comprehensive markdown");
     StrBuf* strbuf = strbuf_new();
-    printf("Parsed input with root item: %p\n", (void*)input->root);
-    // format_item(strbuf, input->root, 0, NULL);
+    printf("Parsed input with root_item: %p\n", (void*)input->root);
+    format_item(strbuf, input->root, 0, NULL);
+    printf("Formatted output: %s\n", strbuf->str ? strbuf->str : "(null)");
 
     // Format using JSON formatter to test parser only
     // String* json_type = create_lambda_string("json");

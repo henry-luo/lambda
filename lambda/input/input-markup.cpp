@@ -45,6 +45,14 @@ static Item parse_emoji_shortcode(MarkupParser* parser, const char** text);
 static Item parse_inline_math(MarkupParser* parser, const char** text);
 static Item parse_small_caps(MarkupParser* parser, const char** text);
 
+// Phase 5: Forward declarations for enhanced table processing
+static Item parse_table_structure(MarkupParser* parser);
+static bool is_table_separator(const char* line);
+static char* parse_table_alignment(const char* line);
+static void apply_table_alignment(Element* table, const char* alignment_spec);
+static bool is_table_continuation(const char* line);
+static Item parse_table_cell_content(MarkupParser* parser, const char* cell_text);
+
 // Phase 2: Utility functions
 static BlockType detect_block_type(const char* line);
 static int get_header_level(const char* line);
@@ -266,7 +274,7 @@ static Item parse_block_element(MarkupParser* parser) {
         case BLOCK_QUOTE:
             return parse_blockquote(parser, line);
         case BLOCK_TABLE:
-            return parse_table_row(parser, line);
+            return parse_table_structure(parser);
         case BLOCK_MATH:
             return parse_math_block(parser, line);
         case BLOCK_DIVIDER:
@@ -697,75 +705,6 @@ static Item parse_blockquote(MarkupParser* parser, const char* line) {
     return (Item){.item = (uint64_t)quote};
 }
 
-// Parse table rows (|col1|col2|col3|)
-static Item parse_table_row(MarkupParser* parser, const char* line) {
-    Element* row = create_element(parser->input, "tr");
-    if (!row) {
-        parser->current_line++;
-        return (Item){.item = ITEM_ERROR};
-    }
-    
-    // Split line by | characters
-    const char* pos = line;
-    skip_whitespace(&pos);
-    
-    // Skip leading | if present
-    if (*pos == '|') pos++;
-    
-    while (*pos) {
-        // Find next | or end of line
-        const char* cell_start = pos;
-        const char* cell_end = pos;
-        
-        while (*cell_end && *cell_end != '|') {
-            cell_end++;
-        }
-        
-        // Create table cell
-        Element* cell = create_element(parser->input, "td");
-        if (cell) {
-            // Extract cell content
-            size_t cell_len = cell_end - cell_start;
-            char* cell_text = (char*)malloc(cell_len + 1);
-            if (cell_text) {
-                strncpy(cell_text, cell_start, cell_len);
-                cell_text[cell_len] = '\0';
-                
-                // Trim whitespace from cell content
-                char* trimmed = (char*)cell_text;
-                while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
-                char* end = trimmed + strlen(trimmed) - 1;
-                while (end > trimmed && (*end == ' ' || *end == '\t')) {
-                    *end = '\0';
-                    end--;
-                }
-                
-                // Parse cell content
-                Item cell_content = parse_inline_spans(parser, trimmed);
-                if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
-                    list_push((List*)cell, cell_content);
-                    increment_element_content_length(cell);
-                }
-                
-                free(cell_text);
-            }
-            
-            // Add cell to row
-            list_push((List*)row, (Item){.item = (uint64_t)cell});
-            increment_element_content_length(row);
-        }
-        
-        // Move to next cell
-        pos = cell_end;
-        if (*pos == '|') pos++;
-        
-        if (!*pos) break;
-    }
-    
-    parser->current_line++;
-    return (Item){.item = (uint64_t)row};
-}
-
 // Parse math blocks ($$...$$)
 static Item parse_math_block(MarkupParser* parser, const char* line) {
     Element* math = create_element(parser->input, "math");
@@ -808,6 +747,346 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
     increment_element_content_length(math);
     
     return (Item){.item = (uint64_t)math};
+}
+
+// Phase 5: Enhanced table parsing with alignment and multi-line support
+static Item parse_table_structure(MarkupParser* parser) {
+    if (parser->current_line >= parser->line_count) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Create table element
+    Element* table = create_element(parser->input, "table");
+    if (!table) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* first_line = parser->lines[parser->current_line];
+    
+    // Check if next line is a separator (for header detection)
+    bool has_header = false;
+    char* alignment_spec = NULL;
+    
+    if (parser->current_line + 1 < parser->line_count) {
+        const char* next_line = parser->lines[parser->current_line + 1];
+        if (is_table_separator(next_line)) {
+            has_header = true;
+            alignment_spec = parse_table_alignment(next_line);
+        }
+    }
+    
+    // Apply alignment to table if available
+    if (alignment_spec) {
+        add_attribute_to_element(parser->input, table, "align", alignment_spec);
+        free(alignment_spec);
+        alignment_spec = NULL;
+    }
+    
+    // Parse header row if present
+    if (has_header) {
+        Element* thead = create_element(parser->input, "thead");
+        if (thead) {
+            // Parse the header row and convert cells to th elements
+            const char* header_line = parser->lines[parser->current_line];
+            Element* header_row = create_element(parser->input, "tr");
+            if (header_row) {
+                // Parse header row cells manually and create th elements
+                const char* pos = header_line;
+                skip_whitespace(&pos);
+                
+                // Skip leading | if present
+                if (*pos == '|') pos++;
+                
+                while (*pos) {
+                    // Find next | or end of line
+                    const char* cell_start = pos;
+                    const char* cell_end = pos;
+                    
+                    while (*cell_end && *cell_end != '|') {
+                        cell_end++;
+                    }
+                    
+                    // Extract cell content
+                    size_t cell_len = cell_end - cell_start;
+                    char* cell_text = (char*)malloc(cell_len + 1);
+                    if (!cell_text) break;
+                    
+                    strncpy(cell_text, cell_start, cell_len);
+                    cell_text[cell_len] = '\0';
+                    
+                    // Create table header cell
+                    Element* th_cell = create_element(parser->input, "th");
+                    if (th_cell) {
+                        // Parse cell content with enhanced formatting
+                        Item cell_content = parse_table_cell_content(parser, cell_text);
+                        if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
+                            list_push((List*)th_cell, cell_content);
+                            increment_element_content_length(th_cell);
+                        }
+                        
+                        // Add cell to row
+                        list_push((List*)header_row, (Item){.item = (uint64_t)th_cell});
+                        increment_element_content_length(header_row);
+                    }
+                    
+                    free(cell_text);
+                    
+                    // Move to next cell
+                    pos = cell_end;
+                    if (*pos == '|') pos++;
+                    
+                    if (!*pos) break;
+                }
+                
+                // Add header row to thead
+                list_push((List*)thead, (Item){.item = (uint64_t)header_row});
+                increment_element_content_length(thead);
+            }
+            
+            // Add thead to table
+            list_push((List*)table, (Item){.item = (uint64_t)thead});
+            increment_element_content_length(table);
+        }
+        
+        // Skip header line and separator line
+        parser->current_line += 2;
+    }
+    
+    // Create tbody for data rows
+    Element* tbody = create_element(parser->input, "tbody");
+    if (!tbody) {
+        parser->current_line++;
+        return (Item){.item = (uint64_t)table};
+    }
+    
+    // Parse data rows
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        
+        if (!is_table_continuation(line)) {
+            break;
+        }
+        
+        Item row = parse_table_row(parser, line);
+        if (row.item != ITEM_ERROR && row.item != ITEM_UNDEFINED) {
+            list_push((List*)tbody, row);
+            increment_element_content_length(tbody);
+        }
+    }
+    
+    // Add tbody to table if it has content
+    if (tbody && ((TypeElmt*)tbody->type)->content_length > 0) {
+        list_push((List*)table, (Item){.item = (uint64_t)tbody});
+        increment_element_content_length(table);
+    }
+    
+    return (Item){.item = (uint64_t)table};
+}
+
+// Check if line is a table separator (e.g., |---|---|)
+static bool is_table_separator(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Must start with |
+    if (*pos != '|') return false;
+    pos++;
+    
+    // Check pattern: spaces, dashes, colons, pipes
+    bool found_dash = false;
+    while (*pos) {
+        if (*pos == '|') {
+            if (!found_dash) return false; // Must have at least one dash per column
+            found_dash = false;
+            pos++;
+        } else if (*pos == '-') {
+            found_dash = true;
+            pos++;
+        } else if (*pos == ':' || *pos == ' ' || *pos == '\t') {
+            pos++;
+        } else {
+            return false; // Invalid character
+        }
+    }
+    
+    return found_dash; // Must end with valid column
+}
+
+// Parse table alignment specification
+static char* parse_table_alignment(const char* line) {
+    if (!line) return NULL;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Count columns first
+    int column_count = 0;
+    const char* temp_pos = pos;
+    while (*temp_pos) {
+        if (*temp_pos == '|') {
+            column_count++;
+        }
+        temp_pos++;
+    }
+    
+    if (column_count <= 1) return NULL;
+    column_count--; // Subtract 1 because we count separators
+    
+    // Allocate alignment string
+    char* alignment = (char*)malloc(column_count + 1);
+    if (!alignment) return NULL;
+    
+    int col_index = 0;
+    if (*pos == '|') pos++; // Skip leading |
+    
+    while (*pos && col_index < column_count) {
+        // Find column boundaries
+        const char* col_start = pos;
+        while (*pos && *pos != '|') pos++;
+        
+        // Analyze this column for alignment
+        bool left_colon = false;
+        bool right_colon = false;
+        
+        // Check for colons at start and end
+        const char* col_pos = col_start;
+        skip_whitespace(&col_pos);
+        if (*col_pos == ':') left_colon = true;
+        
+        const char* col_end = pos - 1;
+        while (col_end > col_start && (*col_end == ' ' || *col_end == '\t')) col_end--;
+        if (col_end >= col_start && *col_end == ':') right_colon = true;
+        
+        // Determine alignment
+        if (left_colon && right_colon) {
+            alignment[col_index] = 'c'; // center
+        } else if (right_colon) {
+            alignment[col_index] = 'r'; // right
+        } else {
+            alignment[col_index] = 'l'; // left (default)
+        }
+        
+        col_index++;
+        if (*pos == '|') pos++;
+    }
+    
+    alignment[column_count] = '\0';
+    return alignment;
+}
+
+// Apply table alignment to table element
+static void apply_table_alignment(Element* table, const char* alignment_spec) {
+    // Note: We need parser->input to add attributes, so we'll handle this in the calling function
+    // This function serves as a placeholder for potential future alignment processing
+    (void)table;
+    (void)alignment_spec;
+}
+
+// Check if line continues the table
+static bool is_table_continuation(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Empty line ends table
+    if (!*pos) return false;
+    
+    // Must contain pipe character to be table row
+    return is_table_row(pos);
+}
+
+// Parse table cell content with enhanced formatting support
+static Item parse_table_cell_content(MarkupParser* parser, const char* cell_text) {
+    if (!cell_text || !*cell_text) {
+        String* empty = input_create_string(parser->input, "");
+        return (Item){.item = s2it(empty)};
+    }
+    
+    // Trim whitespace
+    while (*cell_text == ' ' || *cell_text == '\t') cell_text++;
+    
+    const char* end = cell_text + strlen(cell_text) - 1;
+    while (end > cell_text && (*end == ' ' || *end == '\t')) end--;
+    
+    size_t len = end - cell_text + 1;
+    char* trimmed = (char*)malloc(len + 1);
+    if (!trimmed) {
+        String* empty = input_create_string(parser->input, "");
+        return (Item){.item = s2it(empty)};
+    }
+    
+    strncpy(trimmed, cell_text, len);
+    trimmed[len] = '\0';
+    
+    // Parse inline content
+    Item result = parse_inline_spans(parser, trimmed);
+    free(trimmed);
+    
+    return result;
+}
+
+// Enhanced table row parsing (keep original function name for compatibility)
+static Item parse_table_row(MarkupParser* parser, const char* line) {
+    Element* row = create_element(parser->input, "tr");
+    if (!row) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Split line by | characters
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Skip leading | if present
+    if (*pos == '|') pos++;
+    
+    while (*pos) {
+        // Find next | or end of line
+        const char* cell_start = pos;
+        const char* cell_end = pos;
+        
+        while (*cell_end && *cell_end != '|') {
+            cell_end++;
+        }
+        
+        // Extract cell content
+        size_t cell_len = cell_end - cell_start;
+        char* cell_text = (char*)malloc(cell_len + 1);
+        if (!cell_text) break;
+        
+        strncpy(cell_text, cell_start, cell_len);
+        cell_text[cell_len] = '\0';
+        
+        // Create table cell
+        Element* cell = create_element(parser->input, "td");
+        if (cell) {
+            // Parse cell content with enhanced formatting
+            Item cell_content = parse_table_cell_content(parser, cell_text);
+            if (cell_content.item != ITEM_ERROR && cell_content.item != ITEM_UNDEFINED) {
+                list_push((List*)cell, cell_content);
+                increment_element_content_length(cell);
+            }
+            
+            // Add cell to row
+            list_push((List*)row, (Item){.item = (uint64_t)cell});
+            increment_element_content_length(row);
+        }
+        
+        free(cell_text);
+        
+        // Move to next cell
+        pos = cell_end;
+        if (*pos == '|') pos++;
+        
+        if (!*pos) break;
+    }
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)row};
 }
 
 // Phase 2: Enhanced inline content parsing with spans

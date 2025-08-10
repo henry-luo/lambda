@@ -131,35 +131,44 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
     }
 
     ShapeEntry *field = map_type->shape;
+    printf("printing named items: %p, type: %d, length: %ld\n", map_data, map_type->type_id, map_type->length);
     for (int i = 0; i < map_type->length; i++) {
         // Safety check for valid field pointer
         if (!field || (uintptr_t)field < 0x1000) {
+            printf("invalid field pointer: %p\n", field);
             strbuf_append_str(strbuf, "[invalid field pointer]");
             break;
         }
         if (i) strbuf_append_str(strbuf, ", ");
         if (!field) {
+            printf("field is null at index %d\n", i);
             strbuf_append_str(strbuf, "[null field shape]");
             break; // exit loop if field is null
         }
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
+            printf("nested map at field %d: %p\n", i, data);
             Map *nest_map = *(Map**)data;
             TypeMap *nest_map_type = (TypeMap*)nest_map->type;
             print_named_items_with_depth(strbuf, nest_map_type, nest_map->data, depth + 1);
         }
         else {
+            printf("field %d: %p, name: %.*s, type: %d, data: %p\n", 
+                i, field, (int)field->name->length, field->name->str, field->type->type_id, data);
             // Safety check for field name and type
             if (!field->name || (uintptr_t)field->name < 0x1000) {
+                printf("invalid field name: %p\n", field->name);
                 strbuf_append_str(strbuf, "[invalid field name]");
                 goto advance_field;
             }
             if (!field->type || (uintptr_t)field->type < 0x1000) {
+                printf("invalid field type: %p\n", field->type);
                 strbuf_append_str(strbuf, "[invalid field type]");
                 goto advance_field;
             }
             // Safety check for type_id range
             if (field->type->type_id < 0 || field->type->type_id > 50) {
+                printf("invalid type_id: %d\n", field->type->type_id);
                 strbuf_append_str(strbuf, "[invalid type_id]");
                 goto advance_field;
             }
