@@ -302,7 +302,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 
 ## Implementation Plan
 
-### Phase 1: Core Infrastructure (Week 1)
+### Phase 1: Core Infrastructure
 
 **Files to Create:**
 - `lambda/input/markup-parser.h` - Core interfaces and structures
@@ -320,7 +320,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Format detection for each supported format
 - Basic string buffer operations
 
-### Phase 2: Block Element Parsers (Week 2)
+### Phase 2: Block Element Parsers
 
 **Deliverables:**
 1. Heading parser (all formats)
@@ -335,7 +335,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Horizontal rules: various marker styles
 - Paragraphs: line breaks, continuations
 
-### Phase 3: List Processing (Week 3)
+### Phase 3: List Processing
 
 **Deliverables:**
 1. Multi-level list nesting
@@ -350,7 +350,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Complex list content (paragraphs, code blocks)
 - Format-specific list markers
 
-### Phase 4: Inline Element Parsers (Week 4)
+### Phase 4: Inline Element Parsers
 
 **Deliverables:**
 1. Emphasis parsing (bold, italic, combinations)
@@ -365,7 +365,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Code spans: nested backticks, escaping
 - Entities: HTML entities, Unicode escapes
 
-### Phase 5: Table Support (Week 5)
+### Phase 5: Table Support
 
 **Deliverables:**
 1. Simple tables (markdown/textile style)
@@ -380,11 +380,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Complex table content: emphasis, links, code
 - Malformed table handling
 
-### Phase 6: Advanced Features (Week 6)
-
-**Files to Update:**
-- Multiple files - Advanced feature integration
-- `temp/test_markup_advanced.ls` - Advanced feature tests
+### Phase 6: Advanced Features
 
 **Deliverables:**
 1. Math support integration (existing math parser)
@@ -399,11 +395,7 @@ static String* parse_content_to_string(MarkupParser* parser, const char* start, 
 - Directives: code, figures, admonitions
 - Metadata: YAML, org properties
 
-### Phase 7: Integration and Performance (Week 7)
-
-**Files to Create:**
-- `lambda/input/input-markup.cpp` - Main integration
-- `test/lambda/input/input_markup_unified.ls` - Integration tests
+### Phase 7: Integration and Performance
 
 **Deliverables:**
 1. Integration with existing input system

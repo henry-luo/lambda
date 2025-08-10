@@ -36,7 +36,13 @@ typedef enum {
     BLOCK_QUOTE,
     BLOCK_TABLE,
     BLOCK_MATH,
-    BLOCK_DIVIDER
+    BLOCK_DIVIDER,
+    // Phase 6: Advanced block types
+    BLOCK_FOOTNOTE_DEF,
+    BLOCK_RST_DIRECTIVE,
+    BLOCK_ORG_BLOCK,
+    BLOCK_YAML_FRONTMATTER,
+    BLOCK_ORG_PROPERTIES
 } BlockType;
 
 // Inline element types for enhanced parsing
@@ -48,7 +54,11 @@ typedef enum {
     INLINE_LINK,
     INLINE_IMAGE,
     INLINE_MATH,
-    INLINE_STRIKETHROUGH
+    INLINE_STRIKETHROUGH,
+    // Phase 6: Advanced inline types
+    INLINE_FOOTNOTE_REF,
+    INLINE_CITATION,
+    INLINE_WIKI_TEMPLATE
 } InlineType;
 
 // Parser state for tracking parsing context

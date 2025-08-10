@@ -245,6 +245,16 @@ fi
 
 print_status "Working from project root: $(pwd)"
 
+# Build the project first
+print_status "🔨 Building project with make..."
+if ! make; then
+    print_error "❌ Project build failed!"
+    print_error "Please check the build errors above and fix any issues."
+    exit 1
+fi
+print_success "✅ Project build completed successfully"
+echo ""
+
 # Find Criterion installation
 find_criterion
 

@@ -45,6 +45,25 @@ static Item parse_emoji_shortcode(MarkupParser* parser, const char** text);
 static Item parse_inline_math(MarkupParser* parser, const char** text);
 static Item parse_small_caps(MarkupParser* parser, const char** text);
 
+// Math parser integration functions
+static Item parse_math_content(Input* input, const char* math_content, const char* flavor);
+static const char* detect_math_flavor(const char* content);
+
+// Phase 6: Advanced features - footnotes, citations, directives, metadata
+static Item parse_footnote_definition(MarkupParser* parser, const char* line);
+static Item parse_footnote_reference(MarkupParser* parser, const char** text);
+static Item parse_citation(MarkupParser* parser, const char** text);
+static Item parse_rst_directive(MarkupParser* parser, const char* line);
+static Item parse_org_block(MarkupParser* parser, const char* line);
+static Item parse_yaml_frontmatter(MarkupParser* parser);
+static Item parse_org_properties(MarkupParser* parser);
+static Item parse_wiki_template(MarkupParser* parser, const char** text);
+static bool is_footnote_definition(const char* line);
+static bool is_rst_directive(const char* line);
+static bool is_org_block(const char* line);
+static bool has_yaml_frontmatter(MarkupParser* parser);
+static bool has_org_properties(MarkupParser* parser);
+
 // Phase 5: Forward declarations for enhanced table processing
 static Item parse_table_structure(MarkupParser* parser);
 static bool is_table_separator(const char* line);
@@ -233,6 +252,21 @@ static Item parse_document(MarkupParser* parser) {
         return (Item){.item = ITEM_ERROR};
     }
     
+    // Phase 6: Parse metadata first (YAML frontmatter or Org properties)
+    if (has_yaml_frontmatter(parser)) {
+        Item metadata = parse_yaml_frontmatter(parser);
+        if (metadata.item != ITEM_UNDEFINED && metadata.item != ITEM_ERROR) {
+            list_push((List*)doc, metadata);
+            increment_element_content_length(doc);
+        }
+    } else if (has_org_properties(parser)) {
+        Item properties = parse_org_properties(parser);
+        if (properties.item != ITEM_UNDEFINED && properties.item != ITEM_ERROR) {
+            list_push((List*)doc, properties);
+            increment_element_content_length(doc);
+        }
+    }
+    
     // Parse content directly into the document
     while (parser->current_line < parser->line_count) {
         Item block = parse_block_element(parser);
@@ -259,6 +293,19 @@ static Item parse_block_element(MarkupParser* parser) {
     if (is_empty_line(line)) {
         parser->current_line++;
         return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // Phase 6: Check for advanced features first
+    if (is_footnote_definition(line)) {
+        return parse_footnote_definition(parser, line);
+    }
+    
+    if (is_rst_directive(line)) {
+        return parse_rst_directive(parser, line);
+    }
+    
+    if (is_org_block(line)) {
+        return parse_org_block(parser, line);
     }
     
     // Detect block type
@@ -740,11 +787,20 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
         parser->current_line++;
     }
     
-    // Create math content (no inline parsing for math blocks)
-    String* math_content = strbuf_to_string(sb);
-    Item text_item = {.item = s2it(math_content)};
-    list_push((List*)math, text_item);
-    increment_element_content_length(math);
+    // Parse the math content using the math parser
+    String* math_content_str = strbuf_to_string(sb);
+    const char* math_flavor = detect_math_flavor(math_content_str->chars);
+    
+    Item parsed_math = parse_math_content(parser->input, math_content_str->chars, math_flavor);
+    if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
+        list_push((List*)math, parsed_math);
+        increment_element_content_length(math);
+    } else {
+        // Fallback to plain text if math parsing fails
+        Item text_item = {.item = s2it(math_content_str)};
+        list_push((List*)math, text_item);
+        increment_element_content_length(math);
+    }
     
     return (Item){.item = (uint64_t)math};
 }
@@ -1096,7 +1152,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     }
     
     // For simple text without markup, return as string
-    if (!strpbrk(text, "*_`[!~\\$:^")) {
+    if (!strpbrk(text, "*_`[!~\\$:^{@")) {
         String* content = input_create_string(parser->input, text);
         return (Item){.item = s2it(content)};
     }
@@ -1148,7 +1204,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
         }
         else if (*pos == '[') {
-            // Flush text and parse link
+            // Flush text first
             if (sb->length > 0) {
                 String* text_content = strbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
@@ -1157,10 +1213,29 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 strbuf_reset(sb);
             }
             
-            Item link_item = parse_link(parser, &pos);
-            if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, link_item);
-                increment_element_content_length(span);
+            // Phase 6: Check for footnote reference [^1] first
+            if (*(pos+1) == '^') {
+                Item footnote_ref = parse_footnote_reference(parser, &pos);
+                if (footnote_ref.item != ITEM_ERROR && footnote_ref.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, footnote_ref);
+                    increment_element_content_length(span);
+                }
+            }
+            // Phase 6: Check for citation [@key]
+            else if (*(pos+1) == '@') {
+                Item citation = parse_citation(parser, &pos);
+                if (citation.item != ITEM_ERROR && citation.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, citation);
+                    increment_element_content_length(span);
+                }
+            }
+            // Regular link parsing
+            else {
+                Item link_item = parse_link(parser, &pos);
+                if (link_item.item != ITEM_ERROR && link_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, link_item);
+                    increment_element_content_length(span);
+                }
             }
         }
         else if (*pos == '!' && *(pos+1) == '[') {
@@ -1258,6 +1333,23 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             } else if (pos == old_pos) {
                 // Parse failed and didn't advance, advance manually to avoid infinite loop
                 pos++;
+            }
+        }
+        // Phase 6: Wiki template parsing {{template|args}}
+        else if (*pos == '{' && *(pos+1) == '{') {
+            // Flush text and parse wiki template
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            Item template_item = parse_wiki_template(parser, &pos);
+            if (template_item.item != ITEM_ERROR && template_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, template_item);
+                increment_element_content_length(span);
             }
         }
         else if (*pos == '$') {
@@ -1635,6 +1727,47 @@ Item input_markup(Input *input, const char* content) {
     parser_destroy(parser);
     
     return result;
+}
+
+// Math parser integration functions
+static Item parse_math_content(Input* input, const char* math_content, const char* flavor) {
+    if (!input || !math_content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Create a temporary Input to preserve the current state
+    StrBuf* original_sb = input->sb;
+    Item original_root = input->root;
+    
+    // Parse the math expression using the existing parse_math function
+    // This modifies input->root, so we need to capture the result
+    parse_math(input, math_content, flavor);
+    Item result = input->root;
+    
+    // Restore original state
+    input->root = original_root;
+    input->sb = original_sb;
+    
+    return result;
+}
+
+static const char* detect_math_flavor(const char* content) {
+    if (!content) return "latex";
+    
+    // Simple heuristics to detect math flavor
+    // Look for LaTeX-specific commands
+    if (strstr(content, "\\frac") || strstr(content, "\\sum") || 
+        strstr(content, "\\int") || strstr(content, "\\alpha")) {
+        return "latex";
+    }
+    
+    // Look for Typst-specific syntax
+    if (strstr(content, "frac(") || strstr(content, "sum_")) {
+        return "typst";
+    }
+    
+    // Default to LaTeX
+    return "latex";
 }
 
 // Phase 2: Utility functions for enhanced parsing
@@ -2102,12 +2235,21 @@ static Item parse_inline_math(MarkupParser* parser, const char** text) {
     strncpy(content, content_start, content_len);
     content[content_len] = '\0';
     
-    // Add math content as string
-    String* math_str = input_create_string(parser->input, content);
-    if (math_str) {
-        Item math_item = {.item = s2it(math_str)};
-        list_push((List*)math_elem, math_item);
+    // Parse the math content using the math parser
+    const char* math_flavor = detect_math_flavor(content);
+    Item parsed_math = parse_math_content(parser->input, content, math_flavor);
+    
+    if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
+        list_push((List*)math_elem, parsed_math);
         increment_element_content_length(math_elem);
+    } else {
+        // Fallback to plain text if math parsing fails
+        String* math_str = input_create_string(parser->input, content);
+        if (math_str) {
+            Item math_item = {.item = s2it(math_str)};
+            list_push((List*)math_elem, math_item);
+            increment_element_content_length(math_elem);
+        }
     }
     
     free(content);
@@ -2121,4 +2263,540 @@ static Item parse_small_caps(MarkupParser* parser, const char** text) {
     // Small caps could be implemented as HTML <span style="font-variant: small-caps">
     // This is a placeholder for future implementation
     return (Item){.item = ITEM_UNDEFINED};
+}
+
+// Phase 6: Advanced features implementation
+
+// Check if line is a footnote definition ([^1]: content)
+static bool is_footnote_definition(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Check for [^
+    if (*pos != '[' || *(pos+1) != '^') return false;
+    pos += 2;
+    
+    // Check for identifier
+    if (!*pos || isspace(*pos)) return false;
+    
+    // Find closing ]:
+    while (*pos && *pos != ']') pos++;
+    if (*pos != ']' || *(pos+1) != ':') return false;
+    
+    return true;
+}
+
+// Parse footnote definition ([^1]: This is a footnote)
+static Item parse_footnote_definition(MarkupParser* parser, const char* line) {
+    Element* footnote = create_element(parser->input, "footnote");
+    if (!footnote) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    pos += 2; // Skip [^
+    
+    // Extract footnote ID
+    const char* id_start = pos;
+    while (*pos && *pos != ']') pos++;
+    
+    size_t id_len = pos - id_start;
+    char* id = (char*)malloc(id_len + 1);
+    if (id) {
+        strncpy(id, id_start, id_len);
+        id[id_len] = '\0';
+        add_attribute_to_element(parser->input, footnote, "id", id);
+        free(id);
+    }
+    
+    // Skip ]: and parse content
+    pos += 2; // Skip ]:
+    skip_whitespace(&pos);
+    
+    if (*pos) {
+        Item content = parse_inline_spans(parser, pos);
+        if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
+            list_push((List*)footnote, content);
+            increment_element_content_length(footnote);
+        }
+    }
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)footnote};
+}
+
+// Parse footnote reference ([^1])
+static Item parse_footnote_reference(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+    
+    // Check for [^
+    if (*pos != '[' || *(pos+1) != '^') {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    pos += 2; // Skip [^
+    const char* id_start = pos;
+    
+    // Find closing ]
+    while (*pos && *pos != ']') pos++;
+    
+    if (*pos != ']') {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* ref = create_element(parser->input, "footnote-ref");
+    if (!ref) {
+        *text = pos + 1;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract and add ID
+    size_t id_len = pos - id_start;
+    char* id = (char*)malloc(id_len + 1);
+    if (id) {
+        strncpy(id, id_start, id_len);
+        id[id_len] = '\0';
+        add_attribute_to_element(parser->input, ref, "ref", id);
+        free(id);
+    }
+    
+    *text = pos + 1; // Skip closing ]
+    return (Item){.item = (uint64_t)ref};
+}
+
+// Parse citations [@key] or [@key, p. 123]
+static Item parse_citation(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+    
+    // Check for [@
+    if (*pos != '[' || *(pos+1) != '@') {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    pos += 2; // Skip [@
+    const char* key_start = pos;
+    
+    // Find end of citation key (space, comma, or ])
+    while (*pos && *pos != ' ' && *pos != ',' && *pos != ']') pos++;
+    
+    if (pos == key_start) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* citation = create_element(parser->input, "citation");
+    if (!citation) {
+        *text = pos;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract citation key
+    size_t key_len = pos - key_start;
+    char* key = (char*)malloc(key_len + 1);
+    if (key) {
+        strncpy(key, key_start, key_len);
+        key[key_len] = '\0';
+        add_attribute_to_element(parser->input, citation, "key", key);
+        free(key);
+    }
+    
+    // Check for additional citation info (page numbers, etc.)
+    if (*pos == ',' || *pos == ' ') {
+        skip_whitespace(&pos);
+        if (*pos == ',') {
+            pos++;
+            skip_whitespace(&pos);
+        }
+        
+        const char* info_start = pos;
+        while (*pos && *pos != ']') pos++;
+        
+        if (pos > info_start) {
+            size_t info_len = pos - info_start;
+            char* info = (char*)malloc(info_len + 1);
+            if (info) {
+                strncpy(info, info_start, info_len);
+                info[info_len] = '\0';
+                add_attribute_to_element(parser->input, citation, "info", info);
+                free(info);
+            }
+        }
+    }
+    
+    // Find closing ]
+    while (*pos && *pos != ']') pos++;
+    if (*pos == ']') pos++;
+    
+    *text = pos;
+    return (Item){.item = (uint64_t)citation};
+}
+
+// Check if line is an RST directive (.. directive::)
+static bool is_rst_directive(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Check for .. 
+    if (*pos != '.' || *(pos+1) != '.' || *(pos+2) != ' ') return false;
+    pos += 3;
+    
+    // Check for directive name followed by ::
+    while (*pos && !isspace(*pos) && *pos != ':') pos++;
+    return (*pos == ':' && *(pos+1) == ':');
+}
+
+// Parse RST directive (.. code-block:: python)
+static Item parse_rst_directive(MarkupParser* parser, const char* line) {
+    Element* directive = create_element(parser->input, "directive");
+    if (!directive) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    pos += 3; // Skip .. 
+    
+    // Extract directive name
+    const char* name_start = pos;
+    while (*pos && *pos != ':') pos++;
+    
+    size_t name_len = pos - name_start;
+    char* name = (char*)malloc(name_len + 1);
+    if (name) {
+        strncpy(name, name_start, name_len);
+        name[name_len] = '\0';
+        add_attribute_to_element(parser->input, directive, "type", name);
+        free(name);
+    }
+    
+    // Skip :: and parse arguments
+    if (*pos == ':' && *(pos+1) == ':') {
+        pos += 2;
+        skip_whitespace(&pos);
+        
+        if (*pos) {
+            add_attribute_to_element(parser->input, directive, "args", pos);
+        }
+    }
+    
+    parser->current_line++;
+    
+    // Parse directive content (indented lines)
+    StrBuf* sb = parser->input->sb;
+    strbuf_reset(sb);
+    
+    while (parser->current_line < parser->line_count) {
+        const char* content_line = parser->lines[parser->current_line];
+        
+        // Check if line is indented (part of directive)
+        if (*content_line == ' ' || *content_line == '\t') {
+            if (sb->length > 0) {
+                strbuf_append_char(sb, '\n');
+            }
+            strbuf_append_str(sb, content_line);
+            parser->current_line++;
+        } else {
+            break;
+        }
+    }
+    
+    // Add content if any
+    if (sb->length > 0) {
+        String* content_str = strbuf_to_string(sb);
+        Item content_item = {.item = s2it(content_str)};
+        list_push((List*)directive, content_item);
+        increment_element_content_length(directive);
+    }
+    
+    return (Item){.item = (uint64_t)directive};
+}
+
+// Check if line is an Org block (#+BEGIN_*)
+static bool is_org_block(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    return (strncmp(pos, "#+BEGIN_", 8) == 0);
+}
+
+// Parse Org block (#+BEGIN_SRC python ... #+END_SRC)
+static Item parse_org_block(MarkupParser* parser, const char* line) {
+    Element* org_block = create_element(parser->input, "org-block");
+    if (!org_block) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    pos += 8; // Skip #+BEGIN_
+    
+    // Extract block type
+    const char* type_start = pos;
+    while (*pos && !isspace(*pos)) pos++;
+    
+    size_t type_len = pos - type_start;
+    char* type = (char*)malloc(type_len + 1);
+    if (type) {
+        strncpy(type, type_start, type_len);
+        type[type_len] = '\0';
+        add_attribute_to_element(parser->input, org_block, "type", type);
+        free(type);
+    }
+    
+    // Parse block arguments
+    skip_whitespace(&pos);
+    if (*pos) {
+        add_attribute_to_element(parser->input, org_block, "args", pos);
+    }
+    
+    parser->current_line++;
+    
+    // Build end marker
+    char* end_marker = (char*)malloc(type_len + 10);
+    sprintf(end_marker, "#+END_%.*s", (int)type_len, type_start);
+    
+    // Collect block content until end marker
+    StrBuf* sb = parser->input->sb;
+    strbuf_reset(sb);
+    
+    while (parser->current_line < parser->line_count) {
+        const char* content_line = parser->lines[parser->current_line];
+        
+        // Check for end marker
+        const char* check_pos = content_line;
+        skip_whitespace(&check_pos);
+        
+        if (strncmp(check_pos, end_marker, strlen(end_marker)) == 0) {
+            parser->current_line++; // Skip end marker
+            break;
+        }
+        
+        // Add line to content
+        if (sb->length > 0) {
+            strbuf_append_char(sb, '\n');
+        }
+        strbuf_append_str(sb, content_line);
+        parser->current_line++;
+    }
+    
+    free(end_marker);
+    
+    // Add content
+    if (sb->length > 0) {
+        String* content_str = strbuf_to_string(sb);
+        Item content_item = {.item = s2it(content_str)};
+        list_push((List*)org_block, content_item);
+        increment_element_content_length(org_block);
+    }
+    
+    return (Item){.item = (uint64_t)org_block};
+}
+
+// Check if document has YAML frontmatter
+static bool has_yaml_frontmatter(MarkupParser* parser) {
+    if (!parser || parser->line_count == 0) return false;
+    
+    const char* first_line = parser->lines[0];
+    skip_whitespace(&first_line);
+    
+    return (strcmp(first_line, "---") == 0);
+}
+
+// Parse YAML frontmatter (---)
+static Item parse_yaml_frontmatter(MarkupParser* parser) {
+    if (!has_yaml_frontmatter(parser)) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* metadata = create_element(parser->input, "metadata");
+    if (!metadata) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    add_attribute_to_element(parser->input, metadata, "type", "yaml");
+    
+    parser->current_line++; // Skip opening ---
+    
+    // Collect YAML content until closing ---
+    StrBuf* sb = parser->input->sb;
+    strbuf_reset(sb);
+    
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        
+        // Check for closing ---
+        const char* pos = line;
+        skip_whitespace(&pos);
+        if (strcmp(pos, "---") == 0) {
+            parser->current_line++; // Skip closing ---
+            break;
+        }
+        
+        // Add line to YAML content
+        if (sb->length > 0) {
+            strbuf_append_char(sb, '\n');
+        }
+        strbuf_append_str(sb, line);
+        parser->current_line++;
+    }
+    
+    // Add YAML content as raw text
+    String* yaml_content = strbuf_to_string(sb);
+    Item yaml_item = {.item = s2it(yaml_content)};
+    list_push((List*)metadata, yaml_item);
+    increment_element_content_length(metadata);
+    
+    return (Item){.item = (uint64_t)metadata};
+}
+
+// Check if document has Org properties
+static bool has_org_properties(MarkupParser* parser) {
+    if (!parser || parser->line_count == 0) return false;
+    
+    // Check first few lines for #+PROPERTY: or #+TITLE: etc.
+    for (int i = 0; i < 10 && i < parser->line_count; i++) {
+        const char* line = parser->lines[i];
+        skip_whitespace(&line);
+        if (strncmp(line, "#+", 2) == 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// Parse Org document properties (#+TITLE:, #+AUTHOR:, etc.)
+static Item parse_org_properties(MarkupParser* parser) {
+    if (!has_org_properties(parser)) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* properties = create_element(parser->input, "metadata");
+    if (!properties) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    add_attribute_to_element(parser->input, properties, "type", "org");
+    
+    // Parse property lines
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        const char* pos = line;
+        skip_whitespace(&pos);
+        
+        if (strncmp(pos, "#+", 2) != 0) {
+            break; // No more properties
+        }
+        
+        pos += 2; // Skip #+
+        const char* key_start = pos;
+        
+        // Find colon
+        while (*pos && *pos != ':') pos++;
+        if (*pos != ':') {
+            parser->current_line++;
+            continue;
+        }
+        
+        // Extract property key
+        size_t key_len = pos - key_start;
+        char* key = (char*)malloc(key_len + 1);
+        if (key) {
+            strncpy(key, key_start, key_len);
+            key[key_len] = '\0';
+            
+            // Convert to lowercase
+            for (int i = 0; key[i]; i++) {
+                key[i] = tolower(key[i]);
+            }
+            
+            pos++; // Skip colon
+            skip_whitespace(&pos);
+            
+            // Add property as attribute
+            if (*pos) {
+                add_attribute_to_element(parser->input, properties, key, pos);
+            }
+            
+            free(key);
+        }
+        
+        parser->current_line++;
+    }
+    
+    return (Item){.item = (uint64_t)properties};
+}
+
+// Parse wiki template ({{template|arg1|arg2}})
+static Item parse_wiki_template(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+    
+    // Check for {{
+    if (*pos != '{' || *(pos+1) != '{') {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    pos += 2; // Skip {{
+    const char* template_start = pos;
+    
+    // Find closing }}
+    int brace_depth = 1;
+    const char* content_end = NULL;
+    
+    while (*pos && brace_depth > 0) {
+        if (*pos == '{' && *(pos+1) == '{') {
+            brace_depth++;
+            pos += 2;
+        } else if (*pos == '}' && *(pos+1) == '}') {
+            brace_depth--;
+            if (brace_depth == 0) {
+                content_end = pos;
+            }
+            pos += 2;
+        } else {
+            pos++;
+        }
+    }
+    
+    if (!content_end) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* template_elem = create_element(parser->input, "wiki-template");
+    if (!template_elem) {
+        *text = pos;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract template content
+    size_t content_len = content_end - template_start;
+    char* content = (char*)malloc(content_len + 1);
+    if (content) {
+        strncpy(content, template_start, content_len);
+        content[content_len] = '\0';
+        
+        // Parse template name and arguments
+        char* pipe_pos = strchr(content, '|');
+        if (pipe_pos) {
+            *pipe_pos = '\0';
+            add_attribute_to_element(parser->input, template_elem, "name", content);
+            add_attribute_to_element(parser->input, template_elem, "args", pipe_pos + 1);
+        } else {
+            add_attribute_to_element(parser->input, template_elem, "name", content);
+        }
+        
+        free(content);
+    }
+    
+    *text = pos;
+    return (Item){.item = (uint64_t)template_elem};
 }
