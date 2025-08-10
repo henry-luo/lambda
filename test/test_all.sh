@@ -62,6 +62,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  num_stack         Run only number stack tests"
     echo "  mime_detect       Run only MIME detection tests"
     echo "  math              Run only math roundtrip tests"
+    echo "  markup_roundtrip  Run only markup roundtrip tests"
     echo ""
     echo "Configuration:"
     echo "  Test configurations are loaded from test/test_config.json"
@@ -158,6 +159,151 @@ get_build_config_file() {
     else
         echo "build_lambda_config.json"
     fi
+}
+
+# Helper function to build generic compilation command from config
+build_generic_compile_cmd() {
+    local suite_type="$1"
+    local source="$2" 
+    local binary="$3"
+    local deps="$4"
+    local special_flags="$5"
+    
+    # Check if suite uses build config
+    local uses_build_config=$(get_config "$suite_type" "uses_build_config")
+    local build_config_file=$(get_build_config_file "$suite_type")
+    
+    if [ "$uses_build_config" = "true" ] && [ -f "$build_config_file" ]; then
+        # Build config-driven compilation (for mir, lambda, validator types)
+        build_config_driven_compile_cmd "$suite_type" "$source" "$binary" "$special_flags" "$build_config_file"
+        return $?
+    else
+        # Simple dependency-based compilation (for library, input types)
+        build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags"
+        return $?
+    fi
+}
+
+# Helper function to build config-driven compilation command
+build_config_driven_compile_cmd() {
+    local suite_type="$1"
+    local source="$2"
+    local binary="$3" 
+    local special_flags="$4"
+    local config_file="$5"
+    
+    if [ ! -f "$config_file" ]; then
+        echo "❌ Configuration file $config_file not found!"
+        return 1
+    fi
+    
+    # Extract and build object files list
+    local object_files=()
+    while IFS= read -r source_file; do
+        local base_name
+        if [[ "$source_file" == *.cpp ]]; then
+            base_name=$(basename "$source_file" .cpp)
+        else
+            base_name=$(basename "$source_file" .c)
+        fi
+        local obj_file="build/${base_name}.o"
+        if [ -f "$obj_file" ]; then
+            object_files+=("$PWD/$obj_file")
+        fi
+    done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+    
+    # Process source_dirs if any
+    local source_dirs
+    source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+    if [ -n "$source_dirs" ]; then
+        while IFS= read -r source_dir; do
+            if [ -d "$source_dir" ]; then
+                while IFS= read -r source_file; do
+                    local rel_path="${source_file#$PWD/}"
+                    local base_name
+                    if [[ "$rel_path" == *.cpp ]]; then
+                        base_name=$(basename "$rel_path" .cpp)
+                    else
+                        base_name=$(basename "$rel_path" .c)
+                    fi
+                    local obj_file="build/${base_name}.o"
+                    if [ -f "$obj_file" ]; then
+                        object_files+=("$PWD/$obj_file")
+                    fi
+                done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
+            fi
+        done <<< "$source_dirs"
+    fi
+    
+    # Exclude main.o since Criterion provides its own main function
+    local filtered_object_files=()
+    for obj_file in "${object_files[@]}"; do
+        if [[ "$obj_file" != *"/main.o" ]]; then
+            filtered_object_files+=("$obj_file")
+        fi
+    done
+    object_files=("${filtered_object_files[@]}")
+    
+    # Build library flags from config
+    local include_flags=""
+    local static_libs=""
+    local dynamic_libs=""
+    local libraries
+    libraries=$(jq -r '.libraries // []' "$config_file")
+    
+    if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
+        while IFS= read -r lib_info; do
+            local name include lib link
+            name=$(echo "$lib_info" | jq -r '.name')
+            include=$(echo "$lib_info" | jq -r '.include // empty')
+            lib=$(echo "$lib_info" | jq -r '.lib // empty')
+            link=$(echo "$lib_info" | jq -r '.link // "static"')
+            
+            if [ -n "$include" ] && [ "$include" != "null" ]; then
+                include_flags="$include_flags -I$include"
+            fi
+            
+            if [ "$link" = "static" ]; then
+                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                    static_libs="$static_libs $lib"
+                fi
+            else
+                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                    dynamic_libs="$dynamic_libs -L$lib -l$name"
+                fi
+            fi
+        done < <(echo "$libraries" | jq -c '.[]')
+    fi
+    
+    # Choose compiler based on suite type
+    local compiler="gcc"
+    if [ "$suite_type" = "lambda" ]; then
+        compiler="clang"
+        # Add lambda-specific includes and libraries
+        include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
+        include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
+        dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+    fi
+    
+    # Build final command
+    echo "$compiler $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
+    return 0
+}
+
+# Helper function to build dependency-based compilation command  
+build_dependency_based_compile_cmd() {
+    local suite_type="$1"
+    local source="$2"
+    local binary="$3"
+    local deps="$4"
+    local special_flags="$5"
+    
+    if [ "$suite_type" = "validator" ]; then
+        echo "gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS -o $binary $source"
+    else
+        echo "gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+    fi
+    return 0
 }
 
 # Function to run test executable with raw output (no shell wrapper)
@@ -932,208 +1078,34 @@ run_individual_test() {
         deps="${dependencies_array[$test_index]}"
     fi
     
-    # Handle raw mode
+    # Handle raw mode using generic approach
     if [ "$RAW_OUTPUT" = true ]; then
-        local raw_compile_cmd=""
+        local raw_compile_cmd
         local raw_binary_path=""
         
-        if [ "$suite_type" = "validator" ]; then
-            raw_compile_cmd="gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS -o $binary $source"
-            raw_binary_path="$binary"
-        elif [ "$suite_type" = "mir" ]; then
-            # MIR tests need special compilation with object files from build config
-            # Use the same compilation logic as run_mir_suite_impl
-            local config_file="build_lambda_config.json"
-            if [ ! -f "$config_file" ]; then
-                print_error "Configuration file $config_file not found!"
-                return 1
-            fi
-            
-            # Extract and build object files list (same as run_mir_suite_impl)
-            local object_files=()
-            while IFS= read -r source_file; do
-                local base_name
-                if [[ "$source_file" == *.cpp ]]; then
-                    base_name=$(basename "$source_file" .cpp)
-                else
-                    base_name=$(basename "$source_file" .c)
-                fi
-                local obj_file="build/${base_name}.o"
-                if [ -f "$obj_file" ]; then
-                    object_files+=("$PWD/$obj_file")
-                fi
-            done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
-            
-            # Process source_dirs if any
-            local source_dirs
-            source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
-            if [ -n "$source_dirs" ]; then
-                while IFS= read -r source_dir; do
-                    if [ -d "$source_dir" ]; then
-                        while IFS= read -r source_file; do
-                            local rel_path="${source_file#$PWD/}"
-                            local base_name
-                            if [[ "$rel_path" == *.cpp ]]; then
-                                base_name=$(basename "$rel_path" .cpp)
-                            else
-                                base_name=$(basename "$rel_path" .c)
-                            fi
-                            local obj_file="build/${base_name}.o"
-                            if [ -f "$obj_file" ]; then
-                                object_files+=("$PWD/$obj_file")
-                            fi
-                        done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
-                    fi
-                done <<< "$source_dirs"
-            fi
-            
-            # For MIR tests, exclude main.o since Criterion provides its own main function
-            local filtered_object_files=()
-            for obj_file in "${object_files[@]}"; do
-                if [[ "$obj_file" != *"/main.o" ]]; then
-                    filtered_object_files+=("$obj_file")
-                fi
-            done
-            object_files=("${filtered_object_files[@]}")
-            
-            # Build library flags
-            local include_flags=""
-            local static_libs=""
-            local dynamic_libs=""
-            local libraries
-            libraries=$(jq -r '.libraries // []' "$config_file")
-            
-            if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
-                while IFS= read -r lib_info; do
-                    local name include lib link
-                    name=$(echo "$lib_info" | jq -r '.name')
-                    include=$(echo "$lib_info" | jq -r '.include // empty')
-                    lib=$(echo "$lib_info" | jq -r '.lib // empty')
-                    link=$(echo "$lib_info" | jq -r '.link // "static"')
-                    
-                    if [ -n "$include" ] && [ "$include" != "null" ]; then
-                        include_flags="$include_flags -I$include"
-                    fi
-                    
-                    if [ "$link" = "static" ]; then
-                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                            static_libs="$static_libs $lib"
-                        fi
-                    else
-                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                            dynamic_libs="$dynamic_libs -L$lib -l$name"
-                        fi
-                    fi
-                done < <(echo "$libraries" | jq -c '.[]')
-            fi
-            
-            raw_compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
-            raw_binary_path="$binary"
-        elif [ "$suite_type" = "lambda" ]; then
-            # Lambda tests need special compilation with object files from build config
-            # Use the same compilation logic as MIR tests
-            local config_file="build_lambda_config.json"
-            if [ ! -f "$config_file" ]; then
-                print_error "Configuration file $config_file not found!"
-                return 1
-            fi
-            
-            # Extract and build object files list (same as run_mir_suite_impl)
-            local object_files=()
-            while IFS= read -r source_file; do
-                local base_name
-                if [[ "$source_file" == *.cpp ]]; then
-                    base_name=$(basename "$source_file" .cpp)
-                else
-                    base_name=$(basename "$source_file" .c)
-                fi
-                local obj_file="build/${base_name}.o"
-                if [ -f "$obj_file" ]; then
-                    object_files+=("$PWD/$obj_file")
-                fi
-            done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
-            
-            # Process source_dirs if any
-            local source_dirs
-            source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
-            if [ -n "$source_dirs" ]; then
-                while IFS= read -r source_dir; do
-                    if [ -d "$source_dir" ]; then
-                        while IFS= read -r source_file; do
-                            local rel_path="${source_file#$PWD/}"
-                            local base_name
-                            if [[ "$rel_path" == *.cpp ]]; then
-                                base_name=$(basename "$rel_path" .cpp)
-                            else
-                                base_name=$(basename "$rel_path" .c)
-                            fi
-                            local obj_file="build/${base_name}.o"
-                            if [ -f "$obj_file" ]; then
-                                object_files+=("$PWD/$obj_file")
-                            fi
-                        done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
-                    fi
-                done <<< "$source_dirs"
-            fi
-            
-            # For Lambda tests, exclude main.o since Criterion provides its own main function
-            local filtered_object_files=()
-            for obj_file in "${object_files[@]}"; do
-                if [[ "$obj_file" != *"/main.o" ]]; then
-                    filtered_object_files+=("$obj_file")
-                fi
-            done
-            object_files=("${filtered_object_files[@]}")
-            
-            # Build library flags
-            local include_flags=""
-            local static_libs=""
-            local dynamic_libs=""
-            local libraries
-            libraries=$(jq -r '.libraries // []' "$config_file")
-            
-            if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
-                while IFS= read -r lib_info; do
-                    local name include lib link
-                    name=$(echo "$lib_info" | jq -r '.name')
-                    include=$(echo "$lib_info" | jq -r '.include // empty')
-                    lib=$(echo "$lib_info" | jq -r '.lib // empty')
-                    link=$(echo "$lib_info" | jq -r '.link // "static"')
-                    
-                    if [ -n "$include" ] && [ "$include" != "null" ]; then
-                        include_flags="$include_flags -I$include"
-                    fi
-                    
-                    if [ "$link" = "static" ]; then
-                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                            static_libs="$static_libs $lib"
-                        fi
-                    else
-                        if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                            dynamic_libs="$dynamic_libs -L$lib -l$name"
-                        fi
-                    fi
-                done < <(echo "$libraries" | jq -c '.[]')
-            fi
-            
-            # Add additional includes and libraries for lambda tests
-            include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
-            include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
-            dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
-            
-            raw_compile_cmd="clang $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
-            raw_binary_path="$binary"
-        else
-            raw_compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
-            raw_binary_path="test/$binary"
+        # Use generic compilation command builder
+        raw_compile_cmd=$(build_generic_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags")
+        
+        if [ $? -ne 0 ]; then
+            echo "$raw_compile_cmd"  # This will be the error message
+            return 1
         fi
         
+        # Determine binary path based on suite type
+        if [ "$suite_type" = "validator" ] || [ "$suite_type" = "mir" ] || [ "$suite_type" = "lambda" ]; then
+            raw_binary_path="$binary"
+        else
+            raw_binary_path="test/$binary" 
+        fi
+        
+        # Compile and run
+        echo "🔧 Compiling with raw mode: $raw_compile_cmd"
         if $raw_compile_cmd 2>/dev/null; then
             run_raw_test "$raw_binary_path" "$test_name"
             return $?
         else
             echo "❌ Failed to compile $source"
-            $raw_compile_cmd
+            $raw_compile_cmd  # Show error output
             return 1
         fi
     fi
@@ -1554,13 +1526,13 @@ run_target_test() {
             run_individual_library_test "$target"
             return $?
             ;;
-        "mime_detect"|"math")
+        "mime_detect"|"math"|"markup_roundtrip")
             run_individual_input_test "$target"
             return $?
             ;;
         *)
             print_error "Unknown target: $target"
-            print_status "Available targets: all, library, input, validator, mir, lambda, strbuf, strview, variable_pool, num_stack, mime_detect, math"
+            print_status "Available targets: all, library, input, validator, mir, lambda, strbuf, strview, variable_pool, num_stack, mime_detect, math, markup_roundtrip"
             return 1
             ;;
     esac

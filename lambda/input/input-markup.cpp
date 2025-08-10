@@ -432,11 +432,25 @@ static Item parse_nested_list_content(MarkupParser* parser, int base_indent) {
                 increment_element_content_length(content_container);
             }
         } else {
-            // Parse as paragraph content
-            Item para_content = parse_paragraph(parser, line);
-            if (para_content.item != ITEM_ERROR && para_content.item != ITEM_UNDEFINED) {
-                list_push((List*)content_container, para_content);
-                increment_element_content_length(content_container);
+            // Check what type of block this is
+            BlockType block_type = detect_block_type(line);
+            if (block_type == BLOCK_CODE_BLOCK) {
+                // Parse as code block directly
+                Item code_content = parse_code_block(parser, line);
+                if (code_content.item != ITEM_ERROR && code_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)content_container, code_content);
+                    increment_element_content_length(content_container);
+                }
+            } else {
+                // Parse as paragraph content
+                Item para_content = parse_paragraph(parser, line);
+                if (para_content.item != ITEM_ERROR && para_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)content_container, para_content);
+                    increment_element_content_length(content_container);
+                } else {
+                    // If paragraph parsing failed and didn't advance, advance manually to avoid infinite loop
+                    parser->current_line++;
+                }
             }
         }
     }
