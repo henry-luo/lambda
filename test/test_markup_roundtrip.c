@@ -207,13 +207,8 @@ Test(markup_roundtrip, complete_test) {
     // char* file_content = read_file_content("test/input/complete_markup_test.md");
     // cr_assert_not_null(file_content, "Failed to read complete_markup_test.md file");
     
-    // Use simple content for testing instead of comprehensive to isolate issue
-    const char* comprehensive_content = read_file_content("test/input/simple_phase6_test.md");
-    cr_assert_not_null(comprehensive_content, "Failed to read simple_phase6_test.md file");
-    
-    char* comprehensive_markdown = strdup(comprehensive_content);
-    
-    printf("Simple Phase 6 content for testing (length: %zu bytes)\n", strlen(comprehensive_markdown));
+    const char* comprehensive_content = read_file_content("test/input/comprehensive_test.md");
+    cr_assert_not_null(comprehensive_content, "Failed to read comprehensive_test.md file");
     
     // Create Lambda strings for input parameters
     String* type_str = create_lambda_string("markup");
@@ -221,10 +216,10 @@ Test(markup_roundtrip, complete_test) {
     
     // Get current directory for URL resolution
     lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "simple_phase6_test.md");
+    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_test.md");
     
     // Parse comprehensive content
-    Input* input = input_from_source(comprehensive_markdown, dummy_url, type_str, flavor_str);
+    Input* input = input_from_source(comprehensive_content, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse comprehensive markdown");
     StrBuf* strbuf = strbuf_new();
     printf("Parsed input with root_item: %p\n", (void*)input->root);
@@ -239,6 +234,5 @@ Test(markup_roundtrip, complete_test) {
     printf("Formatted content (length %zu): %s\n", formatted->len, formatted->chars ? formatted->chars : "(null)");
 
     // Cleanup
-    free((void*)comprehensive_content);
-    free(comprehensive_markdown);
+    free(comprehensive_content);
 }
