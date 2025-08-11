@@ -5,8 +5,15 @@ extern "C" void run_validation(const char *data_file, const char *schema_file, c
 #include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
 
-// Forward declare read_text_file from lib/file.c
-extern char* read_text_file(const char *filename);
+// Forward declare additional transpiler functions
+extern "C" {
+    char* read_text_file(const char *filename);
+    void write_text_file(const char *filename, const char *content);
+    TSTree* lambda_parse_source(TSParser* parser, const char* source);
+}
+
+// C++ functions
+void transpile_ast(Transpiler* tp, AstScript *script);
 
 // External function declarations
 extern "C" {
@@ -77,6 +84,7 @@ void print_help() {
     printf("Usage:\n");
     printf("  lambda [script.ls]           - Run a script file\n");
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
+    printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
     printf("  lambda --repl                - Start REPL mode\n");
     printf("  lambda --repl --mir          - Start REPL with MIR JIT\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
@@ -211,6 +219,84 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir) {
     print_item(output, result);
     printf("%s\n", output->str);
     strbuf_free(output);
+}
+
+void transpile_script_only(Runtime *runtime, const char *script_path) {
+    printf("Transpiling script: %s (no execution)\n", script_path);
+    
+    // Read the source file
+    const char* source = read_text_file(script_path);
+    if (!source) {
+        printf("Error: Could not read file '%s'\n", script_path);
+        return;
+    }
+    
+    // Create a transpiler and transpile the script
+    Transpiler transpiler;
+    memset(&transpiler, 0, sizeof(Transpiler));
+    transpiler.parser = runtime->parser;
+    transpiler.runtime = runtime;
+    transpiler.reference = strdup(script_path);
+    transpiler.source = source;
+    transpiler.index = 0;
+    
+    // Parse the source
+    transpiler.syntax_tree = lambda_parse_source(transpiler.parser, transpiler.source);
+    if (transpiler.syntax_tree == NULL) {
+        printf("Error: Failed to parse the source code.\n");
+        free((void*)source);
+        return;
+    }
+    
+    // Check for syntax errors
+    TSNode root_node = ts_tree_root_node(transpiler.syntax_tree);
+    if (ts_node_has_error(root_node)) {
+        printf("Syntax tree has errors.\n");
+        find_errors(root_node);
+        ts_tree_delete(transpiler.syntax_tree);
+        free((void*)source);
+        return;
+    }
+    
+    // Build AST
+    size_t grow_size = 4096;
+    size_t tolerance_percent = 20;
+    pool_variable_init(&transpiler.ast_pool, grow_size, tolerance_percent);
+    transpiler.type_list = arraylist_new(16);
+    transpiler.const_list = arraylist_new(16);
+    
+    if (strcmp(ts_node_type(root_node), "document") != 0) {
+        printf("Error: The tree has no valid root node.\n");
+        ts_tree_delete(transpiler.syntax_tree);
+        free((void*)source);
+        return;
+    }
+    
+    // Build the AST
+    transpiler.ast_root = build_script(&transpiler, root_node);
+    
+    // Transpile to C code
+    transpiler.code_buf = strbuf_new_cap(1024);
+    transpile_ast(&transpiler, (AstScript*)transpiler.ast_root);
+    
+    // Output the transpiled C code
+    printf("Transpiled C code:\n");
+    printf("==================\n");
+    printf("%s\n", transpiler.code_buf->str);
+    printf("==================\n");
+    
+    // Write to file for convenience
+    write_text_file("_transpiled.c", transpiler.code_buf->str);
+    printf("Transpiled code written to: _transpiled.c\n");
+    
+    // Cleanup
+    strbuf_free(transpiler.code_buf);
+    if (transpiler.syntax_tree) ts_tree_delete(transpiler.syntax_tree);
+    if (transpiler.ast_pool) pool_variable_destroy(transpiler.ast_pool);
+    if (transpiler.type_list) arraylist_free(transpiler.type_list);
+    if (transpiler.const_list) arraylist_free(transpiler.const_list);
+    free((void*)source);
+    free((void*)transpiler.reference);
 }
 
 void run_assertions() {
@@ -420,6 +506,7 @@ int main(int argc, char *argv[]) {
     
     bool use_mir = false;
     bool repl_mode = false;
+    bool transpile_only = false;
     
     // Parse arguments
     for (int i = 1; i < argc; i++) {
@@ -427,9 +514,15 @@ int main(int argc, char *argv[]) {
             use_mir = true;
         } else if (strcmp(argv[i], "--repl") == 0) {
             repl_mode = true;
+        } else if (strcmp(argv[i], "--transpile-only") == 0) {
+            transpile_only = true;
         } else if (argv[i][0] != '-') {
-            // This is a script file - run it
-            run_script_file(&runtime, argv[i], use_mir);
+            // This is a script file
+            if (transpile_only) {
+                transpile_script_only(&runtime, argv[i]);
+            } else {
+                run_script_file(&runtime, argv[i], use_mir);
+            }
             return 0;
         } else {
             // Unknown option
@@ -441,7 +534,15 @@ int main(int argc, char *argv[]) {
     
     // If --repl was specified, start REPL
     if (repl_mode) {
+        if (transpile_only) {
+            printf("Error: --transpile-only cannot be used with --repl\n");
+            return 1;
+        }
         run_repl(&runtime, use_mir);
+    } else if (transpile_only) {
+        printf("Error: --transpile-only requires a script file\n");
+        print_help();
+        return 1;
     } else {
         // No script file specified and no --repl flag
         printf("Error: No script file specified. Use --repl for interactive mode.\n");
