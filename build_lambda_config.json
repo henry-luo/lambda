@@ -125,12 +125,10 @@
         "fms-extensions",
         "pedantic",
         "fcolor-diagnostics",
-        "fsanitize=address",
         "fno-omit-frame-pointer",
         "O1"
     ],
     "linker_flags": [
-        "fsanitize=address"
     ],
     "debug": true,
     "build_dir": "build",

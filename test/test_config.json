@@ -3,18 +3,19 @@
     {
       "suite": "validator",
       "name": "🔍 Validator Tests",
-      "sources": ["test/test_validator.c"],
+      "sources": ["test/test_validator.cpp"],
       "dependencies": ["build_lambda_config.json"],
       "binaries": ["test/test_validator.exe"],
       "type": "validator",
-      "special_flags": "-Iinclude -Ilambda -Ilambda/validator -fms-extensions",
+      "special_flags": "-std=c++17 -lstdc++",
       "uses_build_config": true,
       "environment": {
         "TEST_DIR_PATH": "$PWD/test/lambda/validator",
         "LAMBDA_EXE_PATH": "$PWD/lambda.exe"
       },
       "requires_lambda_exe": true,
-      "parallel": true
+      "parallel": false,
+      "compiler": "g++"
     },
     {
       "suite": "library",

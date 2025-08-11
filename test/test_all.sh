@@ -275,11 +275,19 @@ build_config_driven_compile_cmd() {
         done < <(echo "$libraries" | jq -c '.[]')
     fi
     
-    # Choose compiler based on suite type
+    # Choose compiler based on suite type or config
     local compiler="gcc"
-    if [ "$suite_type" = "lambda" ]; then
+    
+    # Check if compiler is specified in test config
+    local config_compiler=$(get_config "$suite_type" "compiler")
+    if [ -n "$config_compiler" ] && [ "$config_compiler" != "null" ] && [ "$config_compiler" != "" ]; then
+        compiler="$config_compiler"
+    elif [ "$suite_type" = "lambda" ]; then
         compiler="clang"
-        # Add lambda-specific includes and libraries
+    fi
+    
+    # Add suite-specific includes and libraries
+    if [ "$suite_type" = "lambda" ]; then
         include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
         include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
         dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
@@ -299,7 +307,13 @@ build_dependency_based_compile_cmd() {
     local special_flags="$5"
     
     if [ "$suite_type" = "validator" ]; then
-        echo "gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS -o $binary $source"
+        # Get compiler from config for validator tests
+        local config_compiler=$(get_config "validator" "compiler")
+        local compiler="gcc"
+        if [ -n "$config_compiler" ] && [ "$config_compiler" != "null" ] && [ "$config_compiler" != "" ]; then
+            compiler="$config_compiler"
+        fi
+        echo "$compiler $special_flags $CRITERION_FLAGS -o $binary $source"
     else
         echo "gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
     fi
