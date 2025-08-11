@@ -46,6 +46,15 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
 
 // write the native C type for the lambda type
 void writeType(Transpiler* tp, Type *type) {
+    if (!type) {
+        strbuf_append_str(tp->code_buf, "void*");
+        return;
+    }
+    // Defensive check: verify the pointer is in a reasonable range
+    if ((uintptr_t)type < 0x1000 || (uintptr_t)type > 0x7FFFFFFFFFFF) {
+        strbuf_append_str(tp->code_buf, "invalid*");
+        return;
+    }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -70,16 +79,16 @@ void writeType(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "mpf_t*");
         break;    
     case LMD_TYPE_STRING:
-        strbuf_append_str(tp->code_buf, "char*");
+        strbuf_append_str(tp->code_buf, "String*");
         break;
     case LMD_TYPE_BINARY:
-        strbuf_append_str(tp->code_buf, "uint8_t*");
+        strbuf_append_str(tp->code_buf, "String*");
         break;
     case LMD_TYPE_SYMBOL:
-        strbuf_append_str(tp->code_buf, "char*");
+        strbuf_append_str(tp->code_buf, "String*");
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "char*");
+        strbuf_append_str(tp->code_buf, "String*");
         break;
 
     case LMD_TYPE_RANGE:
@@ -90,7 +99,10 @@ void writeType(Transpiler* tp, Type *type) {
         break;
     case LMD_TYPE_ARRAY: {
         TypeArray *array_type = (TypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
+        if (array_type->nested && 
+            (uintptr_t)array_type->nested >= 0x1000 && 
+            (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
+            array_type->nested->type_id == LMD_TYPE_INT) {
             strbuf_append_str(tp->code_buf, "ArrayLong*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
@@ -468,6 +480,10 @@ void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
 // print the type of the AST node
 char* format_type(Type *type) {
     if (!type) { return "null*"; }
+    // Defensive check: verify the pointer is in a reasonable range
+    if ((uintptr_t)type < 0x1000 || (uintptr_t)type > 0x7FFFFFFFFFFF) {
+        return "invalid*";
+    }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -503,7 +519,10 @@ char* format_type(Type *type) {
         return "Range*";
     case LMD_TYPE_ARRAY: {
         TypeArray *array_type = (TypeArray*)type;
-        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
+        if (array_type->nested && 
+            (uintptr_t)array_type->nested >= 0x1000 && 
+            (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
+            array_type->nested->type_id == LMD_TYPE_INT) {
             return "ArrayLong*";
         } else {
             return "Array*";
@@ -533,7 +552,7 @@ void print_ast_node(AstNode *node, int indent) {
     switch(node->node_type) {
     case AST_NODE_IDENT:
         printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name.length, 
-            ((AstIdentNode*)node)->name.str, format_type(node->type), node->type->is_const);
+            ((AstIdentNode*)node)->name.str, format_type(node->type), node->type ? node->type->is_const : -1);
         break;
     case AST_NODE_PRIMARY:
         printf("[primary expr:%s,const:%d]\n", format_type(node->type), node->type ? node->type->is_const : -1);
@@ -559,12 +578,24 @@ void print_ast_node(AstNode *node, int indent) {
     }
     case AST_NODE_IF_EXPR: {
         printf("[if expr:%s]\n", format_type(node->type));
-        AstIfExprNode* if_node = (AstIfExprNode*)node;
+        AstIfNode* if_node = (AstIfNode*)node;
         print_ast_node(if_node->cond, indent + 1);
         print_label(indent + 1, "then:");
         print_ast_node(if_node->then, indent + 1);
         if (if_node->otherwise) {
             print_label(indent + 1, "else:");            
+            print_ast_node(if_node->otherwise, indent + 1);
+        }
+        break;
+    }
+    case AST_NODE_IF_STAM: {
+        printf("[if stam:%s]\n", format_type(node->type));
+        AstIfNode* if_node = (AstIfNode*)node;
+        print_ast_node(if_node->cond, indent + 1);
+        print_label(indent + 1, "then:");
+        print_ast_node(if_node->then, indent + 1);
+        if (if_node->otherwise) {
+            print_label(indent + 1, "else:");
             print_ast_node(if_node->otherwise, indent + 1);
         }
         break;
@@ -580,17 +611,27 @@ void print_ast_node(AstNode *node, int indent) {
         break;
     }
     case AST_NODE_FOR_EXPR: {
-        printf("[for %s:%s]\n", node->node_type == AST_NODE_FOR_EXPR ? "expr" : "stam", format_type(node->type));
+        printf("[for expr:%s]\n", format_type(node->type));
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             print_label(indent + 1, "loop:");
             print_ast_node(loop, indent + 1);
             loop = loop->next;
         }
-        if (node->node_type == AST_NODE_FOR_EXPR) {
-            print_label(indent + 1, "then:");
-            print_ast_node(((AstForNode*)node)->then, indent + 1);
+        print_label(indent + 1, "then:");
+        print_ast_node(((AstForNode*)node)->then, indent + 1);
+        break;
+    }
+    case AST_NODE_FOR_STAM: {
+        printf("[for stam:%s]\n", format_type(node->type));
+        AstNode *loop = ((AstForNode*)node)->loop;
+        while (loop) {
+            print_label(indent + 1, "loop:");
+            print_ast_node(loop, indent + 1);
+            loop = loop->next;
         }
+        print_label(indent + 1, "then:");
+        print_ast_node(((AstForNode*)node)->then, indent + 1);
         break;
     }
     case AST_NODE_ASSIGN: {

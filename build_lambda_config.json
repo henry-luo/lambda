@@ -126,7 +126,8 @@
         "pedantic",
         "fcolor-diagnostics",
         "fno-omit-frame-pointer",
-        "O1"
+        "g",
+        "O0"
     ],
     "linker_flags": [
     ],
@@ -141,7 +142,8 @@
                 "fcolor-diagnostics",
                 "fsanitize=address",
                 "fno-omit-frame-pointer",
-                "O1"
+                "g",
+                "O0"
             ],
             "linker_flags": [
                 "fsanitize=address"

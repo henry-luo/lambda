@@ -287,7 +287,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
 }
 
-void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
+void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
     printf("transpile if expr\n");
     // transpile as C conditional expr
     strbuf_append_char(tp->code_buf, '(');
@@ -376,9 +376,23 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     }
     
     Type * expr_type = loop_node->as->type;
-    Type *item_type = 
-        expr_type->type_id == LMD_TYPE_ARRAY ? ((TypeArray*)expr_type)->nested : 
-        expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : &TYPE_ANY;
+    Type *item_type = nullptr;
+    
+    // Safely determine item type based on expression type
+    if (expr_type->type_id == LMD_TYPE_ARRAY) {
+        TypeArray* array_type = (TypeArray*)expr_type;
+        // Validate that the cast is safe by checking the nested pointer
+        if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
+            item_type = array_type->nested;
+        } else {
+            printf("Warning: Invalid nested type in array, using TYPE_ANY\n");
+            item_type = &TYPE_ANY;
+        }
+    } else if (expr_type->type_id == LMD_TYPE_RANGE) {
+        item_type = &TYPE_INT;
+    } else {
+        item_type = &TYPE_ANY;
+    }
         
     // Validate that we have a proper type for item_type
     if (!item_type) {
@@ -386,6 +400,12 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         item_type = &TYPE_ANY; // fallback to ANY type for safety
     }
         
+    // Defensive check: verify item_type is valid before accessing type_id
+    if (!item_type || (uintptr_t)item_type < 0x1000 || (uintptr_t)item_type > 0x7FFFFFFFFFFF) {
+        printf("Warning: item_type pointer is invalid (%p), using TYPE_ANY\n", item_type);
+        item_type = &TYPE_ANY;
+    }
+    
     strbuf_append_str(tp->code_buf, 
         expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
         (item_type->type_id == LMD_TYPE_INT) ? " ArrayLong *arr=" : " Array *arr=");
@@ -909,9 +929,15 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_binary_expr(tp, (AstBinaryNode*)expr_node);
         break;
     case AST_NODE_IF_EXPR:
-        transpile_if_expr(tp, (AstIfExprNode*)expr_node);
+        transpile_if_expr(tp, (AstIfNode*)expr_node);
+        break;
+    case AST_NODE_IF_STAM:
+        transpile_if_expr(tp, (AstIfNode*)expr_node);
         break;
     case AST_NODE_FOR_EXPR:
+        transpile_for_expr(tp, (AstForNode*)expr_node);
+        break;        
+    case AST_NODE_FOR_STAM:
         transpile_for_expr(tp, (AstForNode*)expr_node);
         break;        
     case AST_NODE_ASSIGN:
@@ -1056,7 +1082,16 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         define_ast_node(tp, ((AstBinaryNode*)node)->right);
         break;
     case AST_NODE_IF_EXPR: {
-        AstIfExprNode* if_node = (AstIfExprNode*)node;
+        AstIfNode* if_node = (AstIfNode*)node;
+        define_ast_node(tp, if_node->cond);
+        define_ast_node(tp, if_node->then);
+        if (if_node->otherwise) {
+            define_ast_node(tp, if_node->otherwise);
+        }
+        break;
+    }
+    case AST_NODE_IF_STAM: {
+        AstIfNode* if_node = (AstIfNode*)node;
         define_ast_node(tp, if_node->cond);
         define_ast_node(tp, if_node->then);
         if (if_node->otherwise) {
@@ -1087,9 +1122,16 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
             define_ast_node(tp, loop);
             loop = loop->next;
         }
-        if (node->node_type == AST_NODE_FOR_EXPR) {
-            define_ast_node(tp, ((AstForNode*)node)->then);
+        define_ast_node(tp, ((AstForNode*)node)->then);
+        break;
+    }
+    case AST_NODE_FOR_STAM: {
+        AstNode *loop = ((AstForNode*)node)->loop;
+        while (loop) {
+            define_ast_node(tp, loop);
+            loop = loop->next;
         }
+        define_ast_node(tp, ((AstForNode*)node)->then);
         break;
     }
     case AST_NODE_ASSIGN: {

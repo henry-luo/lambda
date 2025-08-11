@@ -43,7 +43,9 @@ typedef enum AstNodeType {
     AST_NODE_ASSIGN,
     AST_NODE_LOOP,
     AST_NODE_IF_EXPR,
+    AST_NODE_IF_STAM,
     AST_NODE_FOR_EXPR,
+    AST_NODE_FOR_STAM,
     AST_NODE_LET_STAM,
     AST_NODE_PUB_STAM,
     AST_NODE_INDEX_EXPR,
@@ -132,11 +134,11 @@ typedef struct AstForNode : AstNode {
     NameScope *vars;  // scope for the variables in the loop
 } AstForNode;
 
-typedef struct AstIfExprNode : AstNode {
+typedef struct AstIfNode : AstNode {
     AstNode *cond;
     AstNode *then;
     AstNode *otherwise;
-} AstIfExprNode;
+} AstIfNode;
 
 typedef struct AstArrayNode : AstNode {
     AstNode *item;  // first item in the array
@@ -238,6 +240,8 @@ struct Runtime {
 void* alloc_const(Transpiler* tp, size_t size);
 AstNode* build_map(Transpiler* tp, TSNode map_node);
 AstNode* build_elmt(Transpiler* tp, TSNode element_node);
+AstNode* build_if_stam(Transpiler* tp, TSNode if_node);
+AstNode* build_for_stam(Transpiler* tp, TSNode for_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
