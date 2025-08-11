@@ -16,7 +16,6 @@ void parse_html(Input* input, const char* html_string);
 void parse_latex(Input* input, const char* latex_string);
 void parse_rtf(Input* input, const char* rtf_string);
 void parse_pdf(Input* input, const char* pdf_string);
-void parse_mediawiki(Input* input, const char* mediawiki_string);
 void parse_asciidoc(Input* input, const char* asciidoc_string);
 void parse_man(Input* input, const char* man_string);
 void parse_eml(Input* input, const char* eml_string);
@@ -479,7 +478,7 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
             parse_pdf(input, source);
         }
         else if (strcmp(effective_type, "wiki") == 0) {
-            parse_mediawiki(input, source);
+            input->root = input_markup(input, source);
         }
         else if (strcmp(effective_type, "asciidoc") == 0) {
             parse_asciidoc(input, source);

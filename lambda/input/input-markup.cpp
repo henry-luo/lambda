@@ -59,6 +59,19 @@ static Item parse_yaml_frontmatter(MarkupParser* parser);
 static Item parse_org_properties(MarkupParser* parser);
 static Item parse_wiki_template(MarkupParser* parser, const char** text);
 
+// MediaWiki-specific forward declarations
+static bool is_wiki_heading(const char* line, int* level);
+static bool is_wiki_list_item(const char* line, char* marker, int* level);
+static bool is_wiki_table_start(const char* line);
+static bool is_wiki_table_row(const char* line);
+static bool is_wiki_table_end(const char* line);
+static bool is_wiki_horizontal_rule(const char* line);
+static Item parse_wiki_table(MarkupParser* parser);
+static Item parse_wiki_list(MarkupParser* parser);
+static Item parse_wiki_link(MarkupParser* parser, const char** text);
+static Item parse_wiki_external_link(MarkupParser* parser, const char** text);
+static Item parse_wiki_bold_italic(MarkupParser* parser, const char** text);
+
 // RST-specific functions (from old input-rst.cpp)
 static bool is_rst_transition_line(const char* line);
 static Item parse_rst_transition(MarkupParser* parser);
@@ -391,6 +404,10 @@ static Item parse_block_element(MarkupParser* parser) {
             if (parser->config.format == MARKUP_TEXTILE) {
                 return parse_textile_list_item(parser, line);
             }
+            // Check if this is a MediaWiki list item
+            if (parser->config.format == MARKUP_WIKI) {
+                return parse_wiki_list(parser);
+            }
             return parse_list_item(parser, line);
         case BLOCK_CODE_BLOCK:
             // Check for RST literal block
@@ -418,6 +435,10 @@ static Item parse_block_element(MarkupParser* parser) {
             if (parser->config.format == MARKUP_RST && is_rst_grid_table_line(line)) {
                 return parse_rst_grid_table(parser);
             }
+            // Check for MediaWiki table
+            if (parser->config.format == MARKUP_WIKI && is_wiki_table_start(line)) {
+                return parse_wiki_table(parser);
+            }
             return parse_table_structure(parser);
         case BLOCK_MATH:
             return parse_math_block(parser, line);
@@ -425,6 +446,11 @@ static Item parse_block_element(MarkupParser* parser) {
             // Check for RST transition line
             if (parser->config.format == MARKUP_RST && is_rst_transition_line(line)) {
                 return parse_rst_transition(parser);
+            }
+            // Check for MediaWiki horizontal rule
+            if (parser->config.format == MARKUP_WIKI && is_wiki_horizontal_rule(line)) {
+                parser->current_line++;
+                return parse_divider(parser);
             }
             parser->current_line++;
             return parse_divider(parser);
@@ -1291,7 +1317,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     }
     
     // For simple text without markup, return as string
-    if (!strpbrk(text, "*_`[!~\\$:^{@")) {
+    if (!strpbrk(text, "*_`[!~\\$:^{@'")) {
         String* content = input_create_string(parser->input, text);
         return (Item){.item = s2it(content)};
     }
@@ -1352,6 +1378,25 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 strbuf_reset(sb);
             }
             
+            // MediaWiki-specific link parsing
+            if (parser->config.format == MARKUP_WIKI && *(pos+1) == '[') {
+                Item wiki_link_item = parse_wiki_link(parser, &pos);
+                if (wiki_link_item.item != ITEM_ERROR && wiki_link_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, wiki_link_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+            }
+            // MediaWiki external link parsing
+            if (parser->config.format == MARKUP_WIKI) {
+                Item wiki_external_item = parse_wiki_external_link(parser, &pos);
+                if (wiki_external_item.item != ITEM_ERROR && wiki_external_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, wiki_external_item);
+                    increment_element_content_length(span);
+                    continue;
+                }
+            }
+            
             // Phase 6: Check for footnote reference [^1] first
             if (*(pos+1) == '^') {
                 Item footnote_ref = parse_footnote_reference(parser, &pos);
@@ -1375,6 +1420,26 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                     list_push((List*)span, link_item);
                     increment_element_content_length(span);
                 }
+            }
+        }
+        else if (*pos == '\'' && parser->config.format == MARKUP_WIKI) {
+            // Flush text and parse MediaWiki bold/italic
+            if (sb->length > 0) {
+                String* text_content = strbuf_to_string(sb);
+                Item text_item = {.item = s2it(text_content)};
+                list_push((List*)span, text_item);
+                increment_element_content_length(span);
+                strbuf_reset(sb);
+            }
+            
+            const char* old_pos = pos;
+            Item wiki_format_item = parse_wiki_bold_italic(parser, &pos);
+            if (wiki_format_item.item != ITEM_ERROR && wiki_format_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, wiki_format_item);
+                increment_element_content_length(span);
+            } else if (pos == old_pos) {
+                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                pos++;
             }
         }
         else if (*pos == '!' && *(pos+1) == '[') {
@@ -2072,6 +2137,23 @@ static BlockType detect_block_type(MarkupParser* parser, const char* line) {
         }
     }
     
+    // MediaWiki-specific blocks - only detected when format is WIKI
+    if (parser->config.format == MARKUP_WIKI) {
+        if (is_wiki_horizontal_rule(line)) {
+            return BLOCK_DIVIDER;
+        }
+        
+        if (is_wiki_table_start(line)) {
+            return BLOCK_TABLE;
+        }
+        
+        char marker;
+        int level;
+        if (is_wiki_list_item(line, &marker, &level)) {
+            return BLOCK_LIST_ITEM;
+        }
+    }
+    
     // Header detection (# ## ### etc. and RST underlined headers)
     if (get_header_level(parser, line) > 0) {
         return BLOCK_HEADER;
@@ -2179,6 +2261,14 @@ static int get_header_level(MarkupParser* parser, const char* line) {
         int textile_level = 0;
         if (is_textile_heading(line, &textile_level)) {
             return textile_level;
+        }
+    }
+    
+    // Handle MediaWiki-style headers (= Header =) - only for WIKI format
+    if (parser->config.format == MARKUP_WIKI) {
+        int wiki_level = 0;
+        if (is_wiki_heading(line, &wiki_level)) {
+            return wiki_level;
         }
     }
     
@@ -3707,6 +3797,475 @@ static Item parse_org_properties(MarkupParser* parser) {
     return (Item){.item = (uint64_t)properties};
 }
 
+// ============================================================================
+// MediaWiki-Specific Features 
+// ============================================================================
+
+// MediaWiki-specific helper functions
+static bool is_wiki_heading(const char* line, int* level) {
+    if (!line || *line != '=') return false;
+    
+    int eq_count = count_leading_chars(line, '=');
+    if (eq_count == 0 || eq_count > 6) return false;
+    
+    // Check if line ends with same number of =
+    int len = strlen(line);
+    int trailing_eq = 0;
+    for (int i = len - 1; i >= 0 && line[i] == '='; i--) {
+        trailing_eq++;
+    }
+    
+    if (trailing_eq >= eq_count) {
+        if (level) *level = eq_count;
+        return true;
+    }
+    
+    return false;
+}
+
+static bool is_wiki_list_item(const char* line, char* marker, int* level) {
+    if (!line) return false;
+    
+    int pos = 0;
+    int count = 0;
+    
+    // Count leading list markers
+    while (line[pos] == '*' || line[pos] == '#' || line[pos] == ':' || line[pos] == ';') {
+        if (count == 0) *marker = line[pos]; // First marker determines type
+        count++;
+        pos++;
+    }
+    
+    if (count > 0 && (line[pos] == ' ' || line[pos] == '\0')) {
+        *level = count;
+        return true;
+    }
+    
+    return false;
+}
+
+static bool is_wiki_table_start(const char* line) {
+    char* trimmed = trim_whitespace(line);
+    bool result = (strncmp(trimmed, "{|", 2) == 0);
+    free(trimmed);
+    return result;
+}
+
+static bool is_wiki_table_row(const char* line) {
+    char* trimmed = trim_whitespace(line);
+    bool result = (trimmed[0] == '|' && trimmed[1] != '}' && trimmed[1] != '-');
+    free(trimmed);
+    return result;
+}
+
+static bool is_wiki_table_end(const char* line) {
+    char* trimmed = trim_whitespace(line);
+    bool result = (strncmp(trimmed, "|}", 2) == 0);
+    free(trimmed);
+    return result;
+}
+
+static bool is_wiki_horizontal_rule(const char* line) {
+    char* trimmed = trim_whitespace(line);
+    bool result = (strncmp(trimmed, "----", 4) == 0);
+    free(trimmed);
+    return result;
+}
+
+// MediaWiki-specific block parsers
+static Item parse_wiki_table(MarkupParser* parser) {
+    const char* line = parser->lines[parser->current_line];
+    if (!is_wiki_table_start(line)) return (Item){.item = ITEM_UNDEFINED};
+    
+    // Create table element
+    Element* table = create_element(parser->input, "table");
+    if (!table) return (Item){.item = ITEM_ERROR};
+    
+    parser->current_line++; // Skip {|
+    
+    Element* tbody = create_element(parser->input, "tbody");
+    if (!tbody) return (Item){.item = (uint64_t)table};
+    
+    Element* current_row = NULL;
+    
+    while (parser->current_line < parser->line_count && 
+           !is_wiki_table_end(parser->lines[parser->current_line])) {
+        const char* line = parser->lines[parser->current_line];
+        
+        if (!line || is_empty_line(line)) {
+            parser->current_line++;
+            continue;
+        }
+        
+        char* trimmed = trim_whitespace(line);
+        
+        if (trimmed[0] == '|' && trimmed[1] == '-') {
+            // Table row separator - start new row
+            if (current_row) {
+                list_push((List*)tbody, (Item){.item = (uint64_t)current_row});
+                increment_element_content_length(tbody);
+            }
+            current_row = create_element(parser->input, "tr");
+        } else if (is_wiki_table_row(line)) {
+            // Table cell
+            if (!current_row) {
+                current_row = create_element(parser->input, "tr");
+            }
+            
+            if (current_row) {
+                // Parse cell content (skip leading |)
+                const char* cell_content = trimmed + 1;
+                while (*cell_content == ' ') cell_content++;
+                
+                Element* cell = create_element(parser->input, "td");
+                if (cell) {
+                    if (strlen(cell_content) > 0) {
+                        // Wrap cell content in paragraph for proper block structure
+                        Element* paragraph = create_element(parser->input, "p");
+                        if (paragraph) {
+                            Item content = parse_inline_spans(parser, cell_content);
+                            if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
+                                list_push((List*)paragraph, content);
+                                increment_element_content_length(paragraph);
+                            }
+                            list_push((List*)cell, (Item){.item = (uint64_t)paragraph});
+                            increment_element_content_length(cell);
+                        }
+                    }
+                    list_push((List*)current_row, (Item){.item = (uint64_t)cell});
+                    increment_element_content_length(current_row);
+                }
+            }
+        }
+        
+        free(trimmed);
+        parser->current_line++;
+    }
+    
+    // Add final row if exists
+    if (current_row) {
+        list_push((List*)tbody, (Item){.item = (uint64_t)current_row});
+        increment_element_content_length(tbody);
+    }
+    
+    if (parser->current_line < parser->line_count && 
+        is_wiki_table_end(parser->lines[parser->current_line])) {
+        parser->current_line++; // Skip |}
+    }
+    
+    if (((TypeElmt*)tbody->type)->content_length > 0) {
+        list_push((List*)table, (Item){.item = (uint64_t)tbody});
+        increment_element_content_length(table);
+    }
+    
+    return (Item){.item = (uint64_t)table};
+}
+
+static Item parse_wiki_list(MarkupParser* parser) {
+    const char* line = parser->lines[parser->current_line];
+    char marker;
+    int level;
+    
+    if (!is_wiki_list_item(line, &marker, &level)) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // Determine list type
+    const char* list_tag = NULL;
+    switch (marker) {
+        case '*': list_tag = "ul"; break;
+        case '#': list_tag = "ol"; break;
+        case ':': list_tag = "dl"; break; // Definition list
+        case ';': list_tag = "dl"; break; // Definition list
+        default: return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* list = create_element(parser->input, list_tag);
+    if (!list) return (Item){.item = ITEM_ERROR};
+    
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        
+        if (!line || is_empty_line(line)) {
+            parser->current_line++;
+            continue;
+        }
+        
+        char item_marker;
+        int item_level;
+        if (!is_wiki_list_item(line, &item_marker, &item_level) || 
+            item_marker != marker) {
+            break;
+        }
+        
+        // Create list item
+        const char* item_tag = (marker == ':' || marker == ';') ? "dd" : "li";
+        if (marker == ';') item_tag = "dt"; // Definition term
+        
+        Element* list_item = create_element(parser->input, item_tag);
+        if (!list_item) break;
+        
+        // Extract item content (skip markers and space)
+        const char* content_start = line + item_level;
+        if (*content_start == ' ') content_start++;
+        
+        char* content = trim_whitespace(content_start);
+        if (content && strlen(content) > 0) {
+            if (marker == '*' || marker == '#') {
+                // Regular lists need paragraph wrapper
+                Element* paragraph = create_element(parser->input, "p");
+                if (paragraph) {
+                    Item text_content = parse_inline_spans(parser, content);
+                    if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
+                        list_push((List*)paragraph, text_content);
+                        increment_element_content_length(paragraph);
+                    }
+                    list_push((List*)list_item, (Item){.item = (uint64_t)paragraph});
+                    increment_element_content_length(list_item);
+                }
+            } else {
+                // Definition lists can have direct content
+                Item text_content = parse_inline_spans(parser, content);
+                if (text_content.item != ITEM_ERROR && text_content.item != ITEM_UNDEFINED) {
+                    list_push((List*)list_item, text_content);
+                    increment_element_content_length(list_item);
+                }
+            }
+        }
+        free(content);
+        
+        list_push((List*)list, (Item){.item = (uint64_t)list_item});
+        increment_element_content_length(list);
+        
+        parser->current_line++;
+    }
+    
+    return (Item){.item = (uint64_t)list};
+}
+
+// MediaWiki-specific inline parsers
+static Item parse_wiki_link(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+    if (pos[0] != '[' || pos[1] != '[') return (Item){.item = ITEM_UNDEFINED};
+    
+    pos += 2; // Skip [[
+    
+    const char* link_start = pos;
+    const char* link_end = NULL;
+    const char* display_start = NULL;
+    const char* display_end = NULL;
+    
+    // Find closing ]]
+    while (*pos != '\0' && pos[1] != '\0') {
+        if (pos[0] == ']' && pos[1] == ']') {
+            if (display_start == NULL) {
+                link_end = pos;
+            } else {
+                display_end = pos;
+            }
+            pos += 2;
+            break;
+        } else if (*pos == '|' && display_start == NULL) {
+            link_end = pos;
+            pos++;
+            display_start = pos;
+        } else {
+            pos++;
+        }
+    }
+    
+    if (link_end == NULL) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* link_elem = create_element(parser->input, "a");
+    if (!link_elem) return (Item){.item = ITEM_ERROR};
+    
+    // Extract link target
+    int link_len = link_end - link_start;
+    char* link_target = (char*)malloc(link_len + 1);
+    strncpy(link_target, link_start, link_len);
+    link_target[link_len] = '\0';
+    add_attribute_to_element(parser->input, link_elem, "href", link_target);
+    
+    // Extract display text (or use link target)
+    char* display_text;
+    if (display_start != NULL && display_end != NULL) {
+        int display_len = display_end - display_start;
+        display_text = (char*)malloc(display_len + 1);
+        strncpy(display_text, display_start, display_len);
+        display_text[display_len] = '\0';
+    } else {
+        display_text = strdup(link_target);
+    }
+    
+    if (strlen(display_text) > 0) {
+        String* text_str = input_create_string(parser->input, display_text);
+        if (text_str) {
+            list_push((List*)link_elem, (Item){.item = s2it(text_str)});
+            increment_element_content_length(link_elem);
+        }
+    }
+    
+    free(link_target);
+    free(display_text);
+    *text = pos;
+    return (Item){.item = (uint64_t)link_elem};
+}
+
+static Item parse_wiki_external_link(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+    if (*pos != '[') return (Item){.item = ITEM_UNDEFINED};
+    
+    pos++; // Skip [
+    
+    const char* url_start = pos;
+    const char* url_end = NULL;
+    const char* display_start = NULL;
+    const char* display_end = NULL;
+    
+    // Find space or closing ]
+    while (*pos != '\0') {
+        if (*pos == ']') {
+            if (display_start == NULL) {
+                url_end = pos;
+            } else {
+                display_end = pos;
+            }
+            pos++;
+            break;
+        } else if (*pos == ' ' && display_start == NULL) {
+            url_end = pos;
+            pos++;
+            display_start = pos;
+        } else {
+            pos++;
+        }
+    }
+    
+    if (url_end == NULL) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    Element* link_elem = create_element(parser->input, "a");
+    if (!link_elem) return (Item){.item = ITEM_ERROR};
+    
+    // Extract URL
+    int url_len = url_end - url_start;
+    char* url = (char*)malloc(url_len + 1);
+    strncpy(url, url_start, url_len);
+    url[url_len] = '\0';
+    add_attribute_to_element(parser->input, link_elem, "href", url);
+    
+    // Extract display text (or use URL)
+    char* display_text;
+    if (display_start != NULL && display_end != NULL) {
+        int display_len = display_end - display_start;
+        display_text = (char*)malloc(display_len + 1);
+        strncpy(display_text, display_start, display_len);
+        display_text[display_len] = '\0';
+    } else {
+        display_text = strdup(url);
+    }
+    
+    if (strlen(display_text) > 0) {
+        String* text_str = input_create_string(parser->input, display_text);
+        if (text_str) {
+            list_push((List*)link_elem, (Item){.item = s2it(text_str)});
+            increment_element_content_length(link_elem);
+        }
+    }
+    
+    free(url);
+    free(display_text);
+    *text = pos;
+    return (Item){.item = (uint64_t)link_elem};
+}
+
+static Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
+    const char* pos = *text;
+    if (*pos != '\'') return (Item){.item = ITEM_UNDEFINED};
+    
+    const char* start_pos = pos;
+    int quote_count = 0;
+    
+    // Count opening quotes
+    while (*pos == '\'') {
+        quote_count++;
+        pos++;
+    }
+    
+    if (quote_count < 2) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    const char* content_start = pos;
+    const char* content_end = NULL;
+    
+    // Find closing quotes
+    while (*pos != '\0') {
+        if (*pos == '\'') {
+            int close_quote_count = 0;
+            const char* temp_pos = pos;
+            
+            while (*temp_pos == '\'') {
+                close_quote_count++;
+                temp_pos++;
+            }
+            
+            if (close_quote_count >= quote_count) {
+                content_end = pos;
+                pos += quote_count;
+                break;
+            }
+            
+            // If we found quotes but not enough, skip past all the quotes we counted
+            pos = temp_pos;
+        } else {
+            pos++;
+        }
+    }
+    
+    if (content_end == NULL) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // Determine element type
+    const char* tag_name;
+    if (quote_count >= 5) {
+        tag_name = "strong"; // Bold + italic, but we'll use strong for now
+    } else if (quote_count >= 3) {
+        tag_name = "strong"; // Bold
+    } else {
+        tag_name = "em"; // Italic
+    }
+    
+    Element* format_elem = create_element(parser->input, tag_name);
+    if (!format_elem) return (Item){.item = ITEM_ERROR};
+    
+    // Extract content
+    int content_len = content_end - content_start;
+    if (content_len < 0) return (Item){.item = ITEM_ERROR};
+    
+    char* content = (char*)malloc(content_len + 1);
+    if (!content) return (Item){.item = ITEM_ERROR};
+    
+    strncpy(content, content_start, content_len);
+    content[content_len] = '\0';
+    
+    if (strlen(content) > 0) {
+        String* text_str = input_create_string(parser->input, content);
+        if (text_str) {
+            list_push((List*)format_elem, (Item){.item = s2it(text_str)});
+            increment_element_content_length(format_elem);
+        }
+    }
+    
+    free(content);
+    *text = pos;
+    return (Item){.item = (uint64_t)format_elem};
+}
+
 // Parse wiki template ({{template|arg1|arg2}})
 static Item parse_wiki_template(MarkupParser* parser, const char** text) {
     const char* pos = *text;
@@ -3716,29 +4275,41 @@ static Item parse_wiki_template(MarkupParser* parser, const char** text) {
         return (Item){.item = ITEM_UNDEFINED};
     }
     
+    const char* start_pos = pos;
     pos += 2; // Skip {{
     const char* template_start = pos;
     
-    // Find closing }}
-    int brace_depth = 1;
+    // Find closing }} by tracking double-brace pairs
+    int double_brace_depth = 1; // We've seen one opening {{
     const char* content_end = NULL;
     
-    while (*pos && brace_depth > 0) {
+    while (*pos && double_brace_depth > 0) {
         if (*pos == '{' && *(pos+1) == '{') {
-            brace_depth++;
+            double_brace_depth++;
             pos += 2;
         } else if (*pos == '}' && *(pos+1) == '}') {
-            brace_depth--;
-            if (brace_depth == 0) {
+            double_brace_depth--;
+            if (double_brace_depth == 0) {
                 content_end = pos;
+                pos += 2; // Skip the closing }}
+                break;
+            } else {
+                pos += 2;
             }
-            pos += 2;
         } else {
             pos++;
         }
+        
+        // Safety check to prevent infinite loops
+        if (pos - start_pos > 10000) {
+            *text = start_pos + 2; // Advance past {{ to prevent infinite loop
+            return (Item){.item = ITEM_UNDEFINED};
+        }
     }
     
-    if (!content_end) {
+    if (!content_end || double_brace_depth != 0) {
+        // Advance past the {{ to prevent infinite loop
+        *text = start_pos + 2;
         return (Item){.item = ITEM_UNDEFINED};
     }
     
