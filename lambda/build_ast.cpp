@@ -148,7 +148,12 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     Type* t;
     pool_variable_alloc(pool, size, (void**)&t);
     memset(t, 0, size);
-    t->type_id = type;  assert(t->is_const == 0);
+    t->type_id = type;
+    // Defensive check: verify the type was properly initialized
+    if (t->is_const != 0) {
+        printf("Warning: alloc_type - is_const flag was not zeroed properly\n");
+        t->is_const = 0; // Force correction
+    }
     return t;
 }
 
@@ -345,7 +350,11 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
     }
     if (!entry) {
         if (scope->parent) {
-            assert(scope != scope->parent);
+            // Defensive check: prevent infinite loop if parent pointer is circular
+            if (scope == scope->parent) {
+                printf("Error: circular parent scope detected - breaking to prevent infinite loop\n");
+                return NULL;
+            }
             scope = scope->parent;
             printf("checking parent scope: %p\n", scope);
             goto FIND_VAR_NAME;
@@ -383,7 +392,11 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 (int)entry->name.length, entry->name.str, 
                 (int)entry->import->module.length, entry->import->module.str);
             ast_node->type = alloc_type(tp->ast_pool, entry->node->type->type_id, sizeof(Type));
-            assert(ast_node->type->is_const == 0);
+            // Defensive check: verify is_const was properly reset by alloc_type
+            if (ast_node->type->is_const != 0) {
+                printf("Warning: alloc_type did not reset is_const flag - correcting\n");
+                ast_node->type->is_const = 0;
+            }
         }
         else { ast_node->type = entry->node->type; }
         printf("ident %p type: %d\n", ast_node->type, ast_node->type ? ast_node->type->type_id : -1);
@@ -539,6 +552,13 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
     ast_node->left = build_expr(tp, left_node);
+    
+    // Defensive validation: ensure left operand was built successfully
+    if (!ast_node->left) {
+        printf("Error: build_binary_expr failed to build left operand\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
 
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
     StrView op = ts_node_source(tp, op_node);
@@ -564,10 +584,27 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (strview_equal(&op, "!")) { ast_node->op = OPERATOR_EXCLUDE; }
     else if (strview_equal(&op, "is")) { ast_node->op = OPERATOR_IS; }
     else if (strview_equal(&op, "in")) { ast_node->op = OPERATOR_IN; }
-    else { printf("unknown operator: %.*s\n", (int)op.length, op.str); }
+    else { 
+        printf("Error: build_binary_expr unknown operator: %.*s\n", (int)op.length, op.str);
+        ast_node->op = OPERATOR_ADD; // Default fallback to prevent crashes
+    }
 
     TSNode right_node = ts_node_child_by_field_id(bi_node, FIELD_RIGHT);
     ast_node->right = build_expr(tp, right_node);
+    
+    // Defensive validation: ensure right operand was built successfully
+    if (!ast_node->right) {
+        printf("Error: build_binary_expr failed to build right operand\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    // Additional validation: ensure both operands have valid types
+    if (!ast_node->left->type || !ast_node->right->type) {
+        printf("Error: build_binary_expr operands missing type information\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
 
     printf("get binary type\n");
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
@@ -619,14 +656,45 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     AstIfExprNode* ast_node = (AstIfExprNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfExprNode));
     TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
+    
+    // Defensive validation: ensure condition was built successfully
+    if (!ast_node->cond) {
+        printf("Error: build_if_expr failed to build condition expression\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
     TSNode then_node = ts_node_child_by_field_id(if_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
+    
+    // Defensive validation: ensure then clause was built successfully  
+    if (!ast_node->then) {
+        printf("Error: build_if_expr failed to build then expression\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
     TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
     if (ts_node_is_null(else_node)) {
         ast_node->otherwise = NULL;
     } else {
         ast_node->otherwise = build_expr(tp, else_node);
+        // Defensive validation: if else node exists, ensure it was built successfully
+        if (!ast_node->otherwise) {
+            printf("Error: build_if_expr failed to build else expression\n");
+            ast_node->type = &TYPE_ERROR;
+            return (AstNode*)ast_node;
+        }
     }
+    
+    // Additional validation: ensure expressions have valid types
+    if (!ast_node->cond->type || !ast_node->then->type || 
+        (ast_node->otherwise && !ast_node->otherwise->type)) {
+        printf("Error: build_if_expr expressions missing type information\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
     // determine the type of the if expression, should be union of then and else
     TypeId type_id = max(ast_node->then->type->type_id, 
         ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL);
@@ -721,8 +789,20 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_DECLARE) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
-            assert(ts_node_symbol(child) == SYM_ASSIGN_EXPR);
+            // Defensive check: validate symbol type instead of using assert
+            if (ts_node_symbol(child) != SYM_ASSIGN_EXPR) {
+                printf("Error: build_let_stam expected SYM_ASSIGN_EXPR but got symbol %d\n", ts_node_symbol(child));
+                // Skip invalid node and continue - defensive recovery
+                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                continue;
+            }
             AstNode *declare = build_assign_expr(tp, child);
+            // Additional defensive check
+            if (!declare) {
+                printf("Error: build_let_stam failed to build assign expression\n");
+                has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+                continue;
+            }
             if (prev_declare == NULL) {
                 ast_node->declare = declare;
             } else {
@@ -1482,7 +1562,11 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
     if (!node) { printf("misssing root node\n");  return; }
-    assert(node->node_type == AST_SCRIPT);
+    // Defensive check: validate node type instead of using assert
+    if (node->node_type != AST_SCRIPT) {
+        printf("Error: declare_module_import expected AST_SCRIPT but got node_type %d\n", node->node_type);
+        return;  // Defensive recovery - exit gracefully
+    }
     node = ((AstScript*)node)->child;
     printf("finding content node\n");
     while (node) {
