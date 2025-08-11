@@ -1,0 +1,1 @@
+\begin{bmatrix} x+y & 2z \\ 3a-b & \frac{1}{2} \end{bmatrix}

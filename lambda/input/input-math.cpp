@@ -2,6 +2,7 @@
 #include "input-common.h"
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 
 // math parser for latex math, typst math, and ascii math
 // produces syntax tree of nested <expr op:...> elements
@@ -643,6 +644,10 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
 // use common utility functions from input.c and input-common.c
 #define create_math_element input_create_element
 #define add_attribute_to_element input_add_attribute_to_element
+
+// Forward declarations for helper functions from input-common.cpp  
+extern bool is_trig_function(const char* func_name);
+extern bool is_log_function(const char* func_name);
 
 // skip whitespace helper
 static void skip_math_whitespace(const char **math) {
@@ -1670,9 +1675,21 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
     
     skip_math_whitespace(math);
     
-    while (**math && **math != '}') {
+    // Add loop safety: prevent infinite loops in relational parsing
+    const size_t MAX_RELATIONAL_ITERATIONS = 100;
+    size_t iteration_count = 0;
+    const char* last_position = *math;
+    
+    while (**math && **math != '}' && iteration_count < MAX_RELATIONAL_ITERATIONS) {
         const char* op_name = NULL;
         int op_len = 0;
+        
+        // Safety check: ensure we're making progress
+        if (*math == last_position) {
+            fprintf(stderr, "Warning: No progress in relational expression parsing at position %zu\n", *math - (*math - strlen(*math)));
+            break;
+        }
+        last_position = *math;
         
         // Check for relational operators
         if (**math == '=') {
@@ -1754,6 +1771,12 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         }
         
         skip_math_whitespace(math);
+        iteration_count++;
+    }
+    
+    // Log if we hit the iteration limit
+    if (iteration_count >= MAX_RELATIONAL_ITERATIONS) {
+        fprintf(stderr, "Warning: Relational expression parsing hit iteration limit (%zu)\n", MAX_RELATIONAL_ITERATIONS);
     }
     
     return left;
@@ -1817,9 +1840,16 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
     
     skip_math_whitespace(math);
     
-    while (**math && **math != '}' && (**math == '+' || **math == '-')) {
+    // Add loop safety: prevent infinite loops in addition parsing
+    const size_t MAX_ADDITION_ITERATIONS = 100;
+    size_t iteration_count = 0;
+    
+    while (**math && **math != '}' && (**math == '+' || **math == '-') && iteration_count < MAX_ADDITION_ITERATIONS) {
         char op = **math;
         const char* op_name = (op == '+') ? "add" : "sub";
+        
+        // Remember position before parsing this operation
+        const char* position_before = *math;
         
         (*math)++; // skip operator
         skip_math_whitespace(math);
@@ -1829,12 +1859,24 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
             return {.item = ITEM_ERROR};
         }
         
+        // Safety check: ensure we're making progress after parsing the right operand
+        if (*math == position_before) {
+            fprintf(stderr, "Warning: No progress in addition expression parsing at position\n");
+            break;
+        }
+        
         left = create_binary_expr(input, op_name, left, right);
         if (left .item == ITEM_ERROR) {
             return {.item = ITEM_ERROR};
         }
         
         skip_math_whitespace(math);
+        iteration_count++;
+    }
+    
+    // Log if we hit the iteration limit
+    if (iteration_count >= MAX_ADDITION_ITERATIONS) {
+        fprintf(stderr, "Warning: Addition expression parsing hit iteration limit (%zu)\n", MAX_ADDITION_ITERATIONS);
     }
     
     return left;
@@ -1849,9 +1891,21 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
     
     skip_math_whitespace(math);
     
-    while (**math && **math != '}') {
+    // Add loop safety: prevent infinite loops in multiplication parsing
+    const size_t MAX_MULTIPLICATION_ITERATIONS = 200;
+    size_t iteration_count = 0;
+    const char* last_position = *math;
+    
+    while (**math && **math != '}' && iteration_count < MAX_MULTIPLICATION_ITERATIONS) {
         bool explicit_op = false;
         const char* op_name = "mul";
+        
+        // Safety check: ensure we're making progress
+        if (*math == last_position && iteration_count > 0) {
+            fprintf(stderr, "Warning: No progress in multiplication expression parsing, breaking\n");
+            break;
+        }
+        last_position = *math;
         
         // Check for explicit multiplication or division operators
         if (**math == '*' || **math == '/') {
@@ -1902,6 +1956,12 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         }
         
         skip_math_whitespace(math);
+        iteration_count++;
+    }
+    
+    // Log if we hit the iteration limit
+    if (iteration_count >= MAX_MULTIPLICATION_ITERATIONS) {
+        fprintf(stderr, "Warning: Multiplication expression parsing hit iteration limit (%zu)\n", MAX_MULTIPLICATION_ITERATIONS);
     }
     
     return left;
@@ -1982,8 +2042,20 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
     skip_math_whitespace(math);
     
     // handle postfix operators (superscript, subscript, prime)
-    while (true) {
+    // Add loop safety: prevent infinite loops in postfix parsing
+    const size_t MAX_POSTFIX_ITERATIONS = 50;
+    size_t iteration_count = 0;
+    const char* last_position = *math;
+    
+    while (true && iteration_count < MAX_POSTFIX_ITERATIONS) {
         bool processed = false;
+        
+        // Safety check: ensure we're making progress
+        if (*math == last_position && iteration_count > 0) {
+            fprintf(stderr, "Warning: No progress in postfix expression parsing, breaking\n");
+            break;
+        }
+        last_position = *math;
         
         if (flavor == MATH_FLAVOR_LATEX) {
             if (**math == '^') {
@@ -2082,7 +2154,14 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             break;
         }
         skip_math_whitespace(math);
+        iteration_count++;
     }
+    
+    // Log if we hit the iteration limit
+    if (iteration_count >= MAX_POSTFIX_ITERATIONS) {
+        fprintf(stderr, "Warning: Postfix expression parsing hit iteration limit (%zu)\n", MAX_POSTFIX_ITERATIONS);
+    }
+    
     // Note: ASCII power operations are now handled in parse_power_expression
     
     return left;
@@ -2371,8 +2450,21 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
     int col_count = 0;
     int current_col = 0;
     
-    while (**math && **math != '}') {
+    // Add loop safety: prevent infinite loops in matrix parsing
+    const size_t MAX_MATRIX_ITERATIONS = 10000;
+    size_t iteration_count = 0;
+    const char* last_position = *math;
+    
+    while (**math && **math != '}' && iteration_count < MAX_MATRIX_ITERATIONS) {
         skip_math_whitespace(math);
+        
+        // Safety check: ensure we're making progress
+        if (*math == last_position && iteration_count > 0) {
+            fprintf(stderr, "Warning: No progress in matrix parsing, forcing advancement\n");
+            (*math)++; // Force advancement to prevent infinite loop
+            continue;
+        }
+        last_position = *math;
         
         if (strncmp(*math, "\\\\", 2) == 0) {
             // End of row
@@ -2421,6 +2513,12 @@ static Item parse_latex_matrix(Input *input, const char **math, const char* matr
         }
         
         skip_math_whitespace(math);
+        iteration_count++;
+    }
+    
+    // Log if we hit the iteration limit
+    if (iteration_count >= MAX_MATRIX_ITERATIONS) {
+        fprintf(stderr, "Warning: Matrix parsing hit iteration limit (%zu)\n", MAX_MATRIX_ITERATIONS);
     }
     
     if (**math != '}') {
@@ -2550,12 +2648,49 @@ static Item parse_latex_matrix_environment(Input *input, const char **math, cons
             continue;
         }
         
-        // Parse matrix cell content
-        Item cell = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-        if (cell .item == ITEM_ERROR) {
-            printf("ERROR: Failed to parse matrix cell at row %d, col %d\n", row_count + 1, current_col + 1);
+        // Parse matrix cell content - use a restricted parser that stops at matrix delimiters
+        const char* cell_start = *math;
+        const char* cell_end = *math;
+        
+        // Find the end of the cell by looking for delimiters
+        while (*cell_end && 
+               *cell_end != '&' &&  // column separator
+               strncmp(cell_end, "\\\\", 2) != 0 &&  // row separator 
+               strncmp(cell_end, "\\end{", 5) != 0) {  // end of environment
+            cell_end++;
+        }
+        
+        // Create a temporary null-terminated string for the cell content
+        size_t cell_len = cell_end - cell_start;
+        char* cell_content = (char*)malloc(cell_len + 1);
+        if (!cell_content) {
+            printf("ERROR: Memory allocation failed for matrix cell\n");
             return {.item = ITEM_ERROR};
         }
+        
+        strncpy(cell_content, cell_start, cell_len);
+        cell_content[cell_len] = '\0';
+        
+        // Remove trailing whitespace from cell content
+        while (cell_len > 0 && isspace(cell_content[cell_len - 1])) {
+            cell_content[--cell_len] = '\0';
+        }
+        
+        // Parse the cell content if it's not empty
+        Item cell = {.item = ITEM_NULL};
+        if (cell_len > 0) {
+            const char* cell_ptr = cell_content;
+            cell = parse_math_expression(input, &cell_ptr, MATH_FLAVOR_LATEX);
+            if (cell .item == ITEM_ERROR) {
+                printf("ERROR: Failed to parse matrix cell at row %d, col %d: '%s'\n", 
+                       row_count + 1, current_col + 1, cell_content);
+                free(cell_content);
+                return {.item = ITEM_ERROR};
+            }
+        }
+        
+        free(cell_content);
+        *math = cell_end;  // Advance the math pointer to the delimiter
         
         if (cell .item != ITEM_NULL) {
             list_push((List*)current_row, cell);
@@ -3978,6 +4113,10 @@ static MathFlavor get_math_flavor(const char* flavor_str) {
 void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     printf("parse_math called with: '%s', flavor: '%s' (length: %zu)\n", math_string, flavor_str ? flavor_str : "null", strlen(math_string));
     
+    // Add timeout protection
+    clock_t start_time = clock();
+    const double PARSING_TIMEOUT_SECONDS = 30.0; // 30 second timeout
+    
     // Debug: print the last 5 characters and their codes
     size_t len = strlen(math_string);
     for (size_t i = (len >= 5) ? len - 5 : 0; i < len; i++) {
@@ -3992,9 +4131,25 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     MathFlavor flavor = get_math_flavor(flavor_str);
     printf("Math flavor resolved to: %d\n", flavor);
     
-    // parse the math expression
+    // parse the math expression with timeout check
     skip_math_whitespace(&math);
+    
+    // Check timeout before parsing
+    if ((clock() - start_time) / CLOCKS_PER_SEC > PARSING_TIMEOUT_SECONDS) {
+        fprintf(stderr, "Error: Math parsing timed out before parsing (%.2f seconds)\n", PARSING_TIMEOUT_SECONDS);
+        input->root = {.item = ITEM_ERROR};
+        return;
+    }
+    
     Item result = parse_math_expression(input, &math, flavor);
+    
+    // Check timeout after parsing
+    double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
+    if (elapsed_time > PARSING_TIMEOUT_SECONDS) {
+        fprintf(stderr, "Error: Math parsing timed out (%.2f seconds)\n", elapsed_time);
+        input->root = {.item = ITEM_ERROR};
+        return;
+    }
     
     if (result .item == ITEM_ERROR || result .item == ITEM_NULL) {
         printf("Result is error or null, setting input->root to ITEM_ERROR\n");
@@ -4002,7 +4157,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
         return;
     }
     
-    printf("Setting input->root to result: %llu (0x%llx)\n", result.item, result.item);
+    printf("Setting input->root to result: %llu (0x%llx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
     input->root = result;
 }
 
