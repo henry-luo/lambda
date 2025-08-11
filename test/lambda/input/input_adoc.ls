@@ -1,4 +1,4 @@
-let adoc = input('./test/input/test.adoc', 'asciidoc')
+let adoc = input('./test/input/comprehensive_test.adoc', 'asciidoc')
 
 "AsciiDoc parsing successful!"
 

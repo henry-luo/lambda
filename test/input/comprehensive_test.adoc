@@ -1,0 +1,188 @@
+= AsciiDoc Comprehensive Feature Test
+
+This is a comprehensive test document for the AsciiDoc parser implementation in the new unified markup parser. It tests all implemented features to ensure complete compatibility and functionality.
+
+== Document Structure & Headers
+
+AsciiDoc supports six levels of headers using equal signs (=).
+
+=== Level 3 Header
+This is a level 3 header section.
+
+==== Level 4 Header  
+This is a level 4 header section.
+
+===== Level 5 Header
+This is a level 5 header section.
+
+====== Level 6 Header
+This is a level 6 header section.
+
+== Inline Formatting
+
+AsciiDoc supports various inline formatting options:
+
+=== Bold and Italic Text
+- This is *bold text* using asterisks
+- This is _italic text_ using underscores  
+- You can combine *bold* and _italic_ text in the same paragraph
+- Multiple *bold words* and _italic phrases_ in one sentence
+
+=== Inline Code
+- Single `backticks` create inline code
+- Code like `printf("Hello, World!")` is properly formatted
+- Variables like `int counter = 0` are highlighted
+- File paths like `/usr/local/bin` are monospaced
+
+=== Hyperlinks and URLs
+- Direct URLs are auto-linked: https://github.com
+- HTTP links work too: http://example.com
+- HTTPS protocol: https://www.google.com
+- FTP links: ftp://files.example.com
+
+== Lists
+
+AsciiDoc supports unordered lists using asterisks:
+
+=== Simple List
+* First item in list
+* Second item in list
+* Third item with *bold formatting*
+* Fourth item with _italic text_
+* Fifth item with `inline code`
+
+=== List with Mixed Content
+* Item with https://example.com link
+* Item with *bold* and _italic_ text
+* Item with `code snippets` and formatting
+* Item with multiple https://github.com and http://test.com links
+
+== Code Blocks
+
+AsciiDoc supports code blocks using four dashes:
+
+=== Python Code Block
+----
+def hello_world():
+    print("Hello, World!")
+    return "success"
+
+# This is a comment
+for i in range(5):
+    print(f"Iteration: {i}")
+----
+
+=== JavaScript Code Block  
+----
+function greetUser(name) {
+    console.log(`Hello, ${name}!`);
+    return true;
+}
+
+// Example usage
+greetUser("AsciiDoc");
+const result = greetUser("Parser");
+----
+
+=== Configuration Example
+----
+# Application Configuration
+server.port=8080
+database.host=localhost
+database.name=myapp
+logging.level=INFO
+----
+
+== Admonitions
+
+AsciiDoc supports five types of admonitions for important information:
+
+=== Note Admonition
+NOTE: This is a note admonition. It provides additional information that might be helpful to readers.
+
+=== Tip Admonition
+TIP: This is a tip admonition. It offers helpful advice or shortcuts for users.
+
+=== Important Admonition  
+IMPORTANT: This is an important admonition. It highlights critical information that users must not overlook.
+
+=== Warning Admonition
+WARNING: This is a warning admonition. It alerts users about potential issues or dangers.
+
+=== Caution Admonition
+CAUTION: This is a caution admonition. It advises users to proceed carefully to avoid problems.
+
+== Tables
+
+AsciiDoc supports table formatting using pipe symbols and equal signs:
+
+=== Simple Data Table
+|===
+|Name |Age |City |Country
+
+|Alice |28 |New York |USA
+|Bob |34 |London |UK  
+|Charlie |25 |Tokyo |Japan
+|Diana |31 |Sydney |Australia
+|Eve |29 |Toronto |Canada
+|===
+
+=== Table with Mixed Content
+|===
+|Feature |Status |Description |Priority
+
+|*Headers* |✓ |All six header levels |High
+|_Lists_ |✓ |Unordered lists with asterisks |High
+|`Code Blocks` |✓ |Four-dash delimited blocks |Medium
+|Admonitions |✓ |NOTE, TIP, IMPORTANT, WARNING, CAUTION |Medium
+|https://example.com |✓ |URL auto-linking |Low
+|===
+
+=== Product Comparison Table
+|===
+|Product |Price |Features |Rating
+
+|Basic Plan |$10/month |*Core features* only |⭐⭐⭐
+|Pro Plan |$25/month |All features + _premium support_ |⭐⭐⭐⭐
+|Enterprise |$100/month |Everything + `API access` |⭐⭐⭐⭐⭐
+|Custom |Contact Sales |Tailored solutions |Varies
+|===
+
+== Complex Mixed Content
+
+This section demonstrates complex combinations of formatting:
+
+=== Rich Text Paragraph
+This paragraph contains *bold text*, _italic text_, and `inline code`. It also includes links to https://asciidoc.org and http://github.com. The combination of **multiple bold** and __italic formatting__ with `code snippets` creates rich, readable content.
+
+=== Feature List with Complex Items
+* *Bold header*: This item starts with bold text and includes _italic emphasis_ 
+* _Italic header_: This item has `code examples` like `git commit -m "message"`
+* `Code header`: Links to https://docs.github.com and https://git-scm.com
+* Mixed content: *Bold*, _italic_, `code`, and https://example.com all together
+
+=== Multi-line Admonitions
+NOTE: This is a comprehensive note that spans multiple concepts. It demonstrates that admonitions can contain *bold text*, _italic text_, `inline code`, and even links like https://asciidoc.org for additional reference material.
+
+TIP: Pro tip for developers: When writing AsciiDoc, you can combine `git commit` commands with *proper formatting* and reference documentation at https://git-scm.com/docs for the most _effective_ workflow.
+
+== Conclusion
+
+This comprehensive test document validates all implemented AsciiDoc features:
+
+* ✅ Document structure with proper metadata
+* ✅ Six levels of headers (= to ======)  
+* ✅ Inline formatting: *bold*, _italic_, `code`
+* ✅ URL auto-linking: https:// and http:// protocols
+* ✅ Unordered lists with asterisk bullets
+* ✅ Code blocks with four-dash delimiters (----)
+* ✅ Five admonition types: NOTE, TIP, IMPORTANT, WARNING, CAUTION
+* ✅ Tables with pipe delimiter syntax (|===)
+* ✅ Complex mixed content combinations
+* ✅ Proper parsing and element generation
+
+The unified markup parser successfully handles all these AsciiDoc features with full compatibility and generates the expected HTML-like element structure for further processing.
+
+=== Final Notes
+
+IMPORTANT: This test file serves as both a validation tool and a reference for the complete AsciiDoc feature set supported by the new unified markup parser implementation.

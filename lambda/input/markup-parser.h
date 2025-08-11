@@ -15,6 +15,7 @@ typedef enum {
     MARKUP_TEXTILE,
     MARKUP_WIKI,
     MARKUP_ORG,
+    MARKUP_ASCIIDOC,
     MARKUP_AUTO_DETECT
 } MarkupFormat;
 

@@ -933,7 +933,7 @@ Test(validator_tests, csv_requires_explicit_schema) {
 
 Test(validator_tests, asciidoc_uses_doc_schema) {
     // Test that AsciiDoc files automatically use doc_schema.ls
-    test_auto_schema_detection_helper("test/input/test.adoc",
+    test_auto_schema_detection_helper("test/input/simple.adoc",
                                      "Using document schema for asciidoc input", 
                                      NULL, true);
 }
@@ -947,7 +947,7 @@ Test(validator_tests, rst_uses_doc_schema) {
 
 Test(validator_tests, textile_uses_doc_schema) {
     // Test that Textile files automatically use doc_schema.ls
-    test_auto_schema_detection_helper("test/input/test.textile",
+    test_auto_schema_detection_helper("test/input/simple.textile",
                                      "Using document schema for textile input", 
                                      NULL, true);
 }

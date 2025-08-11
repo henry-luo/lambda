@@ -1,0 +1,17 @@
+= Simple AsciiDoc Test
+
+This is a simple test document.
+
+== Section 1
+
+Some text content.
+
+* List item 1
+* List item 2
+
+[source,python]
+----
+print("Hello World")
+----
+
+Done.

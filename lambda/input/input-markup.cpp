@@ -110,6 +110,20 @@ static Item parse_textile_list_item(MarkupParser* parser, const char* line);
 static Item parse_textile_inline_content(MarkupParser* parser, const char* text);
 static char* parse_textile_modifiers(const char* line, int* start_pos);
 
+// AsciiDoc-specific functions (from old input-adoc.cpp)
+static bool is_asciidoc_heading(const char* line, int* level);
+static bool is_asciidoc_list_item(const char* line);
+static bool is_asciidoc_listing_block(const char* line);
+static bool is_asciidoc_admonition(const char* line);
+static bool is_asciidoc_table_start(const char* line);
+static Item parse_asciidoc_heading(MarkupParser* parser, const char* line);
+static Item parse_asciidoc_list(MarkupParser* parser);
+static Item parse_asciidoc_listing_block(MarkupParser* parser);
+static Item parse_asciidoc_admonition(MarkupParser* parser, const char* line);
+static Item parse_asciidoc_table(MarkupParser* parser);
+static Item parse_asciidoc_inline(MarkupParser* parser, const char* text);
+static Item parse_asciidoc_link(MarkupParser* parser, const char** text);
+
 // Phase 5: Forward declarations for enhanced table processing
 static Item parse_table_structure(MarkupParser* parser);
 static bool is_table_separator(const char* line);
@@ -209,6 +223,8 @@ MarkupFormat detect_markup_format(const char* content, const char* filename) {
                 return MARKUP_WIKI;
             } else if (strcasecmp(ext, "org") == 0) {
                 return MARKUP_ORG;
+            } else if (strcasecmp(ext, "adoc") == 0 || strcasecmp(ext, "asciidoc") == 0 || strcasecmp(ext, "asc") == 0) {
+                return MARKUP_ASCIIDOC;
             }
         }
     }
@@ -216,6 +232,16 @@ MarkupFormat detect_markup_format(const char* content, const char* filename) {
     // Content-based detection
     const char* line = content;
     size_t len = strlen(content);
+    
+    // Check for AsciiDoc patterns
+    if (strstr(content, "= ") == content || strstr(content, "== ") || strstr(content, "=== ") ||
+        strstr(content, "NOTE:") || strstr(content, "WARNING:") || strstr(content, "TIP:") || 
+        strstr(content, "IMPORTANT:") || strstr(content, "CAUTION:") ||
+        strstr(content, "----") || strstr(content, "....") ||
+        strstr(content, "[source") || strstr(content, "ifdef::") || strstr(content, "ifndef::") ||
+        strstr(content, ":toc:") || strstr(content, ":numbered:")) {
+        return MARKUP_ASCIIDOC;
+    }
     
     // Check for Org-mode patterns
     if (strstr(content, "#+TITLE:") || strstr(content, "#+AUTHOR:") || 
@@ -308,7 +334,7 @@ static Item parse_document(MarkupParser* parser) {
     // Create meta element only if there's actual metadata content
     Element* meta = NULL;
     
-    // Phase 6: Parse metadata first (YAML frontmatter or Org properties)
+    // Phase 6: Parse metadata first (YAML frontmatter, Org properties, or AsciiDoc defaults)
     if (has_yaml_frontmatter(parser)) {
         meta = create_element(parser->input, "meta");
         if (meta) {
@@ -326,6 +352,15 @@ static Item parse_document(MarkupParser* parser) {
                 list_push((List*)meta, properties);
                 increment_element_content_length(meta);
             }
+        }
+    } else if (parser->config.format == MARKUP_ASCIIDOC) {
+        // For AsciiDoc: create default metadata like the old parser for compatibility
+        meta = create_element(parser->input, "meta");
+        if (meta) {
+            // Add default title
+            add_attribute_to_element(parser->input, meta, "title", "AsciiDoc Document");
+            // Add default language
+            add_attribute_to_element(parser->input, meta, "language", "en");
         }
     }
     
@@ -408,6 +443,10 @@ static Item parse_block_element(MarkupParser* parser) {
             if (parser->config.format == MARKUP_WIKI) {
                 return parse_wiki_list(parser);
             }
+            // Check if this is an AsciiDoc list item
+            if (parser->config.format == MARKUP_ASCIIDOC) {
+                return parse_asciidoc_list(parser);
+            }
             return parse_list_item(parser, line);
         case BLOCK_CODE_BLOCK:
             // Check for RST literal block
@@ -423,11 +462,19 @@ static Item parse_block_element(MarkupParser* parser) {
                     return parse_textile_pre_block(parser, line);
                 }
             }
+            // Check for AsciiDoc listing block
+            if (parser->config.format == MARKUP_ASCIIDOC && is_asciidoc_listing_block(line)) {
+                return parse_asciidoc_listing_block(parser);
+            }
             return parse_code_block(parser, line);
         case BLOCK_QUOTE:
             // Check for Textile block quote
             if (parser->config.format == MARKUP_TEXTILE && is_textile_block_quote(line)) {
                 return parse_textile_block_quote(parser, line);
+            }
+            // Check for AsciiDoc admonition
+            if (parser->config.format == MARKUP_ASCIIDOC && is_asciidoc_admonition(line)) {
+                return parse_asciidoc_admonition(parser, line);
             }
             return parse_blockquote(parser, line);
         case BLOCK_TABLE:
@@ -438,6 +485,10 @@ static Item parse_block_element(MarkupParser* parser) {
             // Check for MediaWiki table
             if (parser->config.format == MARKUP_WIKI && is_wiki_table_start(line)) {
                 return parse_wiki_table(parser);
+            }
+            // Check for AsciiDoc table
+            if (parser->config.format == MARKUP_ASCIIDOC && is_asciidoc_table_start(line)) {
+                return parse_asciidoc_table(parser);
             }
             return parse_table_structure(parser);
         case BLOCK_MATH:
@@ -1673,6 +1724,11 @@ static Item parse_inline_content(MarkupParser* parser, const char* text) {
         }
     }
     
+    // For AsciiDoc format, handle AsciiDoc-specific inline elements
+    if (parser->config.format == MARKUP_ASCIIDOC) {
+        return parse_asciidoc_inline(parser, text);
+    }
+    
     // Default to standard inline spans parsing
     return parse_inline_spans(parser, text);
 }
@@ -2034,6 +2090,36 @@ Item input_markup(Input *input, const char* content) {
     return result;
 }
 
+// Overloaded version that accepts explicit format
+Item input_markup_with_format(Input *input, const char* content, MarkupFormat format) {
+    if (!input || !content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    const char* flavor = detect_markup_flavor(format, content);
+    
+    // Create parser configuration
+    ParseConfig config = {
+        .format = format,
+        .flavor = flavor,
+        .strict_mode = false
+    };
+    
+    // Create parser
+    MarkupParser* parser = parser_create(input, config);
+    if (!parser) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Parse content
+    Item result = parse_markup_content(parser, content);
+    
+    // Cleanup
+    parser_destroy(parser);
+    
+    return result;
+}
+
 // Math parser integration functions
 static Item parse_math_content(Input* input, const char* math_content, const char* flavor) {
     if (!input || !math_content) {
@@ -2134,6 +2220,30 @@ static BlockType detect_block_type(MarkupParser* parser, const char* line) {
         char list_type = 0;
         if (is_textile_list_item(line, &list_type)) {
             return BLOCK_LIST_ITEM;
+        }
+    }
+    
+    // AsciiDoc-specific blocks - only detected when format is ASCIIDOC
+    if (parser->config.format == MARKUP_ASCIIDOC) {
+        if (is_asciidoc_listing_block(line)) {
+            return BLOCK_CODE_BLOCK;
+        }
+        
+        if (is_asciidoc_admonition(line)) {
+            return BLOCK_QUOTE; // Treat admonitions as specialized quotes
+        }
+        
+        if (is_asciidoc_table_start(line)) {
+            return BLOCK_TABLE;
+        }
+        
+        if (is_asciidoc_list_item(line)) {
+            return BLOCK_LIST_ITEM;
+        }
+        
+        int level;
+        if (is_asciidoc_heading(line, &level)) {
+            return BLOCK_HEADER;
         }
     }
     
@@ -2269,6 +2379,14 @@ static int get_header_level(MarkupParser* parser, const char* line) {
         int wiki_level = 0;
         if (is_wiki_heading(line, &wiki_level)) {
             return wiki_level;
+        }
+    }
+    
+    // Handle AsciiDoc-style headers (= Header, == Header ==) - only for ASCIIDOC format  
+    if (parser->config.format == MARKUP_ASCIIDOC) {
+        int asciidoc_level = 0;
+        if (is_asciidoc_heading(line, &asciidoc_level)) {
+            return asciidoc_level;
         }
     }
     
@@ -5265,4 +5383,611 @@ static Item parse_textile_list_item(MarkupParser* parser, const char* line) {
     
     parser->current_line++;
     return (Item){.item = (uint64_t)list_item};
+}
+
+// ============================================================================
+// AsciiDoc-Specific Features (from old input-adoc.cpp)
+// ============================================================================
+
+// AsciiDoc heading detection (= Header, == Header, etc.)
+static bool is_asciidoc_heading(const char* line, int* level) {
+    if (!line || !level) return false;
+    
+    *level = 0;
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    // Count leading equals signs
+    while (*pos == '=' && *level < 6) {
+        (*level)++;
+        pos++;
+    }
+    
+    if (*level == 0) return false;
+    
+    // Must be followed by space or end of line
+    return (*pos == '\0' || *pos == ' ' || *pos == '\t');
+}
+
+// AsciiDoc list item detection (* Item)
+static bool is_asciidoc_list_item(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    return (*pos == '*' && (*(pos+1) == ' ' || *(pos+1) == '\t'));
+}
+
+// AsciiDoc listing block detection (----)
+static bool is_asciidoc_listing_block(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    return (strncmp(pos, "----", 4) == 0 && strlen(pos) >= 4);
+}
+
+// AsciiDoc admonition detection (NOTE:, WARNING:, etc.)
+static bool is_asciidoc_admonition(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    return (strncmp(pos, "NOTE:", 5) == 0 ||
+            strncmp(pos, "TIP:", 4) == 0 ||
+            strncmp(pos, "IMPORTANT:", 10) == 0 ||
+            strncmp(pos, "WARNING:", 8) == 0 ||
+            strncmp(pos, "CAUTION:", 8) == 0);
+}
+
+// AsciiDoc table start detection (|===)
+static bool is_asciidoc_table_start(const char* line) {
+    if (!line) return false;
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    return (strncmp(pos, "|===", 4) == 0);
+}
+
+// Parse AsciiDoc heading
+static Item parse_asciidoc_heading(MarkupParser* parser, const char* line) {
+    int level;
+    if (!is_asciidoc_heading(line, &level)) {
+        return parse_paragraph(parser, line);
+    }
+    
+    // Create header element
+    char tag_name[10];
+    snprintf(tag_name, sizeof(tag_name), "h%d", level);
+    Element* header = create_element(parser->input, tag_name);
+    if (!header) {
+        parser->current_line++;
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Add level attribute (required by schema)
+    char level_str[10];
+    snprintf(level_str, sizeof(level_str), "%d", level);
+    add_attribute_to_element(parser->input, header, "level", level_str);
+    
+    // Parse content after equals signs
+    const char* pos = line;
+    skip_whitespace(&pos);
+    while (*pos == '=') pos++; // Skip equals signs
+    skip_whitespace(&pos);
+    
+    if (*pos) {
+        String* content = input_create_string(parser->input, pos);
+        list_push((List*)header, (Item){.item = s2it(content)});
+        increment_element_content_length(header);
+    }
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)header};
+}
+
+// Parse AsciiDoc list
+static Item parse_asciidoc_list(MarkupParser* parser) {
+    Element* list = create_element(parser->input, "ul");
+    if (!list) return (Item){.item = ITEM_ERROR};
+    
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        
+        if (!is_asciidoc_list_item(line)) {
+            break;
+        }
+        
+        // Create list item
+        Element* list_item = create_element(parser->input, "li");
+        if (!list_item) {
+            parser->current_line++;
+            continue;
+        }
+        
+        // Parse content after asterisk
+        const char* pos = line;
+        skip_whitespace(&pos);
+        if (*pos == '*') pos++; // Skip asterisk
+        skip_whitespace(&pos);
+        
+        if (*pos) {
+            Element* paragraph = create_element(parser->input, "p");
+            if (paragraph) {
+                Item content = parse_asciidoc_inline(parser, pos);
+                if (content.item != ITEM_UNDEFINED) {
+                    list_push((List*)paragraph, content);
+                    increment_element_content_length(paragraph);
+                }
+                list_push((List*)list_item, (Item){.item = (uint64_t)paragraph});
+                increment_element_content_length(list_item);
+            }
+        }
+        
+        list_push((List*)list, (Item){.item = (uint64_t)list_item});
+        increment_element_content_length(list);
+        parser->current_line++;
+    }
+    
+    return (Item){.item = (uint64_t)list};
+}
+
+// Parse AsciiDoc listing block (----)
+static Item parse_asciidoc_listing_block(MarkupParser* parser) {
+    parser->current_line++; // Skip opening ----
+    
+    // Find closing ----
+    int end_line = -1;
+    for (int i = parser->current_line; i < parser->line_count; i++) {
+        if (is_asciidoc_listing_block(parser->lines[i])) {
+            end_line = i;
+            break;
+        }
+    }
+    
+    if (end_line == -1) {
+        // No closing delimiter, treat as regular paragraph
+        parser->current_line--;
+        return parse_paragraph(parser, parser->lines[parser->current_line]);
+    }
+    
+    // Create pre and code blocks
+    Element* pre_block = create_element(parser->input, "pre");
+    if (!pre_block) return (Item){.item = ITEM_ERROR};
+    
+    Element* code_block = create_element(parser->input, "code");
+    if (!code_block) return (Item){.item = ITEM_ERROR};
+    
+    // Concatenate content lines
+    if (end_line > parser->current_line) {
+        size_t total_len = 0;
+        for (int i = parser->current_line; i < end_line; i++) {
+            total_len += strlen(parser->lines[i]) + 1; // +1 for newline
+        }
+        
+        char* content = (char*)malloc(total_len + 1);
+        content[0] = '\0';
+        
+        for (int i = parser->current_line; i < end_line; i++) {
+            strcat(content, parser->lines[i]);
+            if (i < end_line - 1) strcat(content, "\n");
+        }
+        
+        String* content_str = input_create_string(parser->input, content);
+        if (content_str) {
+            list_push((List*)code_block, (Item){.item = s2it(content_str)});
+            increment_element_content_length(code_block);
+        }
+        
+        free(content);
+    }
+    
+    // Add code block to pre block
+    list_push((List*)pre_block, (Item){.item = (uint64_t)code_block});
+    increment_element_content_length(pre_block);
+    
+    parser->current_line = end_line + 1; // Skip closing ----
+    return (Item){.item = (uint64_t)pre_block};
+}
+
+// Parse AsciiDoc admonition
+static Item parse_asciidoc_admonition(MarkupParser* parser, const char* line) {
+    Element* admonition = create_element(parser->input, "div");
+    if (!admonition) return (Item){.item = ITEM_ERROR};
+    
+    const char* pos = line;
+    skip_whitespace(&pos);
+    
+    const char* content = NULL;
+    const char* type = NULL;
+    
+    if (strncmp(pos, "NOTE:", 5) == 0) {
+        type = "note";
+        content = pos + 5;
+    } else if (strncmp(pos, "TIP:", 4) == 0) {
+        type = "tip";
+        content = pos + 4;
+    } else if (strncmp(pos, "IMPORTANT:", 10) == 0) {
+        type = "important";
+        content = pos + 10;
+    } else if (strncmp(pos, "WARNING:", 8) == 0) {
+        type = "warning";
+        content = pos + 8;
+    } else if (strncmp(pos, "CAUTION:", 8) == 0) {
+        type = "caution";
+        content = pos + 8;
+    }
+    
+    if (type) {
+        add_attribute_to_element(parser->input, admonition, "class", type);
+        
+        // Skip whitespace after colon
+        skip_whitespace(&content);
+        
+        if (*content) {
+            Item inline_content = parse_asciidoc_inline(parser, content);
+            if (inline_content.item != ITEM_UNDEFINED) {
+                list_push((List*)admonition, inline_content);
+                increment_element_content_length(admonition);
+            }
+        }
+    }
+    
+    parser->current_line++;
+    return (Item){.item = (uint64_t)admonition};
+}
+
+// Parse AsciiDoc table
+static Item parse_asciidoc_table(MarkupParser* parser) {
+    parser->current_line++; // Skip opening |===
+    
+    Element* table = create_element(parser->input, "table");
+    if (!table) return (Item){.item = ITEM_ERROR};
+    
+    Element* tbody = create_element(parser->input, "tbody");
+    if (!tbody) return (Item){.item = ITEM_ERROR};
+    
+    bool header_parsed = false;
+    Element* thead = NULL;
+    
+    while (parser->current_line < parser->line_count) {
+        const char* line = parser->lines[parser->current_line];
+        
+        // Check for table end
+        if (is_asciidoc_table_start(line)) {
+            parser->current_line++; // Skip closing |===
+            break;
+        }
+        
+        // Skip empty lines
+        if (is_empty_line(line)) {
+            parser->current_line++;
+            continue;
+        }
+        
+        // Parse table row
+        if (line[0] == '|') {
+            Element* row = create_element(parser->input, "tr");
+            if (!row) {
+                parser->current_line++;
+                continue;
+            }
+            
+            // Split line by |
+            const char* ptr = line + 1; // Skip first |
+            const char* cell_start = ptr;
+            
+            while (*ptr) {
+                if (*ptr == '|' || *(ptr + 1) == '\0') {
+                    // End of cell
+                    int cell_len = ptr - cell_start;
+                    if (*(ptr + 1) == '\0' && *ptr != '|') {
+                        cell_len++; // Include last character if not |
+                    }
+                    
+                    char* cell_text = (char*)malloc(cell_len + 1);
+                    strncpy(cell_text, cell_start, cell_len);
+                    cell_text[cell_len] = '\0';
+                    
+                    char* trimmed_cell = trim_whitespace(cell_text);
+                    free(cell_text);
+                    
+                    // Create cell element
+                    const char* cell_tag = (!header_parsed) ? "th" : "td";
+                    Element* cell = create_element(parser->input, cell_tag);
+                    if (cell && trimmed_cell && strlen(trimmed_cell) > 0) {
+                        Item cell_content = parse_asciidoc_inline(parser, trimmed_cell);
+                        if (cell_content.item != ITEM_UNDEFINED) {
+                            list_push((List*)cell, cell_content);
+                            increment_element_content_length(cell);
+                        }
+                        list_push((List*)row, (Item){.item = (uint64_t)cell});
+                        increment_element_content_length(row);
+                    }
+                    
+                    if (trimmed_cell) free(trimmed_cell);
+                    
+                    if (*ptr == '|') {
+                        ptr++;
+                        cell_start = ptr;
+                    } else {
+                        break;
+                    }
+                } else {
+                    ptr++;
+                }
+            }
+            
+            // Add row to appropriate section
+            if (!header_parsed) {
+                if (!thead) {
+                    thead = create_element(parser->input, "thead");
+                }
+                if (thead) {
+                    list_push((List*)thead, (Item){.item = (uint64_t)row});
+                    increment_element_content_length(thead);
+                }
+                header_parsed = true;
+            } else {
+                list_push((List*)tbody, (Item){.item = (uint64_t)row});
+                increment_element_content_length(tbody);
+            }
+        }
+        
+        parser->current_line++;
+    }
+    
+    // Add sections to table
+    if (thead && ((TypeElmt*)thead->type)->content_length > 0) {
+        list_push((List*)table, (Item){.item = (uint64_t)thead});
+        increment_element_content_length(table);
+    }
+    
+    if (((TypeElmt*)tbody->type)->content_length > 0) {
+        list_push((List*)table, (Item){.item = (uint64_t)tbody});
+        increment_element_content_length(table);
+    }
+    
+    return (Item){.item = (uint64_t)table};
+}
+
+// Parse AsciiDoc inline content with formatting
+static Item parse_asciidoc_inline(MarkupParser* parser, const char* text) {
+    if (!text || strlen(text) == 0) {
+        return (Item){.item = ITEM_UNDEFINED};
+    }
+    
+    // Check if text contains any formatting characters
+    bool has_formatting = false;
+    const char* check_ptr = text;
+    while (*check_ptr) {
+        if (*check_ptr == '*' || *check_ptr == '_' || *check_ptr == '`' || 
+            strncmp(check_ptr, "http://", 7) == 0 || strncmp(check_ptr, "https://", 8) == 0) {
+            has_formatting = true;
+            break;
+        }
+        check_ptr++;
+    }
+    
+    // If no formatting, just return the text as a string
+    if (!has_formatting) {
+        return (Item){.item = s2it(input_create_string(parser->input, text))};
+    }
+    
+    Element* container = create_element(parser->input, "span");
+    if (!container) {
+        return (Item){.item = s2it(input_create_string(parser->input, text))};
+    }
+    
+    const char* ptr = text;
+    const char* start = text;
+    
+    while (*ptr) {
+        if (*ptr == '*' && ptr[1] != '\0' && ptr != text) {  // Don't match at start
+            // Bold text - find closing *
+            const char* bold_start = ptr + 1;
+            const char* bold_end = strchr(bold_start, '*');
+            if (bold_end && bold_end > bold_start) {
+                // Add text before bold
+                if (ptr > start) {
+                    int len = ptr - start;
+                    char* before_text = (char*)malloc(len + 1);
+                    strncpy(before_text, start, len);
+                    before_text[len] = '\0';
+                    String* before_str = input_create_string(parser->input, before_text);
+                    if (before_str) {
+                        list_push((List*)container, (Item){.item = s2it(before_str)});
+                        increment_element_content_length(container);
+                    }
+                    free(before_text);
+                }
+                
+                // Create bold element
+                Element* bold = create_element(parser->input, "strong");
+                if (bold) {
+                    int bold_len = bold_end - bold_start;
+                    char* bold_text = (char*)malloc(bold_len + 1);
+                    strncpy(bold_text, bold_start, bold_len);
+                    bold_text[bold_len] = '\0';
+                    String* bold_str = input_create_string(parser->input, bold_text);
+                    if (bold_str) {
+                        list_push((List*)bold, (Item){.item = s2it(bold_str)});
+                        increment_element_content_length(bold);
+                    }
+                    list_push((List*)container, (Item){.item = (uint64_t)bold});
+                    increment_element_content_length(container);
+                    free(bold_text);
+                }
+                
+                ptr = bold_end + 1;
+                start = ptr;
+                continue;
+            }
+        } else if (*ptr == '_' && ptr[1] != '\0' && ptr != text) {  // Don't match at start
+            // Italic text - find closing _
+            const char* italic_start = ptr + 1;
+            const char* italic_end = strchr(italic_start, '_');
+            if (italic_end && italic_end > italic_start) {
+                // Add text before italic
+                if (ptr > start) {
+                    int len = ptr - start;
+                    char* before_text = (char*)malloc(len + 1);
+                    strncpy(before_text, start, len);
+                    before_text[len] = '\0';
+                    String* before_str = input_create_string(parser->input, before_text);
+                    if (before_str) {
+                        list_push((List*)container, (Item){.item = s2it(before_str)});
+                        increment_element_content_length(container);
+                    }
+                    free(before_text);
+                }
+                
+                // Create italic element
+                Element* italic = create_element(parser->input, "em");
+                if (italic) {
+                    int italic_len = italic_end - italic_start;
+                    char* italic_text = (char*)malloc(italic_len + 1);
+                    strncpy(italic_text, italic_start, italic_len);
+                    italic_text[italic_len] = '\0';
+                    String* italic_str = input_create_string(parser->input, italic_text);
+                    if (italic_str) {
+                        list_push((List*)italic, (Item){.item = s2it(italic_str)});
+                        increment_element_content_length(italic);
+                    }
+                    list_push((List*)container, (Item){.item = (uint64_t)italic});
+                    increment_element_content_length(container);
+                    free(italic_text);
+                }
+                
+                ptr = italic_end + 1;
+                start = ptr;
+                continue;
+            }
+        } else if (*ptr == '`' && ptr[1] != '\0') {
+            // Inline code - find closing `
+            const char* code_start = ptr + 1;
+            const char* code_end = strchr(code_start, '`');
+            if (code_end && code_end > code_start) {
+                // Add text before code
+                if (ptr > start) {
+                    int len = ptr - start;
+                    char* before_text = (char*)malloc(len + 1);
+                    strncpy(before_text, start, len);
+                    before_text[len] = '\0';
+                    String* before_str = input_create_string(parser->input, before_text);
+                    if (before_str) {
+                        list_push((List*)container, (Item){.item = s2it(before_str)});
+                        increment_element_content_length(container);
+                    }
+                    free(before_text);
+                }
+                
+                // Create code element
+                Element* code = create_element(parser->input, "code");
+                if (code) {
+                    int code_len = code_end - code_start;
+                    char* code_text = (char*)malloc(code_len + 1);
+                    strncpy(code_text, code_start, code_len);
+                    code_text[code_len] = '\0';
+                    String* code_str = input_create_string(parser->input, code_text);
+                    if (code_str) {
+                        list_push((List*)code, (Item){.item = s2it(code_str)});
+                        increment_element_content_length(code);
+                    }
+                    list_push((List*)container, (Item){.item = (uint64_t)code});
+                    increment_element_content_length(container);
+                    free(code_text);
+                }
+                
+                ptr = code_end + 1;
+                start = ptr;
+                continue;
+            }
+        } else if (strncmp(ptr, "http://", 7) == 0 || strncmp(ptr, "https://", 8) == 0) {
+            // Simple URL link
+            const char* url_start = ptr;
+            const char* url_end = ptr;
+            
+            // Find end of URL (space, newline, or bracket)
+            while (*url_end && !isspace(*url_end) && *url_end != '[' && *url_end != ']') {
+                url_end++;
+            }
+            
+            if (url_end > url_start) {
+                // Add text before link
+                if (ptr > start) {
+                    int len = ptr - start;
+                    char* before_text = (char*)malloc(len + 1);
+                    strncpy(before_text, start, len);
+                    before_text[len] = '\0';
+                    String* before_str = input_create_string(parser->input, before_text);
+                    if (before_str) {
+                        list_push((List*)container, (Item){.item = s2it(before_str)});
+                        increment_element_content_length(container);
+                    }
+                    free(before_text);
+                }
+                
+                // Create link element
+                Element* link = create_element(parser->input, "a");
+                if (link) {
+                    int url_len = url_end - url_start;
+                    char* url_text = (char*)malloc(url_len + 1);
+                    strncpy(url_text, url_start, url_len);
+                    url_text[url_len] = '\0';
+                    
+                    add_attribute_to_element(parser->input, link, "href", url_text);
+                    String* link_str = input_create_string(parser->input, url_text);
+                    if (link_str) {
+                        list_push((List*)link, (Item){.item = s2it(link_str)});
+                        increment_element_content_length(link);
+                    }
+                    list_push((List*)container, (Item){.item = (uint64_t)link});
+                    increment_element_content_length(container);
+                    free(url_text);
+                }
+                
+                ptr = url_end;
+                start = ptr;
+                continue;
+            }
+        }
+        
+        ptr++;
+    }
+    
+    // Add remaining text
+    if (ptr > start) {
+        int len = ptr - start;
+        char* remaining_text = (char*)malloc(len + 1);
+        strncpy(remaining_text, start, len);
+        remaining_text[len] = '\0';
+        String* remaining_str = input_create_string(parser->input, remaining_text);
+        if (remaining_str) {
+            list_push((List*)container, (Item){.item = s2it(remaining_str)});
+            increment_element_content_length(container);
+        }
+        free(remaining_text);
+    }
+    
+    // If container has only one child, return the child directly
+    if (((TypeElmt*)container->type)->content_length == 1) {
+        List* container_list = (List*)container;
+        return list_get(container_list, 0);
+    }
+    
+    // If container is empty, return a simple string
+    if (((TypeElmt*)container->type)->content_length == 0) {
+        return (Item){.item = s2it(input_create_string(parser->input, text))};
+    }
+
+    return (Item){.item = (uint64_t)container};
+}
+
+// Parse AsciiDoc links (placeholder for more complex link parsing)
+static Item parse_asciidoc_link(MarkupParser* parser, const char** text) {
+    // This would handle more complex AsciiDoc link syntax like http://example.com[Link Text]
+    // For now, basic URL detection is handled in parse_asciidoc_inline
+    return (Item){.item = ITEM_UNDEFINED};
 }

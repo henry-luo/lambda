@@ -1,0 +1,89 @@
+= AsciiDoc Feature Test
+
+This is a comprehensive test document for the AsciiDoc parser implementation.
+
+== Document Structure & Headers
+
+AsciiDoc supports multiple levels of headers using equal signs (=).
+
+=== Level 3 Header
+This is a level 3 header section.
+
+==== Level 4 Header  
+This is a level 4 header section.
+
+== Text Formatting
+
+AsciiDoc supports various text formatting options:
+
+- *Bold text* for emphasis
+- _Italic text_ for emphasis  
+- `Monospaced text` for code references
+- Multiple *bold words* and _italic phrases_ in one sentence
+
+== Lists
+
+AsciiDoc supports different types of lists:
+
+=== Unordered Lists
+* First item
+* Second item  
+* Third item with *bold* formatting
+* Fourth item
+
+=== Ordered Lists  
+1. First ordered item
+2. Second ordered item
+3. Third ordered item
+4. Fourth ordered item
+
+== Code Blocks
+
+AsciiDoc supports code blocks using four dashes:
+
+=== Simple Code Block
+----
+def hello_world():
+    print("Hello, World!")
+    return "success"
+----
+
+== Links and URLs
+
+AsciiDoc automatically converts URLs to links:
+* Simple link: https://www.example.com
+* Another link: http://test.com
+
+== Admonitions
+
+AsciiDoc supports admonitions for important information:
+
+NOTE: This is a note admonition. It provides additional information.
+
+TIP: This is a tip admonition. It offers helpful advice.
+
+IMPORTANT: This is an important admonition. Critical information.
+
+WARNING: This is a warning admonition. Alerts about potential issues.
+
+CAUTION: This is a caution admonition. Advises careful action.
+
+== Tables
+
+AsciiDoc supports table formatting:
+
+|===
+|Feature |Status |Description |Priority
+
+|Headers |✓ |6 levels (= to ======) |High
+|Text Formatting |✓ |Bold, italic, monospace |High  
+|Lists |✓ |Unordered and ordered |High
+|Code Blocks |✓ |Four dashes (----) |Medium
+|Links |✓ |Auto-linking URLs |Medium
+|Admonitions |✓ |NOTE, TIP, IMPORTANT, WARNING, CAUTION |Medium
+|Tables |✓ |Basic table support |Low
+|===
+
+== Document Metadata
+
+This document tests all the major AsciiDoc features implemented in the new unified markup parser to ensure compatibility and functionality.

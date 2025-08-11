@@ -27,6 +27,10 @@ void parse_css(Input* input, const char* css_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
 Item input_markup(Input *input, const char* content);
 
+// Import MarkupFormat enum from markup-parser.h
+#include "markup-parser.h"
+Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
+
 String* strbuf_to_string(StrBuf *sb) {
     String *string = (String*)sb->str;
     if (string) {
@@ -480,8 +484,8 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
         else if (strcmp(effective_type, "wiki") == 0) {
             input->root = input_markup(input, source);
         }
-        else if (strcmp(effective_type, "asciidoc") == 0) {
-            parse_asciidoc(input, source);
+        else if (strcmp(effective_type, "asciidoc") == 0 || strcmp(effective_type, "adoc") == 0) {
+            input->root = input_markup_with_format(input, source, MARKUP_ASCIIDOC);
         }
         else if (strcmp(effective_type, "man") == 0) {
             parse_man(input, source);
