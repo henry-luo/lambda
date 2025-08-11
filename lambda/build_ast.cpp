@@ -196,6 +196,20 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     TSNode field_node = ts_node_child_by_field_id(array_node, FIELD_FIELD);
     ast_node->field = build_expr(tp, field_node);
 
+    // Defensive check: if either object or field building failed, return error
+    if (!ast_node->object || !ast_node->field) {
+        printf("Error: Failed to build field expression - object or field is null\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    // Additional safety: check if object has valid type
+    if (!ast_node->object->type) {
+        printf("Error: Field expression object missing type information\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
     if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
         Type* nested = ((TypeArray*)ast_node->object->type)->nested;
         ast_node->type = nested ? nested : &TYPE_ANY;
@@ -1448,6 +1462,11 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         // already processed
         return NULL;
     case SYM_COMMENT:
+        return NULL;
+    case SYM_INDEX:
+        // This is likely a parsing error - index tokens should not appear as standalone expressions
+        // Common cause: malformed syntax like "1..3" which parses as "1." + ".3" 
+        printf("Error: Unexpected index token - check for malformed range syntax (use 'to' instead of '..')\n");
         return NULL;
     default:
         printf("unknown syntax node: %s\n", ts_node_type(expr_node));

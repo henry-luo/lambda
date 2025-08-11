@@ -309,6 +309,28 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
 
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     printf("transpile assign expr\n");
+    
+    // Defensive validation: ensure all required pointers and components are valid
+    if (!tp || !tp->code_buf) {
+        printf("Error: transpile_assign_expr called with null transpiler or code buffer\n");
+        return;
+    }
+    if (!asn_node) {
+        printf("Error: transpile_assign_expr called with null assign node\n");
+        strbuf_append_str(tp->code_buf, "\n /* invalid assignment */");
+        return;
+    }
+    if (!asn_node->type) {
+        printf("Error: transpile_assign_expr missing type information\n");
+        strbuf_append_str(tp->code_buf, "\n /* assignment missing type */");
+        return;
+    }
+    if (!asn_node->as) {
+        printf("Error: transpile_assign_expr missing assignment expression\n");
+        strbuf_append_str(tp->code_buf, "\n /* assignment missing expression */");
+        return;
+    }
+    
     strbuf_append_str(tp->code_buf, "\n ");
     // declare the type
     Type *type = asn_node->type;
@@ -322,19 +344,53 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
 }
 
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
+    // Defensive validation: ensure all required pointers and components are valid
+    if (!let_node) {
+        printf("Error: transpile_let_stam called with null let node\n");
+        return;
+    }
+    
     AstNode *declare = let_node->declare;
     while (declare) {
-        assert(declare->node_type == AST_NODE_ASSIGN);
+        // Additional validation for each declaration node
+        if (declare->node_type != AST_NODE_ASSIGN) {
+            printf("Error: transpile_let_stam found non-assign node in declare chain\n");
+            // Skip this node and continue - defensive recovery
+            declare = declare->next;
+            continue;
+        }
+        
         transpile_assign_expr(tp, (AstNamedNode*)declare);
         declare = declare->next;
     }
 }
 
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
+    // Defensive validation: ensure all required pointers and components are valid
+    if (!loop_node) {
+        printf("Error: transpile_loop_expr called with null loop node\n");
+        return;
+    }
+    if (!loop_node->as || !loop_node->as->type) {
+        printf("Error: transpile_loop_expr missing iterable expression or type\n");
+        return;
+    }
+    if (!then) {
+        printf("Error: transpile_loop_expr missing then expression\n");
+        return;
+    }
+    
     Type * expr_type = loop_node->as->type;
     Type *item_type = 
         expr_type->type_id == LMD_TYPE_ARRAY ? ((TypeArray*)expr_type)->nested : 
         expr_type->type_id == LMD_TYPE_RANGE ? &TYPE_INT : &TYPE_ANY;
+        
+    // Validate that we have a proper type for item_type
+    if (!item_type) {
+        printf("Error: transpile_loop_expr failed to determine item type\n");
+        item_type = &TYPE_ANY; // fallback to ANY type for safety
+    }
+        
     strbuf_append_str(tp->code_buf, 
         expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
         (item_type->type_id == LMD_TYPE_INT) ? " ArrayLong *arr=" : " Array *arr=");
@@ -361,6 +417,23 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
 }
 
 void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
+    // Defensive validation: ensure all required pointers and components are valid
+    if (!for_node) {
+        printf("Error: transpile_for_expr called with null for node\n");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+    if (!for_node->then) {
+        printf("Error: transpile_for_expr missing then expression\n");
+        strbuf_append_str(tp->code_buf, "({\n List* ls=list();\n ls;})");
+        return;
+    }
+    if (!for_node->then->type) {
+        printf("Error: transpile_for_expr then expression missing type information\n");
+        strbuf_append_str(tp->code_buf, "({\n List* ls=list();\n ls;})");
+        return;
+    }
+    
     Type *then_type = for_node->then->type;
     // init a list
     strbuf_append_str(tp->code_buf, "({\n List* ls=list(); \n");
@@ -616,10 +689,38 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 }
 
 void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
-    // todo: also need to check index type to be numeric
+    // Defensive validation: ensure all required pointers and types are valid
+    if (!field_node) {
+        printf("Error: transpile_index_expr called with null field_node\n");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+    if (!field_node->object || !field_node->field) {
+        printf("Error: transpile_index_expr missing object or field\n");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+    if (!field_node->object->type || !field_node->field->type) {
+        printf("Error: transpile_index_expr missing type information\n");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+    
     TypeId object_type = field_node->object->type->type_id;
     TypeId field_type = field_node->field->type->type_id;
     
+    // Check if field type is numeric (addressing the TODO comment)
+    if (field_type != LMD_TYPE_INT && field_type != LMD_TYPE_INT64 && field_type != LMD_TYPE_FLOAT) {
+        // Non-numeric index, must use generic fn_index
+        strbuf_append_str(tp->code_buf, "fn_index(");
+        transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
+    }
+    
+    // Fast path optimizations for specific type combinations
     if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");
@@ -630,12 +731,21 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     else if (object_type == LMD_TYPE_ARRAY && field_type == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "array_get(");
         transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
     }    
     else if (object_type == LMD_TYPE_LIST && field_type == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
     }    
     else {
+        // Generic fallback for all other cases
         strbuf_append_str(tp->code_buf, "fn_index(");
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
@@ -643,10 +753,6 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_char(tp->code_buf, ')');
         return;    
     }
-    
-    strbuf_append_char(tp->code_buf, ',');
-    transpile_expr(tp, field_node->field);
-    strbuf_append_char(tp->code_buf, ')');
 }
 
 void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
