@@ -295,8 +295,14 @@ void transpile_if_expr(Transpiler* tp, AstIfExprNode *if_node) {
     strbuf_append_char(tp->code_buf, '?');
     transpile_expr(tp, if_node->then);
     strbuf_append_char(tp->code_buf, ':');
-    if (if_node->otherwise) transpile_expr(tp, if_node->otherwise);
-    else strbuf_append_str(tp->code_buf, "null");
+    if (if_node->otherwise) {
+        transpile_expr(tp, if_node->otherwise);
+    } else {
+        // Defensive code: according to grammar, else clause is required for if_expr,
+        // but we handle the missing case gracefully with proper null representation
+        printf("Warning: if_expr missing else clause (should not happen per grammar)\n");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+    }
     strbuf_append_char(tp->code_buf, ')');
     printf("end if expr\n");
 }
@@ -613,6 +619,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // todo: also need to check index type to be numeric
     TypeId object_type = field_node->object->type->type_id;
     TypeId field_type = field_node->field->type->type_id;
+    
     if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");
@@ -636,6 +643,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         strbuf_append_char(tp->code_buf, ')');
         return;    
     }
+    
     strbuf_append_char(tp->code_buf, ',');
     transpile_expr(tp, field_node->field);
     strbuf_append_char(tp->code_buf, ')');
