@@ -157,6 +157,7 @@ void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
     size = vsnprintf(sb->str + sb->length, sb->capacity - sb->length, format, args);
     if (size < 0) return;
     sb->length += size;
+    sb->str[sb->length] = '\0';  // Ensure null termination
 }
 
 void strbuf_copy(StrBuf *dst, const StrBuf *src) {

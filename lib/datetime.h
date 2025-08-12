@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include "mem-pool/include/mem_pool.h"
 #include "string.h"
+#include "strbuf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -102,7 +103,7 @@ typedef enum {
 DateTime* datetime_new(VariableMemPool* pool);
 DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str);
 DateTime* datetime_now(VariableMemPool* pool);
-String* datetime_to_string(VariableMemPool* pool, DateTime* dt, DateTimeFormat format);
+void datetime_to_string(StrBuf *strbuf, DateTime* dt, DateTimeFormat format);
 
 // Parsing functions for different formats
 DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str);
@@ -114,10 +115,10 @@ DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str);
 DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFormat format, char** end);
 
 // Formatting functions
-String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt);
-String* datetime_format_ics(VariableMemPool* pool, DateTime* dt);
-String* datetime_format_rfc2822(VariableMemPool* pool, DateTime* dt);
-String* datetime_format_human(VariableMemPool* pool, DateTime* dt);
+void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt);
+void datetime_format_ics(StrBuf *strbuf, DateTime* dt);
+void datetime_format_rfc2822(StrBuf *strbuf, DateTime* dt);
+void datetime_format_human(StrBuf *strbuf, DateTime* dt);
 
 // Utility functions
 bool datetime_is_valid(DateTime* dt);

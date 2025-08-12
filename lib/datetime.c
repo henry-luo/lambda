@@ -1,6 +1,7 @@
 #include "datetime.h"
 #include "mem-pool/include/mem_pool.h"
 #include "string.h"
+#include "strbuf.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -582,14 +583,11 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
     return true;
 }
 
-String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt) {
-    if (!dt || !pool) return NULL;
+void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
+    if (!dt || !strbuf) return;
     printf("Formatting DateTime to ISO8601: %d-%02d-%02dT%02d:%02d:%02d.%03d\n",
            DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
            dt->hour, dt->minute, dt->second, dt->millisecond);
-    
-    char buffer[64];
-    int len = 0;
     
     int year = DATETIME_GET_YEAR(dt);
     int month = DATETIME_GET_MONTH(dt);
@@ -599,36 +597,36 @@ String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt) {
     switch (dt->precision) {
         case DATETIME_HAS_YEAR:
             /* Just year */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "%04d", year);
+            strbuf_append_format(strbuf, "%04d", year);
             break;
             
         case DATETIME_HAS_DATE:
             /* Check if this is a partial date (year-month only) or full date */
             if (day == 0) {
                 /* Year and month only (day was not specified) */
-                len += snprintf(buffer + len, sizeof(buffer) - len, "%04d-%02d", year, month);
+                strbuf_append_format(strbuf, "%04d-%02d", year, month);
             } else {
                 /* Full date */
-                len += snprintf(buffer + len, sizeof(buffer) - len, "%04d-%02d-%02d", year, month, day);
+                strbuf_append_format(strbuf, "%04d-%02d-%02d", year, month, day);
             }
             break;
             
         case DATETIME_HAS_TIME:
             /* Time only */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "T%02d:%02d:%02d", 
-                           dt->hour, dt->minute, dt->second);
+            strbuf_append_format(strbuf, "T%02d:%02d:%02d", 
+                               dt->hour, dt->minute, dt->second);
             if (dt->millisecond > 0) {
-                len += snprintf(buffer + len, sizeof(buffer) - len, ".%03d", dt->millisecond);
+                strbuf_append_format(strbuf, ".%03d", dt->millisecond);
             }
             break;
             
         case DATETIME_HAS_DATETIME:
             /* Full datetime */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "%04d-%02d-%02d", year, month, day);
-            len += snprintf(buffer + len, sizeof(buffer) - len, "T%02d:%02d:%02d", 
-                           dt->hour, dt->minute, dt->second);
+            strbuf_append_format(strbuf, "%04d-%02d-%02d", year, month, day);
+            strbuf_append_format(strbuf, "T%02d:%02d:%02d", 
+                               dt->hour, dt->minute, dt->second);
             if (dt->millisecond > 0) {
-                len += snprintf(buffer + len, sizeof(buffer) - len, ".%03d", dt->millisecond);
+                strbuf_append_format(strbuf, ".%03d", dt->millisecond);
             }
             break;
     }
@@ -638,75 +636,70 @@ String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt) {
         /* Handle timezone formatting */
         if (DATETIME_HAS_TIMEZONE(dt)) {
             if (DATETIME_IS_UTC_FORMAT(dt)) {
-                len += snprintf(buffer + len, sizeof(buffer) - len, "Z");
+                strbuf_append_char(strbuf, 'Z');
             } else {
                 int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
                 int hours = abs(tz_offset) / 60;
                 int minutes = abs(tz_offset) % 60;
-                len += snprintf(buffer + len, sizeof(buffer) - len, "%c%02d:%02d",
-                               tz_offset >= 0 ? '+' : '-', hours, minutes);
+                strbuf_append_format(strbuf, "%c%02d:%02d",
+                                   tz_offset >= 0 ? '+' : '-', hours, minutes);
             }
         }
     }
-    
-    return create_string(pool, buffer);
 }
 
-String* datetime_format_ics(VariableMemPool* pool, DateTime* dt) {
-    if (!dt || !pool) return NULL;
-    
-    char buffer[32];
-    int len = 0;
+void datetime_format_ics(StrBuf *strbuf, DateTime* dt) {
+    if (!dt || !strbuf) return;
     
     /* Format based on precision */
     switch (dt->precision) {
         case DATETIME_HAS_YEAR:
             /* Year only - not standard ICS, but we'll format as year0101 */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "%04d0101", 
-                           DATETIME_GET_YEAR(dt));
+            strbuf_append_format(strbuf, "%04d0101", DATETIME_GET_YEAR(dt));
             break;
             
         case DATETIME_HAS_DATE:
             /* Date only */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "%04d%02d%02d", 
-                           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
+            strbuf_append_format(strbuf, "%04d%02d%02d", 
+                               DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
             break;
             
         case DATETIME_HAS_TIME:
             /* Time only - not standard ICS, but we'll format as 19700101T time */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "19700101T%02d%02d%02d", 
-                           dt->hour, dt->minute, dt->second);
+            strbuf_append_format(strbuf, "19700101T%02d%02d%02d", 
+                               dt->hour, dt->minute, dt->second);
             if (DATETIME_IS_UTC_FORMAT(dt)) {
-                len += snprintf(buffer + len, sizeof(buffer) - len, "Z");
+                strbuf_append_char(strbuf, 'Z');
             }
             break;
             
         case DATETIME_HAS_DATETIME:
             /* Full datetime */
-            len += snprintf(buffer + len, sizeof(buffer) - len, "%04d%02d%02dT%02d%02d%02d", 
-                           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
-                           dt->hour, dt->minute, dt->second);
+            strbuf_append_format(strbuf, "%04d%02d%02dT%02d%02d%02d", 
+                               DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
+                               dt->hour, dt->minute, dt->second);
             if (DATETIME_IS_UTC_FORMAT(dt)) {
-                len += snprintf(buffer + len, sizeof(buffer) - len, "Z");
+                strbuf_append_char(strbuf, 'Z');
             }
             break;
     }
-    
-    return create_string(pool, buffer);
 }
 
-String* datetime_to_string(VariableMemPool* pool, DateTime* dt, DateTimeFormat format) {
-    if (!dt || !pool) return NULL;
+void datetime_to_string(StrBuf *strbuf, DateTime* dt, DateTimeFormat format) {
+    if (!dt || !strbuf) return;
     
     switch (format) {
         case DATETIME_FORMAT_ISO8601:
         case DATETIME_FORMAT_ISO8601_UTC:
-            return datetime_format_iso8601(pool, dt);
+            datetime_format_iso8601(strbuf, dt);
+            break;
         case DATETIME_FORMAT_HUMAN:
         case DATETIME_FORMAT_HUMAN_UTC:
-            return datetime_format_human(pool, dt);
+            datetime_format_human(strbuf, dt);
+            break;
         default:
-            return datetime_format_iso8601(pool, dt);
+            datetime_format_iso8601(strbuf, dt);
+            break;
     }
 }
 
@@ -728,16 +721,15 @@ DateTime* datetime_parse_rfc2822(VariableMemPool* pool, const char* rfc_str) {
     return NULL;
 }
 
-String* datetime_format_rfc2822(VariableMemPool* pool, DateTime* dt) {
+void datetime_format_rfc2822(StrBuf *strbuf, DateTime* dt) {
     /* TODO: Implement RFC2822 formatting */
-    (void)pool; (void)dt; /* suppress unused warnings */
-    return NULL;
+    (void)strbuf; (void)dt; /* suppress unused warnings */
 }
 
-String* datetime_format_human(VariableMemPool* pool, DateTime* dt) {
+void datetime_format_human(StrBuf *strbuf, DateTime* dt) {
     /* TODO: Implement human-readable formatting */
     /* Fallback to ISO8601 for now */
-    return datetime_format_iso8601(pool, dt);
+    datetime_format_iso8601(strbuf, dt);
 }
 
 DateTime* datetime_add_seconds(VariableMemPool* pool, DateTime* dt, int64_t seconds) {

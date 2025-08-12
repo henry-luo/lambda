@@ -32,7 +32,7 @@
         "lib/strview.c",
         "lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include",
         "lib/num_stack.c",
-        "lib/datetime.c lib/string.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
+        "lib/datetime.c lib/string.c lib/strbuf.c lib/strview.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
       ],
       "binaries": [
         "test_strbuf.exe",

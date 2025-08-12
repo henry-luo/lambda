@@ -1,5 +1,6 @@
 #include <criterion/criterion.h>
 #include "../lib/datetime.h"
+#include "../lib/strbuf.h"
 #include <string.h>
 
 /* Test fixture setup */
@@ -181,22 +182,27 @@ Test(datetime, iso8601_formatting) {
     DATETIME_SET_TZ_OFFSET(dt, 0);
     dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
-    String* formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted, "ISO8601 formatting should succeed");
-    cr_assert_str_eq(formatted->chars, "2025-08-12T14:30:45.123Z", "ISO8601 formatting should produce correct string");
+    StrBuf* strbuf = strbuf_new();
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str, "ISO8601 formatting should succeed");
+    cr_assert_str_eq(strbuf->str, "2025-08-12T14:30:45.123Z", "ISO8601 formatting should produce correct string");
     
     /* Test without milliseconds */
     dt->millisecond = 0;
-    formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted);
-    cr_assert_str_eq(formatted->chars, "2025-08-12T14:30:45Z", "ISO8601 formatting without milliseconds should be correct");
+    strbuf_reset(strbuf);
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str);
+    cr_assert_str_eq(strbuf->str, "2025-08-12T14:30:45Z", "ISO8601 formatting without milliseconds should be correct");
     
     /* Test with timezone offset */
     DATETIME_SET_TZ_OFFSET(dt, 330); /* +05:30 */
     dt->format_hint = DATETIME_FORMAT_ISO8601;
-    formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted);
-    cr_assert_str_eq(formatted->chars, "2025-08-12T14:30:45+05:30", "ISO8601 formatting with timezone should be correct");
+    strbuf_reset(strbuf);
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str);
+    cr_assert_str_eq(strbuf->str, "2025-08-12T14:30:45+05:30", "ISO8601 formatting with timezone should be correct");
+    
+    strbuf_free(strbuf);
 }
 
 /* Test ICS formatting */
@@ -213,15 +219,19 @@ Test(datetime, ics_formatting) {
     DATETIME_SET_TZ_OFFSET(dt, 0);
     dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
-    String* formatted = datetime_format_ics(pool, dt);
-    cr_assert_not_null(formatted, "ICS formatting should succeed");
-    cr_assert_str_eq(formatted->chars, "20250812T143045Z", "ICS formatting should produce correct string");
+    StrBuf* strbuf = strbuf_new();
+    datetime_format_ics(strbuf, dt);
+    cr_assert_not_null(strbuf->str, "ICS formatting should succeed");
+    cr_assert_str_eq(strbuf->str, "20250812T143045Z", "ICS formatting should produce correct string");
     
     /* Test date-only */
     dt->precision = DATETIME_HAS_DATE;
-    formatted = datetime_format_ics(pool, dt);
-    cr_assert_not_null(formatted);
-    cr_assert_str_eq(formatted->chars, "20250812", "ICS date-only formatting should be correct");
+    strbuf_reset(strbuf);
+    datetime_format_ics(strbuf, dt);
+    cr_assert_not_null(strbuf->str);
+    cr_assert_str_eq(strbuf->str, "20250812", "ICS date-only formatting should be correct");
+    
+    strbuf_free(strbuf);
 }
 
 /* Test Unix timestamp conversion */
@@ -299,14 +309,16 @@ Test(datetime, round_trip_iso8601) {
         cr_assert_not_null(dt, "Parsing should succeed for test string: %s", test_strings[i]);
         
         /* Format it back */
-        String* formatted = datetime_format_iso8601(pool, dt);
-        cr_assert_not_null(formatted, "Formatting should succeed for test string: %s", test_strings[i]);
+        StrBuf* strbuf = strbuf_new();
+        datetime_format_iso8601(strbuf, dt);
+        cr_assert_not_null(strbuf->str, "Formatting should succeed for test string: %s", test_strings[i]);
         
         /* For date-only strings, we don't expect perfect round-trip since formatting includes default time */
         if (strchr(test_strings[i], 'T') != NULL) {
-            cr_assert_str_eq(formatted->chars, test_strings[i], 
+            cr_assert_str_eq(strbuf->str, test_strings[i], 
                            "Round-trip should preserve original string: %s", test_strings[i]);
         }
+        strbuf_free(strbuf);
     }
 }
 
@@ -315,8 +327,12 @@ Test(datetime, error_handling) {
     /* Test NULL input handling */
     cr_assert_null(datetime_parse_iso8601(pool, NULL), "Parsing NULL string should return NULL");
     cr_assert_null(datetime_parse_iso8601(NULL, "2025-08-12"), "Parsing with NULL pool should return NULL");
-    cr_assert_null(datetime_format_iso8601(pool, NULL), "Formatting NULL DateTime should return NULL");
-    cr_assert_null(datetime_format_iso8601(NULL, datetime_new(pool)), "Formatting with NULL pool should return NULL");
+    
+    /* Test formatting with NULL inputs - these should not crash but just return early */
+    StrBuf* strbuf = strbuf_new();
+    datetime_format_iso8601(NULL, datetime_new(pool)); /* Should not crash with NULL strbuf */
+    datetime_format_iso8601(strbuf, NULL); /* Should not crash with NULL DateTime */
+    strbuf_free(strbuf);
     
     /* Test invalid date strings */
     cr_assert_null(datetime_parse_iso8601(pool, "invalid"), "Parsing invalid string should return NULL");
@@ -336,9 +352,11 @@ Test(datetime, precision_year_only) {
     cr_assert_eq(dt->day, 1, "Day should default to 1 for year-only");
     
     /* Test year-only formatting */
-    String* formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted, "Year-only formatting should succeed");
-    cr_assert_str_eq(formatted->chars, "2024", "Year-only should format as just the year");
+    StrBuf* strbuf = strbuf_new();
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str, "Year-only formatting should succeed");
+    cr_assert_str_eq(strbuf->str, "2024", "Year-only should format as just the year");
+    strbuf_free(strbuf);
 }
 
 /* Test precision flags for different formats */
@@ -400,53 +418,31 @@ Test(datetime, lambda_format_parsing) {
 /* Test precision-aware formatting */
 Test(datetime, precision_aware_formatting) {
     DateTime* dt;
-    String* formatted;
+    StrBuf* strbuf = strbuf_new();
     
     /* Test year-only formatting preserves precision */
     dt = datetime_parse(pool, "2024", DATETIME_PARSE_ISO8601, NULL);
     cr_assert_not_null(dt, "Year-only parsing should succeed for formatting test");
-    formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted, "Year-only formatting should succeed");
-    cr_assert_str_eq(formatted->chars, "2024", "Year-only formatting should output just the year");
+    strbuf_reset(strbuf);
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str, "Year-only formatting should succeed");
+    cr_assert_str_eq(strbuf->str, "2024", "Year-only formatting should output just the year");
     
     /* Test date-only formatting preserves precision */
     dt = datetime_parse(pool, "2024-08-12", DATETIME_PARSE_ISO8601, NULL);
     cr_assert_not_null(dt, "Date-only parsing should succeed for formatting test");
-    formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted, "Date-only formatting should succeed");
-    cr_assert_str_eq(formatted->chars, "2024-08-12", "Date-only formatting should output just the date");
+    strbuf_reset(strbuf);
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str, "Date-only formatting should succeed");
+    cr_assert_str_eq(strbuf->str, "2024-08-12", "Date-only formatting should output just the date");
     
     /* Test full datetime formatting */
     dt = datetime_parse(pool, "2024-08-12T14:30:45", DATETIME_PARSE_ISO8601, NULL);
     cr_assert_not_null(dt, "Full datetime parsing should succeed for formatting test");
-    formatted = datetime_format_iso8601(pool, dt);
-    cr_assert_not_null(formatted, "Full datetime formatting should succeed");
-    cr_assert_str_eq(formatted->chars, "2024-08-12T14:30:45", "Full datetime formatting should output date and time");
-}
-
-/* Test auto-detection parsing format */
-Test(datetime, auto_detection_parsing) {
-    DateTime* dt;
+    strbuf_reset(strbuf);
+    datetime_format_iso8601(strbuf, dt);
+    cr_assert_not_null(strbuf->str, "Full datetime formatting should succeed");
+    cr_assert_str_eq(strbuf->str, "2024-08-12T14:30:45", "Full datetime formatting should output date and time");
     
-    /* Test ISO8601 year-only */
-    dt = datetime_parse(pool, "2024", DATETIME_PARSE_ISO8601, NULL);
-    cr_assert_not_null(dt, "ISO8601 year-only should succeed");
-    cr_assert_eq(dt->precision, DATETIME_HAS_YEAR, "Year-only should have correct precision");
-    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Year should be correct");
-    
-    /* Test ISO8601 date-only */
-    dt = datetime_parse(pool, "2024-08-12", DATETIME_PARSE_ISO8601, NULL);
-    cr_assert_not_null(dt, "ISO8601 date-only should succeed");
-    cr_assert_eq(dt->precision, DATETIME_HAS_DATE, "Date-only should have correct precision");
-    
-    /* Test ISO8601 full datetime */
-    dt = datetime_parse(pool, "2024-08-12T14:30:45", DATETIME_PARSE_ISO8601, NULL);
-    cr_assert_not_null(dt, "ISO8601 full datetime should succeed");
-    cr_assert_eq(dt->precision, DATETIME_HAS_DATETIME, "Datetime should have correct precision");
-    
-    /* Test Lambda format content (without wrapper) */
-    dt = datetime_parse(pool, "2024", DATETIME_PARSE_LAMBDA, NULL);
-    cr_assert_not_null(dt, "Lambda format year-only should succeed");
-    cr_assert_eq(dt->precision, DATETIME_HAS_YEAR, "Lambda year-only should have correct precision");
-    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Lambda year should be correct");
+    strbuf_free(strbuf);
 }

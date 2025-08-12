@@ -231,17 +231,9 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_DTIME: {
                 DateTime *dt = *(DateTime**)data;
                 if (dt) {
-                    // Initialize datetime formatting pool if needed
-                    init_datetime_format_pool();
-                    
-                    String* formatted = datetime_format_iso8601(datetime_format_pool, dt);
-                    if (formatted && formatted->chars) {
-                        strbuf_append_format(strbuf, "t'%s'", formatted->chars);
-                    } else {
-                        strbuf_append_str(strbuf, "t''");
-                    }
-                } else {
-                    strbuf_append_str(strbuf, "t''");
+                    strbuf_append_str(strbuf, "t'"); 
+                    datetime_format_iso8601(strbuf, dt);
+                    strbuf_append_char(strbuf, '\'');
                 }
                 break;
             }
@@ -385,17 +377,9 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_DTIME: {
         DateTime *dt = (DateTime*)item.pointer;
         if (dt) {
-            // Initialize datetime formatting pool if needed
-            init_datetime_format_pool();
-            
-            String* formatted = datetime_format_iso8601(datetime_format_pool, dt);
-            if (formatted && formatted->chars) {
-                strbuf_append_format(strbuf, "t'%s'", formatted->chars);
-            } else {
-                strbuf_append_str(strbuf, "t''");
-            }
-        } else {
-            strbuf_append_str(strbuf, "t''");
+            strbuf_append_str(strbuf, "t'"); 
+            datetime_format_iso8601(strbuf, dt);
+            strbuf_append_char(strbuf, '\'');
         }
         break;
     }
