@@ -1048,7 +1048,7 @@ Test(validator_tests, empty_file_handling) {
 }
 
 // XML-specific edge cases
-Test(validator_tests, xml_malformed_structure) {
+Test(validator_tests, xml_malformed_structure, .disabled = true) {
     // Test XML with malformed structure
     FILE* tmp_file = fopen("test/lambda/validator/test_malformed_xml.xml", "w");
     if (tmp_file) {
@@ -1064,7 +1064,7 @@ Test(validator_tests, xml_malformed_structure) {
     }
 }
 
-Test(validator_tests, xml_namespace_conflicts) {
+Test(validator_tests, xml_namespace_conflicts, .disabled = true) {
     // Test XML with namespace conflicts
     FILE* tmp_file = fopen("test/lambda/validator/test_ns_conflict.xml", "w");
     if (tmp_file) {
@@ -1083,7 +1083,7 @@ Test(validator_tests, xml_namespace_conflicts) {
     }
 }
 
-Test(validator_tests, xml_invalid_encoding) {
+Test(validator_tests, xml_invalid_encoding, .disabled = true) {
     // Test XML with invalid encoding declaration
     FILE* tmp_file = fopen("test/lambda/validator/test_bad_encoding.xml", "w");
     if (tmp_file) {

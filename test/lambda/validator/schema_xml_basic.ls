@@ -17,11 +17,11 @@ type BookElement = <book
 
 // Bookstore root element containing books
 type BookstoreElement = <bookstore
-    books: BookElement*               // zero or more book elements
+    BookElement*               // zero or more book elements
 >
 
 // Document structure matching XML parser output
 type Document = <document
     xmlDeclaration: XmlProcessingInstruction, // <?xml> declaration
-    bookstore: BookstoreElement       // bookstore root element
+    BookstoreElement       // bookstore root element
 >
