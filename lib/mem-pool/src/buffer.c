@@ -1,4 +1,5 @@
 #include <memory.h>
+#include <string.h>
 #include "internals.h"
 
 Buffer *buffer_new(size_t size)

@@ -1,11 +1,13 @@
 #pragma once
 
+#include <stdint.h>
+#include <stdbool.h>
+#include "mem-pool/include/mem_pool.h"
+#include "string.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdint.h>
-#include <stdbool.h>
 
 // Lambda DateTime Structure (Bitfield-packed)
 // Represents date and time with timezone information
@@ -85,37 +87,36 @@ typedef enum {
 #define DATETIME_TZ_CET         60     // UTC+1 (Central European Time)
 #define DATETIME_TZ_JST         540    // UTC+9 (Japan Standard Time)
 
-// Forward declarations
-typedef struct String String;
-typedef struct Context Context;
-
 // Core DateTime functions
-DateTime* datetime_new(Context* ctx);
-DateTime* datetime_from_string(Context* ctx, const char* datetime_str);
-DateTime* datetime_now(Context* ctx);
-String* datetime_to_string(Context* ctx, DateTime* dt, DateTimeFormat format);
+DateTime* datetime_new(VariableMemPool* pool);
+DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str);
+DateTime* datetime_now(VariableMemPool* pool);
+String* datetime_to_string(VariableMemPool* pool, DateTime* dt, DateTimeFormat format);
 
 // Parsing functions for different formats
-DateTime* datetime_parse_iso8601(Context* ctx, const char* iso_str);
-DateTime* datetime_parse_ics(Context* ctx, const char* ics_str);
-DateTime* datetime_parse_rfc2822(Context* ctx, const char* rfc_str);
+DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str);
+DateTime* datetime_parse_ics(VariableMemPool* pool, const char* ics_str);
+DateTime* datetime_parse_rfc2822(VariableMemPool* pool, const char* rfc_str);
+
+// General parsing function that returns DateTime* and end pointer
+DateTime* datetime_parse(VariableMemPool* pool, const char* str, char** end);
 
 // Formatting functions
-String* datetime_format_iso8601(Context* ctx, DateTime* dt);
-String* datetime_format_ics(Context* ctx, DateTime* dt);
-String* datetime_format_rfc2822(Context* ctx, DateTime* dt);
-String* datetime_format_human(Context* ctx, DateTime* dt);
+String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt);
+String* datetime_format_ics(VariableMemPool* pool, DateTime* dt);
+String* datetime_format_rfc2822(VariableMemPool* pool, DateTime* dt);
+String* datetime_format_human(VariableMemPool* pool, DateTime* dt);
 
 // Utility functions
 bool datetime_is_valid(DateTime* dt);
 int datetime_compare(DateTime* dt1, DateTime* dt2);
-DateTime* datetime_add_seconds(Context* ctx, DateTime* dt, int64_t seconds);
-DateTime* datetime_to_utc(Context* ctx, DateTime* dt);
-DateTime* datetime_to_local(Context* ctx, DateTime* dt);
+DateTime* datetime_add_seconds(VariableMemPool* pool, DateTime* dt, int64_t seconds);
+DateTime* datetime_to_utc(VariableMemPool* pool, DateTime* dt);
+DateTime* datetime_to_local(VariableMemPool* pool, DateTime* dt);
 
 // Convert between DateTime and unix timestamp
 int64_t datetime_to_unix(DateTime* dt);
-DateTime* datetime_from_unix(Context* ctx, int64_t unix_timestamp);
+DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp);
 
 #ifdef __cplusplus
 }

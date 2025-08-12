@@ -1,4 +1,5 @@
 #include "strbuf.h"
+#include <string.h>
 
 #define INITIAL_CAPACITY 32
 

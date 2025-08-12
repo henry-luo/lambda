@@ -1,9 +1,19 @@
 
 #include "transpiler.hpp"
-#include "datetime.h"
+#include "../lib/datetime.h"
 
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
+
+// Static memory pool for DateTime formatting
+static VariableMemPool* datetime_format_pool = NULL;
+
+// Initialize datetime formatting pool if needed
+static void init_datetime_format_pool() {
+    if (!datetime_format_pool) {
+        pool_variable_init(&datetime_format_pool, 1024, 10); // Small pool for formatting strings
+    }
+}
 
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
@@ -221,11 +231,10 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_DTIME: {
                 DateTime *dt = *(DateTime**)data;
                 if (dt) {
-                    // Create temporary context for formatting
-                    Context temp_ctx = {0};
-                    temp_ctx.heap = (Heap*)data; // Use a temporary heap context
+                    // Initialize datetime formatting pool if needed
+                    init_datetime_format_pool();
                     
-                    String* formatted = datetime_format_iso8601(&temp_ctx, dt);
+                    String* formatted = datetime_format_iso8601(datetime_format_pool, dt);
                     if (formatted && formatted->chars) {
                         strbuf_append_format(strbuf, "t'%s'", formatted->chars);
                     } else {
@@ -376,11 +385,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_DTIME: {
         DateTime *dt = (DateTime*)item.pointer;
         if (dt) {
-            // Create temporary context for formatting
-            Context temp_ctx = {0};
-            temp_ctx.heap = NULL; // We'll handle this more robustly later
+            // Initialize datetime formatting pool if needed
+            init_datetime_format_pool();
             
-            String* formatted = datetime_format_iso8601(&temp_ctx, dt);
+            String* formatted = datetime_format_iso8601(datetime_format_pool, dt);
             if (formatted && formatted->chars) {
                 strbuf_append_format(strbuf, "t'%s'", formatted->chars);
             } else {

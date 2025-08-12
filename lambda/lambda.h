@@ -13,7 +13,7 @@ typedef int int32_t;
 typedef long long int64_t;
 #endif
 
-#ifndef __cplusplus
+#if !defined(__cplusplus) && !defined(_STDBOOL_H) && !defined(_STDBOOL_H_) && !defined(__bool_true_false_are_defined)
 #define bool uint8_t
 #define true 1
 #define false 0
@@ -138,11 +138,14 @@ extern Item ItemError;
 #endif
 
 // a fat string with prefixed length and flags
+#ifndef STRING_STRUCT_DEFINED
 typedef struct String {
     uint32_t len:22;  // string len , up to 4MB;
     uint32_t ref_cnt:10;  // ref_cnt, up to 1024 refs
     char chars[];
 } String;
+#define STRING_STRUCT_DEFINED
+#endif
 
 typedef struct Heap Heap;
 typedef struct Pack Pack;

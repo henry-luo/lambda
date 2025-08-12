@@ -1,4 +1,5 @@
 #include <unistd.h>
+#include <string.h>
 #include <lexbor/url/url.h>
 #include "../lib/strbuf.h"
 

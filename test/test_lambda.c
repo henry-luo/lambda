@@ -2,13 +2,18 @@
 #include <criterion/new/assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>  // for getcwd and chdir
 #include <assert.h>
+#include <string.h>
 
 // Include C header and declare extern C functions from the lambda project
 #include "../lambda/lambda.h"
 #include "../lib/strbuf.h"
+
+// Explicitly declare string functions to avoid macro interference
+extern size_t strlen(const char *s);
+extern int strcmp(const char *s1, const char *s2);
+extern char *strstr(const char *haystack, const char *needle);
 
 // Forward declarations for C interface functions from the lambda runtime
 typedef struct Runtime Runtime;

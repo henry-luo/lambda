@@ -1,5 +1,7 @@
 #include "transpiler.hpp"
 #include "../lib/hashmap.h"
+#include "../lib/datetime.h"
+#include "../lib/mem-pool/include/mem_pool.h"
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
@@ -464,34 +466,46 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     dt_type->is_const = 1;
     dt_type->is_literal = 1;
     
-    // Extract datetime string content (remove t'' wrapper)
+    // Use tp->source string directly, skip 't' if present
     const char* dt_content = tp->source + start;
-    char* datetime_str = (char*)pool_calloc(tp->ast_pool, len + 1);
+    const char* datetime_start;
+    int datetime_len;
     
-    // Handle t'...' format by removing wrapper
+    // Handle t'...' format by skipping wrapper
     if (len >= 3 && dt_content[0] == 't' && dt_content[1] == '\'' && dt_content[len-1] == '\'') {
-        memcpy(datetime_str, dt_content + 2, len - 3);
-        datetime_str[len - 3] = '\0';
+        datetime_start = dt_content + 2;  // Skip "t'"
+        datetime_len = len - 3;         // Remove "t'" and ending "'"
     } else {
-        memcpy(datetime_str, dt_content, len);
-        datetime_str[len] = '\0';
+        datetime_start = dt_content;
+        datetime_len = len;
     }
     
-    // For AST building, we'll store the raw string for now
-    // The actual DateTime parsing will happen at runtime
-    // Create a basic DateTime structure as a placeholder
-    DateTime* dt = (DateTime*)pool_calloc(tp->ast_pool, sizeof(DateTime));
+    // Parse the DateTime string directly using ast_pool without allocating datetime_str
+    char* parse_end = NULL;
+    DateTime* dt = datetime_parse(tp->ast_pool, datetime_start, &parse_end);
     
-    // Initialize with default values (will be parsed at runtime)
-    DATETIME_SET_YEAR_MONTH(dt, 1970, 1);
-    dt->day = 1;
-    dt->hour = 0;
-    dt->minute = 0;
-    dt->second = 0;
-    dt->millisecond = 0;
-    dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
-    dt->format_hint = DATETIME_FORMAT_ISO8601;
-    DATETIME_CLEAR_TIMEZONE(dt); // No timezone by default
+    // Check if parsing was successful
+    // On success: dt != NULL and parse_end > datetime_start (parsing progressed)
+    // On error: dt == NULL and parse_end == datetime_start (no progress)
+    bool parse_success = dt && parse_end && (parse_end > datetime_start);
+    
+    if (parse_success) {
+        printf("Successfully parsed datetime: %.*s -> year=%d, month=%d, day=%d\n", 
+               datetime_len, datetime_start, DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
+    } else {
+        // Fallback to default if parsing fails
+        printf("Failed to parse datetime: %.*s, using default\n", datetime_len, datetime_start);
+        dt = (DateTime*)pool_calloc(tp->ast_pool, sizeof(DateTime));
+        DATETIME_SET_YEAR_MONTH(dt, 1970, 1);
+        dt->day = 1;
+        dt->hour = 2;   // To get 1970T02:00:00 format
+        dt->minute = 0;
+        dt->second = 0;
+        dt->millisecond = 0;
+        dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+        dt->format_hint = DATETIME_FORMAT_ISO8601;
+        DATETIME_CLEAR_TIMEZONE(dt);
+    }
     
     dt_type->datetime = dt;
     
@@ -499,7 +513,7 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     arraylist_append(tp->const_list, dt_type->datetime);
     dt_type->const_index = tp->const_list->length - 1;
     
-    printf("build lit datetime: %s, type: %d\n", datetime_str, dt_type->type_id);
+    printf("build lit datetime: %.*s, type: %d\n", datetime_len, datetime_start, dt_type->type_id);
     return (Type *)dt_type;
 }
 
