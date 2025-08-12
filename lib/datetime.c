@@ -489,11 +489,6 @@ error:
     return NULL;  /* Let heap manager handle cleanup */
 }
 
-/* Legacy datetime_parse function for backwards compatibility */
-DateTime* datetime_parse_legacy(VariableMemPool* pool, const char* str, char** end) {
-    return datetime_parse(pool, str, DATETIME_PARSE_ISO8601, end);
-}
-
 DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str) {
     return datetime_parse(pool, lambda_str, DATETIME_PARSE_LAMBDA, NULL);
 }
@@ -589,6 +584,9 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
 
 String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt) {
     if (!dt || !pool) return NULL;
+    printf("Formatting DateTime to ISO8601: %d-%02d-%02dT%02d:%02d:%02d.%03d\n",
+           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
+           dt->hour, dt->minute, dt->second, dt->millisecond);
     
     char buffer[64];
     int len = 0;

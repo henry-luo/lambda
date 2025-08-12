@@ -113,9 +113,6 @@ DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str);
 // General parsing function with format parameter
 DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFormat format, char** end);
 
-// Legacy parsing function for backwards compatibility
-DateTime* datetime_parse_legacy(VariableMemPool* pool, const char* str, char** end);
-
 // Formatting functions
 String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt);
 String* datetime_format_ics(VariableMemPool* pool, DateTime* dt);
