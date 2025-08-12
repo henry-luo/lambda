@@ -460,51 +460,28 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     printf("build lit datetime: %.*s\n", (int)sv.length, sv.str);
     
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int len = end - start;
+    int datetime_len = end - start;
     
     TypeDateTime *dt_type = (TypeDateTime*)alloc_type(tp->ast_pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
     dt_type->is_const = 1;
     dt_type->is_literal = 1;
     
-    // Use tp->source string directly, skip 't' if present
-    const char* dt_content = tp->source + start;
-    const char* datetime_start;
-    int datetime_len;
-    
-    // Handle t'...' format by skipping wrapper
-    if (len >= 3 && dt_content[0] == 't' && dt_content[1] == '\'' && dt_content[len-1] == '\'') {
-        datetime_start = dt_content + 2;  // Skip "t'"
-        datetime_len = len - 3;         // Remove "t'" and ending "'"
-    } else {
-        datetime_start = dt_content;
-        datetime_len = len;
-    }
-    
+    // Use tp->source string directly
+    const char* datetime_start = tp->source + start;
     // Parse the DateTime string directly using ast_pool without allocating datetime_str
     char* parse_end = NULL;
-    DateTime* dt = datetime_parse(tp->ast_pool, datetime_start, &parse_end);
+    DateTime* dt = datetime_parse(tp->ast_pool, datetime_start, DATETIME_PARSE_LAMBDA, &parse_end);
     
     // Check if parsing was successful
     // On success: dt != NULL and parse_end > datetime_start (parsing progressed)
     // On error: dt == NULL and parse_end == datetime_start (no progress)
-    bool parse_success = dt && parse_end && (parse_end > datetime_start);
-    
-    if (parse_success) {
+    if (dt && parse_end > datetime_start) {
         printf("Successfully parsed datetime: %.*s -> year=%d, month=%d, day=%d\n", 
                datetime_len, datetime_start, DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
     } else {
         // Fallback to default if parsing fails
         printf("Failed to parse datetime: %.*s, using default\n", datetime_len, datetime_start);
-        dt = (DateTime*)pool_calloc(tp->ast_pool, sizeof(DateTime));
-        DATETIME_SET_YEAR_MONTH(dt, 1970, 1);
-        dt->day = 1;
-        dt->hour = 2;   // To get 1970T02:00:00 format
-        dt->minute = 0;
-        dt->second = 0;
-        dt->millisecond = 0;
-        dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
-        dt->format_hint = DATETIME_FORMAT_ISO8601;
-        DATETIME_CLEAR_TIMEZONE(dt);
+        return NULL;
     }
     
     dt_type->datetime = dt;

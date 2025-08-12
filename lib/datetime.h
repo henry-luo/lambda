@@ -27,9 +27,11 @@ typedef struct DateTime {
 } DateTime;
 
 // DateTime precision flags (2 bits = 4 possible flags max)
-#define DATETIME_HAS_DATE      0x01
-#define DATETIME_HAS_TIME      0x02
-// Combinations: 0x00=none, 0x01=date only, 0x02=time only, 0x03=date+time
+#define DATETIME_HAS_YEAR      0x00  // Year only (default/minimal precision)
+#define DATETIME_HAS_DATE      0x01  // Date (year, month, day)
+#define DATETIME_HAS_TIME      0x02  // Time only (hour, minute, second)
+#define DATETIME_HAS_DATETIME  0x03  // Full datetime (date + time)
+// Combinations: 0x00=year only, 0x01=date only, 0x02=time only, 0x03=date+time
 
 // DateTime format hints with UTC flag (2 bits = 4 combinations)
 typedef enum {
@@ -38,6 +40,15 @@ typedef enum {
     DATETIME_FORMAT_ISO8601_UTC = 2, // 2024-01-15T10:30:00Z (UTC/Z suffix)
     DATETIME_FORMAT_HUMAN_UTC = 3,   // 2024-01-15 10:30 AM UTC (human readable UTC)
 } DateTimeFormat;
+
+// DateTime format types for parsing
+typedef enum {
+    DATETIME_PARSE_ISO8601 = 0,      // ISO8601 format (2024-01-15T10:30:00)
+    DATETIME_PARSE_ICS = 1,          // ICS format (20240115T103000Z)
+    DATETIME_PARSE_RFC2822 = 2,      // RFC2822 format (Mon, 15 Jan 2024 10:30:00 +0500)
+    DATETIME_PARSE_LAMBDA = 3,       // Lambda format (YYYY-MM-DD hh:mm:ss, without t'...' wrapper)
+    DATETIME_PARSE_HUMAN = 4,        // Human readable format
+} DateTimeParseFormat;
 
 // Helper macros for packed year_month field
 // Formula: year_month = (year + 4000) * 16 + month
@@ -97,9 +108,13 @@ String* datetime_to_string(VariableMemPool* pool, DateTime* dt, DateTimeFormat f
 DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str);
 DateTime* datetime_parse_ics(VariableMemPool* pool, const char* ics_str);
 DateTime* datetime_parse_rfc2822(VariableMemPool* pool, const char* rfc_str);
+DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str);
 
-// General parsing function that returns DateTime* and end pointer
-DateTime* datetime_parse(VariableMemPool* pool, const char* str, char** end);
+// General parsing function with format parameter
+DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFormat format, char** end);
+
+// Legacy parsing function for backwards compatibility
+DateTime* datetime_parse_legacy(VariableMemPool* pool, const char* str, char** end);
 
 // Formatting functions
 String* datetime_format_iso8601(VariableMemPool* pool, DateTime* dt);

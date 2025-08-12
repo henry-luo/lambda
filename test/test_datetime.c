@@ -324,3 +324,129 @@ Test(datetime, error_handling) {
     cr_assert_null(datetime_parse_iso8601(pool, "2025-02-30"), "Parsing invalid day should return NULL");
     cr_assert_null(datetime_parse_iso8601(pool, "2025-08-12T25:00:00"), "Parsing invalid hour should return NULL");
 }
+
+/* Test new precision system with year-only flag */
+Test(datetime, precision_year_only) {
+    /* Test year-only parsing with ISO8601 format */
+    DateTime* dt = datetime_parse(pool, "2024", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "Year-only parsing should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_YEAR, "Precision should be year-only (0x00)");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Year should be parsed correctly");
+    cr_assert_eq(DATETIME_GET_MONTH(dt), 1, "Month should default to 1 for year-only");
+    cr_assert_eq(dt->day, 1, "Day should default to 1 for year-only");
+    
+    /* Test year-only formatting */
+    String* formatted = datetime_format_iso8601(pool, dt);
+    cr_assert_not_null(formatted, "Year-only formatting should succeed");
+    cr_assert_str_eq(formatted->chars, "2024", "Year-only should format as just the year");
+}
+
+/* Test precision flags for different formats */
+Test(datetime, precision_flags) {
+    DateTime* dt;
+    
+    /* Test date-only precision */
+    dt = datetime_parse(pool, "2024-08-12", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "Date-only parsing should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_DATE, "Precision should be date-only (0x01)");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Year should be parsed correctly");
+    cr_assert_eq(DATETIME_GET_MONTH(dt), 8, "Month should be parsed correctly");
+    cr_assert_eq(dt->day, 12, "Day should be parsed correctly");
+    
+    /* Test full datetime precision */
+    dt = datetime_parse(pool, "2024-08-12T14:30:45", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "Full datetime parsing should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_DATETIME, "Precision should be full datetime (0x03)");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Year should be parsed correctly");
+    cr_assert_eq(DATETIME_GET_MONTH(dt), 8, "Month should be parsed correctly");
+    cr_assert_eq(dt->day, 12, "Day should be parsed correctly");
+    cr_assert_eq(dt->hour, 14, "Hour should be parsed correctly");
+    cr_assert_eq(dt->minute, 30, "Minute should be parsed correctly");
+    cr_assert_eq(dt->second, 45, "Second should be parsed correctly");
+}
+
+/* Test Lambda format parsing and precision */
+Test(datetime, lambda_format_parsing) {
+    DateTime* dt;
+    
+    /* Test Lambda year-only format */
+    dt = datetime_parse(pool, "t'2024'", DATETIME_PARSE_LAMBDA, NULL);
+    cr_assert_not_null(dt, "Lambda year-only parsing should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_YEAR, "Lambda year-only precision should be year-only (0x00)");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Lambda year should be parsed correctly");
+    cr_assert_eq(DATETIME_GET_MONTH(dt), 1, "Lambda year-only month should default to 1");
+    cr_assert_eq(dt->day, 1, "Lambda year-only day should default to 1");
+    
+    /* Test Lambda full datetime format */
+    dt = datetime_parse(pool, "t'2024-08-12 14:30:45'", DATETIME_PARSE_LAMBDA, NULL);
+    cr_assert_not_null(dt, "Lambda full datetime parsing should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_DATETIME, "Lambda datetime precision should be full datetime (0x03)");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Lambda datetime year should be parsed correctly");
+    cr_assert_eq(DATETIME_GET_MONTH(dt), 8, "Lambda datetime month should be parsed correctly");
+    cr_assert_eq(dt->day, 12, "Lambda datetime day should be parsed correctly");
+    cr_assert_eq(dt->hour, 14, "Lambda datetime hour should be parsed correctly");
+    cr_assert_eq(dt->minute, 30, "Lambda datetime minute should be parsed correctly");
+    cr_assert_eq(dt->second, 45, "Lambda datetime second should be parsed correctly");
+    
+    /* Test Lambda date-only format */
+    dt = datetime_parse(pool, "t'2024-08-12'", DATETIME_PARSE_LAMBDA, NULL);
+    cr_assert_not_null(dt, "Lambda date-only parsing should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_DATE, "Lambda date-only precision should be date-only (0x01)");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Lambda date year should be parsed correctly");
+    cr_assert_eq(DATETIME_GET_MONTH(dt), 8, "Lambda date month should be parsed correctly");
+    cr_assert_eq(dt->day, 12, "Lambda date day should be parsed correctly");
+}
+
+/* Test precision-aware formatting */
+Test(datetime, precision_aware_formatting) {
+    DateTime* dt;
+    String* formatted;
+    
+    /* Test year-only formatting preserves precision */
+    dt = datetime_parse(pool, "2024", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "Year-only parsing should succeed for formatting test");
+    formatted = datetime_format_iso8601(pool, dt);
+    cr_assert_not_null(formatted, "Year-only formatting should succeed");
+    cr_assert_str_eq(formatted->chars, "2024", "Year-only formatting should output just the year");
+    
+    /* Test date-only formatting preserves precision */
+    dt = datetime_parse(pool, "2024-08-12", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "Date-only parsing should succeed for formatting test");
+    formatted = datetime_format_iso8601(pool, dt);
+    cr_assert_not_null(formatted, "Date-only formatting should succeed");
+    cr_assert_str_eq(formatted->chars, "2024-08-12", "Date-only formatting should output just the date");
+    
+    /* Test full datetime formatting */
+    dt = datetime_parse(pool, "2024-08-12T14:30:45", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "Full datetime parsing should succeed for formatting test");
+    formatted = datetime_format_iso8601(pool, dt);
+    cr_assert_not_null(formatted, "Full datetime formatting should succeed");
+    cr_assert_str_eq(formatted->chars, "2024-08-12T14:30:45", "Full datetime formatting should output date and time");
+}
+
+/* Test auto-detection parsing format */
+Test(datetime, auto_detection_parsing) {
+    DateTime* dt;
+    
+    /* Test ISO8601 year-only */
+    dt = datetime_parse(pool, "2024", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "ISO8601 year-only should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_YEAR, "Year-only should have correct precision");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Year should be correct");
+    
+    /* Test ISO8601 date-only */
+    dt = datetime_parse(pool, "2024-08-12", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "ISO8601 date-only should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_DATE, "Date-only should have correct precision");
+    
+    /* Test ISO8601 full datetime */
+    dt = datetime_parse(pool, "2024-08-12T14:30:45", DATETIME_PARSE_ISO8601, NULL);
+    cr_assert_not_null(dt, "ISO8601 full datetime should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_DATETIME, "Datetime should have correct precision");
+    
+    /* Test Lambda format content (without wrapper) */
+    dt = datetime_parse(pool, "2024", DATETIME_PARSE_LAMBDA, NULL);
+    cr_assert_not_null(dt, "Lambda format year-only should succeed");
+    cr_assert_eq(dt->precision, DATETIME_HAS_YEAR, "Lambda year-only should have correct precision");
+    cr_assert_eq(DATETIME_GET_YEAR(dt), 2024, "Lambda year should be correct");
+}

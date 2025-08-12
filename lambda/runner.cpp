@@ -257,7 +257,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     // script not found, create a new one
-    printf("Script %s not found, loading...\n", script_path);
+    printf("Loading %s ...\n", script_path);
     Script *new_script = (Script*)calloc(1, sizeof(Script));
     new_script->reference = strdup(script_path);
     new_script->source = source ? source : read_text_file(script_path);
