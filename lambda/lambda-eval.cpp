@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include <stdarg.h>
 #include <time.h>
+#include <cstdlib>  // for abs function
 
 extern __thread Context* context;
 
@@ -743,13 +744,86 @@ String* fn_string(Item itm) {
     else if (itm.type_id == LMD_TYPE_DTIME) {
         DateTime *dt = (DateTime*)itm.pointer;
         if (dt) {
-            // Format datetime to ISO8601 string using new macros
-            // We need a context, but for now we'll create a basic formatted string
+            // Debug: Print the datetime precision and basic info
+            printf("fn_string debug: DateTime precision=%d, hour=%d, minute=%d, second=%d, ms=%d\n", 
+                   dt->precision, dt->hour, dt->minute, dt->second, dt->millisecond);
+            
+            // Format datetime in Lambda format based on precision
             char buf[64];
-            snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", 
-                DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day, 
-                dt->hour, dt->minute, dt->second, dt->millisecond);
-            int len = strlen(buf);
+            int len = 0;
+            
+            switch (dt->precision) {
+                case DATETIME_PRECISION_YEAR_ONLY:
+                    len = snprintf(buf, sizeof(buf), "t'%04d'", DATETIME_GET_YEAR(dt));
+                    break;
+                    
+                case DATETIME_PRECISION_DATE_ONLY:
+                    len = snprintf(buf, sizeof(buf), "t'%04d-%02d-%02d'", 
+                        DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
+                    break;
+                    
+                case DATETIME_PRECISION_TIME_ONLY: {
+                    // Debug: Print the datetime values we're formatting
+                    printf("fn_string debug: formatting time-only: %02d:%02d:%02d.%03d, tz_offset=%d\n", 
+                           dt->hour, dt->minute, dt->second, dt->millisecond, 
+                           DATETIME_HAS_TIMEZONE(dt) ? DATETIME_GET_TZ_OFFSET(dt) : -999);
+                    
+                    // Format time-only without 'T' prefix
+                    len = snprintf(buf, sizeof(buf), "t'%02d:%02d:%02d", 
+                        dt->hour, dt->minute, dt->second);
+                    
+                    // Add milliseconds if non-zero
+                    if (dt->millisecond > 0) {
+                        len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
+                    }
+                    
+                    // Add timezone - use 'z' for UTC (+00:00)
+                    if (DATETIME_HAS_TIMEZONE(dt)) {
+                        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+                        if (tz_offset == 0) {
+                            len += snprintf(buf + len, sizeof(buf) - len, "z");
+                        } else {
+                            int hours = abs(tz_offset) / 60;
+                            int minutes = abs(tz_offset) % 60;
+                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d", 
+                                tz_offset >= 0 ? hours : -hours, minutes);
+                        }
+                    }
+                    
+                    len += snprintf(buf + len, sizeof(buf) - len, "'");
+                    break;
+                }
+                    
+                case DATETIME_PRECISION_DATE_TIME:
+                default: {
+                    // Format full datetime with 'T' separator
+                    len = snprintf(buf, sizeof(buf), "t'%04d-%02d-%02dT%02d:%02d:%02d", 
+                        DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
+                        dt->hour, dt->minute, dt->second);
+                    
+                    // Add milliseconds if non-zero
+                    if (dt->millisecond > 0) {
+                        len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
+                    }
+                    
+                    // Add timezone - use 'z' for UTC (+00:00)
+                    if (DATETIME_HAS_TIMEZONE(dt)) {
+                        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+                        if (tz_offset == 0) {
+                            len += snprintf(buf + len, sizeof(buf) - len, "z");
+                        } else {
+                            int hours = abs(tz_offset) / 60;
+                            int minutes = abs(tz_offset) % 60;
+                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d", 
+                                tz_offset >= 0 ? hours : -hours, minutes);
+                        }
+                    }
+                    
+                    len += snprintf(buf + len, sizeof(buf) - len, "'");
+                    break;
+                }
+            }
+            
             String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
             strcpy(str->chars, buf);
             str->len = len;  str->ref_cnt = 0;
@@ -1109,7 +1183,7 @@ static bool static_dt_initialized = false;
 
 // DateTime system function - creates a current DateTime
 DateTime* fn_datetime() {
-    // Use a static DateTime to avoid heap allocation issues
+    // Use a static DateTime to avoid heap allocation issues - this is not roubust, not thread-safe
     if (!static_dt_initialized) {
         memset(&static_dt, 0, sizeof(DateTime));
         static_dt_initialized = true;
@@ -1118,21 +1192,8 @@ DateTime* fn_datetime() {
     // Get current time
     time_t now = time(NULL);
     struct tm* tm_utc = gmtime(&now);
-    
-    if (!tm_utc) {
-        // Return a default DateTime if time conversion fails
-        DATETIME_SET_YEAR_MONTH(&static_dt, 1970, 1);
-        static_dt.day = 1;
-        static_dt.hour = 0;
-        static_dt.minute = 0;
-        static_dt.second = 0;
-        static_dt.millisecond = 0;
-        static_dt.precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
-        static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
-        DATETIME_SET_TZ_OFFSET(&static_dt, 0);
-        return &static_dt;
-    }
-    
+    if (!tm_utc) { return NULL; }
+
     // Set date and time from current UTC time
     DATETIME_SET_YEAR_MONTH(&static_dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
     static_dt.day = tm_utc->tm_mday;
@@ -1143,7 +1204,7 @@ DateTime* fn_datetime() {
     
     // Set as UTC timezone
     DATETIME_SET_TZ_OFFSET(&static_dt, 0);
-    static_dt.precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+    static_dt.precision = DATETIME_PRECISION_DATE_TIME;
     static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
     return &static_dt;

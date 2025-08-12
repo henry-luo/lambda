@@ -24,9 +24,7 @@ static int days_in_month(int year, int month) {
 DateTime* datetime_new(VariableMemPool* pool) {
     DateTime* dt = (DateTime*)pool_calloc(pool, sizeof(DateTime));
     if (!dt) return NULL;
-    
-    memset(dt, 0, sizeof(DateTime));
-    dt->precision = DATETIME_HAS_DATETIME;  // Full datetime by default
+    dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime by default
     dt->format_hint = DATETIME_FORMAT_ISO8601;
     return dt;
 }
@@ -54,7 +52,7 @@ DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp) {
     
     /* Set UTC timezone (offset 0) and precision */
     DATETIME_SET_TZ_OFFSET(dt, 0);
-    dt->precision = DATETIME_HAS_DATETIME;  // Full datetime from unix timestamp
+    dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime from unix timestamp
     dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
     return dt;
@@ -262,9 +260,11 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         }
         
         /* Parse optional timezone */
+        bool parsed_z_suffix = false;
         if (**ptr == 'z' || **ptr == 'Z') {
             (*ptr)++;
             DATETIME_SET_TZ_OFFSET(dt, 0);  /* UTC */
+            parsed_z_suffix = true;
         } else if (**ptr == '+' || **ptr == '-') {
             bool tz_negative = (**ptr == '-');
             (*ptr)++;
@@ -285,8 +285,8 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         /* Set default date values and time-only precision */
         DATETIME_SET_YEAR_MONTH(dt, 1970, 1);
         dt->day = 1;
-        dt->precision = DATETIME_HAS_TIME;
-        dt->format_hint = DATETIME_FORMAT_ISO8601;
+        dt->precision = DATETIME_PRECISION_TIME_ONLY;
+        dt->format_hint = parsed_z_suffix ? DATETIME_FORMAT_ISO8601_UTC : DATETIME_FORMAT_ISO8601;
         return true;
     }
     
@@ -297,10 +297,10 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     if (negative_year) year = -year;
     if (year < DATETIME_MIN_YEAR || year > DATETIME_MAX_YEAR) return false;
     
-    /* Default values - use 0 for unspecified components */
-    int month = 0, day = 0;  /* 0 = unspecified */
+    /* Default values - use 1 for month/day to make valid dates */
+    int month = 1, day = 1;  /* Default to January 1st for year-only dates */
     int hour = 0, minute = 0, second = 0, millisecond = 0;
-    uint8_t precision = DATETIME_HAS_YEAR;  /* Start with year-only */
+    uint8_t precision = DATETIME_PRECISION_YEAR_ONLY;  /* Start with year-only */
     
     /* Parse optional month */
     if (format == DATETIME_PARSE_LAMBDA) {
@@ -311,14 +311,14 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         (*ptr)++;
         if (!parse_int(ptr, 2, &month)) return false;
         if (month < 1 || month > DATETIME_MAX_MONTH) return false;
-        precision = DATETIME_HAS_DATE;  /* Now we have year-month */
+        precision = DATETIME_PRECISION_DATE_ONLY;  /* Now we have year-month */
         
         /* Parse optional day */
         if (**ptr == '-') {
             (*ptr)++;
             if (!parse_int(ptr, 2, &day)) return false;
             if (day < 1 || day > days_in_month(year, month)) return false;
-            /* precision remains DATETIME_HAS_DATE but now with full date */
+            /* precision remains DATETIME_PRECISION_DATE_ONLY but now with full date */
         }
     }
     
@@ -345,10 +345,10 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         }
         
         /* Update precision */
-        if (precision == DATETIME_HAS_DATE) {
-            precision = DATETIME_HAS_DATETIME;  // Full datetime
+        if (precision == DATETIME_PRECISION_DATE_ONLY) {
+            precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime
         } else {
-            precision |= DATETIME_HAS_TIME;     // Year + time (unusual but supported)
+            precision = DATETIME_PRECISION_TIME_ONLY;  // Year + time becomes time only
         }
         
         /* Parse time: HH:MM:SS */
@@ -441,7 +441,10 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     if (dt->format_hint == 0) {  /* Not set to UTC format above */
         dt->format_hint = DATETIME_FORMAT_ISO8601;
     }
-    
+    printf("Parsed DateTime: %d-%02d-%02d %02d:%02d:%02d.%03d, precision: %d, format hint: %d\n",
+           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
+           dt->hour, dt->minute, dt->second, dt->millisecond,
+           dt->precision, dt->format_hint);
     return true;
 }
 
@@ -483,6 +486,10 @@ DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFo
     
     /* Set end pointer to where parsing stopped */
     if (end) *end = (char*)ptr;
+    printf("Parsed DateTime: %d-%02d-%02d %02d:%02d:%02d.%03d, precision: %d, format hint: %d\n",
+           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
+           dt->hour, dt->minute, dt->second, dt->millisecond,
+           dt->precision, dt->format_hint);
     return dt;
     
 error:
@@ -525,10 +532,7 @@ DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str) 
     
     /* Try ISO8601 format */
     dt = datetime_parse(pool, datetime_str, DATETIME_PARSE_ISO8601, NULL);
-    if (dt) return dt;
-    
-    /* If all parsing fails, return NULL */
-    return NULL;
+    return dt;
 }
 
 /* Internal ICS parser (common logic) */
@@ -551,7 +555,7 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
     /* Check for time part */
     if (**ptr == 'T' && strlen(*ptr) >= 7) {
         (*ptr)++; /* skip 'T' */
-        dt->precision = DATETIME_HAS_DATETIME;  // Full datetime
+        dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime
         
         int hour, minute, second;
         if (!parse_int(ptr, 2, &hour)) return false;
@@ -572,7 +576,7 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
         }
     } else {
         /* Date only */
-        dt->precision = DATETIME_HAS_DATE;
+        dt->precision = DATETIME_PRECISION_DATE_ONLY;
         DATETIME_CLEAR_TIMEZONE(dt);
     }
     
@@ -583,11 +587,12 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
     return true;
 }
 
-void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
+void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat format) {
     if (!dt || !strbuf) return;
-    printf("Formatting DateTime to ISO8601: %d-%02d-%02dT%02d:%02d:%02d.%03d\n",
+    char separator = (format == DATETIME_PARSE_LAMBDA) ? ' ' : 'T';
+    printf("Formatting DateTime to string: %d-%02d-%02d %02d:%02d:%02d.%03d, format: %d\n",
            DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
-           dt->hour, dt->minute, dt->second, dt->millisecond);
+           dt->hour, dt->minute, dt->second, dt->millisecond, format);
     
     int year = DATETIME_GET_YEAR(dt);
     int month = DATETIME_GET_MONTH(dt);
@@ -595,12 +600,12 @@ void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
     
     /* Format based on precision */
     switch (dt->precision) {
-        case DATETIME_HAS_YEAR:
+        case DATETIME_PRECISION_YEAR_ONLY:
             /* Just year */
             strbuf_append_format(strbuf, "%04d", year);
             break;
             
-        case DATETIME_HAS_DATE:
+        case DATETIME_PRECISION_DATE_ONLY:
             /* Check if this is a partial date (year-month only) or full date */
             if (day == 0) {
                 /* Year and month only (day was not specified) */
@@ -611,20 +616,19 @@ void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
             }
             break;
             
-        case DATETIME_HAS_TIME:
+        case DATETIME_PRECISION_TIME_ONLY:
             /* Time only */
-            strbuf_append_format(strbuf, "T%02d:%02d:%02d", 
+            strbuf_append_format(strbuf, "%02d:%02d:%02d", 
                                dt->hour, dt->minute, dt->second);
             if (dt->millisecond > 0) {
                 strbuf_append_format(strbuf, ".%03d", dt->millisecond);
             }
             break;
             
-        case DATETIME_HAS_DATETIME:
+        case DATETIME_PRECISION_DATE_TIME:
             /* Full datetime */
-            strbuf_append_format(strbuf, "%04d-%02d-%02d", year, month, day);
-            strbuf_append_format(strbuf, "T%02d:%02d:%02d", 
-                               dt->hour, dt->minute, dt->second);
+            strbuf_append_format(strbuf, "%04d-%02d-%02d%c%02d:%02d:%02d",
+                year, month, day, separator, dt->hour, dt->minute, dt->second);
             if (dt->millisecond > 0) {
                 strbuf_append_format(strbuf, ".%03d", dt->millisecond);
             }
@@ -632,11 +636,11 @@ void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
     }
     
     /* Handle timezone formatting for time-based precisions */
-    if (dt->precision == DATETIME_HAS_TIME || dt->precision == DATETIME_HAS_DATETIME) {
+    if (dt->precision == DATETIME_PRECISION_TIME_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) {
         /* Handle timezone formatting */
         if (DATETIME_HAS_TIMEZONE(dt)) {
             if (DATETIME_IS_UTC_FORMAT(dt)) {
-                strbuf_append_char(strbuf, 'Z');
+                strbuf_append_char(strbuf, 'z');
             } else {
                 int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
                 int hours = abs(tz_offset) / 60;
@@ -648,23 +652,31 @@ void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
     }
 }
 
+void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt) {
+    datetime_format_internal(strbuf, dt, DATETIME_PARSE_ISO8601);
+}
+
+void datetime_format_lambda(StrBuf *strbuf, DateTime* dt) {
+    datetime_format_internal(strbuf, dt, DATETIME_PARSE_LAMBDA);
+}
+
 void datetime_format_ics(StrBuf *strbuf, DateTime* dt) {
     if (!dt || !strbuf) return;
     
     /* Format based on precision */
     switch (dt->precision) {
-        case DATETIME_HAS_YEAR:
+        case DATETIME_PRECISION_YEAR_ONLY:
             /* Year only - not standard ICS, but we'll format as year0101 */
             strbuf_append_format(strbuf, "%04d0101", DATETIME_GET_YEAR(dt));
             break;
             
-        case DATETIME_HAS_DATE:
+        case DATETIME_PRECISION_DATE_ONLY:
             /* Date only */
             strbuf_append_format(strbuf, "%04d%02d%02d", 
                                DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
             break;
             
-        case DATETIME_HAS_TIME:
+        case DATETIME_PRECISION_TIME_ONLY:
             /* Time only - not standard ICS, but we'll format as 19700101T time */
             strbuf_append_format(strbuf, "19700101T%02d%02d%02d", 
                                dt->hour, dt->minute, dt->second);
@@ -673,7 +685,7 @@ void datetime_format_ics(StrBuf *strbuf, DateTime* dt) {
             }
             break;
             
-        case DATETIME_HAS_DATETIME:
+        case DATETIME_PRECISION_DATE_TIME:
             /* Full datetime */
             strbuf_append_format(strbuf, "%04d%02d%02dT%02d%02d%02d", 
                                DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,

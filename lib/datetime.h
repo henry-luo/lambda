@@ -22,25 +22,10 @@ typedef struct DateTime {
     uint64_t second : 6;           // 0-63 (0-59 for seconds)
     uint64_t millisecond : 10;     // 0-1023 (0-999 for milliseconds)
     uint64_t tz_offset_biased : 11; // Timezone offset + 1024 bias, 0 = no timezone
-    uint64_t precision : 2;        // DateTime precision flags (2 bits = 4 flags)
+    uint64_t precision : 2;        // DateTimePrecision enum (2 bits = 4 possible values)
     uint64_t format_hint : 2;      // Format hint + UTC flag (2 bits = 4 combinations)
     // Total: 17+5+5+6+6+10+11+2+2 = 64 bits exactly
 } DateTime;
-
-// DateTime precision flags (2 bits = 4 possible flags max)
-#define DATETIME_HAS_YEAR      0x00  // Year only (default/minimal precision)
-#define DATETIME_HAS_DATE      0x01  // Date (year, month, day)
-#define DATETIME_HAS_TIME      0x02  // Time only (hour, minute, second)
-#define DATETIME_HAS_DATETIME  0x03  // Full datetime (date + time)
-// Combinations: 0x00=year only, 0x01=date only, 0x02=time only, 0x03=date+time
-
-// DateTime format hints with UTC flag (2 bits = 4 combinations)
-typedef enum {
-    DATETIME_FORMAT_ISO8601 = 0,     // 2024-01-15T10:30:00+05:00 (with timezone)
-    DATETIME_FORMAT_HUMAN = 1,       // 2024-01-15 10:30 AM (human readable)
-    DATETIME_FORMAT_ISO8601_UTC = 2, // 2024-01-15T10:30:00Z (UTC/Z suffix)
-    DATETIME_FORMAT_HUMAN_UTC = 3,   // 2024-01-15 10:30 AM UTC (human readable UTC)
-} DateTimeFormat;
 
 // DateTime format types for parsing
 typedef enum {
@@ -50,6 +35,22 @@ typedef enum {
     DATETIME_PARSE_LAMBDA = 3,       // Lambda format (YYYY-MM-DD hh:mm:ss, without t'...' wrapper)
     DATETIME_PARSE_HUMAN = 4,        // Human readable format
 } DateTimeParseFormat;
+
+// DateTime precision levels (2 bits = 4 possible values)
+typedef enum {
+    DATETIME_PRECISION_YEAR_ONLY = 0,  // Year only (2024)
+    DATETIME_PRECISION_DATE_ONLY = 1,  // Date (year, month, day) (2024-01-15)
+    DATETIME_PRECISION_TIME_ONLY = 2,  // Time only (hour, minute, second) (10:30:00)
+    DATETIME_PRECISION_DATE_TIME = 3,  // Full datetime (date + time) (2024-01-15T10:30:00)
+} DateTimePrecision;
+
+// DateTime format hints with UTC flag (2 bits = 4 combinations)
+typedef enum {
+    DATETIME_FORMAT_ISO8601 = 0,     // 2024-01-15T10:30:00+05:00 (with timezone)
+    DATETIME_FORMAT_HUMAN = 1,       // 2024-01-15 10:30 AM (human readable)
+    DATETIME_FORMAT_ISO8601_UTC = 2, // 2024-01-15T10:30:00Z (UTC/Z suffix)
+    DATETIME_FORMAT_HUMAN_UTC = 3,   // 2024-01-15 10:30 AM UTC (human readable UTC)
+} DateTimeFormat;
 
 // Helper macros for packed year_month field
 // Formula: year_month = (year + 4000) * 16 + month
@@ -116,6 +117,7 @@ DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFo
 
 // Formatting functions
 void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt);
+void datetime_format_lambda(StrBuf *strbuf, DateTime* dt);
 void datetime_format_ics(StrBuf *strbuf, DateTime* dt);
 void datetime_format_rfc2822(StrBuf *strbuf, DateTime* dt);
 void datetime_format_human(StrBuf *strbuf, DateTime* dt);

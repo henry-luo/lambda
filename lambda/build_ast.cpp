@@ -456,9 +456,6 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 }
 
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    StrView sv = ts_node_source(tp, node);
-    printf("build lit datetime: %.*s\n", (int)sv.length, sv.str);
-    
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
     int datetime_len = end - start;
     
@@ -476,8 +473,8 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // On success: dt != NULL and parse_end > datetime_start (parsing progressed)
     // On error: dt == NULL and parse_end == datetime_start (no progress)
     if (dt && parse_end > datetime_start) {
-        printf("Successfully parsed datetime: %.*s -> year=%d, month=%d, day=%d\n", 
-               datetime_len, datetime_start, DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
+        printf("parsed datetime fields: %d, %d, %d, %d, %d\n", 
+            dt->year_month, dt->day, dt->hour, dt->minute, dt->second);
     } else {
         // Fallback to default if parsing fails
         printf("Failed to parse datetime: %.*s, using default\n", datetime_len, datetime_start);

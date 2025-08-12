@@ -232,7 +232,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 DateTime *dt = *(DateTime**)data;
                 if (dt) {
                     strbuf_append_str(strbuf, "t'"); 
-                    datetime_format_iso8601(strbuf, dt);
+                    datetime_format_lambda(strbuf, dt);
                     strbuf_append_char(strbuf, '\'');
                 }
                 break;
@@ -378,7 +378,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         DateTime *dt = (DateTime*)item.pointer;
         if (dt) {
             strbuf_append_str(strbuf, "t'"); 
-            datetime_format_iso8601(strbuf, dt);
+            datetime_format_lambda(strbuf, dt);
             strbuf_append_char(strbuf, '\'');
         }
         break;
