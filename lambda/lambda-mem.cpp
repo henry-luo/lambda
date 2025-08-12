@@ -123,7 +123,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
             if (!nested_map->ref_cnt) free_container((Container*)nested_map, clear_entry);
         }
         else if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
-            field->type->type_id == LMD_TYPE_DTIME || field->type->type_id == LMD_TYPE_BINARY) {
+            field->type->type_id == LMD_TYPE_BINARY) {
             String *str = *(String**)field_ptr;
             Item item = {.item = s2it(str)};
             free_item(item, clear_entry);
@@ -202,7 +202,7 @@ void free_container(Container* cont, bool clear_entry) {
 
 void free_item(Item item, bool clear_entry) {
     if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL || 
-        item.type_id == LMD_TYPE_DTIME || item.type_id == LMD_TYPE_BINARY) {
+        item.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)item.pointer;
         if (!str->ref_cnt) {
             pool_variable_free(context->heap->pool, str);
@@ -240,7 +240,8 @@ void frame_end() {
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
         Item itm = {.raw_pointer = data};
-        if (itm.type_id == LMD_TYPE_STRING) {
+        if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+            itm.type_id == LMD_TYPE_BINARY) {
             String *str = (String*)itm.pointer;
             if (!str->ref_cnt) {
                 printf("freeing heap string: %s\n", str->chars);
