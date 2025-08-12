@@ -36,6 +36,7 @@ extern "C" {
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 #include "../lib/num_stack.h"
+#include "datetime.h"
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
@@ -102,6 +103,10 @@ typedef struct TypeString : TypeConst {
 } TypeString;
 
 typedef TypeString TypeSymbol;
+
+typedef struct TypeDateTime : TypeConst {
+    DateTime *datetime;
+} TypeDateTime;
 
 typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array

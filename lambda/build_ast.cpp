@@ -33,6 +33,7 @@ Type LIT_INT = {.type_id = LMD_TYPE_INT, .is_const = 1, .is_literal = 1};
 Type LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
 Type LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_const = 1, .is_literal = 1};
 Type LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
+Type LIT_DTIME = {.type_id = LMD_TYPE_DTIME, .is_const = 1, .is_literal = 1};
 Type LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
 
 TypeType LIT_TYPE_NULL;
@@ -110,7 +111,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float", .type=&TYPE_FLOAT, .lit_type = (Type*)&LIT_TYPE_FLOAT},
     [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal", .type=&TYPE_DECIMAL, .lit_type = (Type*)&LIT_TYPE_DECIMAL},
     [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number", .type=&TYPE_NUMBER, .lit_type = (Type*)&LIT_TYPE_NUMBER},
-    [LMD_TYPE_DTIME] = {.byte_size = sizeof(char*), .name = "datetime", .type=&TYPE_DTIME, .lit_type = (Type*)&LIT_TYPE_DTIME},
+    [LMD_TYPE_DTIME] = {.byte_size = sizeof(DateTime*), .name = "datetime", .type=&TYPE_DTIME, .lit_type = (Type*)&LIT_TYPE_DTIME},
     [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .type=&TYPE_STRING, .lit_type = (Type*)&LIT_TYPE_STRING},
     [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .type=&TYPE_SYMBOL, .lit_type = (Type*)&LIT_TYPE_SYMBOL},
     [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .type=&TYPE_BINARY, .lit_type = (Type*)&LIT_TYPE_BINARY},
@@ -433,7 +434,6 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
     int len =  end - start;
     TypeString *str_type = (TypeString*)alloc_type(tp->ast_pool, 
-        (symbol == SYM_DATETIME || symbol == SYM_TIME) ? LMD_TYPE_DTIME :
         symbol == SYM_STRING ? LMD_TYPE_STRING : 
         symbol == SYM_BINARY ? LMD_TYPE_BINARY : 
         LMD_TYPE_SYMBOL, sizeof(TypeString));
@@ -451,6 +451,55 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     arraylist_append(tp->const_list, str_type->string);
     str_type->const_index = tp->const_list->length - 1;
     return (Type *)str_type;
+}
+
+Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
+    StrView sv = ts_node_source(tp, node);
+    printf("build lit datetime: %.*s\n", (int)sv.length, sv.str);
+    
+    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+    int len = end - start;
+    
+    TypeDateTime *dt_type = (TypeDateTime*)alloc_type(tp->ast_pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
+    dt_type->is_const = 1;
+    dt_type->is_literal = 1;
+    
+    // Extract datetime string content (remove t'' wrapper)
+    const char* dt_content = tp->source + start;
+    char* datetime_str = (char*)pool_calloc(tp->ast_pool, len + 1);
+    
+    // Handle t'...' format by removing wrapper
+    if (len >= 3 && dt_content[0] == 't' && dt_content[1] == '\'' && dt_content[len-1] == '\'') {
+        memcpy(datetime_str, dt_content + 2, len - 3);
+        datetime_str[len - 3] = '\0';
+    } else {
+        memcpy(datetime_str, dt_content, len);
+        datetime_str[len] = '\0';
+    }
+    
+    // For AST building, we'll store the raw string for now
+    // The actual DateTime parsing will happen at runtime
+    // Create a basic DateTime structure as a placeholder
+    DateTime* dt = (DateTime*)pool_calloc(tp->ast_pool, sizeof(DateTime));
+    
+    // Initialize with default values (will be parsed at runtime)
+    dt->year = 1970;
+    dt->month = 1;
+    dt->day = 1;
+    dt->hour = 0;
+    dt->minute = 0;
+    dt->second = 0;
+    dt->millisecond = 0;
+    dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+    
+    dt_type->datetime = dt;
+    
+    // Add to const list
+    arraylist_append(tp->const_list, dt_type->datetime);
+    dt_type->const_index = tp->const_list->length - 1;
+    
+    printf("build lit datetime: %s, type: %d\n", datetime_str, dt_type->type_id);
+    return (Type *)dt_type;
 }
 
 Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
@@ -512,7 +561,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = build_lit_string(tp, str_node, symbol);
     }
     else if (symbol == SYM_DATETIME || symbol == SYM_TIME) {
-        ast_node->type = build_lit_string(tp, child, symbol);
+        ast_node->type = build_lit_datetime(tp, child, symbol);
     }    
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);

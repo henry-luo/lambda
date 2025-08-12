@@ -736,8 +736,25 @@ String* fn_string(Item itm) {
         return itm.bool_val ? &STR_TRUE : &STR_FALSE;
     }    
     else if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
-        itm.type_id == LMD_TYPE_BINARY || itm.type_id == LMD_TYPE_DTIME) {
+        itm.type_id == LMD_TYPE_BINARY) {
         return (String*)itm.pointer;
+    }
+    else if (itm.type_id == LMD_TYPE_DTIME) {
+        DateTime *dt = (DateTime*)itm.pointer;
+        if (dt) {
+            // Format datetime to ISO8601 string
+            // We need a context, but for now we'll create a basic formatted string
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", 
+                dt->year, dt->month, dt->day, dt->hour, dt->minute, dt->second, dt->millisecond);
+            int len = strlen(buf);
+            String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
+            strcpy(str->chars, buf);
+            str->len = len;  str->ref_cnt = 0;
+            return str;
+        } else {
+            return &STR_NULL;
+        }
     }
     else if (itm.type_id == LMD_TYPE_INT) {
         char buf[32];

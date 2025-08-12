@@ -71,6 +71,7 @@ typedef struct ArrayLong ArrayLong;
 typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
+typedef struct DateTime DateTime;
 
 /*
 # Lambda Runtime Item
@@ -285,6 +286,7 @@ Item push_l(long lval);
 #define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
 
 #define const_s(index)      ((String*)*(rt->consts + index))
+#define const_k(index)      ((DateTime*)*(rt->consts + index))
 
 // item unboxing
 long it2l(Item item);

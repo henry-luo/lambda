@@ -1,5 +1,6 @@
 
 #include "transpiler.hpp"
+#include "datetime.h"
 
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
@@ -88,7 +89,7 @@ void writeType(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "String*");
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "String*");
+        strbuf_append_str(tp->code_buf, "DateTime*");
         break;
 
     case LMD_TYPE_RANGE:
@@ -218,9 +219,18 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 break;
             }
             case LMD_TYPE_DTIME: {
-                String *dt = *(String**)data;
-                if (dt && dt->chars) {
-                    strbuf_append_format(strbuf, "t'%s'", dt->chars);
+                DateTime *dt = *(DateTime**)data;
+                if (dt) {
+                    // Create temporary context for formatting
+                    Context temp_ctx = {0};
+                    temp_ctx.heap = (Heap*)data; // Use a temporary heap context
+                    
+                    String* formatted = datetime_format_iso8601(&temp_ctx, dt);
+                    if (formatted && formatted->chars) {
+                        strbuf_append_format(strbuf, "t'%s'", formatted->chars);
+                    } else {
+                        strbuf_append_str(strbuf, "t''");
+                    }
                 } else {
                     strbuf_append_str(strbuf, "t''");
                 }
@@ -364,9 +374,21 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_DTIME: {
-        String *string = (String*)item.pointer;
-        if (string && string->chars) strbuf_append_format(strbuf, "t'%s'", string->chars);
-        else strbuf_append_str(strbuf, "t''");
+        DateTime *dt = (DateTime*)item.pointer;
+        if (dt) {
+            // Create temporary context for formatting
+            Context temp_ctx = {0};
+            temp_ctx.heap = NULL; // We'll handle this more robustly later
+            
+            String* formatted = datetime_format_iso8601(&temp_ctx, dt);
+            if (formatted && formatted->chars) {
+                strbuf_append_format(strbuf, "t'%s'", formatted->chars);
+            } else {
+                strbuf_append_str(strbuf, "t''");
+            }
+        } else {
+            strbuf_append_str(strbuf, "t''");
+        }
         break;
     }
     case LMD_TYPE_BINARY: {
@@ -509,7 +531,7 @@ char* format_type(Type *type) {
     case LMD_TYPE_SYMBOL:
         return "char*";
     case LMD_TYPE_DTIME:
-        return "char*";
+        return "DateTime*";
     case LMD_TYPE_BINARY:
         return "uint8_t*";
 

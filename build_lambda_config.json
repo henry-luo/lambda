@@ -47,6 +47,7 @@
         "lambda/transpile.cpp",
         "lambda/transpile-mir.cpp",
         "lambda/build_ast.cpp",
+        "lambda/datetime.cpp",
         "lambda/mir.c",
         "lambda/pack.cpp",
         "lambda/print.cpp",

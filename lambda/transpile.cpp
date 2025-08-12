@@ -4,6 +4,7 @@ extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
+Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
     if (import) {
@@ -33,8 +34,37 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     printf("transpile box item: %d\n", item->type->type_id);
+    printf("transpile box item type name: %s, node_type: %d\n", 
+        item->type->type_id == LMD_TYPE_DTIME ? "DateTime" : 
+        item->type->type_id == LMD_TYPE_STRING ? "String" :
+        item->type->type_id == LMD_TYPE_LIST ? "List" :
+        item->type->type_id == LMD_TYPE_NULL ? "Null" : "Other",
+        item->node_type);
+        
+    // Debug: if this is a primary node with an identifier, show more info
+    if (item->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri = (AstPrimaryNode*)item;
+        if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
+            AstIdentNode* ident = (AstIdentNode*)pri->expr;
+            printf("transpile_box_item: identifier found: %.*s\n", 
+                (int)ident->name.length, ident->name.str);
+            if (ident->entry && ident->entry->node) {
+                printf("transpile_box_item: identifier entry type: %d\n", 
+                    ident->entry->node->type->type_id);
+            }
+        }
+    }
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
+        // Check if this is actually a call expression that returns void
+        if (item->node_type == AST_NODE_PRIMARY) {
+            AstPrimaryNode* pri = (AstPrimaryNode*)item;
+            if (pri->expr && pri->expr->node_type == AST_NODE_CALL_EXPR) {
+                printf("transpile_box_item: Found call expression, using ITEM_NULL placeholder\n");
+                strbuf_append_str(tp->code_buf, "ITEM_NULL");
+                break;
+            }
+        }
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         break;
     case LMD_TYPE_BOOL:
@@ -222,12 +252,18 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
+            printf("transpile_primary_expr: identifier %.*s, type: %d\n", 
+                (int)ident_node->name.length, ident_node->name.str, pri_node->type->type_id);
+                
             if (ident_node->entry && ident_node->entry->node && 
                 ident_node->entry->node->node_type == AST_NODE_FUNC) {
                 write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node, 
                     (AstImportNode*)ident_node->entry->import);
             }
             else if (ident_node->entry && ident_node->entry->node) {
+                printf("transpile_primary_expr: writing var name for %.*s, entry type: %d\n",
+                    (int)ident_node->name.length, ident_node->name.str,
+                    ident_node->entry->node->type->type_id);
                 write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
                     (AstImportNode*)ident_node->entry->import);
             }
@@ -242,11 +278,18 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     } else { // const
         if (pri_node->type->is_literal) {  // literal
             if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL ||
-                pri_node->type->type_id == LMD_TYPE_DTIME || pri_node->type->type_id == LMD_TYPE_BINARY) {
+                pri_node->type->type_id == LMD_TYPE_BINARY) {
                 // loads the const string without boxing
                 strbuf_append_str(tp->code_buf, "const_s(");
                 TypeString *str_type = (TypeString*)pri_node->type;
                 strbuf_append_int(tp->code_buf, str_type->const_index);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_DTIME) {
+                // loads the const datetime without boxing
+                strbuf_append_str(tp->code_buf, "const_k(");
+                TypeDateTime *dt_type = (TypeDateTime*)pri_node->type;
+                strbuf_append_int(tp->code_buf, dt_type->const_index);
                 strbuf_append_char(tp->code_buf, ')');
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT || pri_node->type->type_id == LMD_TYPE_INT64) {
@@ -759,6 +802,16 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
             type->length--;
             // already transpiled
         }
+        else if (item->node_type == AST_NODE_PRIMARY) {
+            // Check if this is a statement call expression (like print)
+            AstPrimaryNode* pri = (AstPrimaryNode*)item;
+            if (pri->expr && pri->expr->node_type == AST_NODE_CALL_EXPR) {
+                type->length--;
+                strbuf_append_str(tp->code_buf, "\n ");
+                transpile_expr(tp, item);
+                strbuf_append_char(tp->code_buf, ';');
+            }
+        }
         item = item->next;
     }
     if (type->length == 0) {
@@ -927,8 +980,18 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     strbuf_append_str(tp->code_buf, "(");
     AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
+        printf("transpile_call_expr: processing arg type %d, node_type %d\n", 
+            arg->type->type_id, arg->node_type);
+        
+        // For system functions, box DateTime arguments
+        if (call_node->function->node_type == AST_NODE_SYS_FUNC && arg->type->type_id == LMD_TYPE_DTIME) {
+            printf("transpile_call_expr: BOXING DateTime for sys func\n");
+            strbuf_append_str(tp->code_buf, "k2it(");
+            transpile_expr(tp, arg);
+            strbuf_append_str(tp->code_buf, ")");
+        }
         // boxing based on arg type and fn definition type
-        if (param_type) {
+        else if (param_type) {
             if (param_type->type_id == arg->type->type_id) {
                 transpile_expr(tp, arg);
             }
