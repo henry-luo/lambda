@@ -207,96 +207,18 @@ void run_repl(Runtime *runtime, bool use_mir) {
     strbuf_free(repl_history);
 }
 
-void run_script_file(Runtime *runtime, const char *script_path, bool use_mir) {
+void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false) {
     Item result;
     if (use_mir) {
         result = run_script_mir(runtime, NULL, (char*)script_path);
     } else {
-        result = run_script_at(runtime, (char*)script_path);
+        result = run_script_at(runtime, (char*)script_path, transpile_only);
     }
     
     StrBuf *output = strbuf_new_cap(256);
     print_item(output, result);
     printf("%s\n", output->str);
     strbuf_free(output);
-}
-
-void transpile_script_only(Runtime *runtime, const char *script_path) {
-    printf("Transpiling script: %s (no execution)\n", script_path);
-    
-    // Read the source file
-    const char* source = read_text_file(script_path);
-    if (!source) {
-        printf("Error: Could not read file '%s'\n", script_path);
-        return;
-    }
-    
-    // Create a transpiler and transpile the script
-    Transpiler transpiler;
-    memset(&transpiler, 0, sizeof(Transpiler));
-    transpiler.parser = runtime->parser;
-    transpiler.runtime = runtime;
-    transpiler.reference = strdup(script_path);
-    transpiler.source = source;
-    transpiler.index = 0;
-    
-    // Parse the source
-    transpiler.syntax_tree = lambda_parse_source(transpiler.parser, transpiler.source);
-    if (transpiler.syntax_tree == NULL) {
-        printf("Error: Failed to parse the source code.\n");
-        free((void*)source);
-        return;
-    }
-    
-    // Check for syntax errors
-    TSNode root_node = ts_tree_root_node(transpiler.syntax_tree);
-    if (ts_node_has_error(root_node)) {
-        printf("Syntax tree has errors.\n");
-        find_errors(root_node);
-        ts_tree_delete(transpiler.syntax_tree);
-        free((void*)source);
-        return;
-    }
-    
-    // Build AST
-    size_t grow_size = 4096;
-    size_t tolerance_percent = 20;
-    pool_variable_init(&transpiler.ast_pool, grow_size, tolerance_percent);
-    transpiler.type_list = arraylist_new(16);
-    transpiler.const_list = arraylist_new(16);
-    
-    if (strcmp(ts_node_type(root_node), "document") != 0) {
-        printf("Error: The tree has no valid root node.\n");
-        ts_tree_delete(transpiler.syntax_tree);
-        free((void*)source);
-        return;
-    }
-    
-    // Build the AST
-    transpiler.ast_root = build_script(&transpiler, root_node);
-    
-    // Transpile to C code
-    transpiler.code_buf = strbuf_new_cap(1024);
-    transpile_ast(&transpiler, (AstScript*)transpiler.ast_root);
-    
-    // Output the transpiled C code
-    printf("Transpiled C code:\n");
-    printf("==================\n");
-    printf("%s\n", transpiler.code_buf->str);
-    printf("==================\n");
-    
-    // Write to file for convenience
-    write_text_file("_transpiled.c", transpiler.code_buf->str);
-    printf("Transpiled code written to: _transpiled.c\n");
-    
-    // Cleanup
-    strbuf_free(transpiler.code_buf);
-    if (transpiler.syntax_tree) ts_tree_delete(transpiler.syntax_tree);
-    if (transpiler.ast_pool) pool_variable_destroy(transpiler.ast_pool);
-    if (transpiler.type_list) arraylist_free(transpiler.type_list);
-    if (transpiler.const_list) arraylist_free(transpiler.const_list);
-    free((void*)source);
-    free((void*)transpiler.reference);
 }
 
 void run_assertions() {
@@ -518,11 +440,7 @@ int main(int argc, char *argv[]) {
             transpile_only = true;
         } else if (argv[i][0] != '-') {
             // This is a script file
-            if (transpile_only) {
-                transpile_script_only(&runtime, argv[i]);
-            } else {
-                run_script_file(&runtime, argv[i], use_mir);
-            }
+            run_script_file(&runtime, argv[i], use_mir, transpile_only);
             return 0;
         } else {
             // Unknown option

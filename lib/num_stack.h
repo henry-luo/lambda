@@ -3,11 +3,13 @@
 
 #include <stdlib.h>
 #include <stdbool.h>
+#include "datetime.h"
 
 // union to store either long or double values
 typedef union {
     long as_long;
     double as_double;
+    DateTime as_datetime;
 } num_value_t;
 
 typedef struct num_chunk num_chunk_t;
@@ -29,6 +31,7 @@ void num_stack_destroy(num_stack_t *stack);
 // push operations
 long* num_stack_push_long(num_stack_t *stack, long value);
 double* num_stack_push_double(num_stack_t *stack, double value);
+DateTime* num_stack_push_datetime(num_stack_t *stack, DateTime value);
 
 // access operations
 num_value_t* num_stack_get(num_stack_t *stack, size_t index);

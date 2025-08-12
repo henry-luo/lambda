@@ -640,7 +640,7 @@ void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat 
         /* Handle timezone formatting */
         if (DATETIME_HAS_TIMEZONE(dt)) {
             if (DATETIME_IS_UTC_FORMAT(dt)) {
-                strbuf_append_char(strbuf, 'z');
+                strbuf_append_char(strbuf,  format == DATETIME_PARSE_LAMBDA ? 'z' : 'Z');
             } else {
                 int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
                 int hours = abs(tz_offset) / 60;

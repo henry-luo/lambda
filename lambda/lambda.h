@@ -262,6 +262,7 @@ Item v2it(List *list);
 
 Item push_d(double dval);
 Item push_l(long lval);
+Item push_k(long dtval);
 
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)

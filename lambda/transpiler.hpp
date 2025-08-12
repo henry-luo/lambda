@@ -269,8 +269,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
 void runner_init(Runtime *runtime, Runner* runner);
 void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
-Item run_script(Runtime *runtime, const char* source, char* script_path);
-Item run_script_at(Runtime *runtime, char* script_path);
+Item run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
+Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
 

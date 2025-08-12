@@ -49,7 +49,13 @@ void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
         arr->extra++;
         break;
     }
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
+    case LMD_TYPE_DTIME:  {
+        DateTime* dtval = (DateTime*)(arr->items + (arr->capacity - arr->extra - 1));
+        *dtval = *(DateTime*)itm.pointer;  arr->items[index] = {.item = k2it(dtval)};
+        arr->extra++;
+        break;
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         String *str = (String*)itm.pointer;
         str->ref_cnt++;
         break;
@@ -105,6 +111,11 @@ Item array_get(Array *array, int index) {
     case LMD_TYPE_FLOAT: {
         double dval = *(double*)item.pointer;
         return push_d(dval);
+    }
+    case LMD_TYPE_DTIME: {
+        // DateTime dtval = *(DateTime*)item.pointer;
+        long dtval = *(long*)item.pointer;
+        return push_k(dtval);
     }
     default:
         return item;
@@ -197,9 +208,8 @@ void list_push(List *list, Item item) {
     list->items[list->length++] = item;
     // printf("list push item: type: %d, length: %ld\n", itm.type_id, list->length);
     switch (item.type_id) {
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
-        String *str = (String*)item.pointer;
-        str->ref_cnt++;
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+        String *str = (String*)item.pointer;  str->ref_cnt++;
         break;
     }
     case LMD_TYPE_FLOAT: {
@@ -214,7 +224,14 @@ void list_push(List *list, Item item) {
         *ival = *(long*)item.pointer;  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
         break;
-    }}
+    }
+    case LMD_TYPE_DTIME:  {
+        DateTime* dtval = (DateTime*)(list->items + (list->capacity - list->extra - 1));
+        *dtval = *(DateTime*)item.pointer;  list->items[list->length-1] = {.item = k2it(dtval)};
+        list->extra++;
+        break;
+    }
+    }
 }
 
 Item list_fill(List *list, int count, ...) {
@@ -286,7 +303,13 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 printf("field float value: %f\n", *(double*)field_ptr);
                 break;
             }
-            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
+            case LMD_TYPE_DTIME:  {
+                DateTime* dtval = va_arg(args, DateTime*);
+                *(DateTime**)field_ptr = dtval;
+                printf("field datetime value\n");
+                break;
+            }
+            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
                 String *str = va_arg(args, String*);
                 printf("field string value: %s\n", str->chars);
                 *(String**)field_ptr = str;
@@ -513,6 +536,12 @@ Item push_l(long lval) {
     printf("push_l: %ld\n", lval);
     long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval); // stack_alloc(sizeof(long));
     return {.item = l2it(lptr)};
+}
+
+Item push_k(long val) {
+    DateTime dtval = *(DateTime*)&val;
+    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, dtval); // stack_alloc(sizeof(DateTime));
+    return {.item = k2it(dtptr)};
 }
 
 String *str_cat(String *left, String *right) {

@@ -112,6 +112,12 @@ double* num_stack_push_double(num_stack_t *stack, double value) {
     return (double*)num_stack_push_value(stack, val);
 }
 
+DateTime* num_stack_push_datetime(num_stack_t *stack, DateTime value) {
+    num_value_t val;
+    val.as_datetime = value;
+    return (DateTime*)num_stack_push_value(stack, val);
+}
+
 // get element at specific index (0-based)
 num_value_t* num_stack_get(num_stack_t *stack, size_t index) {
     if (!stack || index >= stack->total_length) return NULL;

@@ -161,6 +161,8 @@ void init_module_import(Transpiler *tp, AstScript *script) {
     }    
 }
 
+extern unsigned int lambda_lambda_h_len;
+
 void transpile_script(Transpiler *tp, const char* source, const char* script_path) {
     if (!source) {
         printf("Error: Source code is NULL\n");
@@ -232,7 +234,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     tp->jit_context = jit_init();
     // compile user code to MIR
     write_text_file("_transpiled.c", tp->code_buf->str);
-    printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str);    
+    printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str + lambda_lambda_h_len);    
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;
     // generate native code and return the function
@@ -309,10 +311,14 @@ void runner_cleanup(Runner* runner) {
     }
 }
 
-Item run_script(Runtime *runtime, const char* source, char* script_path) {
+Item run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only) {
     Runner runner;
     runner_init(runtime, &runner);
     runner.script = load_script(runtime, script_path, source);
+    if (transpile_only) {
+        printf("Transpiled script %s only, not executing.\n", script_path);
+        return ItemNull;
+    }
     // execute the function
     Item result;
     if (!runner.script || !runner.script->main_func) { 
@@ -329,8 +335,8 @@ Item run_script(Runtime *runtime, const char* source, char* script_path) {
     return result;
 }
 
-Item run_script_at(Runtime *runtime, char* script_path) {
-    return run_script(runtime, NULL, script_path);
+Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
+    return run_script(runtime, NULL, script_path, transpile_only);
 }
 
 void runtime_init(Runtime* runtime) {
