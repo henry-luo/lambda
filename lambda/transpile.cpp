@@ -1037,6 +1037,26 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         }
         arg = arg->next;  param_type = param_type ? param_type->next : NULL;
     }
+    
+    // Special handling for format function - add default second argument if only one provided
+    if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
+        StrView fn = ts_node_source(tp, call_node->function->node);
+        if (fn.length == 6 && strncmp(fn.str, "format", 6) == 0) {
+            // Count arguments
+            int arg_count = 0;
+            AstNode* count_arg = call_node->argument;
+            while (count_arg) {
+                arg_count++;
+                count_arg = count_arg->next;
+            }
+            
+            // If only one argument, add default null second argument
+            if (arg_count == 1) {
+                strbuf_append_str(tp->code_buf, ", ITEM_NULL");
+            }
+        }
+    }
+    
     strbuf_append_char(tp->code_buf, ')');
 }
 

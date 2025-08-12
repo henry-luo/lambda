@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include <stdarg.h>
+#include <time.h>
 
 extern __thread Context* context;
 
@@ -742,11 +743,12 @@ String* fn_string(Item itm) {
     else if (itm.type_id == LMD_TYPE_DTIME) {
         DateTime *dt = (DateTime*)itm.pointer;
         if (dt) {
-            // Format datetime to ISO8601 string
+            // Format datetime to ISO8601 string using new macros
             // We need a context, but for now we'll create a basic formatted string
             char buf[64];
             snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", 
-                dt->year, dt->month, dt->day, dt->hour, dt->minute, dt->second, dt->millisecond);
+                DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day, 
+                dt->hour, dt->minute, dt->second, dt->millisecond);
             int len = strlen(buf);
             String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
             strcpy(str->chars, buf);
@@ -900,6 +902,11 @@ void fn_print(Item item) {
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
+
+// Single-argument format function wrapper - uses default formatting
+extern "C" String* fn_format_simple(Item item) {
+    return fn_format(item, ItemNull);
+}
 
 String* fn_format(Item item, Item type) {
     TypeId type_id = get_type_id(type);
@@ -1094,4 +1101,50 @@ Item fn_len(Item item) {
         break;
     }
     return {.item = i2it(size)};
+}
+
+// Static DateTime instance to avoid dynamic allocation issues
+static DateTime static_dt;
+static bool static_dt_initialized = false;
+
+// DateTime system function - creates a current DateTime
+DateTime* fn_datetime() {
+    // Use a static DateTime to avoid heap allocation issues
+    if (!static_dt_initialized) {
+        memset(&static_dt, 0, sizeof(DateTime));
+        static_dt_initialized = true;
+    }
+    
+    // Get current time
+    time_t now = time(NULL);
+    struct tm* tm_utc = gmtime(&now);
+    
+    if (!tm_utc) {
+        // Return a default DateTime if time conversion fails
+        DATETIME_SET_YEAR_MONTH(&static_dt, 1970, 1);
+        static_dt.day = 1;
+        static_dt.hour = 0;
+        static_dt.minute = 0;
+        static_dt.second = 0;
+        static_dt.millisecond = 0;
+        static_dt.precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+        static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
+        DATETIME_SET_TZ_OFFSET(&static_dt, 0);
+        return &static_dt;
+    }
+    
+    // Set date and time from current UTC time
+    DATETIME_SET_YEAR_MONTH(&static_dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
+    static_dt.day = tm_utc->tm_mday;
+    static_dt.hour = tm_utc->tm_hour;
+    static_dt.minute = tm_utc->tm_min;
+    static_dt.second = tm_utc->tm_sec;
+    static_dt.millisecond = 0;
+    
+    // Set as UTC timezone
+    DATETIME_SET_TZ_OFFSET(&static_dt, 0);
+    static_dt.precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+    static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
+    
+    return &static_dt;
 }

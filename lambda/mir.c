@@ -60,6 +60,7 @@ func_obj_t func_list[] = {
     {"fn_input", (fn_ptr) fn_input},
     {"fn_print", (fn_ptr) fn_print},
     {"fn_format", (fn_ptr) fn_format},
+    {"fn_datetime", (fn_ptr) fn_datetime},
     {"fn_index", (fn_ptr) fn_index},
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},

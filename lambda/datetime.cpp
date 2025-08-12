@@ -58,18 +58,18 @@ DateTime* datetime_from_unix(Context* ctx, int64_t unix_timestamp) {
     struct tm* tm_utc = gmtime(&timestamp);
     if (!tm_utc) return NULL;
     
-    dt->year = tm_utc->tm_year + 1900;
-    dt->month = tm_utc->tm_mon + 1;
+    // Use the new macros for year/month setting
+    DATETIME_SET_YEAR_MONTH(dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
     dt->day = tm_utc->tm_mday;
     dt->hour = tm_utc->tm_hour;
     dt->minute = tm_utc->tm_min;
     dt->second = tm_utc->tm_sec;
     dt->millisecond = 0;
     
-    dt->tz_offset_minutes = 0;
-    dt->has_timezone = true;
-    dt->is_utc = true;
-    dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME | DATETIME_HAS_SECONDS | DATETIME_HAS_TIMEZONE;
+    // Set UTC timezone (offset 0) and precision
+    DATETIME_SET_TZ_OFFSET(dt, 0);
+    dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+    dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
     return dt;
 }
@@ -78,8 +78,8 @@ int64_t datetime_to_unix(DateTime* dt) {
     if (!dt || !datetime_is_valid(dt)) return 0;
     
     struct tm tm_time = {0};
-    tm_time.tm_year = dt->year - 1900;
-    tm_time.tm_mon = dt->month - 1;
+    tm_time.tm_year = DATETIME_GET_YEAR(dt) - 1900;
+    tm_time.tm_mon = DATETIME_GET_MONTH(dt) - 1;
     tm_time.tm_mday = dt->day;
     tm_time.tm_hour = dt->hour;
     tm_time.tm_min = dt->minute;
@@ -89,9 +89,10 @@ int64_t datetime_to_unix(DateTime* dt) {
     time_t timestamp = mktime(&tm_time);
     if (timestamp == -1) return 0;
     
-    // Adjust for timezone offset
-    if (dt->has_timezone && !dt->is_utc) {
-        timestamp -= dt->tz_offset_minutes * 60;
+    // Adjust for timezone offset if present
+    if (DATETIME_HAS_TIMEZONE(dt)) {
+        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+        timestamp -= tz_offset * 60;
     }
     
     return (int64_t)timestamp;
@@ -99,14 +100,24 @@ int64_t datetime_to_unix(DateTime* dt) {
 
 bool datetime_is_valid(DateTime* dt) {
     if (!dt) return false;
-    if (dt->year < 1 || dt->year > 9999) return false;
-    if (dt->month < 1 || dt->month > 12) return false;
-    if (dt->day < 1 || dt->day > days_in_month(dt->year, dt->month)) return false;
-    if (dt->hour < 0 || dt->hour > 23) return false;
-    if (dt->minute < 0 || dt->minute > 59) return false;
-    if (dt->second < 0 || dt->second > 59) return false;
-    if (dt->millisecond < 0 || dt->millisecond > 999) return false;
-    if (dt->tz_offset_minutes < -720 || dt->tz_offset_minutes > 840) return false;
+    
+    int year = DATETIME_GET_YEAR(dt);
+    int month = DATETIME_GET_MONTH(dt);
+    
+    if (year < DATETIME_MIN_YEAR || year > DATETIME_MAX_YEAR) return false;
+    if (month < 1 || month > DATETIME_MAX_MONTH) return false;
+    if (dt->day < 1 || dt->day > days_in_month(year, month)) return false;
+    if (dt->hour > DATETIME_MAX_HOUR) return false;
+    if (dt->minute > DATETIME_MAX_MINUTE) return false;
+    if (dt->second > DATETIME_MAX_SECOND) return false;
+    if (dt->millisecond > DATETIME_MAX_MILLIS) return false;
+    
+    // Check timezone offset if present
+    if (DATETIME_HAS_TIMEZONE(dt)) {
+        int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+        if (tz_offset < DATETIME_MIN_TZ_OFFSET || tz_offset > DATETIME_MAX_TZ_OFFSET) return false;
+    }
+    
     return true;
 }
 
@@ -166,61 +177,64 @@ DateTime* datetime_parse_iso8601(Context* ctx, const char* iso_str) {
     skip_whitespace(&ptr);
     
     // Parse date: YYYY-MM-DD
-    if (!parse_int(&ptr, 4, &dt->year)) goto error;
+    int year, month, day;
+    if (!parse_int(&ptr, 4, &year)) goto error;
     dt->precision |= DATETIME_HAS_DATE;
     
     if (*ptr == '-') ptr++;
-    if (!parse_int_small(&ptr, 2, &dt->month)) goto error;
+    if (!parse_int(&ptr, 2, &month)) goto error;
     
     if (*ptr == '-') ptr++;
-    if (!parse_int_small(&ptr, 2, &dt->day)) goto error;
+    if (!parse_int(&ptr, 2, &day)) goto error;
     
+    // Set year and month using new macro
+    DATETIME_SET_YEAR_MONTH(dt, year, month);
+    dt->day = day;
     // Check for time separator 'T' or space
     if (*ptr == 'T' || *ptr == ' ') {
         ptr++;
         dt->precision |= DATETIME_HAS_TIME;
         
         // Parse time: HH:MM:SS
-        if (!parse_int_small(&ptr, 2, &dt->hour)) goto error;
+        int hour, minute, second = 0;
+        if (!parse_int(&ptr, 2, &hour)) goto error;
+        dt->hour = hour;
         
         if (*ptr == ':') ptr++;
-        if (!parse_int_small(&ptr, 2, &dt->minute)) goto error;
+        if (!parse_int(&ptr, 2, &minute)) goto error;
+        dt->minute = minute;
         
         if (*ptr == ':') {
             ptr++;
-            dt->precision |= DATETIME_HAS_SECONDS;
-            if (!parse_int_small(&ptr, 2, &dt->second)) goto error;
+            if (!parse_int(&ptr, 2, &second)) goto error;
+            dt->second = second;
             
             // Parse optional milliseconds
             if (*ptr == '.') {
                 ptr++;
-                dt->precision |= DATETIME_HAS_MILLIS;
                 int millis_width = 0;
+                int millisecond = 0;
                 while (isdigit(*ptr) && millis_width < 3) {
-                    dt->millisecond = dt->millisecond * 10 + (*ptr - '0');
+                    millisecond = millisecond * 10 + (*ptr - '0');
                     ptr++;
                     millis_width++;
                 }
                 // Normalize to 3 digits
                 while (millis_width < 3) {
-                    dt->millisecond *= 10;
+                    millisecond *= 10;
                     millis_width++;
                 }
+                dt->millisecond = millisecond;
             }
         }
         
         // Parse timezone
         skip_whitespace(&ptr);
         if (*ptr == 'Z') {
-            dt->has_timezone = true;
-            dt->is_utc = true;
-            dt->tz_offset_minutes = 0;
-            dt->precision |= DATETIME_HAS_TIMEZONE;
+            DATETIME_SET_TZ_OFFSET(dt, 0);
+            dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
             ptr++;
         } else if (*ptr == '+' || *ptr == '-') {
-            dt->has_timezone = true;
-            dt->precision |= DATETIME_HAS_TIMEZONE;
-            
             bool negative = (*ptr == '-');
             ptr++;
             
@@ -230,12 +244,21 @@ DateTime* datetime_parse_iso8601(Context* ctx, const char* iso_str) {
             if (*ptr == ':') ptr++;
             if (!parse_int(&ptr, 2, &tz_minutes)) goto error;
             
-            dt->tz_offset_minutes = tz_hours * 60 + tz_minutes;
-            if (negative) dt->tz_offset_minutes = -dt->tz_offset_minutes;
+            int tz_offset_minutes = tz_hours * 60 + tz_minutes;
+            if (negative) tz_offset_minutes = -tz_offset_minutes;
+            DATETIME_SET_TZ_OFFSET(dt, tz_offset_minutes);
+        } else {
+            // No timezone specified
+            DATETIME_CLEAR_TIMEZONE(dt);
         }
+    } else {
+        // Date only, no timezone
+        DATETIME_CLEAR_TIMEZONE(dt);
     }
     
-    dt->format_hint = DATETIME_FORMAT_ISO8601;
+    if (dt->format_hint == 0) {  // Not set to UTC format above
+        dt->format_hint = DATETIME_FORMAT_ISO8601;
+    }
     
     if (!datetime_is_valid(dt)) goto error;
     return dt;
@@ -256,30 +279,43 @@ DateTime* datetime_parse_ics(Context* ctx, const char* ics_str) {
     if (strlen(ptr) < 8) goto error;
     
     // Parse date: YYYYMMDD
-    if (!parse_int(&ptr, 4, &dt->year)) goto error;
-    if (!parse_int_small(&ptr, 2, &dt->month)) goto error;
-    if (!parse_int_small(&ptr, 2, &dt->day)) goto error;
+    int year, month, day;
+    if (!parse_int(&ptr, 4, &year)) goto error;
+    if (!parse_int(&ptr, 2, &month)) goto error;
+    if (!parse_int(&ptr, 2, &day)) goto error;
+    
+    DATETIME_SET_YEAR_MONTH(dt, year, month);
+    dt->day = day;
     dt->precision |= DATETIME_HAS_DATE;
     
     // Check for time part
     if (*ptr == 'T' && strlen(ptr) >= 7) {
         ptr++; // skip 'T'
-        dt->precision |= DATETIME_HAS_TIME | DATETIME_HAS_SECONDS;
+        dt->precision |= DATETIME_HAS_TIME;
         
-        if (!parse_int_small(&ptr, 2, &dt->hour)) goto error;
-        if (!parse_int_small(&ptr, 2, &dt->minute)) goto error;
-        if (!parse_int_small(&ptr, 2, &dt->second)) goto error;
+        int hour, minute, second;
+        if (!parse_int(&ptr, 2, &hour)) goto error;
+        if (!parse_int(&ptr, 2, &minute)) goto error;
+        if (!parse_int(&ptr, 2, &second)) goto error;
+        
+        dt->hour = hour;
+        dt->minute = minute;
+        dt->second = second;
         
         // Check for UTC marker
         if (*ptr == 'Z') {
-            dt->has_timezone = true;
-            dt->is_utc = true;
-            dt->tz_offset_minutes = 0;
-            dt->precision |= DATETIME_HAS_TIMEZONE;
+            DATETIME_SET_TZ_OFFSET(dt, 0);
+            dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
+        } else {
+            DATETIME_CLEAR_TIMEZONE(dt);
         }
+    } else {
+        DATETIME_CLEAR_TIMEZONE(dt);
     }
     
-    dt->format_hint = DATETIME_FORMAT_ICS;
+    if (dt->format_hint == 0) {
+        dt->format_hint = DATETIME_FORMAT_ISO8601;
+    }
     
     if (!datetime_is_valid(dt)) goto error;
     return dt;
@@ -309,34 +345,34 @@ DateTime* datetime_from_string(Context* ctx, const char* datetime_str) {
 String* datetime_format_iso8601(Context* ctx, DateTime* dt) {
     if (!dt || !ctx) return NULL;
     
-    char buffer[32];
+    char buffer[64];
     int len = 0;
     
     if (dt->precision & DATETIME_HAS_DATE) {
         len += snprintf(buffer + len, sizeof(buffer) - len, "%04d-%02d-%02d", 
-                       dt->year, dt->month, dt->day);
+                       DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
     }
     
     if (dt->precision & DATETIME_HAS_TIME) {
         len += snprintf(buffer + len, sizeof(buffer) - len, "T%02d:%02d", 
                        dt->hour, dt->minute);
         
-        if (dt->precision & DATETIME_HAS_SECONDS) {
-            len += snprintf(buffer + len, sizeof(buffer) - len, ":%02d", dt->second);
-            
-            if (dt->precision & DATETIME_HAS_MILLIS) {
-                len += snprintf(buffer + len, sizeof(buffer) - len, ".%03d", dt->millisecond);
-            }
+        len += snprintf(buffer + len, sizeof(buffer) - len, ":%02d", dt->second);
+        
+        if (dt->millisecond > 0) {
+            len += snprintf(buffer + len, sizeof(buffer) - len, ".%03d", dt->millisecond);
         }
         
-        if (dt->precision & DATETIME_HAS_TIMEZONE) {
-            if (dt->is_utc) {
+        // Handle timezone formatting
+        if (DATETIME_HAS_TIMEZONE(dt)) {
+            if (DATETIME_IS_UTC_FORMAT(dt)) {
                 len += snprintf(buffer + len, sizeof(buffer) - len, "Z");
             } else {
-                int hours = abs(dt->tz_offset_minutes) / 60;
-                int minutes = abs(dt->tz_offset_minutes) % 60;
+                int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
+                int hours = abs(tz_offset) / 60;
+                int minutes = abs(tz_offset) % 60;
                 len += snprintf(buffer + len, sizeof(buffer) - len, "%c%02d:%02d",
-                               dt->tz_offset_minutes >= 0 ? '+' : '-', hours, minutes);
+                               tz_offset >= 0 ? '+' : '-', hours, minutes);
             }
         }
     }
@@ -352,14 +388,14 @@ String* datetime_format_ics(Context* ctx, DateTime* dt) {
     
     if (dt->precision & DATETIME_HAS_DATE) {
         len += snprintf(buffer + len, sizeof(buffer) - len, "%04d%02d%02d", 
-                       dt->year, dt->month, dt->day);
+                       DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
     }
     
     if (dt->precision & DATETIME_HAS_TIME) {
         len += snprintf(buffer + len, sizeof(buffer) - len, "T%02d%02d%02d", 
                        dt->hour, dt->minute, dt->second);
         
-        if (dt->is_utc) {
+        if (DATETIME_IS_UTC_FORMAT(dt)) {
             len += snprintf(buffer + len, sizeof(buffer) - len, "Z");
         }
     }
@@ -372,10 +408,11 @@ String* datetime_to_string(Context* ctx, DateTime* dt, DateTimeFormat format) {
     
     switch (format) {
         case DATETIME_FORMAT_ISO8601:
+        case DATETIME_FORMAT_ISO8601_UTC:
             return datetime_format_iso8601(ctx, dt);
-        case DATETIME_FORMAT_ICS:
-            return datetime_format_ics(ctx, dt);
-        // Add other formats as needed
+        case DATETIME_FORMAT_HUMAN:
+        case DATETIME_FORMAT_HUMAN_UTC:
+            return datetime_format_human(ctx, dt);
         default:
             return datetime_format_iso8601(ctx, dt);
     }
@@ -418,7 +455,7 @@ DateTime* datetime_add_seconds(Context* ctx, DateTime* dt, int64_t seconds) {
 }
 
 DateTime* datetime_to_utc(Context* ctx, DateTime* dt) {
-    if (!dt || !ctx || !dt->has_timezone || dt->is_utc) return dt;
+    if (!dt || !ctx || !DATETIME_HAS_TIMEZONE(dt) || DATETIME_IS_UTC_FORMAT(dt)) return dt;
     
     DateTime* utc_dt = datetime_new(ctx);
     if (!utc_dt) return NULL;
@@ -430,7 +467,7 @@ DateTime* datetime_to_utc(Context* ctx, DateTime* dt) {
     DateTime* result = datetime_from_unix(ctx, unix_time);
     if (result) {
         result->precision = dt->precision;
-        result->format_hint = dt->format_hint;
+        result->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     }
     
     return result;

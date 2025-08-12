@@ -319,3 +319,4 @@ Type* fn_type(Item item);
 Item fn_input(Item url, Item type);
 void fn_print(Item item);
 String* fn_format(Item item, Item type);
+DateTime* fn_datetime();

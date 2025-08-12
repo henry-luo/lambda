@@ -483,14 +483,15 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     DateTime* dt = (DateTime*)pool_calloc(tp->ast_pool, sizeof(DateTime));
     
     // Initialize with default values (will be parsed at runtime)
-    dt->year = 1970;
-    dt->month = 1;
+    DATETIME_SET_YEAR_MONTH(dt, 1970, 1);
     dt->day = 1;
     dt->hour = 0;
     dt->minute = 0;
     dt->second = 0;
     dt->millisecond = 0;
     dt->precision = DATETIME_HAS_DATE | DATETIME_HAS_TIME;
+    dt->format_hint = DATETIME_FORMAT_ISO8601;
+    DATETIME_CLEAR_TIMEZONE(dt); // No timezone by default
     
     dt_type->datetime = dt;
     
