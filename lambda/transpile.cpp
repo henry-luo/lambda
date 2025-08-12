@@ -788,6 +788,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
+    printf("transpile content expr\n");
     TypeArray *type = (TypeArray*)list_node->type;
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
@@ -801,16 +802,6 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         else if (item->node_type == AST_NODE_FUNC) {
             type->length--;
             // already transpiled
-        }
-        else if (item->node_type == AST_NODE_PRIMARY) {
-            // Check if this is a statement call expression (like print)
-            AstPrimaryNode* pri = (AstPrimaryNode*)item;
-            if (pri->expr && pri->expr->node_type == AST_NODE_CALL_EXPR) {
-                type->length--;
-                strbuf_append_str(tp->code_buf, "\n ");
-                transpile_expr(tp, item);
-                strbuf_append_char(tp->code_buf, ';');
-            }
         }
         item = item->next;
     }
@@ -1485,6 +1476,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         define_module_import(tp, (AstImportNode*)node);
         break;
     case AST_NODE_SYS_FUNC:
+        // should define its params
         break;
     default:
         printf("unknown expression type: %d\n", node->node_type);
@@ -1497,6 +1489,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
 void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
+    printf("define_ast_node...\n");
     AstNode* child = script->child;
     while (child) {
         define_ast_node(tp, child);
@@ -1504,6 +1497,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     }    
 
     // global evaluation, wrapped inside main()
+    printf("transpile_ast_node...\n");
     strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n return ");
     child = script->child;
     bool has_content = false;
