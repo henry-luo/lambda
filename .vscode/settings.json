@@ -51,6 +51,7 @@
         "api.h": "c",
         "lambda-data.h": "c",
         "stdexcept": "cpp",
-        "forward_list": "cpp"
+        "forward_list": "cpp",
+        "algorithm": "cpp"
     }
 }

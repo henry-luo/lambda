@@ -756,8 +756,25 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     }
     
     // determine the type of the if expression, should be union of then and else
-    TypeId type_id = max(ast_node->then->type->type_id, 
-        ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL);
+    TypeId then_type_id = ast_node->then->type->type_id;
+    TypeId else_type_id = ast_node->otherwise ? ast_node->otherwise->type->type_id : LMD_TYPE_NULL;
+    
+    // Check if branches have incompatible types that require coercion to ANY
+    bool need_any_type = false;
+    if (then_type_id != else_type_id) {
+        // check if number coercion is possible
+        if (then_type_id == LMD_TYPE_INT && else_type_id == LMD_TYPE_FLOAT ||
+            then_type_id == LMD_TYPE_FLOAT && else_type_id == LMD_TYPE_INT) {
+            // coercion is possible
+        } else {
+            // Incompatible types that cannot be coerced, use ANY
+            printf("Error: if branches have incompatible types %d and %d, coercing to ANY\n", 
+                then_type_id, else_type_id);        
+            need_any_type = true;
+        }
+    }
+    
+    TypeId type_id = need_any_type ? LMD_TYPE_ANY : max(then_type_id, else_type_id);
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
     printf("end build if expr\n");
     return (AstNode*)ast_node;
@@ -851,7 +868,11 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         }
         child = ts_node_next_named_sibling(child);
     }
-    if (!ast_node->declare && type->length == 1) { return ast_node->item;}
+    if (!ast_node->declare && type->length == 1) { 
+        tp->current_scope = ast_node->vars->parent;  // Fix scope restoration
+        printf("build_list: returning single item with type %d\n", ast_node->item->type->type_id);
+        return ast_node->item;
+    }
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }
@@ -1459,11 +1480,13 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
     ast_node->then = build_expr(tp, then_node);
     if (!ast_node->then) { 
         printf("missing for then\n"); 
-        ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ANY, sizeof(Type));  // fallback
+        ast_node->type = &LIT_TYPE_ERROR;  // fallback
     } else { 
         printf("got for then type %d\n", ast_node->then->node_type); 
-        // For expression type should be based on the 'then' expression, wrapped in a collection type
-        ast_node->type = ast_node->then->type;
+        // For expression type should be Item | List containing the element type
+        // TypeList* type_list = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+        // type_list->nested = ast_node->then->type;
+        ast_node->type = &LIT_TYPE_ANY;
     }
 
     tp->current_scope = ast_node->vars->parent;

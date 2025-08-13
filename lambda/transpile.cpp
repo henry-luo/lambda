@@ -446,32 +446,12 @@ void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
     
     // Determine if branches have incompatible C types that need coercion
     bool need_coercion = false;
-    
-    if (then_type && else_type) {
-        // Check for specific type incompatibilities that cause C compilation errors
-        bool then_is_null = (then_type->type_id == LMD_TYPE_NULL);
-        bool else_is_null = (else_type->type_id == LMD_TYPE_NULL);
-        bool then_is_int = (then_type->type_id == LMD_TYPE_INT);
-        bool else_is_int = (else_type->type_id == LMD_TYPE_INT);  
-        bool then_is_string = (then_type->type_id == LMD_TYPE_STRING);
-        bool else_is_string = (else_type->type_id == LMD_TYPE_STRING);
-        
-        // These combinations cause C compilation errors:
-        // 1. null vs string/int  
-        // 2. int vs string
-        // 3. Any type mismatch when result type is ANY
-        if ((then_is_null && (else_is_string || else_is_int)) ||
-            (else_is_null && (then_is_string || then_is_int)) ||
-            (then_is_int && else_is_string) ||
-            (then_is_string && else_is_int) ||
-            (if_type && if_type->type_id == LMD_TYPE_ANY)) {
-            need_coercion = true;
-        }
+    if (then_type && else_type || then_type->type_id != else_type->type_id) {
+        // any type mismatch requires coercion
+        need_coercion = true;
     }
-    
     if (need_coercion) {
         printf("transpile if expr with type coercion\n");
-        
         // When we need coercion, always box to Item to ensure runtime safety
         strbuf_append_str(tp->code_buf, "(");
         transpile_expr(tp, if_node->cond);
