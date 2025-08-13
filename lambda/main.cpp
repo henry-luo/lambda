@@ -215,7 +215,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
         result = run_script_at(runtime, (char*)script_path, transpile_only);
     }
     
-    printf("Script '%s' executed: ============\n", script_path);
+    printf("######### Script '%s' executed: ######################\n", script_path);
     StrBuf *output = strbuf_new_cap(256);
     print_item(output, result);
     printf("%s\n", output->str);

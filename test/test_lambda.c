@@ -131,6 +131,10 @@ Test(lambda_tests, test_sys_fn_ls) {
     test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
 }
 
+Test(lambda_tests, test_expr_stam_ls) {
+    test_lambda_script_against_file("test/lambda/test_expr_stam.ls", "test/lambda/test_expr_stam.txt");
+}
+
 // Additional test cases for other lambda scripts
 Test(lambda_tests, test_expr_ls) {
     // For expr.ls, we'll test if it runs without errors

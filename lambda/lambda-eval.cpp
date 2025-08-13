@@ -148,7 +148,11 @@ void list_push(List *list, Item item) {
     if (!item.item) { return; }  // NULL value
     if (item.type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (item.type_id == LMD_TYPE_RAW_POINTER) {
-        assert(item.raw_pointer > 1024);
+        if (item.item <= 1024) {
+            // treat as invalid pointer
+            printf("list_push: invalid raw pointer: %p\n", item.raw_pointer);
+            return;
+        }
         TypeId type_id = *((uint8_t*)item.raw_pointer);
         // nest list is flattened
         if (type_id == LMD_TYPE_LIST) {
@@ -176,9 +180,9 @@ void list_push(List *list, Item item) {
         }
     }
     // store the value in the list (and we may need two slots for long/double)
+    printf("list push item: type: %d, length: %ld\n", item.type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
-    // printf("list push item: type: %d, length: %ld\n", itm.type_id, list->length);
     switch (item.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         String *str = (String*)item.pointer;  str->ref_cnt++;
@@ -640,14 +644,18 @@ Range* fn_to(Item item_a, Item item_b) {
     // todo: join binary, list, array, map
     if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64) && 
         (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64)) {
-        if (item_a.long_val > item_b.long_val) {
+        long start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : *(long*)item_a.pointer;
+        long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : *(long*)item_b.pointer;
+        if (start > end) {
             // todo: should raise error
+            printf("Error: start of range is greater than end: %ld > %ld\n", start, end);
             return NULL;
         }
         Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
         range->type_id = LMD_TYPE_RANGE;
-        range->start = item_a.long_val;  range->end = item_b.long_val;
-        range->length = item_b.long_val - item_a.long_val + 1;
+        range->start = start;  range->end = end;
+        range->length = end - start + 1;
+        printf("create range: %ld to %ld, length: %ld\n", range->start, range->end, range->length);
         return range;
     }
     else {
