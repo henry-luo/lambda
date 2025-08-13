@@ -529,15 +529,19 @@ Item v2it(List* list) {
 }
 
 Item push_d(double dval) {
-    printf("push_d: %g\n", dval);
+    printf("TRACE: push_d: %g\n", dval);
     double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval); // stack_alloc(sizeof(double));
-    return {.item = d2it(dptr)};
+    Item result = {.item = d2it(dptr)};
+    printf("TRACE: push_d result item: %llu, type_id: %d\n", result.item, result.type_id);
+    return result;
 }
 
 Item push_l(long lval) {
-    printf("push_l: %ld\n", lval);
+    printf("TRACE: push_l: %ld\n", lval);
     long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval); // stack_alloc(sizeof(long));
-    return {.item = l2it(lptr)};
+    Item result = {.item = l2it(lptr)};
+    printf("TRACE: push_l result item: %llu, type_id: %d\n", result.item, result.type_id);
+    return result;
 }
 
 Item push_k(long val) {

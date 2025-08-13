@@ -33,6 +33,10 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
 }
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
+    if (!item->type) {
+        printf("transpile box item: NULL type, node_type: %d\n", item->node_type);
+        return;
+    }
     printf("transpile box item: %d\n", item->type->type_id);
     printf("transpile box item type name: %s, node_type: %d\n", 
         item->type->type_id == LMD_TYPE_DTIME ? "DateTime" : 

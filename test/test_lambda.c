@@ -20,7 +20,7 @@ typedef struct Runtime Runtime;
 
 extern void runtime_init(Runtime* runtime);
 extern void runtime_cleanup(Runtime* runtime);
-extern uint64_t run_script_at(Runtime *runtime, char* script_path);
+extern uint64_t run_script_at(Runtime *runtime, char* script_path, bool transpile_only);
 extern void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
 
 // Simple C-compatible Runtime structure definition
@@ -88,9 +88,13 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     runtime_init(&runtime);  runtime.current_dir = "";
     
     // Run the script
-    uint64_t ret = run_script_at(&runtime, (char*)script_path);
+    uint64_t ret = run_script_at(&runtime, (char*)script_path, false);
+    printf("TRACE: test runner - ret: %llu\n", ret);
+    
     StrBuf* output_buf = strbuf_new_cap(1024);
-    format_item(output_buf, ret, 0, " ");
+    // Cast uint64_t to Item (which is uint64_t in C)
+    format_item(output_buf, (Item)ret, 0, " ");
+    printf("TRACE: test runner - formatted output: '%s'\n", output_buf->str);
         
     // Read expected output to verify the file exists
     char* expected_output = read_file_to_string(expected_output_path);
@@ -145,7 +149,7 @@ Test(lambda_tests, test_expr_ls) {
     runtime_init(&runtime);
     runtime.current_dir = "";
     
-    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/expr.ls");
+    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/expr.ls", false);
     
     // Restore original directory
     chdir(original_cwd);
@@ -173,7 +177,7 @@ Test(lambda_tests, test_box_unbox_ls) {
     runtime_init(&runtime);
     runtime.current_dir = "";
     
-    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/box_unbox.ls");
+    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/box_unbox.ls", false);
     
     // Restore original directory
     chdir(original_cwd);
@@ -200,7 +204,7 @@ Test(lambda_tests, test_csv_test_ls) {
     runtime_init(&runtime);
     runtime.current_dir = "";
     
-    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/csv_test.ls");
+    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/csv_test.ls", false);
     
     // Restore original directory
     chdir(original_cwd);

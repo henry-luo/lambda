@@ -272,7 +272,11 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
 void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
-    if (!item.item) { strbuf_append_str(strbuf, "NULL"); return; }
+    if (!item.item) { 
+        printf("TRACE: print_item - item is NULL, appending null\n");
+        strbuf_append_str(strbuf, "null"); 
+        return; 
+    }
 
     TypeId type_id = get_type_id(item);
     switch (type_id) { // packed value

@@ -117,7 +117,18 @@ bool datetime_is_valid(DateTime* dt) {
     
     if (year < DATETIME_MIN_YEAR || year > DATETIME_MAX_YEAR) return false;
     if (month < 1 || month > DATETIME_MAX_MONTH) return false;
-    if (dt->day < 1 || dt->day > days_in_month(year, month)) return false;
+    
+    /* Allow day = 0 for partial dates (year-month only), but validate full dates */
+    if (dt->day == 0) {
+        /* Partial date is valid if precision indicates year-only or date-only */
+        if (dt->precision != DATETIME_PRECISION_YEAR_ONLY && 
+            dt->precision != DATETIME_PRECISION_DATE_ONLY) {
+            return false;  /* day=0 not valid for time-based precisions */
+        }
+    } else if (dt->day < 1 || dt->day > days_in_month(year, month)) {
+        return false;  /* Invalid day for full dates */
+    }
+    
     if (dt->hour > DATETIME_MAX_HOUR) return false;
     if (dt->minute > DATETIME_MAX_MINUTE) return false;
     if (dt->second > DATETIME_MAX_SECOND) return false;
@@ -212,7 +223,6 @@ DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str) {
  */
 static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimeParseFormat format) {
     if (!dt || !ptr || !*ptr) return false;
-    printf("Parsing DateTime from string: %.10s, format: %d\n", *ptr, format);
     
     const char* start = *ptr;
     skip_whitespace(ptr);
@@ -297,8 +307,8 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     if (negative_year) year = -year;
     if (year < DATETIME_MIN_YEAR || year > DATETIME_MAX_YEAR) return false;
     
-    /* Default values - use 1 for month/day to make valid dates */
-    int month = 1, day = 1;  /* Default to January 1st for year-only dates */
+    /* Default values - use 1 for month, 0 for day when not specified */
+    int month = 1, day = 0;  /* Default: January for year-only, day=0 when not specified */
     int hour = 0, minute = 0, second = 0, millisecond = 0;
     uint8_t precision = DATETIME_PRECISION_YEAR_ONLY;  /* Start with year-only */
     
@@ -319,6 +329,8 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
             if (!parse_int(ptr, 2, &day)) return false;
             if (day < 1 || day > days_in_month(year, month)) return false;
             /* precision remains DATETIME_PRECISION_DATE_ONLY but now with full date */
+        } else {
+            /* Month specified but no day - keep day = 0 to indicate partial date */
         }
     }
     
@@ -431,7 +443,14 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     
     /* Set all the parsed values */
     DATETIME_SET_YEAR_MONTH(dt, year, month);
-    dt->day = day;
+    
+    /* For year-only precision, set day to 1 to represent first day of year */
+    if (precision == DATETIME_PRECISION_YEAR_ONLY) {
+        dt->day = 1;
+    } else {
+        dt->day = day;
+    }
+    
     dt->hour = hour;
     dt->minute = minute;
     dt->second = second;
@@ -441,10 +460,6 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     if (dt->format_hint == 0) {  /* Not set to UTC format above */
         dt->format_hint = DATETIME_FORMAT_ISO8601;
     }
-    printf("Parsed DateTime: %d-%02d-%02d %02d:%02d:%02d.%03d, precision: %d, format hint: %d\n",
-           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
-           dt->hour, dt->minute, dt->second, dt->millisecond,
-           dt->precision, dt->format_hint);
     return true;
 }
 
@@ -486,10 +501,6 @@ DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFo
     
     /* Set end pointer to where parsing stopped */
     if (end) *end = (char*)ptr;
-    printf("Parsed DateTime: %d-%02d-%02d %02d:%02d:%02d.%03d, precision: %d, format hint: %d\n",
-           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
-           dt->hour, dt->minute, dt->second, dt->millisecond,
-           dt->precision, dt->format_hint);
     return dt;
     
 error:
@@ -590,9 +601,6 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
 void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat format) {
     if (!dt || !strbuf) return;
     char separator = (format == DATETIME_PARSE_LAMBDA) ? ' ' : 'T';
-    printf("Formatting DateTime to string: %d-%02d-%02d %02d:%02d:%02d.%03d, format: %d\n",
-           DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
-           dt->hour, dt->minute, dt->second, dt->millisecond, format);
     
     int year = DATETIME_GET_YEAR(dt);
     int month = DATETIME_GET_MONTH(dt);
@@ -617,11 +625,15 @@ void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat 
             break;
             
         case DATETIME_PRECISION_TIME_ONLY:
-            /* Time only */
-            strbuf_append_format(strbuf, "%02d:%02d:%02d", 
-                               dt->hour, dt->minute, dt->second);
-            if (dt->millisecond > 0) {
-                strbuf_append_format(strbuf, ".%03d", dt->millisecond);
+            /* Time only - omit seconds if they are 0 and no milliseconds */
+            if (dt->second == 0 && dt->millisecond == 0) {
+                strbuf_append_format(strbuf, "%02d:%02d", dt->hour, dt->minute);
+            } else {
+                strbuf_append_format(strbuf, "%02d:%02d:%02d", 
+                                   dt->hour, dt->minute, dt->second);
+                if (dt->millisecond > 0) {
+                    strbuf_append_format(strbuf, ".%03d", dt->millisecond);
+                }
             }
             break;
             
