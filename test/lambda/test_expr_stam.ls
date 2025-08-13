@@ -34,12 +34,12 @@ let strings = ["a", "b", "c"];
 let bools = [true, false, true];
 let mixed_array = [42, "hello", 3.14, true, null, [1, 2]];
 
-// Let expressions with maps
+"# Let expressions with maps"
 (let m = {a: 1, b: 2}, m.a + m.b)
 (let person = {name: "Alice", age: 30}, person.name)
 (let nested_map = {outer: {inner: 42}}, nested_map.outer.inner)
 
-// Let statements with maps
+"# Let statements with maps"
 let config = {debug: true, port: 8080, host: "localhost"};
 let user = {id: 123, name: "Bob", email: "bob@test.com", active: true};
 let complex_map = {
@@ -58,11 +58,11 @@ let complex_map = {
 (if (1 > 0) 42 else 0)
 (if (false) null else "default")
 
-// If expressions with let
+"If expressions with let"
 (let x = 5, if (x > 3) "big" else "small")
 (let score = 85, if (score >= 90) "A" else if (score >= 80) "B" else "C")
 
-// Nested if expressions
+"Nested if expressions"
 (if (true) (if (false) 1 else 2) else 3)
 (let val = 10, if (val > 5) (if (val > 15) "very big" else "medium") else "small")
 
@@ -85,16 +85,16 @@ if (user.active) {
 
 // === FOR EXPRESSION vs STATEMENT TESTS ===
 
-// For expressions with arrays  
+"For expressions with arrays"
 (for (x in [1, 2, 3]) x * 2)
 (for (item in strings) item + "!")
 (for (num in numbers) (if (num % 2 == 0) num else 0))
 
-// For expressions with ranges
+"For expressions with ranges"
 (for (i in 1 to 5) i * i)
 (for (j in 0 to 3) j + 10)
 
-// For statements with arrays
+"For statements with arrays"
 for item in mixed_array {
     item
 }
@@ -107,7 +107,7 @@ for num in numbers {
     }
 }
 
-// For statements with ranges
+"For statements with ranges"
 for i in 1 to 10 {
     i * 2 + 1
 }
@@ -184,34 +184,33 @@ if (numbers[0] > 0) {
 (for (item in (1, "two", 3.0)) item)  // list
 (for (val in [null, true, false, 123]) val)  // array
 
-// === EDGE CASES AND ERROR CONDITIONS ===
+"=== EDGE CASES AND ERROR CONDITIONS ==="
 
-// Empty collections
+"Empty collections"
 (for (x in []) x)  // empty array
 (for (y in {}) y)  // empty map
 
-// Single element collections
+"Single element collections"
 (for (single in [42]) single * 2)
 (for (one in {key: "value"}) one)
 
-// Null handling
+"Null handling"
 (let maybe_null = null, if (maybe_null) "has value" else "is null")
 (for (item in [1, null, 3]) (if (item) item else "empty"))
 
-// Zero and negative numbers
+"Zero and negative numbers"
 (let zero = 0, if (zero) "truthy" else "falsy")
 (let negative = -5, if (negative > 0) "positive" else "not positive")
 (for (n in -2 to 2) (if (n == 0) "zero" else n))
 
-// Very nested expressions
+"Very nested expressions"
 (let a = 1,
  let b = (let x = a + 1, x * 2),
  let c = (if (b > 3) (for (i in 1 to b) i) else [b]),
  (for (item in c) item + 10))
 
-// Mixed statement and expression patterns
+"Mixed statement and expression patterns"
 let base_value = 100;
-
 if (base_value > 50) {
     let multiplier = (if (base_value > 75) 2 else 1);
     for i in 1 to 5 {
@@ -222,7 +221,7 @@ if (base_value > 50) {
     base_value
 }
 
-// Final complex example combining everything
+"Final complex example combining everything"
 let final_test = {
     data: (for (i in 1 to 3) {value: i, squared: i * i}),
     process: (let threshold = 2,

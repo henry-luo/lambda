@@ -144,41 +144,11 @@ List* list() {
     return list;
 }
 
-void expand_list(List *list) {
-    list->capacity = list->capacity ? list->capacity * 2 : 8;
-    // list items are allocated from C heap, instead of Lambda heap
-    // to consider: could also alloc directly from Lambda heap without the heap entry
-    // need to profile to see which is faster
-    Item* old_items = list->items;
-    list->items = (Item*)Realloc(list->items, list->capacity * sizeof(Item));
-    // copy extra items to the end of the list
-    if (list->extra) {
-        memcpy(list->items + (list->capacity - list->extra), 
-            list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));
-        // scan the list, if the item is long/double,
-        // and is stored in the list extra slots, need to update the pointer
-        for (int i = 0; i < list->length; i++) {
-            Item itm = list->items[i];
-            if (itm.type_id == LMD_TYPE_FLOAT || itm.type_id == LMD_TYPE_INT64 ||
-                itm.type_id == LMD_TYPE_DTIME) {
-                Item* old_pointer = (Item*)itm.pointer;
-                // Only update pointers that are in the old list buffer's extra space
-                if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
-                    int offset = old_items + list->capacity/2 - old_pointer;
-                    void* new_pointer = list->items + list->capacity - offset;
-                    list->items[i] = {.item = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : 
-                        itm.type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
-                }
-                // if the pointer is not in the old buffer, it should not be updated
-            }
-        }
-    }
-}
-
 void list_push(List *list, Item item) {
     if (!item.item) { return; }  // NULL value
     if (item.type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (item.type_id == LMD_TYPE_RAW_POINTER) {
+        assert(item.raw_pointer > 1024);
         TypeId type_id = *((uint8_t*)item.raw_pointer);
         // nest list is flattened
         if (type_id == LMD_TYPE_LIST) {
@@ -242,10 +212,16 @@ Item list_fill(List *list, int count, ...) {
     va_start(args, count);
     for (int i = 0; i < count; i++) {
         Item itm = {.item = va_arg(args, uint64_t)};
+        TypeId type_id = itm.type_id;
+        if (type_id == LMD_TYPE_STRING) {
+            String *str = (String*)itm.pointer;
+            printf("list fill string value: %s\n", str->chars);
+        }
         list_push(list, itm);
     }
     va_end(args);
     frame_end();
+    printf("list_filled: %ld items\n", list->length);
     return list->length ? (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT
         ? list->items[0] : (Item){.list = list}) : ItemNull;
 }
@@ -369,6 +345,7 @@ Map* map_fill(Map* map, ...) {
     set_fields(map_type, map->data, args);
     va_end(args);
     frame_end();
+    printf("map filled with type: %d, length: %ld\n", map_type->type_id, map_type->length);
     return map;
 }
 

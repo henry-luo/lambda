@@ -155,6 +155,8 @@ bool num_stack_reset_to_index(num_stack_t *stack, size_t index) {
     
     // traverse from tail to find the chunk containing the target index
     while (chunk) {
+        printf("Checking chunk: %p, used: %zu, current_elements_counted: %zu\n", 
+            chunk, chunk->used, current_elements_counted);
         if (current_elements_counted + chunk->used >= elements_from_end) {
             // the target position is in this chunk
             size_t elements_to_keep_in_chunk = chunk->used - (elements_from_end - current_elements_counted);
@@ -165,6 +167,7 @@ bool num_stack_reset_to_index(num_stack_t *stack, size_t index) {
             // free all chunks after this one
             num_chunk_t *chunk_to_free = chunk->next;
             while (chunk_to_free) {
+                printf("Freeing chunk: %p, used: %zu\n", chunk_to_free, chunk_to_free->used);
                 num_chunk_t *next = chunk_to_free->next;
                 free(chunk_to_free->data);
                 free(chunk_to_free);
