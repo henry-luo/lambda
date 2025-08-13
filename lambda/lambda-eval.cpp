@@ -552,10 +552,18 @@ Item push_k(long val) {
 
 String *str_cat(String *left, String *right) {
     printf("str_cat %p, %p\n", left, right);
+    if (!left || !right) {
+        printf("Error: null pointer in str_cat: left=%p, right=%p\n", left, right);
+        return NULL;
+    }
     size_t left_len = left->len;
     size_t right_len = right->len;
     printf("left len %zu, right len %zu\n", left_len, right_len);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
+    if (!result) {
+        printf("Error: failed to allocate memory for str_cat result\n");
+        return NULL;
+    }
     printf("str result %p\n", result);
     result->ref_cnt = 0;  result->len = left_len + right_len;
     memcpy(result->chars, left->chars, left_len);

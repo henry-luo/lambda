@@ -670,8 +670,13 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     writeType(tp, item_type);
     strbuf_append_str(tp->code_buf, " _");
     strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
-    strbuf_append_str(tp->code_buf, expr_type->type_id == LMD_TYPE_RANGE ? 
-        "=i;\n" : "=arr->items[i];\n");
+    if (expr_type->type_id == LMD_TYPE_RANGE) {
+        strbuf_append_str(tp->code_buf, "=i;\n");
+    } else if (item_type->type_id == LMD_TYPE_STRING) {
+        strbuf_append_str(tp->code_buf, "=fn_string(arr->items[i]);\n");
+    } else {
+        strbuf_append_str(tp->code_buf, "=arr->items[i];\n");
+    }
     AstNode *next_loop = loop_node->next;
     if (next_loop) {
         printf("transpile nested loop\n");

@@ -118,28 +118,35 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
             Map *nested_map = *(Map**)field_ptr;
-            // delink the nested map
-            if (nested_map->ref_cnt > 0) nested_map->ref_cnt--;
-            if (!nested_map->ref_cnt) free_container((Container*)nested_map, clear_entry);
+            if (nested_map) {
+                // delink the nested map
+                if (nested_map->ref_cnt > 0) nested_map->ref_cnt--;
+                if (!nested_map->ref_cnt) free_container((Container*)nested_map, clear_entry);
+            }
         }
         else if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
             field->type->type_id == LMD_TYPE_BINARY) {
             String *str = *(String**)field_ptr;
-            Item item = {.item = s2it(str)};
-            free_item(item, clear_entry);
+            if (str) {
+                Item item = {.item = s2it(str)};
+                free_item(item, clear_entry);
+            }
         }
         else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
             field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
             Container *container = *(Container**)field_ptr;
-            // delink with the container
-            if (container->ref_cnt > 0) container->ref_cnt--;
-            if (!container->ref_cnt) free_container(container, clear_entry);
+            if (container) {
+                // delink with the container
+                if (container->ref_cnt > 0) container->ref_cnt--;
+                if (!container->ref_cnt) free_container(container, clear_entry);
+            }
         }
         field = field->next;
     }
 }
 
 void free_container(Container* cont, bool clear_entry) {
+    if (!cont) return;  // Add null pointer check
     printf("free container: %p\n", cont);
     assert(cont->ref_cnt == 0);
     TypeId type_id = cont->type_id;
@@ -204,15 +211,17 @@ void free_item(Item item, bool clear_entry) {
     if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL || 
         item.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)item.pointer;
-        if (!str->ref_cnt) {
+        if (str && !str->ref_cnt) {
             pool_variable_free(context->heap->pool, str);
         }
     }
     else if (item.type_id == LMD_TYPE_RAW_POINTER) {
         Container* container = item.container;
-        // delink with the container
-        if (container->ref_cnt > 0) container->ref_cnt--;
-        if (!container->ref_cnt) free_container(container, clear_entry);
+        if (container) {
+            // delink with the container
+            if (container->ref_cnt > 0) container->ref_cnt--;
+            if (!container->ref_cnt) free_container(container, clear_entry);
+        }
     }
     if (clear_entry) {
         ArrayList *entries = context->heap->entries;
@@ -235,7 +244,15 @@ void frame_start() {
 void frame_end() {
     ArrayList *entries = context->heap->entries;
     // free heap allocations
+    int loop_count = 0;
+    int original_length = entries->length;
     for (int i = entries->length - 1; i >= 0; i--) {
+        loop_count++;
+        if (loop_count > original_length + 100) {
+            printf("ERROR: frame_end infinite loop detected! loop_count=%d, i=%d, original_length=%d\n", 
+                   loop_count, i, original_length);
+            break;
+        }
         printf("free heap entry index: %d\n", i);
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
@@ -243,18 +260,20 @@ void frame_end() {
         if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
             itm.type_id == LMD_TYPE_BINARY) {
             String *str = (String*)itm.pointer;
-            if (!str->ref_cnt) {
+            if (str && !str->ref_cnt) {
                 printf("freeing heap string: %s\n", str->chars);
                 pool_variable_free(context->heap->pool, (void*)str);
             }
         }
         else if (itm.type_id == LMD_TYPE_RAW_POINTER) {
             Container* cont = (Container*)itm.raw_pointer;
-            if (cont->ref_cnt > 0) {
-                // clear the heap entry, and keep the container to be freed by ref_cnt
-                entries->data[i] = NULL;  
+            if (cont) {
+                if (cont->ref_cnt > 0) {
+                    // clear the heap entry, and keep the container to be freed by ref_cnt
+                    entries->data[i] = NULL;  
+                }
+                else free_container(cont, false);
             }
-            else free_container(cont, false);
         }
         else if (itm.type_id == LMD_CONTAINER_HEAP_START) {
             printf("reached container start: %d\n", i);
