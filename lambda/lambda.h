@@ -298,6 +298,7 @@ double it2d(Item item);
 
 double pow(double x, double y);
 Item add(Item a, Item b);
+Item mul(Item a, Item b);
 String *str_cat(String *left, String *right);
 
 typedef void* (*fn_ptr)();

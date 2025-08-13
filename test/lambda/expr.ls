@@ -42,3 +42,6 @@ type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3)
 
 ({a: 1, b: 2, c: 3}.b)
 (<e a:"str", b:2>.a)
+
+(let y = (let x=5, x + 3.14), y * 2) 
+"a" * 3

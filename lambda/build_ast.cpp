@@ -844,8 +844,10 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode *prev_declare = NULL, *prev_item = NULL;
     while (!ts_node_is_null(child)) {
+        printf("build_list: processing child\n");
         AstNode* item = build_expr(tp, child);
         if (item) {
+            printf("build_list: got item with node_type %d\n", item->node_type);
             if (item->node_type == AST_NODE_ASSIGN) {
                 AstNode *declare = item;
                 printf("got declare type %d\n", declare->node_type);
@@ -857,6 +859,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
                 prev_declare = declare;
             }
             else { // normal list item
+                printf("build_list: adding item as list item, incrementing length from %ld to %ld\n", type->length, type->length + 1);
                 if (!prev_item) { 
                     ast_node->item = item;
                 } else {  
@@ -865,6 +868,8 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
                 prev_item = item;
                 type->length++;   
             }
+        } else {
+            printf("build_list: got null item\n");
         }
         child = ts_node_next_named_sibling(child);
     }

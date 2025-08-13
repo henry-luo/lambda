@@ -48,6 +48,7 @@ func_obj_t func_list[] = {
     {"push_k", (fn_ptr) push_k},
     {"str_cat", (fn_ptr) str_cat},
     {"add", (fn_ptr) add},
+    {"mul", (fn_ptr) mul},
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
     {"to_fn", (fn_ptr) to_fn},

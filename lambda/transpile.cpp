@@ -394,6 +394,35 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         transpile_box_item(tp, bi_node->right);
         strbuf_append_char(tp->code_buf, ')');        
     }
+    else if (bi_node->op == OPERATOR_MUL) {
+        if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
+            if (bi_node->left->type->type_id == LMD_TYPE_INT || 
+                bi_node->left->type->type_id == LMD_TYPE_INT64 ||
+                bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
+                strbuf_append_str(tp->code_buf, "(");
+                transpile_expr(tp, bi_node->left);
+                strbuf_append_char(tp->code_buf, '*');
+                transpile_expr(tp, bi_node->right);
+                strbuf_append_char(tp->code_buf, ')');
+                return;
+            }
+        }
+        else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
+            strbuf_append_char(tp->code_buf, '(');
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, '*');
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+        // call runtime mul()
+        strbuf_append_str(tp->code_buf, "mul(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');        
+    }
     else if (bi_node->op == OPERATOR_DIV && bi_node->left->type->type_id == LMD_TYPE_INT && 
         bi_node->right->type->type_id == LMD_TYPE_INT) {
         // division is always carried out in double
@@ -446,7 +475,7 @@ void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
     
     // Determine if branches have incompatible C types that need coercion
     bool need_coercion = false;
-    if (then_type && else_type || then_type->type_id != else_type->type_id) {
+    if ((then_type && else_type) && (then_type->type_id != else_type->type_id)) {
         // any type mismatch requires coercion
         need_coercion = true;
     }
@@ -745,6 +774,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     }
     
     TypeArray *type = (TypeArray*)list_node->type;
+    printf("transpile_list_expr: type->length = %ld\n", type->length);
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");
     // let declare first
@@ -761,6 +791,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         declare = declare->next;
     }
     if (type->length == 0) {
+        printf("transpile_list_expr: type->length is 0, outputting null\n");
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }    

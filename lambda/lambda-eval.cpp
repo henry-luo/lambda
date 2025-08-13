@@ -594,6 +594,63 @@ Item add(Item item_a, Item item_b) {
     return ItemError;
 }
 
+String *str_repeat(String *str, long times) {
+    if (times <= 0) {
+        // Return empty string
+        String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+        result->ref_cnt = 0;
+        result->len = 0;
+        result->chars[0] = '\0';
+        return result;
+    }
+    
+    size_t str_len = str->len;
+    size_t total_len = str_len * times;
+    String *result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
+    result->ref_cnt = 0;
+    result->len = total_len;
+    
+    for (long i = 0; i < times; i++) {
+        memcpy(result->chars + (i * str_len), str->chars, str_len);
+    }
+    result->chars[total_len] = '\0';
+    
+    return result;
+}
+
+Item mul(Item item_a, Item item_b) {
+    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        return {.item = i2it(item_a.long_val * item_b.long_val)};
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+        return push_l(*(long*)item_a.pointer * *(long*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
+        printf("mul float: %g * %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        return push_d(*(double*)item_a.pointer * *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
+        return push_d((double)item_a.long_val * *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
+        return push_d(*(double*)item_a.pointer * (double)item_b.long_val);
+    }
+    else if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_INT) {
+        String *str_a = (String*)item_a.pointer;
+        String *result = str_repeat(str_a, item_b.long_val);
+        return {.item = s2it(result)};
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_STRING) {
+        String *str_b = (String*)item_b.pointer;
+        String *result = str_repeat(str_b, item_a.long_val);
+        return {.item = s2it(result)};
+    }
+    else {
+        printf("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
+    }
+    return ItemError;
+}
+
 Range* fn_to(Item item_a, Item item_b) {
     // todo: join binary, list, array, map
     if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64) && 
