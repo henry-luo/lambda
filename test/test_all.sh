@@ -11,16 +11,7 @@ trap 'exit 0' SIGPIPE
 # Detect if we're being piped and set a flag
 if [ ! -t 1 ]; then
     PIPED_OUTPUT=true
-    
-    # Immediately use quick summary mode to avoid any hangs
-    echo "Detected piped output - using quick summary mode"
-    echo "✅ Library tests: PASSED (simulated for pipe mode)"
-    echo "✅ Input tests: PASSED (simulated for pipe mode)" 
-    echo "✅ MIR tests: PASSED (simulated for pipe mode)"
-    echo "✅ Lambda tests: PASSED (simulated for pipe mode)"
-    echo "✅ Validator tests: PASSED (simulated for pipe mode)"
-    echo "🎉 All test suites passed! (pipe mode - use without pipe for actual testing)"
-    exit 0
+    echo "Detected piped output - running tests in sequential mode to avoid hangs"
 else
     PIPED_OUTPUT=false
 fi
@@ -703,6 +694,211 @@ run_parallel_suite_impl() {
     local test_passed=()
     local test_failed=()
     
+    # Check if we should run in sequential mode due to piped output
+    if [ "$PIPED_OUTPUT" = "true" ]; then
+        safe_echo "Running tests sequentially due to piped output..."
+        
+        # Run each test sequentially
+        for i in "${!sources_array[@]}"; do
+            local test_source="${sources_array[$i]}"
+            local test_binary="${binaries_array[$i]}"
+            local test_deps="${dependencies_array[$i]}"
+            local test_name="${sources_array[$i]%%.c}"
+            
+            # Add test/ prefix if not already present
+            if [[ "$test_source" != test/* ]]; then
+                test_source="test/$test_source"
+            fi
+            if [[ "$test_binary" != test/* ]]; then
+                test_binary="test/$test_binary"
+            fi
+            
+            safe_echo "🔧 Compiling $test_source..."
+            
+            local compile_cmd=""
+            
+            # Handle different compilation methods based on configuration
+            if [ "$uses_build_config" = "true" ]; then
+                # Build config-based compilation (for MIR and Lambda)
+                local config_file=$(get_build_config_file "$suite_name")
+                if [ ! -f "$config_file" ]; then
+                    print_error "Configuration file $config_file not found!"
+                    total_failed=$((total_failed + 1))
+                    continue
+                fi
+                
+                # Extract and build object files list
+                local object_files=()
+                while IFS= read -r source_file; do
+                    local base_name
+                    if [[ "$source_file" == *.cpp ]]; then
+                        base_name=$(basename "$source_file" .cpp)
+                    else
+                        base_name=$(basename "$source_file" .c)
+                    fi
+                    local obj_file="build/${base_name}.o"
+                    if [ -f "$obj_file" ]; then
+                        object_files+=("$PWD/$obj_file")
+                    fi
+                done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+                
+                # Process source_dirs if any
+                local source_dirs
+                source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+                if [ -n "$source_dirs" ]; then
+                    while IFS= read -r source_dir; do
+                        if [ -d "$source_dir" ]; then
+                            while IFS= read -r source_file; do
+                                local rel_path="${source_file#$PWD/}"
+                                local base_name
+                                if [[ "$rel_path" == *.cpp ]]; then
+                                    base_name=$(basename "$rel_path" .cpp)
+                                else
+                                    base_name=$(basename "$rel_path" .c)
+                                fi
+                                local obj_file="build/${base_name}.o"
+                                if [ -f "$obj_file" ]; then
+                                    object_files+=("$PWD/$obj_file")
+                                fi
+                            done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
+                        fi
+                    done <<< "$source_dirs"
+                fi
+                
+                # Exclude main.o since Criterion provides its own main function
+                local filtered_object_files=()
+                for obj_file in "${object_files[@]}"; do
+                    if [[ "$obj_file" != *"/main.o" ]]; then
+                        filtered_object_files+=("$obj_file")
+                    fi
+                done
+                object_files=("${filtered_object_files[@]}")
+                
+                # Build library flags
+                local include_flags=""
+                local static_libs=""
+                local dynamic_libs=""
+                local libraries
+                libraries=$(jq -r '.libraries // []' "$config_file")
+                
+                if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
+                    while IFS= read -r lib_info; do
+                        local name include lib link
+                        name=$(echo "$lib_info" | jq -r '.name')
+                        include=$(echo "$lib_info" | jq -r '.include // empty')
+                        lib=$(echo "$lib_info" | jq -r '.lib // empty')
+                        link=$(echo "$lib_info" | jq -r '.link // "static"')
+                        
+                        if [ -n "$include" ] && [ "$include" != "null" ]; then
+                            include_flags="$include_flags -I$include"
+                        fi
+                        
+                        if [ "$link" = "static" ]; then
+                            if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                                static_libs="$static_libs $lib"
+                            fi
+                        else
+                            if [ -n "$lib" ] && [ "$lib" != "null" ]; then
+                                dynamic_libs="$dynamic_libs -L$lib -l$name"
+                            fi
+                        fi
+                    done < <(echo "$libraries" | jq -c '.[]')
+                fi
+                
+                # Special handling for lambda tests
+                if [ "$suite_name" = "lambda" ]; then
+                    include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
+                    include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
+                    dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+                    compile_cmd="clang $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
+                else
+                    compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
+                fi
+            else
+                # Standard compilation (for library and input tests)
+                compile_cmd="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS $special_flags"
+            fi
+            
+            if $compile_cmd 2>/dev/null; then
+                safe_echo "✅ Compiled $test_source successfully"
+                
+                # Run test sequentially
+                safe_echo "🧪 Running $test_binary..."
+                
+                set +e
+                local output=$(./"$test_binary" --verbose --tap 2>&1)
+                local exit_code=$?
+                set -e
+                
+                safe_echo "$output"
+                safe_echo ""
+                
+                # Parse results - handle both TAP and Criterion output formats
+                local test_total=0
+                local test_failed=0
+                
+                if echo "$output" | grep -q "^ok "; then
+                    # TAP format
+                    test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
+                    test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
+                elif echo "$output" | grep -q "Synthesis:"; then
+                    # Criterion synthesis format
+                    local synthesis_line=$(echo "$output" | grep "Synthesis:" | tail -1)
+                    test_total=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+                    test_failed=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+                    local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
+                    test_failed=$((test_failed + crashing_tests))
+                else
+                    # Fallback based on exit code
+                    if [ $exit_code -eq 0 ]; then
+                        test_total=1
+                        test_failed=0
+                    else
+                        test_total=1
+                        test_failed=1
+                    fi
+                fi
+                
+                test_total=$(echo "$test_total" | tr -cd '0-9')
+                test_failed=$(echo "$test_failed" | tr -cd '0-9')
+                test_total=${test_total:-0}
+                test_failed=${test_failed:-0}
+                local test_passed=$((test_total - test_failed))
+                
+                test_names+=("$test_name")
+                test_totals+=($test_total)
+                test_passed+=($test_passed)
+                test_failed+=($test_failed)
+                
+                total_tests=$((total_tests + test_total))
+                total_failed=$((total_failed + test_failed))
+                
+                # Cleanup
+                if [ -f "$test_binary" ] && [ "$KEEP_EXE" = false ]; then
+                    rm "$test_binary"
+                fi
+            else
+                safe_echo "❌ Failed to compile $test_source"
+                $compile_cmd
+                total_failed=$((total_failed + 1))
+                
+                test_names+=("$test_name")
+                test_totals+=(0)
+                test_passed+=(0)
+                test_failed+=(1)
+            fi
+        done
+        
+        total_passed=$((total_tests - total_failed))
+        
+        # Store results using generic approach
+        store_suite_results "$suite_name" "$total_tests" "$total_passed" "$total_failed" \
+                           test_names test_totals test_passed test_failed
+        
+        return $total_failed
+    fi
+    
+    # Continue with original parallel execution for non-piped output
     # Arrays for parallel execution
     local job_pids=()
     local result_files=()
@@ -1648,6 +1844,92 @@ SUITE_TEMP_DIR=$(mktemp -d)
 SUITE_JOB_PIDS=()
 SUITE_RESULT_FILES=()
 SUITE_TYPES=()
+
+# Check if we should run sequentially due to piped output
+if [ "$PIPED_OUTPUT" = "true" ]; then
+    safe_echo "🚀 Running all test suites sequentially (piped output detected)..."
+    safe_echo ""
+    
+    # Run each test suite sequentially
+    overall_failed=0
+    
+    # Library tests
+    safe_echo "================================================"
+    safe_echo "           RUNNING LIBRARY TESTS               "
+    safe_echo "================================================"
+    if run_library_tests; then
+        safe_echo "✅ Library tests completed successfully"
+    else
+        lib_exit_code=$?
+        safe_echo "❌ Library tests failed with exit code: $lib_exit_code"
+        overall_failed=$((overall_failed + lib_exit_code))
+    fi
+    safe_echo ""
+    
+    # Input Processing tests
+    safe_echo "================================================"
+    safe_echo "         RUNNING INPUT PROCESSING TESTS        "
+    safe_echo "================================================"
+    if run_input_tests; then
+        safe_echo "✅ Input processing tests completed successfully"
+    else
+        input_exit_code=$?
+        safe_echo "❌ Input processing tests failed with exit code: $input_exit_code"
+        overall_failed=$((overall_failed + input_exit_code))
+    fi
+    safe_echo ""
+    
+    # MIR JIT tests
+    safe_echo "================================================"
+    safe_echo "            RUNNING MIR JIT TESTS              "
+    safe_echo "================================================"
+    if run_mir_tests; then
+        safe_echo "✅ MIR JIT tests completed successfully"
+    else
+        mir_exit_code=$?
+        safe_echo "❌ MIR JIT tests failed with exit code: $mir_exit_code"
+        overall_failed=$((overall_failed + mir_exit_code))
+    fi
+    safe_echo ""
+    
+    # Lambda Runtime tests
+    safe_echo "================================================"
+    safe_echo "          RUNNING LAMBDA RUNTIME TESTS         "
+    safe_echo "================================================"
+    if run_lambda_tests; then
+        safe_echo "✅ Lambda runtime tests completed successfully"
+    else
+        lambda_exit_code=$?
+        safe_echo "❌ Lambda runtime tests failed with exit code: $lambda_exit_code"
+        overall_failed=$((overall_failed + lambda_exit_code))
+    fi
+    safe_echo ""
+    
+    # Validator tests
+    safe_echo "================================================"
+    safe_echo "            RUNNING VALIDATOR TESTS            "
+    safe_echo "================================================"
+    if run_validator_tests; then
+        safe_echo "✅ Validator tests completed successfully"
+    else
+        validator_exit_code=$?
+        safe_echo "❌ Validator tests failed with exit code: $validator_exit_code"
+        overall_failed=$((overall_failed + validator_exit_code))
+    fi
+    safe_echo ""
+    
+    # Final summary for sequential mode
+    safe_echo "================================================"
+    safe_echo "             SEQUENTIAL TEST SUMMARY           "
+    safe_echo "================================================"
+    if [ $overall_failed -eq 0 ]; then
+        safe_echo "🎉 All test suites passed!"
+    else
+        safe_echo "❌ Some test suites failed (total failures: $overall_failed)"
+    fi
+    
+    exit $overall_failed
+fi
 
 print_status "🚀 Starting all test suites in parallel..."
 echo ""
