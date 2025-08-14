@@ -1,23 +1,31 @@
-// XML Schema (XSD) converted to Lambda schema
-// Based on library.xsd - comprehensive library management schema
+// XML Library Schema - Following working basic pattern
+// The schema syntax field:type works for both attributes and child element text content
 
-// Library root element - defined first to be recognized as root
+// Library root element - this is the Document type (MUST BE FIRST)
 type Document = <library
-    established: string,              // established attribute
-    xmlns: string,                   // namespace attribute
-    name: string,                     // text content from name child element
-    address: string,                  // text content from address child element
-    BookType*                         // zero or more book child elements
+    established: string,             // established attribute
+    xmlns: string?,                  // optional namespace attribute
+    name: string,                    // name child element text content
+    address: string,                 // address child element text content
+    BookType*                        // zero or more book child elements
 >
 
-// Book element with attributes and text content from child elements
+// Author element with attributes and child elements
+type AuthorType = <author
+    id: string,                      // id attribute
+    firstName: string,               // firstName child element text content
+    lastName: string,                // lastName child element text content
+    birthYear: string?               // optional birthYear child element text content
+>
+
+// Book element with attributes and child elements
 type BookType = <book
-    category: string,                 // category attribute
-    inStock: string?,                 // optional inStock attribute
-    title: string,                    // text from title child element
-    author: string,                   // simplified author as string
-    isbn: string,                     // text from isbn child element
-    publishedYear: string,            // text from publishedYear child element
-    price: string,                    // text from price child element
-    description: string?              // optional text from description child element
+    category: string,                // category attribute
+    inStock: string?,                // optional inStock attribute (can be true/false)
+    title: string,                   // title child element text content
+    author: AuthorType,              // author child element (complex structure)
+    isbn: string,                    // isbn child element text content
+    publishedYear: string,           // publishedYear child element text content
+    price: string,                   // price child element text content
+    description: string?             // optional description child element text content
 >

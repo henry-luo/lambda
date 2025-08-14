@@ -14,6 +14,9 @@
 #include <assert.h>
 #include <stdio.h>
 
+// Debug flag - set to 0 to disable all SCHEMA_DEBUG output
+#define ENABLE_SCHEMA_DEBUG 0
+
 // External function declarations
 extern "C" {
     TSParser* lambda_parser(void);
@@ -154,9 +157,9 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     TSSymbol symbol = ts_node_symbol(type_expr_node);
     const char* node_type = ts_node_type(type_expr_node);
     
-    printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s'\n", symbol, node_type);
-    printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type=%d, sym_primary_type=%d, sym_identifier=%d\n", 
-           sym_base_type, sym_primary_type, sym_identifier);
+    // if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s'\n", symbol, node_type);
+    // if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type=%d, sym_primary_type=%d, sym_identifier=%d\n", 
+    //        sym_base_type, sym_primary_type, sym_identifier);
     
     // Handle different node types based on Tree-sitter symbols from ts-enum.h
     switch (symbol) {
@@ -205,7 +208,7 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
             
         case anon_sym_null:
         case sym_null:
-            printf("[SCHEMA_DEBUG] get_type_id: null case triggered\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] get_type_id: null case triggered\n");
             return build_primitive_schema(parser, type_expr_node, LMD_TYPE_NULL);
             
         // Complex type nodes
@@ -234,7 +237,7 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
         // Type expressions
         case sym_base_type:
         case sym_primary_type:
-            printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type/sym_primary_type case, calling build_primary_type_schema\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type/sym_primary_type case, calling build_primary_type_schema\n");
             return build_primary_type_schema(parser, type_expr_node);
             
         case sym_list_type:
@@ -260,7 +263,7 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
             
         // Identifiers and references
         case sym_identifier:
-            printf("[SCHEMA_DEBUG] build_schema_type: sym_identifier case, calling build_reference_schema\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_identifier case, calling build_reference_schema\n");
             return build_reference_schema(parser, type_expr_node);
             
         // Binary expressions (for union types: Type1 | Type2)
@@ -304,7 +307,7 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
 TypeSchema* build_primitive_schema(SchemaParser* parser, TSNode node, TypeId type_id) {
     if (!parser) return NULL;
     
-    printf("[SCHEMA_DEBUG] build_primitive_schema: type_id=%d\n", type_id);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primitive_schema: type_id=%d\n", type_id);
     return create_primitive_schema(type_id, parser->pool);
 }
 
@@ -499,7 +502,7 @@ TypeSchema* build_reference_schema(SchemaParser* parser, TSNode node) {
     // Extract type name from identifier using the helper function
     StrView type_name = get_node_source(parser, node);
     
-    printf("[SCHEMA_DEBUG] build_reference_schema: type_name='%.*s', length=%zu\n", 
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_reference_schema: type_name='%.*s', length=%zu\n", 
            (int)type_name.length, type_name.str, type_name.length);
     
     // Check if this is a primitive type name first
@@ -514,7 +517,7 @@ TypeSchema* build_reference_schema(SchemaParser* parser, TSNode node) {
         } else if (strview_equal(&type_name, "bool")) {
             return create_primitive_schema(LMD_TYPE_BOOL, parser->pool);
         } else if (strview_equal(&type_name, "null")) {
-            printf("[SCHEMA_DEBUG] build_reference_schema: creating LMD_TYPE_NULL for 'null'\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_reference_schema: creating LMD_TYPE_NULL for 'null'\n");
             return create_primitive_schema(LMD_TYPE_NULL, parser->pool);
         } else if (strview_equal(&type_name, "char")) {
             return create_primitive_schema(LMD_TYPE_SYMBOL, parser->pool);  // char represented as symbol
@@ -537,7 +540,7 @@ TypeSchema* build_reference_schema(SchemaParser* parser, TSNode node) {
     memcpy(name_str, type_name.str, type_name.length);
     name_str[type_name.length] = '\0';
     
-    printf("[SCHEMA_DEBUG] build_reference_schema: creating reference for '%s' (not a primitive)\n", name_str);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_reference_schema: creating reference for '%s' (not a primitive)\n", name_str);
     
     return create_reference_schema(name_str, parser->pool);
 }
@@ -583,11 +586,11 @@ TypeSchema* build_primary_type_schema(SchemaParser* parser, TSNode node) {
 
 TypeSchema* build_primary_type_schema_with_depth(SchemaParser* parser, TSNode node, int depth) {
     if (!parser || depth > 10) {
-        printf("[SCHEMA_DEBUG] build_primary_type_schema: maximum recursion depth reached, defaulting to ANY\n");
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: maximum recursion depth reached, defaulting to ANY\n");
         return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
     }
     
-    printf("[SCHEMA_DEBUG] build_primary_type_schema: depth=%d, symbol=%d, type='%s'\n", 
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: depth=%d, symbol=%d, type='%s'\n", 
            depth, ts_node_symbol(node), ts_node_type(node));
     
     // First, check all children (not just named children) for primitive type tokens
@@ -596,37 +599,37 @@ TypeSchema* build_primary_type_schema_with_depth(SchemaParser* parser, TSNode no
         TSNode child = ts_node_child(node, i);
         TSSymbol child_symbol = ts_node_symbol(child);
         
-        printf("[SCHEMA_DEBUG] build_primary_type_schema: child[%d] symbol=%d, type='%s'\n", 
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: child[%d] symbol=%d, type='%s'\n", 
                i, child_symbol, ts_node_type(child));
         
         // Check for specific primitive type anonymous symbols first
         switch (child_symbol) {
             case 64: // anon_sym_int
-                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_int=64\n");
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_int=64\n");
                 return create_primitive_schema(LMD_TYPE_INT, parser->pool);
             case 67: // anon_sym_string
-                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_string=67\n");
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_string=67\n");
                 return create_primitive_schema(LMD_TYPE_STRING, parser->pool);
             case 65: // anon_sym_float
-                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_float=65\n");
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_float=65\n");
                 return create_primitive_schema(LMD_TYPE_FLOAT, parser->pool);
             case 97: // anon_sym_bool
-                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_bool=97\n");
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_bool=97\n");
                 return create_primitive_schema(LMD_TYPE_BOOL, parser->pool);
             case 21: // anon_sym_null
-                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_null=21\n");
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_null=21\n");
                 return create_primitive_schema(LMD_TYPE_NULL, parser->pool);
         }
         
         // Handle identifiers (custom types)
         if (child_symbol == sym_identifier) {
-            printf("[SCHEMA_DEBUG] build_primary_type_schema: found identifier, calling build_reference_schema\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found identifier, calling build_reference_schema\n");
             return build_reference_schema(parser, child);
         }
         
         // For non-wrapper types, delegate immediately
         if (child_symbol != sym_base_type && child_symbol != sym_primary_type) {
-            printf("[SCHEMA_DEBUG] build_primary_type_schema: found non-wrapper type, delegating to build_schema_type\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: found non-wrapper type, delegating to build_schema_type\n");
             return build_schema_type(parser, child);
         }
     }
@@ -637,12 +640,12 @@ TypeSchema* build_primary_type_schema_with_depth(SchemaParser* parser, TSNode no
         TSSymbol child_symbol = ts_node_symbol(child);
         
         if (child_symbol == sym_base_type || child_symbol == sym_primary_type) {
-            printf("[SCHEMA_DEBUG] build_primary_type_schema: recursively processing wrapper type with depth %d\n", depth + 1);
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: recursively processing wrapper type with depth %d\n", depth + 1);
             return build_primary_type_schema_with_depth(parser, child, depth + 1);
         }
     }
     
-    printf("[SCHEMA_DEBUG] build_primary_type_schema: no resolvable child found, defaulting to LMD_TYPE_ANY\n");
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_primary_type_schema: no resolvable child found, defaulting to LMD_TYPE_ANY\n");
     return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
 }
 
@@ -667,7 +670,7 @@ TypeSchema* build_list_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    printf("[SCHEMA_DEBUG] build_array_type_schema: parsing array type node\n");
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: parsing array type node\n");
     
     // For array types [ElementType], we need to find the element type within the brackets
     // Try field IDs first
@@ -677,14 +680,14 @@ TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
     if (ts_node_is_null(element_node)) {
         // If field ID doesn't work, look for child nodes manually
         uint32_t child_count = ts_node_child_count(node);
-        printf("[SCHEMA_DEBUG] build_array_type_schema: array has %d children\n", child_count);
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: array has %d children\n", child_count);
         
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(node, i);
             const char* child_type = ts_node_type(child);
             TSSymbol child_symbol = ts_node_symbol(child);
             
-            printf("[SCHEMA_DEBUG] build_array_type_schema: child[%d] type='%s', symbol=%d\n", 
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: child[%d] type='%s', symbol=%d\n", 
                    i, child_type, child_symbol);
             
             // Skip brackets and other syntax tokens, look for actual type nodes
@@ -692,7 +695,7 @@ TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
                 child_symbol != anon_sym_STAR && child_symbol != anon_sym_PLUS &&
                 child_symbol != anon_sym_QMARK) {
                 element_node = child;
-                printf("[SCHEMA_DEBUG] build_array_type_schema: found element type node: %s\n", child_type);
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: found element type node: %s\n", child_type);
                 break;
             }
         }
@@ -700,17 +703,17 @@ TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
     
     if (!ts_node_is_null(element_node)) {
         element_type = build_schema_type(parser, element_node);
-        printf("[SCHEMA_DEBUG] build_array_type_schema: element_type=%p, schema_type=%d\n", 
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: element_type=%p, schema_type=%d\n", 
                element_type, element_type ? element_type->schema_type : -1);
     }
     
     if (!element_type) {
-        printf("[SCHEMA_DEBUG] build_array_type_schema: defaulting to LMD_TYPE_ANY\n");
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: defaulting to LMD_TYPE_ANY\n");
         element_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
     }
     
     TypeSchema* result = create_array_schema(element_type, 0, -1, parser->pool);
-    printf("[SCHEMA_DEBUG] build_array_type_schema: created array schema=%p\n", result);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_array_type_schema: created array schema=%p\n", result);
     return result;
 }
 
@@ -785,10 +788,10 @@ TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
                 
                 // Parse field type
                 TypeSchema* field_type = build_schema_type(parser, type_node);
-                printf("[SCHEMA_DEBUG] build_map_type_schema: field='%.*s', field_type=%p\n",
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_map_type_schema: field='%.*s', field_type=%p\n",
                        (int)field_name.length, field_name.str, field_type);
                 if (!field_type) {
-                    printf("[SCHEMA_DEBUG] build_map_type_schema: field_type is NULL, using LMD_TYPE_ANY\n");
+                    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_map_type_schema: field_type is NULL, using LMD_TYPE_ANY\n");
                     field_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
                 }
                 

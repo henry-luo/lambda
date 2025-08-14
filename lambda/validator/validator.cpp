@@ -12,6 +12,9 @@
 #include <string>
 #include <cmath>
 
+// Debug flag - set to 0 to disable all SCHEMA_DEBUG output  
+#define ENABLE_SCHEMA_DEBUG 0
+
 // External function declarations
 extern "C" {
     TSParser* lambda_parser(void);
@@ -492,10 +495,56 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
         
         Item field_value;
         if (map->type_id == LMD_TYPE_ELEMENT) {
-            // For Elements, use elmt_get to access attributes
-            //printf("[TRACE] validate_map: calling elmt_get for element\n");
-            //fflush(stdout);
-            field_value = elmt_get((Element*)map, field_key);
+            // For Elements, first try to get from attributes
+            Element* element = (Element*)map;
+            field_value = elmt_get(element, field_key);
+            
+            // If attribute not found, check if this field matches a child element with text content
+            if (field_value.item == ITEM_NULL) {
+                String* field_name_str = (String*)field_key.pointer;
+                printf("[DEBUG] validate_map: Looking for child element '%s' in %ld children\n", 
+                       field_name_str->chars, element->length);
+                
+                // Look through child elements to find one with matching tag name
+                for (int i = 0; i < element->length; i++) {
+                    Item child_item = element->items[i];
+                    TypeId child_type_id = get_type_id(child_item);
+                    printf("[DEBUG] validate_map: Child %d has type %d (LMD_TYPE_ELEMENT=%d)\n", 
+                           i, child_type_id, LMD_TYPE_ELEMENT);
+                    
+                    if (child_type_id == LMD_TYPE_ELEMENT) {
+                        Element* child_element = (Element*)child_item.pointer;
+                        if (child_element->type) {
+                            TypeElmt* child_type = (TypeElmt*)child_element->type;
+                            printf("[DEBUG] validate_map: Child element tag: '%.*s'\n", 
+                                   (int)child_type->name.length, child_type->name.str);
+                            
+                            // Check if child element tag name matches field name
+                            if (child_type->name.length == field_name_str->len &&
+                                memcmp(child_type->name.str, field_name_str->chars, field_name_str->len) == 0) {
+                                printf("[DEBUG] validate_map: Found matching child element '%s'\n", 
+                                       field_name_str->chars);
+                                
+                                // Found matching child element, check if it has text content
+                                if (child_element->length > 0) {
+                                    Item first_child = child_element->items[0];
+                                    TypeId first_child_type = get_type_id(first_child);
+                                    printf("[DEBUG] validate_map: First child has type %d (LMD_TYPE_STRING=%d)\n", 
+                                           first_child_type, LMD_TYPE_STRING);
+                                    
+                                    if (first_child_type == LMD_TYPE_STRING) {
+                                        // Use the text content as the field value
+                                        field_value = first_child;
+                                        printf("[DEBUG] validate_map: Using child element text content for field '%s'\n", 
+                                               field_name_str->chars);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         } else {
             // For Maps, use map_get
             //printf("[TRACE] validate_map: calling map_get for map\n");
@@ -661,7 +710,33 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
             Item attr_value = elmt_get(element, attr_key);
             
             if (attr_value.item == ITEM_NULL) {
-                if (required_attr->required) {
+                // Check if there's a child element with matching tag name
+                bool child_element_found = false;
+                
+                // Iterate through child elements
+                for (size_t i = 0; i < element->length; i++) {
+                    Item child_item = element->items[i];
+                    if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                        Element* child_element = child_item.element;
+                        if (child_element && child_element->type) {
+                            TypeElmt* child_elmt_type = (TypeElmt*)child_element->type;
+                            
+                            // Compare tag name with field name
+                            if (child_elmt_type->name.length == required_attr->name.length &&
+                                strncmp(child_elmt_type->name.str, required_attr->name.str, required_attr->name.length) == 0) {
+                                
+                                // Found matching child element, get its text content
+                                if (child_element->length > 0 && get_type_id(child_element->items[0]) == LMD_TYPE_STRING) {
+                                    child_element_found = true;
+                                    attr_value = child_element->items[0];  // Use child element's text content
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (!child_element_found && required_attr->required) {
                     char error_msg[256];
                     snprintf(error_msg, sizeof(error_msg), 
                             "Missing required attribute: %.*s", 
@@ -1058,7 +1133,7 @@ TypeSchema* create_primitive_schema(TypeId primitive_type, VariableMemPool* pool
     TypeSchema* schema = (TypeSchema*)pool_calloc(pool, sizeof(TypeSchema));
     schema->schema_type = LMD_SCHEMA_PRIMITIVE;
     
-    printf("[SCHEMA_DEBUG] create_primitive_schema: primitive_type=%d\n", primitive_type);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] create_primitive_schema: primitive_type=%d\n", primitive_type);
     SchemaPrimitive* prim_data = (SchemaPrimitive*)pool_calloc(pool, sizeof(SchemaPrimitive));
     prim_data->primitive_type = primitive_type;
     schema->schema_data = prim_data;
