@@ -1,5 +1,6 @@
 // SOAP/Web Service XML schema
 // Tests XML for SOAP messages with complex nested structures
+// Note: Using unqualified names, assuming validator strips namespaces
 
 type SoapFault = <Fault
     faultcode: string,                // fault code
@@ -31,8 +32,8 @@ type SoapBody = <Body
 >
 
 type Document = <Envelope
-    xmlns: string,                    // SOAP namespace
+    xmlns:soap: string,               // SOAP namespace
     encodingStyle: string?,           // optional encoding style
-    header: SoapHeader?,              // optional header
-    body: SoapBody                    // required body
+    SoapHeader?,                      // optional header  
+    SoapBody                          // required body
 >

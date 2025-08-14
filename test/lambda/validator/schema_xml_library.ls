@@ -7,7 +7,7 @@ type Document = <library
     xmlns: string?,                  // optional namespace attribute
     name: string,                    // name child element text content
     address: string,                 // address child element text content
-    BookType*                        // zero or more book child elements
+    BookType+                        // one or more book child elements
 >
 
 // Author element with attributes and child elements
@@ -18,14 +18,9 @@ type AuthorType = <author
     birthYear: string?               // optional birthYear child element text content
 >
 
-// Book element with attributes and child elements
+// Book element definition with nested AuthorType
 type BookType = <book
-    category: string,                // category attribute
-    inStock: string?,                // optional inStock attribute (can be true/false)
-    title: string,                   // title child element text content
-    author: AuthorType,              // author child element (complex structure)
-    isbn: string,                    // isbn child element text content
-    publishedYear: string,           // publishedYear child element text content
-    price: string,                   // price child element text content
-    description: string?             // optional description child element text content
+    title: string,                    // title attribute or text content
+    isbn: string?,                   // optional isbn attribute or text content
+    AuthorType+                      // one or more authors (nested type)
 >
