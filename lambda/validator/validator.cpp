@@ -10,6 +10,7 @@
 #include <cassert>
 #include <memory>
 #include <string>
+#include <cmath>
 
 // External function declarations
 extern "C" {
@@ -327,6 +328,25 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
             add_validation_error(result, error);
         }
     } else {
+        // Additional validation for numeric type conversions
+        if (expected_type == LMD_TYPE_INT && actual_type == LMD_TYPE_FLOAT) {
+            // For float to int conversion, check if the float is actually an integer
+            double float_value = *(double*)item.pointer;
+            if (float_value != floor(float_value)) {
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg), 
+                        "Cannot convert float %.1f to int: has fractional part",
+                        float_value);
+                
+                ValidationError* error = create_validation_error(
+                    VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->path, ctx->pool);
+                if (error) {
+                    error->expected = schema;
+                    error->actual = item;
+                    add_validation_error(result, error);
+                }
+            }
+        }
         ////// printf("[DEBUG].*: Types compatible - VALIDATION PASSED\n");
     }
     
@@ -968,6 +988,27 @@ bool is_compatible_type(TypeId actual, TypeId expected) {
                    actual == LMD_TYPE_FLOAT || actual == LMD_TYPE_DECIMAL;
         case LMD_TYPE_ANY:
             return true;
+            
+        // Numeric type compatibility for JSON parsing
+        case LMD_TYPE_INT:
+            // Allow float -> int conversion (JSON often parses all numbers as floats)
+            // Also allow int64 -> int and decimal -> int
+            return actual == LMD_TYPE_FLOAT || actual == LMD_TYPE_INT64 || actual == LMD_TYPE_DECIMAL;
+            
+        case LMD_TYPE_FLOAT:
+            // Allow int -> float conversion (upcast)
+            // Also allow int64 -> float and decimal -> float
+            return actual == LMD_TYPE_INT || actual == LMD_TYPE_INT64 || actual == LMD_TYPE_DECIMAL;
+            
+        case LMD_TYPE_INT64:
+            // Allow int -> int64 conversion (upcast)
+            // Allow float -> int64 if no fractional part (handled in runtime validation)
+            return actual == LMD_TYPE_INT || actual == LMD_TYPE_FLOAT;
+            
+        case LMD_TYPE_DECIMAL:
+            // Allow all numeric types -> decimal conversion
+            return actual == LMD_TYPE_INT || actual == LMD_TYPE_INT64 || actual == LMD_TYPE_FLOAT;
+            
         default:
             return false;
     }

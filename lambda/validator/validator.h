@@ -235,6 +235,7 @@ TypeSchema* build_list_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_object_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_function_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_primary_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_primary_type_schema_with_depth(SchemaParser* parser, TSNode node, int depth);
 TypeSchema* build_list_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node);

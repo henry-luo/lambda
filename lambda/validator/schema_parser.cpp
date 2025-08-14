@@ -578,67 +578,71 @@ TypeSchema* build_function_schema(SchemaParser* parser, TSNode node) {
 }
 
 TypeSchema* build_primary_type_schema(SchemaParser* parser, TSNode node) {
-    if (!parser) return NULL;
+    return build_primary_type_schema_with_depth(parser, node, 0);
+}
+
+TypeSchema* build_primary_type_schema_with_depth(SchemaParser* parser, TSNode node, int depth) {
+    if (!parser || depth > 10) {
+        printf("[SCHEMA_DEBUG] build_primary_type_schema: maximum recursion depth reached, defaulting to ANY\n");
+        return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+    }
     
-    // Handle primary type expressions - delegate to first child, but avoid infinite recursion
+    printf("[SCHEMA_DEBUG] build_primary_type_schema: depth=%d, symbol=%d, type='%s'\n", 
+           depth, ts_node_symbol(node), ts_node_type(node));
+    
+    // First, check all children (not just named children) for primitive type tokens
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        TSSymbol child_symbol = ts_node_symbol(child);
+        
+        printf("[SCHEMA_DEBUG] build_primary_type_schema: child[%d] symbol=%d, type='%s'\n", 
+               i, child_symbol, ts_node_type(child));
+        
+        // Check for specific primitive type anonymous symbols first
+        switch (child_symbol) {
+            case 64: // anon_sym_int
+                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_int=64\n");
+                return create_primitive_schema(LMD_TYPE_INT, parser->pool);
+            case 67: // anon_sym_string
+                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_string=67\n");
+                return create_primitive_schema(LMD_TYPE_STRING, parser->pool);
+            case 65: // anon_sym_float
+                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_float=65\n");
+                return create_primitive_schema(LMD_TYPE_FLOAT, parser->pool);
+            case 97: // anon_sym_bool
+                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_bool=97\n");
+                return create_primitive_schema(LMD_TYPE_BOOL, parser->pool);
+            case 21: // anon_sym_null
+                printf("[SCHEMA_DEBUG] build_primary_type_schema: found anon_sym_null=21\n");
+                return create_primitive_schema(LMD_TYPE_NULL, parser->pool);
+        }
+        
+        // Handle identifiers (custom types)
+        if (child_symbol == sym_identifier) {
+            printf("[SCHEMA_DEBUG] build_primary_type_schema: found identifier, calling build_reference_schema\n");
+            return build_reference_schema(parser, child);
+        }
+        
+        // For non-wrapper types, delegate immediately
+        if (child_symbol != sym_base_type && child_symbol != sym_primary_type) {
+            printf("[SCHEMA_DEBUG] build_primary_type_schema: found non-wrapper type, delegating to build_schema_type\n");
+            return build_schema_type(parser, child);
+        }
+    }
+    
+    // If we only found wrapper types, recurse into the first one with increased depth
     TSNode child = ts_node_named_child(node, 0);
-    printf("[SCHEMA_DEBUG] build_primary_type_schema: child node symbol=%d, type='%s'\n", 
-           ts_node_symbol(child), ts_node_type(child));
-    
     if (!ts_node_is_null(child)) {
         TSSymbol child_symbol = ts_node_symbol(child);
         
-        // Avoid infinite recursion between sym_base_type and sym_primary_type
         if (child_symbol == sym_base_type || child_symbol == sym_primary_type) {
-            printf("[SCHEMA_DEBUG] build_primary_type_schema: avoiding recursion, looking deeper\n");
-            
-            // Look deeper for the actual leaf node by traversing all children
-            TSNode current_node = child;
-            int max_depth = 5; // Prevent infinite traversal
-            
-            while (max_depth-- > 0) {
-                TSNode deeper_child = ts_node_named_child(current_node, 0);
-                if (ts_node_is_null(deeper_child)) {
-                    // Try getting all children, not just named children
-                    uint32_t child_count = ts_node_child_count(current_node);
-                    for (uint32_t i = 0; i < child_count; i++) {
-                        TSNode any_child = ts_node_child(current_node, i);
-                        if (!ts_node_is_null(any_child)) {
-                            TSSymbol any_symbol = ts_node_symbol(any_child);
-                            if (any_symbol == sym_identifier) {
-                                deeper_child = any_child;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (ts_node_is_null(deeper_child)) break;
-                }
-                
-                TSSymbol deeper_symbol = ts_node_symbol(deeper_child);
-                printf("[SCHEMA_DEBUG] build_primary_type_schema: found deeper node symbol=%d, type='%s'\n", 
-                       deeper_symbol, ts_node_type(deeper_child));
-                
-                if (deeper_symbol == sym_identifier) {
-                    printf("[SCHEMA_DEBUG] build_primary_type_schema: found identifier, calling build_reference_schema\n");
-                    return build_reference_schema(parser, deeper_child);
-                } else if (deeper_symbol != sym_base_type && deeper_symbol != sym_primary_type) {
-                    printf("[SCHEMA_DEBUG] build_primary_type_schema: found non-recursive node, delegating\n");
-                    return build_schema_type(parser, deeper_child);
-                }
-                
-                current_node = deeper_child;
-            }
-            
-            // If we can't find a leaf, default to ANY
-            printf("[SCHEMA_DEBUG] build_primary_type_schema: couldn't find leaf after recursion detection, defaulting to LMD_TYPE_ANY\n");
-            return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+            printf("[SCHEMA_DEBUG] build_primary_type_schema: recursively processing wrapper type with depth %d\n", depth + 1);
+            return build_primary_type_schema_with_depth(parser, child, depth + 1);
         }
-        
-        return build_schema_type(parser, child);
     }
     
-    printf("[SCHEMA_DEBUG] build_primary_type_schema: no child found, defaulting to LMD_TYPE_ANY\n");
+    printf("[SCHEMA_DEBUG] build_primary_type_schema: no resolvable child found, defaulting to LMD_TYPE_ANY\n");
     return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
 }
 
