@@ -335,7 +335,8 @@ build_dependency_based_compile_cmd() {
         fi
         echo "$compiler $special_flags $CRITERION_FLAGS -o $binary $source"
     else
-        echo "gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+        # Use clang for library and input tests to match normal compilation behavior
+        echo "clang -o test/$binary test/$source $deps $CRITERION_FLAGS $special_flags"
     fi
     return 0
 }
@@ -1714,6 +1715,101 @@ run_individual_lambda_test() {
     return $?
 }
 
+# Generalized function to run a suite in raw mode
+run_suite_raw_mode() {
+    local suite_name="$1"
+    
+    # Load configuration if not already loaded
+    if [ ${#TEST_SUITE_NAMES[@]} -eq 0 ]; then
+        load_test_config
+    fi
+    
+    # Get suite configuration
+    local sources_str=$(get_config_array "$suite_name" "sources" " ")
+    local suite_display_name=$(get_config "$suite_name" "name")
+    
+    if [ -z "$sources_str" ]; then
+        print_error "No configuration found for suite: $suite_name"
+        return 1
+    fi
+    
+    # Parse arrays using bash 3.2 compatible method
+    IFS=' ' read -ra sources_array <<< "$sources_str"
+    
+    print_status "🚀 Running $suite_display_name in RAW mode"
+    
+    local overall_failed=0
+    
+    # For suites with multiple tests, run each one individually
+    if [ ${#sources_array[@]} -gt 1 ]; then
+        for source_file in "${sources_array[@]}"; do
+            # Extract test name from source file
+            local test_name=$(basename "$source_file" .c)
+            test_name=${test_name#test_}  # Remove "test_" prefix if present
+            
+            print_status "Running individual test: $test_name"
+            if run_individual_test "$suite_name" "$test_name"; then
+                print_success "$test_name test completed successfully"
+            else
+                local exit_code=$?
+                print_error "$test_name test failed with exit code: $exit_code"
+                overall_failed=$((overall_failed + exit_code))
+            fi
+            echo ""
+        done
+    else
+        # For suites with single tests, run the suite test directly
+        local test_name="$suite_name"
+        print_status "Running single suite test: $test_name"
+        if run_individual_test "$suite_name" "$test_name"; then
+            print_success "$test_name test completed successfully"
+        else
+            local exit_code=$?
+            print_error "$test_name test failed with exit code: $exit_code"
+            overall_failed=$exit_code
+        fi
+    fi
+    
+    return $overall_failed
+}
+
+# Generalized function to run a suite in normal mode
+run_suite_normal_mode() {
+    local suite_name="$1"
+    
+    case "$suite_name" in
+        "library")
+            print_status "🚀 Running Library Tests Suite"
+            run_library_tests
+            return $?
+            ;;
+        "input")
+            print_status "🚀 Running Input Processing Tests Suite"
+            run_input_tests
+            return $?
+            ;;
+        "validator")
+            print_status "🚀 Running Validator Tests Suite"
+            run_validator_tests
+            return $?
+            ;;
+        "mir")
+            print_status "🚀 Running MIR JIT Tests Suite"
+            run_mir_tests
+            return $?
+            ;;
+        "lambda")
+            print_status "🚀 Running Lambda Runtime Tests Suite"
+            run_lambda_tests
+            return $?
+            ;;
+        *)
+            print_error "Unknown suite: $suite_name"
+            return 1
+            ;;
+    esac
+}
+
 # Function to run target test suites
 run_target_test() {
     local target="$1"
@@ -1723,59 +1819,22 @@ run_target_test() {
             # Raw mode not supported for "all" target
             if [ "$RAW_OUTPUT" = true ]; then
                 print_error "--raw option is not supported with --target=all"
-                print_status "Use --raw with individual tests like: --target=math --raw"
+                print_status "Use --raw with individual tests or suite targets"
                 return 1
             fi
             # Run all tests (existing behavior)
             return 0
             ;;
-        "library")
+        "library"|"input"|"validator"|"mir"|"lambda")
             if [ "$RAW_OUTPUT" = true ]; then
-                print_error "--raw option is not supported with suite targets"
-                print_status "Use --raw with individual tests like: --target=strbuf --raw"
-                return 1
-            fi
-            print_status "🚀 Running Library Tests Suite"
-            run_library_tests
-            return $?
-            ;;
-        "input")
-            if [ "$RAW_OUTPUT" = true ]; then
-                # For input suite, we'll run the input roundtrip test with raw output
-                # since mime_detect and math already have their own individual targets
-                run_individual_test "input" "input"
+                # Run suite in raw mode by running individual tests from the suite
+                run_suite_raw_mode "$target"
+                return $?
+            else
+                # Run suite normally
+                run_suite_normal_mode "$target"
                 return $?
             fi
-            print_status "🚀 Running Input Processing Tests Suite"
-            run_input_tests
-            return $?
-            ;;
-        "validator")
-            if [ "$RAW_OUTPUT" = true ]; then
-                run_individual_validator_test "validator"
-                return $?
-            fi
-            print_status "🚀 Running Validator Tests Suite"
-            run_validator_tests
-            return $?
-            ;;
-        "mir")
-            if [ "$RAW_OUTPUT" = true ]; then
-                run_individual_mir_test "mir"
-                return $?
-            fi
-            print_status "🚀 Running MIR JIT Tests Suite"
-            run_mir_tests
-            return $?
-            ;;
-        "lambda")
-            if [ "$RAW_OUTPUT" = true ]; then
-                run_individual_lambda_test "lambda"
-                return $?
-            fi
-            print_status "🚀 Running Lambda Runtime Tests Suite"
-            run_lambda_tests
-            return $?
             ;;
         "strbuf"|"strview"|"variable_pool"|"num_stack")
             run_individual_library_test "$target"
