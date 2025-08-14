@@ -157,9 +157,9 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     TSSymbol symbol = ts_node_symbol(type_expr_node);
     const char* node_type = ts_node_type(type_expr_node);
     
-    // if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s'\n", symbol, node_type);
-    // if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type=%d, sym_primary_type=%d, sym_identifier=%d\n", 
-    //        sym_base_type, sym_primary_type, sym_identifier);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s'\n", symbol, node_type);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type=%d, sym_primary_type=%d, sym_identifier=%d\n", 
+           sym_base_type, sym_primary_type, sym_identifier);
     
     // Handle different node types based on Tree-sitter symbols from ts-enum.h
     switch (symbol) {
@@ -250,7 +250,12 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
             return build_map_type_schema(parser, type_expr_node);
             
         case sym_element_type:
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_element_type case matched, calling build_element_type_schema\n");
             return build_element_type_schema(parser, type_expr_node);
+        
+        case sym_content_type:
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_content_type case matched\n");
+            return build_content_type_schema(parser, type_expr_node);
             
         case sym_fn_type:
             return build_function_type_schema(parser, type_expr_node);
@@ -271,6 +276,7 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
             return build_binary_expression_schema(parser, type_expr_node);
             
         default:
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: default case for symbol=%d, type='%s'\n", symbol, node_type);
             // Handle binary expressions for union types manually if not caught above
             if (ts_node_child_count(type_expr_node) >= 3) {
                 TSNode op_node = ts_node_child(type_expr_node, 1);
@@ -479,6 +485,23 @@ TypeSchema* build_map_schema(SchemaParser* parser, TSNode node) {
     //printf("[SCHEMA_PARSER] DEBUG: Map schema created with %d fields\n", field_count);
     
     return schema;
+}
+
+TypeSchema* build_content_type_schema(SchemaParser* parser, TSNode node) {
+    if (!parser) return NULL;
+    
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_content_type_schema: entering, child_count=%d\n", ts_node_child_count(node));
+    
+    // Content type should contain a single type expression (likely a string literal)
+    if (ts_node_child_count(node) > 0) {
+        TSNode child = ts_node_child(node, 0);
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_content_type_schema: processing child type='%s', symbol=%d\n", 
+                                       ts_node_type(child), ts_node_symbol(child));
+        return build_schema_type(parser, child);
+    }
+    
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_content_type_schema: no children, returning string schema\n");
+    return create_primitive_schema(LMD_TYPE_STRING, parser->pool);
 }
 
 TypeSchema* build_element_schema(SchemaParser* parser, TSNode node) {
@@ -841,6 +864,8 @@ TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: entering, child_count=%d\n", ts_node_child_count(node));
+    
     // Extract element tag name first
     const char* tag_name = "element";
     TSNode name_node = ts_node_child_by_field_id(node, field_name);
@@ -856,16 +881,21 @@ TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
         for (int i = 0; i < ts_node_child_count(node); i++) {
             TSNode child = ts_node_child(node, i);
             const char* child_type = ts_node_type(child);
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: child[%d] type='%s', symbol=%d\n", 
+                                           i, child_type, ts_node_symbol(child));
             if (strcmp(child_type, "identifier") == 0) {
                 StrView tag_view = get_node_source(parser, child);
                 char* parsed_tag = (char*)pool_calloc(parser->pool, tag_view.length + 1);
                 memcpy(parsed_tag, tag_view.str, tag_view.length);
                 parsed_tag[tag_view.length] = '\0';
                 tag_name = parsed_tag;
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: extracted tag_name='%s'\n", tag_name);
                 break;
             }
         }
     }
+    
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: using tag_name='%s'\n", tag_name);
     
     // Create the basic element schema
     TypeSchema* schema = create_element_schema(tag_name, parser->pool);
@@ -876,12 +906,60 @@ TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
     SchemaMapField* last_attr = NULL;
     int attr_count = 0;
     
+    // NEW: Also look for content literals
+    TypeSchema** content_types = NULL;
+    int content_count = 0;
+    
     for (int i = 0; i < ts_node_child_count(node); i++) {
         TSNode child = ts_node_child(node, i);
         TSSymbol child_symbol = ts_node_symbol(child);
+        const char* child_type = ts_node_type(child);
         
-        // Skip the tag name identifier
-        if (child_symbol == sym_identifier) continue;
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: processing child[%d], type='%s', symbol=%d\n", 
+                                       i, child_type, child_symbol);
+        
+        // Skip the tag name identifier and angle brackets
+        if (child_symbol == sym_identifier || child_symbol == 51 || child_symbol == 52) continue;  // < and >
+        
+        // Check if this is a content type (should be content)
+        if (child_symbol == sym_content_type) {
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: found content_type for content\n");
+            // Parse the content type as a content constraint
+            TypeSchema* content_schema = build_schema_type(parser, child);  // Use existing parser
+            if (content_schema) {
+                // Allocate new content array
+                TypeSchema** new_content_types = (TypeSchema**)pool_calloc(parser->pool, (content_count + 1) * sizeof(TypeSchema*));
+                // Copy old content if any
+                if (content_types) {
+                    memcpy(new_content_types, content_types, content_count * sizeof(TypeSchema*));
+                }
+                content_types = new_content_types;
+                content_types[content_count] = content_schema;
+                content_count++;
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: added content_type, count now %d\n", content_count);
+            }
+            continue;
+        }
+        
+        // Check if this is a string literal (should be content)
+        if (child_symbol == sym_string || strcmp(child_type, "string") == 0) {
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: found string literal for content\n");
+            // Parse the string literal as a content constraint
+            TypeSchema* literal_schema = build_schema_type(parser, child);  // Use existing parser
+            if (literal_schema) {
+                // Allocate new content array
+                TypeSchema** new_content_types = (TypeSchema**)pool_calloc(parser->pool, (content_count + 1) * sizeof(TypeSchema*));
+                // Copy old content if any
+                if (content_types) {
+                    memcpy(new_content_types, content_types, content_count * sizeof(TypeSchema*));
+                }
+                content_types = new_content_types;
+                content_types[content_count] = literal_schema;
+                content_count++;
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: added content literal, count now %d\n", content_count);
+            }
+            continue;
+        }
         
         // Parse assign expressions as attributes (name: type format)
         if (child_symbol == sym_assign_expr || child_symbol == sym_attr) {
@@ -941,6 +1019,16 @@ TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
     
     // Set the parsed attributes
     element_data->attributes = attributes;
+    
+    // Set the parsed content types
+    if (content_count > 0) {
+        element_data->content_types = content_types;
+        element_data->content_count = content_count;
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: set content_count=%d\n", content_count);
+    }
+    
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: finished, content parsing implemented\n");
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: element_data->content_count=%d\n", element_data->content_count);
     
     return schema;
 }

@@ -44,8 +44,8 @@ void* heap_calloc(size_t size, TypeId type_id) {
 }
 
 void expand_list(List *list) {
-    printf("expand list: %p, length: %ld, capacity: %ld\n", 
-        list, list->length, list->capacity);
+    //printf("expand list: %p, length: %ld, capacity: %ld\n", 
+    //    list, list->length, list->capacity);
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry

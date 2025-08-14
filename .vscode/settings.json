@@ -52,6 +52,7 @@
         "lambda-data.h": "c",
         "stdexcept": "cpp",
         "forward_list": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "memory": "cpp"
     }
 }

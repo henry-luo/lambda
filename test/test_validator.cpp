@@ -88,8 +88,8 @@ void test_cli_validation_helper(const char* data_file, const char* schema_file,
     FILE* fp = popen(command, "r");
     cr_assert_not_null(fp, "Failed to execute validation command: %s", command);
     
-    // Read output
-    char output[4096] = {0};
+    // Read output with very large buffer to capture full validation results
+    char output[65536] = {0};  // 64KB buffer to handle large debug outputs
     size_t total_read = 0;
     char buffer[256];
     while (fgets(buffer, sizeof(buffer), fp) && total_read < sizeof(output) - 1) {
@@ -152,10 +152,10 @@ void test_auto_schema_detection_helper(const char* data_file, const char* expect
     FILE* fp = popen(command, "r");
     cr_assert_not_null(fp, "Failed to execute validation command: %s", command);
     
-    // Read output
-    char output[4096] = {0};
+    // Read output with very large buffer to capture full validation results
+    char output[65536] = {0};  // 64KB buffer to handle large debug outputs
     size_t total_read = 0;
-    char buffer[256];
+    char buffer[512];
     while (fgets(buffer, sizeof(buffer), fp) && total_read < sizeof(output) - 1) {
         size_t len = strlen(buffer);
         if (total_read + len < sizeof(output) - 1) {

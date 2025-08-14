@@ -180,7 +180,7 @@ void list_push(List *list, Item item) {
         }
     }
     // store the value in the list (and we may need two slots for long/double)
-    printf("list push item: type: %d, length: %ld\n", item.type_id, list->length);
+    //printf("list push item: type: %d, length: %ld\n", item.type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     switch (item.type_id) {

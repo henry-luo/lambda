@@ -200,7 +200,7 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
 
 ValidationResult* validate_item(SchemaValidator* validator, Item item, 
                                 TypeSchema* schema, ValidationContext* context) {
-    // ////// printf("[DEBUG].*: -1);
+    // ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: -1);
     
     if (!validator || !schema || !context) {
         ValidationResult* result = create_validation_result(context ? context->pool : validator->pool);
@@ -212,9 +212,9 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
     }
     
     // TRACE: Log validation entry
-    // //printf("[TRACE] validate_item: depth=%d, schema_type=%d, item_type=%d\n", 
-    //        context->current_depth, schema->schema_type, get_type_id(item));
-    // //fflush(stdout);
+    printf("[TRACE] validate_item: depth=%d, schema_type=%d, item_type=%d\n", 
+           context->current_depth, schema->schema_type, get_type_id(item));
+    fflush(stdout);
     
     // Check validation depth
     if (context->current_depth >= context->options.max_depth) {
@@ -232,37 +232,46 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
     ValidationResult* result = nullptr;
     
     // Dispatch to appropriate validation function based on schema type
-    // ////// printf("[DEBUG].*: %d\n", schema->schema_type);
+    if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: schema_type = %d\n", schema->schema_type);
+    if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: LMD_SCHEMA_PRIMITIVE=%d, LMD_SCHEMA_UNION=%d, LMD_SCHEMA_ARRAY=%d\n", 
+           LMD_SCHEMA_PRIMITIVE, LMD_SCHEMA_UNION, LMD_SCHEMA_ARRAY);
+    if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: LMD_SCHEMA_MAP=%d, LMD_SCHEMA_ELEMENT=%d, LMD_SCHEMA_REFERENCE=%d\n", 
+           LMD_SCHEMA_MAP, LMD_SCHEMA_ELEMENT, LMD_SCHEMA_REFERENCE);
     switch (schema->schema_type) {
         case LMD_SCHEMA_PRIMITIVE:
-            // ////// printf("[DEBUG].*: Calling validate_primitive\n");
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_primitive\n");
             result = validate_primitive(item, schema, context);
             break;
         case LMD_SCHEMA_UNION:
-            // ////// printf("[DEBUG].*: Calling validate_union\n");
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_union\n");
             result = validate_union(validator, item, schema, context);
             break;
         case LMD_SCHEMA_ARRAY:
-            // ////// printf("[DEBUG].*: Calling validate_array\n");
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_array\n");
             result = validate_array(validator, item, schema, context);
             break;
         case LMD_SCHEMA_MAP:
-            // ////// printf("[DEBUG].*: Calling validate_map\n");
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_map\n");
             result = validate_map(validator, item, schema, context);
             break;
         case LMD_SCHEMA_ELEMENT:
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_element\n");
             result = validate_element(validator, item, schema, context);
             break;
         case LMD_SCHEMA_OCCURRENCE:
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_occurrence\n");
             result = validate_occurrence(validator, item, schema, context);
             break;
         case LMD_SCHEMA_REFERENCE:
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_reference\n");
             result = validate_reference(validator, item, schema, context);
             break;
         case LMD_SCHEMA_LITERAL:
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_literal\n");
             result = validate_literal(item, schema, context);
             break;
         default:
+            if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: UNKNOWN SCHEMA TYPE %d - going to default case\n", schema->schema_type);
             result = create_validation_result(context->pool);
             add_validation_error(result, create_validation_error(
                 VALID_ERROR_TYPE_MISMATCH, "Unknown schema type", 
@@ -290,11 +299,11 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
 // ==================== Primitive Type Validation ====================
 
 ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationContext* ctx) {
-    // ////// printf("[DEBUG].*: Starting primitive validation\n");
+    if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_primitive: Starting primitive validation\n");
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_PRIMITIVE) {
-        ////printf("[DEBUG].*: Schema is not primitive type (got %d)\n", schema->schema_type);
+        ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Schema is not primitive type (got %d)\n", schema->schema_type);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected primitive schema", 
             ctx->path, ctx->pool));
@@ -303,7 +312,7 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
     
     SchemaPrimitive* prim_schema = (SchemaPrimitive*)schema->schema_data;
     if (!prim_schema) {
-        ////// printf("[DEBUG].*: Schema data is null\n");
+        ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Schema data is null\n");
         add_validation_error(result, create_validation_error(
             VALID_ERROR_PARSE_ERROR, "Invalid primitive schema data", 
             ctx->path, ctx->pool));
@@ -313,11 +322,11 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
     TypeId expected_type = prim_schema->primitive_type;
     TypeId actual_type = get_type_id(item);
     
-    // ////printf("[DEBUG].*: %d\n",
-    //        expected_type, actual_type);
+    if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_primitive: expected_type=%d, actual_type=%d\n",
+           expected_type, actual_type);
     
     if (!is_compatible_type(actual_type, expected_type)) {
-        // ////// printf("[DEBUG].*: Types not compatible - VALIDATION FAILED\n");
+        if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_primitive: Types not compatible - VALIDATION FAILED\n");
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
                 "Type mismatch: expected type %d, got type %d",
@@ -350,7 +359,7 @@ ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationCo
                 }
             }
         }
-        ////// printf("[DEBUG].*: Types compatible - VALIDATION PASSED\n");
+        ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Types compatible - VALIDATION PASSED\n");
     }
     
     return result;
@@ -415,13 +424,13 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     // //printf("[TRACE] validate_map: depth=%d, entering\n", ctx->current_depth);
     // //fflush(stdout);
     
-    ////// printf("[DEBUG].*: Starting map validation\n");
+    ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Starting map validation\n");
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_MAP) {
         //printf("[TRACE] validate_map: schema not map type, got %d\n", schema->schema_type);
         //fflush(stdout);
-        ////printf("[DEBUG].*: Schema is not map type (got %d)\n", schema->schema_type);
+        ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Schema is not map type (got %d)\n", schema->schema_type);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected map schema", 
             ctx->path, ctx->pool));
@@ -431,13 +440,13 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     TypeId actual_type = get_type_id(item);
     //printf("[TRACE] validate_map: actual_type=%d\n", actual_type);
     //fflush(stdout);
-    ////// printf("[DEBUG].*: %d\n", actual_type);
+    ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: %d\n", actual_type);
     
     // Accept both MAP and ELEMENT types, since Elements can also act as Maps
     if (actual_type != LMD_TYPE_MAP && actual_type != LMD_TYPE_ELEMENT) {
         //printf("[TRACE] validate_map: type mismatch, expected map/element got %d\n", actual_type);
         //fflush(stdout);
-        ////// printf("[DEBUG].*: Type mismatch - expected map/element, got %d\n", actual_type);
+        ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Type mismatch - expected map/element, got %d\n", actual_type);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected map", 
             ctx->path, ctx->pool));
@@ -446,7 +455,7 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     
     SchemaMap* map_schema = (SchemaMap*)schema->schema_data;
     if (!map_schema) {
-        ////// printf("[DEBUG].*: Map schema data is null\n");
+        ////// if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Map schema data is null\n");
         add_validation_error(result, create_validation_error(
             VALID_ERROR_PARSE_ERROR, "Invalid map schema data", 
             ctx->path, ctx->pool));
@@ -454,7 +463,7 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     }
     
     Map* map = (Map*)item.pointer;
-    ////printf("[DEBUG].*: Validating map with %d fields in schema\n", 
+    ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Validating map with %d fields in schema\n", 
     //       map_schema->field_count);
     
     // NOTE: The schema parser currently has incomplete field parsing implementation
@@ -471,7 +480,7 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
         //printf("[TRACE] validate_map: field %d, name='%.*s', required=%d\n", 
         //       field_num, (int)field->name.length, field->name.str, field->required);
         //fflush(stdout);
-        ////printf("[DEBUG].*: %s)\n",
+        ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: %s)\n",
         //       field_num, (int)field->name.length, field->name.str, 
         //       field->required ? "yes" : "no");
         
@@ -502,40 +511,40 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
             // If attribute not found, check if this field matches a child element with text content
             if (field_value.item == ITEM_NULL) {
                 String* field_name_str = (String*)field_key.pointer;
-                printf("[DEBUG] validate_map: Looking for child element '%s' in %ld children\n", 
+                if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: Looking for child element '%s' in %ld children\n", 
                        field_name_str->chars, element->length);
                 
                 // Look through child elements to find one with matching tag name
                 for (int i = 0; i < element->length; i++) {
                     Item child_item = element->items[i];
                     TypeId child_type_id = get_type_id(child_item);
-                    printf("[DEBUG] validate_map: Child %d has type %d (LMD_TYPE_ELEMENT=%d)\n", 
+                    if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: Child %d has type %d (LMD_TYPE_ELEMENT=%d)\n", 
                            i, child_type_id, LMD_TYPE_ELEMENT);
                     
                     if (child_type_id == LMD_TYPE_ELEMENT) {
                         Element* child_element = (Element*)child_item.pointer;
                         if (child_element->type) {
                             TypeElmt* child_type = (TypeElmt*)child_element->type;
-                            printf("[DEBUG] validate_map: Child element tag: '%.*s'\n", 
+                            if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: Child element tag: '%.*s'\n", 
                                    (int)child_type->name.length, child_type->name.str);
                             
                             // Check if child element tag name matches field name
                             if (child_type->name.length == field_name_str->len &&
                                 memcmp(child_type->name.str, field_name_str->chars, field_name_str->len) == 0) {
-                                printf("[DEBUG] validate_map: Found matching child element '%s'\n", 
+                                if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: Found matching child element '%s'\n", 
                                        field_name_str->chars);
                                 
                                 // Found matching child element, check if it has text content
                                 if (child_element->length > 0) {
                                     Item first_child = child_element->items[0];
                                     TypeId first_child_type = get_type_id(first_child);
-                                    printf("[DEBUG] validate_map: First child has type %d (LMD_TYPE_STRING=%d)\n", 
+                                    if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: First child has type %d (LMD_TYPE_STRING=%d)\n", 
                                            first_child_type, LMD_TYPE_STRING);
                                     
                                     if (first_child_type == LMD_TYPE_STRING) {
                                         // Use the text content as the field value
                                         field_value = first_child;
-                                        printf("[DEBUG] validate_map: Using child element text content for field '%s'\n", 
+                                        if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: Using child element text content for field '%s'\n", 
                                                field_name_str->chars);
                                         break;
                                     }
@@ -558,11 +567,11 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
         // Check if this is a missing field vs a null value field
         bool field_is_missing = false;
         
-        printf("[DEBUG] validate_map: field='%.*s', field_value.item=%llu, ITEM_NULL=%llu\n",
+        if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: field='%.*s', field_value.item=%llu, ITEM_NULL=%llu\n",
                (int)field->name.length, field->name.str, field_value.item, ITEM_NULL);
         
         if (field_value.item == ITEM_NULL) {
-            printf("[DEBUG] validate_map: field_value.item == ITEM_NULL\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: field_value.item == ITEM_NULL\n");
             // ITEM_NULL could mean either:
             // 1. Field exists but has null value (should be valid if schema expects null)
             // 2. Field is truly missing
@@ -570,34 +579,34 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
             // The key insight: if the schema expects null type, then ITEM_NULL is valid
             if (field->type->schema_type == LMD_SCHEMA_PRIMITIVE) {
                 SchemaPrimitive* prim = (SchemaPrimitive*)field->type->schema_data;
-                printf("[DEBUG] validate_map: primitive schema, prim=%p\n", prim);
+                if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: primitive schema, prim=%p\n", prim);
                 if (prim) {
-                    printf("[DEBUG] validate_map: expected type = %d, LMD_TYPE_NULL = %d\n",
+                    if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: expected type = %d, LMD_TYPE_NULL = %d\n",
                            prim->primitive_type, LMD_TYPE_NULL);
                 } else {
-                    printf("[DEBUG] validate_map: prim is NULL\n");
+                    if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: prim is NULL\n");
                 }
                 if (prim && prim->primitive_type == LMD_TYPE_NULL) {
                     // Expected type is null, so ITEM_NULL is a valid value, field is not missing
-                    printf("[DEBUG] validate_map: expected null, treating as valid field\n");
+                    if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: expected null, treating as valid field\n");
                     field_is_missing = false;
                 } else {
                     // Expected type is not null, so ITEM_NULL means missing field
-                    printf("[DEBUG] validate_map: expected non-null, treating as missing field\n");
+                    if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: expected non-null, treating as missing field\n");
                     field_is_missing = true;
                 }
             } else {
                 // Non-primitive type expected, so ITEM_NULL means missing field
-                printf("[DEBUG] validate_map: non-primitive schema (type=%d), treating as missing field\n", field->type->schema_type);
+                if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: non-primitive schema (type=%d), treating as missing field\n", field->type->schema_type);
                 field_is_missing = true;
             }
         } else {
             // Field has a non-null value, so it's definitely not missing
-            printf("[DEBUG] validate_map: field_value.item != ITEM_NULL, field exists\n");
+            if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: field_value.item != ITEM_NULL, field exists\n");
             field_is_missing = false;
         }
         
-        printf("[DEBUG] validate_map: field_is_missing = %s\n", field_is_missing ? "true" : "false");
+        if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_map: field_is_missing = %s\n", field_is_missing ? "true" : "false");
         
         if (field_is_missing) {
             // Field is truly missing
@@ -656,12 +665,13 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
 // ==================== Element Validation ====================
 
 ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
-    //printf("[TRACE] validate_element: depth=%d, entering\n", ctx->current_depth);
-    //fflush(stdout);
+    printf("[TRACE] validate_element: depth=%d, entering\n", ctx->current_depth);
+    fflush(stdout);
     
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_ELEMENT) {
+        printf("[TRACE] validate_element: ERROR - not element schema type\n");
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected element schema", 
             ctx->path, ctx->pool));
@@ -669,7 +679,9 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
     }
     
     TypeId actual_type = get_type_id(item);
+    printf("[TRACE] validate_element: actual_type=%d (expecting %d=LMD_TYPE_ELEMENT)\n", actual_type, LMD_TYPE_ELEMENT);
     if (actual_type != LMD_TYPE_ELEMENT) {
+        printf("[TRACE] validate_element: ERROR - not element item type\n");
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected element", 
             ctx->path, ctx->pool));
@@ -678,6 +690,11 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
     
     SchemaElement* element_schema = (SchemaElement*)schema->schema_data;
     Element* element = (Element*)item.pointer;
+    
+    printf("[TRACE] validate_element: element_schema=%p, element=%p\n", element_schema, element);
+    printf("[TRACE] validate_element: element->length=%ld, element_schema->content_count=%d\n", 
+           element->length, element_schema->content_count);
+    fflush(stdout);
     
     // Check element tag matches
     if (element->type) {
@@ -767,10 +784,14 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
     }
     
     // Validate content types
+    printf("[TRACE] validate_element: About to validate content - element_schema->content_count=%d\n", element_schema->content_count);
     if (element_schema->content_count > 0 && element_schema->content_types) {
+        printf("[TRACE] validate_element: Validating %d content types against %ld element items\n", 
+               element_schema->content_count, element->length);
         for (int i = 0; i < element_schema->content_count; i++) {
             if (i < element->length) {
                 Item content_item = element->items[i];
+                printf("[TRACE] validate_element: Validating content[%d], type=%d\n", i, get_type_id(content_item));
                 
                 PathSegment* content_path = path_push_index(ctx->path, i, ctx->pool);
                 ValidationContext content_ctx = *ctx;
@@ -780,13 +801,28 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
                     validator, content_item, element_schema->content_types[i], &content_ctx);
                 
                 if (content_result) {
+                    printf("[TRACE] validate_element: Content[%d] validation result: valid=%d, errors=%d\n", 
+                           i, content_result->valid, content_result->error_count);
                     merge_validation_results(result, content_result);
                 }
+            } else {
+                printf("[TRACE] validate_element: Content[%d] missing (element has only %ld items)\n", i, element->length);
+                
+                // Missing required content is a validation error
+                char error_msg[256];
+                snprintf(error_msg, sizeof(error_msg), 
+                        "Element is missing required content item %d (has %ld items, needs %d)",
+                        i, element->length, element_schema->content_count);
+                
+                PathSegment* content_path = path_push_index(ctx->path, i, ctx->pool);
+                add_validation_error(result, create_validation_error(
+                    VALID_ERROR_MISSING_FIELD, error_msg, content_path, ctx->pool));
             }
         }
         
         // Check if element has too many content items
         if (element->length > element_schema->content_count) {
+            printf("[TRACE] validate_element: Element has too many items (%ld > %d)\n", element->length, element_schema->content_count);
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg), 
                     "Element has %ld content items, but schema allows only %d",
@@ -796,8 +832,13 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
                 VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, 
                 ctx->path, ctx->pool));
         }
+    } else {
+        printf("[TRACE] validate_element: No content validation (content_count=%d, content_types=%p)\n", 
+               element_schema->content_count, element_schema->content_types);
     }
     
+    printf("[TRACE] validate_element: Returning result: valid=%d, errors=%d\n", result->valid, result->error_count);
+    fflush(stdout);
     return result;
 }
 
@@ -904,7 +945,7 @@ ValidationResult* validate_occurrence(SchemaValidator* validator, Item item, Typ
 // ==================== Reference Validation ====================
 
 ValidationResult* validate_reference(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
-    ////printf("[DEBUG].*: Starting reference validation for '%.*s'\n", 
+    ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Starting reference validation for '%.*s'\n", 
     //       (int)schema->name.length, schema->name.str);
     ValidationResult* result = create_validation_result(ctx->pool);
     
@@ -919,7 +960,7 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     VisitedEntry lookup = { .key = schema->name, .visited = false };
     const VisitedEntry* visited_entry = (const VisitedEntry*)hashmap_get(ctx->visited, &lookup);
     if (visited_entry && visited_entry->visited) {
-        ////printf("[DEBUG].*: Circular reference detected for '%.*s'\n", 
+        ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Circular reference detected for '%.*s'\n", 
         //       (int)schema->name.length, schema->name.str);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_CIRCULAR_REFERENCE, "Circular type reference detected", 
@@ -940,7 +981,7 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
         return result;
     }
     
-    // printf("[DEBUG] validate_reference: Resolved '%.*s' to schema type %d\n", 
+    // if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_reference: Resolved '%.*s' to schema type %d\n", 
     //        (int)schema->name.length, schema->name.str, resolved->schema_type);
     
     // Mark as visited and validate
@@ -954,7 +995,7 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
     VisitedEntry unmark_entry = { .key = schema->name, .visited = false };
     hashmap_set(ctx->visited, &unmark_entry);
     
-    ////printf("[DEBUG].*: Finished validating '%.*s'\n", 
+    ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Finished validating '%.*s'\n", 
     //       (int)schema->name.length, schema->name.str);
     return result;
 }

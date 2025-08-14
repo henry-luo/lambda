@@ -5,7 +5,7 @@
 // Core attribute types used throughout the schema
 type Identifier = string?
 type CssClass = string | [string*]
-type DataAttrs = {string: any}
+type DataAttrs = {string: string}
 
 // Base attributes used by most elements
 type BaseAttrs = {
@@ -18,10 +18,10 @@ type BaseAttrs = {
 type MetaString = string
 type MetaInlines = string  // text with inline markup
 type MetaBlocks = element  // block content
-type MetaList = [any*]
-type MetaMap = {string: any}
+type MetaList = [string*]
+type MetaMap = {string: string}
 type MetaBool = bool
-type MetaValue = any
+type MetaValue = string
 
 // Author information structure
 type Author = {
@@ -132,8 +132,8 @@ type Meta = {
     custom: {string: MetaValue}?
 }
 
-// Inline element types
-type InlineContent = string | element
+// Inline element types - restricted to safe inline elements
+type InlineContent = string | em | strong | code | a | span | br | img
 
 // Block element base type
 type BlockContent = element
@@ -229,12 +229,12 @@ type MathAttrs = BaseAttrs & {
 // Map item for attribute definitions
 type MapItem = {
     name: string | symbol,
-    as: any
+    as: string
 }
 
 type AttrType = {
     name: string | symbol | string,
-    as: any
+    as: string
 }
 
 // Core document structure types
@@ -332,14 +332,28 @@ type note = Note
 type math = Math
 type line_block = LineBlock
 
-// Complete document type
+// Complete document type - more restrictive structure
 type Document = {
-    meta?: any,
-    body: [BlockElement*]
+    meta?: {                         // Only allow specific metadata  
+        title: string?
+    },
+    body: [StrictBlock+]             // Require at least one block, and be strict about content
 }
 
 // Allowed block elements - iframe is NOT included
 type BlockElement = Para | Header | CodeBlock | BlockQuote | List | HorizontalRule | Div
+
+// Strict block content - only allow safe elements
+type StrictBlock = StrictPara | Header | CodeBlock
+
+// Strict paragraph that only allows safe inline content
+type StrictPara = {
+    tag: "p",
+    content: [SafeInline+]           // Must have content, only safe inline elements
+}
+
+// Safe inline content - no HTML elements like iframe, script, etc.
+type SafeInline = string | em | strong | code | a
 
 // Simple content definitions
 type Para = {

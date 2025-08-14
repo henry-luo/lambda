@@ -240,6 +240,7 @@ TypeSchema* build_list_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node);
+TypeSchema* build_content_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_function_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_binary_type_schema(SchemaParser* parser, TSNode node);
 TypeSchema* build_binary_expression_schema(SchemaParser* parser, TSNode node);
