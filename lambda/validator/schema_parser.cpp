@@ -667,19 +667,51 @@ TypeSchema* build_list_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    // Extract element type from array type using field IDs
+    printf("[SCHEMA_DEBUG] build_array_type_schema: parsing array type node\n");
+    
+    // For array types [ElementType], we need to find the element type within the brackets
+    // Try field IDs first
     TSNode element_node = ts_node_child_by_field_id(node, field_type);
     TypeSchema* element_type = NULL;
     
+    if (ts_node_is_null(element_node)) {
+        // If field ID doesn't work, look for child nodes manually
+        uint32_t child_count = ts_node_child_count(node);
+        printf("[SCHEMA_DEBUG] build_array_type_schema: array has %d children\n", child_count);
+        
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            const char* child_type = ts_node_type(child);
+            TSSymbol child_symbol = ts_node_symbol(child);
+            
+            printf("[SCHEMA_DEBUG] build_array_type_schema: child[%d] type='%s', symbol=%d\n", 
+                   i, child_type, child_symbol);
+            
+            // Skip brackets and other syntax tokens, look for actual type nodes
+            if (child_symbol != anon_sym_LBRACK && child_symbol != anon_sym_RBRACK &&
+                child_symbol != anon_sym_STAR && child_symbol != anon_sym_PLUS &&
+                child_symbol != anon_sym_QMARK) {
+                element_node = child;
+                printf("[SCHEMA_DEBUG] build_array_type_schema: found element type node: %s\n", child_type);
+                break;
+            }
+        }
+    }
+    
     if (!ts_node_is_null(element_node)) {
         element_type = build_schema_type(parser, element_node);
+        printf("[SCHEMA_DEBUG] build_array_type_schema: element_type=%p, schema_type=%d\n", 
+               element_type, element_type ? element_type->schema_type : -1);
     }
     
     if (!element_type) {
+        printf("[SCHEMA_DEBUG] build_array_type_schema: defaulting to LMD_TYPE_ANY\n");
         element_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
     }
     
-    return create_array_schema(element_type, 0, -1, parser->pool);
+    TypeSchema* result = create_array_schema(element_type, 0, -1, parser->pool);
+    printf("[SCHEMA_DEBUG] build_array_type_schema: created array schema=%p\n", result);
+    return result;
 }
 
 TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {

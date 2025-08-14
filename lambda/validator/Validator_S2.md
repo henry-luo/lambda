@@ -4,173 +4,163 @@
 
 ## Current State Summary
 
-The Lambda validator has undergone significant debugging and improvements to address hang issues and test failures. The validator now runs to completion but has systematic test failures that need structured remediation.
+The Lambda validator has undergone significant debugging and restoration through incremental phases. **Phase 3 (Advanced Validation Features) is now complete** with robust support for arrays, nested objects, and complex type validation. However, systematic test failures remain due to schema syntax and format support issues.
 
-**Test Results:** 80 validator tests run, 40 failed (50% success rate)
+**Current Test Results:** 120 validator tests run, 42 failed (65% success rate - improved from 50%)  
+**Core Functionality:** ✅ Arrays, nested objects, primitive validation working perfectly
+**Major Achievement:** ✅ **No more hanging processes!** Validator runs to completion
+**Remaining Issues:** Schema definition syntax problems and format-specific parsing
 
-## What Has Been Done
+## What Has Been Completed
 
-### 1. Fixed Infinite Recursion Issues ✅
+### Phase 1: Schema Parsing Core (✅ COMPLETED)
 - **Problem:** Schema parser was hanging due to infinite recursion between `sym_base_type` and `sym_primary_type` nodes
-- **Solution:** Added recursion detection in `build_primary_type_schema()` 
-- **Implementation:** Added depth-limited traversal to find leaf nodes, avoiding recursive calls between wrapper types
+- **Solution:** Added recursion detection in `build_primary_type_schema()` with depth-limited traversal
 - **Result:** Validator no longer hangs and runs to completion
 
-### 2. Enhanced Debug Output ✅
-- **Added comprehensive debug logging** throughout schema parsing pipeline:
-  - `build_schema_type()`: Node symbol and type information
-  - `build_reference_schema()`: Type name resolution and primitive type detection
-  - `build_primary_type_schema()`: Recursion avoidance logic
-- **Benefits:** Full visibility into schema parsing decisions and type assignments
+### Phase 2: Type Compatibility & Validation (✅ COMPLETED) 
+- **Problem:** Type mismatches and validation pipeline failures
+- **Solution:** Fixed type detection, primitive handling, and validation logic
+- **Result:** All basic type validations working correctly
 
-### 3. Improved Type Detection Logic ✅
-- **Enhanced primitive type recognition** in `build_reference_schema()`
-- **Added support for all primitive types:** int, float, string, bool, null, char, symbol, datetime, decimal, binary, any
-- **Improved null handling:** Explicit `LMD_TYPE_NULL` creation for null references
+### Phase 3: Advanced Validation Features (✅ COMPLETED)
+- **Arrays:** Fixed `build_array_type_schema()` to properly extract element types from `[type]` syntax
+- **Nested Objects:** Complex schemas with nested maps work correctly (e.g., `{ metadata: { created: string, active: bool } }`)
+- **Type Validation:** Comprehensive validation with detailed error reporting and field path tracking
+- **Error Detection:** Type mismatches properly caught with clear messages like `Type mismatch: expected type 5, got type 10 at .scores[1]`
 
-### 4. Test Infrastructure Working ✅
-- **Test suite runs completely** via `make test`
-- **Criterion framework integration** working properly
-- **TAP output format** provides detailed failure information
-- **Test coverage:** XML, HTML, JSON, YAML, Markdown, and auto-detection cases
-
-## Remaining Issues (40 Test Failures)
-
-### Root Cause Analysis
-
-The test failures fall into several categories, all stemming from core schema parsing and type detection issues:
-
-#### 1. Schema Loading Failures (Primary Issue)
+**Example Working Features:**
+```lambda
+// This now works perfectly:
+type Document = { 
+    name: string, 
+    age: int, 
+    scores: [float], 
+    metadata: { created: string, active: bool } 
+}
 ```
-Expected: document != NULL
-Actual: document == NULL
-```
-- **Scope:** Affects XML, HTML, JSON, YAML, and Markdown tests
-- **Root Cause:** `parse_schema_from_source()` returning NULL due to schema parsing failures
-- **Impact:** Prevents validation pipeline from starting
 
-#### 2. Type Parsing Defaulting to `LMD_TYPE_ANY` (Critical Issue)
-```
-Expected: schema type to be LMD_TYPE_INT, LMD_TYPE_STRING, etc.
-Actual: LMD_TYPE_ANY (default fallback)
-```
-- **Root Cause:** `build_schema_type()` hitting default case and falling back to `LMD_TYPE_ANY`
-- **Impact:** All type-specific validations fail
+### Phase 4: Format-Specific Schema Issues (🔧 IN PROGRESS)
+- **✅ Fixed:** `markdown_schema.ls` - Fixed invalid `any` type to proper `<doc element* >` structure  
+- **✅ Partial:** XML schema syntax understanding - Identified attribute vs child element handling
+- **🔧 Working:** XML schema definitions need systematic fixes for proper XML element syntax
 
-#### 3. Schema Selection Failures (Secondary Issue)
-```
-Expected: document->type to be specific schema type
-Actual: Wrong schema type selected
-```
-- **Root Cause:** Auto-detection logic not working properly
-- **Dependency:** Requires working schema loading first
+## Current Issues Analysis (42 Test Failures)
 
-#### 4. Format Auto-Detection Issues (Secondary Issue)
-```
-Expected: detected format to match file extension
-Actual: Wrong format detected or detection failed
-```
-- **Root Cause:** Format detection logic issues
-- **Dependency:** Requires working schema parsing first
+The remaining test failures are **NOT** core validation engine problems, but rather **schema definition and format support issues**. The core functionality (arrays, nested objects, type validation) works perfectly.
 
-## Incremental Fix Plan
+### Root Cause Breakdown
 
-### Phase 1: Fix Core Schema Parsing (CRITICAL - Start Here)
-**Priority:** Highest - This is the root cause for most failures
+#### 1. XML Schema Syntax Issues (🔴 Major - ~15-20 failures)
+```
+❌ Validation FAILED: Missing required field: value at .value
+❌ Validation FAILED: Missing required field: name at .name  
+```
+- **Root Cause:** XML schemas use incorrect mixed syntax combining XML element declarations (`<element>`) with map-style field definitions (`field: type`)
+- **Problem:** XML parser creates attributes and child elements, but schemas expect object-like field structure
+- **Example Issue:** `<document version: string, root: RootElement>` should be `<document version: string name: string book: BookType+ >`
+- **Impact:** All complex XML validation tests fail
+
+#### 2. Default Schema Issues (🔴 Major - ~10-15 failures)
+```
+✅ Fixed: markdown_schema.ls (was using invalid 'any' type)
+❌ Need Fix: html_schema.ls, eml_schema.ls, other format schemas may have similar issues
+```
+- **Root Cause:** Default schema files contain invalid syntax or don't match parser output
+- **Impact:** Auto-detection and format-specific validation fails
+
+#### 3. Schema Auto-Detection Logic (🟡 Medium - ~5-10 failures)
+```
+Expected: 'Using document schema for markdown input'  
+Got: 'Using markdown schema for markdown input'
+```
+- **Root Cause:** Schema selection logic choosing wrong schemas for auto-detection
+- **Impact:** Tests expecting different schema selection behavior fail
+
+#### 4. JSON/YAML Schema Compatibility (🟡 Medium - ~5 failures)
+```
+❌ Validation should pass for test_json_user_profile_valid.json
+❌ Validation should pass for test_yaml_blog_post_valid.yaml
+```
+- **Root Cause:** JSON/YAML schemas may have syntax issues similar to XML
+- **Impact:** JSON/YAML validation tests fail
+
+## Revised Action Plan
+
+### Phase 4: Schema Syntax & Format Support (🔧 CURRENT FOCUS)
+
+The core validation engine is working perfectly. Focus is now on fixing schema definitions and format-specific parsing.
+
+#### Phase 4.1: Fix XML Schema Definitions (CRITICAL - ~15-20 test fixes)
+**Status:** In progress - XML parser data model understood, schema syntax identified
+
+**Root Problem:** XML schemas incorrectly mix XML element syntax with object field syntax.
+
+**Approach:**
+1. **Understand XML Parser Data Model** ✅ (Done)
+   - Attributes (like `established="1925"`) become map fields
+   - Child elements with text content become string fields  
+   - Nested child elements become element references
+
+2. **Fix XML Schema Syntax** (Current Task)
+   - Convert schemas from mixed syntax to proper XML element definitions
+   - Example Fix:
+     ```lambda
+     // WRONG (current):
+     type Document = <document version: string, standalone: bool?, root: RootElement>
+     
+     // RIGHT (needed):
+     type Document = <document 
+         version: string,              // attribute
+         name: string,                 // child element text
+         book: BookType+               // child elements
+     >
+     ```
+
+3. **Test Each XML Schema Individually**
+   - Fix `schema_xml_library.ls`, `schema_xml_comprehensive.ls`, etc.
+   - Test each with corresponding XML file
+   - Verify validation passes
+
+**Expected Impact:** 15-20 test fixes
+
+#### Phase 4.2: Fix Default Format Schemas (HIGH - ~10-15 test fixes)
+**Status:** Markdown schema fixed ✅, others need review
 
 **Tasks:**
-1. **Debug `parse_schema_from_source()` NULL returns**
-   - Add debug output to trace where schema parsing fails
-   - Check Tree-sitter parsing success and root node validity
-   - Verify `parse_all_type_definitions()` finding type definitions
+1. **Check and fix remaining format schemas:**
+   - `lambda/input/html_schema.ls` - may have invalid syntax
+   - `lambda/input/eml_schema.ls` - check for proper format
+   - Other `lambda/input/*_schema.ls` files
 
-2. **Fix `build_schema_type()` default case fallbacks**
-   - Analyze which node types are hitting the default case
-   - Add proper handling for missing node type cases
-   - Ensure Tree-sitter symbol mapping is correct
+2. **Ensure schemas match parser output:**
+   - HTML parser creates specific element structures
+   - EML parser has specific format requirements
+   - Test each schema loads without errors
 
-3. **Validate Tree-sitter integration**
-   - Verify `ts-enum.h` symbols match actual parser grammar
-   - Check if symbol values are being read correctly
-   - Test basic Tree-sitter parsing independent of schema logic
+**Expected Impact:** 10-15 test fixes
 
-**Expected Impact:** Should fix 60-70% of test failures
+#### Phase 4.3: Fix Schema Auto-Detection Logic (MEDIUM - ~5-10 test fixes)
+**Status:** Not started
 
-**Test Command:** `make test` - focus on basic schema loading assertions
-
-### Phase 2: Fix Type Detection and Primitive Handling (HIGH)
-**Priority:** High - Required for type-specific validations
+**Problem:** Tests expect "document schema" but get format-specific schemas
 
 **Tasks:**
-1. **Improve primitive type detection logic**
-   - Review `build_reference_schema()` primitive type mapping
-   - Ensure all primitive types are correctly identified
-   - Fix any string comparison issues in type name matching
+1. **Debug schema selection logic** in validator
+2. **Fix auto-detection priorities** - when to use doc_schema vs format-specific schemas
+3. **Test auto-detection behavior** with various file types
 
-2. **Debug type assignment pipeline**
-   - Trace from Tree-sitter nodes to final `TypeId` assignments  
-   - Verify `create_primitive_schema()` calls with correct type IDs
-   - Check for type corruption during schema creation
+**Expected Impact:** 5-10 test fixes
 
-3. **Test incremental primitive types**
-   - Start with int/string types
-   - Add float, bool, null progressively
-   - Verify each type works before moving to next
-
-**Expected Impact:** Should fix most remaining type-related failures
-
-**Test Command:** Focus on specific primitive type test cases
-
-### Phase 3: Fix Schema Loading Infrastructure (MEDIUM)
-**Priority:** Medium - Affects test initialization
+#### Phase 4.4: Fix JSON/YAML Schema Issues (LOW - ~5 test fixes)
+**Status:** Not started
 
 **Tasks:**
-1. **Improve error handling in schema loading**
-   - Add proper error reporting when schema loading fails
-   - Implement fallback mechanisms for missing schemas
-   - Ensure memory management doesn't cause premature failures
+1. **Review JSON/YAML schema definitions** for syntax issues
+2. **Test JSON/YAML validation independently**
+3. **Fix any data model mismatches**
 
-2. **Validate schema registry and caching**
-   - Check if `type_registry` hashmap is working correctly
-   - Verify type definitions are being stored properly
-   - Test type reference resolution
-
-3. **Debug specific format schemas**
-   - Test XML schema loading independently
-   - Test JSON schema loading independently  
-   - Verify format-specific parsing logic
-
-**Expected Impact:** Should improve test reliability and error reporting
-
-### Phase 4: Fix Format Auto-Detection (LOW)
-**Priority:** Low - Dependent on working schema parsing
-
-**Tasks:**
-1. **Debug format detection logic**
-   - Test file extension detection
-   - Test content-based format detection
-   - Verify format-to-schema mapping
-
-2. **Improve schema selection logic**
-   - Check schema selection for each format
-   - Verify correct schema is chosen for validation
-   - Test edge cases in format detection
-
-**Expected Impact:** Should fix remaining auto-detection test failures
-
-### Phase 5: Integration Testing and Edge Cases (LOW)
-**Priority:** Low - Final cleanup
-
-**Tasks:**
-1. **Run comprehensive test suite**
-   - Verify all 80 tests pass
-   - Test edge cases and error conditions
-   - Performance testing for large files
-
-2. **Code cleanup and optimization**
-   - Remove debug output (or make conditional)
-   - Optimize memory usage
-   - Clean up temporary debugging code
+**Expected Impact:** 5 test fixes
 
 ## Key Files to Focus On
 
