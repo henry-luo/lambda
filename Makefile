@@ -206,11 +206,41 @@ test:
 		exit 1; \
 	fi
 
+test-library: build
+	@echo "Running library test suite..."
+	@if [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh --target=library --raw; \
+	else \
+		echo "Error: Test script not found at test/test_all.sh"; \
+		echo "Please ensure the test script exists and is executable."; \
+		exit 1; \
+	fi
+
 test-input: build
 	@echo "Running input processing test suite..."
 	@if [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh --target=mime_detect --raw; \
 		./test/test_all.sh --target=math --raw; \
+	else \
+		echo "Error: Test script not found at test/test_all.sh"; \
+		echo "Please ensure the test script exists and is executable."; \
+		exit 1; \
+	fi
+
+test-validator: build
+	@echo "Running validator test suite..."
+	@if [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh --target=validator --raw; \
+	else \
+		echo "Error: Test script not found at test/test_all.sh"; \
+		echo "Please ensure the test script exists and is executable."; \
+		exit 1; \
+	fi
+
+test-lambda: build
+	@echo "Running lambda test suite..."
+	@if [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh --target=lambda --raw; \
 	else \
 		echo "Error: Test script not found at test/test_all.sh"; \
 		echo "Please ensure the test script exists and is executable."; \
