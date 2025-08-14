@@ -22,10 +22,10 @@ type RssChannel = <channel
     pubDate: datetime?,               // optional publication date
     lastBuildDate: datetime?,         // optional last build date
     ttl: int?,                        // optional time to live
-    items: RssItem*                   // zero or more items
+    RssItem*                          // zero or more items
 >
 
 type Document = <rss
-    version: string,                  // RSS version (required)
-    channel: RssChannel               // single channel (required)
+    version: string,                  // RSS version (required attribute)
+    RssChannel                        // single channel (required child element)
 >

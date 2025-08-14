@@ -29,10 +29,13 @@ type LibraryType = <library
     books: BookType+                  // one or more books (maxOccurs="unbounded")
 >
 
-// Document structure matching XML parser output
-type Document = <document
-    xmlDeclaration: XmlProcessingInstruction?, // optional <?xml> declaration
-    library: LibraryType              // library root element
+// Document structure - library is now the root with our parsing fix
+type Document = <library
+    established: string,              // year established (required attribute)
+    xmlns: string?,                   // optional namespace
+    name: string,                     // library name
+    address: string,                  // library address
+    BookType*                         // zero or more books
 >
 
 // Processing instruction for XML declaration

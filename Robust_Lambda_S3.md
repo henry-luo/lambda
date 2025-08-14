@@ -77,20 +77,6 @@ This document tracks the evolution of the Lambda Script engine from a basic tran
 4. **Memory Debugging**: Add heap/pool debugging prints when needed
 5. **Runtime Validation**: Test with various input combinations
 
-### Memory Management Patterns
-```cpp
-// Proper AST pool initialization
-pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
-
-// Heap allocation with type tagging
-void* entry = type_id < LMD_TYPE_CONTAINER ?
-    (void*)((((uint64_t)type_id)<<56) | (uint64_t)(data)) : data;
-
-// DateTime field access using macros
-DATETIME_SET_YEAR_MONTH(dt, year, month);
-int year = DATETIME_GET_YEAR(dt);
-```
-
 ## 📋 Incremental Enhancement Plan
 
 ### Phase 6: Extended System Functions 🎯

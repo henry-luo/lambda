@@ -15,13 +15,7 @@ type BookElement = <book
     price: string                     // price text content
 >
 
-// Bookstore root element containing books
-type BookstoreElement = <bookstore
+// Bookstore root element containing books - this is now the root with our parsing fix
+type Document = <bookstore
     BookElement*               // zero or more book elements
->
-
-// Document structure matching XML parser output
-type Document = <document
-    xmlDeclaration: XmlProcessingInstruction, // <?xml> declaration
-    BookstoreElement       // bookstore root element
 >

@@ -378,12 +378,18 @@ static Item parse_document(MarkupParser* parser) {
     
     // Parse content into the body element
     while (parser->current_line < parser->line_count) {
+        int line_before = parser->current_line;
         Item block = parse_block_element(parser);
         if (block.item != ITEM_UNDEFINED && block.item != ITEM_ERROR) {
             // Add block elements as children in the List structure
             list_push((List*)body, block);
             // Increment content length for proper element tracking
             increment_element_content_length(body);
+        }
+        
+        // Safety check: ensure we always advance at least one line to prevent infinite loops
+        if (parser->current_line == line_before) {
+            parser->current_line++;
         }
     }
     

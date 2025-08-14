@@ -71,12 +71,16 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     const char* root_type = "Document";  // Default for doc_schema.ls
     if (strstr(schema_file, "html5_schema.ls")) {
         root_type = "HTMLDocument";  // Use HTMLDocument for HTML5 schema
+    } else if (strstr(schema_file, "markdown_schema.ls")) {
+        root_type = "any";           // Use any for markdown schema (permissive)
     } else if (strstr(schema_file, "eml_schema.ls")) {
         root_type = "EMLDocument";   // Use EMLDocument for EML schema
     } else if (strstr(schema_file, "ics_schema.ls")) {
         root_type = "ICSDocument";   // Use ICSDocument for ICS schema
     } else if (strstr(schema_file, "vcf_schema.ls")) {
         root_type = "VCFDocument";   // Use VCFDocument for VCF schema
+    } else if (strstr(schema_file, "schema_json_user_profile.ls")) {
+        root_type = "UserProfileDocument";   // Use UserProfileDocument for JSON user profile schema
     }
     
     // Use the refactored schema parser

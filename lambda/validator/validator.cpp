@@ -11,6 +11,12 @@
 #include <memory>
 #include <string>
 
+// External function declarations
+extern "C" {
+    TSParser* lambda_parser(void);
+    TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+}
+
 // ==================== Hashmap Entry Structures ====================
 
 struct SchemaEntry {
@@ -117,8 +123,37 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
     
     SchemaParser* parser = schema_parser_create(validator->pool);
     if (!parser) return -1;
+
+    // Parse all types first - use the same code as parse_schema_from_source
+    TSTree* tree = lambda_parse_source(parser->base.parser, schema_source);
+    if (!tree) {
+        schema_parser_destroy(parser);
+        return -1;
+    }
     
-    TypeSchema* root_schema = parse_schema_from_source(parser, schema_source);
+    TSNode root = ts_tree_root_node(tree);
+    parser->current_source = schema_source;
+    parser->current_tree = tree;
+    
+    // First, collect all type definitions from the source
+    parse_all_type_definitions(parser, root);
+    
+    // Try to find the requested root type
+    TypeSchema* root_schema = find_type_definition(parser, schema_name);
+    if (!root_schema) {
+        // Fallback: if the requested type isn't found, try "Document"
+        root_schema = find_type_definition(parser, "Document");
+    }
+    if (!root_schema) {
+        // If still no root schema found, use the first available type
+        if (parser->type_definitions && parser->type_definitions->length > 0) {
+            TypeDefinition* first_def = (TypeDefinition*)parser->type_definitions->data[0];
+            if (first_def && first_def->schema_type) {
+                root_schema = first_def->schema_type;
+            }
+        }
+    }
+    
     if (!root_schema) {
         schema_parser_destroy(parser);
         return -1;
@@ -135,8 +170,8 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
                     printf("[SCHEMA] WARNING: Failed to register type definition: %.*s\n",
                            (int)def->name.length, def->name.str);
                 } else {
-                    //printf("[SCHEMA] DEBUG: Registered type definition: %.*s\n",
-                    //       (int)def->name.length, def->name.str);
+                    // printf("[SCHEMA] DEBUG: Registered type definition: %.*s\n",
+                    //        (int)def->name.length, def->name.str);
                 }
             }
         }
@@ -172,8 +207,15 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
         return result;
     }
     
+    // TRACE: Log validation entry
+    // //printf("[TRACE] validate_item: depth=%d, schema_type=%d, item_type=%d\n", 
+    //        context->current_depth, schema->schema_type, get_type_id(item));
+    // //fflush(stdout);
+    
     // Check validation depth
     if (context->current_depth >= context->options.max_depth) {
+        //printf("[TRACE] validate_item: MAX DEPTH EXCEEDED at %d\n", context->current_depth);
+        //fflush(stdout);
         ValidationResult* result = create_validation_result(context->pool);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_CONSTRAINT_VIOLATION, "Maximum validation depth exceeded", 
@@ -233,6 +275,9 @@ ValidationResult* validate_item(SchemaValidator* validator, Item item,
         }
         custom = custom->next;
     }
+    
+    // //printf("[TRACE] validate_item: depth=%d, exiting\n", context->current_depth);
+    // //fflush(stdout);
     
     context->current_depth--;
     return result;
@@ -344,10 +389,15 @@ ValidationResult* validate_array(SchemaValidator* validator, Item item, TypeSche
 // ==================== Map Validation ====================
 
 ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
+    // //printf("[TRACE] validate_map: depth=%d, entering\n", ctx->current_depth);
+    // //fflush(stdout);
+    
     ////// printf("[DEBUG].*: Starting map validation\n");
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_MAP) {
+        //printf("[TRACE] validate_map: schema not map type, got %d\n", schema->schema_type);
+        //fflush(stdout);
         ////printf("[DEBUG].*: Schema is not map type (got %d)\n", schema->schema_type);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected map schema", 
@@ -356,9 +406,14 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     }
     
     TypeId actual_type = get_type_id(item);
+    //printf("[TRACE] validate_map: actual_type=%d\n", actual_type);
+    //fflush(stdout);
     ////// printf("[DEBUG].*: %d\n", actual_type);
     
+    // Accept both MAP and ELEMENT types, since Elements can also act as Maps
     if (actual_type != LMD_TYPE_MAP && actual_type != LMD_TYPE_ELEMENT) {
+        //printf("[TRACE] validate_map: type mismatch, expected map/element got %d\n", actual_type);
+        //fflush(stdout);
         ////// printf("[DEBUG].*: Type mismatch - expected map/element, got %d\n", actual_type);
         add_validation_error(result, create_validation_error(
             VALID_ERROR_TYPE_MISMATCH, "Expected map", 
@@ -386,15 +441,99 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
     // Validate required fields and check types
     SchemaMapField* field = map_schema->fields;
     int field_num = 0;
+    //printf("[TRACE] validate_map: starting field validation loop\n");
+    //fflush(stdout);
+    
     while (field) {
+        //printf("[TRACE] validate_map: field %d, name='%.*s', required=%d\n", 
+        //       field_num, (int)field->name.length, field->name.str, field->required);
+        //fflush(stdout);
         ////printf("[DEBUG].*: %s)\n",
         //       field_num, (int)field->name.length, field->name.str, 
         //       field->required ? "yes" : "no");
         
         Item field_key = {.item = s2it(string_from_strview(field->name, ctx->pool))};
-        Item field_value = map_get(map, field_key);
+        //printf("[TRACE] validate_map: about to call map_get for field '%.*s'\n", 
+        //       (int)field->name.length, field->name.str);
+        //printf("[TRACE] validate_map: map=%p, map->type_id=%d\n", 
+        //       map, map ? map->type_id : -1);
+        //fflush(stdout);
+        
+        // Safety check: validate map structure before calling get function
+        if (!map || (map->type_id != LMD_TYPE_MAP && map->type_id != LMD_TYPE_ELEMENT)) {
+            //printf("[TRACE] validate_map: INVALID MAP STRUCTURE - type_id=%d, expected=%d or %d\n", 
+            //       map ? map->type_id : -1, LMD_TYPE_MAP, LMD_TYPE_ELEMENT);
+            //fflush(stdout);
+            add_validation_error(result, create_validation_error(
+                VALID_ERROR_CONSTRAINT_VIOLATION, "Invalid map structure detected", 
+                ctx->path, ctx->pool));
+            break;
+        }
+        
+        Item field_value;
+        if (map->type_id == LMD_TYPE_ELEMENT) {
+            // For Elements, use elmt_get to access attributes
+            //printf("[TRACE] validate_map: calling elmt_get for element\n");
+            //fflush(stdout);
+            field_value = elmt_get((Element*)map, field_key);
+        } else {
+            // For Maps, use map_get
+            //printf("[TRACE] validate_map: calling map_get for map\n");
+            //fflush(stdout);
+            field_value = map_get(map, field_key);
+        }
+        
+        //printf("[TRACE] validate_map: map_get returned, field_value.item=%llu\n", field_value.item);
+        //fflush(stdout);
+        
+        // Check if this is a missing field vs a null value field
+        bool field_is_missing = false;
+        
+        printf("[DEBUG] validate_map: field='%.*s', field_value.item=%llu, ITEM_NULL=%llu\n",
+               (int)field->name.length, field->name.str, field_value.item, ITEM_NULL);
         
         if (field_value.item == ITEM_NULL) {
+            printf("[DEBUG] validate_map: field_value.item == ITEM_NULL\n");
+            // ITEM_NULL could mean either:
+            // 1. Field exists but has null value (should be valid if schema expects null)
+            // 2. Field is truly missing
+            // 
+            // The key insight: if the schema expects null type, then ITEM_NULL is valid
+            if (field->type->schema_type == LMD_SCHEMA_PRIMITIVE) {
+                SchemaPrimitive* prim = (SchemaPrimitive*)field->type->schema_data;
+                printf("[DEBUG] validate_map: primitive schema, prim=%p\n", prim);
+                if (prim) {
+                    printf("[DEBUG] validate_map: expected type = %d, LMD_TYPE_NULL = %d\n",
+                           prim->primitive_type, LMD_TYPE_NULL);
+                } else {
+                    printf("[DEBUG] validate_map: prim is NULL\n");
+                }
+                if (prim && prim->primitive_type == LMD_TYPE_NULL) {
+                    // Expected type is null, so ITEM_NULL is a valid value, field is not missing
+                    printf("[DEBUG] validate_map: expected null, treating as valid field\n");
+                    field_is_missing = false;
+                } else {
+                    // Expected type is not null, so ITEM_NULL means missing field
+                    printf("[DEBUG] validate_map: expected non-null, treating as missing field\n");
+                    field_is_missing = true;
+                }
+            } else {
+                // Non-primitive type expected, so ITEM_NULL means missing field
+                printf("[DEBUG] validate_map: non-primitive schema (type=%d), treating as missing field\n", field->type->schema_type);
+                field_is_missing = true;
+            }
+        } else {
+            // Field has a non-null value, so it's definitely not missing
+            printf("[DEBUG] validate_map: field_value.item != ITEM_NULL, field exists\n");
+            field_is_missing = false;
+        }
+        
+        printf("[DEBUG] validate_map: field_is_missing = %s\n", field_is_missing ? "true" : "false");
+        
+        if (field_is_missing) {
+            // Field is truly missing
+            //printf("[TRACE] validate_map: field is missing\n");
+            //fflush(stdout);
             if (field->required) {
                 char error_msg[256];
                 snprintf(error_msg, sizeof(error_msg), 
@@ -407,6 +546,9 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
                     VALID_ERROR_MISSING_FIELD, error_msg, field_path, ctx->pool));
             }
         } else {
+            // Field exists - validate it (even if it has a null value)
+            //printf("[TRACE] validate_map: field has value, validating\n");
+            //fflush(stdout);
             // Validate field value
             PathSegment* field_path = path_push_field(ctx->path, 
                 field->name.str, ctx->pool);
@@ -421,7 +563,20 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
             }
         }
         
+        //printf("[TRACE] validate_map: advancing to next field\n");
+        //fflush(stdout);
         field = field->next;
+        field_num++;
+        
+        // Safety check: prevent infinite field loops
+        if (field_num > 1000) {
+            //printf("[TRACE] validate_map: FIELD LOOP SAFETY BREAK at %d fields\n", field_num);
+            //fflush(stdout);
+            add_validation_error(result, create_validation_error(
+                VALID_ERROR_CONSTRAINT_VIOLATION, "Too many fields in validation (safety)", 
+                ctx->path, ctx->pool));
+            break;
+        }
     }
     
     // TODO: Check for unexpected fields if not open
@@ -432,6 +587,9 @@ ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema
 // ==================== Element Validation ====================
 
 ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
+    //printf("[TRACE] validate_element: depth=%d, entering\n", ctx->current_depth);
+    //fflush(stdout);
+    
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_ELEMENT) {
@@ -551,6 +709,9 @@ ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSc
 // ==================== Union Validation ====================
 
 ValidationResult* validate_union(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx) {
+    //printf("[TRACE] validate_union: depth=%d, entering\n", ctx->current_depth);
+    //fflush(stdout);
+    
     ValidationResult* result = create_validation_result(ctx->pool);
     
     if (schema->schema_type != LMD_SCHEMA_UNION) {
@@ -561,13 +722,30 @@ ValidationResult* validate_union(SchemaValidator* validator, Item item, TypeSche
     }
     
     SchemaUnion* union_schema = (SchemaUnion*)schema->schema_data;
+    //printf("[TRACE] validate_union: type_count=%d\n", union_schema->type_count);
+    //fflush(stdout);
+    
+    // Safety check: prevent excessive union validation attempts at deep levels
+    if (ctx->current_depth > 50) {
+        //printf("[TRACE] validate_union: DEPTH LIMIT EXCEEDED at %d\n", ctx->current_depth);
+        //fflush(stdout);
+        add_validation_error(result, create_validation_error(
+            VALID_ERROR_CONSTRAINT_VIOLATION, "Union validation depth limit exceeded (safety)", 
+            ctx->path, ctx->pool));
+        return result;
+    }
     
     // Try to validate against each type in the union
     for (int i = 0; i < union_schema->type_count; i++) {
+        //printf("[TRACE] validate_union: trying type %d/%d\n", i+1, union_schema->type_count);
+        //fflush(stdout);
+        
         ValidationResult* type_result = validate_item(
             validator, item, union_schema->types[i], ctx);
         
         if (type_result && type_result->valid) {
+            //printf("[TRACE] validate_union: found matching type %d\n", i+1);
+            //fflush(stdout);
             // Found matching type in union
             validation_result_destroy(result);
             return type_result;
@@ -577,6 +755,9 @@ ValidationResult* validate_union(SchemaValidator* validator, Item item, TypeSche
             validation_result_destroy(type_result);
         }
     }
+    
+    //printf("[TRACE] validate_union: no matching type found\n");
+    //fflush(stdout);
     
     // No types in union matched
     add_validation_error(result, create_validation_error(
@@ -664,8 +845,8 @@ ValidationResult* validate_reference(SchemaValidator* validator, Item item, Type
         return result;
     }
     
-    ////printf("[DEBUG].*: Resolved '%.*s' to schema type %d\n", 
-    //       (int)schema->name.length, schema->name.str, resolved->schema_type);
+    // printf("[DEBUG] validate_reference: Resolved '%.*s' to schema type %d\n", 
+    //        (int)schema->name.length, schema->name.str, resolved->schema_type);
     
     // Mark as visited and validate
     VisitedEntry entry = { .key = schema->name, .visited = true };
@@ -836,6 +1017,7 @@ TypeSchema* create_primitive_schema(TypeId primitive_type, VariableMemPool* pool
     TypeSchema* schema = (TypeSchema*)pool_calloc(pool, sizeof(TypeSchema));
     schema->schema_type = LMD_SCHEMA_PRIMITIVE;
     
+    printf("[SCHEMA_DEBUG] create_primitive_schema: primitive_type=%d\n", primitive_type);
     SchemaPrimitive* prim_data = (SchemaPrimitive*)pool_calloc(pool, sizeof(SchemaPrimitive));
     prim_data->primitive_type = primitive_type;
     schema->schema_data = prim_data;

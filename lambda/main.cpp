@@ -405,9 +405,11 @@ int main(int argc, char *argv[]) {
             } else if (input_format && strcmp(input_format, "vcf") == 0) {
                 schema_file = "lambda/input/vcf_schema.ls";
                 printf("Using VCF schema for vCard input\n");
+            } else if (input_format && strcmp(input_format, "markdown") == 0) {
+                schema_file = "lambda/input/markdown_schema.ls";
+                printf("Using markdown schema for markdown input\n");
             } else if (input_format && (strcmp(input_format, "asciidoc") == 0 || 
                                      strcmp(input_format, "man") == 0 ||
-                                     strcmp(input_format, "markdown") == 0 ||
                                      strcmp(input_format, "rst") == 0 ||
                                      strcmp(input_format, "textile") == 0 ||
                                      strcmp(input_format, "wiki") == 0)) {

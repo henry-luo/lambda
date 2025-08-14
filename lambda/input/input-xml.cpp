@@ -659,11 +659,7 @@ static Item parse_element(Input *input, const char **xml) {
                     
                     // Only add non-empty text content
                     if (text_end > text_start) {
-                        // Process entities in text content
-                        const char* temp_xml = text_start;
-                        String* text_content = parse_string_content(input, &temp_xml, '\0');
-                        
-                        // Manual parsing since parse_string_content expects end_char
+                        // Manual entity parsing for text content
                         while (text_start < text_end) {
                             if (*text_start == '&') {
                                 text_start++;
@@ -738,16 +734,35 @@ void parse_xml(Input* input, const char* xml_string) {
     Element* doc_element = input_create_element(input, "document");
     if (!doc_element) { input->root = {.item = ITEM_ERROR};  return; }
 
+    int actual_element_count = 0;  // Count only actual XML elements (not PIs, comments, etc.)
+    Item actual_root_element = {.item = ITEM_ERROR};
+    
     // Parse all top-level elements (including XML declaration, comments, PIs, and the main element)
     while (*xml) {
         skip_whitespace(&xml);
         if (!*xml) break;
+        
+        const char* old_xml = xml; // Save position to detect infinite loops
         
         if (*xml == '<') {
             Item element = parse_element(input, &xml);
             if (element .item != ITEM_ERROR) {
                 list_push((List*)doc_element, element);
                 ((TypeElmt*)doc_element->type)->content_length++;
+                
+                // Check if this is an actual XML element (not processing instruction, comment, DTD, etc.)
+                Element* elem = (Element*)element.item;
+                if (elem && elem->type) {
+                    TypeElmt* elmt_type = (TypeElmt*)elem->type;
+                    // Count as actual element if it doesn't start with ?, !, or --
+                    if (elmt_type->name.length > 0 && 
+                        elmt_type->name.str[0] != '?' && 
+                        elmt_type->name.str[0] != '!' &&
+                        !(elmt_type->name.length >= 3 && strncmp(elmt_type->name.str, "!--", 3) == 0)) {
+                        actual_element_count++;
+                        actual_root_element = element;
+                    }
+                }
             }
         } else {
             // Skip any stray text content at document level
@@ -755,16 +770,18 @@ void parse_xml(Input* input, const char* xml_string) {
                 xml++;
             }
         }
+        
+        // Safety check: ensure we always advance to prevent infinite loops
+        if (xml == old_xml) {
+            xml++; // Force advance by at least one character
+        }
     }
     
-    // If document has only one child element, return that as root
+    // If document has only one actual XML element, return that as root
     // Otherwise return the document element containing all elements
-    if (((TypeElmt*)doc_element->type)->content_length == 1) {
-        List* doc_list = (List*)doc_element;
-        if (doc_list->items && doc_list->items[0] .item != ITEM_ERROR) {
-            input->root = doc_list->items[0];
-            return;
-        }
+    if (actual_element_count == 1 && actual_root_element.item != ITEM_ERROR) {
+        input->root = actual_root_element;
+        return;
     }
     input->root = {.item = (uint64_t)doc_element};
 }

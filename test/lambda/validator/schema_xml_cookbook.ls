@@ -43,10 +43,13 @@ type CookbookType = <cookbook
     recipes: RecipeType+              // one or more recipes
 >
 
-// Document structure matching XML parser output
-type Document = <document
-    xmlDeclaration: XmlProcessingInstruction?, // optional <?xml> declaration
-    cookbook: CookbookType            // cookbook root element
+// Document structure - cookbook is now the root with our parsing fix  
+type Document = <cookbook
+    title: string,                    // cookbook title (required attribute)
+    author: string,                   // cookbook author (required attribute)
+    year: string,                     // publication year (required attribute)
+    xmlns: string?,                   // optional namespace
+    RecipeType*                       // zero or more recipes
 >
 
 // Processing instruction for XML declaration
