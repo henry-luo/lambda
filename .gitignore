@@ -98,6 +98,7 @@ windows-deps/**/*.bz2
 # ICU source and build artifacts
 icu/
 icu-compact/
+icu-compact-build/
 
 # Documentation related
 .obsidian/

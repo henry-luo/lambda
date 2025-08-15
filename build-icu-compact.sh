@@ -79,12 +79,12 @@ if command -v jq >/dev/null 2>&1; then
 }'
     fi
     
-    # Write the extracted filter to the build directory
-    echo "$ICU_DATA_FILTER" > "$BUILD_DIR/lambda_minimal.json"
+    # Write the extracted filter to the install directory
+    echo "$ICU_DATA_FILTER" > "$INSTALL_DIR/lambda_minimal.json"
     
 else
     echo "Warning: jq not found, using hardcoded minimal data filter"
-    cat > "$BUILD_DIR/lambda_minimal.json" << 'EOF'
+    cat > "$INSTALL_DIR/lambda_minimal.json" << 'EOF'
 {
   "localeFilter": {
     "filterType": "language",
@@ -113,7 +113,7 @@ else
 EOF
 fi
 
-echo "ICU data filter written to: $BUILD_DIR/lambda_minimal.json"
+echo "ICU data filter written to: $INSTALL_DIR/lambda_minimal.json"
 
 # Configure ICU with ultra-compact settings
 echo "Configuring ICU with ultra-compact settings..."
