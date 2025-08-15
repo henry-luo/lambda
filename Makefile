@@ -57,7 +57,7 @@ endif
 
 ifeq ($(UNICODE_LEVEL),compact)
     UNICODE_FLAGS = -DLAMBDA_UNICODE_LEVEL=2 -DU_STATIC_IMPLEMENTATION
-    ICU_LIBS = -L$(ICU_COMPACT_ROOT)/lib -licu_compact
+    ICU_LIBS = -L$(ICU_COMPACT_ROOT)/lib -licui18n -licuuc -licudata
     ICU_CFLAGS = -I$(ICU_COMPACT_ROOT)/include
 endif
 

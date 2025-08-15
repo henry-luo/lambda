@@ -264,13 +264,13 @@ get_warnings_for_file() {
 get_flags_for_file() {
     local file="$1"
     if is_cpp_file "$file"; then
-        local cpp_flags="$FLAGS"
+        local cpp_flags="$FLAGS -std=c++17"
         if [ "$CROSS_COMPILE" = "true" ]; then
-            cpp_flags="$cpp_flags -std=c++11 -fpermissive -Wno-fpermissive"
+            cpp_flags="$cpp_flags -fpermissive -Wno-fpermissive"
         fi
         echo "$cpp_flags"
     else
-        echo "$FLAGS"
+        echo "$FLAGS -std=c99"
     fi
 }
 

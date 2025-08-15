@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <cstdlib>  // for abs function
+#include <cmath>    // for pow function
 
 extern __thread Context* context;
 
@@ -801,7 +802,12 @@ Item fn_pow(Item item_a, Item item_b) {
         return ItemError;
     }
     
-    return push_d(pow(base, exponent));
+    return push_d(lambda_pow(base, exponent));
+}
+
+// Implementation of lambda_pow function
+double lambda_pow(double x, double y) {
+    return pow(x, y);
 }
 
 Item fn_mod(Item item_a, Item item_b) {

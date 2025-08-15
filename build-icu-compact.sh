@@ -6,7 +6,7 @@ set -e
 
 # Configuration
 ICU_VERSION="75.1"
-ICU_DIR="icu-${ICU_VERSION}"
+ICU_DIR="icu"
 ICU_TARBALL="icu4c-75_1-src.tgz"
 ICU_URL="https://github.com/unicode-org/icu/releases/download/release-75-1/${ICU_TARBALL}"
 BUILD_DIR="$(pwd)/icu-compact-build"
@@ -102,7 +102,7 @@ make clean 2>/dev/null || true
     --enable-small \
     CFLAGS="-Os -DNDEBUG -ffunction-sections -fdata-sections -DUCONFIG_NO_SERVICE=1 -DUCONFIG_NO_REGULAR_EXPRESSIONS=1 -DUCONFIG_NO_FORMATTING=1 -DUCONFIG_NO_TRANSLITERATION=1 -DUCONFIG_NO_BREAK_ITERATION=1 -DUCONFIG_NO_IDNA=1 -DUCONFIG_NO_LEGACY_CONVERSION=1" \
     CXXFLAGS="-Os -DNDEBUG -ffunction-sections -fdata-sections -DUCONFIG_NO_SERVICE=1 -DUCONFIG_NO_REGULAR_EXPRESSIONS=1 -DUCONFIG_NO_FORMATTING=1 -DUCONFIG_NO_TRANSLITERATION=1 -DUCONFIG_NO_BREAK_ITERATION=1 -DUCONFIG_NO_IDNA=1 -DUCONFIG_NO_LEGACY_CONVERSION=1" \
-    LDFLAGS="-Wl,--gc-sections"
+    LDFLAGS="-Wl,-dead_strip"
 
 # Build ICU
 echo "Building ICU with ultra-compact configuration..."

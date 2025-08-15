@@ -304,7 +304,7 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 long it2l(Item item);
 double it2d(Item item);
 
-double pow(double x, double y);
+double lambda_pow(double x, double y);
 Item fn_add(Item a, Item b);
 Item fn_mul(Item a, Item b);
 Item fn_sub(Item a, Item b);

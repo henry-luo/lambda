@@ -7,16 +7,12 @@
 #include <string.h>
 #include <stdlib.h>
 
-// C linkage for functions from lambda-eval.cpp
-extern "C" {
-    double it2d(Item itm);
-}
-
 #ifdef LAMBDA_ICU_SUPPORT
     #include <unicode/ucol.h>
     #include <unicode/ustring.h>
     #include <unicode/unorm2.h>
     #include <unicode/uchar.h>
+    #include <unicode/uclean.h>  // For u_init
 #endif
 
 // Global ICU collator instances (initialized once)
@@ -44,24 +40,32 @@ void init_unicode_support(void) {
     
     UErrorCode status = U_ZERO_ERROR;
     
-    // Create default collator (root locale, case-sensitive)
-    g_default_collator = ucol_open("", &status);
+    // Initialize ICU explicitly
+    u_init(&status);
     if (U_FAILURE(status)) {
-        printf("Failed to create default ICU collator: %s\n", u_errorName(status));
+        printf("ICU initialization failed (%s), falling back to ASCII-only comparison\n", u_errorName(status));
+        unicode_initialized = true; // Mark as initialized but without ICU support
         return;
     }
     
-    // Create case-insensitive collator
-    g_case_insensitive_collator = ucol_open("", &status);
-    if (U_SUCCESS(status)) {
-        ucol_setAttribute(g_case_insensitive_collator, UCOL_CASE_LEVEL, UCOL_OFF, &status);
-        ucol_setAttribute(g_case_insensitive_collator, UCOL_STRENGTH, UCOL_SECONDARY, &status);
-    }
-    
-    // Get NFC normalizer
-    g_nfc_normalizer = unorm2_getNFCInstance(&status);
+    // Create default collator (root locale, case-sensitive)
+    g_default_collator = ucol_open("", &status);
     if (U_FAILURE(status)) {
-        printf("Failed to get NFC normalizer: %s\n", u_errorName(status));
+        printf("ICU collator creation failed (%s), using ASCII fallback\n", u_errorName(status));
+        // Don't return - continue with initialization but without ICU collators
+    } else {
+        // Create case-insensitive collator
+        g_case_insensitive_collator = ucol_open("", &status);
+        if (U_SUCCESS(status)) {
+            ucol_setAttribute(g_case_insensitive_collator, UCOL_CASE_LEVEL, UCOL_OFF, &status);
+            ucol_setAttribute(g_case_insensitive_collator, UCOL_STRENGTH, UCOL_SECONDARY, &status);
+        }
+        
+        // Get NFC normalizer
+        g_nfc_normalizer = unorm2_getNFCInstance(&status);
+        if (U_FAILURE(status)) {
+            printf("Failed to get NFC normalizer: %s\n", u_errorName(status));
+        }
     }
     
     unicode_initialized = true;
@@ -91,6 +95,9 @@ void cleanup_unicode_support(void) {
 }
 
 // Unicode-aware string comparison for equality
+// Use external symbol for C linkage function
+extern "C" double it2d_c_symbol(Item item) asm("_it2d");
+
 CompResult equal_comp_unicode(Item a_item, Item b_item) {
     printf("equal_comp_unicode called\n");
     
@@ -98,7 +105,7 @@ CompResult equal_comp_unicode(Item a_item, Item b_item) {
         // Handle numeric promotion as before
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
-            double a_val = it2d(a_item), b_val = it2d(b_item);
+            double a_val = it2d_c_symbol(a_item), b_val = it2d_c_symbol(b_item);
             return (a_val == b_val) ? COMP_TRUE : COMP_FALSE;
         }
         return COMP_ERROR;

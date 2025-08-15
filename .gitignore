@@ -95,6 +95,10 @@ windows-deps/include/lexbor/
 windows-deps/**/*.xz
 windows-deps/**/*.bz2
 
+# ICU source and build artifacts
+icu/
+icu-compact/
+
 # Documentation related
 .obsidian/
 site/
