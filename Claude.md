@@ -170,14 +170,16 @@ let result = format(process(doc.data), 'markdown')
 ./setup-windows-deps.sh # Windows cross-compilation
 
 # Build projects
-./compile.sh                           # Default Lambda build
+make                           # Default Lambda build
 ./compile.sh build_radiant_config.json # Radiant renderer
 ./compile.sh --platform=windows        # Windows cross-compilation
 
 # Run Lambda
-./lambda --repl          # Interactive REPL
-./lambda --mir script.ls # JIT compiled execution
-./lambda script.ls       # Interpreted execution
+./lambda                             # interactive REPL
+./lambda --mir script.ls             # JIT compiled execution
+./lambda script.ls                   # script execution
+./lambda --help                      # print help message
+./lambda --transpile-only script.ls  # only transpile the script to C code
 ```
 
 ## Dependencies

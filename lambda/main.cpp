@@ -88,11 +88,10 @@ void simple_add_history(const char *line) {
 void print_help() {
     printf("Lambda Script Interpreter v1.0\n");
     printf("Usage:\n");
+    printf("  lambda                       - Start REPL mode (default)\n");
     printf("  lambda [script.ls]           - Run a script file\n");
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
     printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
-    printf("  lambda --repl                - Start REPL mode\n");
-    printf("  lambda --repl --mir          - Start REPL with MIR JIT\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nREPL Commands:\n");
@@ -257,12 +256,6 @@ void run_assertions() {
 int main(int argc, char *argv[]) {
     // Run basic assertions
     run_assertions();
-    
-    // If no arguments provided, show help by default
-    if (argc == 1) {
-        print_help();
-        return 0;
-    }
     
     // Parse command line arguments
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
@@ -439,15 +432,12 @@ int main(int argc, char *argv[]) {
     }
     
     bool use_mir = false;
-    bool repl_mode = false;
     bool transpile_only = false;
     
     // Parse arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--mir") == 0) {
             use_mir = true;
-        } else if (strcmp(argv[i], "--repl") == 0) {
-            repl_mode = true;
         } else if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
         } else if (argv[i][0] != '-') {
@@ -462,22 +452,14 @@ int main(int argc, char *argv[]) {
         }
     }
     
-    // If --repl was specified, start REPL
-    if (repl_mode) {
-        if (transpile_only) {
-            printf("Error: --transpile-only cannot be used with --repl\n");
-            return 1;
-        }
-        run_repl(&runtime, use_mir);
-    } else if (transpile_only) {
+    // If we get here, no script file was specified - start REPL mode
+    if (transpile_only) {
         printf("Error: --transpile-only requires a script file\n");
         print_help();
         return 1;
     } else {
-        // No script file specified and no --repl flag
-        printf("Error: No script file specified. Use --repl for interactive mode.\n");
-        print_help();
-        return 1;
+        // Start REPL mode by default (with or without MIR)
+        run_repl(&runtime, use_mir);
     }
     
 #if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT

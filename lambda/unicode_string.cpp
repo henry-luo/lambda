@@ -90,7 +90,7 @@ void cleanup_unicode_support(void) {
     }
     
     unicode_initialized = false;
-    printf("ICU Unicode support cleaned up\n");
+    // printf("ICU Unicode support cleaned up\n");
 #endif
 }
 
