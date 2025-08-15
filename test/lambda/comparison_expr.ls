@@ -310,19 +310,4 @@ let z = 10.0
 (3.14159 > 3.14158)
 (2.718281828 <= 2.718281829)
 
-"===== TEST SUMMARY ====="
-"Total expressions tested: ~200+ comparison operations"
-"Categories covered:"
-"- Basic equality and inequality (==, !=)"
-"- Relational operators (<, >, <=, >=)" 
-"- Logical NOT operations (not)"
-"- Logical AND/OR operations (and, or)"
-"- Mixed type comparisons (int/float)"
-"- Complex boolean expressions"
-"- Error cases with invalid types"
-"- Boolean-numeric type mismatch errors (true==1, false==0, etc.)"
-"- String comparison errors (non-equality operators)"
-"- Boolean-string operation errors"
-"- Null comparison and operation errors"
-"- Mixed invalid type combinations"
-"- Edge cases and precision tests"
+"End of Comparison Expression Tests."

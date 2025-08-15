@@ -132,7 +132,15 @@ Test(lambda_tests, test_sys_fn_ls) {
 }
 
 Test(lambda_tests, test_expr_stam_ls) {
-    test_lambda_script_against_file("test/lambda/test_expr_stam.ls", "test/lambda/test_expr_stam.txt");
+    test_lambda_script_against_file("test/lambda/expr_stam.ls", "test/lambda/expr_stam.txt");
+}
+
+Test(lambda_tests, test_numeric_expr_ls) {
+    test_lambda_script_against_file("test/lambda/numeric_expr.ls", "test/lambda/numeric_expr.txt");
+}
+
+Test(lambda_tests, test_comparison_expr_ls) {
+    test_lambda_script_against_file("test/lambda/comparison_expr.ls", "test/lambda/comparison_expr.txt");
 }
 
 // Additional test cases for other lambda scripts

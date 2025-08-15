@@ -1,0 +1,276 @@
+"===== COMPREHENSIVE COMPARISON OPERATIONS TEST ====="
+"Basic Equality Comparisons (==):"
+true
+false
+true
+false
+true
+true
+true
+true
+true
+true
+"Basic Inequality Comparisons (!=):"
+true
+false
+true
+false
+true
+false
+true
+true
+true
+"Less Than Comparisons (<):"
+true
+false
+false
+true
+false
+false
+true
+false
+true
+true
+true
+false
+"Greater Than Comparisons (>):"
+true
+false
+false
+true
+false
+false
+true
+false
+true
+true
+true
+false
+"Less Than or Equal Comparisons (<=):"
+true
+false
+true
+true
+false
+true
+true
+false
+true
+true
+true
+true
+true
+false
+true
+"Greater Than or Equal Comparisons (>=):"
+true
+false
+true
+true
+false
+true
+true
+false
+true
+true
+true
+true
+true
+false
+true
+"Logical NOT Operations (not):"
+false
+false
+false
+false
+false
+false
+false
+false
+"Logical AND Operations (and):"
+true
+false
+false
+false
+true
+false
+true
+true
+true
+true
+"Logical OR Operations (or):"
+true
+true
+true
+false
+true
+true
+true
+true
+true
+true
+"Mixed Boolean Logic:"
+true
+false
+true
+true
+true
+false
+"Logical Operations with Mixed Types:"
+true
+false
+true
+false
+true
+false
+true
+false
+"Large Number Comparisons:"
+true
+true
+true
+true
+true
+true
+"Negative Number Comparisons:"
+true
+true
+true
+true
+true
+true
+"Zero Comparisons:"
+true
+true
+true
+true
+true
+true
+true
+true
+true
+"Mixed Type Comparisons:"
+true
+true
+true
+true
+true
+true
+true
+true
+"Complex Boolean Expressions:"
+true
+true
+true
+true
+true
+"Nested Comparisons:"
+true
+true
+true
+false
+"Error Cases - Type Mismatches (should produce errors):"
+"Testing invalid comparisons..."
+error
+error
+error
+error
+error
+error
+"Additional Error Cases - Invalid Type Comparisons:"
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+"Error Cases - String Comparisons (non-equality):"
+true
+false
+false
+false
+"Error Cases - Boolean with String Operations:"
+error
+error
+error
+error
+error
+error
+error
+error
+error
+"Error Cases - Null Comparisons:"
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+"Error Cases - Null with Boolean Operations:"
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+"Error Cases - Mixed Invalid Types:"
+error
+error
+error
+error
+error
+error
+error
+error
+true
+true
+true
+true
+"Conditional Expressions with Comparisons:"
+"five is greater"
+"equal"
+"not less than"
+"both true"
+"Variable Comparisons:"
+true
+true
+true
+true
+true
+false
+true
+"Complex Arithmetic in Comparisons:"
+true
+true
+true
+false
+false
+"Chained Comparisons Logic:"
+true
+true
+true
+true
+"Edge Cases with Very Large Numbers:"
+true
+true
+true
+"Float Precision Comparisons:"
+false
+true
+true
+true
+"End of Comparison Expression Tests."

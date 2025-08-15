@@ -1,0 +1,184 @@
+"===== COMPREHENSIVE NUMERIC OPERATIONS TEST ====="
+"Basic Operations:"
+8
+2
+15
+3.3333333333
+3
+8
+"Negative Numbers:"
+-2
+-8
+-15
+-3.3333333333
+-3
+"Float Operations:"
+7.8
+3.2
+12.65
+2.3913043478
+50.4468654042
+"Mixed Operand Types:"
+1.5
+1.8
+10
+4
+error
+7.5
+1.7
+9
+3
+error
+"Modulo Operations (%):"
+2
+-2
+2
+-2
+2
+0
+39
+"Modulo by Zero (errors):"
+error
+error
+error
+"Modulo with Float (errors):"
+error
+error
+error
+"Modulo with Boolean/Null (errors):"
+error
+error
+error
+error
+"Modulo with String (errors):"
+error
+error
+"Unary Operations - Fast Path (C operators) - Numeric Types:"
+42
+-42
+3.14
+-3.14
+"Unary Operations - Runtime Functions - String to Number Casting:"
+123
+-123
+3.14
+-3.14
+-42
+42
+"Unary Operations - Runtime Functions - Symbol to Number Casting:"
+456
+-456
+2.71
+-2.71
+"Unary Operations - Error Cases - Invalid String/Symbol:"
+error
+error
+error
+error
+"Unary Operations - Error Cases - Unsupported Types:"
+error
+error
+error
+error
+"Unary Operations - Mixed Expressions:"
+32
+-6.28
+"Division by Zero:"
+inf
+nan
+error
+error
+"Boolean Arithmetic (errors):"
+error
+error
+error
+error
+error
+error
+"Null Arithmetic (errors):"
+error
+error
+error
+error
+error
+error
+error
+error
+"String with Numbers (errors):"
+error
+error
+"testtesttesttesttest"
+"testtesttesttesttest"
+"Additional Data Type Errors:"
+error
+error
+error
+error
+"Mixed Type Errors:"
+error
+error
+error
+error
+"More Mixed Type Combinations (errors):"
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+error
+"Edge Cases:"
+1e-15
+-1486618624
+1486618624
+"More Edge Cases:"
+1
+1e+20
+1e-50
+1.4787576366
+nan
+inf
+-inf
+nan
+-inf
+0
+"Power Operations:"
+1
+0
+1
+0.5
+-8
+4
+"String Repetition:"
+"hellohellohello"
+""
+"worldworldworldworldworld"
+"Complex Expressions:"
+16
+11
+1.29883e+35
+"Operator Precedence Tests:"
+3.60394e+17
+25
+3.60394e+17
+3.60288e+17
+7.20576e+17
+21
+1.44115e+18
+3.60288e+17
+-3.60288e+17
+3.60288e+17
+"Precision Tests:"
+0.3
+0.2
+1.08086e+18
+"Large Numbers:"
+0
+-1
+"===== END OF COMPREHENSIVE TEST ====="
+"All numeric tests completed successfully."
