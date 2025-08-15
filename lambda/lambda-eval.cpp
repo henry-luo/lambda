@@ -554,7 +554,7 @@ String *str_cat(String *left, String *right) {
     return result;
 }
 
-Item add(Item item_a, Item item_b) {
+Item fn_add(Item item_a, Item item_b) {
     // todo: join binary, list, array, map
     if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_STRING) {
         String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
@@ -607,7 +607,7 @@ String *str_repeat(String *str, long times) {
     return result;
 }
 
-Item mul(Item item_a, Item item_b) {
+Item fn_mul(Item item_a, Item item_b) {
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
         return {.item = i2it(item_a.long_val * item_b.long_val)};
     }
@@ -636,6 +636,201 @@ Item mul(Item item_a, Item item_b) {
     }
     else {
         printf("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
+    }
+    return ItemError;
+}
+
+Item fn_sub(Item item_a, Item item_b) {
+    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        return {.item = i2it(item_a.long_val - item_b.long_val)};
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+        return push_l(*(long*)item_a.pointer - *(long*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
+        printf("sub float: %g - %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        return push_d(*(double*)item_a.pointer - *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
+        return push_d((double)item_a.long_val - *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
+        return push_d(*(double*)item_a.pointer - (double)item_b.long_val);
+    }
+    else {
+        printf("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
+    }
+    return ItemError;
+}
+
+Item fn_div(Item item_a, Item item_b) {
+    // Check for division by zero
+    bool is_zero = false;
+    if (item_b.type_id == LMD_TYPE_INT && item_b.long_val == 0) {
+        is_zero = true;
+    }
+    else if (item_b.type_id == LMD_TYPE_INT64 && *(long*)item_b.pointer == 0) {
+        is_zero = true;
+    }
+    else if (item_b.type_id == LMD_TYPE_FLOAT && *(double*)item_b.pointer == 0.0) {
+        is_zero = true;
+    }
+    
+    if (is_zero) {
+        printf("division by zero error\n");
+        return ItemError;
+    }
+
+    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        return push_d((double)item_a.long_val / (double)item_b.long_val);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+        return push_d((double)*(long*)item_a.pointer / (double)*(long*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
+        printf("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        return push_d(*(double*)item_a.pointer / *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
+        return push_d((double)item_a.long_val / *(double*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
+        return push_d(*(double*)item_a.pointer / (double)item_b.long_val);
+    }
+    else {
+        printf("unknown div type: %d, %d\n", item_a.type_id, item_b.type_id);
+    }
+    return ItemError;
+}
+
+Item fn_idiv(Item item_a, Item item_b) {
+    // Check for division by zero
+    bool is_zero = false;
+    if (item_b.type_id == LMD_TYPE_INT) {
+        // Sign extend the 56-bit long_val to a proper signed long
+        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        is_zero = (signed_val == 0);
+    }
+    else if (item_b.type_id == LMD_TYPE_INT64 && *(long*)item_b.pointer == 0) {
+        is_zero = true;
+    }
+    
+    if (is_zero) {
+        printf("integer division by zero error\n");
+        return ItemError;
+    }
+
+    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        // Sign extend both values to proper signed longs
+        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        return (Item){.item = i2it(a_val / b_val)};
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+        return push_l(*(long*)item_a.pointer / *(long*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
+        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        return push_l(a_val / *(long*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
+        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        return push_l(*(long*)item_a.pointer / b_val);
+    }
+    else {
+        printf("unknown idiv type: %d, %d\n", item_a.type_id, item_b.type_id);
+    }
+    return ItemError;
+}
+
+Item fn_pow(Item item_a, Item item_b) {
+    double base = 0.0, exponent = 0.0;
+    
+    // Convert first argument to double
+    if (item_a.type_id == LMD_TYPE_INT) {
+        // Sign extend the 56-bit long_val to a proper signed long
+        long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        base = (double)signed_val;
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64) {
+        base = (double)(*(long*)item_a.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT) {
+        base = *(double*)item_a.pointer;
+    }
+    else {
+        printf("unknown pow base type: %d\n", item_a.type_id);
+        return ItemError;
+    }
+    
+    // Convert second argument to double
+    if (item_b.type_id == LMD_TYPE_INT) {
+        // Sign extend the 56-bit long_val to a proper signed long
+        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        exponent = (double)signed_val;
+    }
+    else if (item_b.type_id == LMD_TYPE_INT64) {
+        exponent = (double)(*(long*)item_b.pointer);
+    }
+    else if (item_b.type_id == LMD_TYPE_FLOAT) {
+        exponent = *(double*)item_b.pointer;
+    }
+    else {
+        printf("unknown pow exponent type: %d\n", item_b.type_id);
+        return ItemError;
+    }
+    
+    return push_d(pow(base, exponent));
+}
+
+Item fn_mod(Item item_a, Item item_b) {
+    if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        // Sign extend both values to proper signed longs
+        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        
+        if (b_val == 0) {
+            printf("modulo by zero error\n");
+            return ItemError;
+        }
+        
+        return (Item){.item = i2it(a_val % b_val)};
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+        long a_val = *(long*)item_a.pointer;
+        long b_val = *(long*)item_b.pointer;
+        
+        if (b_val == 0) {
+            printf("modulo by zero error\n");
+            return ItemError;
+        }
+        
+        return push_l(a_val % b_val);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
+        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        long b_val = *(long*)item_b.pointer;
+        
+        if (b_val == 0) {
+            printf("modulo by zero error\n");
+            return ItemError;
+        }
+        
+        return push_l(a_val % b_val);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
+        long a_val = *(long*)item_a.pointer;
+        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        
+        if (b_val == 0) {
+            printf("modulo by zero error\n");
+            return ItemError;
+        }
+        
+        return push_l(a_val % b_val);
+    }
+    else {
+        printf("unknown mod type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
