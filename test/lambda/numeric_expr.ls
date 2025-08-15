@@ -36,6 +36,82 @@
 9.0 / 3
 15.5 _/ 4
 
+"Modulo Operations (%):"
+17 % 5
+-17 % 5
+17 % -5
+-17 % -5
+100 % 7
+0 % 5
+1234567890 % 123
+
+"Modulo by Zero (errors):"
+5 % 0
+0 % 0
+17 % 0
+
+"Modulo with Float (errors):"
+5.5 % 3
+7 % 2.5
+3.14 % 2.71
+
+"Modulo with Boolean/Null (errors):"
+true % 2
+5 % false
+null % 3
+7 % null
+
+"Modulo with String (errors):"
+"hello" % 3
+5 % "test"
+
+"Unary Operations - Fast Path (C operators) - Numeric Types:"
+let num = 42
+let float_val = 3.14
++num
+-num  
++float_val
+-float_val
+
+"Unary Operations - Runtime Functions - String to Number Casting:"
+let str_int = "123"
+let str_float = "3.14"
+let str_negative = "-42"
++str_int
+-str_int
++str_float
+-str_float
++str_negative
+-str_negative
+
+"Unary Operations - Runtime Functions - Symbol to Number Casting:"  
+let sym_int = '456'
+let sym_float = '2.71'
++sym_int
+-sym_int
++sym_float
+-sym_float
+
+"Unary Operations - Error Cases - Invalid String/Symbol:"
+let str_invalid = "hello"
+let sym_invalid = 'world'
++str_invalid
+-str_invalid
++sym_invalid
+-sym_invalid
+
+"Unary Operations - Error Cases - Unsupported Types:"
+let bool_val = true
+let null_val = null
++bool_val
+-bool_val
++null_val
+-null_val
+
+"Unary Operations - Mixed Expressions:"
++("42") + -("10")
+-("3.14") * +("2")
+
 "Division by Zero:"
 5 / 0
 0 / 0

@@ -829,10 +829,117 @@ Item fn_mod(Item item_a, Item item_b) {
         
         return push_l(a_val % b_val);
     }
+    else if (item_a.type_id == LMD_TYPE_FLOAT || item_b.type_id == LMD_TYPE_FLOAT) {
+        printf("modulo not supported for float types\n");
+        return ItemError;
+    }
     else {
         printf("unknown mod type: %d, %d\n", item_a.type_id, item_b.type_id);
+        return ItemError;
     }
-    return ItemError;
+}
+
+Item fn_pos(Item item) {
+    // Unary + operator - return the item as-is for numeric types, or cast strings/symbols to numbers
+    if (item.type_id == LMD_TYPE_INT) {
+        return item;  // Already in correct format
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        return item;  // Already in correct format
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        return item;  // Already in correct format
+    }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        return item;  // For decimal, unary + returns the same value
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        // Cast string/symbol to number
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            printf("unary + error: empty string/symbol\n");
+            return ItemError;
+        }
+        
+        // Try to parse as integer first
+        char* endptr;
+        long long_val = strtol(str->chars, &endptr, 10);
+        
+        // If entire string was consumed and no overflow, it's an integer
+        if (*endptr == '\0' && endptr == str->chars + str->len) {
+            return (Item){.item = i2it(long_val)};
+        }
+        
+        // Try to parse as float
+        double double_val = strtod(str->chars, &endptr);
+        if (*endptr == '\0' && endptr == str->chars + str->len) {
+            return push_d(double_val);
+        }
+        
+        // Not a valid number
+        printf("unary + error: cannot convert '%.*s' to number\n", (int)str->len, str->chars);
+        return ItemError;
+    }
+    else {
+        // For other types (bool, datetime, etc.), unary + is an error
+        printf("unary + not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_neg(Item item) {
+    // Unary - operator - negate numeric values or cast and negate strings/symbols
+    if (item.type_id == LMD_TYPE_INT) {
+        // Sign extend the 56-bit long_val to a proper signed long, then negate
+        long val = (long)((int64_t)(item.long_val << 8) >> 8);
+        return (Item){.item = i2it(-val)};
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        long val = *(long*)item.pointer;
+        return push_l(-val);
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        return push_d(-val);
+    }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        // For decimal types, we'd need to negate the mpf_t value
+        // This would require more complex decimal arithmetic
+        printf("unary - for decimal type not yet implemented\n");
+        return ItemError;
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        // Cast string/symbol to number, then negate
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            printf("unary - error: empty string/symbol\n");
+            return ItemError;
+        }
+        
+        // Try to parse as integer first
+        char* endptr;
+        long long_val = strtol(str->chars, &endptr, 10);
+        
+        // If entire string was consumed and no overflow, it's an integer
+        if (*endptr == '\0' && endptr == str->chars + str->len) {
+            return (Item){.item = i2it(-long_val)};
+        }
+        
+        // Try to parse as float
+        double double_val = strtod(str->chars, &endptr);
+        if (*endptr == '\0' && endptr == str->chars + str->len) {
+            return push_d(-double_val);
+        }
+        
+        // Not a valid number
+        printf("unary - error: cannot convert '%.*s' to number\n", (int)str->len, str->chars);
+        return ItemError;
+    }
+    else {
+        // For other types (bool, datetime, etc.), unary - is an error
+        printf("unary - not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
 }
 
 Range* fn_to(Item item_a, Item item_b) {
@@ -949,6 +1056,11 @@ bool equal(Item a_item, Item b_item) {
     }
     printf("unknown comparing type %d\n", a_item.type_id);
     return false;
+}
+
+Item fn_equal(Item a_item, Item b_item) {
+    printf("fn_equal expr\n");
+    return {.item = b2it(equal(a_item, b_item))};
 }
 
 bool fn_in(Item a_item, Item b_item) {

@@ -600,8 +600,43 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
 
     TSNode operand_node = ts_node_child_by_field_id(bi_node, FIELD_OPERAND);
     ast_node->operand = build_expr(tp, operand_node);
-    // ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
-    ast_node->type = ast_node->op == OPERATOR_NOT ? &TYPE_BOOL : &TYPE_FLOAT;
+    
+    // Defensive validation: ensure operand was built successfully
+    if (!ast_node->operand) {
+        printf("Error: build_unary_expr failed to build operand\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    // Additional validation: ensure operand has valid type
+    if (!ast_node->operand->type) {
+        printf("Error: build_unary_expr operand missing type information\n");
+        ast_node->type = &TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+
+    // More robust type inference based on operator and operand type
+    TypeId operand_type = ast_node->operand->type->type_id;
+    TypeId type_id;
+    
+    if (ast_node->op == OPERATOR_NOT) {
+        type_id = LMD_TYPE_BOOL;
+    }
+    else if (ast_node->op == OPERATOR_POS || ast_node->op == OPERATOR_NEG) {
+        // For numeric unary operators (+/-), preserve the operand type if numeric
+        if (LMD_TYPE_INT <= operand_type && operand_type <= LMD_TYPE_NUMBER) {
+            type_id = operand_type;  // Preserve the exact numeric type
+        }
+        else {
+            type_id = LMD_TYPE_ANY;  // Non-numeric types need runtime handling
+        }
+    }
+    else {
+        printf("Error: build_unary_expr unknown operator\n");
+        type_id = LMD_TYPE_ANY;  // Default fallback
+    }
+    
+    ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
 
     printf("end build unary expr\n");
     return (AstNode*)ast_node;

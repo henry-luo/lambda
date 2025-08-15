@@ -304,6 +304,9 @@ Item fn_div(Item a, Item b);
 Item fn_idiv(Item a, Item b);
 Item fn_pow(Item a, Item b);
 Item fn_mod(Item a, Item b);
+Item fn_pos(Item a);
+Item fn_neg(Item a);
+Item fn_equal(Item a, Item b);
 String *str_cat(String *left, String *right);
 
 typedef void* (*fn_ptr)();

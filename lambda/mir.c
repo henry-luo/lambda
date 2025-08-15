@@ -26,7 +26,6 @@ typedef struct {
 
 func_obj_t func_list[] = {
     // {"printf", (fn_ptr) printf}, // printf does not work
-    {"fn_pow", (fn_ptr) fn_pow},
     {"array", (fn_ptr) array},
     {"array_fill", (fn_ptr) array_fill},
     {"array_get", (fn_ptr) array_get},
@@ -48,11 +47,15 @@ func_obj_t func_list[] = {
     {"push_k", (fn_ptr) push_k},
     {"str_cat", (fn_ptr) str_cat},
     {"fn_add", (fn_ptr) fn_add},
-    {"fn_mul", (fn_ptr) fn_mul},
     {"fn_sub", (fn_ptr) fn_sub},
+    {"fn_mul", (fn_ptr) fn_mul},
     {"fn_div", (fn_ptr) fn_div},
     {"fn_idiv", (fn_ptr) fn_idiv},
     {"fn_mod", (fn_ptr) fn_mod},
+    {"fn_pow", (fn_ptr) fn_pow},
+    {"fn_pos", (fn_ptr) fn_pos},
+    {"fn_neg", (fn_ptr) fn_neg},
+    {"fn_equal", (fn_ptr) fn_equal},
     {"it2l", (fn_ptr) it2l},
     {"it2d", (fn_ptr) it2d},
     {"to_fn", (fn_ptr) to_fn},

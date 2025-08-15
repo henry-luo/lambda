@@ -122,11 +122,12 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             }
         }
         
-        // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, or OPERATOR_IDIV,
+        // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, OPERATOR_IDIV, or OPERATOR_MOD,
         // don't wrap with i2it because these functions already return an Item
         if (item->node_type == AST_NODE_BINARY) {
             AstBinaryNode* bin_node = (AstBinaryNode*)item;
-            if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || bin_node->op == OPERATOR_IDIV) {
+            if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || 
+                bin_node->op == OPERATOR_IDIV || bin_node->op == OPERATOR_MOD) {
                 transpile_expr(tp, item);
                 break;
             }
@@ -158,11 +159,12 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         else {
-            // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, or OPERATOR_IDIV,
+            // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, OPERATOR_IDIV, or OPERATOR_MOD,
             // don't wrap with push_d because these functions already return an Item
             if (item->node_type == AST_NODE_BINARY) {
                 AstBinaryNode* bin_node = (AstBinaryNode*)item;
-                if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || bin_node->op == OPERATOR_IDIV) {
+                if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || 
+                    bin_node->op == OPERATOR_IDIV || bin_node->op == OPERATOR_MOD) {
                     transpile_expr(tp, item);
                     break;
                 }
@@ -332,11 +334,47 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 
 void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
     // printf("transpile unary expr\n");
-    if (unary_node->op == OPERATOR_NOT) { strbuf_append_str(tp->code_buf, "!"); }
-    else strbuf_append_str_n(tp->code_buf, unary_node->op_str.str, unary_node->op_str.length);
-    strbuf_append_char(tp->code_buf, '(');
-    transpile_expr(tp, unary_node->operand);
-    strbuf_append_char(tp->code_buf, ')');
+    if (unary_node->op == OPERATOR_NOT) {
+        strbuf_append_str(tp->code_buf, "!");
+        strbuf_append_char(tp->code_buf, '(');
+        transpile_expr(tp, unary_node->operand);
+        strbuf_append_char(tp->code_buf, ')');
+    }
+    else if (unary_node->op == OPERATOR_POS || unary_node->op == OPERATOR_NEG) {
+        TypeId operand_type = unary_node->operand->type->type_id;
+        
+        // Fast path for numeric types that can be handled directly by C
+        if (operand_type == LMD_TYPE_INT || operand_type == LMD_TYPE_INT64 || 
+            operand_type == LMD_TYPE_FLOAT) {
+            // Direct C operator application for primitive numeric types
+            if (unary_node->op == OPERATOR_POS) {
+                // Unary + can be optimized away for numeric types
+                strbuf_append_char(tp->code_buf, '(');
+                transpile_expr(tp, unary_node->operand);
+                strbuf_append_char(tp->code_buf, ')');
+            } else { // OPERATOR_NEG
+                strbuf_append_char(tp->code_buf, '(');
+                strbuf_append_char(tp->code_buf, '-');
+                transpile_expr(tp, unary_node->operand);
+                strbuf_append_char(tp->code_buf, ')');
+            }
+        }
+        else {
+            // Runtime function call for other types (ANY, DECIMAL, etc.)
+            if (unary_node->op == OPERATOR_POS) {
+                strbuf_append_str(tp->code_buf, "fn_pos(");
+            } else { // OPERATOR_NEG
+                strbuf_append_str(tp->code_buf, "fn_neg(");
+            }
+            transpile_box_item(tp, unary_node->operand);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+    }
+    else {
+        // Fallback for unknown operators (should not happen with proper AST)
+        printf("Error: transpile_unary_expr unknown operator %d\n", unary_node->op);
+        strbuf_append_str(tp->code_buf, "null");
+    }
 }
 
 void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
@@ -473,28 +511,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');        
     }
     else if (bi_node->op == OPERATOR_MOD) {
-        if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
-            if (bi_node->left->type->type_id == LMD_TYPE_INT || 
-                bi_node->left->type->type_id == LMD_TYPE_INT64) {
-                strbuf_append_str(tp->code_buf, "(");
-                transpile_expr(tp, bi_node->left);
-                strbuf_append_char(tp->code_buf, '%');
-                transpile_expr(tp, bi_node->right);
-                strbuf_append_char(tp->code_buf, ')');
-                return;
-            }
-            // else error for float modulo
-        }
-        else if ((bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->left->type->type_id == LMD_TYPE_INT64) &&
-                 (bi_node->right->type->type_id == LMD_TYPE_INT || bi_node->right->type->type_id == LMD_TYPE_INT64)) {
-            strbuf_append_char(tp->code_buf, '(');
-            transpile_expr(tp, bi_node->left);
-            strbuf_append_char(tp->code_buf, '%');
-            transpile_expr(tp, bi_node->right);
-            strbuf_append_char(tp->code_buf, ')');
-            return;
-        }
-        // call runtime fn_mod()
+        // Always call runtime fn_mod() for proper error handling (division by zero, type checking)
         strbuf_append_str(tp->code_buf, "fn_mod(");
         transpile_box_item(tp, bi_node->left);
         strbuf_append_char(tp->code_buf, ',');
@@ -561,18 +578,88 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');   
     }
     else if (bi_node->op == OPERATOR_EQ) {
-        strbuf_append_char(tp->code_buf, '(');
-        transpile_expr(tp, bi_node->left);
-        strbuf_append_str(tp->code_buf, " == ");
-        transpile_expr(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');
+        // Check if we need to use the runtime equal() function
+        // This happens when one operand is an Item (e.g., from fn_mod) and the other is a plain type
+        TypeId left_type = bi_node->left->type->type_id;
+        TypeId right_type = bi_node->right->type->type_id;
+        
+        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
+        bool left_returns_item = false;
+        bool right_returns_item = false;
+        
+        if (bi_node->left->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
+            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
+                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
+                left_returns_item = true;
+            }
+        }
+        
+        if (bi_node->right->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
+            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
+                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
+                right_returns_item = true;
+            }
+        }
+        
+        // Use runtime equal() function if types are incompatible or one side returns Item
+        if (left_returns_item || right_returns_item || left_type != right_type) {
+            strbuf_append_str(tp->code_buf, "item_true(fn_equal(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+        } else {
+            // Use direct C comparison for compatible types
+            strbuf_append_char(tp->code_buf, '(');
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, " == ");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+        }
     }
     else if (bi_node->op == OPERATOR_NE) {
-        strbuf_append_char(tp->code_buf, '(');
-        transpile_expr(tp, bi_node->left);
-        strbuf_append_str(tp->code_buf, " != ");
-        transpile_expr(tp, bi_node->right);
-        strbuf_append_char(tp->code_buf, ')');
+        // Check if we need to use the runtime equal() function (then negate the result)
+        // This happens when one operand is an Item (e.g., from fn_mod) and the other is a plain type
+        TypeId left_type = bi_node->left->type->type_id;
+        TypeId right_type = bi_node->right->type->type_id;
+        
+        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
+        bool left_returns_item = false;
+        bool right_returns_item = false;
+        
+        if (bi_node->left->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
+            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
+                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
+                left_returns_item = true;
+            }
+        }
+        
+        if (bi_node->right->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
+            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
+                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
+                right_returns_item = true;
+            }
+        }
+        
+        // Use runtime equal() function (negated) if types are incompatible or one side returns Item
+        if (left_returns_item || right_returns_item || left_type != right_type) {
+            strbuf_append_str(tp->code_buf, "!item_true(fn_equal(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
+            strbuf_append_str(tp->code_buf, "))");
+        } else {
+            // Use direct C comparison for compatible types
+            strbuf_append_char(tp->code_buf, '(');
+            transpile_expr(tp, bi_node->left);
+            strbuf_append_str(tp->code_buf, " != ");
+            transpile_expr(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+        }
     }
     else if (bi_node->op == OPERATOR_LT) {
         strbuf_append_char(tp->code_buf, '(');
