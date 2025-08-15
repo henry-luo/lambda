@@ -11,6 +11,7 @@ ICU_TARBALL="icu4c-75_1-src.tgz"
 ICU_URL="https://github.com/unicode-org/icu/releases/download/release-75-1/${ICU_TARBALL}"
 BUILD_DIR="$(pwd)/icu-compact-build"
 INSTALL_DIR="$(pwd)/icu-compact"
+BUILD_CONFIG="build_lambda_config.json"
 
 # Create build directories
 mkdir -p "$BUILD_DIR"
@@ -34,8 +35,56 @@ if [ ! -d "$ICU_DIR" ]; then
 fi
 
 # Create minimal data filter for ultra-compact build
-echo "Creating minimal ICU data filter..."
-cat > "$BUILD_DIR/lambda_minimal.json" << 'EOF'
+echo "Creating minimal ICU data filter from build config..."
+
+# Check if build config exists
+if [ ! -f "$BUILD_CONFIG" ]; then
+    echo "Error: Build config file $BUILD_CONFIG not found!"
+    exit 1
+fi
+
+# Extract ICU data_filter from build config
+if command -v jq >/dev/null 2>&1; then
+    echo "Using jq to extract data_filter from $BUILD_CONFIG..."
+    
+    # Find the ICU library entry and extract its data_filter
+    ICU_DATA_FILTER=$(jq -r '.libraries[] | select(.name == "icu") | .data_filter' "$BUILD_CONFIG" 2>/dev/null)
+    
+    if [ "$ICU_DATA_FILTER" = "null" ] || [ -z "$ICU_DATA_FILTER" ]; then
+        echo "Warning: No data_filter found for ICU in $BUILD_CONFIG, using minimal defaults"
+        ICU_DATA_FILTER='{
+  "localeFilter": {
+    "filterType": "language",
+    "includelist": ["root", "en"]
+  },
+  "collationFilter": {
+    "filterType": "language", 
+    "includelist": ["root", "en"]
+  },
+  "featureFilters": {
+    "normalization": "include",
+    "brkitr_rules": "exclude", 
+    "brkitr_dictionaries": "exclude",
+    "cnvalias": "exclude",
+    "confusables": "exclude",
+    "curr": "exclude",
+    "lang": "exclude",
+    "region": "exclude",
+    "translit": "exclude",
+    "unit": "exclude",
+    "zone": "exclude",
+    "misc": "exclude",
+    "supplementalData": "include"
+  }
+}'
+    fi
+    
+    # Write the extracted filter to the build directory
+    echo "$ICU_DATA_FILTER" > "$BUILD_DIR/lambda_minimal.json"
+    
+else
+    echo "Warning: jq not found, using hardcoded minimal data filter"
+    cat > "$BUILD_DIR/lambda_minimal.json" << 'EOF'
 {
   "localeFilter": {
     "filterType": "language",
@@ -62,6 +111,9 @@ cat > "$BUILD_DIR/lambda_minimal.json" << 'EOF'
   }
 }
 EOF
+fi
+
+echo "ICU data filter written to: $BUILD_DIR/lambda_minimal.json"
 
 # Configure ICU with ultra-compact settings
 echo "Configuring ICU with ultra-compact settings..."
@@ -79,29 +131,14 @@ make clean 2>/dev/null || true
     --disable-tests \
     --disable-extras \
     --disable-dyload \
-    --disable-tools \
+    --enable-tools \
     --without-samples \
-    --with-data-packaging=static \
-    --with-data-filter-file="$BUILD_DIR/lambda_minimal.json" \
-    --disable-transliteration \
-    --disable-break-iteration \
-    --disable-legacy-converters \
-    --disable-idna \
-    --disable-spoof-detection \
-    --disable-confusable-detection \
-    --disable-regex \
-    --disable-icuio \
-    --disable-layout-engine \
-    --disable-layoutex \
-    --disable-formatting \
-    --disable-calendars \
-    --disable-timezones \
-    --disable-filters \
+    --with-data-packaging=archive \
     --disable-draft \
     --disable-renaming \
     --enable-small \
-    CFLAGS="-Os -DNDEBUG -ffunction-sections -fdata-sections -DUCONFIG_NO_SERVICE=1 -DUCONFIG_NO_REGULAR_EXPRESSIONS=1 -DUCONFIG_NO_FORMATTING=1 -DUCONFIG_NO_TRANSLITERATION=1 -DUCONFIG_NO_BREAK_ITERATION=1 -DUCONFIG_NO_IDNA=1 -DUCONFIG_NO_LEGACY_CONVERSION=1" \
-    CXXFLAGS="-Os -DNDEBUG -ffunction-sections -fdata-sections -DUCONFIG_NO_SERVICE=1 -DUCONFIG_NO_REGULAR_EXPRESSIONS=1 -DUCONFIG_NO_FORMATTING=1 -DUCONFIG_NO_TRANSLITERATION=1 -DUCONFIG_NO_BREAK_ITERATION=1 -DUCONFIG_NO_IDNA=1 -DUCONFIG_NO_LEGACY_CONVERSION=1" \
+    CFLAGS="-Os -DNDEBUG -ffunction-sections -fdata-sections -DU_CHARSET_IS_UTF8=1" \
+    CXXFLAGS="-Os -DNDEBUG -ffunction-sections -fdata-sections -DU_CHARSET_IS_UTF8=1" \
     LDFLAGS="-Wl,-dead_strip"
 
 # Build ICU

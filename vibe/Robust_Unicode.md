@@ -140,6 +140,42 @@ endif
 - **Relational operators**: Now supported instead of returning error
 - **Error handling**: Proper fallback when ICU unavailable
 
+### Build Configuration System
+
+#### ICU Support Levels
+```makefile
+# Build targets with Unicode support
+make build          # Default: UNICODE_LEVEL=compact (2-4MB ICU)
+make build-ascii    # ASCII-only: UNICODE_LEVEL=none (0KB overhead)
+```
+
+#### Configurable ICU Data Filtering
+The `build-icu-compact.sh` script now reads its configuration from `build_lambda_config.json`:
+
+```json
+{
+  "libraries": [
+    {
+      "name": "icu",
+      "data_filter": {
+        "localeFilter": {
+          "filterType": "language",
+          "includelist": ["root", "en"]
+        },
+        "featureFilters": {
+          "normalization": "include",
+          "brkitr_rules": "exclude",
+          "curr": "exclude",
+          "translit": "exclude"
+        }
+      }
+    }
+  ]
+}
+```
+
+This allows customizing which Unicode data is included in the ultra-compact build, enabling further size optimization based on specific application needs.
+
 ---
 
 ## Size vs Feature Analysis

@@ -83,7 +83,7 @@ JOBS := $(shell echo $$(($(NPROCS) > 8 ? 8 : $(NPROCS))))
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build clean debug release rebuild test test-input run help install uninstall \
+.PHONY: all build build-ascii clean debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
         build-windows build-debug build-release clean-all distclean \
         verify-windows test-windows build-icu clean-icu test-unicode build-unicode
@@ -93,7 +93,8 @@ help:
 	@echo "$(PROJECT_NAME) - Available Make Targets:"
 	@echo ""
 	@echo "Build Targets:"
-	@echo "  build         - Build lambda project (incremental, default target)"
+	@echo "  build         - Build lambda project with Unicode support (incremental, default)"
+	@echo "  build-ascii   - Build lambda project with ASCII-only support (no Unicode)"
 	@echo "  debug         - Build with debug symbols"
 	@echo "  release       - Build optimized release version"
 	@echo "  rebuild       - Force complete rebuild"
@@ -150,6 +151,11 @@ help:
 build:
 	@echo "Building $(PROJECT_NAME) (incremental)..."
 	UNICODE_FLAGS="$(UNICODE_FLAGS)" ICU_CFLAGS="$(ICU_CFLAGS)" ICU_LIBS="$(ICU_LIBS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+
+# ASCII-only build (no Unicode support)
+build-ascii:
+	@echo "Building $(PROJECT_NAME) with ASCII-only support (no Unicode)..."
+	UNICODE_LEVEL=none UNICODE_FLAGS="-DLAMBDA_UNICODE_LEVEL=0" ICU_CFLAGS="" ICU_LIBS="" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
 print-vars:
 	@echo "UNICODE_LEVEL=$(UNICODE_LEVEL)"

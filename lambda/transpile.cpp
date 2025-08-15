@@ -764,15 +764,16 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             }
         }
         
-        // Use runtime equal() function if types are incompatible or one side returns Item
-        if (left_returns_item || right_returns_item || left_type != right_type) {
+        // Use runtime equal() function if types are incompatible, one side returns Item, or comparing strings
+        if (left_returns_item || right_returns_item || left_type != right_type || 
+            left_type == LMD_TYPE_STRING) {
             strbuf_append_str(tp->code_buf, "fn_eq(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         } else {
-            // Use direct C comparison for compatible types
+            // Use direct C comparison for compatible non-string types
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " == ");
@@ -806,15 +807,16 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             }
         }
         
-        // Use runtime equal() function (negated) if types are incompatible or one side returns Item
-        if (left_returns_item || right_returns_item || left_type != right_type) {
+        // Use runtime equal() function (negated) if types are incompatible, one side returns Item, or comparing strings
+        if (left_returns_item || right_returns_item || left_type != right_type || 
+            left_type == LMD_TYPE_STRING) {
             strbuf_append_str(tp->code_buf, "fn_ne(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         } else {
-            // Use direct C comparison for compatible types
+            // Use direct C comparison for compatible non-string types
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " != ");

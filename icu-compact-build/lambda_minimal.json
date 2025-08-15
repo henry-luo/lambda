@@ -1,0 +1,25 @@
+{
+  "localeFilter": {
+    "filterType": "language",
+    "includelist": ["root", "en"]
+  },
+  "collationFilter": {
+    "filterType": "language", 
+    "includelist": ["root", "en"]
+  },
+  "featureFilters": {
+    "normalization": "include",
+    "brkitr_rules": "exclude", 
+    "brkitr_dictionaries": "exclude",
+    "cnvalias": "exclude",
+    "confusables": "exclude",
+    "curr": "exclude",
+    "lang": "exclude",
+    "region": "exclude",
+    "translit": "exclude",
+    "unit": "exclude",
+    "zone": "exclude",
+    "misc": "exclude",
+    "supplementalData": "include"
+  }
+}
