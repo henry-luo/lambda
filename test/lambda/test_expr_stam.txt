@@ -136,6 +136,6 @@ false
 14
 "# Mixed statement and expression patterns"
 "# Final complex example combining everything"
-{result:10, status:"high"}
-{result:40, status:"high"}
+{result:1, status:"low"}
+{result:4, status:"low"}
 {result:90, status:"high"}

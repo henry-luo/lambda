@@ -55,6 +55,13 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
+// Comparison result enum: 0=false, 1=true, 2=error
+typedef enum {
+    COMP_FALSE = 0,
+    COMP_TRUE = 1,
+    COMP_ERROR = 2
+} CompResult;
+
 #define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
 
 typedef struct Type {
@@ -270,6 +277,7 @@ Item push_k(long dtval);
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
+Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 // todo: int overflow check and promotion to decimal
 #define i2it(int_val)        (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
 #define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
@@ -306,7 +314,16 @@ Item fn_pow(Item a, Item b);
 Item fn_mod(Item a, Item b);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
-Item fn_equal(Item a, Item b);
+CompResult equal_comp(Item a, Item b);
+Item fn_eq(Item a, Item b);
+Item fn_ne(Item a, Item b);
+Item fn_lt(Item a, Item b);
+Item fn_gt(Item a, Item b);
+Item fn_le(Item a, Item b);
+Item fn_ge(Item a, Item b);
+Item fn_not(Item a);
+Item fn_and(Item a, Item b);
+Item fn_or(Item a, Item b);
 String *str_cat(String *left, String *right);
 
 typedef void* (*fn_ptr)();

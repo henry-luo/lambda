@@ -164,6 +164,14 @@ All numeric operators now have robust error handling, type safety, and comprehen
 ✅ **Modulo (%) - NOW COMPLETE**: robust error handling, integer-only support  
 ✅ All operators have consistent error messages and handling  
 
+### Comparison Operators: ✅ **NEW PHASE COMPLETE**
+✅ **Equality (==, !=) - ENHANCED**: Renamed `fn_equal` → `fn_eq`, added `fn_ne()` with fast path for numeric types  
+✅ **Relational (<, >, <=, >=) - NEW**: Added `fn_lt()`, `fn_gt()`, `fn_le()`, `fn_ge()` with fast path optimizations  
+✅ **Logical NOT (not) - NEW**: Added `fn_not()` with universal truthiness support  
+✅ All comparison operators have consistent error handling and performance optimization  
+✅ Enhanced transpiler integration with smart function selection  
+✅ Complete MIR integration and symbol resolution  
+
 ### Operator Implementation Summary:
 
 | Operator | Fast Path | Runtime Function | Error Handling | Test Coverage |

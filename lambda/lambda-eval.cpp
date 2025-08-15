@@ -500,6 +500,23 @@ bool item_true(Item item) {
     }
 }
 
+// Convert Item to boolean Item, preserving errors
+Item safe_b2it(Item item) {
+    switch (item.type_id) {
+    case LMD_TYPE_ERROR:
+        // Preserve error - don't convert to boolean
+        return item;
+    case LMD_TYPE_BOOL:
+        // Already boolean, return as-is
+        return item;
+    case LMD_TYPE_NULL:
+        return {.item = b2it(false)};
+    default:
+        // Convert to boolean based on truthiness
+        return {.item = b2it(item_true(item))};
+    }
+}
+
 // list to item
 Item v2it(List* list) {
     if (!list) { return ItemNull; }
@@ -1027,40 +1044,275 @@ bool fn_is(Item a, Item b) {
 }
 
 bool equal(Item a_item, Item b_item) {
-    printf("equal expr\n");
+    CompResult result = equal_comp(a_item, b_item);
+    return result == COMP_TRUE;
+}
+
+CompResult equal_comp(Item a_item, Item b_item) {
+    printf("equal_comp expr\n");
     if (a_item.type_id != b_item.type_id) {
-        // number promotion
+        // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
-            return a_val == b_val;
+            return (a_val == b_val) ? COMP_TRUE : COMP_FALSE;
         }
-        return false;
+        // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
+        // Note: null can only be compared to null, any other comparison is a type error
+        return COMP_ERROR;
     }
+    
     if (a_item.type_id == LMD_TYPE_NULL) {
-        return true;
+        return COMP_TRUE; // null == null
     }    
+    else if (a_item.type_id == LMD_TYPE_BOOL) {
+        return (a_item.bool_val == b_item.bool_val) ? COMP_TRUE : COMP_FALSE;
+    }
     else if (a_item.type_id == LMD_TYPE_INT) {
-        return a_item.long_val == b_item.long_val;
+        return (a_item.long_val == b_item.long_val) ? COMP_TRUE : COMP_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return *(long*)a_item.pointer == *(long*)b_item.pointer;
+        return (*(long*)a_item.pointer == *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
-        return *(double*)a_item.pointer == *(double*)b_item.pointer;
+        return (*(double*)a_item.pointer == *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
         a_item.type_id == LMD_TYPE_BINARY || a_item.type_id == LMD_TYPE_DTIME) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
-        return str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0;
+        bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
+        return result ? COMP_TRUE : COMP_FALSE;
     }
     printf("unknown comparing type %d\n", a_item.type_id);
-    return false;
+    return COMP_ERROR;
 }
 
-Item fn_equal(Item a_item, Item b_item) {
-    printf("fn_equal expr\n");
-    return {.item = b2it(equal(a_item, b_item))};
+// Comparison functions with fast path for int/float and fallback for other types
+
+Item fn_eq(Item a_item, Item b_item) {
+    // Fast path for numeric types
+    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
+        return {.item = b2it(a_item.long_val == b_item.long_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
+        return {.item = b2it(*(double*)a_item.pointer == *(double*)b_item.pointer)};
+    }
+    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
+             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.long_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.long_val : *(double*)b_item.pointer;
+        return {.item = b2it(a_val == b_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
+        return {.item = b2it(a_item.bool_val == b_item.bool_val)};
+    }
+    
+    // Fallback to 3-state comparison function
+    printf("fn_eq fallback\n");
+    CompResult result = equal_comp(a_item, b_item);
+    if (result == COMP_ERROR) {
+        printf("equality type error for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    return {.item = b2it(result == COMP_TRUE)};
+}
+
+Item fn_ne(Item a_item, Item b_item) {
+    // Fast path for numeric types
+    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
+        return {.item = b2it(a_item.long_val != b_item.long_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
+        return {.item = b2it(*(double*)a_item.pointer != *(double*)b_item.pointer)};
+    }
+    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
+             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.long_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.long_val : *(double*)b_item.pointer;
+        return {.item = b2it(a_val != b_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
+        return {.item = b2it(a_item.bool_val != b_item.bool_val)};
+    }
+    
+    // Fallback to 3-state comparison function
+    printf("fn_ne fallback\n");
+    CompResult result = equal_comp(a_item, b_item);
+    if (result == COMP_ERROR) {
+        printf("inequality type error for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    return {.item = b2it(result == COMP_FALSE)};
+}
+
+Item fn_lt(Item a_item, Item b_item) {
+    // Fast path for numeric types
+    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
+        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
+        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
+        return {.item = b2it(a_val < b_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
+        return {.item = b2it(*(double*)a_item.pointer < *(double*)b_item.pointer)};
+    }
+    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
+             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        return {.item = b2it(a_val < b_val)};
+    }
+    // Error for non-numeric types - relational comparisons not supported
+    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
+        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
+        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
+        printf("less than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    // Fallback error for any other type combination
+    printf("less than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+    return ItemError;
+}
+
+Item fn_gt(Item a_item, Item b_item) {
+    // Fast path for numeric types
+    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
+        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
+        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
+        return {.item = b2it(a_val > b_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
+        return {.item = b2it(*(double*)a_item.pointer > *(double*)b_item.pointer)};
+    }
+    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
+             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        return {.item = b2it(a_val > b_val)};
+    }
+    // Error for non-numeric types - relational comparisons not supported
+    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
+        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
+        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
+        printf("greater than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    // Fallback error for any other type combination
+    printf("greater than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+    return ItemError;
+}
+
+Item fn_le(Item a_item, Item b_item) {
+    // Fast path for numeric types
+    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
+        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
+        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
+        return {.item = b2it(a_val <= b_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
+        return {.item = b2it(*(double*)a_item.pointer <= *(double*)b_item.pointer)};
+    }
+    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
+             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        return {.item = b2it(a_val <= b_val)};
+    }
+    // Error for non-numeric types - relational comparisons not supported
+    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
+        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
+        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
+        printf("less than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    // Fallback error for any other type combination
+    printf("less than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+    return ItemError;
+}
+
+Item fn_ge(Item a_item, Item b_item) {
+    // Fast path for numeric types
+    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
+        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
+        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
+        return {.item = b2it(a_val >= b_val)};
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
+        return {.item = b2it(*(double*)a_item.pointer >= *(double*)b_item.pointer)};
+    }
+    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
+             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        return {.item = b2it(a_val >= b_val)};
+    }
+    // Error for non-numeric types - relational comparisons not supported
+    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
+        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
+        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
+        printf("greater than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    // Fallback error for any other type combination
+    printf("greater than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+    return ItemError;
+}
+
+Item fn_not(Item item) {
+    // Logical NOT - invert the truthiness of the item
+    printf("fn_not expr\n");
+    return {.item = b2it(!item_true(item))};
+}
+
+Item fn_and(Item a_item, Item b_item) {
+    printf("fn_and called with types: %d, %d\n", a_item.type_id, b_item.type_id);
+    
+    // Fast path for boolean types
+    if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
+        printf("fn_and: bool fast path\n");
+        return {.item = b2it(a_item.bool_val && b_item.bool_val)};
+    }
+    
+    // Type error for string operands in logical operations
+    if (a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING) {
+        printf("logical AND not supported with string types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    
+    // Type error for null operands in logical operations
+    if (a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
+        printf("logical AND not supported with null types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    
+    // Fallback to generic truthiness evaluation for numeric and boolean combinations
+    printf("fn_and: generic truthiness fallback\n");
+    bool a_truth = item_true(a_item);
+    bool b_truth = item_true(b_item);
+    return {.item = b2it(a_truth && b_truth)};
+}
+
+Item fn_or(Item a_item, Item b_item) {
+    // Fast path for boolean types
+    if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
+        return {.item = b2it(a_item.bool_val || b_item.bool_val)};
+    }
+    
+    // Type error for string operands in logical operations
+    if (a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING) {
+        printf("logical OR not supported with string types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    
+    // Type error for null operands in logical operations
+    if (a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
+        printf("logical OR not supported with null types: %d, %d\n", a_item.type_id, b_item.type_id);
+        return ItemError;
+    }
+    
+    // Fallback to generic truthiness evaluation for numeric and boolean combinations
+    bool a_truth = item_true(a_item);
+    bool b_truth = item_true(b_item);
+    return {.item = b2it(a_truth || b_truth)};
 }
 
 bool fn_in(Item a_item, Item b_item) {
