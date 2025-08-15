@@ -52,16 +52,8 @@ extern "C" {
 }
 #endif
 
-// Unicode-enhanced comparison functions (when Unicode support is enabled)
-#include "unicode_config.h"
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-Item fn_eq_unicode(Item a, Item b);
-Item fn_ne_unicode(Item a, Item b);
-Item fn_lt_unicode(Item a, Item b);
-Item fn_gt_unicode(Item a, Item b);
-Item fn_le_unicode(Item a, Item b);
-Item fn_ge_unicode(Item a, Item b);
-#endif
+// Unicode-enhanced comparison functions are declared in unicode_string.h
+#include "unicode_string.h"
 
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type

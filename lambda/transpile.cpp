@@ -471,10 +471,22 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
     // printf("transpile unary expr\n");
     if (unary_node->op == OPERATOR_NOT) {
-        strbuf_append_str(tp->code_buf, "!");
-        strbuf_append_char(tp->code_buf, '(');
-        transpile_expr(tp, unary_node->operand);
-        strbuf_append_char(tp->code_buf, ')');
+        TypeId operand_type = unary_node->operand->type->type_id;
+        
+        // For boolean operands, we need to determine if they return C bool or Item
+        if (operand_type == LMD_TYPE_BOOL) {
+            // Most boolean expressions return Item structs, so we need item_true()
+            // Only simple boolean literals would return C bool directly
+            strbuf_append_str(tp->code_buf, "b2it(!item_true(");
+            transpile_expr(tp, unary_node->operand);
+            strbuf_append_str(tp->code_buf, "))");
+        } else {
+            // Direct C negation for non-boolean types
+            strbuf_append_str(tp->code_buf, "!");
+            strbuf_append_char(tp->code_buf, '(');
+            transpile_expr(tp, unary_node->operand);
+            strbuf_append_char(tp->code_buf, ')');
+        }
     }
     else if (unary_node->op == OPERATOR_POS || unary_node->op == OPERATOR_NEG) {
         TypeId operand_type = unary_node->operand->type->type_id;
@@ -538,33 +550,78 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         } else {
-            // Use direct C logical operations for valid types
-            strbuf_append_char(tp->code_buf, '(');
-            // left operand
-            if (bi_node->left->type->type_id == LMD_TYPE_ANY) {
-                strbuf_append_str(tp->code_buf, "item_true(");
-                transpile_expr(tp, bi_node->left);
+            // Check if either operand is a comparison that returns Item
+            bool left_returns_item = false;
+            bool right_returns_item = false;
+            
+            if (bi_node->left->node_type == AST_NODE_BINARY) {
+                AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
+                if (left_bin->op == OPERATOR_LT || left_bin->op == OPERATOR_LE ||
+                    left_bin->op == OPERATOR_GT || left_bin->op == OPERATOR_GE ||
+                    left_bin->op == OPERATOR_EQ || left_bin->op == OPERATOR_NE) {
+                    // Check if this comparison uses runtime functions (returns Item)
+                    TypeId left_left_type = left_bin->left->type->type_id;
+                    TypeId left_right_type = left_bin->right->type->type_id;
+                    if (left_left_type != left_right_type || left_left_type == LMD_TYPE_STRING) {
+                        left_returns_item = true;
+                    }
+                }
+            }
+            
+            if (bi_node->right->node_type == AST_NODE_BINARY) {
+                AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
+                if (right_bin->op == OPERATOR_LT || right_bin->op == OPERATOR_LE ||
+                    right_bin->op == OPERATOR_GT || right_bin->op == OPERATOR_GE ||
+                    right_bin->op == OPERATOR_EQ || right_bin->op == OPERATOR_NE) {
+                    // Check if this comparison uses runtime functions (returns Item)
+                    TypeId right_left_type = right_bin->left->type->type_id;
+                    TypeId right_right_type = right_bin->right->type->type_id;
+                    if (right_left_type != right_right_type || right_left_type == LMD_TYPE_STRING) {
+                        right_returns_item = true;
+                    }
+                }
+            }
+            
+            // If either operand returns Item, use runtime functions
+            if (left_returns_item || right_returns_item) {
+                if (bi_node->op == OPERATOR_AND) {
+                    strbuf_append_str(tp->code_buf, "fn_and(");
+                } else {
+                    strbuf_append_str(tp->code_buf, "fn_or(");
+                }
+                transpile_box_item(tp, bi_node->left);
+                strbuf_append_char(tp->code_buf, ',');
+                transpile_box_item(tp, bi_node->right);
                 strbuf_append_char(tp->code_buf, ')');
-            }
-            else {
-                transpile_expr(tp, bi_node->left);
-            }
-            // operator
-            if (bi_node->op == OPERATOR_OR) {
-                strbuf_append_str(tp->code_buf, "||");
             } else {
-                strbuf_append_str(tp->code_buf, "&&");
-            }
-            // right operand
-            if (bi_node->right->type->type_id == LMD_TYPE_ANY) {
-                strbuf_append_str(tp->code_buf, "item_true(");
-                transpile_expr(tp, bi_node->right);
+                // Use direct C logical operations for valid types
+                strbuf_append_char(tp->code_buf, '(');
+                // left operand
+                if (bi_node->left->type->type_id == LMD_TYPE_ANY) {
+                    strbuf_append_str(tp->code_buf, "item_true(");
+                    transpile_expr(tp, bi_node->left);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else {
+                    transpile_expr(tp, bi_node->left);
+                }
+                // operator
+                if (bi_node->op == OPERATOR_OR) {
+                    strbuf_append_str(tp->code_buf, "||");
+                } else {
+                    strbuf_append_str(tp->code_buf, "&&");
+                }
+                // right operand
+                if (bi_node->right->type->type_id == LMD_TYPE_ANY) {
+                    strbuf_append_str(tp->code_buf, "item_true(");
+                    transpile_expr(tp, bi_node->right);
+                    strbuf_append_char(tp->code_buf, ')');
+                }
+                else {
+                    transpile_expr(tp, bi_node->right);
+                }
                 strbuf_append_char(tp->code_buf, ')');
             }
-            else {
-                transpile_expr(tp, bi_node->right);
-            }
-            strbuf_append_char(tp->code_buf, ')');
         }
     }
     else if (bi_node->op == OPERATOR_POW) {
@@ -1044,7 +1101,59 @@ void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
         printf("transpile if expr with type coercion\n");
         // When we need coercion, always box to Item to ensure runtime safety
         strbuf_append_str(tp->code_buf, "(");
-        transpile_expr(tp, if_node->cond);
+        
+        // Check if condition uses runtime functions that return Item
+        bool condition_returns_item = false;
+        if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL && 
+            if_node->cond->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* cond_bin = (AstBinaryNode*)if_node->cond;
+            if (cond_bin->op == OPERATOR_EQ || cond_bin->op == OPERATOR_NE ||
+                cond_bin->op == OPERATOR_LT || cond_bin->op == OPERATOR_GT ||
+                cond_bin->op == OPERATOR_LE || cond_bin->op == OPERATOR_GE) {
+                
+                // Check if this comparison uses runtime functions (same logic as in simple case)
+                TypeId left_type = cond_bin->left->type->type_id;
+                TypeId right_type = cond_bin->right->type->type_id;
+                
+                // Check for invalid operations that force runtime function
+                if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING ||
+                    left_type == LMD_TYPE_BOOL || right_type == LMD_TYPE_BOOL ||
+                    left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) {
+                    condition_returns_item = true;
+                }
+                
+                // Check if types don't match (forces runtime function)
+                if (left_type != right_type) {
+                    condition_returns_item = true;
+                }
+                
+                // Check if either operand is a binary expression that returns Item
+                if (cond_bin->left->node_type == AST_NODE_BINARY) {
+                    AstBinaryNode* left_bin = (AstBinaryNode*)cond_bin->left;
+                    if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
+                        left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
+                        condition_returns_item = true;
+                    }
+                }
+                
+                if (cond_bin->right->node_type == AST_NODE_BINARY) {
+                    AstBinaryNode* right_bin = (AstBinaryNode*)cond_bin->right;
+                    if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
+                        right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
+                        condition_returns_item = true;
+                    }
+                }
+            }
+        }
+        
+        if (condition_returns_item) {
+            strbuf_append_str(tp->code_buf, "item_true(");
+            transpile_expr(tp, if_node->cond);
+            strbuf_append_char(tp->code_buf, ')');
+        } else {
+            transpile_expr(tp, if_node->cond);
+        }
+        
         strbuf_append_str(tp->code_buf, " ? ");
         
         // Handle the 'then' branch - always box to Item for safety
@@ -1067,7 +1176,67 @@ void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
     } else {
         // Generate simple conditional expression (original behavior)
         strbuf_append_char(tp->code_buf, '(');
-        transpile_expr(tp, if_node->cond);
+        
+        // Check if condition is a boolean expression that returns an Item (not a C boolean)
+        if (if_node->cond->type && if_node->cond->type->type_id == LMD_TYPE_BOOL && 
+            if_node->cond->node_type == AST_NODE_BINARY) {
+            AstBinaryNode* cond_bin = (AstBinaryNode*)if_node->cond;
+            if (cond_bin->op == OPERATOR_EQ || cond_bin->op == OPERATOR_NE ||
+                cond_bin->op == OPERATOR_LT || cond_bin->op == OPERATOR_GT ||
+                cond_bin->op == OPERATOR_LE || cond_bin->op == OPERATOR_GE) {
+                
+                // Check if this comparison uses runtime functions (returns Item) or direct C comparison (returns C bool)
+                TypeId left_type = cond_bin->left->type->type_id;
+                TypeId right_type = cond_bin->right->type->type_id;
+                
+                // Determine if it uses runtime function (same logic as in transpile_binary_expr)
+                bool uses_runtime_function = false;
+                
+                // Check for invalid operations that force runtime function
+                if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING ||
+                    left_type == LMD_TYPE_BOOL || right_type == LMD_TYPE_BOOL ||
+                    left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) {
+                    uses_runtime_function = true;
+                }
+                
+                // Check if types don't match (forces runtime function)
+                if (left_type != right_type) {
+                    uses_runtime_function = true;
+                }
+                
+                // Check if either operand is a binary expression that returns Item
+                if (cond_bin->left->node_type == AST_NODE_BINARY) {
+                    AstBinaryNode* left_bin = (AstBinaryNode*)cond_bin->left;
+                    if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
+                        left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
+                        uses_runtime_function = true;
+                    }
+                }
+                
+                if (cond_bin->right->node_type == AST_NODE_BINARY) {
+                    AstBinaryNode* right_bin = (AstBinaryNode*)cond_bin->right;
+                    if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
+                        right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
+                        uses_runtime_function = true;
+                    }
+                }
+                
+                if (uses_runtime_function) {
+                    // Comparison returns Item - need item_true()
+                    strbuf_append_str(tp->code_buf, "item_true(");
+                    transpile_expr(tp, if_node->cond);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else {
+                    // Direct C comparison - no wrapping needed
+                    transpile_expr(tp, if_node->cond);
+                }
+            } else {
+                transpile_expr(tp, if_node->cond);
+            }
+        } else {
+            transpile_expr(tp, if_node->cond);
+        }
+        
         strbuf_append_char(tp->code_buf, '?');
         transpile_expr(tp, if_node->then);
         strbuf_append_char(tp->code_buf, ':');

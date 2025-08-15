@@ -11,6 +11,10 @@
     #include <unicode/uchar.h>
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Forward declarations
 typedef enum {
     UNICODE_COMPARE_EQUAL = 0,
@@ -38,5 +42,9 @@ Item fn_ge_unicode(Item a_item, Item b_item);
 
 // Utility functions
 bool is_ascii_string(const char* str, int len);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // LAMBDA_UNICODE_STRING_H

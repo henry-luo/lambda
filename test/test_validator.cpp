@@ -799,7 +799,10 @@ Test(validator_tests, csv_requires_explicit_schema) {
     cr_assert_not_null(fp, "Failed to execute CSV validation command");
     
     char output[4096] = {0};
-    fgets(output, sizeof(output), fp);
+    char line[1024];
+    while (fgets(line, sizeof(line), fp)) {
+        strncat(output, line, sizeof(output) - strlen(output) - 1);
+    }
     pclose(fp);
     
     bool requires_schema = strstr(output, "requires an explicit schema file") != NULL;
