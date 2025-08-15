@@ -5,6 +5,12 @@ extern "C" void run_validation(const char *data_file, const char *schema_file, c
 #include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
 
+// Unicode support
+#include "unicode_config.h"
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+#include "unicode_string.h"
+#endif
+
 // Forward declare additional transpiler functions
 extern "C" {
     char* read_text_file(const char *filename);
@@ -269,6 +275,11 @@ int main(int argc, char *argv[]) {
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
     
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Initialize Unicode support
+    init_unicode_support();
+#endif
+    
     // Handle validate command
     if (argc >= 2 && strcmp(argv[1], "validate") == 0) {
         // Check for help first
@@ -468,6 +479,11 @@ int main(int argc, char *argv[]) {
         print_help();
         return 1;
     }
+    
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Clean up Unicode support
+    cleanup_unicode_support();
+#endif
     
     return 0;
 }

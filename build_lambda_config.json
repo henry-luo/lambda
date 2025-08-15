@@ -66,6 +66,7 @@
         "lambda/format/format-xml.cpp",
         "lambda/format/format-yaml.cpp",
         "lambda/lambda-eval.cpp",
+        "lambda/unicode_string.cpp",
         "lambda/lambda-mem.cpp",
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",

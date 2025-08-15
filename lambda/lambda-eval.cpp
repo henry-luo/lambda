@@ -1,4 +1,8 @@
 #include "transpiler.hpp"
+#include "unicode_config.h"
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+#include "unicode_string.h"
+#endif
 #include <stdarg.h>
 #include <time.h>
 #include <cstdlib>  // for abs function
@@ -1049,6 +1053,11 @@ bool equal(Item a_item, Item b_item) {
 }
 
 CompResult equal_comp(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced comparison when available
+    return equal_comp_unicode(a_item, b_item);
+#else
+    // Original ASCII-only implementation
     printf("equal_comp expr\n");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
@@ -1085,11 +1094,16 @@ CompResult equal_comp(Item a_item, Item b_item) {
     }
     printf("unknown comparing type %d\n", a_item.type_id);
     return COMP_ERROR;
+#endif
 }
 
 // Comparison functions with fast path for int/float and fallback for other types
 
 Item fn_eq(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced equality comparison
+    return fn_eq_unicode(a_item, b_item);
+#else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
         return {.item = b2it(a_item.long_val == b_item.long_val)};
@@ -1115,9 +1129,14 @@ Item fn_eq(Item a_item, Item b_item) {
         return ItemError;
     }
     return {.item = b2it(result == COMP_TRUE)};
+#endif
 }
 
 Item fn_ne(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced inequality comparison
+    return fn_ne_unicode(a_item, b_item);
+#else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
         return {.item = b2it(a_item.long_val != b_item.long_val)};
@@ -1143,9 +1162,14 @@ Item fn_ne(Item a_item, Item b_item) {
         return ItemError;
     }
     return {.item = b2it(result == COMP_FALSE)};
+#endif
 }
 
 Item fn_lt(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced less-than comparison (supports string comparison)
+    return fn_lt_unicode(a_item, b_item);
+#else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
         long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
@@ -1171,9 +1195,14 @@ Item fn_lt(Item a_item, Item b_item) {
     // Fallback error for any other type combination
     printf("less than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
+#endif
 }
 
 Item fn_gt(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced greater-than comparison (supports string comparison)
+    return fn_gt_unicode(a_item, b_item);
+#else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
         long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
@@ -1199,9 +1228,14 @@ Item fn_gt(Item a_item, Item b_item) {
     // Fallback error for any other type combination
     printf("greater than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
+#endif
 }
 
 Item fn_le(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced less-than-or-equal comparison (supports string comparison)
+    return fn_le_unicode(a_item, b_item);
+#else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
         long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
@@ -1227,9 +1261,14 @@ Item fn_le(Item a_item, Item b_item) {
     // Fallback error for any other type combination
     printf("less than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
+#endif
 }
 
 Item fn_ge(Item a_item, Item b_item) {
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use Unicode-enhanced greater-than-or-equal comparison (supports string comparison)
+    return fn_ge_unicode(a_item, b_item);
+#else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
         long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
@@ -1255,6 +1294,7 @@ Item fn_ge(Item a_item, Item b_item) {
     // Fallback error for any other type combination
     printf("greater than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
+#endif
 }
 
 Item fn_not(Item item) {

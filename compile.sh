@@ -578,6 +578,22 @@ if command -v jq >/dev/null 2>&1; then
         [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
     done < <(get_json_array "linker_flags" "$CONFIG_FILE" "$PLATFORM")
     
+    # Add Unicode support flags if environment variables are set
+    if [ -n "$UNICODE_FLAGS" ]; then
+        echo "Adding Unicode support flags: $UNICODE_FLAGS"
+        FLAGS="$FLAGS $UNICODE_FLAGS"
+    fi
+    
+    if [ -n "$ICU_CFLAGS" ]; then
+        echo "Adding ICU include flags: $ICU_CFLAGS"
+        FLAGS="$FLAGS $ICU_CFLAGS"
+    fi
+    
+    if [ -n "$ICU_LIBS" ]; then
+        echo "Adding ICU library flags: $ICU_LIBS"
+        LINKER_FLAGS="$LINKER_FLAGS $ICU_LIBS"
+    fi
+    
     # Get all source files (unified approach with auto-detection)
     SOURCE_FILES_ARRAY=()
     
