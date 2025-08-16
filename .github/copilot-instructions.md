@@ -16,7 +16,7 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 
 ### Core System
 - **Parser**: Tree-sitter based language parser (`lambda/tree-sitter-lambda/`)
-- **Runtime**: MIR-based JIT transpiler (`lambda/transpiler.hpp`, `lambda/lambda-eval.c`)
+- **Runtime**: MIR-based JIT transpiler (`lambda/transpiler.hpp`, `lambda/lambda-eval.cpp`)
 - **Memory**: Variable memory pool system (`lib/mem-pool/`)
 - **Type System**: Strong typing with inference (`lambda/lambda-data.hpp`)
 
@@ -42,7 +42,7 @@ let dates = t'2025-01-01'
 let binary = b'\xDEADBEEF'
 
 // Functions and expressions
-fn process(items: [int]) -> [int] {
+fn process(items: [int]) {
     for (item in items) item * 2
 }
 
@@ -68,22 +68,7 @@ let output = format(transform(doc), 'markdown')
 - **Type Safety**: Leverage type system macros for field access
 - **Defensive Programming**: Validate pointers and range check arrays
 - **Error Handling**: Graceful fallbacks and proper error propagation
-
-### Memory Management Patterns
-```c
-// Use pool-based allocation
-String* str = create_string(pool, "content");
-
-// Reference counting for shared data
-increase_ref_count(item);
-decrease_ref_count(item);
-
-// Type-safe field access
-DateTime* dt = (DateTime*)item.pointer;
-if (item.type_id == LMD_TYPE_DTIME && dt) {
-    // Safe to use dt
-}
-```
+- **Comment**: Start inline-level comments in lowercase
 
 ### Build System
 - **Primary**: Use `make build` for incremental builds
@@ -95,9 +80,7 @@ if (item.type_id == LMD_TYPE_DTIME && dt) {
 
 The system has configurable Unicode support levels:
 - **Level 0**: ASCII-only (minimal overhead)
-- **Level 1**: Basic Unicode support
-- **Level 2**: Compact ICU integration (default, ~2-4MB)
-- **Level 3**: Full ICU support (~8-12MB)
+- **Level 1**: Compact ICU integration (default, ~2-4MB)
 
 When working with Unicode:
 ```c
@@ -106,29 +89,9 @@ CompResult result = equal_comp_unicode(a_item, b_item);
 UnicodeCompareResult cmp = string_compare_unicode(str1, len1, str2, len2);
 ```
 
-## Mathematical Expressions
-
-The math parser supports multiple syntax flavors:
-- **LaTeX**: `\frac{x}{y}`, `\sin(x)`, `\alpha`
-- **Typst**: `frac(x, y)`, `sin(x)`, `alpha`
-- **ASCII**: `x/y`, `sin(x)`, `alpha`
-
-Math expressions are organized into 24 semantic groups (operators, functions, symbols, fractions, etc.) with unified table-driven parsing.
-
-## Testing & Validation
-
-### Test Organization
-- **Unit Tests**: Individual component testing
-- **Integration Tests**: Full pipeline testing
-- **Memory Tests**: Leak detection and safety validation
-- **Cross-platform Tests**: Platform-specific validation
-
 ### Running Tests
 ```bash
 make test              # Run all tests
-make test-memory       # Memory leak detection
-make test-benchmark    # Performance testing
-make test-unicode      # Unicode handling tests
 ```
 
 ## Common Patterns
@@ -163,6 +126,9 @@ if (result.is_valid) {
 - `lambda/` - Core language runtime and parsers
 - `lib/` - Shared libraries (memory pools, string buffers)
 - `test/` - Test suites and sample files
+- `test/input` - Test suites input data files
+- `test/lambda` - Tests in Lambda script
+- `test/*.c` - Tests in Criterion C/C++ code
 - `typeset/` - Document typesetting system
 - `build/` - Build artifacts (auto-generated)
 - `*.json` - Build configuration files
@@ -175,4 +141,3 @@ if (result.is_valid) {
 4. **Extensibility**: Plugin architecture for new input/output formats
 5. **Standards Compliance**: Unicode, mathematical notation, document formats
 
-When contributing code, prioritize type safety, memory management, and comprehensive testing. The system is designed for both performance and safety, making it suitable for production data processing workflows.

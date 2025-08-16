@@ -24,6 +24,16 @@ Array* array() {
     return arr;
 }
 
+Item array_to_item(Array* arr) {
+    if (!arr) {
+        return ItemError;
+    }
+    Item item;
+    item.type_id = LMD_TYPE_ARRAY;
+    item.array = arr;
+    return item;
+}
+
 Array* array_pooled(VariableMemPool *pool) {
     Array *arr;
     MemPoolError err = pool_variable_alloc(pool, sizeof(Array), (void**)&arr);
@@ -142,6 +152,30 @@ ArrayLong* array_long_new(int count, ...) {
     return arr;
 }
 
+// Wrapper function to return an Item instead of raw ArrayLong*
+Item array_long_new_item(int count, ...) {
+    if (count <= 0) { 
+        ArrayLong *arr = (ArrayLong*)heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
+        arr->type_id = LMD_TYPE_ARRAY_INT;
+        arr->capacity = 0;
+        arr->items = NULL;
+        arr->length = 0;
+        return (Item){.array_long = arr};
+    }
+    va_list args;
+    va_start(args, count);
+    ArrayLong *arr = (ArrayLong*)heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
+    arr->type_id = LMD_TYPE_ARRAY_INT;  
+    arr->capacity = count;
+    arr->items = (long*)Malloc(count * sizeof(long));
+    arr->length = count;
+    for (int i = 0; i < count; i++) {
+        arr->items[i] = va_arg(args, long);
+    }       
+    va_end(args);
+    return (Item){.array_long = arr};
+}
+
 List* list() {
     List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
@@ -231,8 +265,15 @@ Item list_fill(List *list, int count, ...) {
     va_end(args);
     frame_end();
     printf("list_filled: %ld items\n", list->length);
-    return list->length ? (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT
-        ? list->items[0] : (Item){.list = list}) : ItemNull;
+    if (list->length == 0) {
+        return ItemNull;
+    } else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
+        return list->items[0];
+    } else {
+        Item result = {.list = list};
+        result.type_id = LMD_TYPE_LIST;
+        return result;
+    }
 }
 
 Item list_get(List *list, int index) {
@@ -862,6 +903,415 @@ Item fn_mod(Item item_a, Item item_b) {
     }
     else {
         printf("unknown mod type: %d, %d\n", item_a.type_id, item_b.type_id);
+        return ItemError;
+    }
+}
+
+// Numeric system functions implementation
+
+Item fn_abs(Item item) {
+    // abs() - absolute value of a number
+    if (item.type_id == LMD_TYPE_INT) {
+        // Sign extend the 56-bit long_val to a proper signed long
+        long val = (long)((int64_t)(item.long_val << 8) >> 8);
+        return (Item){.item = i2it(val < 0 ? -val : val)};
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        long val = *(long*)item.pointer;
+        return push_l(val < 0 ? -val : val);
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        return push_d(fabs(val));
+    }
+    else {
+        printf("abs not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_round(Item item) {
+    // round() - round to nearest integer
+    if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
+        // Already an integer, return as-is
+        return item;
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        return push_d(round(val));
+    }
+    else {
+        printf("round not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_floor(Item item) {
+    // floor() - round down to nearest integer
+    if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
+        // Already an integer, return as-is
+        return item;
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        return push_d(floor(val));
+    }
+    else {
+        printf("floor not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_ceil(Item item) {
+    // ceil() - round up to nearest integer
+    if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
+        // Already an integer, return as-is
+        return item;
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        return push_d(ceil(val));
+    }
+    else {
+        printf("ceil not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_min(Item item_a, Item item_b) {
+    // min() - minimum of two numbers
+    double a_val = 0.0, b_val = 0.0;
+    bool is_float = false;
+    
+    // Convert first argument
+    if (item_a.type_id == LMD_TYPE_INT) {
+        long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        a_val = (double)signed_val;
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64) {
+        a_val = (double)(*(long*)item_a.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT) {
+        a_val = *(double*)item_a.pointer;
+        is_float = true;
+    }
+    else {
+        printf("min not supported for type: %d\n", item_a.type_id);
+        return ItemError;
+    }
+    
+    // Convert second argument
+    if (item_b.type_id == LMD_TYPE_INT) {
+        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        b_val = (double)signed_val;
+    }
+    else if (item_b.type_id == LMD_TYPE_INT64) {
+        b_val = (double)(*(long*)item_b.pointer);
+    }
+    else if (item_b.type_id == LMD_TYPE_FLOAT) {
+        b_val = *(double*)item_b.pointer;
+        is_float = true;
+    }
+    else {
+        printf("min not supported for type: %d\n", item_b.type_id);
+        return ItemError;
+    }
+    
+    double result = a_val < b_val ? a_val : b_val;
+    
+    // Return as integer if both inputs were integers
+    if (!is_float) {
+        // Convert back to Item int directly to match input type
+        return {.item = i2it((long)result)};
+    } else {
+        return push_d(result);
+    }
+}
+
+Item fn_max(Item item_a, Item item_b) {
+    // max() - maximum of two numbers
+    double a_val = 0.0, b_val = 0.0;
+    bool is_float = false;
+    
+    // Convert first argument
+    if (item_a.type_id == LMD_TYPE_INT) {
+        long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        a_val = (double)signed_val;
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64) {
+        a_val = (double)(*(long*)item_a.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_FLOAT) {
+        a_val = *(double*)item_a.pointer;
+        is_float = true;
+    }
+    else {
+        printf("max not supported for type: %d\n", item_a.type_id);
+        return ItemError;
+    }
+    
+    // Convert second argument
+    if (item_b.type_id == LMD_TYPE_INT) {
+        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        b_val = (double)signed_val;
+    }
+    else if (item_b.type_id == LMD_TYPE_INT64) {
+        b_val = (double)(*(long*)item_b.pointer);
+    }
+    else if (item_b.type_id == LMD_TYPE_FLOAT) {
+        b_val = *(double*)item_b.pointer;
+        is_float = true;
+    }
+    else {
+        printf("max not supported for type: %d\n", item_b.type_id);
+        return ItemError;
+    }
+    
+    double result = a_val > b_val ? a_val : b_val;
+    
+    // Return as integer if both inputs were integers
+    if (!is_float) {
+        // Convert back to Item int directly to match input type
+        return {.item = i2it((long)result)};
+    } else {
+        return push_d(result);
+    }
+}
+
+Item fn_sum(Item item) {
+    // sum() - sum of all elements in an array or list
+    printf("fn_sum called with type_id: %d\n", item.type_id);
+    
+    // Special case: if type_id is 0 but we have a pointer, try to check if it's an Array*
+    if (item.type_id == 0 && item.raw_pointer != NULL) {
+        // Check if this might be an Array by looking at the type_id field  
+        Array* test_array = (Array*)item.raw_pointer;
+        if (test_array->type_id == LMD_TYPE_ARRAY) {
+            printf("Detected Array passed as raw pointer with type_id 0, fixing type directly...\n");
+            printf("LMD_TYPE_ARRAY value: %d\n", LMD_TYPE_ARRAY);
+            // Fix the type_id directly to avoid infinite recursion
+            item.type_id = LMD_TYPE_ARRAY;
+            printf("After fix: item.type_id = %d\n", item.type_id);
+            // Continue processing with corrected type instead of recursing
+        }
+    }
+    
+    // Handle case where ArrayLong* is passed directly as raw pointer
+    if (item.type_id == LMD_TYPE_RAW_POINTER && item.raw_pointer != NULL) {
+        // Check if this might be an ArrayLong by looking at the type_id field
+        TypeId *type_ptr = (TypeId*)item.raw_pointer;
+        if (*type_ptr == LMD_TYPE_ARRAY_INT) {
+            ArrayLong* arr = (ArrayLong*)item.raw_pointer;
+            
+            if (arr->length == 0) {
+                return (Item){.item = i2it(0)};
+            }
+            
+            long sum = 0;
+            for (size_t i = 0; i < arr->length; i++) {
+                sum += arr->items[i];
+            }
+            
+            return (Item){.item = i2it(sum)};
+        }
+    }
+    
+    if (item.type_id == LMD_TYPE_ARRAY) {
+        printf("Processing LMD_TYPE_ARRAY\n");
+        Array* arr = item.array;  // Use item.array, not item.pointer
+        if (!arr || arr->length == 0) {
+            return (Item){.item = i2it(0)};  // Empty array sums to 0
+        }
+        
+        double sum = 0.0;
+        bool has_float = false;
+        
+        for (size_t i = 0; i < arr->length; i++) {
+            Item elem_item = array_get(arr, i);
+            if (elem_item.type_id == LMD_TYPE_INT) {
+                long val = (long)((int64_t)(elem_item.long_val << 8) >> 8);
+                sum += (double)val;
+            }
+            else if (elem_item.type_id == LMD_TYPE_INT64) {
+                sum += (double)(*(long*)elem_item.pointer);
+            }
+            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+                sum += *(double*)elem_item.pointer;
+                has_float = true;
+            }
+            else {
+                printf("sum: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+                return ItemError;
+            }
+        }
+        
+        if (has_float) {
+            return push_d(sum);
+        } else {
+            return (Item){.item = i2it((long)sum)};
+        }
+    }
+    else if (item.type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayLong* arr = item.array_long;  // Use the correct field
+        if (!arr || arr->length == 0) {
+            return (Item){.item = i2it(0)};  // Empty array sums to 0
+        }
+        
+        long sum = 0;
+        for (size_t i = 0; i < arr->length; i++) {
+            sum += arr->items[i];
+        }
+        
+        return (Item){.item = i2it(sum)};
+    }
+    else if (item.type_id == LMD_TYPE_LIST) {
+        List* list = (List*)item.pointer;
+        if (!list || list->length == 0) {
+            return (Item){.item = i2it(0)};  // Empty list sums to 0
+        }
+        
+        double sum = 0.0;
+        bool has_float = false;
+        
+        for (size_t i = 0; i < list->length; i++) {
+            Item elem_item = list_get(list, i);
+            if (elem_item.type_id == LMD_TYPE_INT) {
+                long val = (long)((int64_t)(elem_item.long_val << 8) >> 8);
+                sum += (double)val;
+            }
+            else if (elem_item.type_id == LMD_TYPE_INT64) {
+                sum += (double)(*(long*)elem_item.pointer);
+            }
+            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+                sum += *(double*)elem_item.pointer;
+                has_float = true;
+            }
+            else {
+                printf("sum: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+                return ItemError;
+            }
+        }
+        
+        if (has_float) {
+            return push_d(sum);
+        } else {
+            return push_l((long)sum);
+        }
+    }
+    else {
+        printf("sum not supported for type: %d\n", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_avg(Item item) {
+    // avg() - average of all elements in an array or list
+    
+    // Special case: if type_id is 0 but we have a pointer, try to check if it's an Array*
+    if (item.type_id == 0 && item.raw_pointer != NULL) {
+        // Check if this might be an Array by looking at the type_id field  
+        Array* test_array = (Array*)item.raw_pointer;
+        if (test_array->type_id == LMD_TYPE_ARRAY) {
+            printf("Detected Array passed as raw pointer with type_id 0 to avg, fixing type directly...\n");
+            printf("LMD_TYPE_ARRAY value: %d\n", LMD_TYPE_ARRAY);
+            // Fix the type_id directly to avoid infinite recursion
+            item.array = test_array;
+            item.type_id = LMD_TYPE_ARRAY;  // Set type_id AFTER setting the pointer
+            printf("After fix: item.type_id = %d\n", item.type_id);
+            // Continue processing with corrected type instead of recursing
+        }
+    }
+    
+    // Handle case where ArrayLong* is passed directly as raw pointer
+    if (item.type_id == LMD_TYPE_RAW_POINTER && item.raw_pointer != NULL) {
+        // Check if this might be an ArrayLong by looking at the type_id field
+        TypeId *type_ptr = (TypeId*)item.raw_pointer;
+        if (*type_ptr == LMD_TYPE_ARRAY_INT) {
+            ArrayLong* arr = (ArrayLong*)item.raw_pointer;
+            if (arr->length == 0) {
+                return ItemError;
+            }
+            
+            double sum = 0.0;
+            for (size_t i = 0; i < arr->length; i++) {
+                sum += (double)arr->items[i];
+            }
+            
+            return push_d(sum / (double)arr->length);
+        }
+    }
+    
+    if (item.type_id == LMD_TYPE_ARRAY) {
+        Array* arr = item.array;  // Use item.array, not item.pointer
+        if (!arr || arr->length == 0) {
+            return ItemError;
+        }
+        
+        double sum = 0.0;
+        
+        for (size_t i = 0; i < arr->length; i++) {
+            Item elem_item = array_get(arr, i);
+            if (elem_item.type_id == LMD_TYPE_INT) {
+                long val = (long)((int64_t)(elem_item.long_val << 8) >> 8);
+                sum += (double)val;
+            }
+            else if (elem_item.type_id == LMD_TYPE_INT64) {
+                sum += (double)(*(long*)elem_item.pointer);
+            }
+            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+                sum += *(double*)elem_item.pointer;
+            }
+            else {
+                printf("avg: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+                return ItemError;
+            }
+        }
+        
+        return push_d(sum / (double)arr->length);
+    }
+    else if (item.type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayLong* arr = item.array_long;  // Use the correct field
+        if (!arr || arr->length == 0) {
+            return ItemError;
+        }
+        
+        double sum = 0.0;
+        for (size_t i = 0; i < arr->length; i++) {
+            sum += (double)arr->items[i];
+        }
+        
+        return push_d(sum / (double)arr->length);
+    }
+    else if (item.type_id == LMD_TYPE_LIST) {
+        List* list = (List*)item.pointer;
+        if (!list || list->length == 0) {
+            return ItemError;
+        }
+        
+        double sum = 0.0;
+        
+        for (size_t i = 0; i < list->length; i++) {
+            Item elem_item = list_get(list, i);
+            if (elem_item.type_id == LMD_TYPE_INT) {
+                long val = (long)((int64_t)(elem_item.long_val << 8) >> 8);
+                sum += (double)val;
+            }
+            else if (elem_item.type_id == LMD_TYPE_INT64) {
+                sum += (double)(*(long*)elem_item.pointer);
+            }
+            else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+                sum += *(double*)elem_item.pointer;
+            }
+            else {
+                printf("avg: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+                return ItemError;
+            }
+        }
+        
+        return push_d(sum / (double)list->length);
+    }
+    else {
+        printf("avg not supported for type: %d\n", item.type_id);
         return ItemError;
     }
 }

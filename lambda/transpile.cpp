@@ -318,6 +318,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         break;
+    case LMD_TYPE_NUMBER:
+        // NUMBER type is a union of int/float - transpile the expression directly
+        transpile_expr(tp, item);
+        break;
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
             item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
