@@ -23,11 +23,11 @@ string  symbol  binary  datetime
 
 **Container Types:**
 ```lambda
-1 to 10           // Range
-[int]             // Array of integers
-(int, string)     // List/tuple
-{key: string}     // Map
-<tag attr: int>   // Element
+1 to 10             // Range
+[123, true]         // Array of values
+(0.5, "string:)     // List/tuple
+{key: 'symbol'}     // Map
+<div class: bold; "text" <br>>    // Element
 ```
 
 **Type Operators:**
@@ -37,7 +37,9 @@ int & number     // Intersection
 int?             // Optional (int | null)
 int*             // Zero or more
 int+             // One or more
-(a: int, b: string) => bool   // Function Type
+(a: int, b: string) => bool   // Function type
+{a: int, b: bool}             // Map type
+<div id:symbol; <br>>         // Element type
 ```
 
 ## Literals
@@ -56,7 +58,8 @@ inf  nan  // Special values
 "hello"           // String
 "multi-line       // Multi-line string
 string"
-'symbol           // Symbol
+'symbol'          // Symbol
+symbol            // Unquoted symbol
 ```
 
 **Binary & DateTime:**
