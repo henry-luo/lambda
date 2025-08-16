@@ -3,7 +3,6 @@
 lambda                    # Start REPL
 // REPL Commands: :quit, :help, :clear
 lambda script.ls          # Run script  
-lambda --mir script.ls    # Run with MIR JIT (WIP)
 lambda --transpile-only script.ls # Transpile only
 lambda --help             # Show help
 ```
@@ -11,7 +10,7 @@ lambda --help             # Show help
 **Validation:**
 ```bash
 lambda validate file.json -s schema.ls  # With schema
-lambda validate file.json               # Default schema
+lambda validate file.json            # Default schema
 ```
 
 ## Type System
@@ -100,22 +99,22 @@ pub fn square(x) => x * x; // Export function
 
 ## Operators
 
-**Arithmetic:** Addition, Subtraction, Multiplication, Division, Integer Division, Modulo, Exponentiation
+**Arithmetic:** addition, subtraction, multiplication, division, integer division, modulo, exponentiation
 ```lambda
 +  -  *  /  _/  %  ^
 ```
 
-**Comparison:** Equal, Not Equal, Less Than, Less/Equal, Greater Than, Greater/Equal
+**Comparison:** equal, not equal, less than, less equal, greater than, greater equal
 ```lambda
 ==  !=  <  <=  >  >=
 ```
 
-**Logical:** Logical AND, OR, NOT
+**Logical:** logical and, or, not
 ```lambda
 and  or  not
 ```
 
-**Type & Set:** Type check, Membership, Range, Union, Intersection, Exclusion
+**Type & Set:** type check, membership, range, union, intersection, exclusion
 ```lambda
 is  in  to  |  &  !
 ```
@@ -125,7 +124,8 @@ is  in  to  |  &  !
 **If Expressions (require else):**
 ```lambda
 if (x > 0) "positive" else "non-positive"
-if (score >= 90) "A" else if (score >= 80) "B" else "C"
+if (score >= 90) "A" 
+else if (score >= 80) "B" else "C"
 ```
 
 **If Statements (optional else):**
@@ -218,17 +218,17 @@ error(message)            // Create error
 
 **Supported Input Types:** `json`, `xml`, `yaml`, `markdown`, `csv`, `html`, `latex`, `toml`, `rtf`, `css`, `ini`, `math`, `pdf`
 ```lambda
-input("path/file.md", 'markdown')    // Input Markdown
+input("path/file.md", 'markdown')   // Input Markdown
 ```
 
 **Input with Flavors:** e.g. math flavors: `latex`, `typst`, `ascii`
 ```lambda
-input("formula.txt", {'type': 'math', 'flavor': 'ascii'})
+input("math.txt", {'type':'math', 'flavor':'ascii'})
 ```
 
 **Output Formatting:** `json`, `yaml`, `xml`, `html`, `markdown`
 ```lambda
-format(data, 'yaml')                 // Format as YAML
+format(data, 'yaml')                // Format as YAML
 ```
 
 ## Modules & Imports
@@ -255,7 +255,7 @@ let area = math.PI * math.square(radius);
 
 **Creating Errors:**
 ```lambda
-error("Something went wrong")     // Create error value
+error("Something went wrong")   // Create error value
 ```
 
 **Error Checking:**
@@ -267,12 +267,6 @@ else { print("Success:", result) }
 
 ## Advanced Features
 
-**Pattern Matching:**
-```lambda
-let [first, second, ...rest] = array;  // Array destructuring
-let {name, age} = person;               // Map destructuring
-```
-
 **Type Declarations:**
 ```lambda
 type User = {name: string, age: int};   // Object type
@@ -283,7 +277,8 @@ type Result = int | error;              // Union type
 **Comprehensions - Complex data processing:**
 ```lambda
 (let data = [1, 2, 3, 4, 5],
- let filtered = (for (x in data) if (x % 2 == 0) x else 0),
+ let filtered = (for (x in data) 
+   if (x % 2 == 0) x else 0),
  let doubled = (for (x in filtered) x * 2), doubled)
 ```
 
@@ -306,8 +301,10 @@ type Result = int | error;              // Union type
 **Data Processing:**
 ```lambda
 let data = input("sales.json", 'json')
-let total = sum((for (sale in data.sales) sale.amount))
-let report = {total: total, count: len(data.sales)}
+let total = sum(
+  (for (sale in data.sales) sale.amount))
+let report = {total: total, 
+  count: len(data.sales)}
 format(report, 'json')
 ```
 
