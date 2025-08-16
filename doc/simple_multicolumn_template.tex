@@ -2,22 +2,31 @@
 \usepackage[utf8]{inputenc}
 \usepackage{multicol}
 \usepackage[landscape,margin=0.3in]{geometry}
-\usepackage{listings}
 \usepackage{xcolor}
 \usepackage{titlesec}
 \usepackage{fancyvrb}
 \usepackage{framed}
+\usepackage{alltt}
 
 % Define colors for shaded environments
 \definecolor{shadecolor}{rgb}{0.97,0.97,0.97}
 
-% Define Shaded environment for pandoc
-\newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
-\newenvironment{Highlighting}{\begin{snugshade}}{\end{snugshade}}
+% Define custom verbatim environment for better line break handling
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+  fontsize=\scriptsize,
+  frame=none,
+  framesep=1pt,
+  commandchars=\\\{\}
+}
+
+% Simple environment definitions that preserve pandoc's defaults with light background
+\newenvironment{Shaded}{\begin{snugshade}\vspace{0.5\baselineskip}\fontsize{8}{9}\selectfont}{\vspace{0.5\baselineskip}\end{snugshade}}
 
 % Define tightlist for pandoc
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+% Pandoc highlighting commands
 \newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
 \newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
 \newcommand{\DecValTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
@@ -50,38 +59,26 @@
 \newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.64,0.00,0.00}{\textbf{#1}}}
 \newcommand{\NormalTok}[1]{#1}
 
-% Configure page
+% Configure page with tighter spacing
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{1pt}
+\setlength{\topsep}{0pt}
+\setlength{\partopsep}{0pt}
 \pagestyle{empty}
 
 % Configure multicol
 \setlength{\columnsep}{15pt}
 \setlength{\columnseprule}{0.2pt}
 
-% Configure sections - make them smaller and more compact
-\titleformat{\section}[block]{\normalfont\large\bfseries}{}{0pt}{}
-\titlespacing*{\section}{0pt}{4pt plus 2pt minus 2pt}{2pt plus 1pt minus 1pt}
+% Configure sections - make them slightly bigger and more compact
+\titleformat{\section}[block]{\normalfont\Large\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{3pt plus 1pt minus 1pt}{1pt plus 1pt minus 1pt}
 
-\titleformat{\subsection}[block]{\normalfont\normalsize\bfseries}{}{0pt}{}
-\titlespacing*{\subsection}{0pt}{3pt plus 1pt minus 1pt}{1pt plus 1pt minus 1pt}
+\titleformat{\subsection}[block]{\normalfont\large\bfseries}{}{0pt}{}
+\titlespacing*{\subsection}{0pt}{2pt plus 1pt minus 1pt}{0pt plus 1pt minus 1pt}
 
 % Don't print section numbers
 \setcounter{secnumdepth}{0}
-
-% Configure code blocks - make them more compact
-\lstset{
-    basicstyle=\ttfamily\tiny,
-    breaklines=true,
-    columns=flexible,
-    keepspaces=true,
-    backgroundcolor=\color{gray!10},
-    frame=none,
-    aboveskip=2pt,
-    belowskip=2pt,
-    xleftmargin=2pt,
-    xrightmargin=2pt
-}
 
 % Custom commands for compact lists
 \newenvironment{compactlist}{
