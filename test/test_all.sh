@@ -94,7 +94,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  markup_roundtrip  Run only markup roundtrip tests"
     echo ""
     echo "Configuration:"
-    echo "  Test configurations are loaded from test/test_config.json"
+    echo "  Test configurations are loaded from build_lambda_config.json (test section)"
     echo "  This file defines test suites, sources, dependencies, and compilation flags"
     echo ""
     echo "Examples:"
@@ -120,7 +120,7 @@ fi
 safe_echo ""
 
 # Configuration file path
-TEST_CONFIG_FILE="test/test_config.json"
+BUILD_CONFIG_FILE="build_lambda_config.json"
 
 # Global variables for loaded test configuration
 declare -a TEST_SUITE_NAMES
@@ -131,12 +131,12 @@ get_config() {
     local suite="$1"
     local key="$2"
     
-    if [ ! -f "$TEST_CONFIG_FILE" ]; then
+    if [ ! -f "$BUILD_CONFIG_FILE" ]; then
         echo ""
         return 1
     fi
     
-    jq -r ".tests[] | select(.suite == \"$suite\") | .$key // \"\"" "$TEST_CONFIG_FILE" 2>/dev/null || echo ""
+    jq -r ".test.test_suites[] | select(.suite == \"$suite\") | .$key // \"\"" "$BUILD_CONFIG_FILE" 2>/dev/null || echo ""
 }
 
 # Helper function to get configuration array as string
@@ -145,12 +145,12 @@ get_config_array() {
     local key="$2"
     local separator="${3:-|||}"
     
-    if [ ! -f "$TEST_CONFIG_FILE" ]; then
+    if [ ! -f "$BUILD_CONFIG_FILE" ]; then
         echo ""
         return 1
     fi
     
-    jq -r ".tests[] | select(.suite == \"$suite\") | .$key | join(\"$separator\")" "$TEST_CONFIG_FILE" 2>/dev/null || echo ""
+    jq -r ".test.test_suites[] | select(.suite == \"$suite\") | .$key | join(\"$separator\")" "$BUILD_CONFIG_FILE" 2>/dev/null || echo ""
 }
 
 # Helper function to parse delimiter-separated string into array (bash 3.2 compatible)
@@ -190,6 +190,45 @@ get_build_config_file() {
     fi
 }
 
+# Helper function to build compilation command using library dependency resolution (Phase 2)
+build_library_based_compile_cmd() {
+    local suite_type="$1"
+    local source="$2" 
+    local binary="$3"
+    local test_index="$4"
+    local special_flags="$5"
+    
+    # Try to get library dependencies first (Phase 2 approach)
+    local lib_deps_str=$(get_library_dependencies_for_test "$suite_type" "$test_index")
+    
+    if [ -n "$lib_deps_str" ]; then
+        # Phase 2: Use library name resolution
+        local lib_deps_array=($lib_deps_str)
+        local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
+        
+        # Add criterion for tests
+        local criterion_flags="-I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+        
+        # Handle both prefixed and unprefixed paths
+        local final_source="$source"
+        local final_binary="$binary"
+        
+        # Add test/ prefix if not already present
+        if [[ "$final_source" != test/* ]]; then
+            final_source="test/$final_source"
+        fi
+        if [[ "$final_binary" != test/* ]]; then
+            final_binary="test/$final_binary"
+        fi
+        
+        echo "clang $special_flags -o $final_binary $final_source $resolved_flags $criterion_flags"
+        return 0
+    else
+        # Fallback to legacy dependency strings if library_dependencies not available
+        return 1
+    fi
+}
+
 # Helper function to build generic compilation command from config
 build_generic_compile_cmd() {
     local suite_type="$1"
@@ -197,6 +236,7 @@ build_generic_compile_cmd() {
     local binary="$3"
     local deps="$4"
     local special_flags="$5"
+    local test_index="${6:-0}"  # Optional test index for library dependency resolution
     
     # Check if suite uses build config
     local uses_build_config=$(get_config "$suite_type" "uses_build_config")
@@ -207,9 +247,14 @@ build_generic_compile_cmd() {
         build_config_driven_compile_cmd "$suite_type" "$source" "$binary" "$special_flags" "$build_config_file"
         return $?
     else
-        # Simple dependency-based compilation (for library, input types)
-        build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags"
-        return $?
+        # Try Phase 2 library-based approach first
+        if build_library_based_compile_cmd "$suite_type" "$source" "$binary" "$test_index" "$special_flags"; then
+            return 0
+        else
+            # Fallback to legacy dependency-based compilation
+            build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags"
+            return $?
+        fi
     fi
 }
 
@@ -345,7 +390,19 @@ build_dependency_based_compile_cmd() {
         echo "$compiler $special_flags $CRITERION_FLAGS -o $binary $source"
     else
         # Use clang for library and input tests to match normal compilation behavior
-        echo "clang -o test/$binary test/$source $deps $CRITERION_FLAGS $special_flags"
+        # Handle both prefixed and unprefixed paths
+        local final_source="$source"
+        local final_binary="$binary"
+        
+        # Add test/ prefix if not already present
+        if [[ "$final_source" != test/* ]]; then
+            final_source="test/$final_source"
+        fi
+        if [[ "$final_binary" != test/* ]]; then
+            final_binary="test/$final_binary"
+        fi
+        
+        echo "clang -o $final_binary $final_source $deps $CRITERION_FLAGS $special_flags"
     fi
     return 0
 }
@@ -409,8 +466,41 @@ run_raw_test() {
         return 1
     fi
     
-    # Run the test directly and let it handle its own output
-    ./"$test_binary"
+    # For validator tests, run with TAP format to include all test suites
+    # and parse the results to provide Synthesis-style summary
+    if [[ "$test_binary" == *"validator"* ]]; then
+        # Run and capture output to a temporary file to avoid hanging
+        local temp_file=$(mktemp)
+        ./"$test_binary" --verbose --tap --jobs=$CPU_CORES > "$temp_file" 2>&1
+        local exit_code=$?
+        
+        # Display the output
+        cat "$temp_file"
+        
+        # Parse TAP results for summary
+        local total_tests=$(grep -c "^ok " "$temp_file" 2>/dev/null || echo "0")
+        local failed_tests=$(grep -c "^not ok " "$temp_file" 2>/dev/null || echo "0")
+        
+        # Clean numeric values and ensure they're not empty
+        total_tests=$(echo "$total_tests" | tr -cd '0-9')
+        failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
+        total_tests=${total_tests:-0}
+        failed_tests=${failed_tests:-0}
+        
+        local passed_tests=$((total_tests - failed_tests))
+        
+        # Clean up temp file
+        rm -f "$temp_file"
+        
+        # Provide Synthesis-style summary for consistency
+        echo ""
+        echo "[====] Final Summary: Tested: $total_tests | Passed: $passed_tests | Failed: $failed_tests | Crashed: 0"
+        
+        return $exit_code
+    else
+        # Run the test directly and let it handle its own output
+        ./"$test_binary"
+    fi
     return $?
 }
 
@@ -455,8 +545,8 @@ print_error() {
 
 # Function to load test configuration from JSON
 load_test_config() {
-    if [ ! -f "$TEST_CONFIG_FILE" ]; then
-        print_error "Test configuration file $TEST_CONFIG_FILE not found!"
+    if [ ! -f "$BUILD_CONFIG_FILE" ]; then
+        print_error "Build configuration file $BUILD_CONFIG_FILE not found!"
         exit 1
     fi
     
@@ -466,13 +556,13 @@ load_test_config() {
         exit 1
     fi
     
-    print_status "Loading test configuration from $TEST_CONFIG_FILE..."
+    print_status "Loading test configuration from $BUILD_CONFIG_FILE (test section)..."
     
     # Load all test suite names (compatible with bash 3.2+)
     TEST_SUITE_NAMES=()
     while IFS= read -r suite_name; do
         TEST_SUITE_NAMES+=("$suite_name")
-    done < <(jq -r '.tests[].suite' "$TEST_CONFIG_FILE")
+    done < <(jq -r '.test.test_suites[].suite' "$BUILD_CONFIG_FILE")
     
     print_success "Loaded ${#TEST_SUITE_NAMES[@]} test suite configurations"
 }
@@ -614,7 +704,7 @@ run_common_test_suite() {
     fi
     
     # Set environment variables if specified
-    local env_vars=$(jq -r ".tests[] | select(.suite == \"$suite_name\") | .environment // {} | to_entries | map(\"\(.key)=\(.value)\") | join(\"|||\")" "$TEST_CONFIG_FILE" 2>/dev/null || echo "")
+    local env_vars=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_name\") | .environment // {} | to_entries | map(\"\(.key)=\(.value)\") | join(\"|||\")" "$BUILD_CONFIG_FILE" 2>/dev/null || echo "")
     if [ -n "$env_vars" ] && [ "$env_vars" != "null" ]; then
         IFS='|||' read -ra ENV_ARRAY <<< "$env_vars"
         for env_var in "${ENV_ARRAY[@]}"; do
@@ -777,26 +867,13 @@ run_parallel_suite_impl() {
             
             local compile_cmd=""
             
-            # Handle different compilation methods based on configuration
-            if [ "$uses_build_config" = "true" ]; then
-                # Use enhanced compilation for build config-based tests
-                local config_file=$(get_build_config_file "$suite_name")
-                if [ ! -f "$config_file" ]; then
-                    print_error "Configuration file $config_file not found!"
-                    total_failed=$((total_failed + 1))
-                    continue
-                fi
-                compile_cmd=$(build_enhanced_test_compile_cmd "$test_source" "$test_binary" "$config_file" "" "$special_flags")
-            elif command -v get_automatic_test_dependencies >/dev/null 2>&1; then
-                # Use enhanced compilation for library tests with automatic dependency detection
-                compile_cmd=$(build_enhanced_test_compile_cmd "$test_source" "$test_binary" "build_lambda_config.json" "" "$special_flags")
-            else
-                # Fallback to legacy compilation method
-                if [ -n "$test_deps" ] && [ "$test_deps" != "null" ]; then
-                    compile_cmd="$CC -o $test_binary $test_source $test_deps $special_flags $CRITERION_FLAGS"
-                else
-                    compile_cmd="$CC -o $test_binary $test_source $special_flags $CRITERION_FLAGS"
-                fi
+            # Use the same generic compilation logic as raw mode
+            compile_cmd=$(build_generic_compile_cmd "$suite_name" "$test_source" "$test_binary" "$test_deps" "$special_flags" "$i")
+            
+            if [ $? -ne 0 ]; then
+                safe_echo "$compile_cmd"  # This will be the error message
+                total_failed=$((total_failed + 1))
+                continue
             fi
             
             if $compile_cmd 2>/dev/null; then
@@ -806,7 +883,7 @@ run_parallel_suite_impl() {
                 safe_echo "🧪 Running $test_binary..."
                 
                 set +e
-                local output=$(./"$test_binary" --verbose --tap 2>&1)
+                local output=$(./"$test_binary" 2>&1)
                 local exit_code=$?
                 set -e
                 
@@ -817,17 +894,18 @@ run_parallel_suite_impl() {
                 local test_total=0
                 local test_failed=0
                 
-                if echo "$output" | grep -q "^ok "; then
-                    # TAP format
-                    test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
-                    test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
-                elif echo "$output" | grep -q "Synthesis:"; then
-                    # Criterion synthesis format
+                # Prefer Criterion Synthesis format when both are present (more accurate)
+                if echo "$output" | grep -q "Synthesis:"; then
+                    # Criterion synthesis format (only counts executed tests, excludes skipped)
                     local synthesis_line=$(echo "$output" | grep "Synthesis:" | tail -1)
                     test_total=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
                     test_failed=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
                     local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
                     test_failed=$((test_failed + crashing_tests))
+                elif echo "$output" | grep -q "^ok "; then
+                    # TAP format (includes skipped tests in count)
+                    test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
+                    test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
                 else
                     # Fallback based on exit code
                     if [ $exit_code -eq 0 ]; then
@@ -874,6 +952,25 @@ run_parallel_suite_impl() {
         # Store results using generic approach
         store_suite_results "$suite_name" "$total_tests" "$total_passed" "$total_failed" \
                            test_names test_totals test_passed test_failed
+        
+        # Print summary for sequential execution
+        echo ""
+        local suite_display_name=$(get_config "$suite_name" "name")
+        print_status "📊 $suite_display_name Results Summary:"
+        echo "   Total Tests: $total_tests"
+        echo "   Passed: $total_passed"
+        echo "   Failed: $total_failed"
+        
+        # Demonstrate the generic results retrieval API
+        display_suite_summary "$suite_name"
+        
+        if [ $total_failed -eq 0 ] && [ $total_tests -gt 0 ]; then
+            print_success "All $suite_display_name tests passed!"
+        elif [ $total_tests -eq 0 ]; then
+            print_warning "No tests were detected for $suite_display_name"
+        else
+            print_error "$total_failed $suite_display_name test(s) failed"
+        fi
         
         return $total_failed
     fi
@@ -1004,8 +1101,14 @@ run_parallel_suite_impl() {
                 compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
             fi
         else
-            # Standard compilation (for library and input tests)
-            compile_cmd="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS $special_flags"
+            # Standard compilation (for library and input tests) - use same logic as raw mode
+            compile_cmd=$(build_generic_compile_cmd "$suite_name" "$test_source" "$test_binary" "$test_deps" "$special_flags" "$i")
+            
+            if [ $? -ne 0 ]; then
+                print_error "$compile_cmd"  # This will be the error message
+                total_failed=$((total_failed + 1))
+                continue
+            fi
         fi
         
         if $compile_cmd 2>/dev/null; then
@@ -1015,7 +1118,7 @@ run_parallel_suite_impl() {
             print_status "Starting $test_binary in parallel..."
             (
                 set +e
-                local output=$(./"$test_binary" --verbose --tap 2>&1)
+                local output=$(./"$test_binary" 2>&1)
                 local exit_code=$?
                 set -e
                 
@@ -1023,17 +1126,18 @@ run_parallel_suite_impl() {
                 local test_total=0
                 local test_failed=0
                 
-                if echo "$output" | grep -q "^ok "; then
-                    # TAP format
-                    test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
-                    test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
-                elif echo "$output" | grep -q "Synthesis:"; then
-                    # Criterion synthesis format
+                # Prefer Criterion Synthesis format when both are present (more accurate)
+                if echo "$output" | grep -q "Synthesis:"; then
+                    # Criterion synthesis format (only counts executed tests, excludes skipped)
                     local synthesis_line=$(echo "$output" | grep "Synthesis:" | tail -1)
                     test_total=$(echo "$synthesis_line" | grep -o "Tested: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
                     test_failed=$(echo "$synthesis_line" | grep -o "Failing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
                     local crashing_tests=$(echo "$synthesis_line" | grep -o "Crashing: [0-9]\+" | grep -o "[0-9]\+" || echo "0")
                     test_failed=$((test_failed + crashing_tests))
+                elif echo "$output" | grep -q "^ok "; then
+                    # TAP format (includes skipped tests in count)
+                    test_total=$(echo "$output" | grep -c "^ok " 2>/dev/null || echo "0")
+                    test_failed=$(echo "$output" | grep -c "^not ok " 2>/dev/null || echo "0")
                 else
                     # Fallback based on exit code
                     if [ $exit_code -eq 0 ]; then
@@ -1318,8 +1422,8 @@ run_individual_test() {
         local raw_compile_cmd
         local raw_binary_path=""
         
-        # Use generic compilation command builder
-        raw_compile_cmd=$(build_generic_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags")
+        # Use generic compilation command builder with test index for library dependency resolution
+        raw_compile_cmd=$(build_generic_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags" "$test_index")
         
         if [ $? -ne 0 ]; then
             echo "$raw_compile_cmd"  # This will be the error message
@@ -1353,7 +1457,7 @@ run_individual_test() {
         fi
         
         # Set environment variables from config for validator
-        local env_vars=$(jq -r ".tests[] | select(.suite == \"$suite_type\") | .environment // {} | to_entries | map(\"\(.key)=\(.value)\") | join(\"|||\")" "$TEST_CONFIG_FILE" 2>/dev/null || echo "")
+        local env_vars=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_type\") | .environment // {} | to_entries | map(\"\(.key)=\(.value)\") | join(\"|||\")" "$BUILD_CONFIG_FILE" 2>/dev/null || echo "")
         if [ -n "$env_vars" ] && [ "$env_vars" != "null" ]; then
             IFS='|||' read -ra ENV_ARRAY <<< "$env_vars"
             for env_var in "${ENV_ARRAY[@]}"; do

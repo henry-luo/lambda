@@ -1,30 +1,109 @@
 # Enhanced Test Script Management Plan
 
+## ✅ **PHASE 2 COMPLETE - True Single Source of Truth Achieved**
+
+**Major Achievement**: Successfully consolidated all test configurations into `build_lambda_config.json` and eliminated the duplicate `test/test_config.json`.
+
+**Completed Tasks**:
+- ✅ Consolidated test suite definitions into `build_lambda_config.json` test section
+- ✅ Updated `test_all.sh` to use only the consolidated config file  
+- ✅ Updated `lib/build_utils.sh` to reference the build config instead of test config
+- ✅ Removed duplicate `test/test_config.json` file completely
+- ✅ Updated all jq queries to use `.test.test_suites[]` path structure
+- ✅ Validated library dependency resolution working correctly
+- ✅ Verified Makefile integration still works perfectly
+- ✅ All test suites running successfully with raw mode summary
+
+**Results**: The system now has a true single source of truth for both build libraries AND test configurations in `build_lambda_config.json`.
+
 ## Session Progress Update (August 2025)
 
-### ✅ **Completed Enhancements**
+### ✅ **Major Accomplishments - Phase 1 Complete**
 
-**Raw Mode Summary Feature** - Successfully implemented final summary aggregation for `--raw` mode:
-- Added synthesis line parsing and aggregation across all tests in a suite
-- Fixed macOS sed compatibility issues (using `*` instead of `\+` patterns)
-- Implemented temporary file capture with `tee` for output aggregation
+**🔧 Centralized Build Infrastructure** - Successfully established shared utilities:
+- Created `lib/build_utils.sh` with 327 lines of reusable build functions  
+- Integrated JSON parsing, configuration validation, and dependency resolution
+- `test_all.sh` now sources shared utilities (Phase 1 enhancement active)
+- Unified compilation logic between main build system and test system
+
+**📋 JSON-Based Test Configuration** - Moved from hardcoded to data-driven:
+- Complete test suite definitions in `test/test_config.json` (99 lines)
+- Structured configuration for 5 test suites (validator, library, input, mir, lambda)
+- Suite-specific metadata: sources, dependencies, binaries, flags, environment vars
+- Platform-specific and build-config-driven compilation support
+
+**⚙️ Enhanced Test Runner** - Comprehensive `test_all.sh` improvements:
+- 2,400+ lines of robust test orchestration logic
+- Raw mode with synthesis line aggregation and final summary display
+- Parallel and sequential execution modes with CPU core detection
+- Graceful pipe handling and proper signal management (SIGPIPE)
+- Individual test targeting and suite-level execution
+
+**🎯 Raw Mode Summary Feature** - User experience enhancement:
+- Automatic parsing of Criterion `[====] Synthesis: Tested: X | Passing: Y | Failing: Z | Crashing: W` lines
+- Cross-test aggregation with macOS sed compatibility (using `*` vs `\+`)
 - Final summary format: `[====] Final Summary: Tested: X | Passed: Y | Failed: Z | Crashed: W`
+- Working for multi-test suites (library: 103 total tests, input: 19 total tests)
 
-**Test Count Discrepancy Resolution** - Explained and documented:
-- `make test` reports 18 input tests (individual test aggregation)
-- `make test-input` reports 5 tests (failing math tests only due to output parsing)
-- Different reporting methodologies between suite-level and failure-focused views
+**🔗 Makefile Integration** - Streamlined developer workflow:
+- 687-line comprehensive Makefile with 30+ test targets
+- Proper delegation to `test_all.sh` with parameter passing
+- Individual suite targets (`test-library`, `test-input`, etc.)
+- Memory testing, coverage analysis, and cross-platform support
 
-**System Verification** - Validated enhanced test/build system functionality:
-- Centralized build utilities working correctly
-- JSON-based test configuration system operational
-- Makefile integration fixed and functional
-- Output formatting unified across test modes
+### 📊 **Current System Assessment**
 
-### 🎯 **Next Priority Items**
-- Phase 1 dependency refactoring (library name references)
-- Integration with `compile.sh` dependency resolution
-- Object file reuse strategy implementation
+**✅ What's Working:**
+- Phase 1 build utilities integration (shared JSON parsing, config validation)
+- Complete test configuration externalization from hardcoded strings
+- Raw mode output aggregation and final summaries
+- Parallel test execution with proper synchronization
+- Cross-platform compilation (macOS, Linux, Windows cross-compile)
+
+**🔄 What Still Needs Enhancement:**
+- **Dependency duplication**: Test configs still contain hardcoded dependency strings like:
+  ```json
+  "lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c -Ilib/mem-pool/include"
+  ```
+- **Build system fragmentation**: Tests don't reuse main build system's object files
+- **Manual library mapping**: No automatic dependency resolution from library names
+
+### 🎯 **Next Priority Action Item**
+
+---
+
+## **PROPOSED NEXT ACTION: Phase 2 - Library Name References**
+
+**Objective**: Replace hardcoded dependency strings with structured library name references in `test/test_config.json`.
+
+**Specific Task**: 
+1. Add `library_dependencies` field to test suite configurations
+2. Create library name mappings that reference existing `build_lambda_config.json` library definitions
+3. Implement dependency resolution in `test_all.sh` that translates library names to actual file paths/flags
+
+**Example Transformation**:
+```json
+// BEFORE (Current):
+"dependencies": [
+  "lib/strbuf.c lib/mem-pool/src/variable.c -Ilib/mem-pool/include",
+  "lib/strview.c", 
+  "lib/num_stack.c"
+]
+
+// AFTER (Phase 2):
+"library_dependencies": [
+  ["strbuf", "mem-pool"],
+  ["strview"],
+  ["num_stack"]
+]
+```
+
+**Expected Outcome**: 
+- Single source of truth for library definitions
+- Automatic propagation of library path changes to tests
+- Foundation for Phase 3 object file reuse
+
+**Estimated Effort**: 2-3 hours (modify config + implement resolution logic)
 
 ---
 

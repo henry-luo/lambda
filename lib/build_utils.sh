@@ -324,3 +324,85 @@ validate_config_file() {
     
     return 0
 }
+
+# Function to resolve library dependencies from test config to actual compile flags
+resolve_library_dependencies() {
+    local library_deps_array=("$@")
+    local build_config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
+    local platform=""
+    
+    local resolved_flags=""
+    local include_flags=""
+    local source_files=""
+    local object_files=""
+    local static_libs=""
+    local dynamic_libs=""
+    
+    for lib_name in "${library_deps_array[@]}"; do
+        case "$lib_name" in
+            "strbuf")
+                source_files="$source_files lib/strbuf.c"
+                ;;
+            "strview")
+                source_files="$source_files lib/strview.c"
+                ;;
+            "mem-pool")
+                source_files="$source_files lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c"
+                include_flags="$include_flags -Ilib/mem-pool/include"
+                ;;
+            "num_stack")
+                source_files="$source_files lib/num_stack.c"
+                ;;
+            "datetime")
+                source_files="$source_files lib/datetime.c"
+                ;;
+            "string")
+                source_files="$source_files lib/string.c"
+                ;;
+            "mime-detect")
+                source_files="$source_files lambda/input/mime-detect.c lambda/input/mime-types.c"
+                ;;
+            "lambda-runtime-full")
+                # Complex runtime dependencies - use pre-built objects
+                source_files="$source_files lib/file.c"
+                object_files="$object_files build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o build/datetime.o build/string.o build/unicode_string.o"
+                static_libs="$static_libs lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
+                include_flags="$include_flags -Ilib/mem-pool/include"
+                dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -lgmp -L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
+                ;;
+            "criterion")
+                include_flags="$include_flags -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
+                dynamic_libs="$dynamic_libs -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+                ;;
+        esac
+    done
+    
+    # Build final resolved flags string
+    resolved_flags="$include_flags $source_files $object_files $static_libs $dynamic_libs"
+    echo "$resolved_flags"
+}
+
+# Function to get library dependencies array from test config
+get_library_dependencies_for_test() {
+    local suite_name="$1"
+    local test_index="$2"
+    local build_config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
+    
+    if [ ! -f "$build_config_file" ]; then
+        echo ""
+        return 1
+    fi
+    
+    if has_jq_support; then
+        # Get the library dependencies array for the specific test index
+        local lib_deps=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_name\") | .library_dependencies[$test_index] // empty" "$build_config_file" 2>/dev/null)
+        if [ -n "$lib_deps" ] && [ "$lib_deps" != "null" ]; then
+            # Parse JSON array and return as space-separated string
+            echo "$lib_deps" | jq -r '.[]' | tr '\n' ' '
+        else
+            echo ""
+        fi
+    else
+        echo ""
+    fi
+}

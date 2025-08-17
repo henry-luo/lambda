@@ -189,6 +189,32 @@
             "name": "datetime",
             "sources": ["lib/datetime.c"],
             "link": "inline"
+        },
+        {
+            "name": "mime-detect",
+            "sources": [
+                "lambda/input/mime-detect.c",
+                "lambda/input/mime-types.c"
+            ],
+            "link": "inline"
+        },
+        {
+            "name": "lambda-runtime-full",
+            "description": "Complete Lambda runtime with all dependencies for complex tests",
+            "sources": ["lib/file.c"],
+            "objects": [
+                "build/print.o", "build/strview.o", "build/transpile.o", "build/utf.o",
+                "build/build_ast.o", "build/lambda-eval.o", "build/lambda-mem.o", 
+                "build/runner.o", "build/mir.o", "build/url.o", "build/parse.o", 
+                "build/parser.o", "build/num_stack.o", "build/input*.o", "build/format*.o",
+                "build/strbuf.o", "build/hashmap.o", "build/arraylist.o", "build/variable.o",
+                "build/buffer.o", "build/utils.o", "build/mime-detect.o", "build/mime-types.o",
+                "build/datetime.o", "build/string.o", "build/unicode_string.o"
+            ],
+            "libraries": ["tree-sitter-lambda", "tree-sitter", "gmp", "mir", "zlog", "lexbor", "icu"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "inline"
         }
     ],
     "warnings": [
@@ -334,13 +360,6 @@
                     ["num_stack"],
                     ["datetime", "string", "strbuf", "strview", "mem-pool"]
                 ],
-                "dependencies": [
-                    "lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include",
-                    "lib/strview.c",
-                    "lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include",
-                    "lib/num_stack.c",
-                    "lib/datetime.c lib/string.c lib/strbuf.c lib/strview.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
-                ],
                 "binaries": [
                     "test_strbuf.exe",
                     "test_strview.exe",
@@ -363,7 +382,7 @@
                 "dependencies": [
                     "lambda/input/mime-detect.c lambda/input/mime-types.c",
                     "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o build/datetime.o build/string.o build/unicode_string.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a -L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata -lstdc++",
-                    "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o build/datetime.o build/string.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a -L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
+                    "lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o build/datetime.o build/string.o build/unicode_string.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/usr/local/lib /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a -L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
