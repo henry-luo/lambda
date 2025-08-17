@@ -119,6 +119,12 @@
             "link": "dynamic"
         },
         {
+            "name": "criterion",
+            "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+            "link": "dynamic"
+        },
+        {
             "name": "icu",
             "include": "icu-compact/include",
             "lib": "icu-compact/lib/libicui18n.a icu-compact/lib/libicuuc.a icu-compact/lib/libicudata.a",
@@ -148,6 +154,41 @@
                     "supplementalData": "include"
                 }
             }
+        },
+        {
+            "name": "mem-pool",
+            "include": "lib/mem-pool/include",
+            "sources": [
+                "lib/mem-pool/src/variable.c",
+                "lib/mem-pool/src/buffer.c",
+                "lib/mem-pool/src/utils.c"
+            ],
+            "link": "inline"
+        },
+        {
+            "name": "strbuf",
+            "sources": ["lib/strbuf.c"],
+            "link": "inline"
+        },
+        {
+            "name": "strview", 
+            "sources": ["lib/strview.c"],
+            "link": "inline"
+        },
+        {
+            "name": "string",
+            "sources": ["lib/string.c"],
+            "link": "inline"
+        },
+        {
+            "name": "num_stack",
+            "sources": ["lib/num_stack.c"],
+            "link": "inline"
+        },
+        {
+            "name": "datetime",
+            "sources": ["lib/datetime.c"],
+            "link": "inline"
         }
     ],
     "warnings": [
@@ -285,6 +326,13 @@
                     "test_variable_pool.c",
                     "test_num_stack.c",
                     "test_datetime.c"
+                ],
+                "library_dependencies": [
+                    ["strbuf", "mem-pool"],
+                    ["strview"],
+                    ["mem-pool"],
+                    ["num_stack"],
+                    ["datetime", "string", "strbuf", "strview", "mem-pool"]
                 ],
                 "dependencies": [
                     "lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include",

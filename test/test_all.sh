@@ -5,6 +5,15 @@
 
 set -e  # Exit on any error
 
+# Source shared build utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "$SCRIPT_DIR/lib/build_utils.sh" ]; then
+    source "$SCRIPT_DIR/lib/build_utils.sh"
+    echo "Using enhanced build utilities (Phase 1)"
+else
+    echo "Warning: build_utils.sh not found, using legacy functions"
+fi
+
 # Handle SIGPIPE gracefully when output is piped to commands like grep
 trap 'exit 0' SIGPIPE
 
@@ -338,6 +347,55 @@ build_dependency_based_compile_cmd() {
         # Use clang for library and input tests to match normal compilation behavior
         echo "clang -o test/$binary test/$source $deps $CRITERION_FLAGS $special_flags"
     fi
+    return 0
+}
+
+# Enhanced test compilation function using shared build utilities (Phase 1)
+build_enhanced_test_compile_cmd() {
+    local test_source="$1"
+    local test_binary="$2"
+    local config_file="${3:-build_lambda_config.json}"
+    local platform="$4"
+    local special_flags="$5"
+    
+    echo "🔧 Enhanced compilation for $test_source..." >&2
+    
+    # Validate configuration
+    if ! validate_config_file "$config_file"; then
+        echo "❌ Configuration validation failed" >&2
+        return 1
+    fi
+    
+    # Get automatic dependencies based on test file name
+    local lib_deps_str=$(get_automatic_test_dependencies "$test_source")
+    local lib_deps=($lib_deps_str)
+    
+    echo "   Detected dependencies: ${lib_deps[*]}" >&2
+    
+    # Collect required object files and inline sources
+    local build_dir=$(get_json_value "build_dir" "$config_file" "$platform")
+    build_dir=${build_dir:-build}
+    
+    local object_files=$(collect_required_objects "$build_dir" "${lib_deps[@]}")
+    local inline_sources=$(collect_inline_sources "$config_file" "$platform" "${lib_deps[@]}")
+    
+    # Collect library flags
+    local include_flags=$(collect_include_flags "$config_file" "$platform" "${lib_deps[@]}")
+    local static_libs=$(collect_static_libs "$config_file" "$platform" "${lib_deps[@]}")
+    local dynamic_libs=$(collect_dynamic_libs "$config_file" "$platform" "${lib_deps[@]}")
+    
+    # Add criterion test framework
+    include_flags="$include_flags $(collect_include_flags "$config_file" "$platform" "criterion")"
+    dynamic_libs="$dynamic_libs $(collect_dynamic_libs "$config_file" "$platform" "criterion")"
+    
+    # Add standard test include paths
+    include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
+    
+    # Build final command
+    local compiler="clang"
+    local criterion_flags="-lcriterion"
+    
+    echo "$compiler $special_flags $include_flags -o $test_binary $test_source $inline_sources $object_files $static_libs $dynamic_libs $criterion_flags"
     return 0
 }
 
@@ -720,104 +778,24 @@ run_parallel_suite_impl() {
             
             # Handle different compilation methods based on configuration
             if [ "$uses_build_config" = "true" ]; then
-                # Build config-based compilation (for MIR and Lambda)
+                # Use enhanced compilation for build config-based tests
                 local config_file=$(get_build_config_file "$suite_name")
                 if [ ! -f "$config_file" ]; then
                     print_error "Configuration file $config_file not found!"
                     total_failed=$((total_failed + 1))
                     continue
                 fi
-                
-                # Extract and build object files list
-                local object_files=()
-                while IFS= read -r source_file; do
-                    local base_name
-                    if [[ "$source_file" == *.cpp ]]; then
-                        base_name=$(basename "$source_file" .cpp)
-                    else
-                        base_name=$(basename "$source_file" .c)
-                    fi
-                    local obj_file="build/${base_name}.o"
-                    if [ -f "$obj_file" ]; then
-                        object_files+=("$PWD/$obj_file")
-                    fi
-                done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
-                
-                # Process source_dirs if any
-                local source_dirs
-                source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
-                if [ -n "$source_dirs" ]; then
-                    while IFS= read -r source_dir; do
-                        if [ -d "$source_dir" ]; then
-                            while IFS= read -r source_file; do
-                                local rel_path="${source_file#$PWD/}"
-                                local base_name
-                                if [[ "$rel_path" == *.cpp ]]; then
-                                    base_name=$(basename "$rel_path" .cpp)
-                                else
-                                    base_name=$(basename "$rel_path" .c)
-                                fi
-                                local obj_file="build/${base_name}.o"
-                                if [ -f "$obj_file" ]; then
-                                    object_files+=("$PWD/$obj_file")
-                                fi
-                            done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
-                        fi
-                    done <<< "$source_dirs"
-                fi
-                
-                # Exclude main.o since Criterion provides its own main function
-                local filtered_object_files=()
-                for obj_file in "${object_files[@]}"; do
-                    if [[ "$obj_file" != *"/main.o" ]]; then
-                        filtered_object_files+=("$obj_file")
-                    fi
-                done
-                object_files=("${filtered_object_files[@]}")
-                
-                # Build library flags
-                local include_flags=""
-                local static_libs=""
-                local dynamic_libs=""
-                local libraries
-                libraries=$(jq -r '.libraries // []' "$config_file")
-                
-                if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
-                    while IFS= read -r lib_info; do
-                        local name include lib link
-                        name=$(echo "$lib_info" | jq -r '.name')
-                        include=$(echo "$lib_info" | jq -r '.include // empty')
-                        lib=$(echo "$lib_info" | jq -r '.lib // empty')
-                        link=$(echo "$lib_info" | jq -r '.link // "static"')
-                        
-                        if [ -n "$include" ] && [ "$include" != "null" ]; then
-                            include_flags="$include_flags -I$include"
-                        fi
-                        
-                        if [ "$link" = "static" ]; then
-                            if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                                static_libs="$static_libs $lib"
-                            fi
-                        else
-                            if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                                dynamic_libs="$dynamic_libs -L$lib -l$name"
-                            fi
-                        fi
-                    done < <(echo "$libraries" | jq -c '.[]')
-                fi
-                
-                # Special handling for lambda tests
-                if [ "$suite_name" = "lambda" ]; then
-                    include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
-                    include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
-                    dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
-                    compile_cmd="clang $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
-                else
-                    compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
-                fi
+                compile_cmd=$(build_enhanced_test_compile_cmd "$test_source" "$test_binary" "$config_file" "" "$special_flags")
+            elif command -v get_automatic_test_dependencies >/dev/null 2>&1; then
+                # Use enhanced compilation for library tests with automatic dependency detection
+                compile_cmd=$(build_enhanced_test_compile_cmd "$test_source" "$test_binary" "build_lambda_config.json" "" "$special_flags")
             else
-                # Standard compilation (for library and input tests)
-                compile_cmd="clang -o $test_binary $test_source $test_deps $CRITERION_FLAGS $special_flags"
+                # Fallback to legacy compilation method
+                if [ -n "$test_deps" ] && [ "$test_deps" != "null" ]; then
+                    compile_cmd="$CC -o $test_binary $test_source $test_deps $special_flags $CRITERION_FLAGS"
+                else
+                    compile_cmd="$CC -o $test_binary $test_source $special_flags $CRITERION_FLAGS"
+                fi
             fi
             
             if $compile_cmd 2>/dev/null; then

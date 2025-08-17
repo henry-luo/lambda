@@ -3,6 +3,14 @@
 # Usage: ./compile.sh [config_file] [--platform=PLATFORM]
 #        ./compile.sh --help
 
+# Source shared build utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/lib/build_utils.sh" ]; then
+    source "$SCRIPT_DIR/lib/build_utils.sh"
+else
+    echo "Warning: build_utils.sh not found, using legacy functions"
+fi
+
 # Configuration file default
 CONFIG_FILE="build_lambda_config.json"
 PLATFORM=""
