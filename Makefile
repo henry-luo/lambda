@@ -79,11 +79,36 @@ endif
 # Limit parallel jobs to reasonable maximum
 JOBS := $(shell echo $$(($(NPROCS) > 8 ? 8 : $(NPROCS))))
 
+# Tree-sitter grammar dependencies
+# This system automatically manages the dependency chain:
+# grammar.js -> parser.c -> ts-enum.h -> C/C++ source files
+# When grammar.js is modified, the parser and enum header are automatically regenerated
+GRAMMAR_JS = lambda/tree-sitter-lambda/grammar.js
+PARSER_C = lambda/tree-sitter-lambda/src/parser.c
+GRAMMAR_JSON = lambda/tree-sitter-lambda/src/grammar.json
+NODE_TYPES_JSON = lambda/tree-sitter-lambda/src/node-types.json
+TS_ENUM_H = lambda/ts-enum.h
+GENERATE_PARSER_SCRIPT = ./generate-parser.sh
+UPDATE_TS_ENUM_SCRIPT = ./update_ts_enum.sh
+
+# Auto-generate parser and ts-enum.h when grammar.js changes
+$(TS_ENUM_H): $(GRAMMAR_JS)
+	@echo "Grammar changed, regenerating parser and ts-enum.h..."
+	@command -v tree-sitter >/dev/null 2>&1 || { echo "Error: tree-sitter CLI not found. Install with: npm install -g tree-sitter-cli"; exit 1; }
+	cd lambda/tree-sitter-lambda && tree-sitter generate
+	$(UPDATE_TS_ENUM_SCRIPT)
+	@echo "Updated ts-enum.h from grammar changes"
+
+$(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
+	@echo "Generating parser from grammar.js..."
+	@command -v tree-sitter >/dev/null 2>&1 || { echo "Error: tree-sitter CLI not found. Install with: npm install -g tree-sitter-cli"; exit 1; }
+	cd lambda/tree-sitter-lambda && tree-sitter generate
+
 # Default target
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean debug release rebuild test test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
         build-windows build-debug build-release clean-all distclean \
         verify-windows test-windows build-icu clean-icu test-unicode build-unicode
@@ -109,12 +134,24 @@ help:
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
+	@echo "  clean-test    - Remove test output and temporary files"
+	@echo "  clean-grammar - Remove generated grammar files (parser.c, ts-enum.h)"
 	@echo "  clean-all     - Remove all build directories"
-	@echo "  distclean     - Complete cleanup (build dirs + executables)"
+	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
+	@echo ""
+	@echo "Grammar & Parser:"
+	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
+	@echo "                     (automatic when grammar.js changes)"
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run comprehensive unit tests"
+	@echo "  test-library  - Run library tests only"
 	@echo "  test-input    - Run input processing test suite (MIME detection & math)"
+	@echo "  test-validator- Run validator tests only"
+	@echo "  test-mir      - Run MIR JIT tests only"
+	@echo "  test-lambda   - Run lambda runtime tests only"
+	@echo "  test-verbose  - Run tests with verbose output"
+	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
 	@echo "  test-memory   - Run memory leak detection tests"
 	@echo "  test-benchmark- Run performance benchmark tests"  
@@ -148,7 +185,7 @@ help:
 	@echo "  make rebuild              # Force complete rebuild"
 
 # Main build target (incremental)
-build:
+build: $(TS_ENUM_H)
 	@echo "Building $(PROJECT_NAME) (incremental)..."
 	UNICODE_FLAGS="$(UNICODE_FLAGS)" ICU_CFLAGS="$(ICU_CFLAGS)" ICU_LIBS="$(ICU_LIBS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
@@ -183,7 +220,7 @@ rebuild:
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --force --jobs=$(JOBS)
 
 # Specific project builds
-lambda:
+lambda: $(TS_ENUM_H)
 	@echo "Building lambda project..."
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
@@ -258,6 +295,27 @@ clean:
 	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_status
 	@echo "Build artifacts cleaned."
 
+clean-test:
+	@echo "Cleaning test output..."
+	@rm -rf test_output/
+	@rm -f test/*.exe
+	@rm -f test_*.exe
+	@rm -f *.exe.tmp
+	@rm -f build_test_*.json
+	@echo "Test output cleaned."
+
+clean-grammar:
+	@echo "Cleaning generated grammar files..."
+	@rm -f $(TS_ENUM_H)
+	@rm -f $(PARSER_C)
+	@rm -f $(GRAMMAR_JSON)
+	@rm -f $(NODE_TYPES_JSON)
+	@echo "Generated grammar files cleaned."
+
+# Generate grammar explicitly (useful for development)
+generate-grammar: $(TS_ENUM_H)
+	@echo "Grammar generation complete."
+
 clean-all:
 	@echo "Removing all build directories..."
 	@rm -rf $(BUILD_DIR)
@@ -265,7 +323,7 @@ clean-all:
 	@rm -rf $(BUILD_WINDOWS_DIR)
 	@echo "All build directories removed."
 
-distclean: clean-all
+distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup..."
 	@rm -f $(LAMBDA_EXE)
 	@rm -f lambda-windows.exe
@@ -277,32 +335,46 @@ distclean: clean-all
 # Development targets
 test:
 	@echo "Running comprehensive test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
+	@if [ -f "test_modern.sh" ]; then \
+		./test_modern.sh; \
+	elif [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh; \
 	else \
-		echo "Error: Comprehensive test suite not found at test/test_all.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-dev:
+	@echo "Running comprehensive test suite (development mode)..."
+	@if [ -f "test_modern.sh" ]; then \
+		./test_modern.sh || echo "Note: Some tests failed due to incomplete features (math parser, missing dependencies)"; \
+	elif [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh || echo "Note: Some tests failed due to incomplete features"; \
+	else \
+		echo "Error: No test suite found"; \
 		exit 1; \
 	fi
 
 test-library: build
 	@echo "Running library test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
+	@if [ -f "test_modern.sh" ]; then \
+		./test_modern.sh --suite=library; \
+	elif [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh --target=library --raw; \
 	else \
-		echo "Error: Test script not found at test/test_all.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
+		echo "Error: No test script found"; \
 		exit 1; \
 	fi
 
 test-input: build
 	@echo "Running input processing test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
+	@if [ -f "test_modern.sh" ]; then \
+		./test_modern.sh --suite=input; \
+	elif [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh --target=mime_detect --raw; \
 		./test/test_all.sh --target=math --raw; \
 	else \
-		echo "Error: Test script not found at test/test_all.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
+		echo "Error: No test script found"; \
 		exit 1; \
 	fi
 

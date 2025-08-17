@@ -174,6 +174,17 @@ make rebuild       # Force complete rebuild
 ./compile.sh --force       # Force full rebuild
 ```
 
+### Grammar Auto-Generation
+- **Automatic parser regeneration** when `grammar.js` is modified
+- Dependency chain: `grammar.js` → `parser.c` → `ts-enum.h` → source files
+- No manual intervention required - build system handles everything
+
+```bash
+make build              # Auto-regenerates if grammar.js changed
+make generate-grammar   # Explicitly regenerate parser files
+make clean-grammar      # Clean generated grammar files
+```
+
 ### Parallel Compilation
 - Auto-detects CPU cores (max 8 jobs for stability)
 - 2-4x faster compilation on multi-core systems
