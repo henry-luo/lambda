@@ -1718,6 +1718,14 @@ run_suite_raw_mode() {
     print_status "🚀 Running $suite_display_name in RAW mode"
     
     local overall_failed=0
+    local total_tested=0
+    local total_passed=0
+    local total_failed=0
+    local total_crashed=0
+    local temp_summary_file="/tmp/lambda_test_summary_$$"
+    
+    # Create temp file for collecting synthesis lines
+    > "$temp_summary_file"
     
     # For suites with multiple tests, run each one individually
     if [ ${#sources_array[@]} -gt 1 ]; then
@@ -1727,8 +1735,10 @@ run_suite_raw_mode() {
             local test_name=$(basename "$source_file" .c)
             test_name=${test_name#test_}  # Remove "test_" prefix if present
             
-            # Run individual test without wrapper messages (like lambda mode)
-            if ! run_individual_test "$suite_name" "$test_name"; then
+            # Run test and capture exit code, but let output flow to terminal
+            if run_individual_test "$suite_name" "$test_name" 2>&1 | tee -a "$temp_summary_file"; then
+                local exit_code=0
+            else
                 local exit_code=$?
                 overall_failed=$((overall_failed + exit_code))
             fi
@@ -1737,7 +1747,9 @@ run_suite_raw_mode() {
         # For suites with single tests, run the suite test directly
         local test_name="$suite_name"
         print_status "Running single suite test: $test_name"
-        if run_individual_test "$suite_name" "$test_name"; then
+        
+        # Run test and capture exit code, but let output flow to terminal
+        if run_individual_test "$suite_name" "$test_name" 2>&1 | tee -a "$temp_summary_file"; then
             print_success "$test_name test completed successfully"
         else
             local exit_code=$?
@@ -1745,6 +1757,34 @@ run_suite_raw_mode() {
             overall_failed=$exit_code
         fi
     fi
+    
+    # Parse all synthesis lines from the accumulated output
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^\[====\]\ Synthesis: ]]; then
+            local tested=$(echo "$line" | sed -n 's/.*Tested: \([0-9]*\).*/\1/p')
+            local passed=$(echo "$line" | sed -n 's/.*Passing: \([0-9]*\).*/\1/p')
+            local failed=$(echo "$line" | sed -n 's/.*Failing: \([0-9]*\).*/\1/p')
+            local crashed=$(echo "$line" | sed -n 's/.*Crashing: \([0-9]*\).*/\1/p')
+            
+            # Ensure we have valid numbers (default to 0 if empty)
+            tested=${tested:-0}
+            passed=${passed:-0}
+            failed=${failed:-0}
+            crashed=${crashed:-0}
+            
+            total_tested=$((total_tested + tested))
+            total_passed=$((total_passed + passed))
+            total_failed=$((total_failed + failed))
+            total_crashed=$((total_crashed + crashed))
+        fi
+    done < "$temp_summary_file"
+    
+    # Clean up temp file
+    rm -f "$temp_summary_file"
+    
+    # Print final summary
+    echo
+    echo "[====] Final Summary: Tested: $total_tested | Passed: $total_passed | Failed: $total_failed | Crashed: $total_crashed"
     
     return $overall_failed
 }

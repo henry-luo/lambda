@@ -357,10 +357,17 @@ test-dev:
 
 test-library: build
 	@echo "Running library test suite..."
-	@if [ -f "test_modern.sh" ]; then \
-		./test_modern.sh --suite=library; \
-	elif [ -f "test/test_all.sh" ]; then \
+	@if [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh --target=library --raw; \
+	else \
+		echo "Error: No test script found"; \
+		exit 1; \
+	fi
+
+test-mir: build
+	@echo "Running MIR test suite..."
+	@if [ -f "test/test_all.sh" ]; then \
+		./test/test_all.sh --target=mir --raw; \
 	else \
 		echo "Error: No test script found"; \
 		exit 1; \
@@ -368,9 +375,7 @@ test-library: build
 
 test-input: build
 	@echo "Running input processing test suite..."
-	@if [ -f "test_modern.sh" ]; then \
-		./test_modern.sh --suite=input; \
-	elif [ -f "test/test_all.sh" ]; then \
+	@if [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh --target=input --raw; \
 	else \
 		echo "Error: No test script found"; \
