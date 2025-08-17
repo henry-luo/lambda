@@ -296,13 +296,16 @@ clean:
 	@echo "Build artifacts cleaned."
 
 clean-test:
-	@echo "Cleaning test output..."
-	@rm -rf test_output/
-	@rm -f test/*.exe
-	@rm -f test_*.exe
-	@rm -f *.exe.tmp
-	@rm -f build_test_*.json
-	@echo "Test output cleaned."
+	@echo "Cleaning test build outputs..."
+	@rm -rf test_output/ 2>/dev/null || true
+	@rm -f test/*.exe 2>/dev/null || true
+	@rm -f test_*.exe 2>/dev/null || true
+	@rm -f *.exe.tmp 2>/dev/null || true
+	@rm -f build_test_*.json 2>/dev/null || true
+	@rm -f build_test_*.json.tmp 2>/dev/null || true
+	@find test/ -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find test/ -name "*.o" -type f -delete 2>/dev/null || true
+	@echo "Test build outputs cleaned."
 
 clean-grammar:
 	@echo "Cleaning generated grammar files..."

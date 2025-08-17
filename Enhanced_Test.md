@@ -49,6 +49,23 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 - Removed architectural inconsistency between individual vs aggregate test runs
 - Consistent test counting across all execution modes
 
+### Phase 4: Intelligent Dependency Management ✅
+
+**🎯 Global Compiler Configuration**
+- Added global `compiler` field to `build_lambda_config.json` (defaults to `clang`)
+- Created `get_global_compiler()` helper function with C/C++ variant support
+- Replaced all hardcoded `gcc` references with dynamic compiler selection
+- Updated validator suite to use `clang++` instead of `g++`
+
+**🧹 Test Executable Management**
+- Removed `--keep-exe` option - test executables are now always preserved
+- Modified test script to eliminate all cleanup code during test execution
+- Enhanced `make clean-test` to safely remove only build outputs:
+  - Test executables (`.exe` files)
+  - Debug symbols (`.dSYM` directories)
+  - Object files and temporary build configs
+  - **Preserves all source files** (`.c`, `.cpp`, `.h`, `.sh`)
+
 ---
 
 ## 📋 **CURRENT STATE ANALYSIS**
@@ -59,11 +76,13 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 - Cross-platform compilation support (macOS, Linux, Windows cross-compile)
 - Unified test framework architecture across all suite types
 - Enhanced developer workflow with comprehensive Makefile targets
+- **Global compiler configuration with clang as default**
+- **Safe test executable management and cleanup**
 
 ### 🔄 **Remaining Challenges**
-1. **Dependency Duplication**: Test configs contain hardcoded dependency strings
+1. **Dependency Duplication**: Test configs still contain hardcoded dependency strings
 2. **Build System Fragmentation**: Tests don't reuse main build system's object files
-3. **Manual Library Mapping**: No automatic dependency resolution from library names
+3. **Manual Library Mapping**: Need automatic dependency resolution from library names
 
 **Example of Current Problem:**
 ```json
@@ -78,7 +97,7 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 
 ## 🚀 **INCREMENTAL ENHANCEMENT ROADMAP**
 
-### Phase 4: Intelligent Dependency Management
+### Phase 5: Library Name Dependencies (Next Priority)
 
 **Objective**: Replace hardcoded dependency strings with structured library name references.
 
@@ -89,83 +108,94 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
    "dependencies": ["lib/strbuf.c lib/mem-pool/src/variable.c -Ilib/mem-pool/include"]
    
    // AFTER (Target):
-   "library_dependencies": [["strbuf", "mem-pool"]]
+   "library_dependencies": [["strbuf", "mem-pool", "criterion"]]
    ```
 
-2. **Implement Library Name Resolution**
+2. **Implement Library Name Resolution in `test_all.sh`**
    - Create mapping from library names to actual file paths/flags
    - Leverage existing `build_lambda_config.json` library definitions
-   - Add automatic dependency resolution in `test_all.sh`
+   - Add automatic dependency resolution function
 
-3. **Add Test-Specific Library Support**
-   ```json
-   "test_libraries": [
-       {
-           "name": "criterion",
-           "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-           "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-           "link": "dynamic"
-       }
-   ]
-   ```
+3. **Migrate Test Suites Incrementally**
+   - Start with library tests (simplest dependencies)
+   - Progress to input tests (complex dependencies)
+   - Maintain backward compatibility during transition
 
-**Expected Outcome**: Single source of truth for library definitions with automatic propagation of changes.
+**Expected Outcome**: Single source of truth for library definitions with automatic propagation.
 
 **Estimated Effort**: 2-3 hours
 
-### Phase 5: Build System Integration
+### Phase 6: Build System Integration
 
 **Objective**: Leverage main build system's compilation infrastructure for tests.
 
 **Tasks:**
-1. **Create Unified Compilation Function**
-   ```bash
-   compile_test() {
-       local test_source="$1"
-       local test_binary="$2"
-       local library_deps="$3"  # Array of library names
-       
-       # Leverage compile.sh's library resolution
-       resolve_library_dependencies "$library_deps"
-       collect_required_objects "$library_deps"
-       
-       # Compile with resolved dependencies
-       $CC $test_source -o $test_binary $include_flags $object_files $libs
-   }
-   ```
-
-2. **Object File Reuse Strategy**
+1. **Object File Reuse Strategy**
    - Use pre-compiled object files from `build/` directory
+   - Eliminate redundant source compilation during test builds
    - Automatic dependency tracking based on library requirements
-   - Eliminate redundant source compilation
 
-3. **Enhanced Build Configuration**
-   ```json
-   "test_build_config": {
-       "exclude_objects": ["main.o"],
-       "additional_flags": ["-DTEST_MODE"],
-       "test_libraries": ["criterion"],
-       "memory_checking": {
-           "address_sanitizer": true,
-           "valgrind_support": true
-       }
-   }
-   ```
+2. **Enhanced Compilation Integration**
+   - Leverage `compile.sh` infrastructure for test compilation
+   - Consistent build behavior between main build and tests
+   - Better error diagnostics and build cache efficiency
 
-**Expected Outcome**: Faster test builds, consistent compilation behavior, better error diagnostics.
+**Expected Outcome**: Faster test builds, consistent compilation behavior.
 
-**Estimated Effort**: 4-5 hours
+**Estimated Effort**: 3-4 hours
 
-### Phase 6: Intelligent Automation
+### Phase 7: Intelligent Automation
 
-**Objective**: Implement automatic dependency detection and smart test management.
+**Objective**: Full automation of dependency detection and platform-aware testing.
 
 **Tasks:**
 1. **Automatic Source-to-Library Mapping**
-   ```bash
-   get_test_dependencies() {
-       local test_file="$1"
-       case "$test_file" in
+   - Smart detection of required libraries based on test file content
+   - Dynamic dependency resolution without manual configuration
+
+2. **Platform-Specific Test Configuration**
+   - Debug builds with AddressSanitizer integration
+   - Windows cross-compilation test support
+   - Memory safety integration
+
+**Expected Outcome**: Zero-configuration test dependency management.
+
+**Estimated Effort**: 4-5 hours
+
+---
+
+## 📝 **IMMEDIATE NEXT STEPS**
+
+### Priority 1: Complete Library Name Dependencies (Phase 5)
+1. **Update test configuration format** in `build_lambda_config.json`
+2. **Implement `resolve_library_dependencies()`** function in `test_all.sh`
+3. **Migrate library tests first** (simplest dependencies)
+4. **Test with existing validator suite** to ensure backward compatibility
+
+### Priority 2: Quality Assurance
+1. **Run full test suite** to verify all 240+ tests still pass
+2. **Measure build time improvements** from reduced compilation
+3. **Cross-platform validation** on available platforms
+
+### Success Metrics
+- All existing tests continue to pass
+- Reduced maintenance overhead for dependency management
+- Faster test build times
+- Consistent compiler usage (clang) across all tests
+
+---
+
+## 🎯 **IMPLEMENTATION STRATEGY**
+
+### Incremental Migration Approach
+1. **Phase 5** (2-3 hours): Library name references with backward compatibility
+2. **Phase 6** (3-4 hours): Build system integration and object file reuse  
+3. **Phase 7** (4-5 hours): Full automation and platform-specific support
+
+### Backward Compatibility
+- Maintain old dependency format as fallback during transition
+- Gradual migration of test suites to new format
+- Deprecation warnings for legacy dependency formats
            "test_strbuf.c")     echo "strbuf mem-pool" ;;
            "test_validator.cpp") echo "validator input format" ;;
        esac
@@ -212,32 +242,21 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 - Gradual migration of test suites to new format
 - Deprecation warnings for legacy dependency formats
 
-### Quality Assurance
-- **Regression Testing**: All existing tests must continue to pass
-- **Build Performance**: Measure compilation time improvements
-- **Cross-Platform Validation**: Ensure tests work on macOS, Linux, Windows
-- **Memory Safety**: Verify AddressSanitizer integration
-
 ---
 
 ## 📈 **EXPECTED BENEFITS**
 
-### Maintenance Benefits
+### Recent Achievements (Phase 4)
+- **Unified compiler configuration** with clang as standard across all tests
+- **Preserved test executables** for faster debugging and re-runs
+- **Safe cleanup process** that protects source files from accidental deletion
+
+### Upcoming Benefits (Phases 5-7)
 - **~80% reduction** in duplicated dependency strings
-- **Automatic propagation** of library path changes to tests
-- **Consistent build behavior** across main build and tests
-
-### Developer Experience
+- **Automatic propagation** of library path changes to tests  
 - **Faster test builds** through object file reuse
-- **Better error messages** via enhanced diagnostics
-- **Easier test addition** with automatic dependency detection
+- **Consistent build behavior** across main build and tests
 - **Cross-platform consistency** with platform-aware configurations
-
-### Technical Improvements
-- **Precise dependency tracking** using `.d` files
-- **Parallel test compilation** leveraging existing infrastructure
-- **Memory safety integration** with AddressSanitizer support
-- **Build cache efficiency** through shared object files
 
 ---
 
@@ -248,4 +267,4 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 3. **Platform-Specific Libraries**: Windows cross-compilation test dependencies
 4. **Tree-sitter Integration**: Parser library dependencies for lambda runtime tests
 
-This roadmap transforms the test system from manual dependency management into an intelligent, automated framework that leverages Lambda's robust build infrastructure while maintaining full backward compatibility during migration.
+This enhanced test infrastructure has evolved from manual dependency management to an intelligent, automated framework that leverages Lambda's robust build infrastructure while maintaining backward compatibility.
