@@ -410,7 +410,8 @@ run_raw_test() {
     fi
     
     # Run the test directly and let it handle its own output
-    exec ./"$test_binary"
+    ./"$test_binary"
+    return $?
 }
 
 # Colors for output
@@ -1720,20 +1721,17 @@ run_suite_raw_mode() {
     
     # For suites with multiple tests, run each one individually
     if [ ${#sources_array[@]} -gt 1 ]; then
+        # For library tests in raw mode, compile and run each test cleanly like lambda mode
         for source_file in "${sources_array[@]}"; do
             # Extract test name from source file
             local test_name=$(basename "$source_file" .c)
             test_name=${test_name#test_}  # Remove "test_" prefix if present
             
-            print_status "Running individual test: $test_name"
-            if run_individual_test "$suite_name" "$test_name"; then
-                print_success "$test_name test completed successfully"
-            else
+            # Run individual test without wrapper messages (like lambda mode)
+            if ! run_individual_test "$suite_name" "$test_name"; then
                 local exit_code=$?
-                print_error "$test_name test failed with exit code: $exit_code"
                 overall_failed=$((overall_failed + exit_code))
             fi
-            echo ""
         done
     else
         # For suites with single tests, run the suite test directly
