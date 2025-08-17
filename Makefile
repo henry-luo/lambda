@@ -371,8 +371,7 @@ test-input: build
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh --suite=input; \
 	elif [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=mime_detect --raw; \
-		./test/test_all.sh --target=math --raw; \
+		./test/test_all.sh --target=input --raw; \
 	else \
 		echo "Error: No test script found"; \
 		exit 1; \
