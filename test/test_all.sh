@@ -722,11 +722,7 @@ run_common_test_suite() {
     local is_parallel_suite=$(get_config "$suite_name" "parallel")
     
     case "$suite_type" in
-        "validator")
-            run_validator_suite_impl "$suite_name"
-            return $?
-            ;;
-        "library"|"input"|"mir"|"lambda")
+        "validator"|"library"|"input"|"mir"|"lambda")
             # All these suite types now use the unified parallel implementation
             if [ "$is_parallel" = "true" ] || [ "$is_parallel_suite" = "true" ] || [ "$suite_type" = "mir" ] || [ "$suite_type" = "lambda" ]; then
                 run_parallel_suite_impl "$suite_name"
@@ -741,61 +737,6 @@ run_common_test_suite() {
             return 1
             ;;
     esac
-}
-
-# Implementation for validator test suite
-run_validator_suite_impl() {
-    local suite_name="$1"
-    local sources=$(get_config_array "$suite_name" "sources" " ")
-    local binary=$(get_config_array "$suite_name" "binaries" " ")
-    local special_flags=$(get_config "$suite_name" "special_flags")
-    
-    # Compile validator tests
-    local compile_cmd="gcc -std=c99 -Wall -Wextra -g $special_flags $CRITERION_FLAGS $sources -o $binary"
-    
-    print_status "Compiling validator tests..."
-    if $compile_cmd 2>/dev/null; then
-        print_success "Validator test suite compiled successfully"
-    else
-        print_error "Failed to compile validator test suite"
-        print_error "Attempting compilation with detailed error output..."
-        $compile_cmd
-        return 1
-    fi
-    
-    # Run validator tests
-    print_status "🧪 Running validator tests..."
-    safe_echo ""
-    
-    set +e
-    local test_output=$(./"$binary" --verbose --tap --jobs=$CPU_CORES 2>&1)
-    local test_exit_code=$?
-    set -e
-    
-    safe_echo "$test_output"
-    safe_echo ""
-    
-    # Parse results
-    local total_tests=$(echo "$test_output" | grep -c "^ok " 2>/dev/null || echo "0")
-    local failed_tests=$(echo "$test_output" | grep -c "^not ok " 2>/dev/null || echo "0")
-    
-    # Clean numeric values
-    total_tests=$(echo "$total_tests" | tr -cd '0-9')
-    failed_tests=$(echo "$failed_tests" | tr -cd '0-9')
-    total_tests=${total_tests:-0}
-    failed_tests=${failed_tests:-0}
-    
-    # Store for final summary
-    VALIDATOR_TOTAL_TESTS=$total_tests
-    VALIDATOR_FAILED_TESTS=$failed_tests
-    VALIDATOR_PASSED_TESTS=$((total_tests - failed_tests))
-    
-    # Cleanup
-    if [ -f "$binary" ] && [ "$KEEP_EXE" = false ]; then
-        rm "$binary"
-    fi
-    
-    return $failed_tests
 }
 
 # Implementation for Lambda test suite using parallel execution
@@ -1863,8 +1804,11 @@ run_suite_raw_mode() {
     fi
     
     # Parse all synthesis lines from the accumulated output
+    local found_synthesis=false
     while IFS= read -r line; do
+        # Check if we have Synthesis format (more accurate - excludes skipped tests)
         if [[ "$line" =~ ^\[====\]\ Synthesis: ]]; then
+            found_synthesis=true
             local tested=$(echo "$line" | sed -n 's/.*Tested: \([0-9]*\).*/\1/p')
             local passed=$(echo "$line" | sed -n 's/.*Passing: \([0-9]*\).*/\1/p')
             local failed=$(echo "$line" | sed -n 's/.*Failing: \([0-9]*\).*/\1/p')
@@ -1882,6 +1826,29 @@ run_suite_raw_mode() {
             total_crashed=$((total_crashed + crashed))
         fi
     done < "$temp_summary_file"
+    
+    # If no Synthesis format found, fall back to Final Summary format (includes skipped tests)
+    if [ "$found_synthesis" = false ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^\[====\]\ Final\ Summary: ]]; then
+                local tested=$(echo "$line" | sed -n 's/.*Tested: \([0-9]*\).*/\1/p')
+                local passed=$(echo "$line" | sed -n 's/.*Passed: \([0-9]*\).*/\1/p')
+                local failed=$(echo "$line" | sed -n 's/.*Failed: \([0-9]*\).*/\1/p')
+                local crashed=$(echo "$line" | sed -n 's/.*Crashed: \([0-9]*\).*/\1/p')
+                
+                # Ensure we have valid numbers (default to 0 if empty)
+                tested=${tested:-0}
+                passed=${passed:-0}
+                failed=${failed:-0}
+                crashed=${crashed:-0}
+                
+                total_tested=$((total_tested + tested))
+                total_passed=$((total_passed + passed))
+                total_failed=$((total_failed + failed))
+                total_crashed=$((total_crashed + crashed))
+            fi
+        done < "$temp_summary_file"
+    fi
     
     # Clean up temp file
     rm -f "$temp_summary_file"
