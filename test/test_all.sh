@@ -393,148 +393,6 @@ extract_build_object_files() {
 }
 
 # Helper function to build generic compilation command from config
-build_generic_compile_cmd() {
-    local suite_type="$1"
-    local source="$2" 
-    local binary="$3"
-    local deps="$4"
-    local special_flags="$5"
-    local test_index="${6:-0}"  # Optional test index for library dependency resolution
-    
-    # Phase 5: Try library-based approach first for ALL test suites
-    if build_library_based_compile_cmd "$suite_type" "$source" "$binary" "$test_index" "$special_flags"; then
-        return 0
-    fi
-    
-    # Fallback: Check if suite uses legacy build config approach
-    local uses_build_config=$(get_config "$suite_type" "uses_build_config")
-    local build_config_file=$(get_build_config_file "$suite_type")
-    
-    if [ "$uses_build_config" = "true" ] && [ -f "$build_config_file" ]; then
-        # Legacy build config-driven compilation (should be rare now)
-        build_config_driven_compile_cmd "$suite_type" "$source" "$binary" "$special_flags" "$build_config_file"
-        return $?
-    else
-        # Final fallback to legacy dependency-based compilation
-        build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags"
-        return $?
-    fi
-}
-
-# Helper function to build config-driven compilation command
-build_config_driven_compile_cmd() {
-    local suite_type="$1"
-    local source="$2"
-    local binary="$3" 
-    local special_flags="$4"
-    local config_file="$5"
-    
-    if [ ! -f "$config_file" ]; then
-        echo "❌ Configuration file $config_file not found!"
-        return 1
-    fi
-    
-    # Extract and build object files list
-    local object_files=()
-    while IFS= read -r source_file; do
-        local base_name
-        if [[ "$source_file" == *.cpp ]]; then
-            base_name=$(basename "$source_file" .cpp)
-        else
-            base_name=$(basename "$source_file" .c)
-        fi
-        local obj_file="build/${base_name}.o"
-        if [ -f "$obj_file" ]; then
-            object_files+=("$PWD/$obj_file")
-        fi
-    done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
-    
-    # Process source_dirs if any
-    local source_dirs
-    source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
-    if [ -n "$source_dirs" ]; then
-        while IFS= read -r source_dir; do
-            if [ -d "$source_dir" ]; then
-                while IFS= read -r source_file; do
-                    local rel_path="${source_file#$PWD/}"
-                    local base_name
-                    if [[ "$rel_path" == *.cpp ]]; then
-                        base_name=$(basename "$rel_path" .cpp)
-                    else
-                        base_name=$(basename "$rel_path" .c)
-                    fi
-                    local obj_file="build/${base_name}.o"
-                    if [ -f "$obj_file" ]; then
-                        object_files+=("$PWD/$obj_file")
-                    fi
-                done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
-            fi
-        done <<< "$source_dirs"
-    fi
-    
-    # Exclude main.o since Criterion provides its own main function
-    local filtered_object_files=()
-    for obj_file in "${object_files[@]}"; do
-        if [[ "$obj_file" != *"/main.o" ]]; then
-            filtered_object_files+=("$obj_file")
-        fi
-    done
-    object_files=("${filtered_object_files[@]}")
-    
-    # Build library flags from config
-    local include_flags=""
-    local static_libs=""
-    local dynamic_libs=""
-    local libraries
-    libraries=$(jq -r '.libraries // []' "$config_file")
-    
-    if [ "$libraries" != "null" ] && [ "$libraries" != "[]" ]; then
-        while IFS= read -r lib_info; do
-            local name include lib link
-            name=$(echo "$lib_info" | jq -r '.name')
-            include=$(echo "$lib_info" | jq -r '.include // empty')
-            lib=$(echo "$lib_info" | jq -r '.lib // empty')
-            link=$(echo "$lib_info" | jq -r '.link // "static"')
-            
-            if [ -n "$include" ] && [ "$include" != "null" ]; then
-                include_flags="$include_flags -I$include"
-            fi
-            
-            if [ "$link" = "static" ]; then
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    static_libs="$static_libs $lib"
-                fi
-            else
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    dynamic_libs="$dynamic_libs -L$lib -l$name"
-                fi
-            fi
-        done < <(echo "$libraries" | jq -c '.[]')
-    fi
-    
-    # Choose compiler based on suite type or config
-    local compiler="gcc"
-    
-    # Check if compiler is specified in test config
-    local config_compiler=$(get_config "$suite_type" "compiler")
-    if [ -n "$config_compiler" ] && [ "$config_compiler" != "null" ] && [ "$config_compiler" != "" ]; then
-        compiler="$config_compiler"
-    elif [ "$suite_type" = "lambda" ]; then
-        compiler="clang"
-    fi
-    
-    # Add suite-specific includes and libraries
-    if [ "$suite_type" = "lambda" ]; then
-        include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
-        include_flags="$include_flags -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
-        dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
-    fi
-    
-    # Build final command
-    echo "$compiler $special_flags $include_flags $CRITERION_FLAGS -o $binary $source ${object_files[*]} $static_libs $dynamic_libs"
-    return 0
-}
-
 # Helper function to build dependency-based compilation command  
 build_dependency_based_compile_cmd() {
     local suite_type="$1"
@@ -929,13 +787,17 @@ run_parallel_suite_impl() {
             
             local compile_cmd=""
             
-            # Use the same generic compilation logic as raw mode
-            compile_cmd=$(build_generic_compile_cmd "$suite_name" "$test_source" "$test_binary" "$test_deps" "$special_flags" "$i")
+            # Use the same library-based compilation logic as raw mode
+            compile_cmd=$(build_library_based_compile_cmd "$suite_name" "$test_source" "$test_binary" "$i" "$special_flags")
             
             if [ $? -ne 0 ]; then
-                safe_echo "$compile_cmd"  # This will be the error message
-                total_failed=$((total_failed + 1))
-                continue
+                # Fallback to legacy dependency-based compilation
+                compile_cmd=$(build_dependency_based_compile_cmd "$suite_name" "$test_source" "$test_binary" "$test_deps" "$special_flags")
+                if [ $? -ne 0 ]; then
+                    safe_echo "$compile_cmd"  # This will be the error message
+                    total_failed=$((total_failed + 1))
+                    continue
+                fi
             fi
             
             if $compile_cmd 2>/dev/null; then
@@ -1163,13 +1025,17 @@ run_parallel_suite_impl() {
                 compile_cmd="gcc $special_flags $include_flags $CRITERION_FLAGS -o $test_binary $test_source ${object_files[*]} $static_libs $dynamic_libs"
             fi
         else
-            # Standard compilation (for library and input tests) - use same logic as raw mode
-            compile_cmd=$(build_generic_compile_cmd "$suite_name" "$test_source" "$test_binary" "$test_deps" "$special_flags" "$i")
+            # Standard compilation (for library and input tests) - use library-based compilation
+            compile_cmd=$(build_library_based_compile_cmd "$suite_name" "$test_source" "$test_binary" "$i" "$special_flags")
             
             if [ $? -ne 0 ]; then
-                print_error "$compile_cmd"  # This will be the error message
-                total_failed=$((total_failed + 1))
-                continue
+                # Fallback to legacy dependency-based compilation
+                compile_cmd=$(build_dependency_based_compile_cmd "$suite_name" "$test_source" "$test_binary" "$test_deps" "$special_flags")
+                if [ $? -ne 0 ]; then
+                    print_error "$compile_cmd"  # This will be the error message
+                    total_failed=$((total_failed + 1))
+                    continue
+                fi
             fi
         fi
         
@@ -1484,12 +1350,16 @@ run_individual_test() {
         local raw_compile_cmd
         local raw_binary_path=""
         
-        # Use generic compilation command builder with test index for library dependency resolution
-        raw_compile_cmd=$(build_generic_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags" "$test_index")
+        # Use library-based compilation command builder with test index for library dependency resolution
+        raw_compile_cmd=$(build_library_based_compile_cmd "$suite_type" "$source" "$binary" "$test_index" "$special_flags")
         
         if [ $? -ne 0 ]; then
-            echo "$raw_compile_cmd"  # This will be the error message
-            return 1
+            # Fallback to legacy dependency-based compilation
+            raw_compile_cmd=$(build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags")
+            if [ $? -ne 0 ]; then
+                echo "$raw_compile_cmd"  # This will be the error message
+                return 1
+            fi
         fi
         
         # Determine binary path based on suite type
@@ -1744,11 +1614,15 @@ run_individual_test() {
             done
         fi
         
-        # Use generic compilation logic with library resolution
-        local compile_cmd=$(build_generic_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags" "$test_index")
+        # Use library-based compilation logic with library resolution
+        local compile_cmd=$(build_library_based_compile_cmd "$suite_type" "$source" "$binary" "$test_index" "$special_flags")
         if [ $? -ne 0 ]; then
-            print_error "$compile_cmd"  # This will be the error message
-            return 1
+            # Fallback to legacy dependency-based compilation
+            compile_cmd=$(build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags")
+            if [ $? -ne 0 ]; then
+                print_error "$compile_cmd"  # This will be the error message
+                return 1
+            fi
         fi
         
         local binary_path="./test/$binary"
