@@ -301,7 +301,38 @@ get_automatic_test_dependencies() {
     esac
 }
 
-# Function to check if we're running with jq support
+# Function to get the global compiler setting with C/C++ variant support
+get_global_compiler() {
+    local variant="$1"  # Optional: "c" or "cpp" to get C or C++ variant
+    local config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
+    
+    local base_compiler="clang"  # Default fallback
+    
+    if [ -f "$config_file" ] && has_jq_support; then
+        local config_compiler=$(jq -r '.compiler // empty' "$config_file" 2>/dev/null)
+        if [ -n "$config_compiler" ] && [ "$config_compiler" != "null" ]; then
+            base_compiler="$config_compiler"
+        fi
+    fi
+    
+    # Return appropriate variant
+    case "$variant" in
+        "cpp"|"c++")
+            if [ "$base_compiler" = "clang" ]; then
+                echo "clang++"
+            elif [ "$base_compiler" = "gcc" ]; then
+                echo "g++"
+            else
+                echo "$base_compiler++"
+            fi
+            ;;
+        "c"|*)
+            echo "$base_compiler"
+            ;;
+    esac
+}
+
+# Function to check if jq is available and working
 has_jq_support() {
     command -v jq >/dev/null 2>&1
 }
@@ -329,57 +360,226 @@ validate_config_file() {
 resolve_library_dependencies() {
     local library_deps_array=("$@")
     local build_config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
-    local platform=""
     
     local resolved_flags=""
-    local include_flags=""
-    local source_files=""
-    local object_files=""
-    local static_libs=""
-    local dynamic_libs=""
+    local all_includes=""
+    local all_sources=""
+    local all_objects=""
+    local all_static_libs=""
+    local all_dynamic_libs=""
+    local all_special_flags=""
     
+    # Use associative arrays to track what we've already included (requires bash 4+)
+    # For bash 3.2 compatibility, we'll use simple string tracking
+    local included_objects=""
+    local included_sources=""
+    
+    # Process each library dependency
     for lib_name in "${library_deps_array[@]}"; do
-        case "$lib_name" in
-            "strbuf")
-                source_files="$source_files lib/strbuf.c"
-                ;;
-            "strview")
-                source_files="$source_files lib/strview.c"
-                ;;
-            "mem-pool")
-                source_files="$source_files lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c"
-                include_flags="$include_flags -Ilib/mem-pool/include"
-                ;;
-            "num_stack")
-                source_files="$source_files lib/num_stack.c"
-                ;;
-            "datetime")
-                source_files="$source_files lib/datetime.c"
-                ;;
-            "string")
-                source_files="$source_files lib/string.c"
-                ;;
-            "mime-detect")
-                source_files="$source_files lambda/input/mime-detect.c lambda/input/mime-types.c"
-                ;;
-            "lambda-runtime-full")
-                # Complex runtime dependencies - use pre-built objects
-                source_files="$source_files lib/file.c"
-                object_files="$object_files build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o build/datetime.o build/string.o build/unicode_string.o"
-                static_libs="$static_libs lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a"
-                include_flags="$include_flags -Ilib/mem-pool/include"
-                dynamic_libs="$dynamic_libs -L/opt/homebrew/lib -lgmp -L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
-                ;;
-            "criterion")
-                include_flags="$include_flags -I/opt/homebrew/Cellar/criterion/2.4.2_2/include"
-                dynamic_libs="$dynamic_libs -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
-                ;;
-        esac
+        local lib_result=$(resolve_single_library_dependency "$lib_name" "$build_config_file" "$included_objects" "$included_sources")
+        if [ -n "$lib_result" ]; then
+            # Parse the result format: "includes|sources|objects|static_libs|dynamic_libs|special_flags|updated_included_objects|updated_included_sources"
+            local includes=$(echo "$lib_result" | cut -d'|' -f1)
+            local sources=$(echo "$lib_result" | cut -d'|' -f2)
+            local objects=$(echo "$lib_result" | cut -d'|' -f3)
+            local static_libs=$(echo "$lib_result" | cut -d'|' -f4)
+            local dynamic_libs=$(echo "$lib_result" | cut -d'|' -f5)
+            local special_flags=$(echo "$lib_result" | cut -d'|' -f6)
+            included_objects=$(echo "$lib_result" | cut -d'|' -f7)
+            included_sources=$(echo "$lib_result" | cut -d'|' -f8)
+            
+            # Accumulate results
+            all_includes="$all_includes $includes"
+            all_sources="$all_sources $sources"
+            all_objects="$all_objects $objects"
+            all_static_libs="$all_static_libs $static_libs"
+            all_dynamic_libs="$all_dynamic_libs $dynamic_libs"
+            all_special_flags="$all_special_flags $special_flags"
+        fi
     done
     
     # Build final resolved flags string
-    resolved_flags="$include_flags $source_files $object_files $static_libs $dynamic_libs"
+    resolved_flags="$all_includes $all_sources $all_objects $all_static_libs $all_dynamic_libs $all_special_flags"
     echo "$resolved_flags"
+}
+
+# Helper function to resolve a single library dependency with deduplication
+resolve_single_library_dependency() {
+    local lib_name="$1"
+    local build_config_file="$2"
+    local included_objects="$3"
+    local included_sources="$4"
+    
+    if [ ! -f "$build_config_file" ] || ! has_jq_support; then
+        # Fallback to legacy hardcoded resolution for backwards compatibility
+        local legacy_flags=$(resolve_library_legacy "$lib_name")
+        echo "$legacy_flags||||||$included_objects|$included_sources"
+        return
+    fi
+    
+    # Get library definition from config
+    local lib_def=$(jq -r ".libraries[] | select(.name == "$lib_name")" "$build_config_file" 2>/dev/null)
+    
+    if [ -z "$lib_def" ] || [ "$lib_def" = "null" ]; then
+        # Library not found in config, try legacy resolution
+        local legacy_flags=$(resolve_library_legacy "$lib_name")
+        echo "$legacy_flags||||||$included_objects|$included_sources"
+        return
+    fi
+    
+    local includes=""
+    local sources=""
+    local objects=""
+    local static_libs=""
+    local dynamic_libs=""
+    local special_flags=""
+    
+    # Parse library definition and build flags
+    local include_path=$(echo "$lib_def" | jq -r '.include // empty')
+    local lib_sources=$(echo "$lib_def" | jq -r '.sources[]? // empty' | tr '
+' ' ')
+    local lib_objects=$(echo "$lib_def" | jq -r '.objects[]? // empty' | tr '
+' ' ')
+    local lib_path=$(echo "$lib_def" | jq -r '.lib // empty')
+    local link_type=$(echo "$lib_def" | jq -r '.link // "dynamic"')
+    local nested_libs=$(echo "$lib_def" | jq -r '.libraries[]? // empty' | tr '
+' ' ')
+    local lib_special_flags=$(echo "$lib_def" | jq -r '.special_flags // empty')
+    
+    # Add include path
+    if [ -n "$include_path" ]; then
+        includes="-I$include_path"
+    fi
+    
+    # Add source files (with deduplication)
+    if [ -n "$lib_sources" ]; then
+        for source in $lib_sources; do
+            if [[ "$included_sources" != *"$source"* ]]; then
+                sources="$sources $source"
+                included_sources="$included_sources $source "
+            fi
+        done
+    fi
+    
+    # Add object files (with deduplication)
+    if [ -n "$lib_objects" ]; then
+        for obj in $lib_objects; do
+            # Expand wildcards
+            local expanded_objects=$(ls $obj 2>/dev/null || echo "")
+            for expanded_obj in $expanded_objects; do
+                if [[ "$included_objects" != *"$expanded_obj"* ]]; then
+                    objects="$objects $expanded_obj"
+                    included_objects="$included_objects $expanded_obj "
+                fi
+            done
+        done
+    fi
+    
+    # Add special flags
+    if [ -n "$lib_special_flags" ]; then
+        special_flags="$lib_special_flags"
+    fi
+    
+    # Handle library linking based on type
+    case "$link_type" in
+        "static")
+            if [ -n "$lib_path" ]; then
+                static_libs="$lib_path"
+            fi
+            ;;
+        "dynamic")
+            if [ -n "$lib_path" ]; then
+                local lib_dir=$(dirname "$lib_path")
+                local lib_name_only=$(basename "$lib_path" | sed 's/^lib//' | sed 's/\.[^.]*$//')
+                if [ "$lib_name_only" != "$lib_path" ]; then
+                    # Standard library format
+                    dynamic_libs="-L$lib_dir -l$lib_name_only"
+                else
+                    # Just a directory path - extract library name from parent library
+                    case "$lib_name" in
+                        "criterion")
+                            dynamic_libs="-L$lib_path -lcriterion"
+                            ;;
+                        *)
+                            dynamic_libs="-L$lib_path"
+                            ;;
+                    esac
+                fi
+            fi
+            ;;
+        "inline"|*)
+            # Source files are already handled above
+            ;;
+    esac
+    
+    # Recursively resolve nested library dependencies
+    if [ -n "$nested_libs" ]; then
+        for nested_lib in $nested_libs; do
+            local nested_result=$(resolve_single_library_dependency "$nested_lib" "$build_config_file" "$included_objects" "$included_sources")
+            if [ -n "$nested_result" ]; then
+                # Parse nested result and accumulate
+                local nested_includes=$(echo "$nested_result" | cut -d'|' -f1)
+                local nested_sources=$(echo "$nested_result" | cut -d'|' -f2)
+                local nested_objects=$(echo "$nested_result" | cut -d'|' -f3)
+                local nested_static_libs=$(echo "$nested_result" | cut -d'|' -f4)
+                local nested_dynamic_libs=$(echo "$nested_result" | cut -d'|' -f5)
+                local nested_special_flags=$(echo "$nested_result" | cut -d'|' -f6)
+                included_objects=$(echo "$nested_result" | cut -d'|' -f7)
+                included_sources=$(echo "$nested_result" | cut -d'|' -f8)
+                
+                includes="$includes $nested_includes"
+                sources="$sources $nested_sources"
+                objects="$objects $nested_objects"
+                static_libs="$static_libs $nested_static_libs"
+                dynamic_libs="$dynamic_libs $nested_dynamic_libs"
+                special_flags="$special_flags $nested_special_flags"
+            fi
+        done
+    fi
+    
+    # Return results in pipe-separated format
+    echo "$includes|$sources|$objects|$static_libs|$dynamic_libs|$special_flags|$included_objects|$included_sources"
+}
+
+
+
+# Legacy library resolution for backwards compatibility
+resolve_library_legacy() {
+    local lib_name="$1"
+    local flags=""
+    
+    case "$lib_name" in
+        "strbuf")
+            flags="lib/strbuf.c"
+            ;;
+        "strview")
+            flags="lib/strview.c"
+            ;;
+        "mem-pool")
+            flags="lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c -Ilib/mem-pool/include"
+            ;;
+        "num_stack")
+            flags="lib/num_stack.c"
+            ;;
+        "datetime")
+            flags="lib/datetime.c"
+            ;;
+        "string")
+            flags="lib/string.c"
+            ;;
+        "mime-detect")
+            flags="lambda/input/mime-detect.c lambda/input/mime-types.c"
+            ;;
+        "criterion")
+            flags="-I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+            ;;
+        "lambda-runtime-full")
+            # Complex legacy fallback - should be defined in config instead
+            flags="lib/file.c build/print.o build/strview.o build/transpile.o build/utf.o build/build_ast.o build/lambda-eval.o build/lambda-mem.o build/runner.o build/mir.o build/url.o build/parse.o build/parser.o build/num_stack.o build/input*.o build/format*.o build/strbuf.o build/hashmap.o build/arraylist.o build/variable.o build/buffer.o build/utils.o build/mime-detect.o build/mime-types.o build/datetime.o build/string.o build/unicode_string.o lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a /usr/local/lib/libmir.a /usr/local/lib/libzlog.a /usr/local/lib/liblexbor_static.a -Ilib/mem-pool/include -L/opt/homebrew/lib -lgmp -L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
+            ;;
+    esac
+    
+    echo "$flags"
 }
 
 # Function to get library dependencies array from test config

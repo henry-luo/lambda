@@ -331,7 +331,9 @@
                 "suite": "validator",
                 "name": "🔍 Validator Tests",
                 "sources": ["test/test_validator.cpp"],
-                "dependencies": ["build_lambda_config.json"],
+                "library_dependencies": [
+                    ["criterion"]
+                ],
                 "binaries": ["test/test_validator.exe"],
                 "type": "validator",
                 "special_flags": "-std=c++17 -lstdc++",
@@ -398,7 +400,9 @@
                 "suite": "mir",
                 "name": "⚡ MIR JIT Tests",
                 "sources": ["test/test_mir.c"],
-                "dependencies": ["build_lambda_config.json"],
+                "library_dependencies": [
+                    ["lambda-runtime-full", "criterion"]
+                ],
                 "binaries": ["test/test_mir.exe"],
                 "type": "mir",
                 "special_flags": "-std=c99 -Wall -Wextra -O2 -g -fms-extensions -pedantic -lstdc++",
@@ -410,7 +414,9 @@
                 "suite": "lambda",
                 "name": "🐑 Lambda Runtime Tests",
                 "sources": ["test/test_lambda.c"],
-                "dependencies": ["build_lambda_config.json"],
+                "library_dependencies": [
+                    ["lambda-runtime-full", "criterion"]
+                ],
                 "binaries": ["test/test_lambda.exe"],
                 "type": "lambda",
                 "special_flags": "-fms-extensions -lstdc++",

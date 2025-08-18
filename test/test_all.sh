@@ -190,7 +190,29 @@ get_build_config_file() {
     fi
 }
 
-# Helper function to build compilation command using library dependency resolution (Phase 2)
+# Function to get library dependencies for a specific test
+get_library_dependencies_for_test() {
+    local suite_type="$1"
+    local test_index="${2:-0}"
+    
+    if [ ! -f "$BUILD_CONFIG_FILE" ] || ! has_jq_support; then
+        return 1
+    fi
+    
+    # Get test suite definition from config
+    local test_suite=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_type\")" "$BUILD_CONFIG_FILE" 2>/dev/null)
+    if [ -z "$test_suite" ] || [ "$test_suite" = "null" ]; then
+        return 1
+    fi
+    
+    # Get library dependencies for specific test index
+    local library_deps=$(echo "$test_suite" | jq -r ".library_dependencies[$test_index][]? // empty" | tr '\n' ' ')
+    
+    # Output space-separated library names
+    echo "$library_deps"
+}
+
+# Helper function to build compilation command using library dependency resolution (Phase 5)
 build_library_based_compile_cmd() {
     local suite_type="$1"
     local source="$2" 
@@ -198,16 +220,13 @@ build_library_based_compile_cmd() {
     local test_index="$4"
     local special_flags="$5"
     
-    # Try to get library dependencies first (Phase 2 approach)
+    # Try to get library dependencies first (Phase 5 approach)
     local lib_deps_str=$(get_library_dependencies_for_test "$suite_type" "$test_index")
     
     if [ -n "$lib_deps_str" ]; then
-        # Phase 2: Use library name resolution
+        # Phase 5: Use library name resolution
         local lib_deps_array=($lib_deps_str)
         local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
-        
-        # Add criterion for tests
-        local criterion_flags="-I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
         
         # Handle both prefixed and unprefixed paths
         local final_source="$source"
@@ -221,12 +240,89 @@ build_library_based_compile_cmd() {
             final_binary="test/$final_binary"
         fi
         
-        echo "clang $special_flags -o $final_binary $final_source $resolved_flags $criterion_flags"
+        # Get compiler from config
+        local compiler=$(get_config "$suite_type" "compiler")
+        if [ -z "$compiler" ] || [ "$compiler" = "null" ]; then
+            compiler=$(get_global_compiler)
+        fi
+        
+        # For C++ files, use C++ variant of compiler
+        if [[ "$final_source" == *.cpp ]]; then
+            if [ "$compiler" = "clang" ]; then
+                compiler="clang++"
+            elif [ "$compiler" = "gcc" ]; then
+                compiler="g++"
+            fi
+        fi
+        
+        # For validator tests that use the build config, we rely entirely on library dependencies
+        # DO NOT add object files separately as they should be included in the libraries
+        # This prevents duplicate symbol errors
+        
+        echo "$compiler $special_flags -o $final_binary $final_source $resolved_flags"
         return 0
     else
         # Fallback to legacy dependency strings if library_dependencies not available
         return 1
     fi
+}
+
+# Helper function to extract object files from build config (for validator/mir/lambda tests)
+extract_build_object_files() {
+    local config_file="$1"
+    
+    if [ ! -f "$config_file" ] || ! has_jq_support; then
+        return 1
+    fi
+    
+    # Extract and build object files list
+    local object_files=()
+    while IFS= read -r source_file; do
+        local base_name
+        if [[ "$source_file" == *.cpp ]]; then
+            base_name=$(basename "$source_file" .cpp)
+        else
+            base_name=$(basename "$source_file" .c)
+        fi
+        local obj_file="build/${base_name}.o"
+        if [ -f "$obj_file" ]; then
+            object_files+=("$PWD/$obj_file")
+        fi
+    done < <(jq -r '.source_files[]' "$config_file" | grep -E '\.(c|cpp)$')
+    
+    # Process source_dirs if any
+    local source_dirs
+    source_dirs=$(jq -r '.source_dirs[]?' "$config_file" 2>/dev/null)
+    if [ -n "$source_dirs" ]; then
+        while IFS= read -r source_dir; do
+            if [ -d "$source_dir" ]; then
+                while IFS= read -r source_file; do
+                    local rel_path="${source_file#$PWD/}"
+                    local base_name
+                    if [[ "$rel_path" == *.cpp ]]; then
+                        base_name=$(basename "$rel_path" .cpp)
+                    else
+                        base_name=$(basename "$rel_path" .c)
+                    fi
+                    local obj_file="build/${base_name}.o"
+                    if [ -f "$obj_file" ]; then
+                        object_files+=("$PWD/$obj_file")
+                    fi
+                done < <(find "$source_dir" -name "*.c" -o -name "*.cpp" -type f)
+            fi
+        done <<< "$source_dirs"
+    fi
+    
+    # Exclude main.o since Criterion provides its own main function
+    local filtered_object_files=()
+    for obj_file in "${object_files[@]}"; do
+        if [[ "$obj_file" != *"/main.o" ]]; then
+            filtered_object_files+=("$obj_file")
+        fi
+    done
+    
+    # Return space-separated list
+    printf "%s " "${filtered_object_files[@]}"
 }
 
 # Helper function to build generic compilation command from config
@@ -238,23 +334,23 @@ build_generic_compile_cmd() {
     local special_flags="$5"
     local test_index="${6:-0}"  # Optional test index for library dependency resolution
     
-    # Check if suite uses build config
+    # Phase 5: Try library-based approach first for ALL test suites
+    if build_library_based_compile_cmd "$suite_type" "$source" "$binary" "$test_index" "$special_flags"; then
+        return 0
+    fi
+    
+    # Fallback: Check if suite uses legacy build config approach
     local uses_build_config=$(get_config "$suite_type" "uses_build_config")
     local build_config_file=$(get_build_config_file "$suite_type")
     
     if [ "$uses_build_config" = "true" ] && [ -f "$build_config_file" ]; then
-        # Build config-driven compilation (for mir, lambda, validator types)
+        # Legacy build config-driven compilation (should be rare now)
         build_config_driven_compile_cmd "$suite_type" "$source" "$binary" "$special_flags" "$build_config_file"
         return $?
     else
-        # Try Phase 2 library-based approach first
-        if build_library_based_compile_cmd "$suite_type" "$source" "$binary" "$test_index" "$special_flags"; then
-            return 0
-        else
-            # Fallback to legacy dependency-based compilation
-            build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags"
-            return $?
-        fi
+        # Final fallback to legacy dependency-based compilation
+        build_dependency_based_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags"
+        return $?
     fi
 }
 
@@ -1386,6 +1482,8 @@ run_individual_test() {
         else
             echo "❌ Failed to compile $source"
             $raw_compile_cmd  # Show error output
+            # Print a minimal synthesis line to indicate compilation failure
+            echo "[====] Final Summary: Tested: 0 | Passed: 0 | Failed: 1 | Crashed: 0"
             return 1
         fi
     fi
@@ -1608,7 +1706,26 @@ run_individual_test() {
     else
         print_status "🧪 Running individual test: $test_name"
         print_status "Compiling test/test_$test_name.c..."
-        local compile_cmd="gcc -std=c99 -Wall -Wextra -g -O0 -I. -Ilambda -Ilib $CRITERION_FLAGS -o test/$binary test/$source $deps $special_flags"
+        
+        # Use the new library-based compilation system (Phase 5)
+        local test_index=-1
+        if [ "$suite_type" != "validator" ] && [ "$suite_type" != "mir" ] && [ "$suite_type" != "lambda" ]; then
+            # For library and input tests, find the test index
+            for i in "${!sources_array[@]}"; do
+                if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
+                    test_index=$i
+                    break
+                fi
+            done
+        fi
+        
+        # Use generic compilation logic with library resolution
+        local compile_cmd=$(build_generic_compile_cmd "$suite_type" "$source" "$binary" "$deps" "$special_flags" "$test_index")
+        if [ $? -ne 0 ]; then
+            print_error "$compile_cmd"  # This will be the error message
+            return 1
+        fi
+        
         local binary_path="./test/$binary"
     fi
     
@@ -1781,10 +1898,14 @@ run_suite_raw_mode() {
             test_name=${test_name#test_}  # Remove "test_" prefix if present
             
             # Run test and capture exit code, but let output flow to terminal
-            if run_individual_test "$suite_name" "$test_name" 2>&1 | tee -a "$temp_summary_file"; then
-                local exit_code=0
+            set +e
+            run_individual_test "$suite_name" "$test_name" 2>&1 | tee -a "$temp_summary_file"
+            local exit_code=${PIPESTATUS[0]}  # Get exit code of run_individual_test, not tee
+            set -e
+            
+            if [ $exit_code -eq 0 ]; then
+                : # Test passed
             else
-                local exit_code=$?
                 overall_failed=$((overall_failed + exit_code))
             fi
         done
@@ -1794,10 +1915,14 @@ run_suite_raw_mode() {
         print_status "Running single suite test: $test_name"
         
         # Run test and capture exit code, but let output flow to terminal
-        if run_individual_test "$suite_name" "$test_name" 2>&1 | tee -a "$temp_summary_file"; then
+        set +e
+        run_individual_test "$suite_name" "$test_name" 2>&1 | tee -a "$temp_summary_file"
+        local exit_code=${PIPESTATUS[0]}  # Get exit code of run_individual_test, not tee
+        set -e
+        
+        if [ $exit_code -eq 0 ]; then
             print_success "$test_name test completed successfully"
         else
-            local exit_code=$?
             print_error "$test_name test failed with exit code: $exit_code"
             overall_failed=$exit_code
         fi

@@ -66,6 +66,29 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
   - Object files and temporary build configs
   - **Preserves all source files** (`.c`, `.cpp`, `.h`, `.sh`)
 
+### Phase 5: Library Name Dependencies ✅
+
+**🔗 Structured Library Dependencies**
+- Migrated all test suites from hardcoded dependency strings to structured library name references
+- All 5 test suites (validator, mir, lambda, library, input) now use `library_dependencies` format
+- Enhanced `lib/build_utils.sh` with recursive dependency resolution and object file deduplication
+- Implemented `resolve_library_dependencies()` and `resolve_single_library_dependency()` functions
+
+**🛠️ Enhanced Build Infrastructure**
+- Added `build_library_based_compile_cmd()` for automatic dependency resolution
+- Fixed `get_library_dependencies_for_test()` to properly extract per-test dependencies
+- Implemented robust error handling and exit code propagation for all test suites
+- Removed duplicate function definitions that were overriding deduplication logic
+
+**🎯 Configuration Transformation**
+```json
+// BEFORE (Legacy):
+"dependencies": ["lib/strbuf.c lib/mem-pool/src/variable.c -Ilib/mem-pool/include"]
+
+// AFTER (Current):
+"library_dependencies": ["strbuf", "mem-pool", "criterion"]
+```
+
 ---
 
 ## 📋 **CURRENT STATE ANALYSIS**
@@ -78,54 +101,20 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 - Enhanced developer workflow with comprehensive Makefile targets
 - **Global compiler configuration with clang as default**
 - **Safe test executable management and cleanup**
+- **Structured library name dependencies with automatic resolution**
+- **Object file deduplication and recursive dependency mapping**
 
 ### 🔄 **Remaining Challenges**
-1. **Dependency Duplication**: Test configs still contain hardcoded dependency strings
-2. **Build System Fragmentation**: Tests don't reuse main build system's object files
-3. **Manual Library Mapping**: Need automatic dependency resolution from library names
+1. **Build System Fragmentation**: Tests don't reuse main build system's object files
+2. **Manual Library Source Management**: Library definitions still require manual source file listing
 
-**Example of Current Problem:**
-```json
-"dependencies": [
-    "lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c -Ilib/mem-pool/include",
-    "lib/strview.c",
-    "lib/num_stack.c"
-]
-```
+**Note**: Dependency duplication has been eliminated through the library name dependency system.
 
 ---
 
 ## 🚀 **INCREMENTAL ENHANCEMENT ROADMAP**
 
-### Phase 5: Library Name Dependencies (Next Priority)
-
-**Objective**: Replace hardcoded dependency strings with structured library name references.
-
-**Tasks:**
-1. **Transform Test Configuration Structure**
-   ```json
-   // BEFORE (Current):
-   "dependencies": ["lib/strbuf.c lib/mem-pool/src/variable.c -Ilib/mem-pool/include"]
-   
-   // AFTER (Target):
-   "library_dependencies": [["strbuf", "mem-pool", "criterion"]]
-   ```
-
-2. **Implement Library Name Resolution in `test_all.sh`**
-   - Create mapping from library names to actual file paths/flags
-   - Leverage existing `build_lambda_config.json` library definitions
-   - Add automatic dependency resolution function
-
-3. **Migrate Test Suites Incrementally**
-   - Start with library tests (simplest dependencies)
-   - Progress to input tests (complex dependencies)
-   - Maintain backward compatibility during transition
-
-**Expected Outcome**: Single source of truth for library definitions with automatic propagation.
-
-**Estimated Effort**: 2-3 hours
-
-### Phase 6: Build System Integration
+### Phase 6: Build System Integration (Next Priority)
 
 **Objective**: Leverage main build system's compilation infrastructure for tests.
 
@@ -166,11 +155,11 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 
 ## 📝 **IMMEDIATE NEXT STEPS**
 
-### Priority 1: Complete Library Name Dependencies (Phase 5)
-1. **Update test configuration format** in `build_lambda_config.json`
-2. **Implement `resolve_library_dependencies()`** function in `test_all.sh`
-3. **Migrate library tests first** (simplest dependencies)
-4. **Test with existing validator suite** to ensure backward compatibility
+### Priority 1: Complete Build System Integration (Phase 6)
+1. **Implement object file reuse** from `build/` directory
+2. **Leverage `compile.sh` infrastructure** for test compilation
+3. **Optimize build cache efficiency** and error diagnostics
+4. **Test with existing test suites** to ensure performance improvements
 
 ### Priority 2: Quality Assurance
 1. **Run full test suite** to verify all 240+ tests still pass
@@ -179,9 +168,9 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 
 ### Success Metrics
 - All existing tests continue to pass
-- Reduced maintenance overhead for dependency management
-- Faster test build times
-- Consistent compiler usage (clang) across all tests
+- Reduced test build times through object file reuse
+- Consistent build behavior between main system and tests
+- Maintained library dependency automation from Phase 5
 
 ---
 
@@ -233,30 +222,20 @@ This document outlines the evolution of Lambda's test infrastructure from a frag
 ## 🎯 **IMPLEMENTATION STRATEGY**
 
 ### Incremental Migration Approach
-1. **Phase 4** (2-3 hours): Library name references with backward compatibility
-2. **Phase 5** (4-5 hours): Build system integration and object file reuse
-3. **Phase 6** (6-8 hours): Intelligent automation and platform-specific support
+1. **Phase 6** (3-4 hours): Build system integration and object file reuse
+2. **Phase 7** (4-5 hours): Full automation and platform-specific support
 
-### Backward Compatibility
-- Maintain old dependency format as fallback during transition
-- Gradual migration of test suites to new format
-- Deprecation warnings for legacy dependency formats
+### Recent Achievements (Phase 5)
+- **Library name dependency system** with automatic resolution and deduplication
+- **All test suites migrated** to structured `library_dependencies` format
+- **Enhanced build utilities** with recursive dependency mapping
+- **Eliminated dependency duplication** across all 5 test suites
 
----
-
-## 📈 **EXPECTED BENEFITS**
-
-### Recent Achievements (Phase 4)
-- **Unified compiler configuration** with clang as standard across all tests
-- **Preserved test executables** for faster debugging and re-runs
-- **Safe cleanup process** that protects source files from accidental deletion
-
-### Upcoming Benefits (Phases 5-7)
-- **~80% reduction** in duplicated dependency strings
-- **Automatic propagation** of library path changes to tests  
-- **Faster test builds** through object file reuse
+### Upcoming Benefits (Phases 6-7)
+- **Faster test builds** through object file reuse from main build system
 - **Consistent build behavior** across main build and tests
 - **Cross-platform consistency** with platform-aware configurations
+- **Zero-configuration** dependency management for new tests
 
 ---
 
