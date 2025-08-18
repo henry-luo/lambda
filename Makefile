@@ -554,6 +554,22 @@ test-all:
 	@echo ""
 	@echo "🎉 Complete test suite finished!"
 
+# Phase 6: Build System Integration Targets
+validate-build:
+	@echo "Validating build objects for testing (Phase 6)..."
+	@if [ -f "lib/build_utils.sh" ]; then \
+		if source lib/build_utils.sh && validate_build_objects; then \
+			echo "✅ Build objects validation passed"; \
+		else \
+			echo "❌ Build objects validation failed"; \
+			echo "Run 'make build' to ensure all objects are current"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "❌ Build utilities not found"; \
+		exit 1; \
+	fi
+
 test-ci:
 	@echo "Running CI test suite..."
 	@$(MAKE) test

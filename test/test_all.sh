@@ -220,13 +220,18 @@ build_library_based_compile_cmd() {
     local test_index="$4"
     local special_flags="$5"
     
+    # Phase 6: Check build prerequisites before proceeding
+    if ! check_build_prerequisites; then
+        echo "Build prerequisites check failed. Please run 'make build' first."
+        return 1
+    fi
+    
     # Try to get library dependencies first (Phase 5 approach)
     local lib_deps_str=$(get_library_dependencies_for_test "$suite_type" "$test_index")
     
     if [ -n "$lib_deps_str" ]; then
-        # Phase 5: Use library name resolution
+        # Phase 6: Enhanced library name resolution with object file optimization
         local lib_deps_array=($lib_deps_str)
-        local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
         
         # Handle both prefixed and unprefixed paths
         local final_source="$source"
@@ -255,9 +260,71 @@ build_library_based_compile_cmd() {
             fi
         fi
         
-        # For validator tests that use the build config, we rely entirely on library dependencies
-        # DO NOT add object files separately as they should be included in the libraries
-        # This prevents duplicate symbol errors
+        # Phase 6: Use optimized object file approach when possible
+        local use_objects=false
+        local object_files=""
+        local criterion_flags=""
+        local static_libs=""
+        
+        # Check if we can use object files (non-criterion dependencies exist)
+        local has_non_criterion=false
+        for lib_name in "${lib_deps_array[@]}"; do
+            if [ "$lib_name" != "criterion" ]; then
+                has_non_criterion=true
+                break
+            fi
+        done
+        
+        if [ "$has_non_criterion" = "true" ]; then
+            # Try to get minimal object set from build directory
+            local minimal_objects=$(get_minimal_object_set "$final_source" "${lib_deps_array[@]}")
+            
+            if [ -n "$minimal_objects" ]; then
+                use_objects=true
+                object_files="$minimal_objects"
+                
+                # Get include flags and static libraries from library resolution
+                local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
+                
+                # Extract criterion flags separately
+                for lib_name in "${lib_deps_array[@]}"; do
+                    if [ "$lib_name" = "criterion" ]; then
+                        if pkg-config --exists criterion 2>/dev/null; then
+                            criterion_flags=$(pkg-config --cflags --libs criterion)
+                        else
+                            # Fallback criterion flags
+                            criterion_flags="-I/opt/homebrew/Cellar/criterion/2.4.2_2/include -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion"
+                        fi
+                        break
+                    fi
+                done
+                
+                # Extract static libraries (but exclude object files that we're providing separately)
+                static_libs=$(echo "$resolved_flags" | grep -o '\S*\.a\s*' | tr '\n' ' ')
+                local include_flags=$(echo "$resolved_flags" | grep -o '\-I[^[:space:]]*' | tr '\n' ' ')
+                local link_flags=$(echo "$resolved_flags" | grep -o '\-L[^[:space:]]*\s*\-l[^[:space:]]*' | tr '\n' ' ')
+                
+                # Add ICU libraries if needed for unicode support
+                local icu_libs=""
+                for lib_name in "${lib_deps_array[@]}"; do
+                    if [[ "$lib_name" == *"input"* ]] || [[ "$lib_name" == *"lambda-core"* ]] || [[ "$lib_name" == *"lambda-runtime-full"* ]] || [[ "$lib_name" == *"lambda-input-core"* ]]; then
+                        if [ -n "$ICU_LIBS" ]; then
+                            icu_libs="$ICU_LIBS"
+                        else
+                            # Use hardcoded ICU libs if environment variable is not set
+                            icu_libs="-L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
+                        fi
+                        break
+                    fi
+                done
+                
+                echo "$compiler $special_flags $include_flags -o $final_binary $final_source $object_files $static_libs $link_flags $icu_libs $criterion_flags"
+                return 0
+            fi
+        fi
+        
+        # Phase 6: Fallback to legacy library resolution if object approach fails
+        local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
         
         echo "$compiler $special_flags -o $final_binary $final_source $resolved_flags"
         return 0
@@ -503,55 +570,6 @@ build_dependency_based_compile_cmd() {
     return 0
 }
 
-# Enhanced test compilation function using shared build utilities (Phase 1)
-build_enhanced_test_compile_cmd() {
-    local test_source="$1"
-    local test_binary="$2"
-    local config_file="${3:-build_lambda_config.json}"
-    local platform="$4"
-    local special_flags="$5"
-    
-    echo "🔧 Enhanced compilation for $test_source..." >&2
-    
-    # Validate configuration
-    if ! validate_config_file "$config_file"; then
-        echo "❌ Configuration validation failed" >&2
-        return 1
-    fi
-    
-    # Get automatic dependencies based on test file name
-    local lib_deps_str=$(get_automatic_test_dependencies "$test_source")
-    local lib_deps=($lib_deps_str)
-    
-    echo "   Detected dependencies: ${lib_deps[*]}" >&2
-    
-    # Collect required object files and inline sources
-    local build_dir=$(get_json_value "build_dir" "$config_file" "$platform")
-    build_dir=${build_dir:-build}
-    
-    local object_files=$(collect_required_objects "$build_dir" "${lib_deps[@]}")
-    local inline_sources=$(collect_inline_sources "$config_file" "$platform" "${lib_deps[@]}")
-    
-    # Collect library flags
-    local include_flags=$(collect_include_flags "$config_file" "$platform" "${lib_deps[@]}")
-    local static_libs=$(collect_static_libs "$config_file" "$platform" "${lib_deps[@]}")
-    local dynamic_libs=$(collect_dynamic_libs "$config_file" "$platform" "${lib_deps[@]}")
-    
-    # Add criterion test framework
-    include_flags="$include_flags $(collect_include_flags "$config_file" "$platform" "criterion")"
-    dynamic_libs="$dynamic_libs $(collect_dynamic_libs "$config_file" "$platform" "criterion")"
-    
-    # Add standard test include paths
-    include_flags="$include_flags -I./lib/mem-pool/include -I./lambda -I./lib"
-    
-    # Build final command
-    local compiler="clang"
-    local criterion_flags="-lcriterion"
-    
-    echo "$compiler $special_flags $include_flags -o $test_binary $test_source $inline_sources $object_files $static_libs $dynamic_libs $criterion_flags"
-    return 0
-}
-
 # Function to run test executable with raw output (no shell wrapper)
 run_raw_test() {
     local test_binary="$1"
@@ -653,6 +671,13 @@ load_test_config() {
     fi
     
     print_status "Loading test configuration from $BUILD_CONFIG_FILE (test section)..."
+    
+    # Phase 6: Check build prerequisites early in the process
+    if ! check_build_prerequisites; then
+        print_warning "Build prerequisites check failed. Some tests may not work correctly."
+        print_warning "Consider running 'make build' to ensure all object files are current."
+        # Don't exit here - allow tests to proceed with fallback mechanisms
+    fi
     
     # Load all test suite names (compatible with bash 3.2+)
     TEST_SUITE_NAMES=()
@@ -1832,27 +1857,9 @@ run_individual_library_test() {
     return $?
 }
 
-# Function to run individual validator test
-run_individual_validator_test() {
-    run_individual_test "validator" "$1"
-    return $?
-}
-
 # Function to run individual input test
 run_individual_input_test() {
     run_individual_test "input" "$1"
-    return $?
-}
-
-# Function to run individual MIR test
-run_individual_mir_test() {
-    run_individual_test "mir" "$1"
-    return $?
-}
-
-# Function to run individual Lambda test
-run_individual_lambda_test() {
-    run_individual_test "lambda" "$1"
     return $?
 }
 

@@ -70,194 +70,6 @@ get_json_array() {
     fi
 }
 
-# Function to resolve library configuration
-resolve_library_config() {
-    local config_file="$1"
-    local platform="$2"
-    local lib_name="$3"
-    
-    if command -v jq >/dev/null 2>&1; then
-        # Try platform-specific libraries first
-        if [ -n "$platform" ]; then
-            local platform_lib=$(jq -r ".platforms.$platform.libraries[]? | select(.name == \"$lib_name\")" "$config_file" 2>/dev/null)
-            if [ -n "$platform_lib" ] && [ "$platform_lib" != "null" ]; then
-                echo "$platform_lib"
-                return
-            fi
-        fi
-        
-        # Fallback to default libraries
-        jq -r ".libraries[]? | select(.name == \"$lib_name\")" "$config_file" 2>/dev/null
-    else
-        # Basic parsing fallback
-        echo "Error: jq required for library resolution" >&2
-        return 1
-    fi
-}
-
-# Function to collect include flags from libraries
-collect_include_flags() {
-    local config_file="$1"
-    local platform="$2"
-    shift 2
-    local library_names=("$@")
-    
-    local include_flags=""
-    
-    for lib_name in "${library_names[@]}"; do
-        local lib_config=$(resolve_library_config "$config_file" "$platform" "$lib_name")
-        if [ -n "$lib_config" ] && [ "$lib_config" != "null" ]; then
-            local include=$(echo "$lib_config" | jq -r '.include // empty' 2>/dev/null)
-            if [ -n "$include" ] && [ "$include" != "null" ]; then
-                include_flags="$include_flags -I$include"
-            fi
-        fi
-    done
-    
-    echo "$include_flags"
-}
-
-# Function to collect static library files
-collect_static_libs() {
-    local config_file="$1"
-    local platform="$2"
-    shift 2
-    local library_names=("$@")
-    
-    local static_libs=""
-    
-    for lib_name in "${library_names[@]}"; do
-        local lib_config=$(resolve_library_config "$config_file" "$platform" "$lib_name")
-        if [ -n "$lib_config" ] && [ "$lib_config" != "null" ]; then
-            local link=$(echo "$lib_config" | jq -r '.link // "static"' 2>/dev/null)
-            if [ "$link" = "static" ]; then
-                local lib=$(echo "$lib_config" | jq -r '.lib // empty' 2>/dev/null)
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    static_libs="$static_libs $lib"
-                fi
-            fi
-        fi
-    done
-    
-    echo "$static_libs"
-}
-
-# Function to collect dynamic library flags
-collect_dynamic_libs() {
-    local config_file="$1"
-    local platform="$2"
-    shift 2
-    local library_names=("$@")
-    
-    local dynamic_libs=""
-    
-    for lib_name in "${library_names[@]}"; do
-        local lib_config=$(resolve_library_config "$config_file" "$platform" "$lib_name")
-        if [ -n "$lib_config" ] && [ "$lib_config" != "null" ]; then
-            local link=$(echo "$lib_config" | jq -r '.link // "static"' 2>/dev/null)
-            if [ "$link" = "dynamic" ]; then
-                local lib=$(echo "$lib_config" | jq -r '.lib // empty' 2>/dev/null)
-                if [ -n "$lib" ] && [ "$lib" != "null" ]; then
-                    dynamic_libs="$dynamic_libs -L$lib -l$lib_name"
-                fi
-            fi
-        fi
-    done
-    
-    echo "$dynamic_libs"
-}
-
-# Function to collect source files for inline libraries
-collect_inline_sources() {
-    local config_file="$1"
-    local platform="$2"
-    shift 2
-    local library_names=("$@")
-    
-    local source_files=""
-    
-    for lib_name in "${library_names[@]}"; do
-        local lib_config=$(resolve_library_config "$config_file" "$platform" "$lib_name")
-        if [ -n "$lib_config" ] && [ "$lib_config" != "null" ]; then
-            local link=$(echo "$lib_config" | jq -r '.link // "static"' 2>/dev/null)
-            if [ "$link" = "inline" ]; then
-                local sources=$(echo "$lib_config" | jq -r '.sources[]? // empty' 2>/dev/null)
-                if [ -n "$sources" ]; then
-                    source_files="$source_files $sources"
-                fi
-            fi
-        fi
-    done
-    
-    echo "$source_files"
-}
-
-# Function to collect object files based on library dependencies
-collect_required_objects() {
-    local build_dir="$1"
-    shift
-    local library_names=("$@")
-    
-    local object_files=()
-    
-    for lib_name in "${library_names[@]}"; do
-        case "$lib_name" in
-            "strbuf")
-                [ -f "$build_dir/strbuf.o" ] && object_files+=("$build_dir/strbuf.o")
-                ;;
-            "strview")
-                [ -f "$build_dir/strview.o" ] && object_files+=("$build_dir/strview.o")
-                ;;
-            "mem-pool")
-                [ -f "$build_dir/variable.o" ] && object_files+=("$build_dir/variable.o")
-                [ -f "$build_dir/buffer.o" ] && object_files+=("$build_dir/buffer.o")
-                [ -f "$build_dir/utils.o" ] && object_files+=("$build_dir/utils.o")
-                ;;
-            "num_stack")
-                [ -f "$build_dir/num_stack.o" ] && object_files+=("$build_dir/num_stack.o")
-                ;;
-            "datetime")
-                [ -f "$build_dir/datetime.o" ] && object_files+=("$build_dir/datetime.o")
-                ;;
-            "string")
-                [ -f "$build_dir/string.o" ] && object_files+=("$build_dir/string.o")
-                ;;
-            "input")
-                # Collect all input-related object files
-                for obj in "$build_dir"/input*.o; do
-                    [ -f "$obj" ] && object_files+=("$obj")
-                done
-                [ -f "$build_dir/mime-detect.o" ] && object_files+=("$build_dir/mime-detect.o")
-                [ -f "$build_dir/mime-types.o" ] && object_files+=("$build_dir/mime-types.o")
-                ;;
-            "format")
-                # Collect all format-related object files
-                for obj in "$build_dir"/format*.o; do
-                    [ -f "$obj" ] && object_files+=("$obj")
-                done
-                ;;
-            "lambda-core")
-                # Core lambda runtime objects (excluding main.o for tests)
-                [ -f "$build_dir/lambda-eval.o" ] && object_files+=("$build_dir/lambda-eval.o")
-                [ -f "$build_dir/lambda-mem.o" ] && object_files+=("$build_dir/lambda-mem.o")
-                [ -f "$build_dir/transpile.o" ] && object_files+=("$build_dir/transpile.o")
-                [ -f "$build_dir/build_ast.o" ] && object_files+=("$build_dir/build_ast.o")
-                [ -f "$build_dir/runner.o" ] && object_files+=("$build_dir/runner.o")
-                [ -f "$build_dir/parse.o" ] && object_files+=("$build_dir/parse.o")
-                [ -f "$build_dir/parser.o" ] && object_files+=("$build_dir/parser.o")
-                [ -f "$build_dir/print.o" ] && object_files+=("$build_dir/print.o")
-                [ -f "$build_dir/mir.o" ] && object_files+=("$build_dir/mir.o")
-                [ -f "$build_dir/url.o" ] && object_files+=("$build_dir/url.o")
-                [ -f "$build_dir/utf.o" ] && object_files+=("$build_dir/utf.o")
-                [ -f "$build_dir/unicode_string.o" ] && object_files+=("$build_dir/unicode_string.o")
-                ;;
-        esac
-    done
-    
-    # Remove duplicates and return as space-separated string
-    printf '%s\n' "${object_files[@]}" | sort -u | tr '\n' ' '
-}
-
 # Function to get automatic test dependencies based on test file name
 get_automatic_test_dependencies() {
     local test_file="$1"
@@ -581,28 +393,140 @@ resolve_library_legacy() {
     
     echo "$flags"
 }
+# Phase 6: Build System Integration Functions
 
-# Function to get library dependencies array from test config
-get_library_dependencies_for_test() {
-    local suite_name="$1"
-    local test_index="$2"
-    local build_config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
+# Function to validate that main build objects are up-to-date
+validate_build_objects() {
+    local build_dir="${1:-build}"
+    local config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
     
-    if [ ! -f "$build_config_file" ]; then
-        echo ""
+    # Check if build directory exists
+    if [ ! -d "$build_dir" ]; then
+        echo "Build directory '$build_dir' not found" >&2
         return 1
     fi
     
-    if has_jq_support; then
-        # Get the library dependencies array for the specific test index
-        local lib_deps=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_name\") | .library_dependencies[$test_index] // empty" "$build_config_file" 2>/dev/null)
-        if [ -n "$lib_deps" ] && [ "$lib_deps" != "null" ]; then
-            # Parse JSON array and return as space-separated string
-            echo "$lib_deps" | jq -r '.[]' | tr '\n' ' '
-        else
-            echo ""
-        fi
-    else
-        echo ""
+    # Check if main executable exists
+    if [ ! -f "./lambda.exe" ]; then
+        echo "Main executable 'lambda.exe' not found" >&2
+        return 1
     fi
+    
+    # Basic validation - check if we have essential object files
+    local essential_objects=(
+        "lambda-eval.o"
+        "lambda-mem.o"
+        "strbuf.o"
+        "hashmap.o"
+        "variable.o"
+    )
+    
+    for obj in "${essential_objects[@]}"; do
+        if [ ! -f "$build_dir/$obj" ]; then
+            echo "Essential object file '$build_dir/$obj' not found" >&2
+            return 1
+        fi
+    done
+    
+    return 0
+}
+
+# Function to get required object files for a specific library
+get_library_object_files() {
+    local lib_name="$1"
+    local build_dir="${2:-build}"
+    local config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
+    
+    # Map library names to their required object files
+    case "$lib_name" in
+        "strbuf")
+            echo "$build_dir/strbuf.o"
+            ;;
+        "strview")
+            echo "$build_dir/strview.o"
+            ;;
+        "mem-pool")
+            echo "$build_dir/variable.o $build_dir/buffer.o $build_dir/utils.o"
+            ;;
+        "num_stack")
+            echo "$build_dir/num_stack.o"
+            ;;
+        "datetime")
+            echo "$build_dir/datetime.o"
+            ;;
+        "string")
+            echo "$build_dir/string.o"
+            ;;
+        "mime-detect")
+            echo "$build_dir/mime-detect.o $build_dir/mime-types.o"
+            ;;
+        "lambda-runtime-full")
+            # Return all necessary object files in one line
+            echo "$build_dir/lambda-eval.o $build_dir/lambda-mem.o $build_dir/transpile.o $build_dir/transpile-mir.o $build_dir/build_ast.o $build_dir/mir.o $build_dir/runner.o $build_dir/parse.o $build_dir/parser.o $build_dir/print.o $build_dir/input.o $build_dir/input-json.o $build_dir/input-ini.o $build_dir/input-xml.o $build_dir/input-yaml.o $build_dir/input-toml.o $build_dir/input-common.o $build_dir/input-css.o $build_dir/input-csv.o $build_dir/input-eml.o $build_dir/input-html.o $build_dir/input-ics.o $build_dir/input-latex.o $build_dir/input-man.o $build_dir/input-vcf.o $build_dir/input-mark.o $build_dir/input-org.o $build_dir/input-math.o $build_dir/input-rtf.o $build_dir/input-pdf.o $build_dir/input-markup.o $build_dir/format.o $build_dir/format-css.o $build_dir/format-latex.o $build_dir/format-html.o $build_dir/format-ini.o $build_dir/format-json.o $build_dir/format-math.o $build_dir/format-md.o $build_dir/format-org.o $build_dir/format-rst.o $build_dir/format-toml.o $build_dir/format-xml.o $build_dir/format-yaml.o $build_dir/strbuf.o $build_dir/strview.o $build_dir/arraylist.o $build_dir/file.o $build_dir/hashmap.o $build_dir/variable.o $build_dir/buffer.o $build_dir/utils.o $build_dir/url.o $build_dir/utf.o $build_dir/num_stack.o $build_dir/string.o $build_dir/datetime.o $build_dir/mime-detect.o $build_dir/mime-types.o $build_dir/pack.o $build_dir/validate.o $build_dir/validator.o $build_dir/schema_parser.o $build_dir/unicode_string.o"
+            ;;
+        *)
+            # Unknown library - return empty
+            echo ""
+            ;;
+    esac
+}
+
+# Function to get minimal object file set for a test
+get_minimal_object_set() {
+    local test_source="$1"
+    shift
+    local library_deps=("$@")
+    local build_dir="${BUILD_DIR:-build}"
+    
+    local object_files=""
+    local included_objects=""
+    
+    # Process each library dependency
+    for lib_name in "${library_deps[@]}"; do
+        # Skip criterion as it's handled separately
+        if [ "$lib_name" = "criterion" ]; then
+            continue
+        fi
+        
+        local lib_objects=$(get_library_object_files "$lib_name" "$build_dir")
+        
+        # Add objects, avoiding duplicates
+        for obj_file in $lib_objects; do
+            if [[ "$included_objects" != *"$obj_file"* ]]; then
+                object_files="$object_files $obj_file"
+                included_objects="$included_objects $obj_file "
+            fi
+        done
+    done
+    
+    # Filter out non-existent objects and return
+    local existing_objects=""
+    for obj_file in $object_files; do
+        if [ -f "$obj_file" ]; then
+            existing_objects="$existing_objects $obj_file"
+        fi
+    done
+    
+    # Trim leading/trailing spaces and return
+    local result=$(echo "$existing_objects" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    echo "$result"
+}
+
+# Function to check build prerequisites for testing
+check_build_prerequisites() {
+    local build_dir="${1:-build}"
+    
+    # Check if main build is completed
+    if [ ! -f "./lambda.exe" ]; then
+        echo "Main build not found. Run 'make build' first." >&2
+        return 1
+    fi
+    
+    # Validate build objects
+    if ! validate_build_objects "$build_dir"; then
+        echo "Build objects validation failed. Run 'make build' to ensure objects are current." >&2
+        return 1
+    fi
+    
+    return 0
 }

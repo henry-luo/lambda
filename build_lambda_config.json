@@ -200,6 +200,23 @@
             "link": "inline"
         },
         {
+            "name": "lambda-input-core",
+            "description": "Minimal Lambda input parsing core for simple tests",
+            "sources": ["lib/file.c"],
+            "objects": [
+                "build/input.o", "build/format.o", "build/url.o", "build/print.o",
+                "build/strbuf.o", "build/strview.o", "build/arraylist.o", 
+                "build/variable.o", "build/buffer.o", "build/utils.o",
+                "build/mime-detect.o", "build/mime-types.o", "build/string.o",
+                "build/lambda-mem.o", "build/num_stack.o", "build/unicode_string.o",
+                "build/runner.o"
+            ],
+            "libraries": ["tree-sitter-lambda", "tree-sitter", "lexbor", "icu"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "inline"
+        },
+        {
             "name": "lambda-runtime-full",
             "description": "Complete Lambda runtime with all dependencies for complex tests",
             "sources": ["lib/file.c"],
