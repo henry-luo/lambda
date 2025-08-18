@@ -555,11 +555,8 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     // Initialize the decimal with reference counting and libmpdec
     decimal->ref_cnt = 1;
     
-    // Create libmpdec context and decimal
-    mpd_context_t ctx;
-    mpd_maxcontext(&ctx);  // Use maximum precision context
-    
-    decimal->dec_val = mpd_new(&ctx);
+    // Use transpiler's decimal context
+    decimal->dec_val = mpd_new(&tp->decimal_ctx);
     if (decimal->dec_val == NULL) {
         printf("ERROR: Failed to allocate libmpdec decimal\n");
         free(num_str);
@@ -568,14 +565,10 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     
     // Parse the decimal string
     uint32_t status = 0;
-    mpd_qset_string(decimal->dec_val, num_str, &ctx, &status);
+    mpd_qset_string(decimal->dec_val, num_str, &tp->decimal_ctx, &status);
     if (status != 0) {
         printf("ERROR: Failed to parse decimal string: %s (status: %u)\n", num_str, status);
     }
-
-    char *buf = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
-    printf("DEBUG build_lit_decimal: %s\n", buf);
-    free(buf);
     
     // Add to const list
     arraylist_append(tp->const_list, item_type->decimal);

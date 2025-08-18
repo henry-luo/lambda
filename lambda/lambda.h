@@ -1,6 +1,7 @@
 #pragma once
 // #include <math.h>  // MIR has problem parsing math.h
 // #include <stdint.h>
+#include <mpdecimal.h>  // For libmpdec context
 
 
 #if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT) && !defined(__STDINT_H_INCLUDED)
@@ -170,6 +171,7 @@ typedef struct Context {
     void* type_info;  // meta info for the base types
     void* cwd;  // current working directory
     Item result; // final exec result
+    mpd_context_t decimal_ctx; // libmpdec context for decimal operations
 } Context;
 
 // Array and List struct defintions needed for for-loop

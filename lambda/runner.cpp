@@ -265,6 +265,9 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     new_script->source = source ? source : read_text_file(script_path);
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
+    
+    // Initialize decimal context
+    mpd_maxcontext(&new_script->decimal_ctx);
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
@@ -292,6 +295,10 @@ void runner_setup_context(Runner* runner) {
     runner->context.num_stack = num_stack_create(16);
     runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();
+    
+    // Initialize decimal context
+    mpd_maxcontext(&runner->context.decimal_ctx);
+    
     context = &runner->context;
     heap_init();
     frame_start();

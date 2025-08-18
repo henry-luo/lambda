@@ -215,6 +215,7 @@ struct Script {
     // each script is JIT compiled its own MIR context
     MIR_context_t jit_context;
     main_func_t main_func;  // transpiled main function
+    mpd_context_t decimal_ctx; // libmpdec context for decimal operations
 };
 
 typedef struct Transpiler : Script {
