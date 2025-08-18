@@ -87,7 +87,7 @@ void writeType(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "double");
         break;
     case LMD_TYPE_DECIMAL:
-        strbuf_append_str(tp->code_buf, "mpf_t*");
+        strbuf_append_str(tp->code_buf, "Decimal*");
         break;    
     case LMD_TYPE_STRING:
         strbuf_append_str(tp->code_buf, "String*");
@@ -141,6 +141,24 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
     print_named_items_with_depth(strbuf, map_type, map_data, 0);
+}
+
+void print_decimal(StrBuf *strbuf, Decimal *decimal) {
+    if (decimal == NULL || decimal->dec_val == NULL) {
+        strbuf_append_str(strbuf, "null");
+        return;
+    }
+    
+    // Use libmpdec to format the decimal
+    char *buf = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
+    if (buf == NULL) {
+        strbuf_append_str(strbuf, "error");
+        return;
+    }
+    
+    printf("printed decimal: %s\n", buf);
+    strbuf_append_str(strbuf, buf);
+    free(buf);  // libmpdec allocates the string, we need to free it
 }
 
 void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth) {
@@ -210,6 +228,11 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_FLOAT:
                 strbuf_append_format(strbuf, "%g", *(double*)data);
                 break;
+            case LMD_TYPE_DECIMAL: {
+                Decimal *decimal = *(Decimal**)data;
+                print_decimal(strbuf, decimal);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+                break;
+            }
             case LMD_TYPE_STRING: {
                 String *string = *(String**)data;
                 if (string && string->chars) {
@@ -322,24 +345,9 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_DECIMAL: {
-        mpf_t *num = (mpf_t*)item.pointer;
-        char buf[128];
-        
-        #ifdef CROSS_COMPILE
-        // For cross-compilation, check if full GMP I/O is available
-        if (HAS_GMP_IO()) {
-            // Use full GMP formatting
-            gmp_sprintf(buf, "%.Ff", *num);
-        } else {
-            // Fall back to double precision - convert mpf_t to double
-            double num_double = mpf_get_d(*num);
-            snprintf(buf, sizeof(buf), "%.15g", num_double);
-        }
-        #else
-        // Native compilation - use full GMP
-        gmp_sprintf(buf, "%.Ff", *num);
-        #endif
-        strbuf_append_str(strbuf, buf);
+        Decimal *decimal = (Decimal*)item.pointer;
+        printf("print_item: decimal: %p\n", decimal);
+        print_decimal(strbuf, decimal);
         break;
     }
     case LMD_TYPE_STRING: {

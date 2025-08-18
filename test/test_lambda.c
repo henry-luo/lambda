@@ -119,10 +119,9 @@ Test(lambda_tests, test_single_ls) {
     test_lambda_script_against_file("test/lambda/single.ls", "test/lambda/single.txt");
 }
 
-// TEMPORARILY DISABLED - hangs due to JSON formatting infinite loop on complex nested structures
-// Test(lambda_tests, test_value_ls) {
-//     test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
-// }
+Test(lambda_tests, test_value_ls) {
+    test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
+}
 
 Test(lambda_tests, test_simple_expr_ls) {
     test_lambda_script_against_file("test/lambda/simple_expr.ls", "test/lambda/simple_expr.txt");

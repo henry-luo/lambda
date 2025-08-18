@@ -478,7 +478,8 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     str_type->string = (String*)str;
     const char* str_content = tp->source + start;
     memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
-    str->chars[len] = '\0';  str->len = len;  str->ref_cnt = 1;
+    str->chars[len] = '\0';  str->len = len;  
+    str->ref_cnt = 1;  // set to 1 to prevent it from being freed
     printf("build lit string: %.*s, type: %d\n", 
         (int)str->len, str->chars, str_type->type_id);
     // add to const list
@@ -492,8 +493,7 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     int datetime_len = end - start;
     
     TypeDateTime *dt_type = (TypeDateTime*)alloc_type(tp->ast_pool, LMD_TYPE_DTIME, sizeof(TypeDateTime));
-    dt_type->is_const = 1;
-    dt_type->is_literal = 1;
+    dt_type->is_const = 1;  dt_type->is_literal = 1;
     
     // Use tp->source string directly
     const char* datetime_start = tp->source + start;
@@ -545,9 +545,40 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
     num_str[num_sv.length-1] = '\0';  // clear suffix 'n'/'N'
-    mpf_init(item_type->dec_val);
-    mpf_set_str(item_type->dec_val, num_str, 10);
-    arraylist_append(tp->const_list, &item_type->dec_val);
+    printf("build lit decimal: %s\n", num_str);
+    
+    // Allocate heap-allocated Decimal structure
+    Decimal *decimal;
+    pool_variable_alloc(tp->ast_pool, sizeof(Decimal), (void **)&decimal);
+    item_type->decimal = decimal;
+    
+    // Initialize the decimal with reference counting and libmpdec
+    decimal->ref_cnt = 1;
+    
+    // Create libmpdec context and decimal
+    mpd_context_t ctx;
+    mpd_maxcontext(&ctx);  // Use maximum precision context
+    
+    decimal->dec_val = mpd_new(&ctx);
+    if (decimal->dec_val == NULL) {
+        printf("ERROR: Failed to allocate libmpdec decimal\n");
+        free(num_str);
+        return (Type *)item_type;
+    }
+    
+    // Parse the decimal string
+    uint32_t status = 0;
+    mpd_qset_string(decimal->dec_val, num_str, &ctx, &status);
+    if (status != 0) {
+        printf("ERROR: Failed to parse decimal string: %s (status: %u)\n", num_str, status);
+    }
+
+    char *buf = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
+    printf("DEBUG build_lit_decimal: %s\n", buf);
+    free(buf);
+    
+    // Add to const list
+    arraylist_append(tp->const_list, item_type->decimal);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
     free(num_str);

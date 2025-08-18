@@ -429,8 +429,17 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 printf("transpile_primary_expr: writing var name for %.*s, entry type: %d\n",
                     (int)ident_node->name.length, ident_node->name.str,
                     ident_node->entry->node->type->type_id);
-                write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
-                    (AstImportNode*)ident_node->entry->import);
+                
+                // For decimal identifiers, we need to convert the pointer to an Item
+                if (ident_node->entry->node->type->type_id == LMD_TYPE_DECIMAL) {
+                    strbuf_append_str(tp->code_buf, "c2it(");
+                    write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                        (AstImportNode*)ident_node->entry->import);
+                    strbuf_append_char(tp->code_buf, ')');
+                } else {
+                    write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                        (AstImportNode*)ident_node->entry->import);
+                }
             }
             else {
                 printf("Warning: ident_node->entry is null or entry->node is null\n");
@@ -460,6 +469,13 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             else if (pri_node->type->type_id == LMD_TYPE_INT || pri_node->type->type_id == LMD_TYPE_INT64) {
                 writeNodeSource(tp, pri_node->node);
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_DECIMAL) {
+                // loads the const decimal without boxing
+                strbuf_append_str(tp->code_buf, "const_c2it(");
+                TypeDecimal *dec_type = (TypeDecimal*)pri_node->type;
+                strbuf_append_int(tp->code_buf, dec_type->const_index);
+                strbuf_append_char(tp->code_buf, ')');
             }
             else { // bool, null, float
                 TSNode child = ts_node_named_child(pri_node->node, 0);

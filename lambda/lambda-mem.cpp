@@ -165,6 +165,13 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
                 free_item(item, clear_entry);
             }
         }
+        else if (field->type->type_id == LMD_TYPE_DECIMAL) {
+            Decimal *dec = *(Decimal**)field_ptr;
+            if (dec) {
+                Item item = {.item = c2it(dec)};
+                free_item(item, clear_entry);
+            }
+        }
         else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
             field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
             Container *container = *(Container**)field_ptr;
@@ -248,6 +255,12 @@ void free_item(Item item, bool clear_entry) {
             pool_variable_free(context->heap->pool, str);
         }
     }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        Decimal *dec = (Decimal*)item.pointer;
+        if (dec && !dec->ref_cnt) {
+            pool_variable_free(context->heap->pool, dec);
+        }
+    }
     else if (item.type_id == LMD_TYPE_RAW_POINTER) {
         Container* container = item.container;
         if (container) {
@@ -298,6 +311,13 @@ void frame_end() {
             if (str && !str->ref_cnt) {
                 printf("freeing heap string: %s\n", str->chars);
                 pool_variable_free(context->heap->pool, (void*)str);
+            }
+        }
+        else if (itm.type_id == LMD_TYPE_DECIMAL) {
+            Decimal *dec = (Decimal*)itm.pointer;
+            if (dec && !dec->ref_cnt) {
+                printf("freeing heap decimal\n");
+                pool_variable_free(context->heap->pool, (void*)dec);
             }
         }
         else if (itm.type_id == LMD_TYPE_RAW_POINTER) {

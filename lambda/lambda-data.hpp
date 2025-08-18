@@ -1,22 +1,5 @@
 #pragma once
 
-// Enhanced GMP configuration for cross-compilation
-#ifdef CROSS_COMPILE
-    // For cross-compilation, we may have either full or stub GMP
-    #include <gmp.h>
-    
-    // Declare weak symbols for GMP I/O functions to detect availability at runtime
-    extern int gmp_sprintf(char *, const char *, ...) __attribute__((weak));
-    extern double mpf_get_d(const mpf_t) __attribute__((weak));
-    
-    // Helper macro to check if full GMP I/O is available
-    #define HAS_GMP_IO() (gmp_sprintf != NULL)
-#else
-    // Native compilation should have full GMP
-    #include <gmp.h>
-    #define HAS_GMP_IO() 1
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,6 +12,7 @@ extern "C" {
 #include <stdint.h>
 #include <inttypes.h>  // for cross-platform integer formatting
 #include <math.h>
+#include <mpdecimal.h>
 
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
@@ -74,6 +58,11 @@ typedef struct DataOwner {
     void *owner;  // element/map/list/array that contains/owns the data
 } DataOwner;
 
+struct Decimal {
+    uint16_t ref_cnt;
+    mpd_t* dec_val;  // libmpdec decimal number
+};
+
 struct Map : Container {
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
@@ -98,7 +87,7 @@ typedef struct TypeFloat : TypeConst {
 } TypeFloat;
 
 typedef struct TypeDecimal : TypeConst  {
-    mpf_t dec_val;
+    Decimal *decimal;
 } TypeDecimal;
 
 typedef struct TypeString : TypeConst {

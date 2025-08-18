@@ -2,6 +2,7 @@
 // #include <math.h>  // MIR has problem parsing math.h
 // #include <stdint.h>
 
+
 #if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT) && !defined(__STDINT_H_INCLUDED)
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
@@ -79,6 +80,7 @@ typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
 typedef struct DateTime DateTime;
+typedef struct Decimal Decimal;
 
 /*
 # Lambda Runtime Item
@@ -153,6 +155,8 @@ typedef struct String {
 } String;
 #define STRING_STRUCT_DEFINED
 #endif
+
+
 
 typedef struct Heap Heap;
 typedef struct Pack Pack;
@@ -300,6 +304,7 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 
 #define const_s(index)      ((String*)*(rt->consts + index))
 #define const_k(index)      ((DateTime*)*(rt->consts + index))
+#define const_c(index)      ((Decimal*)*(rt->consts + index))
 
 // item unboxing
 long it2l(Item item);

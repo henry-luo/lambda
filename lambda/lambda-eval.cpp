@@ -229,6 +229,18 @@ void list_push(List *list, Item item) {
         str->ref_cnt++;
         break;
     }
+    case LMD_TYPE_DECIMAL: {
+        Decimal *dval = (Decimal*)item.pointer;
+        if (dval && dval->dec_val) {
+            char *buf = mpd_to_sci(dval->dec_val, 1);
+            printf("DEBUG list_push: pushed decimal value: %s\n", buf ? buf : "null");
+            if (buf) free(buf);
+        } else {
+            printf("DEBUG list_push: pushed null decimal value\n");
+        }
+        dval->ref_cnt++;
+        break;
+    }
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = *(double*)item.pointer;
@@ -1317,8 +1329,8 @@ Item fn_neg(Item item) {
         return push_d(-val);
     }
     else if (item.type_id == LMD_TYPE_DECIMAL) {
-        // For decimal types, we'd need to negate the mpf_t value
-        // This would require more complex decimal arithmetic
+        // For decimal types, we'd need to negate the libmpdec value
+        // This would require more complex decimal arithmetic with libmpdec
         printf("unary - for decimal type not yet implemented\n");
         return ItemError;
     }

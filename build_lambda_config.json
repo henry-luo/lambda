@@ -108,7 +108,7 @@
             "link": "static"
         },
         {
-            "name": "gmp",
+            "name": "mpdec",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib",
             "link": "dynamic"
@@ -229,7 +229,7 @@
                 "build/buffer.o", "build/utils.o", "build/mime-detect.o", "build/mime-types.o",
                 "build/datetime.o", "build/string.o", "build/unicode_string.o"
             ],
-            "libraries": ["tree-sitter-lambda", "tree-sitter", "gmp", "mir", "zlog", "lexbor", "icu"],
+            "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "mir", "zlog", "lexbor", "icu"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "inline"
