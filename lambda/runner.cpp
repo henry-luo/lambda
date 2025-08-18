@@ -297,7 +297,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.cwd = get_current_dir();
     
     // Initialize decimal context
-    mpd_maxcontext(&runner->context.decimal_ctx);
+    mpd_defaultcontext(&runner->context.decimal_ctx);
     
     context = &runner->context;
     heap_init();

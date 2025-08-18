@@ -715,11 +715,8 @@ Item fn_add(Item item_a, Item item_b) {
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
-        mpd_context_t ctx;
-        mpd_defaultcontext(&ctx);  // Use default precision
-        
-        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        mpd_t* a_dec = convert_to_decimal(item_a, &context->decimal_ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &context->decimal_ctx);
         
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
@@ -728,14 +725,14 @@ Item fn_add(Item item_a, Item item_b) {
             return ItemError;
         }
         
-        mpd_t* result = mpd_new(&ctx);
+        mpd_t* result = mpd_new(&context->decimal_ctx);
         if (!result) {
             cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
         
-        mpd_add(result, a_dec, b_dec, &ctx);
+        mpd_add(result, a_dec, b_dec, &context->decimal_ctx);
         
         cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
         cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
@@ -807,11 +804,8 @@ Item fn_mul(Item item_a, Item item_b) {
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
-        mpd_context_t ctx;
-        mpd_defaultcontext(&ctx);
-        
-        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        mpd_t* a_dec = convert_to_decimal(item_a, &context->decimal_ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &context->decimal_ctx);
         
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
@@ -820,14 +814,14 @@ Item fn_mul(Item item_a, Item item_b) {
             return ItemError;
         }
         
-        mpd_t* result = mpd_new(&ctx);
+        mpd_t* result = mpd_new(&context->decimal_ctx);
         if (!result) {
             cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
         
-        mpd_mul(result, a_dec, b_dec, &ctx);
+        mpd_mul(result, a_dec, b_dec, &context->decimal_ctx);
         
         cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
         cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
@@ -865,11 +859,8 @@ Item fn_sub(Item item_a, Item item_b) {
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
-        mpd_context_t ctx;
-        mpd_defaultcontext(&ctx);
-        
-        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        mpd_t* a_dec = convert_to_decimal(item_a, &context->decimal_ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &context->decimal_ctx);
         
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
@@ -878,14 +869,14 @@ Item fn_sub(Item item_a, Item item_b) {
             return ItemError;
         }
         
-        mpd_t* result = mpd_new(&ctx);
+        mpd_t* result = mpd_new(&context->decimal_ctx);
         if (!result) {
             cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
         
-        mpd_sub(result, a_dec, b_dec, &ctx);
+        mpd_sub(result, a_dec, b_dec, &context->decimal_ctx);
         
         cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
         cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
@@ -943,11 +934,8 @@ Item fn_div(Item item_a, Item item_b) {
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
-        mpd_context_t ctx;
-        mpd_defaultcontext(&ctx);  // Use default context instead of maxcontext
-        
-        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        mpd_t* a_dec = convert_to_decimal(item_a, &context->decimal_ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &context->decimal_ctx);
         
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
@@ -977,12 +965,12 @@ Item fn_div(Item item_a, Item item_b) {
             char *a_str = mpd_to_sci(a_dec, 1);
             char *b_str = mpd_to_sci(b_dec, 1);
             printf("DEBUG: About to divide '%s' / '%s'\n", a_str ? a_str : "NULL", b_str ? b_str : "NULL");
-            printf("DEBUG: Context prec=%lld, emax=%lld, emin=%lld\n", (long long)ctx.prec, (long long)ctx.emax, (long long)ctx.emin);
+            printf("DEBUG: Context prec=%lld, emax=%lld, emin=%lld\n", (long long)context->decimal_ctx.prec, (long long)context->decimal_ctx.emax, (long long)context->decimal_ctx.emin);
             if (a_str) mpd_free(a_str);
             if (b_str) mpd_free(b_str);
         }
         
-        mpd_t* result = mpd_new(&ctx);
+        mpd_t* result = mpd_new(&context->decimal_ctx);
         if (!result) {
             cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
@@ -990,7 +978,7 @@ Item fn_div(Item item_a, Item item_b) {
         }
         
         printf("DEBUG: Calling mpd_div...\n");
-        mpd_div(result, a_dec, b_dec, &ctx);
+        mpd_div(result, a_dec, b_dec, &context->decimal_ctx);
         printf("DEBUG: mpd_div completed\n");
         
         cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
@@ -1100,15 +1088,13 @@ Item fn_pow(Item item_a, Item item_b) {
         
         // For decimal operations, return a decimal result
         double result_val = lambda_pow(base, exponent);
-        mpd_context_t ctx;
-        mpd_defaultcontext(&ctx);
         
-        mpd_t* result = mpd_new(&ctx);
+        mpd_t* result = mpd_new(&context->decimal_ctx);
         if (!result) return ItemError;
         
         char str_buf[64];
         snprintf(str_buf, sizeof(str_buf), "%.17g", result_val);
-        mpd_set_string(result, str_buf, &ctx);
+        mpd_set_string(result, str_buf, &context->decimal_ctx);
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
@@ -1167,13 +1153,10 @@ double lambda_pow(double x, double y) {
 Item fn_mod(Item item_a, Item item_b) {
     // Handle decimal types first
     if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
-        mpd_context_t ctx;
-        mpd_defaultcontext(&ctx);
-        
-        mpd_t* val_a = convert_to_decimal(item_a, &ctx);
+        mpd_t* val_a = convert_to_decimal(item_a, &context->decimal_ctx);
         if (!val_a) return ItemError;
         
-        mpd_t* val_b = convert_to_decimal(item_b, &ctx);
+        mpd_t* val_b = convert_to_decimal(item_b, &context->decimal_ctx);
         if (!val_b) {
             cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
             return ItemError;
@@ -1187,14 +1170,14 @@ Item fn_mod(Item item_a, Item item_b) {
             return ItemError;
         }
         
-        mpd_t* result = mpd_new(&ctx);
+        mpd_t* result = mpd_new(&context->decimal_ctx);
         if (!result) {
             cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
             return ItemError;
         }
         
-        mpd_rem(result, val_a, val_b, &ctx);
+        mpd_rem(result, val_a, val_b, &context->decimal_ctx);
         
         // Clean up temporary decimals
         cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
