@@ -15,6 +15,63 @@ extern __thread Context* context;
 #define Malloc malloc
 #define Realloc realloc
 
+// Helper functions for decimal operations
+Item push_decimal(mpd_t* dec_val) {
+    if (!dec_val) return ItemError;
+    
+    Decimal* decimal = (Decimal*)heap_alloc(sizeof(Decimal), LMD_TYPE_DECIMAL);
+    if (!decimal) {
+        mpd_del(dec_val);
+        return ItemError;
+    }
+    
+    decimal->ref_cnt = 1;
+    decimal->dec_val = dec_val;
+    
+    Item result;
+    result.item = c2it(decimal);
+    return result;
+}
+
+mpd_t* convert_to_decimal(Item item, mpd_context_t* ctx) {
+    if (item.type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_ptr = (Decimal*)item.pointer;
+        return dec_ptr->dec_val;
+    }
+    
+    mpd_t* result = mpd_new(ctx);
+    if (!result) return NULL;
+    
+    if (item.type_id == LMD_TYPE_INT) {
+        long signed_val = (long)((int64_t)(item.long_val << 8) >> 8);
+        mpd_set_ssize(result, signed_val, ctx);
+    } else if (item.type_id == LMD_TYPE_INT64) {
+        long val = *(long*)item.pointer;
+        mpd_set_ssize(result, val, ctx);
+    } else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        char str_buf[64];
+        snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+        mpd_set_string(result, str_buf, ctx);
+    } else {
+        mpd_del(result);
+        return NULL;
+    }
+    
+    return result;
+}
+
+void cleanup_temp_decimal(mpd_t* dec_val, bool is_original_decimal) {
+    // Only delete if this was a temporary decimal we created
+    if (!is_original_decimal && dec_val) {
+        mpd_del(dec_val);
+    }
+}
+
+bool decimal_is_zero(mpd_t* dec_val) {
+    return mpd_iszero(dec_val);
+}
+
 void expand_list(List *list);
 
 Array* array() {
@@ -656,6 +713,41 @@ Item fn_add(Item item_a, Item item_b) {
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
         return push_d(*(double*)item_a.pointer + (double)item_b.long_val);
     }
+    // Add libmpdec decimal support
+    else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+        mpd_context_t ctx;
+        mpd_defaultcontext(&ctx);  // Use default precision
+        
+        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        
+        if (!a_dec || !b_dec) {
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            printf("decimal conversion failed in fn_add\n");
+            return ItemError;
+        }
+        
+        mpd_t* result = mpd_new(&ctx);
+        if (!result) {
+            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        mpd_add(result, a_dec, b_dec, &ctx);
+        
+        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            printf("decimal addition failed\n");
+            return ItemError;
+        }
+        
+        return push_decimal(result);
+    }
     else {
         printf("unknown add type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
@@ -713,6 +805,41 @@ Item fn_mul(Item item_a, Item item_b) {
         String *result = str_repeat(str_b, item_a.long_val);
         return {.item = s2it(result)};
     }
+    // Add libmpdec decimal support
+    else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+        mpd_context_t ctx;
+        mpd_defaultcontext(&ctx);
+        
+        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        
+        if (!a_dec || !b_dec) {
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            printf("decimal conversion failed in fn_mul\n");
+            return ItemError;
+        }
+        
+        mpd_t* result = mpd_new(&ctx);
+        if (!result) {
+            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        mpd_mul(result, a_dec, b_dec, &ctx);
+        
+        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            printf("decimal multiplication failed\n");
+            return ItemError;
+        }
+        
+        return push_decimal(result);
+    }
     else {
         printf("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
@@ -736,6 +863,41 @@ Item fn_sub(Item item_a, Item item_b) {
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
         return push_d(*(double*)item_a.pointer - (double)item_b.long_val);
     }
+    // Add libmpdec decimal support
+    else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+        mpd_context_t ctx;
+        mpd_defaultcontext(&ctx);
+        
+        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        
+        if (!a_dec || !b_dec) {
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            printf("decimal conversion failed in fn_sub\n");
+            return ItemError;
+        }
+        
+        mpd_t* result = mpd_new(&ctx);
+        if (!result) {
+            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        mpd_sub(result, a_dec, b_dec, &ctx);
+        
+        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            printf("decimal subtraction failed\n");
+            return ItemError;
+        }
+        
+        return push_decimal(result);
+    }
     else {
         printf("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
@@ -743,38 +905,104 @@ Item fn_sub(Item item_a, Item item_b) {
 }
 
 Item fn_div(Item item_a, Item item_b) {
-    // Check for division by zero
-    bool is_zero = false;
-    if (item_b.type_id == LMD_TYPE_INT && item_b.long_val == 0) {
-        is_zero = true;
-    }
-    else if (item_b.type_id == LMD_TYPE_INT64 && *(long*)item_b.pointer == 0) {
-        is_zero = true;
-    }
-    else if (item_b.type_id == LMD_TYPE_FLOAT && *(double*)item_b.pointer == 0.0) {
-        is_zero = true;
-    }
-    
-    if (is_zero) {
-        printf("division by zero error\n");
-        return ItemError;
-    }
-
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
+        if (item_b.long_val == 0) {
+            printf("integer division by zero error\n");
+            return ItemError;
+        }
         return push_d((double)item_a.long_val / (double)item_b.long_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
+        if (*(long*)item_b.pointer == 0) {
+            printf("integer division by zero error\n");
+            return ItemError;
+        }
         return push_d((double)*(long*)item_a.pointer / (double)*(long*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
+        if (*(double*)item_b.pointer == 0.0) {
+            printf("float division by zero error\n");
+            return ItemError;
+        }
         printf("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer / *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
+        if (*(double*)item_b.pointer == 0.0) {
+            printf("float division by zero error\n");
+            return ItemError;
+        }
         return push_d((double)item_a.long_val / *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
+        if (item_b.long_val == 0) {
+            printf("integer division by zero error\n");
+            return ItemError;
+        }
         return push_d(*(double*)item_a.pointer / (double)item_b.long_val);
+    }
+    // Add libmpdec decimal support
+    else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+        mpd_context_t ctx;
+        mpd_defaultcontext(&ctx);  // Use default context instead of maxcontext
+        
+        mpd_t* a_dec = convert_to_decimal(item_a, &ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, &ctx);
+        
+        if (!a_dec || !b_dec) {
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            printf("decimal conversion failed in fn_div\n");
+            return ItemError;
+        }
+        
+        // Check for division by zero
+        printf("DEBUG: Checking division by zero, b_dec=%p\n", b_dec);
+        if (b_dec) {
+            char *b_str = mpd_to_sci(b_dec, 1);
+            printf("DEBUG: b_dec value as string: '%s'\n", b_str ? b_str : "NULL");
+            printf("DEBUG: mpd_iszero result: %d\n", mpd_iszero(b_dec));
+            if (b_str) mpd_free(b_str);
+        }
+        if (b_dec && decimal_is_zero(b_dec)) {
+            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            printf("decimal division by zero error\n");
+            return ItemError;
+        }
+        printf("DEBUG: Division by zero check passed\n");
+        
+        // Debug the values and context before division
+        if (a_dec && b_dec) {
+            char *a_str = mpd_to_sci(a_dec, 1);
+            char *b_str = mpd_to_sci(b_dec, 1);
+            printf("DEBUG: About to divide '%s' / '%s'\n", a_str ? a_str : "NULL", b_str ? b_str : "NULL");
+            printf("DEBUG: Context prec=%lld, emax=%lld, emin=%lld\n", (long long)ctx.prec, (long long)ctx.emax, (long long)ctx.emin);
+            if (a_str) mpd_free(a_str);
+            if (b_str) mpd_free(b_str);
+        }
+        
+        mpd_t* result = mpd_new(&ctx);
+        if (!result) {
+            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        printf("DEBUG: Calling mpd_div...\n");
+        mpd_div(result, a_dec, b_dec, &ctx);
+        printf("DEBUG: mpd_div completed\n");
+        
+        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            printf("decimal division failed\n");
+            return ItemError;
+        }
+        
+        return push_decimal(result);
     }
     else {
         printf("unknown div type: %d, %d\n", item_a.type_id, item_b.type_id);
@@ -823,6 +1051,75 @@ Item fn_idiv(Item item_a, Item item_b) {
 }
 
 Item fn_pow(Item item_a, Item item_b) {
+    // Handle decimal types first
+    if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+        // For now, convert decimals to double for power operations
+        // This is a limitation of libmpdec - it doesn't have general power operations
+        double base = 0.0, exponent = 0.0;
+        
+        if (item_a.type_id == LMD_TYPE_DECIMAL) {
+            Decimal* dec_ptr = (Decimal*)item_a.pointer;
+            // Convert decimal to string then to double (preserves precision better)
+            char* str = mpd_to_sci(dec_ptr->dec_val, 1);
+            base = strtod(str, NULL);
+            free(str);
+        } else {
+            // Convert non-decimal to double
+            if (item_a.type_id == LMD_TYPE_INT) {
+                long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+                base = (double)signed_val;
+            } else if (item_a.type_id == LMD_TYPE_INT64) {
+                base = (double)(*(long*)item_a.pointer);
+            } else if (item_a.type_id == LMD_TYPE_FLOAT) {
+                base = *(double*)item_a.pointer;
+            } else {
+                printf("unsupported pow base type with decimal: %d\n", item_a.type_id);
+                return ItemError;
+            }
+        }
+        
+        if (item_b.type_id == LMD_TYPE_DECIMAL) {
+            Decimal* dec_ptr = (Decimal*)item_b.pointer;
+            char* str = mpd_to_sci(dec_ptr->dec_val, 1);
+            exponent = strtod(str, NULL);
+            free(str);
+        } else {
+            // Convert non-decimal to double
+            if (item_b.type_id == LMD_TYPE_INT) {
+                long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+                exponent = (double)signed_val;
+            } else if (item_b.type_id == LMD_TYPE_INT64) {
+                exponent = (double)(*(long*)item_b.pointer);
+            } else if (item_b.type_id == LMD_TYPE_FLOAT) {
+                exponent = *(double*)item_b.pointer;
+            } else {
+                printf("unsupported pow exponent type with decimal: %d\n", item_b.type_id);
+                return ItemError;
+            }
+        }
+        
+        // For decimal operations, return a decimal result
+        double result_val = lambda_pow(base, exponent);
+        mpd_context_t ctx;
+        mpd_defaultcontext(&ctx);
+        
+        mpd_t* result = mpd_new(&ctx);
+        if (!result) return ItemError;
+        
+        char str_buf[64];
+        snprintf(str_buf, sizeof(str_buf), "%.17g", result_val);
+        mpd_set_string(result, str_buf, &ctx);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            printf("decimal power operation failed\n");
+            return ItemError;
+        }
+        
+        return push_decimal(result);
+    }
+    
+    // Original non-decimal logic
     double base = 0.0, exponent = 0.0;
     
     // Convert first argument to double
@@ -868,6 +1165,51 @@ double lambda_pow(double x, double y) {
 }
 
 Item fn_mod(Item item_a, Item item_b) {
+    // Handle decimal types first
+    if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
+        mpd_context_t ctx;
+        mpd_defaultcontext(&ctx);
+        
+        mpd_t* val_a = convert_to_decimal(item_a, &ctx);
+        if (!val_a) return ItemError;
+        
+        mpd_t* val_b = convert_to_decimal(item_b, &ctx);
+        if (!val_b) {
+            cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        // Check for division by zero
+        if (decimal_is_zero(val_b)) {
+            printf("modulo by zero error\n");
+            cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        mpd_t* result = mpd_new(&ctx);
+        if (!result) {
+            cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        mpd_rem(result, val_a, val_b, &ctx);
+        
+        // Clean up temporary decimals
+        cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            printf("decimal modulo operation failed\n");
+            return ItemError;
+        }
+        
+        return push_decimal(result);
+    }
+    
+    // Original non-decimal logic for integer mod
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
         // Sign extend both values to proper signed longs
         long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
@@ -2298,3 +2640,4 @@ DateTime* fn_datetime() {
     
     return &static_dt;
 }
+

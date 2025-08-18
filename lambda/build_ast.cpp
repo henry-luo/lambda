@@ -764,7 +764,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     if (ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
-            type_id = LMD_TYPE_FLOAT;  // Division and power always produce float results
+            // If either operand is decimal, result is decimal
+            if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
+                type_id = LMD_TYPE_DECIMAL;
+            } else {
+                type_id = LMD_TYPE_FLOAT;  // Division and power produce float results for non-decimals
+            }
         }
         else {
             type_id = LMD_TYPE_ANY;
@@ -777,7 +782,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         } 
         else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
-            type_id = max(left_type, right_type);
+            // If either operand is decimal, result is decimal
+            if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
+                type_id = LMD_TYPE_DECIMAL;
+            } else {
+                type_id = max(left_type, right_type);
+            }
         }
         else {
             type_id = LMD_TYPE_ANY;
@@ -786,7 +796,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_MOD) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
-            type_id = max(left_type, right_type);
+            // If either operand is decimal, result is decimal
+            if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
+                type_id = LMD_TYPE_DECIMAL;
+            } else {
+                type_id = max(left_type, right_type);
+            }
         }
         else {
             type_id = LMD_TYPE_ANY;

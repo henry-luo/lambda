@@ -109,9 +109,9 @@
         },
         {
             "name": "mpdec",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib",
-            "link": "dynamic"
+            "include": "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
+            "lib": "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
+            "link": "static"
         },
         {
             "name": "readline",

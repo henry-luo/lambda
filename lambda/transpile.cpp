@@ -317,6 +317,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_int(tp->code_buf, item_type->const_index);
             strbuf_append_char(tp->code_buf, ')');
         }
+        else {
+            // Non-literal decimal expression - transpile the expression directly
+            transpile_expr(tp, item);
+        }
         break;
     case LMD_TYPE_NUMBER:
         // NUMBER type is a union of int/float - transpile the expression directly
