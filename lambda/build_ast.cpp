@@ -259,7 +259,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
         else if (strview_equal(&func_name, "number")) {
             fn_node->fn = SYSFUNC_NUMBER;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_FLOAT; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "string")) {
             fn_node->fn = SYSFUNC_STRING;
@@ -299,35 +299,35 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
         else if (strview_equal(&func_name, "abs")) {
             fn_node->fn = SYSFUNC_ABS;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "round")) {
             fn_node->fn = SYSFUNC_ROUND;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "floor")) {
             fn_node->fn = SYSFUNC_FLOOR;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "ceil")) {
             fn_node->fn = SYSFUNC_CEIL;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "min")) {
             fn_node->fn = SYSFUNC_MIN;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "max")) {
             fn_node->fn = SYSFUNC_MAX;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "sum")) {
             fn_node->fn = SYSFUNC_SUM;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "avg")) {
             fn_node->fn = SYSFUNC_AVG;
-            fn_node->type = &TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else {
             printf("unknown system function: %.*s\n", (int)func_name.length, func_name.str);

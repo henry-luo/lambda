@@ -1898,6 +1898,7 @@ void transpile_member_expr(Transpiler* tp, AstFieldNode *field_node) {
 }
 
 void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
+    strbuf_append_char(tp->code_buf, '\n');
     // use function body type as the return type for the time being
     Type *ret_type = fn_node->body->type;
     writeType(tp, ret_type);
@@ -2244,6 +2245,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
     printf("define_ast_node...\n");
+    strbuf_append_str(tp->code_buf, "\n\nContext *rt;\n");  // defines global runtime context
     AstNode* child = script->child;
     while (child) {
         define_ast_node(tp, child);
@@ -2252,7 +2254,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
 
     // global evaluation, wrapped inside main()
     printf("transpile_ast_node...\n");
-    strbuf_append_str(tp->code_buf, "\nItem main(Context *rt){\n return ");
+    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n return ");
     child = script->child;
     bool has_content = false;
     while (child) {

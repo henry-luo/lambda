@@ -133,7 +133,7 @@ void writeType(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "Type*");
         break;
     default:
-        printf("unknown type %d\n", type_id);
+        printf("unknown type to write %d\n", type_id);
     }
 }
 
