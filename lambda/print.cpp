@@ -401,7 +401,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }    
     case LMD_TYPE_LIST: {
         List *list = item.list;
-        // printf("print list: %p, length: %ld\n", list, list->length);
+        printf("print list: %p, length: %ld, depth: %d\n", list, list->length, depth);
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");

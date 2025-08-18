@@ -1,6 +1,8 @@
 #include "transpiler.hpp"
 // Forward declare the validation function to avoid C++ compilation issues
 extern "C" void run_validation(const char *data_file, const char *schema_file, const char *input_format);
+// Forward declare validation execution function for direct calls by tests
+extern "C" int exec_validation(int argc, char* argv[]);
 #include "input/input.h"
 #include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
@@ -254,27 +256,50 @@ void run_assertions() {
 }
 
 int main(int argc, char *argv[]) {
+    // Add trace statement at start of main
+    fprintf(stderr, "TRACE: main() started with %d arguments\n", argc);
+    fflush(stderr);
+    
     // Run basic assertions
+    fprintf(stderr, "TRACE: About to run assertions\n");
+    fflush(stderr);
     run_assertions();
+    fprintf(stderr, "TRACE: Assertions completed\n");
+    fflush(stderr);
     
     // Parse command line arguments
+    fprintf(stderr, "TRACE: Parsing command line arguments\n");
+    fflush(stderr);
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
         return 0;
     }
     
     // Initialize runtime (needed for all operations)
+    fprintf(stderr, "TRACE: About to initialize runtime\n");
+    fflush(stderr);
     Runtime runtime;
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
-    
+    fprintf(stderr, "TRACE: Runtime initialized\n");
+    fflush(stderr);
+
 #if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
     // Initialize Unicode support
+    fprintf(stderr, "TRACE: About to initialize Unicode support\n");
+    fflush(stderr);
     init_unicode_support();
+    fprintf(stderr, "TRACE: Unicode support initialized\n");
+    fflush(stderr);
 #endif
-    
+
     // Handle validate command
+    fprintf(stderr, "TRACE: Checking for validate command\n");
+    fflush(stderr);
     if (argc >= 2 && strcmp(argv[1], "validate") == 0) {
+        fprintf(stderr, "TRACE: Entering validate command handler\n");
+        fflush(stderr);
+        
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Validator v1.0\n\n");
@@ -305,130 +330,16 @@ int main(int argc, char *argv[]) {
             return 0;
         }
         
-        if (argc < 3) {
-            printf("Error: No file specified for validation\n");
-            printf("Usage: %s validate [-s <schema>] [-f <format>] <file> [files...]\n", argv[0]);
-            printf("Use '%s validate --help' for more information.\n", argv[0]);
-            return 1;
-        }
+        // Prepare arguments for exec_validation (skip the "validate" command)
+        int validation_argc = argc - 1;  // Remove the program name
+        char** validation_argv = argv + 1;  // Skip the program name, start from "validate"
         
-        const char* data_file = nullptr;
-        const char* schema_file = nullptr;  // Will be determined based on format
-        const char* input_format = nullptr;  // Auto-detect by default
-        bool schema_explicitly_set = false;
+        // Call the extracted validation function
+        int validation_result = exec_validation(validation_argc, validation_argv);
         
-        // Parse validation arguments
-        for (int i = 2; i < argc; i++) {
-            if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-                schema_file = argv[i + 1];
-                schema_explicitly_set = true;
-                i++; // Skip the schema filename
-            } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
-                input_format = argv[i + 1];
-                i++; // Skip the format name
-            } else if (argv[i][0] != '-') {
-                // This is the input file
-                if (!data_file) {
-                    data_file = argv[i];
-                } else {
-                    printf("Error: Multiple input files not yet supported\n");
-                    return 1;
-                }
-            } else {
-                printf("Error: Unknown validation option '%s'\n", argv[i]);
-                printf("Usage: %s validate [-s <schema>] [-f <format>] <file>\n", argv[0]);
-                printf("Formats: auto, json, csv, ini, toml, yaml, xml, markdown, rst, html, latex, rtf, pdf, wiki, asciidoc, man, eml, vcf, ics, text\n");
-                return 1;
-            }
-        }
-        
-        if (!data_file) {
-            printf("Error: No input file specified\n");
-            printf("Usage: %s validate [-s <schema>] [-f <format>] <file>\n", argv[0]);
-            return 1;
-        }
-        
-        // Auto-detect format if not specified
-        if (!input_format) {
-            const char* ext = strrchr(data_file, '.');
-            if (ext) {
-                if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".htm") == 0) {
-                    input_format = "html";
-                } else if (strcasecmp(ext, ".md") == 0 || strcasecmp(ext, ".markdown") == 0) {
-                    input_format = "markdown";
-                } else if (strcasecmp(ext, ".json") == 0) {
-                    input_format = "json";
-                } else if (strcasecmp(ext, ".xml") == 0) {
-                    input_format = "xml";
-                } else if (strcasecmp(ext, ".yaml") == 0 || strcasecmp(ext, ".yml") == 0) {
-                    input_format = "yaml";
-                } else if (strcasecmp(ext, ".csv") == 0) {
-                    input_format = "csv";
-                } else if (strcasecmp(ext, ".ini") == 0) {
-                    input_format = "ini";
-                } else if (strcasecmp(ext, ".toml") == 0) {
-                    input_format = "toml";
-                } else if (strcasecmp(ext, ".eml") == 0) {
-                    input_format = "eml";
-                } else if (strcasecmp(ext, ".ics") == 0) {
-                    input_format = "ics";
-                } else if (strcasecmp(ext, ".vcf") == 0) {
-                    input_format = "vcf";
-                } else if (strcasecmp(ext, ".rst") == 0) {
-                    input_format = "rst";
-                } else if (strcasecmp(ext, ".wiki") == 0) {
-                    input_format = "wiki";
-                } else if (strcasecmp(ext, ".adoc") == 0 || strcasecmp(ext, ".asciidoc") == 0) {
-                    input_format = "asciidoc";
-                } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 || 
-                          strcasecmp(ext, ".3") == 0 || strcasecmp(ext, ".4") == 0 ||
-                          strcasecmp(ext, ".5") == 0 || strcasecmp(ext, ".6") == 0 ||
-                          strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
-                          strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
-                    input_format = "man";
-                } else if (strcasecmp(ext, ".textile") == 0 || strcasecmp(ext, ".txtl") == 0) {
-                    input_format = "textile";
-                } else if (strcasecmp(ext, ".m") == 0 || strcasecmp(ext, ".mk") == 0 || strcasecmp(ext, ".mark") == 0) {
-                    input_format = "mark";
-                }
-                // If no recognized extension, keep as nullptr for Lambda format
-            }
-        }
-        
-        // Determine schema file if not explicitly set
-        if (!schema_explicitly_set) {
-            if (input_format && strcmp(input_format, "html") == 0) {
-                schema_file = "lambda/input/html5_schema.ls";
-                printf("Using HTML5 schema for HTML input\n");
-            } else if (input_format && strcmp(input_format, "eml") == 0) {
-                schema_file = "lambda/input/eml_schema.ls";
-                printf("Using EML schema for email input\n");
-            } else if (input_format && strcmp(input_format, "ics") == 0) {
-                schema_file = "lambda/input/ics_schema.ls";
-                printf("Using ICS schema for calendar input\n");
-            } else if (input_format && strcmp(input_format, "vcf") == 0) {
-                schema_file = "lambda/input/vcf_schema.ls";
-                printf("Using VCF schema for vCard input\n");
-            } else if (input_format && (strcmp(input_format, "asciidoc") == 0 || 
-                                     strcmp(input_format, "man") == 0 ||
-                                     strcmp(input_format, "markdown") == 0 ||
-                                     strcmp(input_format, "rst") == 0 ||
-                                     strcmp(input_format, "textile") == 0 ||
-                                     strcmp(input_format, "wiki") == 0)) {
-                schema_file = "lambda/input/doc_schema.ls";
-                printf("Using document schema for %s input\n", input_format);
-            } else if (!input_format || strcmp(input_format, "lambda") == 0) {
-                schema_file = "lambda/input/doc_schema.ls";  // Default for Lambda format
-            } else {
-                // For other formats (json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text), require explicit schema
-                printf("Error: Input format '%s' requires an explicit schema file. Use -s <schema_file> option.\n", input_format);
-                printf("Formats with default schemas: html, eml, ics, vcf, asciidoc, man, markdown, rst, textile, wiki\n");
-                return 1;
-            }
-        }
-        
-        run_validation(data_file, schema_file, input_format);
-        return 0;
+        fprintf(stderr, "TRACE: exec_validation completed with result: %d\n", validation_result);
+        fflush(stderr);
+        return validation_result;
     }
     
     bool use_mir = false;

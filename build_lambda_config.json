@@ -349,7 +349,7 @@
                 "name": "🔍 Validator Tests",
                 "sources": ["test/test_validator.cpp"],
                 "library_dependencies": [
-                    ["criterion"]
+                    ["lambda-runtime-full", "criterion"]
                 ],
                 "binaries": ["test/test_validator.exe"],
                 "type": "validator",

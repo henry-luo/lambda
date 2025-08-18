@@ -51,10 +51,6 @@ for arg in "$@"; do
             RAW_OUTPUT=true
             shift
             ;;
-        --keep-exe)
-            KEEP_EXE=true
-            shift
-            ;;
         --help|-h)
             SHOW_HELP=true
             shift
@@ -75,7 +71,6 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Options:"
     echo "  --target=TEST     Run a specific test suite"
     echo "  --raw             Run test executable directly without shell wrapper"
-    echo "  --keep-exe        Keep test executables after running (don't delete)"
     echo "  --help, -h        Show this help message"
     echo ""
     echo "Available test targets:"

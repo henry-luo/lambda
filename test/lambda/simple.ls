@@ -1,1 +1,1 @@
-(for (n in -2 to 2) (if (n == 0) "zero" else n))
+(let lst = (1, 2, 3), lst)

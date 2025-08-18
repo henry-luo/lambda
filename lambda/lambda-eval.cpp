@@ -184,54 +184,54 @@ List* list() {
 }
 
 void list_push(List *list, Item item) {
-    if (!item.item) { return; }  // NULL value
-    if (item.type_id == LMD_TYPE_NULL) { return; } // skip NULL value
-    if (item.type_id == LMD_TYPE_RAW_POINTER) {
-        if (item.item <= 1024) {
-            // treat as invalid pointer
-            printf("list_push: invalid raw pointer: %p\n", item.raw_pointer);
-            return;
-        }
-        TypeId type_id = *((uint8_t*)item.raw_pointer);
-        // nest list is flattened
-        if (type_id == LMD_TYPE_LIST) {
-            // copy over the items
-            List *nest_list = item.list;
-            for (int i = 0; i < nest_list->length; i++) {
-                Item nest_item = nest_list->items[i];
-                list_push(list, nest_item);
-            }
-            return;
-        }
-        else if (type_id == LMD_TYPE_RANGE) {
-            // copy over the items
-            Range *range = item.range;
-            for (int i = range->start; i <= range->end; i++) {
-                // todo: handle value > 32-bit
-                list_push(list, {.item = i2it(i)});
-            }
-            return;
-        }
-        else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
-            type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
-            Container *container = item.container;
-            container->ref_cnt++;
-        }
+    if (item.item <= 1024) {
+        if (!item.item) { return; }  // NULL value
+        // treat as invalid pointer
+        printf("list_push: invalid raw pointer: %p\n", item.raw_pointer);
+        return;
     }
+    TypeId type_id = get_type_id(item);
+    // printf("list_push: pushing item: type_id: %d\n", type_id);
+    if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
+    if (type_id == LMD_TYPE_LIST) { // nest list is flattened
+        // printf("list_push: pushing nested list: %p, type_id: %d\n", item.list, type_id);
+        // copy over the items
+        List *nest_list = item.list;
+        for (int i = 0; i < nest_list->length; i++) {
+            Item nest_item = nest_list->items[i];
+            list_push(list, nest_item);
+        }
+        return;
+    }
+    else if (type_id == LMD_TYPE_RANGE) {
+        // copy over the items
+        Range *range = item.range;
+        for (int i = range->start; i <= range->end; i++) {
+            // todo: handle value > 32-bit
+            list_push(list, {.item = i2it(i)});
+        }
+        return;
+    }
+    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
+        type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+        Container *container = item.container;
+        container->ref_cnt++;
+    }
+    
     // store the value in the list (and we may need two slots for long/double)
     //printf("list push item: type: %d, length: %ld\n", item.type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     switch (item.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
-        String *str = (String*)item.pointer;  str->ref_cnt++;
+        String *str = (String*)item.pointer;
+        str->ref_cnt++;
         break;
     }
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = *(double*)item.pointer;  list->items[list->length-1] = {.item = d2it(dval)};
         list->extra++;
-        printf("list push float: %f, extra: %ld\n", *dval, list->extra);
         break;
     }
     case LMD_TYPE_INT64: {
@@ -250,17 +250,11 @@ void list_push(List *list, Item item) {
 }
 
 Item list_fill(List *list, int count, ...) {
-    // printf("list_fill cnt: %d\n", count);
+    printf("list_fill cnt: %d\n", count);
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
-        Item itm = {.item = va_arg(args, uint64_t)};
-        TypeId type_id = itm.type_id;
-        if (type_id == LMD_TYPE_STRING) {
-            String *str = (String*)itm.pointer;
-            printf("list fill string value: %s\n", str->chars);
-        }
-        list_push(list, itm);
+        list_push(list, {.item = va_arg(args, uint64_t)});
     }
     va_end(args);
     frame_end();
