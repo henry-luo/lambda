@@ -7,16 +7,22 @@
 // Unicode support levels
 #define LAMBDA_UNICODE_NONE     0  // ASCII-only comparison (~0KB overhead)
 #define LAMBDA_UNICODE_MINIMAL  1  // Basic Unicode support (~200KB overhead)  
-#define LAMBDA_UNICODE_COMPACT  2  // Stripped ICU (~2-4MB overhead)
-#define LAMBDA_UNICODE_FULL     3  // Full ICU (~8-12MB overhead)
+#define LAMBDA_UNICODE_UTF8PROC 2  // utf8proc Unicode support (~350KB overhead)
+#define LAMBDA_UNICODE_COMPACT  3  // Stripped ICU (~2-4MB overhead) - deprecated
+#define LAMBDA_UNICODE_FULL     4  // Full ICU (~8-12MB overhead) - deprecated
 
 // Set default Unicode level (can be overridden at compile time)
 #ifndef LAMBDA_UNICODE_LEVEL
-    #define LAMBDA_UNICODE_LEVEL LAMBDA_UNICODE_COMPACT
+    #define LAMBDA_UNICODE_LEVEL LAMBDA_UNICODE_UTF8PROC
 #endif
 
 // Feature flags based on Unicode level
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    #define LAMBDA_UTF8PROC_SUPPORT 1
+    #define LAMBDA_UNICODE_COLLATION 1
+    #define LAMBDA_UNICODE_NORMALIZATION 1
+    #define LAMBDA_ASCII_FAST_PATH 1
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
     #define LAMBDA_ICU_SUPPORT 1
     #define LAMBDA_UNICODE_COLLATION 1
     #define LAMBDA_UNICODE_NORMALIZATION 1
@@ -29,7 +35,14 @@
     #define LAMBDA_ASCII_FAST_PATH 1
 #endif
 
-// ICU configuration for compact build
+// utf8proc configuration for optimal build
+#ifdef LAMBDA_UTF8PROC_SUPPORT
+    #define UTF8PROC_STATIC 1
+    // Compile-time options for utf8proc optimization
+    // (utf8proc is already quite compact, no special flags needed)
+#endif
+
+// ICU configuration for compact build (deprecated)
 #ifdef LAMBDA_ICU_SUPPORT
     #define U_STATIC_IMPLEMENTATION 1
     #define U_DISABLE_RENAMING 1

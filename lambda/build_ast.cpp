@@ -330,6 +330,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             fn_node->fn = SYSFUNC_AVG;
             fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
+        else if (strview_equal(&func_name, "normalize")) {
+            fn_node->fn = SYSFUNC_NORMALIZE;
+            fn_node->type = &TYPE_STRING;
+        }
         else {
             printf("unknown system function: %.*s\n", (int)func_name.length, func_name.str);
             return NULL;

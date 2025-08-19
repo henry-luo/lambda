@@ -94,10 +94,6 @@ void cleanup_unicode_support(void) {
 #endif
 }
 
-// Unicode-aware string comparison for equality
-// Use external symbol for C linkage function
-extern "C" double it2d_c_symbol(Item item) asm("_it2d");
-
 CompResult equal_comp_unicode(Item a_item, Item b_item) {
     printf("equal_comp_unicode called\n");
     
@@ -105,7 +101,8 @@ CompResult equal_comp_unicode(Item a_item, Item b_item) {
         // Handle numeric promotion as before
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
-            double a_val = it2d_c_symbol(a_item), b_val = it2d_c_symbol(b_item);
+            double a_val = a_item.type_id == LMD_TYPE_INT ? a_item.int_val: *(double*)a_item.pointer,
+                b_val = b_item.type_id == LMD_TYPE_INT ? b_item.int_val: *(double*)b_item.pointer;
             return (a_val == b_val) ? COMP_TRUE : COMP_FALSE;
         }
         return COMP_ERROR;

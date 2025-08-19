@@ -4998,6 +4998,10 @@
                 {
                   "type": "STRING",
                   "value": "error"
+                },
+                {
+                  "type": "STRING",
+                  "value": "normalize"
                 }
               ]
             }

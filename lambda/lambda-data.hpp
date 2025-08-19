@@ -193,6 +193,7 @@ typedef enum SysFunc {
     SYSFUNC_PRINT,
     SYSFUNC_FORMAT,
     SYSFUNC_ERROR,
+    SYSFUNC_NORMALIZE,
 } SysFunc;
 
 typedef struct TypeBinary : Type {

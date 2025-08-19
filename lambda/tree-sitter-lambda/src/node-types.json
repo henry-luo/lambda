@@ -2222,6 +2222,10 @@
             "named": false
           },
           {
+            "type": "normalize",
+            "named": false
+          },
+          {
             "type": "number",
             "named": false
           },
@@ -2588,11 +2592,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "floor",
@@ -2691,6 +2695,10 @@
     "named": true
   },
   {
+    "type": "normalize",
+    "named": false
+  },
+  {
     "type": "not",
     "named": false
   },
@@ -2756,11 +2764,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

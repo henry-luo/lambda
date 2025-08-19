@@ -535,7 +535,7 @@ module.exports = grammar({
         'datetime', 'date', 'time', 'today', 'justnow',
         'set', 'slice',
         'all', 'any', 'min', 'max', 'sum', 'avg', 'abs', 'round', 'floor', 'ceil',
-        'input', 'print', 'format', 'error',
+        'input', 'print', 'format', 'error', 'normalize',
       )), $._arguments,
     )),
 

@@ -1,6 +1,8 @@
 #include "transpiler.hpp"
 #include "unicode_config.h"
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+#include "utf_string.h"
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
 #include "unicode_string.h"
 #endif
 #include <stdarg.h>
@@ -1691,6 +1693,77 @@ Item fn_neg(Item item) {
         printf("unary - not supported for type: %d\n", item.type_id);
         return ItemError;
     }
+}
+
+// Unicode string normalization function
+Item fn_normalize(Item str_item, Item type_item) {
+    // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
+    if (str_item.type_id != LMD_TYPE_STRING) {
+        printf("normalize: first argument must be a string, got type: %d\n", str_item.type_id);
+        return ItemError;
+    }
+    
+    if (type_item.type_id != LMD_TYPE_SYMBOL) {
+        printf("normalize: second argument must be a symbol (normalization type), got type: %d\n", type_item.type_id);
+        return ItemError;
+    }
+    
+    String* input_str = (String*)str_item.pointer;
+    String* norm_type = (String*)type_item.pointer;
+    
+    if (!input_str || !norm_type) {
+        printf("normalize: null string arguments\n");
+        return ItemError;
+    }
+    
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc for normalization
+    int result_len = 0;
+    char* result = NULL;
+    
+    if (strncmp(norm_type->chars, "nfc", norm_type->len) == 0) {
+        result = normalize_utf8proc_nfc(input_str->chars, input_str->len, &result_len);
+    } else if (strncmp(norm_type->chars, "nfd", norm_type->len) == 0) {
+        result = normalize_utf8proc_nfd(input_str->chars, input_str->len, &result_len);
+    } else if (strncmp(norm_type->chars, "nfkc", norm_type->len) == 0) {
+        result = normalize_utf8proc_nfkc(input_str->chars, input_str->len, &result_len);
+    } else if (strncmp(norm_type->chars, "nfkd", norm_type->len) == 0) {
+        result = normalize_utf8proc_nfkd(input_str->chars, input_str->len, &result_len);
+    } else {
+        printf("normalize: unknown normalization type '%.*s', supported: nfc, nfd, nfkc, nfkd\n", 
+               (int)norm_type->len, norm_type->chars);
+        return ItemError;
+    }
+    
+    if (!result || result_len == 0) {
+        printf("normalize: normalization failed\n");
+        return ItemError;
+    }
+    
+    // Create a new string from the normalized result
+    String* output_str = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
+    if (!output_str) {
+        free(result);
+        printf("normalize: failed to allocate output string\n");
+        return ItemError;
+    }
+    
+    memcpy(output_str->chars, result, result_len);
+    output_str->len = result_len;
+    free(result);  // utf8proc allocates with malloc, so we need to free
+    
+    return (Item){.item = s2it(output_str)};
+    
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU for normalization (fallback for compatibility)
+    printf("normalize: ICU normalization not implemented yet\n");
+    return ItemError;
+    
+#else
+    // ASCII-only mode: return original string (no normalization)
+    printf("normalize: Unicode normalization disabled (ASCII-only mode)\n");
+    return str_item;  // Return original string unchanged
+#endif
 }
 
 Range* fn_to(Item item_a, Item item_b) {

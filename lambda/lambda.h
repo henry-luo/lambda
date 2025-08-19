@@ -330,6 +330,7 @@ Item fn_sum(Item a);
 Item fn_avg(Item a);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
+Item fn_normalize(Item str, Item type);
 CompResult equal_comp(Item a, Item b);
 Item fn_eq(Item a, Item b);
 Item fn_ne(Item a, Item b);

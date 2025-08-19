@@ -69,6 +69,7 @@
         "lambda/format/format-yaml.cpp",
         "lambda/lambda-eval.cpp",
         "lambda/unicode_string.cpp",
+        "lambda/utf_string.cpp",
         "lambda/lambda-mem.cpp",
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
@@ -127,10 +128,34 @@
             "link": "dynamic"
         },
         {
+            "name": "utf8proc",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libutf8proc.a",
+            "link": "static",
+            "version": "2.10.0",
+            "description": "Small, clean C library for Unicode normalization, case-folding, and other operations",
+            "platforms": {
+                "darwin": {
+                    "include": "/opt/homebrew/include",
+                    "lib": "/opt/homebrew/lib/libutf8proc.a"
+                },
+                "linux": {
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libutf8proc.a"
+                },
+                "windows": {
+                    "include": "windows-deps/include",
+                    "lib": "windows-deps/lib/libutf8proc.a"
+                }
+            }
+        },
+        {
             "name": "icu",
             "include": "icu-compact/include",
             "lib": "icu-compact/lib/libicui18n.a icu-compact/lib/libicuuc.a icu-compact/lib/libicudata.a",
             "link": "static",
+            "deprecated": true,
+            "description": "ICU library - deprecated, migrating to utf8proc",
             "data_filter": {
                 "localeFilter": {
                     "filterType": "language",
@@ -210,9 +235,9 @@
                 "build/variable.o", "build/buffer.o", "build/utils.o",
                 "build/mime-detect.o", "build/mime-types.o", "build/string.o",
                 "build/lambda-mem.o", "build/num_stack.o", "build/unicode_string.o",
-                "build/runner.o", "build/name_pool.o"
+                "build/utf_string.o", "build/runner.o", "build/name_pool.o"
             ],
-            "libraries": ["tree-sitter-lambda", "tree-sitter", "lexbor", "icu"],
+            "libraries": ["tree-sitter-lambda", "tree-sitter", "lexbor", "utf8proc"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "inline"
@@ -228,9 +253,9 @@
                 "build/parser.o", "build/num_stack.o", "build/input*.o", "build/format*.o",
                 "build/strbuf.o", "build/hashmap.o", "build/arraylist.o", "build/variable.o",
                 "build/buffer.o", "build/utils.o", "build/mime-detect.o", "build/mime-types.o",
-                "build/datetime.o", "build/string.o", "build/unicode_string.o", "build/name_pool.o"
+                "build/datetime.o", "build/string.o", "build/unicode_string.o", "build/utf_string.o", "build/name_pool.o"
             ],
-            "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "mir", "zlog", "lexbor", "icu"],
+            "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "mir", "zlog", "lexbor", "utf8proc"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "inline"

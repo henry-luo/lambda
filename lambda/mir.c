@@ -64,6 +64,7 @@ func_obj_t func_list[] = {
     {"fn_avg", (fn_ptr) fn_avg},
     {"fn_pos", (fn_ptr) fn_pos},
     {"fn_neg", (fn_ptr) fn_neg},
+    {"fn_normalize", (fn_ptr) fn_normalize},
     {"fn_eq", (fn_ptr) fn_eq},
     {"fn_ne", (fn_ptr) fn_ne},
     {"fn_lt", (fn_ptr) fn_lt},

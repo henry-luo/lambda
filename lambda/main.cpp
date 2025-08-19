@@ -9,7 +9,9 @@ extern "C" int exec_validation(int argc, char* argv[]);
 
 // Unicode support
 #include "unicode_config.h"
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+#include "utf_string.h"
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
 #include "unicode_string.h"
 #endif
 
@@ -284,12 +286,19 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "TRACE: Runtime initialized\n");
     fflush(stderr);
 
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Initialize Unicode support
-    fprintf(stderr, "TRACE: About to initialize Unicode support\n");
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Initialize utf8proc Unicode support
+    fprintf(stderr, "TRACE: About to initialize utf8proc Unicode support\n");
+    fflush(stderr);
+    init_utf8proc_support();
+    fprintf(stderr, "TRACE: utf8proc Unicode support initialized\n");
+    fflush(stderr);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Initialize ICU Unicode support (deprecated)
+    fprintf(stderr, "TRACE: About to initialize ICU Unicode support\n");
     fflush(stderr);
     init_unicode_support();
-    fprintf(stderr, "TRACE: Unicode support initialized\n");
+    fprintf(stderr, "TRACE: ICU Unicode support initialized\n");
     fflush(stderr);
 #endif
 
@@ -373,8 +382,11 @@ int main(int argc, char *argv[]) {
         run_repl(&runtime, use_mir);
     }
     
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Clean up Unicode support
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Clean up utf8proc Unicode support
+    cleanup_utf8proc_support();
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Clean up ICU Unicode support (deprecated)
     cleanup_unicode_support();
 #endif
     
