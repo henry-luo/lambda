@@ -38,8 +38,8 @@ typedef struct NamePool NamePool;
 }
 #endif
 
-// Unicode-enhanced comparison functions are declared in unicode_string.h
-#include "unicode_string.h"
+// Unicode-enhanced comparison functions are declared in utf_string.h
+#include "utf_string.h"
 
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type

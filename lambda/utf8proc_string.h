@@ -1,5 +1,5 @@
-#ifndef LAMBDA_UTF_STRING_H
-#define LAMBDA_UTF_STRING_H
+#ifndef LAMBDA_UTF8PROC_STRING_H
+#define LAMBDA_UTF8PROC_STRING_H
 
 #include "lambda.h"
 
@@ -82,4 +82,4 @@ Item fn_ge_utf8proc(Item a, Item b);
 
 #endif // LAMBDA_UTF8PROC_SUPPORT
 
-#endif // LAMBDA_UTF_STRING_H
+#endif // LAMBDA_UTF8PROC_STRING_H

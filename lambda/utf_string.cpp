@@ -1,15 +1,12 @@
 #include "utf_string.h"
 
 // Only compile utf8proc functions if utf8proc support is enabled at compile time
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+#ifdef LAMBDA_UTF8PROC_SUPPORT
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-
-#ifdef LAMBDA_UTF8PROC_SUPPORT
-    #include <utf8proc.h>
-#endif
+#include <utf8proc.h>
 
 // Global utf8proc state (minimal - utf8proc is mostly stateless)
 #ifdef LAMBDA_UTF8PROC_SUPPORT
@@ -522,32 +519,4 @@ Item fn_ge_utf8proc(Item a_item, Item b_item) {
     return ItemError;
 }
 
-#else
-// Stub implementations when utf8proc support is disabled
-// These should never be called, but we provide them to avoid linker errors
-
-Item fn_eq_utf8proc(Item a, Item b) {
-    return ItemError;
-}
-
-Item fn_ne_utf8proc(Item a, Item b) {
-    return ItemError;
-}
-
-Item fn_lt_utf8proc(Item a, Item b) {
-    return ItemError;
-}
-
-Item fn_gt_utf8proc(Item a, Item b) {
-    return ItemError;
-}
-
-Item fn_le_utf8proc(Item a, Item b) {
-    return ItemError;
-}
-
-Item fn_ge_utf8proc(Item a, Item b) {
-    return ItemError;
-}
-
-#endif // LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+#endif // LAMBDA_UTF8PROC_SUPPORT

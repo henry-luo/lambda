@@ -40,32 +40,8 @@ TYPESET_SOURCES = \
     $(TYPESET_DIR)/integration/lambda_bridge.c \
     $(TYPESET_DIR)/integration/stylesheet.c
 
-# Unicode support configuration
-UNICODE_LEVEL ?= compact
-ICU_COMPACT_ROOT ?= $(CURDIR)/icu-compact
-
-# Unicode level definitions
-ifeq ($(UNICODE_LEVEL),none)
-    UNICODE_FLAGS = -DLAMBDA_UNICODE_LEVEL=0
-    ICU_LIBS =
-endif
-
-ifeq ($(UNICODE_LEVEL),minimal)
-    UNICODE_FLAGS = -DLAMBDA_UNICODE_LEVEL=1
-    ICU_LIBS =
-endif
-
-ifeq ($(UNICODE_LEVEL),compact)
-    UNICODE_FLAGS = -DLAMBDA_UNICODE_LEVEL=2 -DU_STATIC_IMPLEMENTATION
-    ICU_LIBS = -L$(ICU_COMPACT_ROOT)/lib -licui18n -licuuc -licudata
-    ICU_CFLAGS = -I$(ICU_COMPACT_ROOT)/include
-endif
-
-ifeq ($(UNICODE_LEVEL),full)
-    UNICODE_FLAGS = -DLAMBDA_UNICODE_LEVEL=3 -DU_STATIC_IMPLEMENTATION
-    ICU_LIBS = $(shell pkg-config --libs --static icu-uc icu-i18n 2>/dev/null || echo "-licuuc -licudata -licui18n")
-    ICU_CFLAGS = $(shell pkg-config --cflags icu-uc icu-i18n 2>/dev/null || echo "-I/usr/local/include")
-endif
+# Unicode support configuration (utf8proc-based)
+UNICODE_FLAGS = -DLAMBDA_UTF8PROC_SUPPORT
 
 # Auto-detect number of jobs for parallel compilation
 NPROCS := 1
@@ -111,7 +87,7 @@ $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
         build-windows build-debug build-release clean-all distclean \
-        verify-windows test-windows build-icu clean-icu test-unicode build-unicode
+        verify-windows test-windows
 
 # Help target - shows available commands
 help:
@@ -167,17 +143,11 @@ help:
 	@echo "  lint          - Run linter on source files"
 	@echo ""
 	@echo "Unicode Support:"
-	@echo "  build-icu     - Build ultra-compact ICU for Unicode support"
 	@echo "  test-unicode  - Run Unicode string comparison tests"
 	@echo ""
 	@echo "Options:"
 	@echo "  JOBS=N        - Set number of parallel compilation jobs (default: $(JOBS))"
 	@echo "  CONFIG=file   - Use specific configuration file"
-	@echo "  UNICODE_LEVEL=level - Set Unicode support level:"
-	@echo "                  none    - ASCII-only (0KB overhead)"
-	@echo "                  minimal - Basic Unicode (~200KB overhead)"
-	@echo "                  compact - Compact ICU (~2-4MB overhead, default)"
-	@echo "                  full    - Full ICU (~8-12MB overhead)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make build JOBS=4         # Build with 4 parallel jobs"
@@ -187,18 +157,15 @@ help:
 # Main build target (incremental)
 build: $(TS_ENUM_H)
 	@echo "Building $(PROJECT_NAME) (incremental)..."
-	UNICODE_FLAGS="$(UNICODE_FLAGS)" ICU_CFLAGS="$(ICU_CFLAGS)" ICU_LIBS="$(ICU_LIBS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+	UNICODE_FLAGS="$(UNICODE_FLAGS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
 # ASCII-only build (no Unicode support)
 build-ascii:
 	@echo "Building $(PROJECT_NAME) with ASCII-only support (no Unicode)..."
-	UNICODE_LEVEL=none UNICODE_FLAGS="-DLAMBDA_UNICODE_LEVEL=0" ICU_CFLAGS="" ICU_LIBS="" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+	UNICODE_FLAGS="" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
 print-vars:
-	@echo "UNICODE_LEVEL=$(UNICODE_LEVEL)"
 	@echo "UNICODE_FLAGS=$(UNICODE_FLAGS)"
-	@echo "ICU_CFLAGS=$(ICU_CFLAGS)"
-	@echo "ICU_LIBS=$(ICU_LIBS)"
 
 $(LAMBDA_EXE): build
 
@@ -234,36 +201,9 @@ window: radiant
 all: lambda radiant
 	@echo "All projects built successfully."
 
-# Unicode support targets
-build-icu:
-	@echo "Building ultra-compact ICU for Unicode support..."
-	@if [ ! -d "icu-compact" ]; then \
-		echo "Building ICU compact libraries..."; \
-		./build-icu-compact.sh; \
-	else \
-		echo "ICU compact libraries already exist. Use 'make clean-icu' to rebuild."; \
-	fi
-
-clean-icu:
-	@echo "Cleaning ICU build artifacts..."
-	rm -rf icu-75.1 icu4c-75_1-src.tgz icu-compact-build icu-compact
-	@echo "ICU cleanup complete. Run 'make build-icu' to rebuild."
-
 test-unicode: build
 	@echo "Running Unicode string comparison tests..."
-	@echo "Testing with UNICODE_LEVEL=$(UNICODE_LEVEL)"
 	./$(LAMBDA_EXE) test/lambda/unicode_test.ls
-
-# Unicode build with specific level
-build-unicode:
-	@echo "Building Lambda with Unicode support level: $(UNICODE_LEVEL)"
-	@if [ "$(UNICODE_LEVEL)" = "compact" ] || [ "$(UNICODE_LEVEL)" = "full" ]; then \
-		if [ ! -d "icu-compact" ] && [ "$(UNICODE_LEVEL)" = "compact" ]; then \
-			echo "ICU compact libraries not found. Building them first..."; \
-			$(MAKE) build-icu; \
-		fi \
-	fi
-	UNICODE_FLAGS="$(UNICODE_FLAGS)" ICU_CFLAGS="$(ICU_CFLAGS)" ICU_LIBS="$(ICU_LIBS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
 # Cross-compilation for Windows
 cross-compile: build-windows

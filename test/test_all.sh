@@ -308,28 +308,16 @@ build_library_based_compile_cmd() {
                 local include_flags=$(echo "$resolved_flags" | grep -o '\-I[^[:space:]]*' | tr '\n' ' ')
                 local link_flags=$(echo "$resolved_flags" | grep -o '\-L[^[:space:]]*\s*\-l[^[:space:]]*' | tr '\n' ' ')
                 
-                # Add ICU libraries if needed for unicode support
-                local icu_libs=""
-                local icu_includes=""
+                # Add utf8proc library for unicode support 
+                local utf8proc_libs=""
                 for lib_name in "${lib_deps_array[@]}"; do
                     if [[ "$lib_name" == *"input"* ]] || [[ "$lib_name" == *"lambda-core"* ]] || [[ "$lib_name" == *"lambda-runtime-full"* ]] || [[ "$lib_name" == *"lambda-input-core"* ]]; then
-                        if [ -n "$ICU_LIBS" ]; then
-                            icu_libs="$ICU_LIBS"
-                        else
-                            # Use hardcoded ICU libs if environment variable is not set
-                            icu_libs="-L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
-                        fi
-                        if [ -n "$ICU_CFLAGS" ]; then
-                            icu_includes="$ICU_CFLAGS"
-                        else
-                            # Use hardcoded ICU includes if environment variable is not set
-                            icu_includes="-I/Users/henryluo/Projects/Jubily/icu-compact/include"
-                        fi
+                        utf8proc_libs="lib/utf8proc/libutf8proc.a"
                         break
                     fi
                 done
                 
-                echo "$compiler $final_flags $icu_includes $include_flags -o $final_binary $final_source $object_files $static_libs $link_flags $icu_libs $criterion_flags"
+                echo "$compiler $final_flags $include_flags -o $final_binary $final_source $object_files $static_libs $link_flags $utf8proc_libs $criterion_flags"
                 return 0
             fi
         fi

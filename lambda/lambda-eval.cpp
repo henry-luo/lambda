@@ -1,9 +1,6 @@
 #include "transpiler.hpp"
-#include "unicode_config.h"
 #if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
 #include "utf_string.h"
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-#include "unicode_string.h"
 #endif
 #include <stdarg.h>
 #include <time.h>
