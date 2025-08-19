@@ -45,6 +45,7 @@ enum EnumTypeId {
     LMD_TYPE_LIST,
     LMD_TYPE_RANGE,
     LMD_TYPE_ARRAY_INT,
+    LMD_TYPE_ARRAY_FLOAT,
     LMD_TYPE_ARRAY,
     LMD_TYPE_MAP,
     LMD_TYPE_ELEMENT,
@@ -77,6 +78,7 @@ typedef struct Range Range;
 typedef struct List List;
 typedef struct List Array;
 typedef struct ArrayLong ArrayLong;
+typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
@@ -91,7 +93,7 @@ Lambda runtime uses the following to represent its runtime data:
 	- they are packed into Item, with high bits set to TypeId;
 - for compound scalar types: LMD_TYPE_INT64, LMD_TYPE_FLOAT, LMD_TYPE_DECIMAL, LMD_TYPE_DTIME, LMD_TYPE_SYMBOL, LMD_TYPE_STRING, LMD_TYPE_BINARY
 	- they are packed into item as a tagged pointer. It's a pointer to the actual data, with high bits set to TypeId.
-- for container types: LMD_TYPE_LIST, LMD_TYPE_RANGE, LMD_TYPE_ARRAY_INT, LMD_TYPE_ARRAY, LMD_TYPE_MAP, LMD_TYPE_ELEMENT
+- for container types: LMD_TYPE_LIST, LMD_TYPE_RANGE, LMD_TYPE_ARRAY_INT, LMD_TYPE_ARRAY_FLOAT, LMD_TYPE_ARRAY, LMD_TYPE_MAP, LMD_TYPE_ELEMENT
 	- they are direct/raw pointers to the container data.
 	- all containers extends struct Container, that starts with field TypeId;
 - can use get_type_id() function to get the TypeId of an Item in a general manner;
@@ -136,6 +138,7 @@ typedef union Item {
     List* list;
     Array* array;
     ArrayLong* array_long;
+    ArrayFloat* array_float;
     Map* map;
     Element* element;
     Type* type;
@@ -247,8 +250,32 @@ Item list_get(List *list, int index);
     };
 #endif
 
+#ifndef __cplusplus
+    struct ArrayFloat {
+        TypeId type_id;
+        uint8_t flags;
+        uint16_t ref_cnt;  // reference count
+        //---------------------
+        double* items;  // pointer to items
+        long length;  // number of items
+        long extra;   // count of extra items stored at the end of the array
+        long capacity;  // allocated capacity
+    };
+#else
+    struct ArrayFloat : Container {
+        double* items;
+        long length;
+        long extra;  // count of extra items
+        long capacity;
+    };
+#endif
+
 Array* array();
 ArrayLong* array_long_new(int count, ...);
+ArrayFloat* array_float_new(int count, ...);
+Item array_float_new_item(int count, ...);
+double array_float_get(ArrayFloat* array, int index);
+void array_float_set(ArrayFloat* array, int index, double value);
 Array* array_fill(Array* arr, int count, ...);
 Item array_to_item(Array* arr);
 // void array_push(Array *array, Item item);

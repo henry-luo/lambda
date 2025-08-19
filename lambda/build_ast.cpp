@@ -122,6 +122,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_RANGE] = {.byte_size = sizeof(void*), .name = "array", .type=&TYPE_RANGE, .lit_type = (Type*)&LIT_TYPE_RANGE},
     [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
     [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_ARRAY_FLOAT] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
     [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .type=&TYPE_MAP, .lit_type = (Type*)&LIT_TYPE_MAP},
     [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .type=&TYPE_ELMT, .lit_type = (Type*)&LIT_TYPE_ELMT},
     [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .type=&TYPE_TYPE, .lit_type = (Type*)&LIT_TYPE_TYPE},

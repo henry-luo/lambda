@@ -409,7 +409,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 str->ref_cnt++;
                 break;
             }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container *container = va_arg(args, Container*);
                 *(Container**)field_ptr = container;
@@ -519,7 +519,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             case LMD_TYPE_BINARY:
                 return {.item = x2it(*(char**)field_ptr)};
                 
-            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container* container = *(Container**)field_ptr;
                 printf("map_get container: %p, type_id: %d\n", container, container->type_id);
@@ -1472,6 +1472,17 @@ Item fn_sum(Item item) {
         }
         return (Item){.item = i2it(sum)};
     }
+    else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;  // Use the correct field
+        if (!arr || arr->length == 0) {
+            return push_d(0.0);  // Empty array sums to 0.0
+        }
+        double sum = 0.0;
+        for (size_t i = 0; i < arr->length; i++) {
+            sum += arr->items[i];
+        }
+        return push_d(sum);
+    }
     else if (type_id == LMD_TYPE_LIST) {
         printf("DEBUG fn_sum: Processing LMD_TYPE_LIST\n");
         List* list = item.list;
@@ -1839,9 +1850,9 @@ bool fn_is(Item a, Item b) {
         return a_type_id != LMD_TYPE_ERROR;
     case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
         printf("is array type: %d, %d\n", a_type_id, type_b->type->type_id);
-        return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT;
+        return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT || a_type_id == LMD_TYPE_ARRAY_FLOAT;
     default:
         return a_type_id == type_b->type->type_id;
     }
@@ -2597,6 +2608,11 @@ Item fn_index(Item item, Item index_item) {
         if (index < 0 || index >= arr->length) { return ItemNull; }
         return {.item = i2it(arr->items[index])};
     }
+    case LMD_TYPE_ARRAY_FLOAT: {
+        ArrayFloat *arr = item.array_float;
+        if (index < 0 || index >= arr->length) { return ItemNull; }
+        return push_d(arr->items[index]);
+    }
     case LMD_TYPE_LIST:
         return list_get(item.list, (int)index);
     case LMD_TYPE_ELEMENT:
@@ -2656,6 +2672,9 @@ Item fn_len(Item item) {
         break;
     case LMD_TYPE_ARRAY_INT:
         size = item.array_long->length;
+        break;
+    case LMD_TYPE_ARRAY_FLOAT:
+        size = item.array_float->length;
         break;
     case LMD_TYPE_MAP: {
         size = 0;
@@ -2812,5 +2831,102 @@ DateTime* fn_datetime() {
     static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
     return &static_dt;
+}
+
+// ArrayFloat runtime functions
+
+ArrayFloat* array_float_new(int count, ...) {
+    if (count <= 0) { return NULL; }
+    va_list args;
+    va_start(args, count);
+    ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    arr->capacity = count;
+    arr->items = (double*)Malloc(count * sizeof(double));
+    arr->length = count;
+    for (int i = 0; i < count; i++) {
+        arr->items[i] = va_arg(args, double);
+    }       
+    va_end(args);
+    return arr;
+}
+
+// Wrapper function to return an Item instead of raw ArrayFloat*
+Item array_float_new_item(int count, ...) {
+    if (count <= 0) { 
+        ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+        arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+        arr->capacity = 0;
+        arr->items = NULL;
+        arr->length = 0;
+        return (Item){.array_float = arr};
+    }
+    va_list args;
+    va_start(args, count);
+    ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
+    arr->capacity = count;
+    arr->items = (double*)Malloc(count * sizeof(double));
+    arr->length = count;
+    for (int i = 0; i < count; i++) {
+        arr->items[i] = va_arg(args, double);
+    }       
+    va_end(args);
+    return (Item){.array_float = arr};
+}
+
+double array_float_get(ArrayFloat *arr, int index) {
+    if (!arr || index < 0 || index >= arr->length) {
+        return 0.0;  // Return 0.0 for invalid access
+    }
+    return arr->items[index];
+}
+
+void array_float_set(ArrayFloat *arr, int index, double value) {
+    if (!arr || index < 0 || index >= arr->capacity) {
+        return;  // Invalid access, do nothing
+    }
+    arr->items[index] = value;
+    // Update length if we're setting beyond current length
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
+}
+
+Item array_float_get_item(ArrayFloat *arr, int index) {
+    if (!arr || index < 0 || index >= arr->length) {
+        return ItemNull;  // Return null for invalid access
+    }
+    return push_d(arr->items[index]);
+}
+
+void array_float_set_item(ArrayFloat *arr, int index, Item value) {
+    if (!arr || index < 0 || index >= arr->capacity) {
+        return;  // Invalid access, do nothing
+    }
+    
+    double dval = 0.0;
+    TypeId type_id = get_type_id(value);
+    
+    // Convert item to double based on its type
+    switch (type_id) {
+        case LMD_TYPE_FLOAT:
+            dval = *(double*)value.pointer;
+            break;
+        case LMD_TYPE_INT64:
+            dval = (double)(*(long*)value.pointer);
+            break;
+        case LMD_TYPE_INT:
+            dval = (double)(value.int_val);
+            break;
+        default:
+            return;  // Unsupported type, do nothing
+    }
+    
+    arr->items[index] = dval;
+    // Update length if we're setting beyond current length
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
 }
 

@@ -97,7 +97,7 @@ void print_heap_entries() {
             TypeId type_id = *((uint8_t*)data);
             printf("heap entry data: type: %s\n", type_info[type_id].name);
             if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || 
-                type_id == LMD_TYPE_ARRAY_INT || type_id == LMD_TYPE_MAP || 
+                type_id == LMD_TYPE_ARRAY_INT || type_id == LMD_TYPE_ARRAY_FLOAT || type_id == LMD_TYPE_MAP || 
                 type_id == LMD_TYPE_ELEMENT) {
                 Container *cont = (Container*)data;
                 printf("heap entry container: type: %s, ref_cnt: %d\n", 
@@ -133,6 +133,10 @@ void check_memory_leak() {
             else if (type_id == LMD_TYPE_ARRAY_INT) {
                 ArrayLong *arr = (ArrayLong*)data;
                 printf("heap entry array int: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
+            }
+            else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+                ArrayFloat *arr = (ArrayFloat*)data;
+                printf("heap entry array float: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
                 Map *map = (Map*)data;
@@ -215,6 +219,13 @@ void free_container(Container* cont, bool clear_entry) {
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayLong *arr = (ArrayLong*)cont;
+        if (!arr->ref_cnt) {
+            if (arr->items) free(arr->items);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }
+    else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat *arr = (ArrayFloat*)cont;
         if (!arr->ref_cnt) {
             if (arr->items) free(arr->items);
             pool_variable_free(context->heap->pool, cont);
