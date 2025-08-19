@@ -592,16 +592,6 @@ if command -v jq >/dev/null 2>&1; then
         FLAGS="$FLAGS $UNICODE_FLAGS"
     fi
     
-    if [ -n "$ICU_CFLAGS" ]; then
-        echo "Adding ICU include flags: $ICU_CFLAGS"
-        FLAGS="$FLAGS $ICU_CFLAGS"
-    fi
-    
-    if [ -n "$ICU_LIBS" ]; then
-        echo "Adding ICU library flags: $ICU_LIBS"
-        LINKER_FLAGS="$LINKER_FLAGS $ICU_LIBS"
-    fi
-    
     # Get all source files (unified approach with auto-detection)
     SOURCE_FILES_ARRAY=()
     
