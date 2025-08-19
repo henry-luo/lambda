@@ -398,7 +398,7 @@
                 "sources": [
                     "test_mime_detect.c",
                     "test_math.c",
-                    "test_markup_roundtrip.c"
+                    "test/test_markup_roundtrip.cpp"
                 ],
                 "library_dependencies": [
                     ["mime-detect", "criterion"],
@@ -412,6 +412,7 @@
                 ],
                 "type": "input",
                 "special_flags": "-fms-extensions -lstdc++",
+                "cpp_flags": "-std=c++17",
                 "parallel": true
             },
             {

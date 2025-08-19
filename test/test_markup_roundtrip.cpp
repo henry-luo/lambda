@@ -7,29 +7,21 @@
 #include <unistd.h>
 #include <ctype.h>
 #include "../lambda/lambda.h"
+#include "../lambda/lambda-data.hpp"  // This includes the Input struct definition
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 #include <lexbor/url/url.h>
 
-void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
-
-// Include the Input struct definition (matching lambda-data.hpp)
-typedef struct Input {
-    void* url;
-    void* path;
-    VariableMemPool* pool; // memory pool
-    ArrayList* type_list;  // list of types
-    Item root;
-    StrBuf* sb;
-} Input;
-
-// Forward declarations
-Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor);
-String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-lxb_url_t* get_current_dir();
-lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+// Forward declarations with C linkage
+extern "C" {
+    Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor);
+    String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
+    lxb_url_t* get_current_dir();
+    lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+    void format_item(StrBuf* buf, Item item, int indent, char* format);
+}
 
 // Helper function to create a Lambda String from C string
 String* create_lambda_string(const char* text) {
@@ -57,7 +49,7 @@ char* read_file_content(const char* filepath) {
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
     
-    char* content = malloc(size + 1);
+    char* content = static_cast<char*>(malloc(size + 1));
     if (!content) {
         fclose(file);
         return NULL;
@@ -207,7 +199,7 @@ Test(markup_roundtrip, complete_test) {
     // char* file_content = read_file_content("test/input/complete_markup_test.md");
     // cr_assert_not_null(file_content, "Failed to read complete_markup_test.md file");
     
-    const char* comprehensive_content = read_file_content("test/input/comprehensive_test.md");
+    char* comprehensive_content = read_file_content("test/input/comprehensive_test.md");
     cr_assert_not_null(comprehensive_content, "Failed to read comprehensive_test.md file");
     
     // Create Lambda strings for input parameters
@@ -222,7 +214,7 @@ Test(markup_roundtrip, complete_test) {
     Input* input = input_from_source(comprehensive_content, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse comprehensive markdown");
     StrBuf* strbuf = strbuf_new();
-    printf("Parsed input with root_item: %p\n", (void*)input->root);
+    printf("Parsed input with root_item: %p\n", reinterpret_cast<void*>(input->root.item));
     format_item(strbuf, input->root, 0, NULL);
     printf("Formatted output: %s\n", strbuf->str ? strbuf->str : "(null)");
 
@@ -242,7 +234,7 @@ Test(markup_roundtrip, emoji_test) {
     printf("\n=== Testing Comprehensive Emoji Features ===\n");
     
     // Read emoji test content from file
-    const char* emoji_content = read_file_content("test/input/comprehensive_emoji_test.md");
+    char* emoji_content = read_file_content("test/input/comprehensive_emoji_test.md");
     cr_assert_not_null(emoji_content, "Failed to read comprehensive_emoji_test.md file");
     
     // Create Lambda strings for input parameters
@@ -258,7 +250,7 @@ Test(markup_roundtrip, emoji_test) {
     cr_assert_not_null(input, "Failed to parse comprehensive emoji markdown");
     
     StrBuf* strbuf = strbuf_new();
-    printf("Parsed emoji input with root_item: %p\n", (void*)input->root);
+    printf("Parsed emoji input with root_item: %p\n", reinterpret_cast<void*>(input->root.item));
     format_item(strbuf, input->root, 0, NULL);
     printf("Formatted emoji output: %s\n", strbuf->str ? strbuf->str : "(null)");
 
@@ -280,7 +272,7 @@ Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
     printf("\n=== Testing Comprehensive Math Features from File ===\n");
     
     // Read math test content from file
-    const char* math_content = read_file_content("test/input/comprehensive_math_test.md");
+    char* math_content = read_file_content("test/input/comprehensive_math_test.md");
     cr_assert_not_null(math_content, "Failed to read comprehensive_math_test.md file");
     
     // Create Lambda strings for input parameters
@@ -299,7 +291,7 @@ Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
     cr_assert_not_null(input, "Failed to parse comprehensive math markdown");
     
     StrBuf* strbuf = strbuf_new();
-    printf("Parsed math input with root_item: %p\n", (void*)input->root);
+    printf("Parsed math input with root_item: %p\n", reinterpret_cast<void*>(input->root.item));
     format_item(strbuf, input->root, 0, NULL);
     printf("Formatted math output: %s\n", strbuf->str ? strbuf->str : "(null)");
 
@@ -320,7 +312,7 @@ Test(markup_roundtrip, rst_directives_test) {
     printf("\n=== Testing RST Directives and Format-Specific Features ===\n");
     
     // Read RST test content from file
-    const char* rst_content = read_file_content("test/input/comprehensive_test.rst");
+    char* rst_content = read_file_content("test/input/comprehensive_test.rst");
     cr_assert_not_null(rst_content, "Failed to read comprehensive_test.rst file");
     
     // Create Lambda strings for RST input parameters
@@ -340,7 +332,7 @@ Test(markup_roundtrip, rst_directives_test) {
     cr_assert_not_null(input, "Failed to parse comprehensive RST content");
     
     StrBuf* strbuf = strbuf_new();
-    printf("Parsed RST input with root_item: %p\n", (void*)input->root);
+    printf("Parsed RST input with root_item: %p\n", reinterpret_cast<void*>(input->root.item));
     format_item(strbuf, input->root, 0, NULL);
     printf("Formatted RST output (first 300 chars): %.300s\n", strbuf->str ? strbuf->str : "(null)");
     if (strbuf->str && strlen(strbuf->str) > 300) {
@@ -349,6 +341,8 @@ Test(markup_roundtrip, rst_directives_test) {
 
     // Format using JSON formatter to verify structure
     String* json_type = create_lambda_string("json");
+    printf("DEBUG test: Before format_data, input->root=0x%llx\n", 
+           static_cast<unsigned long long>(input->root.item));
     String* formatted = format_data(input->root, json_type, flavor_str, input->pool);
     cr_assert_not_null(formatted, "Failed to format RST content to JSON");
     cr_assert(formatted->len > 0, "Formatted RST JSON should not be empty");
@@ -495,12 +489,30 @@ Test(markup_parsing_rst, rst_extended_features) {
     Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
     cr_assert_not_null(input, "Failed to parse extended RST content");
     
+    printf("DEBUG: Immediately after input_from_source, input=%p, input->root=0x%llx\n", 
+           static_cast<void*>(input), static_cast<unsigned long long>(input->root.item));
+    
+    // Check if the input pointer is corrupted
+    printf("DEBUG: Input struct fields: url=%p, pool=%p, type_list=%p, sb=%p\n", 
+           input->url, input->pool, input->type_list, input->sb);
+    
     StrBuf* strbuf = strbuf_new();
+    printf("DEBUG test: Before test format_item, input->root=0x%llx\n", 
+           static_cast<unsigned long long>(input->root.item));
     format_item(strbuf, input->root, 0, NULL);
+    printf("DEBUG test: After test format_item, input->root=0x%llx\n", 
+           static_cast<unsigned long long>(input->root.item));
     printf("Extended RST output: %.200s\n", strbuf->str ? strbuf->str : "(null)");
+
+    // Check if the item value changed
+    Item test_root = input->root;
+    printf("DEBUG test: Copied input->root to test_root=0x%llx\n", 
+           static_cast<unsigned long long>(test_root.item));
     
     // Format to JSON and verify extended features
     String* json_type = create_lambda_string("json");
+    printf("DEBUG test extended: Before format_data, input->root=0x%llx, test_root=0x%llx\n", 
+           static_cast<unsigned long long>(input->root.item), static_cast<unsigned long long>(test_root.item));
     String* formatted = format_data(input->root, json_type, NULL, input->pool);
     cr_assert_not_null(formatted, "Failed to format extended RST to JSON");
     

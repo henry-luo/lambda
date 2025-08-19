@@ -246,12 +246,21 @@ build_library_based_compile_cmd() {
             compiler=$(get_global_compiler)
         fi
         
-        # For C++ files, use C++ variant of compiler
+        # Get C++ flags if specified in config
+        local cpp_flags=$(get_config "$suite_type" "cpp_flags")
+        local final_flags="$special_flags"
+        
+        # For C++ files, use C++ variant of compiler and add C++ flags
         if [[ "$final_source" == *.cpp ]]; then
             if [ "$compiler" = "clang" ]; then
                 compiler="clang++"
             elif [ "$compiler" = "gcc" ]; then
                 compiler="g++"
+            fi
+            
+            # Add C++ specific flags if defined
+            if [ -n "$cpp_flags" ] && [ "$cpp_flags" != "null" ]; then
+                final_flags="$special_flags $cpp_flags"
             fi
         fi
         
@@ -301,6 +310,7 @@ build_library_based_compile_cmd() {
                 
                 # Add ICU libraries if needed for unicode support
                 local icu_libs=""
+                local icu_includes=""
                 for lib_name in "${lib_deps_array[@]}"; do
                     if [[ "$lib_name" == *"input"* ]] || [[ "$lib_name" == *"lambda-core"* ]] || [[ "$lib_name" == *"lambda-runtime-full"* ]] || [[ "$lib_name" == *"lambda-input-core"* ]]; then
                         if [ -n "$ICU_LIBS" ]; then
@@ -309,11 +319,17 @@ build_library_based_compile_cmd() {
                             # Use hardcoded ICU libs if environment variable is not set
                             icu_libs="-L/Users/henryluo/Projects/Jubily/icu-compact/lib -licui18n -licuuc -licudata"
                         fi
+                        if [ -n "$ICU_CFLAGS" ]; then
+                            icu_includes="$ICU_CFLAGS"
+                        else
+                            # Use hardcoded ICU includes if environment variable is not set
+                            icu_includes="-I/Users/henryluo/Projects/Jubily/icu-compact/include"
+                        fi
                         break
                     fi
                 done
                 
-                echo "$compiler $special_flags $include_flags -o $final_binary $final_source $object_files $static_libs $link_flags $icu_libs $criterion_flags"
+                echo "$compiler $final_flags $icu_includes $include_flags -o $final_binary $final_source $object_files $static_libs $link_flags $icu_libs $criterion_flags"
                 return 0
             fi
         fi
@@ -321,7 +337,7 @@ build_library_based_compile_cmd() {
         # Phase 6: Fallback to legacy library resolution if object approach fails
         local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
         
-        echo "$compiler $special_flags -o $final_binary $final_source $resolved_flags"
+        echo "$compiler $final_flags -o $final_binary $final_source $resolved_flags"
         return 0
     else
         # Fallback to legacy dependency strings if library_dependencies not available
@@ -396,6 +412,22 @@ build_dependency_based_compile_cmd() {
     local deps="$4"
     local special_flags="$5"
     
+    # Get C++ flags if specified in config
+    local cpp_flags=$(get_config "$suite_type" "cpp_flags")
+    local final_flags="$special_flags"
+    
+    # Handle both prefixed and unprefixed paths
+    local final_source="$source"
+    local final_binary="$binary"
+    
+    # Add test/ prefix if not already present
+    if [[ "$final_source" != test/* ]]; then
+        final_source="test/$final_source"
+    fi
+    if [[ "$final_binary" != test/* ]]; then
+        final_binary="test/$final_binary"
+    fi
+    
     if [ "$suite_type" = "validator" ]; then
         # Get compiler from config for validator tests
         local config_compiler=$(get_config "validator" "compiler")
@@ -403,22 +435,37 @@ build_dependency_based_compile_cmd() {
         if [ -n "$config_compiler" ] && [ "$config_compiler" != "null" ] && [ "$config_compiler" != "" ]; then
             compiler="$config_compiler"
         fi
-        echo "$compiler $special_flags $CRITERION_FLAGS -o $binary $source"
+        
+        # For C++ files, use C++ variant of compiler and add C++ flags
+        if [[ "$final_source" == *.cpp ]]; then
+            if [ "$compiler" = "clang" ]; then
+                compiler="clang++"
+            elif [ "$compiler" = "gcc" ]; then
+                compiler="g++"
+            fi
+            
+            # Add C++ specific flags if defined
+            if [ -n "$cpp_flags" ] && [ "$cpp_flags" != "null" ]; then
+                final_flags="$special_flags $cpp_flags"
+            fi
+        fi
+        
+        echo "$compiler $final_flags $CRITERION_FLAGS -o $final_binary $final_source"
     else
         # Use clang for library and input tests to match normal compilation behavior
-        # Handle both prefixed and unprefixed paths
-        local final_source="$source"
-        local final_binary="$binary"
+        local compiler="clang"
         
-        # Add test/ prefix if not already present
-        if [[ "$final_source" != test/* ]]; then
-            final_source="test/$final_source"
-        fi
-        if [[ "$final_binary" != test/* ]]; then
-            final_binary="test/$final_binary"
+        # For C++ files, use C++ variant of compiler and add C++ flags
+        if [[ "$final_source" == *.cpp ]]; then
+            compiler="clang++"
+            
+            # Add C++ specific flags if defined
+            if [ -n "$cpp_flags" ] && [ "$cpp_flags" != "null" ]; then
+                final_flags="$special_flags $cpp_flags"
+            fi
         fi
         
-        echo "clang -o $final_binary $final_source $deps $CRITERION_FLAGS $special_flags"
+        echo "$compiler -o $final_binary $final_source $deps $CRITERION_FLAGS $final_flags"
     fi
     return 0
 }
@@ -1318,8 +1365,16 @@ run_individual_test() {
         done < <(parse_array_string "$dependencies_str" "|||")
         
         local test_index=-1
+        # Strip extension from test name if present for matching
+        local base_test_name="$test_name"
+        if [[ "$test_name" == *.c ]]; then
+            base_test_name="${test_name%.c}"
+        elif [[ "$test_name" == *.cpp ]]; then
+            base_test_name="${test_name%.cpp}"
+        fi
+        
         for i in "${!sources_array[@]}"; do
-            if [[ "${sources_array[$i]}" == "test_${test_name}.c" ]]; then
+            if [[ "${sources_array[$i]}" == "test_${base_test_name}.c" ]] || [[ "${sources_array[$i]}" == "test/test_${base_test_name}.cpp" ]] || [[ "${sources_array[$i]}" == "test_${base_test_name}.cpp" ]]; then
                 test_index=$i
                 break
             fi
@@ -1329,8 +1384,16 @@ run_individual_test() {
             print_error "Test '$test_name' not found in $suite_type tests"
             print_status "Available $suite_type tests:"
             for source_file in "${sources_array[@]}"; do
-                test_basename=$(basename "$source_file" .c)
-                echo "  - ${test_basename#test_}"
+                if [[ "$source_file" == *.c ]]; then
+                    test_basename=$(basename "$source_file" .c)
+                elif [[ "$source_file" == *.cpp ]]; then
+                    test_basename=$(basename "$source_file" .cpp)
+                else
+                    test_basename=$(basename "$source_file")
+                fi
+                # Remove "test_" prefix from basename
+                test_name_only="${test_basename#test_}"
+                echo "  - ${test_name_only}"
             done
             return 1
         fi
