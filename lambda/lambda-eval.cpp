@@ -1856,8 +1856,11 @@ bool equal(Item a_item, Item b_item) {
 }
 
 CompResult equal_comp(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced comparison when available
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced comparison
+    return equal_comp_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced comparison (deprecated)
     return equal_comp_unicode(a_item, b_item);
 #else
     // Original ASCII-only implementation
@@ -1903,8 +1906,11 @@ CompResult equal_comp(Item a_item, Item b_item) {
 // Comparison functions with fast path for int/float and fallback for other types
 
 Item fn_eq(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced equality comparison
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced equality comparison
+    return fn_eq_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced equality comparison (deprecated)
     return fn_eq_unicode(a_item, b_item);
 #else
     // Fast path for numeric types
@@ -1936,8 +1942,11 @@ Item fn_eq(Item a_item, Item b_item) {
 }
 
 Item fn_ne(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced inequality comparison
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced inequality comparison
+    return fn_ne_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced inequality comparison (deprecated)
     return fn_ne_unicode(a_item, b_item);
 #else
     // Fast path for numeric types
@@ -1969,8 +1978,11 @@ Item fn_ne(Item a_item, Item b_item) {
 }
 
 Item fn_lt(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced less-than comparison (supports string comparison)
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced less-than comparison (supports string comparison)
+    return fn_lt_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced less-than comparison (deprecated)
     return fn_lt_unicode(a_item, b_item);
 #else
     // Fast path for numeric types
@@ -2002,8 +2014,11 @@ Item fn_lt(Item a_item, Item b_item) {
 }
 
 Item fn_gt(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced greater-than comparison (supports string comparison)
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced greater-than comparison (supports string comparison)
+    return fn_gt_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced greater-than comparison (deprecated)
     return fn_gt_unicode(a_item, b_item);
 #else
     // Fast path for numeric types
@@ -2035,8 +2050,11 @@ Item fn_gt(Item a_item, Item b_item) {
 }
 
 Item fn_le(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced less-than-or-equal comparison (supports string comparison)
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced less-than-or-equal comparison (supports string comparison)
+    return fn_le_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced less-than-or-equal comparison (deprecated)
     return fn_le_unicode(a_item, b_item);
 #else
     // Fast path for numeric types
@@ -2068,8 +2086,11 @@ Item fn_le(Item a_item, Item b_item) {
 }
 
 Item fn_ge(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use Unicode-enhanced greater-than-or-equal comparison (supports string comparison)
+#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+    // Use utf8proc Unicode-enhanced greater-than-or-equal comparison (supports string comparison)
+    return fn_ge_utf8proc(a_item, b_item);
+#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
+    // Use ICU Unicode-enhanced greater-than-or-equal comparison (deprecated)
     return fn_ge_unicode(a_item, b_item);
 #else
     // Fast path for numeric types

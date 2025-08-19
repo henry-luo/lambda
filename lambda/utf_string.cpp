@@ -385,24 +385,140 @@ Item fn_ne_utf8proc(Item a_item, Item b_item) {
     return {.item = b2it(result == COMP_FALSE)};
 }
 
-// Stub implementations for relational operators (Phase 4)
+// Relational operators using utf8proc string comparison (Phase 4)
 Item fn_lt_utf8proc(Item a_item, Item b_item) {
-    printf("fn_lt_utf8proc not yet implemented\n");
+    // Handle numeric types first
+    if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
+        (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
+                       *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
+                       *(double*)b_item.pointer;
+        return {.item = b2it(a_val < b_val)};
+    }
+    
+    // Handle string types
+    if ((a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL) &&
+        (b_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_SYMBOL)) {
+        String *str_a = (String*)a_item.pointer;
+        String *str_b = (String*)b_item.pointer;
+        
+        Utf8procCompareResult result = string_compare_utf8proc(str_a->chars, str_a->len,
+                                                              str_b->chars, str_b->len);
+        if (result == UTF8PROC_COMPARE_ERROR) {
+            printf("utf8proc string comparison failed in fn_lt\n");
+            return ItemError;
+        }
+        
+        return {.item = b2it(result == UTF8PROC_COMPARE_LESS)};
+    }
+    
+    // Error for unsupported type combinations
+    printf("less than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
 }
 
 Item fn_gt_utf8proc(Item a_item, Item b_item) {
-    printf("fn_gt_utf8proc not yet implemented\n");
+    // Handle numeric types first
+    if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
+        (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
+                       *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
+                       *(double*)b_item.pointer;
+        return {.item = b2it(a_val > b_val)};
+    }
+    
+    // Handle string types
+    if ((a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL) &&
+        (b_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_SYMBOL)) {
+        String *str_a = (String*)a_item.pointer;
+        String *str_b = (String*)b_item.pointer;
+        
+        Utf8procCompareResult result = string_compare_utf8proc(str_a->chars, str_a->len,
+                                                              str_b->chars, str_b->len);
+        if (result == UTF8PROC_COMPARE_ERROR) {
+            printf("utf8proc string comparison failed in fn_gt\n");
+            return ItemError;
+        }
+        
+        return {.item = b2it(result == UTF8PROC_COMPARE_GREATER)};
+    }
+    
+    // Error for unsupported type combinations
+    printf("greater than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
 }
 
 Item fn_le_utf8proc(Item a_item, Item b_item) {
-    printf("fn_le_utf8proc not yet implemented\n");
+    // Handle numeric types first
+    if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
+        (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
+                       *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
+                       *(double*)b_item.pointer;
+        return {.item = b2it(a_val <= b_val)};
+    }
+    
+    // Handle string types
+    if ((a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL) &&
+        (b_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_SYMBOL)) {
+        String *str_a = (String*)a_item.pointer;
+        String *str_b = (String*)b_item.pointer;
+        
+        Utf8procCompareResult result = string_compare_utf8proc(str_a->chars, str_a->len,
+                                                              str_b->chars, str_b->len);
+        if (result == UTF8PROC_COMPARE_ERROR) {
+            printf("utf8proc string comparison failed in fn_le\n");
+            return ItemError;
+        }
+        
+        return {.item = b2it(result == UTF8PROC_COMPARE_LESS || result == UTF8PROC_COMPARE_EQUAL)};
+    }
+    
+    // Error for unsupported type combinations
+    printf("less than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
 }
 
 Item fn_ge_utf8proc(Item a_item, Item b_item) {
-    printf("fn_ge_utf8proc not yet implemented\n");
+    // Handle numeric types first
+    if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
+        (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
+                       *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
+                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
+                       *(double*)b_item.pointer;
+        return {.item = b2it(a_val >= b_val)};
+    }
+    
+    // Handle string types
+    if ((a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL) &&
+        (b_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_SYMBOL)) {
+        String *str_a = (String*)a_item.pointer;
+        String *str_b = (String*)b_item.pointer;
+        
+        Utf8procCompareResult result = string_compare_utf8proc(str_a->chars, str_a->len,
+                                                              str_b->chars, str_b->len);
+        if (result == UTF8PROC_COMPARE_ERROR) {
+            printf("utf8proc string comparison failed in fn_ge\n");
+            return ItemError;
+        }
+        
+        return {.item = b2it(result == UTF8PROC_COMPARE_GREATER || result == UTF8PROC_COMPARE_EQUAL)};
+    }
+    
+    // Error for unsupported type combinations
+    printf("greater than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
     return ItemError;
 }
 
