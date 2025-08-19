@@ -2664,6 +2664,105 @@ Item fn_len(Item item) {
     return {.item = i2it(size)};
 }
 
+// substring system function - extracts a substring from start to end (exclusive)
+Item fn_substring(Item str_item, Item start_item, Item end_item) {
+    if (get_type_id(str_item) != LMD_TYPE_STRING) {
+        printf("fn_substring: first argument must be a string\n");
+        return ItemError;
+    }
+    
+    if (get_type_id(start_item) != LMD_TYPE_INT && get_type_id(start_item) != LMD_TYPE_INT64) {
+        printf("fn_substring: start index must be an integer\n");
+        return ItemError;
+    }
+    
+    if (get_type_id(end_item) != LMD_TYPE_INT && get_type_id(end_item) != LMD_TYPE_INT64) {
+        printf("fn_substring: end index must be an integer\n");
+        return ItemError;
+    }
+    
+    String* str = (String*)str_item.pointer;
+    if (!str || str->len == 0) {
+        return str_item; // return empty string
+    }
+    
+    long start = it2l(start_item);
+    long end = it2l(end_item);
+    
+    // handle negative indices (count from end)
+    long char_len = utf8_char_count(str->chars);
+    if (start < 0) start = char_len + start;
+    if (end < 0) end = char_len + end;
+    
+    // clamp to valid range
+    if (start < 0) start = 0;
+    if (end > char_len) end = char_len;
+    if (start >= end) {
+        // return empty string
+        String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+        empty->len = 0;
+        empty->chars[0] = '\0';
+        return {.item = s2it(empty)};
+    }
+    
+    // convert char indices to byte indices
+    long byte_start = utf8_char_to_byte_offset(str->chars, start);
+    long byte_end = utf8_char_to_byte_offset(str->chars, end);
+    
+    if (byte_start >= str->len || byte_end < 0) {
+        // return empty string
+        String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
+        empty->len = 0;
+        empty->chars[0] = '\0';
+        return {.item = s2it(empty)};
+    }
+    
+    long result_len = byte_end - byte_start;
+    String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
+    result->len = result_len;
+    memcpy(result->chars, str->chars + byte_start, result_len);
+    result->chars[result_len] = '\0';
+    
+    return {.item = s2it(result)};
+}
+
+// contains system function - checks if a string contains a substring
+Item fn_contains(Item str_item, Item substr_item) {
+    if (get_type_id(str_item) != LMD_TYPE_STRING) {
+        printf("fn_contains: first argument must be a string\n");
+        return ItemError;
+    }
+    
+    if (get_type_id(substr_item) != LMD_TYPE_STRING) {
+        printf("fn_contains: second argument must be a string\n");
+        return ItemError;
+    }
+    
+    String* str = (String*)str_item.pointer;
+    String* substr = (String*)substr_item.pointer;
+    
+    if (!str || !substr) {
+        return {.item = b2it(false)};
+    }
+    
+    if (substr->len == 0) {
+        return {.item = b2it(true)}; // empty string is contained in any string
+    }
+    
+    if (str->len == 0 || substr->len > str->len) {
+        return {.item = b2it(false)};
+    }
+    
+    // simple byte-based search for now - could be optimized with KMP or Boyer-Moore
+    for (int i = 0; i <= str->len - substr->len; i++) {
+        if (memcmp(str->chars + i, substr->chars, substr->len) == 0) {
+            return {.item = b2it(true)};
+        }
+    }
+    
+    return {.item = b2it(false)};
+}
+
 // Static DateTime instance to avoid dynamic allocation issues
 static DateTime static_dt;
 static bool static_dt_initialized = false;

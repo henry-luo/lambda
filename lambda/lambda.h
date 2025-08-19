@@ -331,6 +331,8 @@ Item fn_avg(Item a);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
 Item fn_normalize(Item str, Item type);
+Item fn_substring(Item str, Item start, Item end);
+Item fn_contains(Item str, Item substr);
 CompResult equal_comp(Item a, Item b);
 Item fn_eq(Item a, Item b);
 Item fn_ne(Item a, Item b);

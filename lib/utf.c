@@ -50,3 +50,26 @@ int utf8_char_count(const char* utf8_string) {
     return char_count;
 }
 
+// Convert character index to byte offset in UTF-8 string
+int utf8_char_to_byte_offset(const char* utf8_string, int char_index) {
+    if (!utf8_string || char_index < 0) return 0;
+    
+    int current_char = 0;
+    const unsigned char* ptr = (const unsigned char*)utf8_string;
+    const unsigned char* start = ptr;
+    uint32_t codepoint;
+    
+    while (*ptr && current_char < char_index) {
+        int bytes_consumed = utf8_to_codepoint(ptr, &codepoint);
+        if (bytes_consumed <= 0) {
+            // Invalid UTF-8 sequence, skip this byte
+            ptr++;
+        } else {
+            ptr += bytes_consumed;
+            current_char++;
+        }
+    }
+    
+    return ptr - start;
+}
+

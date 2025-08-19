@@ -2174,6 +2174,10 @@
             "named": false
           },
           {
+            "type": "contains",
+            "named": false
+          },
+          {
             "type": "date",
             "named": false
           },
@@ -2247,6 +2251,10 @@
           },
           {
             "type": "string",
+            "named": false
+          },
+          {
+            "type": "substring",
             "named": false
           },
           {
@@ -2547,6 +2555,10 @@
     "named": true
   },
   {
+    "type": "contains",
+    "named": false
+  },
+  {
     "type": "date",
     "named": false
   },
@@ -2592,11 +2604,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "floor",
@@ -2745,6 +2757,10 @@
   {
     "type": "string_content",
     "named": true
+  },
+  {
+    "type": "substring",
+    "named": false
   },
   {
     "type": "sum",

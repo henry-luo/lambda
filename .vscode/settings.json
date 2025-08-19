@@ -49,10 +49,9 @@
         "unistd.h": "c",
         "lambda.h": "c",
         "api.h": "c",
-        "lambda-data.h": "c",
+        "lambda-data.hpp": "cpp",
         "stdexcept": "cpp",
         "forward_list": "cpp",
-        "algorithm": "cpp",
-        "memory": "cpp"
+        "algorithm": "cpp"
     }
 }

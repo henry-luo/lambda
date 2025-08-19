@@ -5002,6 +5002,14 @@
                 {
                   "type": "STRING",
                   "value": "normalize"
+                },
+                {
+                  "type": "STRING",
+                  "value": "substring"
+                },
+                {
+                  "type": "STRING",
+                  "value": "contains"
                 }
               ]
             }
