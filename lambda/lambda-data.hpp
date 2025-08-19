@@ -14,6 +14,8 @@ extern "C" {
 #include <math.h>
 #include <mpdecimal.h>
 
+typedef struct NamePool NamePool;
+
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/mem-pool/include/mem_pool.h"
@@ -243,8 +245,9 @@ String* strbuf_to_string(StrBuf *sb);
 typedef struct Input {
     void* url;
     void* path;
-    VariableMemPool* pool; // memory pool
-    ArrayList* type_list;  // list of types
+    VariableMemPool* pool;      // memory pool
+    NamePool* name_pool;        // centralized name management
+    ArrayList* type_list;       // list of types
     Item root;
     StrBuf* sb;
 } Input;

@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "name_pool.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
 #include "../lib/mem-pool/include/mem_pool.h"
@@ -161,7 +162,7 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 }
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
-    printf("pushing name %.*s, %p\n", (int)node->name.length, node->name.str, node->type);
+    printf("pushing name %.*s, %p\n", (int)node->name->len, node->name->chars, node->type);
     NameEntry *entry = (NameEntry*)pool_calloc(tp->ast_pool, sizeof(NameEntry));
     entry->name = node->name;  
     entry->node = (AstNode*)node;  entry->import = import;
@@ -377,10 +378,20 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
     NameScope *scope = tp->current_scope;
     FIND_VAR_NAME:
     NameEntry *entry = scope->first;
+    int entry_count = 0;
     while (entry) {
+        entry_count++;
+        if (entry_count > 1000) {  // Safety check for infinite loops
+            printf("ERROR: Too many entries in scope - possible infinite loop in entry list\n");
+            return NULL;
+        }
+        
+        StrView entry_name = strview_init(entry->name->chars, entry->name->len);
         printf("checking name: %.*s vs. %.*s\n", 
-            (int)entry->name.length, entry->name.str, (int)var_name.length, var_name.str);
-        if (strview_eq(&entry->name, &var_name)) { break; }
+            (int)entry_name.length, entry_name.str, (int)var_name.length, var_name.str);
+        if (strview_eq(&entry_name, &var_name)) { 
+            break; 
+        }
         entry = entry->next;
     }
     if (!entry) {
@@ -398,7 +409,7 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
         return NULL;
     }
     else {
-        printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
+        printf("found identifier %.*s\n", (int)entry->name->len, entry->name->chars);
         return entry;
     }
 }
@@ -407,9 +418,9 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     printf("building identifier\n");
     AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstIdentNode));
 
-    // get the identifier name
+    // get the identifier name from source and create pooled string
     StrView var_name = ts_node_source(tp, id_node);
-    ast_node->name = var_name;
+    ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
     
     // lookup the name
     printf("looking up name: %.*s\n", (int)var_name.length, var_name.str);
@@ -418,13 +429,13 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         // ident is used for member access, thus we return TYPE_ANY
         ast_node->type = &TYPE_ANY;
     } else {
-        printf("found identifier %.*s\n", (int)entry->name.length, entry->name.str);
+        printf("found identifier %.*s\n", (int)entry->name->len, entry->name->chars);
         ast_node->entry = entry;
         if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
             // clone and remove is_const flag
             // todo: full type clone
             printf("got imported identifier %.*s from module %.*s\n", 
-                (int)entry->name.length, entry->name.str, 
+                (int)entry->name->len, entry->name->chars, 
                 (int)entry->import->module.length, entry->import->module.str);
             ast_node->type = alloc_type(tp->ast_pool, entry->node->type->type_id, sizeof(Type));
             // Defensive check: verify is_const was properly reset by alloc_type
@@ -435,15 +446,15 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         }
         else { 
             printf("Debug: entry->node->type is %p for identifier %.*s\n", 
-                entry->node->type, (int)entry->name.length, entry->name.str);
+                entry->node->type, (int)entry->name->len, entry->name->chars);
             ast_node->type = entry->node->type; 
             if (!ast_node->type) {
                 printf("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY\n", 
-                    (int)entry->name.length, entry->name.str);
+                    (int)entry->name->len, entry->name->chars);
                 ast_node->type = &TYPE_ANY;
             } else if ((uintptr_t)ast_node->type < 0x1000 || (uintptr_t)ast_node->type > 0x7FFFFFFFFFFF) {
                 printf("Warning: entry->node->type appears to be invalid pointer %p for identifier %.*s, using TYPE_ANY\n", 
-                    ast_node->type, (int)entry->name.length, entry->name.str);
+                    ast_node->type, (int)entry->name->len, entry->name->chars);
                 ast_node->type = &TYPE_ANY;
             }
         }
@@ -1010,8 +1021,8 @@ AstNode* build_assign_expr(Transpiler* tp, TSNode asn_node) {
 
     TSNode name = ts_node_child_by_field_id(asn_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
-    ast_node->name.str = tp->source + start_byte;
-    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+    StrView name_view = {.str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte};
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     TSNode type_node = ts_node_child_by_field_id(asn_node, FIELD_TYPE);
 
@@ -1103,7 +1114,8 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
-    ast_node->name = build_key_string(tp, name);
+    StrView name_view = build_key_string(tp, name);
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
     printf("build key as\n");
@@ -1266,7 +1278,12 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
         prev_item = item;
 
         ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
-        shape_entry->name = &((AstNamedNode*)item)->name;
+        // Convert pooled String* to StrView* for shape entry
+        String* pooled_name = ((AstNamedNode*)item)->name;
+        StrView* name_view = (StrView*)pool_calloc(tp->ast_pool, sizeof(StrView));
+        name_view->str = pooled_name->chars;
+        name_view->length = pooled_name->len;
+        shape_entry->name = name_view;
         shape_entry->type = item->type;
         shape_entry->byte_offset = byte_offset;
         if (!prev_entry) { type->shape = shape_entry; } 
@@ -1320,7 +1337,10 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
         TSSymbol symbol = ts_node_symbol(child);
         if (symbol == SYM_IDENT) {  // element name
             StrView name = ts_node_source(tp, child);
-            type->name = name;
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            // Convert pooled String* to StrView for TypeElmt
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
         }
         else if (symbol == SYM_CONTENT_TYPE) {  // element content
             ast_node->content = build_content_type(tp, child);
@@ -1332,7 +1352,12 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
             prev_item = item;
 
             ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
-            shape_entry->name = &((AstNamedNode*)item)->name;
+            // Convert pooled String* to StrView* for shape entry
+            String* pooled_name = ((AstNamedNode*)item)->name;
+            StrView* name_view = (StrView*)pool_calloc(tp->ast_pool, sizeof(StrView));
+            name_view->str = pooled_name->chars;
+            name_view->length = pooled_name->len;
+            shape_entry->name = name_view;
             shape_entry->type = item->type;           
             shape_entry->byte_offset = byte_offset;
             if (!prev_entry) { type->shape = shape_entry; } 
@@ -1469,7 +1494,16 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         prev_item = item;
 
         ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
-        shape_entry->name = (symbol == SYM_MAP_ITEM) ? &((AstNamedNode*)item)->name : NULL;
+        if (symbol == SYM_MAP_ITEM) {
+            // Convert pooled String* to StrView* for shape entry
+            String* pooled_name = ((AstNamedNode*)item)->name;
+            StrView* name_view = (StrView*)pool_calloc(tp->ast_pool, sizeof(StrView));
+            name_view->str = pooled_name->chars;
+            name_view->length = pooled_name->len;
+            shape_entry->name = name_view;
+        } else {
+            shape_entry->name = NULL;
+        }
         shape_entry->type = item->type;
         if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
             printf("invalid map item type %d, should be map or any\n", item->type->type_id);
@@ -1503,7 +1537,10 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
         TSSymbol symbol = ts_node_symbol(child);
         if (symbol == SYM_IDENT) {  // element name
             StrView name = ts_node_source(tp, child);
-            type->name = name;
+            String* pooled_name = name_pool_create_strview(tp->name_pool, name);
+            // Convert pooled String* to StrView for TypeElmt
+            type->name.str = pooled_name->chars;
+            type->name.length = pooled_name->len;
         }
         else if (symbol == SYM_CONTENT) {  // element content
             ast_node->content = build_content(tp, child, false, false);
@@ -1515,7 +1552,16 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
             prev_item = item;
 
             ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
-            shape_entry->name = (symbol == SYM_ATTR) ? &((AstNamedNode*)item)->name : NULL;
+            if (symbol == SYM_ATTR) {
+                // Convert pooled String* to StrView* for shape entry
+                String* pooled_name = ((AstNamedNode*)item)->name;
+                StrView* name_view = (StrView*)pool_calloc(tp->ast_pool, sizeof(StrView));
+                name_view->str = pooled_name->chars;
+                name_view->length = pooled_name->len;
+                shape_entry->name = name_view;
+            } else {
+                shape_entry->name = NULL;
+            }
             shape_entry->type = item->type;
             if (!shape_entry->name && !(item->type->type_id == LMD_TYPE_MAP || item->type->type_id == LMD_TYPE_ANY)) {
                 printf("invalid map item type %d, should be map or any\n", item->type->type_id);
@@ -1544,8 +1590,8 @@ AstNode* build_loop_expr(Transpiler* tp, TSNode loop_node) {
 
     TSNode name = ts_node_child_by_field_id(loop_node, FIELD_NAME);
     int start_byte = ts_node_start_byte(name);
-    ast_node->name.str = tp->source + start_byte;
-    ast_node->name.length = ts_node_end_byte(name) - start_byte;
+    StrView name_view = {.str = tp->source + start_byte, .length = ts_node_end_byte(name) - start_byte};
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     TSNode expr_node = ts_node_child_by_field_id(loop_node, FIELD_AS);
     ast_node->as = build_expr(tp, expr_node);
@@ -1669,7 +1715,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
 
     TSNode name = ts_node_child_by_field_id(param_node, FIELD_NAME);
     StrView name_str = ts_node_source(tp, name);
-    ast_node->name = name_str;
+    ast_node->name = name_pool_create_strview(tp->name_pool, name_str);
 
     TSNode type_node = ts_node_child_by_field_id(param_node, FIELD_TYPE);
     // determine the type of the field
@@ -1701,7 +1747,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     if (is_named) {
         TSNode fn_name_node = ts_node_child_by_field_id(func_node, FIELD_NAME);
         StrView name = ts_node_source(tp, fn_name_node);
-        ast_node->name = name;
+        ast_node->name = name_pool_create_strview(tp->name_pool, name);
         // add fn name to current scope
         push_name(tp, (AstNamedNode*)ast_node, NULL);
     }
@@ -1899,7 +1945,7 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name.length, func_node->name.str, 
+            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name->len, func_node->name->chars, 
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 push_name(tp, (AstNamedNode*)func_node, import_node);
@@ -1911,7 +1957,7 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
             while (declare) {
                 AstNamedNode *dec_node = (AstNamedNode*)declare;
                 push_name(tp, (AstNamedNode*)dec_node, import_node);
-                printf("got pub var: %.*s\n", (int)dec_node->name.length, dec_node->name.str);
+                printf("got pub var: %.*s\n", (int)dec_node->name->len, dec_node->name->chars);
                 declare = declare->next;
             }
         }
@@ -1932,7 +1978,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
         TSNode child = ts_tree_cursor_current_node(&cursor);
         if (field_id == FIELD_ALIAS) {
             StrView alias = ts_node_source(tp, child);
-            ast_node->alias = alias;
+            ast_node->alias = name_pool_create_strview(tp->name_pool, alias);
         }
         else if (field_id == FIELD_MODULE) {
             StrView module = ts_node_source(tp, child);

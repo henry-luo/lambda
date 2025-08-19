@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "name_pool.h"
 #include <time.h>
 
 #ifdef _WIN32
@@ -209,6 +210,14 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
     tp->type_list = arraylist_new(16);
     tp->const_list = arraylist_new(16);
+    
+    // Initialize name pool
+    tp->name_pool = name_pool_create(tp->ast_pool, nullptr);
+    if (!tp->name_pool) {
+        printf("Error: Failed to create name pool\n");
+        return;
+    }
+    
     if (strcmp(ts_node_type(root_node), "document") != 0) {
         printf("Error: The tree has no valid root node.\n");
         return;

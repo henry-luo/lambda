@@ -8,6 +8,9 @@ extern "C" {
 
 #include "ast.h"
 
+// Forward declaration to avoid circular dependency
+typedef struct NamePool NamePool;
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 
@@ -16,10 +19,10 @@ typedef struct AstImportNode AstImportNode;
 
 // entry in the name_stack
 typedef struct NameEntry {
-    StrView name;
-    AstNode* node;  // AST node that defines the name
+    String* name;               // Changed from StrView to String* (from name pool)
+    AstNode* node;              // AST node that defines the name
     struct NameEntry* next;
-    AstImportNode* import;  // the module that the name is imported from, if any
+    AstImportNode* import;      // the module that the name is imported from, if any
 } NameEntry;
 
 // name_scope
@@ -108,19 +111,19 @@ typedef struct AstBinaryNode : AstNode {
 
 // for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_LOOP, AST_NODE_PARAM
 typedef struct AstNamedNode : AstNode {
-    StrView name;
+    String* name;               // Changed from StrView to String* (from name pool)
     AstNode *as;
 } AstNamedNode;
 
 typedef struct AstIdentNode : AstNode {
-    StrView name;
+    String* name;               // Changed from StrView to String* (from name pool)
     NameEntry *entry;
 } AstIdentNode;
 
 struct AstImportNode : AstNode {
-    StrView alias;
-    StrView module;
-    Script* script; // imported script
+    String* alias;              // Changed from StrView to String* (from name pool)
+    StrView module;             // Keep module as StrView (file path)
+    Script* script;             // imported script
     bool is_relative;
 };
 
@@ -159,10 +162,10 @@ typedef struct AstElementNode : AstMapNode {
 
 // aligned with AstNamedNode on name
 typedef struct AstFuncNode : AstNode {
-    StrView name;
-    AstNamedNode *param; // first parameter of the function
+    String* name;               // Changed from StrView to String* (from name pool)
+    AstNamedNode *param;        // first parameter of the function
     AstNode *body;
-    NameScope *vars;  // vars including params and local variables
+    NameScope *vars;            // vars including params and local variables
 } AstFuncNode;
 
 // root of the AST
@@ -199,23 +202,23 @@ typedef Item (*main_func_t)(Context*);
 typedef struct Runtime Runtime;
 
 struct Script {
-    const char* reference;  // path (relative to the main script) and name of the script
-    int index;  // index of the script in the runtime scripts list
+    const char* reference;      // path (relative to the main script) and name of the script
+    int index;                  // index of the script in the runtime scripts list
     const char* source;
     TSTree* syntax_tree;
 
-    // AST
+    // AST and Memory Management
     VariableMemPool* ast_pool;
+    NamePool* name_pool;        // centralized name management for this script
     AstNode *ast_root;
-    // todo: have a hashmap to speed up name lookup
-    NameScope* current_scope;  // current name scope
-    ArrayList* type_list;  // list of types
-    ArrayList* const_list;  // list of constants
+    NameScope* current_scope;   // current name scope
+    ArrayList* type_list;       // list of types
+    ArrayList* const_list;      // list of constants
 
     // each script is JIT compiled its own MIR context
     MIR_context_t jit_context;
-    main_func_t main_func;  // transpiled main function
-    mpd_context_t decimal_ctx; // libmpdec context for decimal operations
+    main_func_t main_func;      // transpiled main function
+    mpd_context_t decimal_ctx;  // libmpdec context for decimal operations
 };
 
 typedef struct Transpiler : Script {

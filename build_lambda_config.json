@@ -50,6 +50,7 @@
         "lambda/transpile.cpp",
         "lambda/transpile-mir.cpp",
         "lambda/build_ast.cpp",
+        "lambda/name_pool.cpp",
         "lambda/mir.c",
         "lambda/pack.cpp",
         "lambda/print.cpp",
@@ -209,7 +210,7 @@
                 "build/variable.o", "build/buffer.o", "build/utils.o",
                 "build/mime-detect.o", "build/mime-types.o", "build/string.o",
                 "build/lambda-mem.o", "build/num_stack.o", "build/unicode_string.o",
-                "build/runner.o"
+                "build/runner.o", "build/name_pool.o"
             ],
             "libraries": ["tree-sitter-lambda", "tree-sitter", "lexbor", "icu"],
             "include": "lib/mem-pool/include",
@@ -227,7 +228,7 @@
                 "build/parser.o", "build/num_stack.o", "build/input*.o", "build/format*.o",
                 "build/strbuf.o", "build/hashmap.o", "build/arraylist.o", "build/variable.o",
                 "build/buffer.o", "build/utils.o", "build/mime-detect.o", "build/mime-types.o",
-                "build/datetime.o", "build/string.o", "build/unicode_string.o"
+                "build/datetime.o", "build/string.o", "build/unicode_string.o", "build/name_pool.o"
             ],
             "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "mir", "zlog", "lexbor", "icu"],
             "include": "lib/mem-pool/include",

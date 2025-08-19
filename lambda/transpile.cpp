@@ -11,8 +11,8 @@ void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) 
         strbuf_append_format(strbuf, "m%d.", import->script->index);
     }
     strbuf_append_char(strbuf, '_');
-    if (fn_node->name.str) {
-        strbuf_append_str_n(strbuf, fn_node->name.str, fn_node->name.length);
+    if (fn_node->name && fn_node->name->chars) {
+        strbuf_append_str_n(strbuf, fn_node->name->chars, fn_node->name->len);
     } else {
         strbuf_append_char(strbuf, 'f');
     }
@@ -29,7 +29,7 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
     }
     // user var name starts with '_'
     strbuf_append_char(strbuf, '_');
-    strbuf_append_str_n(strbuf, asn_node->name.str, asn_node->name.length);
+    strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
 }
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
@@ -51,7 +51,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)pri->expr;
             printf("transpile_box_item: identifier found: %.*s\n", 
-                (int)ident->name.length, ident->name.str);
+                (int)ident->name->len, ident->name->chars);
             if (ident->entry && ident->entry->node) {
                 printf("transpile_box_item: identifier entry type: %d\n", 
                     ident->entry->node->type->type_id);
@@ -422,7 +422,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
             printf("transpile_primary_expr: identifier %.*s, type: %d\n", 
-                (int)ident_node->name.length, ident_node->name.str, pri_node->type->type_id);
+                (int)ident_node->name->len, ident_node->name->chars, pri_node->type->type_id);
                 
             if (ident_node->entry && ident_node->entry->node && 
                 ident_node->entry->node->node_type == AST_NODE_FUNC) {
@@ -431,7 +431,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             }
             else if (ident_node->entry && ident_node->entry->node) {
                 printf("transpile_primary_expr: writing var name for %.*s, entry type: %d\n",
-                    (int)ident_node->name.length, ident_node->name.str,
+                    (int)ident_node->name->len, ident_node->name->chars,
                     ident_node->entry->node->type->type_id);
                 
                 // For decimal identifiers, we need to convert the pointer to an Item
@@ -1423,7 +1423,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         ";\n for (int i=0; i<arr->length; i++) {\n ");
     writeType(tp, item_type);
     strbuf_append_str(tp->code_buf, " _");
-    strbuf_append_str_n(tp->code_buf, loop_node->name.str, loop_node->name.length);
+    strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
     if (expr_type->type_id == LMD_TYPE_RANGE) {
         strbuf_append_str(tp->code_buf, "=i;\n");
     } else if (item_type->type_id == LMD_TYPE_STRING) {
@@ -1680,9 +1680,8 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         }
         strbuf_append_str(tp->code_buf, ");");
     }
-    else if (!item) {
-        strbuf_append_str(tp->code_buf, "el;");
-    }
+    // Always return the element
+    strbuf_append_str(tp->code_buf, "el;");
     strbuf_append_str(tp->code_buf, "})");
 }
 
@@ -1935,7 +1934,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
         if (param != fn_node->param) strbuf_append_str(tp->code_buf, ",");
         writeType(tp, param->type);
         strbuf_append_str(tp->code_buf, " _");
-        strbuf_append_str_n(tp->code_buf, param->name.str, param->name.length);
+        strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
         param = (AstNamedNode*)param->next;
     }
     if (as_pointer) {
@@ -2086,7 +2085,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name.length, func_node->name.str, 
+            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name->len, func_node->name->chars, 
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);

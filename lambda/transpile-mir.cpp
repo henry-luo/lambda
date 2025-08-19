@@ -297,7 +297,7 @@ static void transpile_mir_unary_expr(MIR_context_t ctx, MIR_item_t func_item, MI
 }
 
 static void transpile_mir_ident_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstIdentNode *ident_node, MIR_reg_t *result_reg) {
-    printf("transpile MIR identifier: %.*s\n", (int)ident_node->name.length, ident_node->name.str);
+    printf("transpile MIR identifier: %.*s\n", (int)ident_node->name->len, ident_node->name->chars);
     
     // For now, just return a placeholder value
     // In a real implementation, we'd look up the variable in a symbol table

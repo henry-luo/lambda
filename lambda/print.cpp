@@ -577,8 +577,8 @@ void print_ast_node(AstNode *node, int indent) {
     // get the function name
     switch(node->node_type) {
     case AST_NODE_IDENT:
-        printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name.length, 
-            ((AstIdentNode*)node)->name.str, format_type(node->type), node->type ? node->type->is_const : -1);
+        printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name->len, 
+            ((AstIdentNode*)node)->name->chars, format_type(node->type), node->type ? node->type->is_const : -1);
         break;
     case AST_NODE_PRIMARY:
         printf("[primary expr:%s,const:%d]\n", format_type(node->type), node->type ? node->type->is_const : -1);
@@ -662,13 +662,13 @@ void print_ast_node(AstNode *node, int indent) {
     }
     case AST_NODE_ASSIGN: {
         AstNamedNode* assign = (AstNamedNode*)node;
-        printf("[assign expr:%.*s:%s]\n", (int)assign->name.length, assign->name.str, format_type(node->type));
+        printf("[assign expr:%.*s:%s]\n", (int)assign->name->len, assign->name->chars, format_type(node->type));
         print_ast_node(assign->as, indent + 1);
         break;
     }
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* key = (AstNamedNode*)node;
-        printf("[key expr:%.*s:%s]\n", (int)key->name.length, key->name.str, format_type(node->type));
+        printf("[key expr:%.*s:%s]\n", (int)key->name->len, key->name->chars, format_type(node->type));
         print_ast_node(key->as, indent + 1);
         break;
     }
@@ -731,7 +731,7 @@ void print_ast_node(AstNode *node, int indent) {
     }
     case AST_NODE_PARAM: {
         AstNamedNode* param = (AstNamedNode*)node;
-        printf("[param: %.*s:%s]\n", (int)param->name.length, param->name.str, format_type(node->type));
+        printf("[param: %.*s:%s]\n", (int)param->name->len, param->name->chars, format_type(node->type));
         break;
     }
     case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
@@ -761,7 +761,7 @@ void print_ast_node(AstNode *node, int indent) {
         if (node->node_type == AST_NODE_FUNC_EXPR) {
             printf("[function expr:%s]\n", format_type(node->type));
         } else {
-            printf("[function: %.*s:%s]\n", (int)func->name.length, func->name.str, format_type(node->type));
+            printf("[function: %.*s:%s]\n", (int)func->name->len, func->name->chars, format_type(node->type));
         }
         print_label(indent + 1, "params:"); 
         AstNode* fn_param = (AstNode*)func->param;
@@ -840,7 +840,7 @@ void print_ast_node(AstNode *node, int indent) {
     }
     case AST_NODE_IMPORT:
         printf("[import %.*s:%.*s]\n", 
-            (int)((AstImportNode*)node)->alias.length, ((AstImportNode*)node)->alias.str, 
+            (int)((AstImportNode*)node)->alias->len, ((AstImportNode*)node)->alias->chars, 
             (int)((AstImportNode*)node)->module.length, ((AstImportNode*)node)->module.str);
         break;
     case AST_SCRIPT: {
