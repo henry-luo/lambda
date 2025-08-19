@@ -312,7 +312,7 @@ build_library_based_compile_cmd() {
                 local utf8proc_libs=""
                 for lib_name in "${lib_deps_array[@]}"; do
                     if [[ "$lib_name" == *"input"* ]] || [[ "$lib_name" == *"lambda-core"* ]] || [[ "$lib_name" == *"lambda-runtime-full"* ]] || [[ "$lib_name" == *"lambda-input-core"* ]]; then
-                        utf8proc_libs="lib/utf8proc/libutf8proc.a"
+                        utf8proc_libs="/opt/homebrew/lib/libutf8proc.a"
                         break
                     fi
                 done
