@@ -1319,7 +1319,98 @@ Item fn_ceil(Item item) {
 }
 
 Item fn_min(Item item_a, Item item_b) {
-    // min() - minimum of two numbers
+    // Check if we're being called with array min (single array argument)
+    // This happens when the second argument is ITEM_NULL or has type LMD_TYPE_NULL
+    if (item_b.type_id == LMD_TYPE_NULL || item_b.raw_pointer == NULL) {
+        // Single argument array min case
+        TypeId type_id = get_type_id(item_a);
+        if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+            ArrayFloat* arr = item_a.array_float;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no minimum
+            }
+            double min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
+            }
+            return push_d(min_val);
+        }
+        else if (type_id == LMD_TYPE_ARRAY_INT) {
+            ArrayLong* arr = item_a.array_long;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no minimum
+            }
+            long min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
+            }
+            return (Item){.item = i2it(min_val)};
+        }
+        else if (type_id == LMD_TYPE_ARRAY) {
+            Array* arr = item_a.array;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no minimum
+            }
+            Item min_item = array_get(arr, 0);
+            double min_val = 0.0;
+            bool is_float = false;
+            
+            // Convert first element
+            if (min_item.type_id == LMD_TYPE_INT) {
+                min_val = (double)min_item.int_val;
+            }
+            else if (min_item.type_id == LMD_TYPE_INT64) {
+                min_val = (double)(*(long*)min_item.pointer);
+            }
+            else if (min_item.type_id == LMD_TYPE_FLOAT) {
+                min_val = *(double*)min_item.pointer;
+                is_float = true;
+            }
+            else {
+                return ItemError;
+            }
+            
+            // Find minimum
+            for (size_t i = 1; i < arr->length; i++) {
+                Item elem_item = array_get(arr, i);
+                double elem_val = 0.0;
+                
+                if (elem_item.type_id == LMD_TYPE_INT) {
+                    elem_val = (double)elem_item.int_val;
+                }
+                else if (elem_item.type_id == LMD_TYPE_INT64) {
+                    elem_val = (double)(*(long*)elem_item.pointer);
+                }
+                else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+                    elem_val = *(double*)elem_item.pointer;
+                    is_float = true;
+                }
+                else {
+                    return ItemError;
+                }
+                
+                if (elem_val < min_val) {
+                    min_val = elem_val;
+                }
+            }
+            
+            if (is_float) {
+                return push_d(min_val);
+            } else {
+                return (Item){.item = i2it((long)min_val)};
+            }
+        }
+        else {
+            printf("min not supported for single argument type: %d\n", type_id);
+            return ItemError;
+        }
+    }
+    
+    // Two argument scalar min case (original behavior)
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
     
@@ -1369,7 +1460,98 @@ Item fn_min(Item item_a, Item item_b) {
 }
 
 Item fn_max(Item item_a, Item item_b) {
-    // max() - maximum of two numbers
+    // Check if we're being called with array max (single array argument)
+    // This happens when the second argument is ITEM_NULL or has type LMD_TYPE_NULL
+    if (item_b.type_id == LMD_TYPE_NULL || item_b.raw_pointer == NULL) {
+        // Single argument array max case
+        TypeId type_id = get_type_id(item_a);
+        if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+            ArrayFloat* arr = item_a.array_float;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no maximum
+            }
+            double max_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] > max_val) {
+                    max_val = arr->items[i];
+                }
+            }
+            return push_d(max_val);
+        }
+        else if (type_id == LMD_TYPE_ARRAY_INT) {
+            ArrayLong* arr = item_a.array_long;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no maximum
+            }
+            long max_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] > max_val) {
+                    max_val = arr->items[i];
+                }
+            }
+            return (Item){.item = i2it(max_val)};
+        }
+        else if (type_id == LMD_TYPE_ARRAY) {
+            Array* arr = item_a.array;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no maximum
+            }
+            Item max_item = array_get(arr, 0);
+            double max_val = 0.0;
+            bool is_float = false;
+            
+            // Convert first element
+            if (max_item.type_id == LMD_TYPE_INT) {
+                max_val = (double)max_item.int_val;
+            }
+            else if (max_item.type_id == LMD_TYPE_INT64) {
+                max_val = (double)(*(long*)max_item.pointer);
+            }
+            else if (max_item.type_id == LMD_TYPE_FLOAT) {
+                max_val = *(double*)max_item.pointer;
+                is_float = true;
+            }
+            else {
+                return ItemError;
+            }
+            
+            // Find maximum
+            for (size_t i = 1; i < arr->length; i++) {
+                Item elem_item = array_get(arr, i);
+                double elem_val = 0.0;
+                
+                if (elem_item.type_id == LMD_TYPE_INT) {
+                    elem_val = (double)elem_item.int_val;
+                }
+                else if (elem_item.type_id == LMD_TYPE_INT64) {
+                    elem_val = (double)(*(long*)elem_item.pointer);
+                }
+                else if (elem_item.type_id == LMD_TYPE_FLOAT) {
+                    elem_val = *(double*)elem_item.pointer;
+                    is_float = true;
+                }
+                else {
+                    return ItemError;
+                }
+                
+                if (elem_val > max_val) {
+                    max_val = elem_val;
+                }
+            }
+            
+            if (is_float) {
+                return push_d(max_val);
+            } else {
+                return (Item){.item = i2it((long)max_val)};
+            }
+        }
+        else {
+            printf("max not supported for single argument type: %d\n", type_id);
+            return ItemError;
+        }
+    }
+    
+    // Two argument scalar max case (original behavior)
     double a_val = 0.0, b_val = 0.0;
     bool is_float = false;
     
@@ -1566,6 +1748,17 @@ Item fn_avg(Item item) {
         double sum = 0.0;
         for (size_t i = 0; i < arr->length; i++) {
             sum += (double)arr->items[i];
+        }
+        return push_d(sum / (double)arr->length);
+    }
+    else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        ArrayFloat* arr = item.array_float;  // Use the correct field
+        if (!arr || arr->length == 0) {
+            return ItemError;
+        }
+        double sum = 0.0;
+        for (size_t i = 0; i < arr->length; i++) {
+            sum += arr->items[i];
         }
         return push_d(sum / (double)arr->length);
     }

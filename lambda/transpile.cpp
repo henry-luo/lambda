@@ -1819,6 +1819,21 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 strbuf_append_str(tp->code_buf, ", ITEM_NULL");
             }
         }
+        // Special handling for min/max functions - add default second argument for array operations
+        else if ((fn.length == 3 && (strncmp(fn.str, "min", 3) == 0 || strncmp(fn.str, "max", 3) == 0))) {
+            // Count arguments
+            int arg_count = 0;
+            AstNode* count_arg = call_node->argument;
+            while (count_arg) {
+                arg_count++;
+                count_arg = count_arg->next;
+            }
+            
+            // If only one argument (array case), add null second argument
+            if (arg_count == 1) {
+                strbuf_append_str(tp->code_buf, ", ITEM_NULL");
+            }
+        }
     }
     
     strbuf_append_char(tp->code_buf, ')');
