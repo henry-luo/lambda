@@ -572,7 +572,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     decimal->ref_cnt = 1;
     
     // Use transpiler's decimal context
-    decimal->dec_val = mpd_new(&tp->decimal_ctx);
+    decimal->dec_val = mpd_new(tp->decimal_ctx);
     if (decimal->dec_val == NULL) {
         printf("ERROR: Failed to allocate libmpdec decimal\n");
         free(num_str);
@@ -581,7 +581,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     
     // Parse the decimal string
     uint32_t status = 0;
-    mpd_qset_string(decimal->dec_val, num_str, &tp->decimal_ctx, &status);
+    mpd_qset_string(decimal->dec_val, num_str, tp->decimal_ctx, &status);
     if (status != 0) {
         printf("ERROR: Failed to parse decimal string: %s (status: %u)\n", num_str, status);
     }
