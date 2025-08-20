@@ -94,6 +94,7 @@ windows-deps/src/lexbor/
 windows-deps/include/lexbor/
 windows-deps/**/*.xz
 windows-deps/**/*.bz2
+win-native-deps/
 
 # ICU source and build artifacts
 icu/
