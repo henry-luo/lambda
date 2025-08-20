@@ -123,32 +123,6 @@ void print_ast_debug(Input* input) {
     }
 }
 
-// Context creation and destruction functions
-Context* create_test_context() {
-    Context* ctx = (Context*)calloc(1, sizeof(Context));
-    if (!ctx) return NULL;
-    
-    // Initialize minimal context for testing
-    ctx->num_stack = num_stack_create(16);
-    ctx->ast_pool = NULL;
-    ctx->consts = NULL;
-    ctx->type_list = NULL;
-    ctx->type_info = NULL;
-    ctx->cwd = NULL;
-    ctx->result = ITEM_NULL;
-    ctx->heap = NULL;  // Will be initialized in setup
-    
-    return ctx;
-}
-
-void destroy_test_context(Context* ctx) {
-    if (!ctx) return;
-    if (ctx->num_stack) {
-        num_stack_destroy((num_stack_t*)ctx->num_stack);
-    }
-    free(ctx);
-}
-
 // Common function to test math expression roundtrip for any array of test cases
 // Returns true if all tests pass, false if any fail
 bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, 

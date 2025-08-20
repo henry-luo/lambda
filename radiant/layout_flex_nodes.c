@@ -1,5 +1,6 @@
 #include "layout.h"
 
+#include "../lib/log.h"
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display);
 
 void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
@@ -21,7 +22,7 @@ void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_init(lycon);
     
-    dzlog_debug("setting up block blk\n");
+    log_debug("setting up block blk\n");
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
@@ -74,16 +75,16 @@ void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
     }
 
     // flow the block in parent context
-    dzlog_debug("flow block in parent context\n");
+    log_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     lycon->block.max_width = max(lycon->block.max_width, block->width 
         + (block->bound ? block->bound->margin.left + block->bound->margin.right : 0));
     lycon->prev_view = (View*)block;
-    dzlog_debug("block view: %d, end block>>\n", block->type);
+    log_debug("block view: %d, end block>>\n", block->type);
 }
 
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
-    dzlog_debug("layout flex nodes");
+    log_debug("layout flex nodes");
     ViewBlock* block = (ViewBlock*)lycon->view;
     alloc_flex_container_prop(lycon, block); 
     
@@ -136,13 +137,13 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
             if (lycon->prev_view && lycon->prev_view->type >= RDT_VIEW_INLINE_BLOCK) {
                 ViewBlock* child_block = (ViewBlock*)lycon->prev_view;
                 child_blocks[index] = child_block;
-                dzlog_debug("flex child %d: x=%d, y=%d, w=%d, h=%d", 
+                log_debug("flex child %d: x=%d, y=%d, w=%d, h=%d", 
                     index, child_block->x, child_block->y, child_block->width, child_block->height);
 
                 // Set up the FlexItem
                 FlexItem* item = &flex_container.items[index];
                 item->width = child_block->width;  item->height = child_block->height;
-                dzlog_debug("flex item %d: width=%d, height=%d\n", index, item->width, item->height);
+                log_debug("flex item %d: width=%d, height=%d\n", index, item->width, item->height);
                 
                 // Copy margins
                 if (child_block->bound) {
@@ -207,7 +208,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                 child_blocks[i]->content_height = flex_container.items[i].height;
             }
 
-            dzlog_debug("flex child adjusted block %d: x=%d, y=%d, w=%d, h=%d", 
+            log_debug("flex child adjusted block %d: x=%d, y=%d, w=%d, h=%d", 
                 i, child_blocks[i]->x, child_blocks[i]->y, child_blocks[i]->width, child_blocks[i]->height);
         }
     }
@@ -231,7 +232,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     }
     lycon->block.max_width = max_width;  // includes padding-left
     lycon->block.advance_y = max_height;  // includes padding-top  
-    dzlog_debug("flex block final: content-wd=%d, content-hg=%d, wd:%d, hg:%d\n", 
+    log_debug("flex block final: content-wd=%d, content-hg=%d, wd:%d, hg:%d\n", 
         block->content_width, block->content_height, block->width, block->height); 
     
     // reflow the block
@@ -245,5 +246,5 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     free(child_blocks);
     free(flex_container.items);
     
-    dzlog_debug("Flex layout complete");
+    log_debug("Flex layout complete");
 }

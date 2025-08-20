@@ -20,6 +20,7 @@
         "lib/strbuf.c",
         "lib/hashmap.c",
         "lib/arraylist.c",
+        "lib/log.c",
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",

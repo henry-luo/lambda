@@ -38,6 +38,7 @@
         "lib/arraylist.c",
         "lib/file.c",
         "lib/hashmap.c",
+        "lib/log.c",
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
@@ -93,12 +94,6 @@
             "name": "mir",
             "include": "/usr/local/include",
             "lib": "/usr/local/lib/libmir.a",
-            "link": "static"
-        },
-        {
-            "name": "zlog",
-            "include": "/usr/local/include",
-            "lib": "/usr/local/lib/libzlog.a",
             "link": "static"
         },
         {
@@ -190,23 +185,6 @@
             "link": "inline"
         },
         {
-            "name": "lambda-input-core",
-            "description": "Minimal Lambda input parsing core for simple tests",
-            "sources": ["lib/file.c"],
-            "objects": [
-                "build/input.o", "build/format.o", "build/url.o", "build/print.o",
-                "build/strbuf.o", "build/strview.o", "build/arraylist.o", 
-                "build/variable.o", "build/buffer.o", "build/utils.o",
-                "build/mime-detect.o", "build/mime-types.o", "build/string.o",
-                "build/lambda-mem.o", "build/num_stack.o",
-                "build/utf_string.o", "build/runner.o", "build/name_pool.o"
-            ],
-            "libraries": ["tree-sitter-lambda", "tree-sitter", "lexbor", "utf8proc"],
-            "include": "lib/mem-pool/include",
-            "special_flags": "-lstdc++",
-            "link": "inline"
-        },
-        {
             "name": "lambda-runtime-full",
             "description": "Complete Lambda runtime with all dependencies for complex tests",
             "sources": [],
@@ -229,6 +207,31 @@
                 "build/format-rst.o", "build/format-toml.o", "build/format-xml.o", "build/format-yaml.o"
             ],
             "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "mir", "zlog", "lexbor", "utf8proc"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "inline"
+        },
+        {
+            "name": "lambda-input-format",
+            "description": "Lambda input processing and formatting without MIR/JIT dependencies",
+            "sources": [],
+            "objects": [
+                "build/strbuf.o", "build/strview.o", "build/hashmap.o", "build/arraylist.o", 
+                "build/variable.o", "build/buffer.o", "build/utils.o", "build/datetime.o", 
+                "build/string.o", "build/utf_string.o", "build/url.o", "build/url_parser.o",
+                "build/input.o", "build/input-common.o", "build/input-css.o", "build/input-csv.o", 
+                "build/input-eml.o", "build/input-html.o", "build/input-ics.o", "build/input-ini.o", 
+                "build/input-json.o", "build/input-latex.o", "build/input-man.o", "build/input-mark.o", 
+                "build/input-markup.o", "build/input-math.o", "build/input-org.o", "build/input-pdf.o", 
+                "build/input-rtf.o", "build/input-toml.o", "build/input-vcf.o", "build/input-xml.o", 
+                "build/input-yaml.o", "build/format.o", "build/format-css.o", "build/format-html.o", 
+                "build/format-ini.o", "build/format-json.o", "build/format-latex.o", "build/format-math.o", 
+                "build/format-md.o", "build/format-org.o", "build/format-rst.o", "build/format-toml.o", 
+                "build/format-xml.o", "build/format-yaml.o", "build/mime-detect.o", "build/mime-types.o",
+                "build/lambda-mem.o", "build/print.o", "build/lambda-eval.o", "build/num_stack.o", 
+                "build/file.o", "build/build_ast.o", "build/utf.o", "build/name_pool.o", "test/test_context.o"
+            ],
+            "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "inline"
@@ -394,8 +397,8 @@
                 ],
                 "library_dependencies": [
                     ["mime-detect", "criterion"],
-                    ["lambda-runtime-full", "criterion"],
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-input-format", "criterion"],
+                    ["lambda-input-format", "criterion"]
                 ],
                 "binaries": [
                     "test_mime_detect.exe",

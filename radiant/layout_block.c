@@ -1,5 +1,6 @@
 #include "layout.h"
 
+#include "../lib/log.h"
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
@@ -110,7 +111,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 }
 
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
-    dzlog_debug("layout block content");
+    log_debug("layout block content");
     lxb_html_element_t *elmt = (lxb_html_element_t*)block->node;
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
         uintptr_t elmt_name = elmt->element.node.local_name;
@@ -134,7 +135,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 layout_flex_nodes(lycon, child);
             }
             else {
-                dzlog_debug("unknown display type\n");
+                log_debug("unknown display type\n");
             }
             lycon->parent = block->parent;
         }
@@ -144,7 +145,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 
 void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    dzlog_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
+    log_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
     if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
@@ -248,7 +249,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     if (elmt->element.style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt);
         lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
-        dzlog_debug("resolved element style: %p\n", elmt->element.style);
+        log_debug("resolved element style: %p\n", elmt->element.style);
     }
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
@@ -311,7 +312,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         }
     }
     
-    dzlog_debug("setting up block blk\n");
+    log_debug("setting up block blk\n");
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
@@ -388,7 +389,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
     }  
     lycon->line.right = lycon->block.width;  
-    dzlog_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d\n",
+    log_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d\n",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
     // layout block content
@@ -397,7 +398,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     }
 
     // flow the block in parent context
-    dzlog_debug("flow block in parent context\n");
+    log_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
     if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
@@ -411,7 +412,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
             block->y = lycon->block.advance_y + calculate_vertical_align_offset(
                 block->in_line->vertical_align, block->height, lycon->block.line_height, 
                 lycon->line.max_ascender, block->height);
-            dzlog_debug("vertical-aligned-inline-block: line %d, block %d, adv: %d, y: %d, va:%d, %d", 
+            log_debug("vertical-aligned-inline-block: line %d, block %d, adv: %d, y: %d, va:%d, %d", 
                 lycon->block.line_height, block->height, lycon->block.advance_y, block->y, 
                 block->in_line->vertical_align, LXB_CSS_VALUE_BOTTOM);
         } else { 
@@ -453,5 +454,5 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         assert(lycon->line.is_line_start);
     }
     lycon->prev_view = (View*)block;
-    dzlog_debug("block view: %d, end block>>\n", block->type);
+    log_debug("block view: %d, end block>>\n", block->type);
 }

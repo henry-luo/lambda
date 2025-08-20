@@ -1,5 +1,6 @@
 #include "layout.h"
 
+#include "../lib/log.h"
 void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
@@ -20,7 +21,7 @@ int calculate_vertical_align_offset(PropValue align, int item_height, int line_h
     case LXB_CSS_VALUE_MIDDLE:
         return (line_height - item_height) / 2;
     case LXB_CSS_VALUE_BOTTOM:
-        dzlog_debug("bottom-aligned-text: line %d", line_height);
+        log_debug("bottom-aligned-text: line %d", line_height);
         return line_height - item_height;
     case LXB_CSS_VALUE_TEXT_TOP:
         // Align with the top of the parent's font
@@ -79,7 +80,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         int vertical_offset = calculate_vertical_align_offset(align, item_height, 
             line_height, lycon->line.max_ascender, item_baseline);
         block->y = lycon->block.advance_y + max(vertical_offset, 0);
-        dzlog_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d", 
+        log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d", 
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
     } else if (view->type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children

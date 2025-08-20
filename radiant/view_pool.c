@@ -1,5 +1,6 @@
 #include "layout.h"
 
+#include "../lib/log.h"
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
 View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
@@ -310,7 +311,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_format(buf, "unknown-view: %d\n", view->type);
             }
             // a check for robustness
-            if (view == view->next) { dzlog_debug("invalid next view");  return; }
+            if (view == view->next) { log_debug("invalid next view");  return; }
             view = view->next;
         } while (view);
     }

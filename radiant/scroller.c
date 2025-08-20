@@ -9,6 +9,7 @@
 #define BAR_COLOR 0xF6
 #define HANDLE_COLOR 0xC0
 
+#include "../lib/log.h"
 void tvg_shape_get_bounds(Tvg_Paint* shape, int* x, int* y, int* width, int* height) {
     Tvg_Matrix m;
     tvg_paint_get_transform(shape, &m);
@@ -37,7 +38,7 @@ float tvg_shape_get_h(Tvg_Paint* shape) {
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, 
     int content_width, int content_height, Bound* clip) {
     printf("rendering scroller\n");
-    dzlog_debug("render scroller content size: %d x %d\n", content_width, content_height);
+    log_debug("render scroller content size: %d x %d\n", content_width, content_height);
     
     int view_x = block_bound->x, view_y = block_bound->y;
     int view_width = block_bound->width, view_height = block_bound->height;
@@ -119,7 +120,7 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
         sp->h_scroll_position = sp->h_scroll_position < 0 ? 0 : 
             sp->h_scroll_position > sp->h_max_scroll ? sp->h_max_scroll : sp->h_scroll_position;
     }
-    dzlog_debug("updated scroll position: %d, %d\n", sp->h_scroll_position, sp->v_scroll_position);
+    log_debug("updated scroll position: %d, %d\n", sp->h_scroll_position, sp->v_scroll_position);
     evcon->need_repaint = true;
     // todo: set invalidate_rect
 }

@@ -5,6 +5,7 @@
 #include <wchar.h>
 #include <assert.h>
 #include <stdbool.h>
+#include "../lib/log.h"
 #include "layout.h"
 
 lxb_url_t* get_current_dir();
@@ -205,10 +206,10 @@ void log_init() {
     // empty existing log file
     FILE *file = fopen("log.txt", "w");
     if (file ) { fclose(file); }
-    int rc = dzlog_init("log.conf", "default");
+    int rc = log_default_init("log.conf", "default");
 }
 void log_cleanup() {
-    zlog_fini();
+    log_fini();
 }
 
 int main() {
@@ -272,7 +273,7 @@ int main() {
         frames++;
     } 
 
-    dzlog_info("End of app");
+    log_info("End of app");
     ui_context_cleanup(&ui_context);
     log_cleanup();
     return 0;

@@ -3,6 +3,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "../lib/stb_image.h"
 
+#include "../lib/log.h"
 typedef struct ImageEntry {
     // ImageFormat format;
     const char* path;  // todo: change to URL
@@ -53,14 +54,14 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     ImageSurface *surface;
     int slen = strlen(file_path);
     // load image data
-    dzlog_debug("loading image at: %s", file_path);
+    log_debug("loading image at: %s", file_path);
     if (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0) {
         surface = (ImageSurface *)calloc(1, sizeof(ImageSurface));
         surface->format = IMAGE_FORMAT_SVG;
         surface->pic = tvg_picture_new();
         Tvg_Result ret = tvg_picture_load(surface->pic, file_path);
         if (ret != TVG_RESULT_SUCCESS) {
-            dzlog_debug("failed to load SVG image: %s", file_path);
+            log_debug("failed to load SVG image: %s", file_path);
             tvg_paint_del(surface->pic);
             free(surface);
             return NULL;
@@ -69,13 +70,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         tvg_picture_get_size(surface->pic, &svg_w, &svg_h);
         surface->width = svg_w;
         surface->height = svg_h;
-        dzlog_debug("SVG image size: %f x %f\n", svg_w, svg_h);
+        log_debug("SVG image size: %f x %f\n", svg_w, svg_h);
     }
     else {
         int width, height, channels;
         unsigned char *data = stbi_load(file_path, &width, &height, &channels, 4);
         if (!data) {
-            dzlog_debug("failed to load image: %s", file_path);
+            log_debug("failed to load image: %s", file_path);
             return NULL;
         }
         surface = image_surface_create_from(width, height, data);

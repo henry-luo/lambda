@@ -1,5 +1,6 @@
 #include "dom.h"
 
+#include "../lib/log.h"
 char* read_text_doc(lxb_url_t *url);
 
 static lxb_status_t serialize_callback(const lxb_char_t *data, size_t len, void *ctx) {
@@ -61,10 +62,10 @@ void parse_html_doc(Document* doc) {
 }
 
 Document* load_html_doc(lxb_url_t *base, char* doc_url) {
-    dzlog_debug("loading HTML document %s", doc_url);
+    log_debug("loading HTML document %s", doc_url);
     lxb_url_t* url = parse_url(base, doc_url);
     if (!url) {
-        dzlog_debug("failed to parse URL: %s", doc_url);
+        log_debug("failed to parse URL: %s", doc_url);
         return NULL;
     }
     // parse the html document

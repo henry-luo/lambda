@@ -1,5 +1,6 @@
 #include "layout.h"
 
+#include "../lib/log.h"
 LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
 
 void line_init(LayoutContext* lycon) {
@@ -138,15 +139,15 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     int font_height = lycon->font.face->size->metrics.height >> 6;
     text->x = lycon->line.advance_x;  text->height = font_height;
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
-        dzlog_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
+        log_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
-        dzlog_debug("bottom-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
+        log_debug("bottom-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + lycon->block.line_height - font_height;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_TOP) {
-        dzlog_debug("top-aligned-text");
+        log_debug("top-aligned-text");
         text->y = lycon->block.advance_y;
     }
     else { // baseline
