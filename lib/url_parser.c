@@ -373,12 +373,12 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         return result;
     }
     
-    // Relative path resolution according to RFC 3986
-    // Step 1: Parse base path into segments (excluding filename)
+    // RFC 3986 Section 5.2.3 - Relative path resolution
+    // The base path segments are parsed, excluding the last segment (filename)
     char* segments[128];
     int segment_count = 0;
     
-    // Parse base path segments but exclude the last one (filename)
+    // Parse base path segments, excluding the last one (which is treated as filename)
     if (base_path && strlen(base_path) > 1) {
         char base_copy[2048];
         strcpy(base_copy, base_path + 1); // Skip leading slash
@@ -396,8 +396,8 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
             token = strtok(NULL, "/");
         }
         
-        // Copy all segments except the last one (which is the filename)
-        for (int i = 0; i < temp_count - 1; i++) {
+        // Copy all segments except the last one (RFC 3986: exclude filename)
+        for (int i = 0; i < temp_count - 1 && i < 127; i++) {
             segments[segment_count] = temp_segments[i];
             segment_count++;
         }
@@ -408,7 +408,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         }
     }
     
-    // Step 2: Process relative path segments
+    // Process relative path segments according to RFC 3986 Section 5.2.4
     char path_copy[1024];
     strncpy(path_copy, relative_path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
@@ -416,13 +416,14 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
     char* token = strtok(path_copy, "/");
     while (token && segment_count < 127) {
         if (strcmp(token, ".") == 0) {
-            // Current directory - skip
+            // Current directory - skip (RFC 3986)
         } else if (strcmp(token, "..") == 0) {
-            // Parent directory - remove last segment if possible
+            // Parent directory - remove last segment if possible (RFC 3986)
             if (segment_count > 0) {
                 free(segments[segment_count - 1]);
                 segment_count--;
             }
+            // If segment_count == 0, ".." has no effect (can't go above root)
         } else if (strlen(token) > 0) {
             // Regular segment - add it
             segments[segment_count] = malloc(strlen(token) + 1);
@@ -434,7 +435,7 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
         token = strtok(NULL, "/");
     }
     
-    // Step 3: Rebuild path from segments
+    // Rebuild path from segments
     strcpy(result, "/");
     for (int i = 0; i < segment_count; i++) {
         if (segments[i]) {
