@@ -303,7 +303,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.consts = runner->script->const_list->data;
     runner->context.num_stack = num_stack_create(16);
     runner->context.result = ItemNull;  // exec result
-    runner->context.cwd = get_current_dir();
+    runner->context.cwd = (char*)"./";  // Simple fallback for current directory
     
     // Initialize decimal context
     mpd_defaultcontext(&runner->context.decimal_ctx);
