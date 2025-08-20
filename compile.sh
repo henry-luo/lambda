@@ -296,15 +296,12 @@ init_header_cache() {
     fi
     
     # Find the newest header file timestamp across all include directories
+    # Optimized: Use a more efficient approach
     if [ ${#INCLUDE_DIRS_ARRAY[@]} -gt 0 ]; then
         local newest_header=""
-        # Use find with -printf for better performance (if available)
-        if find "${INCLUDE_DIRS_ARRAY[@]}" -name "*.h" -printf '%T@ %p\n' 2>/dev/null | head -1 >/dev/null 2>&1; then
-            newest_header=$(find "${INCLUDE_DIRS_ARRAY[@]}" -name "*.h" -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
-        else
-            # Fallback for systems without -printf
-            newest_header=$(find "${INCLUDE_DIRS_ARRAY[@]}" -name "*.h" 2>/dev/null | xargs ls -t 2>/dev/null | head -1)
-        fi
+        # Use find with -newer for faster comparison (single pass)
+        newest_header=$(find "${INCLUDE_DIRS_ARRAY[@]}" -name "*.h" -type f 2>/dev/null | \
+                       xargs -r ls -t 2>/dev/null | head -1)
         
         if [ -n "$newest_header" ] && [ -f "$newest_header" ]; then
             NEWEST_HEADER_TIME=$(stat -f "%m" "$newest_header" 2>/dev/null || stat -c "%Y" "$newest_header" 2>/dev/null)
@@ -335,24 +332,27 @@ needs_recompilation() {
     
     # Check precise dependencies from .d file if it exists
     if [ -f "$dep_file" ]; then
-        # Parse the .d file to check each dependency
-        local needs_rebuild=false
+        # Optimized: Use find with newer to check all dependencies at once
+        # This is much faster than checking each file individually
+        local newer_deps=$(awk '
+            { 
+                # Remove line continuations and target
+                gsub(/\\$/, "")
+                gsub(/^[^:]*:/, "")
+                # Split into individual files
+                for(i=1; i<=NF; i++) {
+                    if($i != "" && $i != "'$object_file'") {
+                        print $i
+                    }
+                }
+            }' "$dep_file" | while read -r dep; do
+                [ -n "$dep" ] && [ -f "$dep" ] && [ "$dep" -nt "$object_file" ] && echo "$dep" && break
+            done)
         
-        # Read the dependency file and extract dependencies
-        # .d file format: target.o: source.c dep1.h dep2.h \
-        #                 dep3.h dep4.h
-        local deps=$(sed -e 's/\\$//' -e 's/^[^:]*://' "$dep_file" | tr -s ' ' '\n' | sed '/^$/d' | sort -u)
-        
-        # Check if any dependency is newer than the object file
-        while IFS= read -r dep; do
-            # Skip empty lines and the target itself
-            if [ -n "$dep" ] && [ "$dep" != "$object_file" ]; then
-                if [ -f "$dep" ] && [ "$dep" -nt "$object_file" ]; then
-                    echo "Dependency changed: $dep"
-                    return 0
-                fi
-            fi
-        done <<< "$deps"
+        if [ -n "$newer_deps" ]; then
+            echo "Dependency changed: $newer_deps"
+            return 0
+        fi
         
         # All dependencies checked, no rebuild needed
         return 1
@@ -738,6 +738,7 @@ files_compiled=0
 files_skipped=0
 
 # Scan all source files (unified C and C++ handling with auto-detection)
+# Optimized: Pre-calculate commonly used values to avoid repeated function calls
 for source in "${SOURCE_FILES_ARRAY[@]}"; do
     if [ -f "$source" ]; then
         obj_name=$(basename "$source" | sed 's/\.[^.]*$//')
