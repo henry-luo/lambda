@@ -1,6 +1,7 @@
 #include "transpiler.hpp"
 #include "name_pool.h"
 #include <time.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -276,7 +277,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     new_script->index = runtime->scripts->length - 1;
     
     // Initialize decimal context
-    mpd_maxcontext(&new_script->decimal_ctx);
+    new_script->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    mpd_maxcontext(new_script->decimal_ctx);
 
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
@@ -306,7 +308,8 @@ void runner_setup_context(Runner* runner) {
     runner->context.cwd = (char*)"./";  // Simple fallback for current directory
     
     // Initialize decimal context
-    mpd_defaultcontext(&runner->context.decimal_ctx);
+    runner->context.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    mpd_defaultcontext(runner->context.decimal_ctx);
     
     context = &runner->context;
     heap_init();
@@ -324,6 +327,12 @@ void runner_cleanup(Runner* runner) {
         check_memory_leak();
         heap_destroy();
         if (runner->context.num_stack) num_stack_destroy((num_stack_t*)runner->context.num_stack);
+    }
+    
+    // Free decimal context
+    if (runner->context.decimal_ctx) {
+        free(runner->context.decimal_ctx);
+        runner->context.decimal_ctx = NULL;
     }
 }
 
@@ -371,6 +380,10 @@ void runtime_cleanup(Runtime* runtime) {
             if (script->ast_pool) pool_variable_destroy(script->ast_pool);
             if (script->type_list) arraylist_free(script->type_list);
             if (script->jit_context) jit_cleanup(script->jit_context);
+            if (script->decimal_ctx) {
+                free(script->decimal_ctx);
+                script->decimal_ctx = NULL;
+            }
             free(script);
         }
         arraylist_free(runtime->scripts);
