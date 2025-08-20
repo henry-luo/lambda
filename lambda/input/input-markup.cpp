@@ -2055,11 +2055,11 @@ Item input_markup(Input *input, const char* content) {
     // Extract filename from URL if available for format detection
     const char* filename = NULL;
     if (input->url) {
-        lxb_url_t* url = (lxb_url_t*)input->url;
-        if (url->path.str.data && url->path.str.length > 0) {
+        Url* url = (Url*)input->url;
+        if (url->pathname && url->pathname->chars && url->pathname->len > 0) {
             // Extract just the filename from the path
-            const char* path_start = (const char*)url->path.str.data;
-            size_t path_len = url->path.str.length;
+            const char* path_start = url->pathname->chars;
+            size_t path_len = url->pathname->len;
             const char* last_slash = NULL;
             for (size_t i = 0; i < path_len; i++) {
                 if (path_start[i] == '/') {

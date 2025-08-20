@@ -233,7 +233,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                     if (content_string->len > 0) {
                         if (is_math_env) {
                             // Parse math content using our math parser
-                            Input* math_input = input_new((lxb_url_t*)input->url);
+                            Input* math_input = input_new((Url*)input->url);
                             if (math_input) {
                                 // Reset our StrBuf before calling math parser
                                 strbuf_reset(input->sb);
@@ -473,7 +473,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             
             if (math_string->len > 0) {
                 // Create temporary input for math parsing
-                Input* math_input = input_new((lxb_url_t*)input->url);
+                Input* math_input = input_new((Url*)input->url);
                 if (math_input) {
                     // Reset our StrBuf before calling math parser
                     strbuf_reset(input->sb);

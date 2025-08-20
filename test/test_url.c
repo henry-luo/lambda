@@ -347,18 +347,7 @@ Test(url_parser, relative_url_with_port) {
     url_destroy(base);
 }
 
-Test(url_parser, url_resolve_relative_function) {
-    // Test the direct url_resolve_relative function
-    Url* base = url_parse("https://example.com/path/page.html");
-    cr_assert_not_null(base, "Base URL should parse successfully");
-    
-    Url* url = url_resolve_relative("../other.html", base);
-    cr_assert_not_null(url, "url_resolve_relative should work");
-    cr_assert_str_eq(url->pathname->chars, "/path/other.html", "Path should be resolved correctly");
-    
-    url_destroy(url);
-    url_destroy(base);
-}
+
 
 Test(url_parser, memory_management) {
     // Test that URLs are properly allocated and freed

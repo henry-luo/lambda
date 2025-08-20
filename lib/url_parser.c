@@ -200,12 +200,14 @@ UrlError url_parse_into(const char* input, Url* url) {
     // Extract path
     size_t path_len = path_end - path_start;
     if (path_len > 0) {
-        char path_buf[1024];
-        if (path_len < sizeof(path_buf)) {
+        // Use dynamic allocation for paths to handle long URLs
+        char* path_buf = malloc(path_len + 1);
+        if (path_buf) {
             strncpy(path_buf, path_start, path_len);
             path_buf[path_len] = '\0';
             url_free_string(url->pathname);
             url->pathname = url_create_string(path_buf);
+            free(path_buf);
         }
     } else if (url->scheme == URL_SCHEME_HTTP || url->scheme == URL_SCHEME_HTTPS) {
         // Default path for HTTP/HTTPS
@@ -228,13 +230,16 @@ UrlError url_parse_into(const char* input, Url* url) {
         
         // Extract query (including the '?')
         size_t query_len = query_end - query_start;
-        if (query_len > 0 && query_len < 1024) {
-            char query_buf[1025]; // +1 for '?', +1 for '\0'
-            query_buf[0] = '?';
-            strncpy(query_buf + 1, query_start, query_len);
-            query_buf[query_len + 1] = '\0';
-            url_free_string(url->search);
-            url->search = url_create_string(query_buf);
+        if (query_len > 0) {
+            char* query_buf = malloc(query_len + 2); // +1 for '?', +1 for '\0'
+            if (query_buf) {
+                query_buf[0] = '?';
+                strncpy(query_buf + 1, query_start, query_len);
+                query_buf[query_len + 1] = '\0';
+                url_free_string(url->search);
+                url->search = url_create_string(query_buf);
+                free(query_buf);
+            }
         }
         
         current = query_end;
@@ -247,12 +252,15 @@ UrlError url_parse_into(const char* input, Url* url) {
         
         // Fragment goes to end of string
         size_t fragment_len = strlen(fragment_start);
-        if (fragment_len > 0 && fragment_len < 1024) {
-            char fragment_buf[1025]; // +1 for '#', +1 for '\0'
-            fragment_buf[0] = '#';
-            strcpy(fragment_buf + 1, fragment_start);
-            url_free_string(url->hash);
-            url->hash = url_create_string(fragment_buf);
+        if (fragment_len > 0) {
+            char* fragment_buf = malloc(fragment_len + 2); // +1 for '#', +1 for '\0'
+            if (fragment_buf) {
+                fragment_buf[0] = '#';
+                strcpy(fragment_buf + 1, fragment_start);
+                url_free_string(url->hash);
+                url->hash = url_create_string(fragment_buf);
+                free(fragment_buf);
+            }
         }
     }
     
@@ -867,6 +875,33 @@ UrlError url_handle_path_relative(const char* input, const Url* base_url, Url* r
 
 // Main enhanced relative URL resolution function
 Url* url_resolve_relative(const char* input, const Url* base_url) {
+    // Robust parameter validation
+    if (!input || !base_url) {
+        return NULL;
+    }
+    
+    // Additional safety checks to catch parameter order mistakes
+    // Check if base_url looks like a valid URL structure pointer
+    // If someone passes (base_url, "string"), base_url would be treated as input (char*)
+    // and "string" would be treated as base_url (Url*), leading to crashes
+    
+    // Try to detect if base_url is actually a string pointer by checking
+    // if it points to readable ASCII data that looks like a URL
+    const char* potential_string = (const char*)base_url;
+    if (potential_string != NULL && 
+        ((strncmp(potential_string, "http://", 7) == 0) ||
+         (strncmp(potential_string, "https://", 8) == 0) ||
+         (strncmp(potential_string, "ftp://", 6) == 0) ||
+         (strncmp(potential_string, "file://", 7) == 0))) {
+        // This suggests the user passed parameters in wrong order
+        return NULL;
+    }
+    
+    // Check for reasonable scheme value to catch corrupted pointers
+    if (base_url->scheme < URL_SCHEME_UNKNOWN || base_url->scheme > URL_SCHEME_CUSTOM) {
+        return NULL;
+    }
+    
     Url* result = url_create();
     if (!result) return NULL;
     
@@ -881,7 +916,31 @@ Url* url_resolve_relative(const char* input, const Url* base_url) {
 
 // Enhanced relative URL resolution implementation
 UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* result) {
-    if (!input || !result) {
+    // Comprehensive parameter validation
+    if (!input || !base_url || !result) {
+        return URL_ERROR_INVALID_INPUT;
+    }
+    
+    // Additional safety checks to catch parameter order mistakes
+    const char* potential_string = (const char*)base_url;
+    if (potential_string != NULL && 
+        ((strncmp(potential_string, "http://", 7) == 0) ||
+         (strncmp(potential_string, "https://", 8) == 0) ||
+         (strncmp(potential_string, "ftp://", 6) == 0) ||
+         (strncmp(potential_string, "file://", 7) == 0))) {
+        // This suggests the user passed parameters in wrong order
+        return URL_ERROR_INVALID_INPUT;
+    }
+    
+    // Check for reasonable scheme value to catch corrupted pointers
+    if (base_url->scheme < URL_SCHEME_UNKNOWN || base_url->scheme > URL_SCHEME_CUSTOM) {
+        return URL_ERROR_INVALID_INPUT;
+    }
+    
+    // Validate that base_url has essential components for relative resolution
+    // File URLs can have NULL or empty hostnames, so be more flexible
+    if (base_url->scheme != URL_SCHEME_FILE && 
+        (!base_url->hostname || !base_url->hostname->chars[0])) {
         return URL_ERROR_INVALID_INPUT;
     }
     
@@ -1055,30 +1114,12 @@ UrlError url_resolve_relative_into(const char* input, const Url* base_url, Url* 
         return error;
     }
     
-    // Build complete href
-    char href_buf[2048];
-    const char* scheme_str = url_scheme_to_string(result->scheme);
-    const char* host_str = (result->host && result->host->len > 0) ? result->host->chars : "";
-    const char* path_str = (result->pathname && result->pathname->len > 0) ? result->pathname->chars : "/";
-    
-    // Determine if we need to show port
-    if (result->port && result->port->len > 0 && 
-        result->port_number != url_default_port_for_scheme(result->scheme)) {
-        const char* port_str = result->port->chars;
-        snprintf(href_buf, sizeof(href_buf), "%s://%s:%s%s", scheme_str, host_str, port_str, path_str);
-    } else {
-        snprintf(href_buf, sizeof(href_buf), "%s://%s%s", scheme_str, host_str, path_str);
-    }
-    
-    if (result->search && result->search->len > 0) {
-        strncat(href_buf, result->search->chars, sizeof(href_buf) - strlen(href_buf) - 1);
-    }
-    if (result->hash && result->hash->len > 0) {
-        strncat(href_buf, result->hash->chars, sizeof(href_buf) - strlen(href_buf) - 1);
-    }
-    
+    // Build complete href using the robust function from url.c
     url_free_string(result->href);
-    result->href = url_create_string(href_buf);
+    result->href = url_construct_href(result);
+    if (!result->href) {
+        return URL_ERROR_MEMORY_ALLOCATION;
+    }
     
     result->is_valid = true;
     return URL_OK;

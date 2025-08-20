@@ -1,6 +1,6 @@
 #include "validator.h"
 #include "validation_exec.h"
-#include <lexbor/url/url.h>
+#include "../../lib/url.h"
 #include <unistd.h>  // for getcwd
 #include <cstring>   // for C++ string functions
 #include <cstdio>    // for C++ stdio functions
@@ -12,7 +12,7 @@ extern "C" {
     char* read_text_file(const char *filename);
 
     // Forward declare input_from_url
-    Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
+    Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 }
 
 extern "C" {

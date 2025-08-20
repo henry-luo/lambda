@@ -952,7 +952,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                     math_content[content_len] = '\0';
                     
                     // Create math element using input-math.cpp
-                    Input* math_input = input_new((lxb_url_t*)input->url);
+                    Input* math_input = input_new((Url*)input->url);
                     if (math_input) {
                         parse_math(math_input, math_content, "latex");
                         
@@ -1049,7 +1049,7 @@ static Element* parse_inline_text(Input* input, const char* text) {
                     math_content[content_len] = '\0';
                     
                     // Create math element using input-math.cpp
-                    Input* math_input = input_new((lxb_url_t*)input->url);
+                    Input* math_input = input_new((Url*)input->url);
                     if (math_input) {
                         parse_math(math_input, math_content, "latex");
                         

@@ -24,8 +24,8 @@ void transpile_ast(Transpiler* tp, AstScript *script);
 
 // External function declarations
 extern "C" {
-    lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-    Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
+    #include "../lib/url.h"
+    Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
     
     // For accessing the validator's internal structure
     // typedef struct {

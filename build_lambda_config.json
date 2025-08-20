@@ -43,7 +43,6 @@
         "lib/mem-pool/src/utils.c",
         "lib/url.c",
         "lib/url_parser.c",
-        "lib/url_compat.c",
         "lib/utf.c",
         "lib/num_stack.c",
         "lib/string.c",
@@ -187,7 +186,8 @@
         },
         {
             "name": "url",
-            "sources": ["lib/url.c"],
+            "sources": ["lib/url.c", "lib/url_parser.c"],
+            "objects": ["build/url.o", "build/url_parser.o"],
             "link": "inline"
         },
         {
@@ -371,7 +371,8 @@
                     "test_variable_pool.c",
                     "test_num_stack.c",
                     "test_datetime.c",
-                    "test_url.c"
+                    "test_url.c",
+                    "test_url_extra.c"
                 ],
                 "library_dependencies": [
                     ["strbuf", "mem-pool", "criterion"],
@@ -379,6 +380,7 @@
                     ["mem-pool", "criterion"],
                     ["num_stack", "criterion"],
                     ["datetime", "string", "strbuf", "strview", "mem-pool", "criterion"],
+                    ["url", "strbuf", "mem-pool", "criterion"],
                     ["url", "strbuf", "mem-pool", "criterion"]
                 ],
                 "binaries": [
@@ -387,7 +389,8 @@
                     "test_variable_pool.exe",
                     "test_num_stack.exe",
                     "test_datetime.exe",
-                    "test_url.exe"
+                    "test_url.exe",
+                    "test_url_extra.exe"
                 ],
                 "type": "library",
                 "special_flags": "-fms-extensions",

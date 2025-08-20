@@ -38,12 +38,23 @@ String* url_string_clone(const String* str) {
 }
 
 // Create new URL structure
-Url* url_create(void) {
-    Url* url = calloc(1, sizeof(Url));
+Url* url_create() {
+    Url* url = malloc(sizeof(Url));
     if (!url) return NULL;
     
-    // Initialize with default values
+    // Initialize all fields to NULL - they will be set during parsing
     url->scheme = URL_SCHEME_UNKNOWN;
+    url->username = NULL;
+    url->password = NULL;
+    url->hostname = NULL;
+    url->port = NULL;
+    url->pathname = url_create_string("/");  // Default pathname
+    url->search = NULL;
+    url->hash = NULL;
+    url->href = NULL;
+    url->origin = NULL;
+    url->protocol = NULL;
+    url->host = url_create_string("");  // Default empty host
     url->port_number = 0;
     url->is_valid = false;
     
@@ -122,7 +133,7 @@ UrlScheme url_scheme_from_string(const char* scheme) {
     // Convert to lowercase for comparison
     char lower[32];
     size_t len = strlen(scheme);
-    if (len >= sizeof(lower)) return URL_SCHEME_CUSTOM;
+    if (len >= sizeof(lower)) return URL_SCHEME_UNKNOWN;
     
     for (size_t i = 0; i < len; i++) {
         lower[i] = tolower(scheme[i]);
@@ -140,7 +151,7 @@ UrlScheme url_scheme_from_string(const char* scheme) {
     if (strcmp(lower, "ws") == 0) return URL_SCHEME_WS;
     if (strcmp(lower, "wss") == 0) return URL_SCHEME_WSS;
     
-    return URL_SCHEME_CUSTOM;
+    return URL_SCHEME_UNKNOWN;
 }
 
 uint16_t url_default_port_for_scheme(UrlScheme scheme) {

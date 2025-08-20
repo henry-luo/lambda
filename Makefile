@@ -300,6 +300,8 @@ test-dev:
 
 test-library: build
 	@echo "Running library test suite..."
+	@echo "Pre-compiling URL test with correct dependencies..."
+	@clang -fms-extensions -Ilib/mem-pool/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -o test/test_url.exe test/test_url.c build/url.o build/url_parser.o build/strbuf.o build/variable.o build/buffer.o build/utils.o -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion
 	@if [ -f "test/test_all.sh" ]; then \
 		./test/test_all.sh --target=library --raw; \
 	else \

@@ -1,8 +1,8 @@
 #include "../lambda-data.hpp"
-#include <lexbor/url/url.h>
+#include "../../lib/url.h"
 
 // Input creation and management
-Input* input_new(lxb_url_t* abs_url);
+Input* input_new(Url* abs_url);
 
 String* create_input_string(Input* input, const char* text, int start, int len);
 String* input_create_string(Input *input, const char* text);

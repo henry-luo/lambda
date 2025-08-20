@@ -230,7 +230,7 @@ resolve_single_library_dependency() {
     fi
     
     # Get library definition from config
-    local lib_def=$(jq -r ".libraries[] | select(.name == "$lib_name")" "$build_config_file" 2>/dev/null)
+    local lib_def=$(jq -r ".libraries[] | select(.name == \"$lib_name\")" "$build_config_file" 2>/dev/null)
     
     if [ -z "$lib_def" ] || [ "$lib_def" = "null" ]; then
         # Library not found in config, try legacy resolution
@@ -248,14 +248,11 @@ resolve_single_library_dependency() {
     
     # Parse library definition and build flags
     local include_path=$(echo "$lib_def" | jq -r '.include // empty')
-    local lib_sources=$(echo "$lib_def" | jq -r '.sources[]? // empty' | tr '
-' ' ')
-    local lib_objects=$(echo "$lib_def" | jq -r '.objects[]? // empty' | tr '
-' ' ')
+    local lib_sources=$(echo "$lib_def" | jq -r '.sources[]? // empty' | tr '\n' ' ')
+    local lib_objects_raw=$(echo "$lib_def" | jq -r '.objects[]? // empty')
     local lib_path=$(echo "$lib_def" | jq -r '.lib // empty')
     local link_type=$(echo "$lib_def" | jq -r '.link // "dynamic"')
-    local nested_libs=$(echo "$lib_def" | jq -r '.libraries[]? // empty' | tr '
-' ' ')
+    local nested_libs=$(echo "$lib_def" | jq -r '.libraries[]? // empty' | tr '\n' ' ')
     local lib_special_flags=$(echo "$lib_def" | jq -r '.special_flags // empty')
     
     # Add include path
@@ -274,17 +271,18 @@ resolve_single_library_dependency() {
     fi
     
     # Add object files (with deduplication)
-    if [ -n "$lib_objects" ]; then
-        for obj in $lib_objects; do
+    if [ -n "$lib_objects_raw" ]; then
+        # Use printf and read in a more reliable way
+        while IFS= read -r obj; do
+            [ -n "$obj" ] || continue
             # Expand wildcards
-            local expanded_objects=$(ls $obj 2>/dev/null || echo "")
-            for expanded_obj in $expanded_objects; do
-                if [[ "$included_objects" != *"$expanded_obj"* ]]; then
-                    objects="$objects $expanded_obj"
-                    included_objects="$included_objects $expanded_obj "
+            if [ -f "$obj" ]; then
+                if [[ "$included_objects" != *"$obj"* ]]; then
+                    objects="$objects $obj"
+                    included_objects="$included_objects $obj "
                 fi
-            done
-        done
+            fi
+        done <<< "$lib_objects_raw"
     fi
     
     # Add special flags
@@ -303,8 +301,8 @@ resolve_single_library_dependency() {
             if [ -n "$lib_path" ]; then
                 local lib_dir=$(dirname "$lib_path")
                 local lib_name_only=$(basename "$lib_path" | sed 's/^lib//' | sed 's/\.[^.]*$//')
-                if [ "$lib_name_only" != "$lib_path" ]; then
-                    # Standard library format
+                if [ -n "$lib_name_only" ] && [ "$lib_name_only" != "$(basename "$lib_path")" ]; then
+                    # Standard library format (extracted a meaningful name)
                     dynamic_libs="-L$lib_dir -l$lib_name_only"
                 else
                     # Just a directory path - extract library name from parent library
@@ -446,7 +444,9 @@ get_library_object_files() {
             echo "$build_dir/strview.o"
             ;;
         "mem-pool")
-            echo "$build_dir/variable.o $build_dir/buffer.o $build_dir/utils.o"
+            echo "$build_dir/variable.o"
+            echo "$build_dir/buffer.o" 
+            echo "$build_dir/utils.o"
             ;;
         "num_stack")
             echo "$build_dir/num_stack.o"
@@ -457,8 +457,13 @@ get_library_object_files() {
         "string")
             echo "$build_dir/string.o"
             ;;
+        "url")
+            echo "$build_dir/url.o"
+            echo "$build_dir/url_parser.o"
+            ;;
         "mime-detect")
-            echo "$build_dir/mime-detect.o $build_dir/mime-types.o"
+            echo "$build_dir/mime-detect.o"
+            echo "$build_dir/mime-types.o"
             ;;
         "lambda-runtime-full")
             # Return all necessary object files in one line
@@ -478,7 +483,7 @@ get_minimal_object_set() {
     local library_deps=("$@")
     local build_dir="${BUILD_DIR:-build}"
     
-    local object_files=""
+    local object_files_array=()
     local included_objects=""
     
     # Process each library dependency
@@ -490,25 +495,32 @@ get_minimal_object_set() {
         
         local lib_objects=$(get_library_object_files "$lib_name" "$build_dir")
         
-        # Add objects, avoiding duplicates
-        for obj_file in $lib_objects; do
-            if [[ "$included_objects" != *"$obj_file"* ]]; then
-                object_files="$object_files $obj_file"
-                included_objects="$included_objects $obj_file "
-            fi
-        done
-    done
-    
-    # Filter out non-existent objects and return
-    local existing_objects=""
-    for obj_file in $object_files; do
-        if [ -f "$obj_file" ]; then
-            existing_objects="$existing_objects $obj_file"
+        # Add objects, avoiding duplicates (handle newline-separated output)
+        if [ -n "$lib_objects" ]; then
+            while IFS= read -r obj_file; do
+                [ -n "$obj_file" ] || continue
+                if [[ "$included_objects" != *"$obj_file"* ]]; then
+                    object_files_array+=("$obj_file")
+                    included_objects="$included_objects $obj_file "
+                fi
+            done <<< "$lib_objects"
         fi
     done
     
-    # Trim leading/trailing spaces and return
-    local result=$(echo "$existing_objects" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+    # Filter out non-existent objects and return
+    local existing_objects_array=()
+    for obj_file in "${object_files_array[@]}"; do
+        if [ -f "$obj_file" ]; then
+            existing_objects_array+=("$obj_file")
+        fi
+    done
+    
+    # Join array elements with spaces and return
+    local result=""
+    for obj in "${existing_objects_array[@]}"; do
+        result="$result $obj"
+    done
+    result=$(echo "$result" | sed 's/^[[:space:]]*//')
     echo "$result"
 }
 

@@ -1,11 +1,9 @@
 #include "input.h"
-#include <lexbor/url/url.h>
+#include "../../lib/url.h"
 #include "mime-detect.h"
+#include <unistd.h>
+#include <stdio.h>
 
-extern "C" {
-    lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-    char* read_text_doc(lxb_url_t *url);
-}
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
 void parse_ini(Input* input, const char* ini_string);
@@ -213,7 +211,7 @@ void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
     }
 }
 
-Input* input_new(lxb_url_t* abs_url) {
+Input* input_new(Url* abs_url) {
     Input* input = (Input*)malloc(sizeof(Input));
     input->url = abs_url;
     size_t grow_size = 1024;  // 1k
@@ -408,7 +406,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, attr_value, input->pool);
 }
 
-extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor) {
+extern "C" Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor) {
     const char* effective_type = NULL;
     
     // Determine the effective type to use
@@ -416,7 +414,7 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
         // Auto-detect MIME type
         MimeDetector* detector = mime_detector_init();
         if (detector) {
-            const char* detected_mime = detect_mime_type(detector, (const char*)abs_url->path.str.data, source, strlen(source));
+            const char* detected_mime = detect_mime_type(detector, abs_url->pathname ? abs_url->pathname->chars : "", source, strlen(source));
             if (detected_mime) {
                 effective_type = mime_to_parser_type(detected_mime);
                 printf("Auto-detected MIME type: %s -> parser type: %s\n", detected_mime, effective_type);
@@ -526,16 +524,82 @@ extern "C" Input* input_from_source(char* source, lxb_url_t* abs_url, String* ty
     return input;
 }
 
-extern "C" Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd) {
-    printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
-    lxb_url_t* abs_url = parse_url(cwd, url->chars);
-    if (!abs_url) { printf("Failed to parse URL\n");  return NULL; }
-    char* source = read_text_doc(abs_url);
-    if (!source) {
-        printf("Failed to read document at URL: %s\n", url->chars);
-        lxb_url_destroy(abs_url);
+// Helper function to get current working directory as file URL
+static Url* get_current_dir_url() {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
         return NULL;
     }
+    
+    // Convert to file:// URL format
+    char file_url[1200];
+    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
+    
+    return url_parse(file_url);
+}
+
+// Helper function to read text file from file:// URL
+static char* read_file_from_url(Url* url) {
+    if (!url || url->scheme != URL_SCHEME_FILE) {
+        fprintf(stderr, "Only file:// URLs are supported for reading\n");
+        return NULL;
+    }
+    
+    const char* pathname = url_get_pathname(url);
+    if (!pathname) return NULL;
+    
+    FILE* file = fopen(pathname, "r");
+    if (!file) {
+        perror("Failed to open file");
+        return NULL;
+    }
+    
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    if (file_size <= 0) {
+        fclose(file);
+        return NULL;
+    }
+    
+    // Allocate buffer and read file
+    char* content = (char*)malloc(file_size + 1);
+    if (!content) {
+        fclose(file);
+        return NULL;
+    }
+    
+    size_t bytes_read = fread(content, 1, file_size, file);
+    content[bytes_read] = '\0';
+    
+    fclose(file);
+    return content;
+}
+
+extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
+    printf("input_data at: %s, type: %s\n", url->chars, type ? type->chars : "null");
+    
+    Url* abs_url;
+    if (cwd) {
+        abs_url = url_parse_with_base(url->chars, cwd);
+    } else {
+        abs_url = url_parse(url->chars);
+    }
+    
+    if (!abs_url) { 
+        printf("Failed to parse URL\n");  
+        return NULL; 
+    }
+    
+    char* source = read_file_from_url(abs_url);
+    if (!source) {
+        printf("Failed to read document at URL: %s\n", url->chars);
+        url_destroy(abs_url);
+        return NULL;
+    }
+    
     Input* input = input_from_source(source, abs_url, type, flavor);
     free(source);  // Free the source string after parsing
     return input;
@@ -544,5 +608,5 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, lxb_
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     printf("input_data at: %s, type: %s, flavor: %s\n", url->chars, 
         type ? type->chars : "null", flavor ? flavor->chars : "null");
-    return input_from_url(url, type, flavor, (lxb_url_t*)ctx->cwd);
+    return input_from_url(url, type, flavor, (Url*)ctx->cwd);
 }
