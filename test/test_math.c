@@ -10,7 +10,7 @@
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
 #include "../lib/mem-pool/include/mem_pool.h"
-#include <lexbor/url/url.h>
+#include "../lib/url.h"  // Use new URL parser instead of lexbor
 
 // Include the Input struct definition (matching lambda-data.hpp)
 typedef struct Input {
@@ -23,12 +23,13 @@ typedef struct Input {
 } Input;
 
 // Forward declarations
-Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor);
-Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
+Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
+Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-lxb_url_t* get_current_dir();
-lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-char* read_text_doc(lxb_url_t *url);
+Url* get_current_dir();
+Url* parse_url(Url *base, const char* doc_url);
+char* read_text_doc(Url *url);
+char* read_text_file(const char *filename);  // From lib/file.c
 void print_item(StrBuf *strbuf, Item item);
 
 // Forward declarations for Lambda runtime 
@@ -102,12 +103,12 @@ String* create_lambda_string(const char* text) {
 }
 
 // Helper to create a dynamic URL for content testing
-lxb_url_t* create_test_url(const char* virtual_path) {
-    lxb_url_t* base = get_current_dir();
+Url* create_test_url(const char* virtual_path) {
+    Url* base = get_current_dir();
     if (!base) return NULL;
     
-    lxb_url_t* test_url = parse_url(base, virtual_path);
-    lxb_url_destroy(base);
+    Url* test_url = parse_url(base, virtual_path);
+    url_destroy(base);
     return test_url;
 }
 
@@ -171,7 +172,7 @@ bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, con
         char virtual_path[256];
         const char* extension = (strcmp(type, "math") == 0) ? "math" : "md";
         snprintf(virtual_path, sizeof(virtual_path), "test://%s_%d.%s", url_prefix, i, extension);
-        lxb_url_t* test_url = create_test_url(virtual_path);
+        Url* test_url = create_test_url(virtual_path);
         cr_assert_neq(test_url, NULL, "Failed to create test URL");
         
         // Create a copy of the test content (input_from_source takes ownership)
@@ -341,13 +342,13 @@ Test(math_roundtrip_tests, pure_math_roundtrip) {
 bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_path, const char* test_description) {
     printf("=== %s ===\n", test_description ? test_description : "Markdown roundtrip test");
     
-    lxb_url_t* current_dir = get_current_dir();
+    Url* current_dir = get_current_dir();
     String* file_url_str = create_lambda_string(test_file_path);
     String* type_str = create_lambda_string("markdown");
     String* flavor_str = create_lambda_string("");
 
     // Read original content for comparison
-    lxb_url_t* input_url = parse_url(current_dir, test_file_path);
+    Url* input_url = parse_url(current_dir, test_file_path);
     char* original_content = read_text_doc(input_url);
     if (!original_content) {
         printf("❌ Could not read %s\n", test_file_path);
@@ -415,8 +416,8 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
     
     // Cleanup
     free(original_content);
-    lxb_url_destroy(current_dir);
-    lxb_url_destroy(input_url);
+    url_destroy(current_dir);
+    url_destroy(input_url);
     
     return length_ok;
 }
@@ -446,3 +447,40 @@ Test(math_roundtrip_tests, curated_markdown_roundtrip) {
 //     );
 //     cr_assert(result, "Comprehensive markdown roundtrip test failed");
 // }
+
+// Helper function implementations for new URL parser
+
+Url* get_current_dir() {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        return NULL;
+    }
+    
+    // Create a file URL from the current directory
+    char file_url[1200];
+    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
+    
+    return url_parse(file_url);
+}
+
+Url* parse_url(Url *base, const char* doc_url) {
+    if (!doc_url) return NULL;
+    
+    if (base) {
+        return url_parse_with_base(doc_url, base);
+    } else {
+        return url_parse(doc_url);
+    }
+}
+
+char* read_text_doc(Url *url) {
+    if (!url || !url->pathname || !url->pathname->chars) {
+        return NULL;
+    }
+    
+    // Extract the file path from the URL
+    const char* path = url->pathname->chars;
+    
+    // Use the existing read_text_file function
+    return read_text_file(path);
+}

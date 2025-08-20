@@ -12,15 +12,16 @@
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
 #include "../lib/mem-pool/include/mem_pool.h"
-#include <lexbor/url/url.h>
+#include "../lib/url.h"  // Use new URL parser instead of lexbor
 
 // Forward declarations with C linkage
 extern "C" {
-    Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor);
+    Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
     String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-    lxb_url_t* get_current_dir();
-    lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
+    Url* get_current_dir();
+    Url* parse_url(Url *base, const char* doc_url);
     void format_item(StrBuf* buf, Item item, int indent, char* format);
+    char* read_text_file(const char *filename);
 }
 
 // Helper function to create a Lambda String from C string
@@ -40,27 +41,6 @@ String* create_lambda_string(const char* text) {
     return result;
 }
 
-// Helper function to read file contents
-char* read_file_content(const char* filepath) {
-    FILE* file = fopen(filepath, "r");
-    if (!file) return NULL;
-    
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    
-    char* content = static_cast<char*>(malloc(size + 1));
-    if (!content) {
-        fclose(file);
-        return NULL;
-    }
-    
-    size_t read_size = fread(content, 1, size, file);
-    content[read_size] = '\0';
-    fclose(file);
-    return content;
-}
-
 // Test with simple markdown elements
 Test(markup_roundtrip, simple_test, .disabled = true) {
     printf("\n=== Testing Simple Markdown Elements ===\n");
@@ -72,8 +52,8 @@ Test(markup_roundtrip, simple_test, .disabled = true) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.md");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(test_markdown);
@@ -119,8 +99,8 @@ Test(markup_roundtrip, empty_test, .disabled = true) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "empty.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "empty.md");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(empty_markdown);
@@ -150,8 +130,8 @@ static bool test_debug_content(const char* content, const char* test_name) {
     
     String* type_str = create_lambda_string("markup");
     String* flavor_str = NULL;
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "debug_test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "debug_test.md");
     char* content_copy = strdup(content);
     
     printf("DEBUG: About to parse with input_from_source...\n");
@@ -196,10 +176,10 @@ Test(markup_roundtrip, complete_test) {
     printf("\n!!! Testing Complete Markup Features ===\n");
     
     // Read comprehensive test content from file
-    // char* file_content = read_file_content("test/input/complete_markup_test.md");
+    // char* file_content = read_text_file("test/input/complete_markup_test.md");
     // cr_assert_not_null(file_content, "Failed to read complete_markup_test.md file");
     
-    char* comprehensive_content = read_file_content("test/input/comprehensive_test.md");
+    char* comprehensive_content = read_text_file("test/input/comprehensive_test.md");
     cr_assert_not_null(comprehensive_content, "Failed to read comprehensive_test.md file");
     
     // Create Lambda strings for input parameters
@@ -207,8 +187,8 @@ Test(markup_roundtrip, complete_test) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "comprehensive_test.md");
     
     // Parse comprehensive content
     Input* input = input_from_source(comprehensive_content, dummy_url, type_str, flavor_str);
@@ -234,7 +214,7 @@ Test(markup_roundtrip, emoji_test) {
     printf("\n=== Testing Comprehensive Emoji Features ===\n");
     
     // Read emoji test content from file
-    char* emoji_content = read_file_content("test/input/comprehensive_emoji_test.md");
+    char* emoji_content = read_text_file("test/input/comprehensive_emoji_test.md");
     cr_assert_not_null(emoji_content, "Failed to read comprehensive_emoji_test.md file");
     
     // Create Lambda strings for input parameters
@@ -242,8 +222,8 @@ Test(markup_roundtrip, emoji_test) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_emoji_test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "comprehensive_emoji_test.md");
     
     // Parse emoji content
     Input* input = input_from_source(emoji_content, dummy_url, type_str, flavor_str);
@@ -272,7 +252,7 @@ Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
     printf("\n=== Testing Comprehensive Math Features from File ===\n");
     
     // Read math test content from file
-    char* math_content = read_file_content("test/input/comprehensive_math_test.md");
+    char* math_content = read_text_file("test/input/comprehensive_math_test.md");
     cr_assert_not_null(math_content, "Failed to read comprehensive_math_test.md file");
     
     // Create Lambda strings for input parameters
@@ -280,8 +260,8 @@ Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_math_test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "comprehensive_math_test.md");
     
     // Make a copy since input_from_source may modify the content
     char* math_content_copy = strdup(math_content);
@@ -312,7 +292,7 @@ Test(markup_roundtrip, rst_directives_test) {
     printf("\n=== Testing RST Directives and Format-Specific Features ===\n");
     
     // Read RST test content from file
-    char* rst_content = read_file_content("test/input/comprehensive_test.rst");
+    char* rst_content = read_text_file("test/input/comprehensive_test.rst");
     cr_assert_not_null(rst_content, "Failed to read comprehensive_test.rst file");
     
     // Create Lambda strings for RST input parameters
@@ -320,8 +300,8 @@ Test(markup_roundtrip, rst_directives_test) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_test.rst");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "comprehensive_test.rst");
     
     // Make a copy since input_from_source may modify the content
     char* rst_content_copy = strdup(rst_content);
@@ -396,8 +376,8 @@ Test(markup_roundtrip, basic_rst_test) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution  
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "basic_test.rst");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "basic_test.rst");
     
     // Make a copy since input_from_source may modify the content
     char* rst_content_copy = strdup(basic_rst);
@@ -482,8 +462,8 @@ Test(markup_parsing_rst, rst_extended_features) {
         "+-------+-------+\n";
         
     String* type_str = create_lambda_string("markup");
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test_extended.rst");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test_extended.rst");
     
     char* content_copy = strdup(rst_extended_content);
     Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
@@ -541,3 +521,31 @@ Test(markup_parsing_rst, rst_extended_features) {
     
     free(content_copy);
 }
+
+// Helper function implementations for new URL parser (C++ version)
+extern "C" {
+
+Url* get_current_dir() {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        return NULL;
+    }
+    
+    // Create a file URL from the current directory
+    char file_url[1200];
+    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
+    
+    return url_parse(file_url);
+}
+
+Url* parse_url(Url *base, const char* doc_url) {
+    if (!doc_url) return NULL;
+    
+    if (base) {
+        return url_parse_with_base(doc_url, base);
+    } else {
+        return url_parse(doc_url);
+    }
+}
+
+} // extern "C"

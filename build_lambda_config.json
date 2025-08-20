@@ -76,15 +76,7 @@
         "lambda/validator/schema_parser.cpp",
         "lambda/main.cpp"
     ],
-    "libraries": [
-        {
-            "name": "lexbor",
-            "_include_original": "/opt/homebrew/opt/lexbor/include",
-            "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
-            "include": "/usr/local/include",
-            "lib": "/usr/local/lib/liblexbor_static.a",            
-            "link": "static"
-        },        
+    "libraries": [     
         {
             "name": "tree-sitter",
             "include": "lambda/tree-sitter/lib/include",
@@ -187,7 +179,6 @@
         {
             "name": "url",
             "sources": ["lib/url.c", "lib/url_parser.c"],
-            "objects": ["build/url.o", "build/url_parser.o"],
             "link": "inline"
         },
         {
@@ -218,15 +209,24 @@
         {
             "name": "lambda-runtime-full",
             "description": "Complete Lambda runtime with all dependencies for complex tests",
-            "sources": ["lib/file.c"],
+            "sources": [],
             "objects": [
                 "build/print.o", "build/strview.o", "build/transpile.o", "build/utf.o",
                 "build/build_ast.o", "build/lambda-eval.o", "build/lambda-mem.o", 
-                "build/runner.o", "build/mir.o", "build/url.o", "build/parse.o", 
-                "build/parser.o", "build/num_stack.o", "build/input*.o", "build/format*.o",
-                "build/strbuf.o", "build/hashmap.o", "build/arraylist.o", "build/variable.o",
-                "build/buffer.o", "build/utils.o", "build/mime-detect.o", "build/mime-types.o",
-                "build/datetime.o", "build/string.o", "build/utf_string.o", "build/name_pool.o"
+                "build/runner.o", "build/mir.o", "build/url.o", "build/url_parser.o", "build/parse.o", 
+                "build/parser.o", "build/num_stack.o", "build/strbuf.o", "build/hashmap.o", 
+                "build/arraylist.o", "build/variable.o", "build/buffer.o", "build/utils.o", 
+                "build/mime-detect.o", "build/mime-types.o", "build/datetime.o", "build/string.o", 
+                "build/utf_string.o", "build/name_pool.o", "build/validate.o", "build/validator.o", 
+                "build/schema_parser.o", "build/input.o", "build/format.o", "build/file.o",
+                "build/input-common.o", "build/input-css.o", "build/input-csv.o", "build/input-eml.o",
+                "build/input-html.o", "build/input-ics.o", "build/input-ini.o", "build/input-json.o",
+                "build/input-latex.o", "build/input-man.o", "build/input-mark.o", "build/input-markup.o",
+                "build/input-math.o", "build/input-org.o", "build/input-pdf.o", "build/input-rtf.o",
+                "build/input-toml.o", "build/input-vcf.o", "build/input-xml.o", "build/input-yaml.o",
+                "build/format-css.o", "build/format-html.o", "build/format-ini.o", "build/format-json.o",
+                "build/format-latex.o", "build/format-math.o", "build/format-md.o", "build/format-org.o",
+                "build/format-rst.o", "build/format-toml.o", "build/format-xml.o", "build/format-yaml.o"
             ],
             "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "mir", "zlog", "lexbor", "utf8proc"],
             "include": "lib/mem-pool/include",
@@ -287,12 +287,6 @@
                     "link": "static"
                 },
                 {
-                    "name": "lexbor",
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/liblexbor_static.a",
-                    "link": "static"
-                },
-                {
                     "name": "mir",
                     "include": "windows-deps/include",
                     "lib": "windows-deps/lib/libmir.a",
@@ -302,12 +296,6 @@
                     "name": "zlog",
                     "include": "windows-deps/include",
                     "lib": "windows-deps/lib/libzlog.a",
-                    "link": "static"
-                },
-                {
-                    "name": "gmp",
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/libgmp.a",
                     "link": "static"
                 },
                 {
