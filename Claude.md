@@ -187,8 +187,7 @@ make                           # Default Lambda build
 ### Core Runtime Dependencies
 - **MIR**: JIT compilation infrastructure
 - **Tree-sitter**: Incremental parsing framework
-- **GMP**: Arbitrary precision arithmetic (minimal usage)
-- **zlog**: Logging system (optional)
+- **MPDec**: Arbitrary precision arithmetic (minimal usage)
 
 ### Document Processing
 - **Lexbor**: HTML/XML parsing (lexbor_static.a ~3.7MB)

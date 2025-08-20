@@ -363,45 +363,6 @@ build_mir_for_mac() {
     return 1
 }
 
-# Function to build zlog for Mac
-build_zlog_for_mac() {
-    echo "Building zlog for Mac..."
-    
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libzlog.a" ]; then
-        echo "zlog already installed in system location"
-        return 0
-    fi
-    
-    if [ ! -d "build_temp/zlog" ]; then
-        cd build_temp
-        echo "Cloning zlog repository..."
-        git clone https://github.com/HardySimpson/zlog.git || {
-            echo "Warning: Could not clone zlog repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    
-    cd "build_temp/zlog"
-    
-    echo "Building zlog..."
-    if make -j$(sysctl -n hw.ncpu); then
-        echo "Installing zlog to system location (requires sudo)..."
-        # Install to system location
-        sudo make install PREFIX="$SYSTEM_PREFIX"
-        
-        echo "✅ zlog built successfully"
-        cd - > /dev/null
-        return 0
-    fi
-    
-    echo "❌ zlog build failed"
-    cd - > /dev/null
-    return 1
-}
-
 echo "Found native compiler: $(which gcc)"
 
 # Build tree-sitter for Mac
@@ -481,18 +442,6 @@ else
     fi
 fi
 
-# Build zlog for Mac (optional)
-echo "Setting up zlog..."
-if [ -f "$SYSTEM_PREFIX/lib/libzlog.a" ]; then
-    echo "zlog already available"
-else
-    if ! build_zlog_for_mac; then
-        echo "Warning: zlog build failed, but this is optional"
-    else
-        echo "zlog built successfully"
-    fi
-fi
-
 # Clean up intermediate files
 cleanup_intermediate_files
 
@@ -513,7 +462,6 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- zlog: $([ -f "$SYSTEM_PREFIX/lib/libzlog.a" ] && echo "✓ Built" || echo "✗ Missing (optional)")"
 echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"
