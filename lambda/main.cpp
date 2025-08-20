@@ -4,7 +4,6 @@ extern "C" void run_validation(const char *data_file, const char *schema_file, c
 // Forward declare validation execution function for direct calls by tests
 extern "C" int exec_validation(int argc, char* argv[]);
 #include "input/input.h"
-#include <lexbor/url/url.h>
 #include <unistd.h>  // for getcwd
 
 // Unicode support

@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../windows_compat.h"  // For Windows compatibility functions like strndup
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
 

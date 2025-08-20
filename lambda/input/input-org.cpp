@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../windows_compat.h"  // For Windows compatibility functions like strndup
 #include <string.h>
 #include <ctype.h>
 
