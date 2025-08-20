@@ -292,7 +292,6 @@ void runner_init(Runtime *runtime, Runner* runner) {
     memset(runner, 0, sizeof(Runner));
 }
 
-#include <lexbor/url/url.h>
 #include "../lib/url.h"
 
 void runner_setup_context(Runner* runner) {
