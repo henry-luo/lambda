@@ -381,48 +381,6 @@ build_mir_for_linux() {
     return 1
 }
 
-# Function to build zlog for Linux
-build_zlog_for_linux() {
-    echo "Building zlog for Linux..."
-    
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libzlog.a" ]; then
-        echo "zlog already installed in system location"
-        return 0
-    fi
-    
-    if [ ! -d "build_temp/zlog" ]; then
-        cd build_temp
-        echo "Cloning zlog repository..."
-        git clone https://github.com/HardySimpson/zlog.git || {
-            echo "Warning: Could not clone zlog repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    
-    cd "build_temp/zlog"
-    
-    echo "Building zlog..."
-    if make -j$(nproc); then
-        echo "Installing zlog to system location (requires sudo)..."
-        # Install to system location
-        sudo make install PREFIX="$SYSTEM_PREFIX"
-        
-        # Update library cache
-        sudo ldconfig
-        
-        echo "✅ zlog built successfully"
-        cd - > /dev/null
-        return 0
-    fi
-    
-    echo "❌ zlog build failed"
-    cd - > /dev/null
-    return 1
-}
-
 echo "Found native compiler: $(which gcc)"
 echo "System: $(uname -a)"
 
@@ -503,18 +461,6 @@ else
     fi
 fi
 
-# Build zlog for Linux (optional)
-echo "Setting up zlog..."
-if [ -f "$SYSTEM_PREFIX/lib/libzlog.a" ]; then
-    echo "zlog already available"
-else
-    if ! build_zlog_for_linux; then
-        echo "Warning: zlog build failed, but this is optional"
-    else
-        echo "zlog built successfully"
-    fi
-fi
-
 # Clean up intermediate files
 cleanup_intermediate_files
 
@@ -528,7 +474,6 @@ echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lam
 echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libgmp.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- zlog: $([ -f "$SYSTEM_PREFIX/lib/libzlog.a" ] && echo "✓ Built" || echo "✗ Missing (optional)")"
 echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"
