@@ -1,5 +1,6 @@
 #include "layout.h"
 
+#include "../lib/log.h"
 AlignType resolve_align_type(PropValue value);
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
@@ -246,7 +247,7 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_value_length_percentage_t *value) {
     int result = 0;
-    dzlog_debug("length value type %d", value->type);
+    log_debug("length value type %d", value->type);
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
         printf("number value\n");
@@ -317,12 +318,12 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         }
         break;
     case LXB_CSS_VALUE_AUTO:
-        dzlog_info("length value: auto");
+        log_info("length value: auto");
         result = (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT || 
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) ? LENGTH_AUTO : 0;
         break;
     default:
-        dzlog_warn("unknown length type: %d", value->type);
+        log_warn("unknown length type: %d", value->type);
         result = 0;
     }
     return (int)result;
@@ -332,28 +333,28 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property, 
     const lxb_css_property_margin_t *margin, uint32_t specificity, Spacing* spacing) {
     int value_cnt = 0;  Spacing sp;
-    dzlog_debug("resolving margin property");
+    log_debug("resolving margin property");
     if (margin->top.type != LXB_CSS_VALUE__UNDEF) {
-        dzlog_debug("resolving margin top");
+        log_debug("resolving margin top");
         sp.top = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->top);
         value_cnt++;
     }
     if (margin->right.type != LXB_CSS_VALUE__UNDEF) {
-        dzlog_debug("resolving margin right");
+        log_debug("resolving margin right");
         sp.right = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->right);
         value_cnt++;
     }
     if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) {
-        dzlog_debug("resolving margin bottom");
+        log_debug("resolving margin bottom");
         sp.bottom = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->bottom);
         value_cnt++;
     }
     if (margin->left.type != LXB_CSS_VALUE__UNDEF) {
-        dzlog_debug("resolving margin left");
+        log_debug("resolving margin left");
         sp.left = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->left);
         value_cnt++;
     }
-    dzlog_debug("margin value count: %d", value_cnt);
+    log_debug("margin value count: %d", value_cnt);
     switch (value_cnt) {
     case 1:
         sp.right = sp.left = sp.bottom = sp.top;
@@ -423,7 +424,7 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
         const lxb_css_rule_declaration_t* display_decl = 
             lxb_dom_element_style_by_id((lxb_dom_element_t*)elmt, LXB_CSS_PROPERTY_DISPLAY);
         if (display_decl) {
-            dzlog_debug("display_value: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
+            log_debug("display_value: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
                 lxb_css_value_by_id(display_decl->u.display->b)->name);
             if (display_decl->u.display->b == LXB_CSS_VALUE__UNDEF) {
                 // map single display value
@@ -1256,7 +1257,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
     case LXB_CSS_PROPERTY__CUSTOM: // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
-        dzlog_warn("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
+        log_warn("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
         break;
     }
     

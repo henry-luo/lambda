@@ -1,4 +1,5 @@
 #include "render.h"
+#include "../lib/log.h"
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
@@ -543,7 +544,7 @@ void render_children(RenderContext* rdcon, View* view) {
             render_text_view(rdcon, text);
         }
         else {
-            dzlog_debug("unknown view in rendering: %d", view->type);
+            log_debug("unknown view in rendering: %d", view->type);
         }
         view = view->next;
     } while (view);

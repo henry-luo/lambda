@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlog.h> 
+#include "../lib/log.h"
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
@@ -168,7 +168,7 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
         MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
-        dzlog_debug("Loaded module: %p, items: %p\n", module, (void*)mitem);
+        log_debug("Loaded module: %p, items: %p\n", module, (void*)mitem);
         for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
             print_module_item(mitem);
             if (mitem->item_type != MIR_func_item) { continue; }

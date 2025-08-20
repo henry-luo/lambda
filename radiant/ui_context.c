@@ -1,6 +1,7 @@
 #include "view.h"
 #include <locale.h>
 
+#include "../lib/log.h"
 void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
@@ -95,17 +96,17 @@ void free_document(Document* doc) {
 }
 
 void ui_context_cleanup(UiContext* uicon) {
-    dzlog_debug("cleaning up UI context");
+    log_debug("cleaning up UI context");
     if (uicon->document) {
         free_document(uicon->document);
     }
 
-    dzlog_debug("cleaning up font resources");
+    log_debug("cleaning up font resources");
     fontface_cleanup(uicon);  // free font cache
     FT_Done_FreeType(uicon->ft_library);
     FcConfigDestroy(uicon->font_config);
 
-    dzlog_debug("cleaning up media resources");
+    log_debug("cleaning up media resources");
     image_cache_cleanup(uicon);  // cleanup image cache
     tvg_engine_term(TVG_ENGINE_SW);
     image_surface_destroy(uicon->surface);

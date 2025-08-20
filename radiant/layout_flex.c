@@ -4,7 +4,7 @@
 #include <math.h>
 #include <assert.h>
 #include <stdbool.h> 
-#include "zlog.h"
+#include "../lib/log.h"
 #include "flex.h"
 
 static void initialize_items(FlexContainer* container, FlexItem* layout_items, int* layout_count);
@@ -18,7 +18,7 @@ static void update_original_items(FlexContainer* container, FlexItem* layout_ite
 // Helper functions
 float clamp(float value, float min, float max) {
     float result = (max != 0) ? fmin(fmax(value, min), max) : fmax(value, min);
-    dzlog_debug("clamp(%.1f, %.1f, %.1f) = %.1f", value, min, max, result);
+    log_debug("clamp(%.1f, %.1f, %.1f) = %.1f", value, min, max, result);
     return result;
 }
 
@@ -52,7 +52,7 @@ int resolve_flex_basis(FlexItem* item, int container_main_size) {
         basis = basis > 0 ? basis : resolve_percentage(item->width, item->is_width_percent, container_main_size);
     }
     
-    dzlog_debug("resolve_flex_basis: width=%d, flex_basis=%d -> %d", 
+    log_debug("resolve_flex_basis: width=%d, flex_basis=%d -> %d", 
            item->width, item->flex_basis, basis);
     
     if (basis < 0) basis = 0;
@@ -98,7 +98,7 @@ void apply_constraints(FlexItem* item, int container_width, int container_height
     item->width = actual_width;
     item->height = actual_height;
     
-    dzlog_debug("apply_constraints: width %d -> %d, height %d -> %d", 
+    log_debug("apply_constraints: width %d -> %d, height %d -> %d", 
            old_width, item->width, old_height, item->height);
 }
 
@@ -128,7 +128,7 @@ static void initialize_items(FlexContainer* container, FlexItem* layout_items, i
             (*layout_count)++;
         }
     }
-    dzlog_debug("Filtered %d items for layout", *layout_count);
+    log_debug("Filtered %d items for layout", *layout_count);
 }
 
 static void create_flex_lines(FlexContainer* container, FlexItem* layout_items, int layout_count, 
@@ -176,7 +176,7 @@ static void create_flex_lines(FlexContainer* container, FlexItem* layout_items, 
     } else {
         free(current_line.items);
     }
-    dzlog_debug("Created %d lines", *line_count);
+    log_debug("Created %d lines", *line_count);
 }
 
 static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine* lines, int line_count,
@@ -205,7 +205,7 @@ static void process_flex_line(FlexContainer* container, FlexLine* line, FlexLine
     position_items_main_axis(container, line, main_size, is_row, is_reverse);
     position_items_cross_axis(container, line, container_cross_size, *cross_pos, is_row);  // Use container_cross_size
     
-    dzlog_debug("Processed line %ld: cross_pos=%.1f, height=%d", line - lines, *cross_pos, line->height);
+    log_debug("Processed line %ld: cross_pos=%.1f, height=%d", line - lines, *cross_pos, line->height);
 }
 
 static void apply_flex_adjustments(FlexContainer* container,FlexLine* line, FlexLine* lines, float free_space) {
@@ -214,7 +214,7 @@ static void apply_flex_adjustments(FlexContainer* container,FlexLine* line, Flex
         total_grow += line->items[i]->flex_grow;
         total_shrink += line->items[i]->flex_shrink;
     }
-    dzlog_debug("Line %ld: free_space=%.1f, total_grow=%.1f, total_shrink=%.1f", 
+    log_debug("Line %ld: free_space=%.1f, total_grow=%.1f, total_shrink=%.1f", 
            line - lines, free_space, total_grow, total_shrink);
 
     if (free_space > 0 && total_grow > 0) {
@@ -230,7 +230,7 @@ static void apply_flex_adjustments(FlexContainer* container,FlexLine* line, Flex
                 }
 
                 apply_constraints(line->items[i], container->width, container->height);
-                dzlog_debug("Grow item %d: width=%d, height=%d", i, line->items[i]->width, line->items[i]->height);
+                log_debug("Grow item %d: width=%d, height=%d", i, line->items[i]->width, line->items[i]->height);
             }
         }
     } else if (free_space < 0 && total_shrink > 0) {
@@ -246,7 +246,7 @@ static void apply_flex_adjustments(FlexContainer* container,FlexLine* line, Flex
                 }
 
                 apply_constraints(line->items[i], container->width, container->height);
-                dzlog_debug("Shrink item %d: width=%d, height=%d", i, line->items[i]->width, line->items[i]->height);
+                log_debug("Shrink item %d: width=%d, height=%d", i, line->items[i]->width, line->items[i]->height);
             }
         }
     }
@@ -274,7 +274,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
     if (auto_margin_count > 0 && free_space > 0) {
         // Distribute free space among auto margins
         auto_margin_size = free_space / auto_margin_count;
-        dzlog_debug("Auto margin detected: %d auto margins, size=%.1f", auto_margin_count, auto_margin_size);
+        log_debug("Auto margin detected: %d auto margins, size=%.1f", auto_margin_count, auto_margin_size);
     } else {
         // Select the appropriate gap based on direction
         int main_axis_gap = is_row ? container->column_gap : container->row_gap;
@@ -295,7 +295,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
         }
     }
     
-    dzlog_debug("Main axis: main_pos=%.1f, spacing=%.1f, auto_margin_size=%.1f", 
+    log_debug("Main axis: main_pos=%.1f, spacing=%.1f, auto_margin_size=%.1f", 
            main_pos, spacing, auto_margin_size);
 
     if (is_reverse) {
@@ -380,7 +380,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
         
         // Log the positions
         for (int i = 0; i < line->item_count; i++) {
-            dzlog_debug("Item %d: pos=%d, size=%d, left_margin=%d, right_margin=%d", 
+            log_debug("Item %d: pos=%d, size=%d, left_margin=%d, right_margin=%d", 
                    i, is_row ? line->items[i]->pos.x : line->items[i]->pos.y, 
                    is_row ? line->items[i]->width : line->items[i]->height,
                    is_row ? line->items[i]->margin[3] : line->items[i]->margin[0],
@@ -454,7 +454,7 @@ static void position_items_main_axis(FlexContainer* container, FlexLine* line, f
                 }
             }
             
-            dzlog_debug("Item %d: pos=%d, size=%d, left_margin=%.1f, right_margin=%.1f, both_sides_auto=%d", 
+            log_debug("Item %d: pos=%d, size=%d, left_margin=%.1f, right_margin=%.1f, both_sides_auto=%d", 
                    i, 
                    is_row ? line->items[i]->pos.x : line->items[i]->pos.y, 
                    is_row ? line->items[i]->width : line->items[i]->height,
@@ -518,7 +518,7 @@ static void position_items_cross_axis(FlexContainer* container, FlexLine* line, 
                 item_cross_pos = 0;
             }
             
-            dzlog_debug("Auto margin cross: container=%d, item=%.1f, pos=%.1f, count=%d", 
+            log_debug("Auto margin cross: container=%d, item=%.1f, pos=%.1f, count=%d", 
                    (int)(is_row ? container->height : container->width), 
                    item_cross_size, item_cross_pos, auto_margin_count);
         } else {
@@ -561,7 +561,7 @@ static void position_items_cross_axis(FlexContainer* container, FlexLine* line, 
             line->items[i]->pos.x = item_cross_pos;
         }
         
-        dzlog_debug("Item %d: cross_pos=%.1f, auto_margin_count=%d", i, item_cross_pos, auto_margin_count);
+        log_debug("Item %d: cross_pos=%.1f, auto_margin_count=%d", i, item_cross_pos, auto_margin_count);
     }
 }
 
@@ -570,7 +570,7 @@ static void update_original_items(FlexContainer* container, FlexItem* layout_ite
     for (int i = 0; i < container->item_count; i++) {
         if (container->items[i].position != POS_ABSOLUTE && container->items[i].visibility != VIS_HIDDEN) {
             container->items[i] = layout_items[k];
-            dzlog_debug("Final item %d: x=%d, y=%d, w=%d, h=%d",
+            log_debug("Final item %d: x=%d, y=%d, w=%d, h=%d",
                    i, container->items[i].pos.x, container->items[i].pos.y,
                    container->items[i].width, container->items[i].height);
             k++;
@@ -580,8 +580,8 @@ static void update_original_items(FlexContainer* container, FlexItem* layout_ite
 
 // flex layout main function
 void layout_flex_container(FlexContainer* container) {
-    dzlog_debug("=== Starting layout_flex_container ===");
-    dzlog_debug("Container: width=%d, height=%d, row_gap=%d, column_gap=%d, items=%d, justify=%d, align_items=%d, align_content=%d", 
+    log_debug("=== Starting layout_flex_container ===");
+    log_debug("Container: width=%d, height=%d, row_gap=%d, column_gap=%d, items=%d, justify=%d, align_items=%d, align_content=%d", 
            container->width, container->height, container->row_gap, container->column_gap, container->item_count, container->justify, 
            container->align_items, container->align_content);
 
@@ -625,7 +625,7 @@ void layout_flex_container(FlexContainer* container) {
     // Sort the items by their order property
     if (layout_count > 0) {
         qsort(items_with_indices, layout_count, sizeof(FlexItemWithIndex), compare_item_order);
-        dzlog_debug("Items sorted by order property");
+        log_debug("Items sorted by order property");
         
         // Extract just the items for layout processing
         for (int i = 0; i < layout_count; i++) {
@@ -679,7 +679,7 @@ void layout_flex_container(FlexContainer* container) {
             default: break;
         }
     }
-    dzlog_debug("Align-content: free_cross_space=%.1f, cross_pos=%.1f, cross_spacing=%.1f", 
+    log_debug("Align-content: free_cross_space=%.1f, cross_pos=%.1f, cross_spacing=%.1f", 
            free_cross_space, cross_pos, cross_spacing);
 
     if (container->wrap == WRAP_WRAP_REVERSE && is_row) {
@@ -711,7 +711,7 @@ void layout_flex_container(FlexContainer* container) {
             // Copy layout results back to the original item
             int original_index = items_with_indices[k].original_index;
             container->items[original_index] = layout_items[k];
-            dzlog_debug("Final item %d: x=%d, y=%d, w=%d, h=%d",
+            log_debug("Final item %d: x=%d, y=%d, w=%d, h=%d",
                    original_index, 
                    layout_items[k].pos.x, 
                    layout_items[k].pos.y,
@@ -725,7 +725,7 @@ void layout_flex_container(FlexContainer* container) {
     free(layout_items);
     for (int i = 0; i < line_count; i++) free(lines[i].items);
     free(lines);
-    dzlog_debug("=== Layout completed ===");
+    log_debug("=== Layout completed ===");
 }
 
 void free_flex_container(FlexContainer* container) {

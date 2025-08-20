@@ -1,6 +1,7 @@
 
 #include "view.h"
 
+#include "../lib/log.h"
 typedef struct FontfaceEntry {
     char* name;
     FT_Face face;
@@ -30,9 +31,9 @@ char* load_font_path(FcConfig *font_config, const char* font_name) {
     else {
         // get font file path
         if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch) {
-            dzlog_debug("Failed to get font file path: %s", font_name);
+            log_debug("Failed to get font file path: %s", font_name);
         } else {
-            dzlog_debug("Found font '%s' at: %s", font_name, file);
+            log_debug("Found font '%s' at: %s", font_name, file);
             path = strdup((const char *)file);  // need to strdup, as file will be destroyed by FcPatternDestroy later
         }
     }
@@ -120,10 +121,10 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
     }
     
     // failed to load glyph under current font, try fallback fonts
-    dzlog_debug("failed to load glyph: %u", codepoint);
+    log_debug("failed to load glyph: %u", codepoint);
     char** font_ptr = uicon->fallback_fonts;
     while (*font_ptr) {
-        dzlog_debug("trying fallback font '%s' for char: %u", *font_ptr, codepoint);
+        log_debug("trying fallback font '%s' for char: %u", *font_ptr, codepoint);
         FT_Face fallback_face = load_styled_font(uicon, *font_ptr, font_style);
         if (fallback_face) {
             char_index = FT_Get_Char_Index(fallback_face, codepoint);
@@ -131,7 +132,7 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
                 error = FT_Load_Glyph(fallback_face, char_index, FT_LOAD_RENDER);
                 if (!error) { slot = fallback_face->glyph;  return slot; } 
             }
-            dzlog_debug("failed to load glyph from fallback font: %s, %u", *font_ptr, codepoint);
+            log_debug("failed to load glyph from fallback font: %s, %u", *font_ptr, codepoint);
         }
         font_ptr++;
     }

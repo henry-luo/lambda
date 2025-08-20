@@ -1,5 +1,6 @@
 #include "handler.h"
 
+#include "../lib/log.h"
 Document* show_html_doc(lxb_url_t *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void to_repaint();
@@ -177,7 +178,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
-            dzlog_debug("mouse down at anchor tag");
+            log_debug("mouse down at anchor tag");
             lxb_dom_attr_t *href = lxb_dom_element_attr_by_id(lxb_dom_interface_element(span->node), LXB_DOM_ATTR_HREF);
             if (href) {
                 printf("got anchor href: %s\n", href->value->data);
@@ -185,11 +186,11 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
                 lxb_char_t *target = (lxb_char_t*)lxb_dom_element_get_attribute(
                     lxb_dom_interface_element(span->node), (const lxb_char_t *)"target", 6, NULL);
                 if (target) {
-                    dzlog_debug("got anchor target: %s", target);
+                    log_debug("got anchor target: %s", target);
                     evcon->new_target = (char*)target;
                 }
                 else {
-                    dzlog_debug("no anchor target found");
+                    log_debug("no anchor target found");
                 }
             }
         }
@@ -288,7 +289,7 @@ lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document,
     status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list, 
         set_iframe_src_callback, (void*)&element);
     if (element) {
-        dzlog_debug("set iframe src: %s", new_src);
+        log_debug("set iframe src: %s", new_src);
         lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3, 
             (const lxb_char_t *)new_src, (size_t)strlen((char*)new_src));
     }
@@ -441,16 +442,16 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         }
 
         if (evcon.new_url) {
-            dzlog_debug("opening-url:%s", evcon.new_url);
+            log_debug("opening-url:%s", evcon.new_url);
             if (evcon.new_target) {
-                dzlog_debug("setting new src to target: %s", evcon.new_target);
+                log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
                 lxb_dom_element_t *elmt = set_iframe_src_by_name(doc->dom_tree, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, (lxb_dom_node_t*)elmt);
                 if (iframe) {
                     if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) && 
                         ((ViewBlock*)iframe)->embed) {
-                        dzlog_debug("updating doc of iframe view");
+                        log_debug("updating doc of iframe view");
                         ViewBlock* block = (ViewBlock*)iframe;
                         if (block->scroller && block->scroller->pane) {
                             block->scroller->pane->h_scroll_position = 0;
@@ -473,7 +474,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                         uicon->document->state->is_dirty = true;
                     }
                 } else {
-                    dzlog_debug("failed to find iframe view");
+                    log_debug("failed to find iframe view");
                 }
             }
             else {
