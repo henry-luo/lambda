@@ -27,7 +27,8 @@ Context* create_test_context() {
     ctx->heap = NULL;  // Will be initialized in setup
     
     // Initialize decimal context (required for some math operations)
-    mpd_defaultcontext(&ctx->decimal_ctx);
+    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    mpd_defaultcontext(ctx->decimal_ctx);
     
     return ctx;
 }
@@ -36,6 +37,10 @@ void destroy_test_context(Context* ctx) {
     if (!ctx) return;
     if (ctx->num_stack) {
         num_stack_destroy((num_stack_t*)ctx->num_stack);
+    }
+    if (ctx->decimal_ctx) {
+        free(ctx->decimal_ctx);
+        ctx->decimal_ctx = NULL;
     }
     free(ctx);
 }
