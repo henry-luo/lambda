@@ -20,8 +20,9 @@ void test_phase1_basic_parsing();
 void test_phase2_components();
 void test_phase3_relative_resolution();
 void test_phase4_enhanced_relative_resolution();
-void test_phase5_negative_and_edge_cases();
-void test_phase6_security_and_performance();
+void test_phase5_serialization();
+void test_phase6_negative_and_edge_cases();
+void test_phase7_security_and_performance();
 
 void test_phase1_basic_parsing() {
     printf("=== Testing Phase 1: Basic Parsing ===\n");
@@ -251,8 +252,198 @@ void test_phase4_enhanced_relative_resolution() {
     printf("✅ Phase 4 Enhanced Relative URL Resolution tests passed\n\n");
 }
 
-void test_phase5_negative_and_edge_cases() {
-    printf("=== Testing Phase 5: Negative Tests and Edge Cases ===\n");
+void test_phase5_serialization() {
+    printf("=== Testing Phase 5: URL Serialization ===\n");
+    
+    // Test 1: Basic URL serialization roundtrip
+    printf("Testing basic URL serialization roundtrip...\n");
+    const char* original_url = "https://user:pass@example.com:8080/path/to/file.html?query=value&param=test#fragment";
+    Url* url = url_parse(original_url);
+    assert(url != NULL);
+    
+    String* serialized = url_serialize(url);
+    assert(serialized != NULL);
+    // For roundtrip, we expect exact preservation
+    assert(strcmp(serialized->chars, original_url) == 0);
+    
+    url_free_string(serialized);
+    url_destroy(url);
+    printf("✅ Basic roundtrip serialization passed\n");
+    
+    // Test 2: URL construction from components
+    printf("Testing URL construction from components...\n");
+    url = url_create();
+    assert(url != NULL);
+    
+    // Set individual components
+    url->scheme = URL_SCHEME_HTTPS;
+    url->hostname = url_create_string("api.example.com");
+    url->port_number = 443;
+    url->pathname = url_create_string("/v1/users");
+    url->search = url_create_string("?limit=10&offset=0");
+    url->hash = url_create_string("#results");
+    
+    String* constructed = url_construct_href(url);
+    assert(constructed != NULL);
+    
+    // Should be: "https://api.example.com/v1/users?limit=10&offset=0#results"
+    // Note: port 443 should be omitted for HTTPS as it's the default
+    const char* expected = "https://api.example.com/v1/users?limit=10&offset=0#results";
+    assert(strcmp(constructed->chars, expected) == 0);
+    
+    url_free_string(constructed);
+    url_destroy(url);
+    printf("✅ Component-based construction passed\n");
+    
+    // Test 3: Serialization without fragment
+    printf("Testing serialization without fragment...\n");
+    url = url_parse("https://example.com/path?query=value#fragment");
+    assert(url != NULL);
+    
+    String* without_fragment = url_serialize_without_fragment(url);
+    assert(without_fragment != NULL);
+    assert(strcmp(without_fragment->chars, "https://example.com/path?query=value") == 0);
+    
+    url_free_string(without_fragment);
+    url_destroy(url);
+    printf("✅ Serialization without fragment passed\n");
+    
+    // Test 4: Origin serialization
+    printf("Testing origin serialization...\n");
+    url = url_parse("https://user:pass@api.example.com:8080/deep/path?query=value#fragment");
+    assert(url != NULL);
+    
+    String* origin = url_serialize_origin(url);
+    assert(origin != NULL);
+    assert(strcmp(origin->chars, "https://api.example.com:8080") == 0);
+    
+    url_free_string(origin);
+    url_destroy(url);
+    printf("✅ Origin serialization passed\n");
+    
+    // Test 5: Component serialization
+    printf("Testing component serialization...\n");
+    url = url_parse("ftp://ftp.example.com:2121/files/document.txt");
+    assert(url != NULL);
+    
+    // Test scheme serialization
+    String* scheme = url_serialize_scheme(url);
+    assert(scheme != NULL);
+    assert(strcmp(scheme->chars, "ftp:") == 0);
+    url_free_string(scheme);
+    
+    // Test host serialization (should include non-default port)
+    String* host = url_serialize_host(url);
+    assert(host != NULL);
+    assert(strcmp(host->chars, "ftp.example.com:2121") == 0);
+    url_free_string(host);
+    
+    // Test path serialization
+    String* path = url_serialize_path(url);
+    assert(path != NULL);
+    assert(strcmp(path->chars, "/files/document.txt") == 0);
+    url_free_string(path);
+    
+    url_destroy(url);
+    printf("✅ Component serialization passed\n");
+    
+    // Test 6: Default port handling in URL construction
+    printf("Testing default port handling in URL construction...\n");
+    
+    // Test constructing URL from components (should omit default ports)
+    url = url_create();
+    url->scheme = URL_SCHEME_HTTPS;
+    url->hostname = url_create_string("secure.example.com");
+    url->port_number = 443; // Default port for HTTPS
+    url->port = url_create_string("443");
+    url->pathname = url_create_string("/path");
+    
+    String* https_constructed = url_construct_href(url);
+    assert(https_constructed != NULL);
+    // Port 443 should be omitted for HTTPS when constructing from components
+    assert(strcmp(https_constructed->chars, "https://secure.example.com/path") == 0);
+    
+    url_free_string(https_constructed);
+    url_destroy(url);
+    
+    // Test constructing HTTP URL with default port
+    url = url_create();
+    url->scheme = URL_SCHEME_HTTP;
+    url->hostname = url_create_string("web.example.com");
+    url->port_number = 80; // Default port for HTTP
+    url->port = url_create_string("80");
+    url->pathname = url_create_string("/index.html");
+    
+    String* http_constructed = url_construct_href(url);
+    assert(http_constructed != NULL);
+    // Port 80 should be omitted for HTTP when constructing from components
+    assert(strcmp(http_constructed->chars, "http://web.example.com/index.html") == 0);
+    
+    url_free_string(http_constructed);
+    url_destroy(url);
+    printf("✅ Default port handling in construction passed\n");
+    
+    // Test 7: Non-default port preservation
+    printf("Testing non-default port preservation...\n");
+    url = url_parse("https://api.example.com:8443/v2/data");
+    assert(url != NULL);
+    
+    String* custom_port = url_serialize(url);
+    assert(custom_port != NULL);
+    // Non-default port should be preserved
+    assert(strcmp(custom_port->chars, "https://api.example.com:8443/v2/data") == 0);
+    
+    url_free_string(custom_port);
+    url_destroy(url);
+    printf("✅ Non-default port preservation passed\n");
+    
+    // Test 8: File URL serialization
+    printf("Testing file URL serialization...\n");
+    url = url_parse("file:///Users/username/Documents/file.txt");
+    assert(url != NULL);
+    
+    String* file_serialized = url_serialize(url);
+    assert(file_serialized != NULL);
+    assert(strcmp(file_serialized->chars, "file:///Users/username/Documents/file.txt") == 0);
+    
+    url_free_string(file_serialized);
+    url_destroy(url);
+    printf("✅ File URL serialization passed\n");
+    
+    // Test 9: Complex URL with all components
+    printf("Testing complex URL with all components...\n");
+    const char* complex_url = "https://admin:secret@secure.api.example.com:9443/v1/admin/users/123?include=profile&format=json#user-details";
+    url = url_parse(complex_url);
+    assert(url != NULL);
+    
+    String* complex_serialized = url_serialize(url);
+    assert(complex_serialized != NULL);
+    assert(strcmp(complex_serialized->chars, complex_url) == 0);
+    
+    url_free_string(complex_serialized);
+    url_destroy(url);
+    printf("✅ Complex URL serialization passed\n");
+    
+    // Test 10: Empty components handling
+    printf("Testing empty components handling...\n");
+    url = url_create();
+    url->scheme = URL_SCHEME_HTTP;
+    url->hostname = url_create_string("example.com");
+    url->pathname = url_create_string("/");
+    
+    String* minimal = url_construct_href(url);
+    assert(minimal != NULL);
+    assert(strcmp(minimal->chars, "http://example.com/") == 0);
+    
+    url_free_string(minimal);
+    url_destroy(url);
+    printf("✅ Empty components handling passed\n");
+    
+    printf("✅ Phase 5 URL Serialization tests passed\n\n");
+}
+
+void test_phase6_negative_and_edge_cases() {
+    printf("=== Testing Phase 6: Negative Tests and Edge Cases ===\n");
     
     // Test 1: NULL input handling
     printf("Testing NULL input handling...\n");
@@ -539,11 +730,11 @@ void test_phase5_negative_and_edge_cases() {
     }
     printf("✅ Invalid character tests passed\n");
     
-    printf("✅ Phase 5 Negative Tests and Edge Cases passed\n\n");
+    printf("✅ Phase 6 Negative Tests and Edge Cases passed\n\n");
 }
 
-void test_phase6_security_and_performance() {
-    printf("=== Testing Phase 6: Security and Performance ===\n");
+void test_phase7_security_and_performance() {
+    printf("=== Testing Phase 7: Security and Performance ===\n");
     
     Url* resolved = NULL;  // Declare resolved variable for the entire function
     
@@ -766,7 +957,7 @@ void test_phase6_security_and_performance() {
     }
     printf("✅ Concurrent access tests passed\n");
     
-    printf("✅ Phase 6 Security and Performance tests passed\n\n");
+    printf("✅ Phase 7 Security and Performance tests passed\n\n");
 }
 
 int main() {
@@ -776,16 +967,18 @@ int main() {
     test_phase2_components();
     test_phase3_relative_resolution();
     test_phase4_enhanced_relative_resolution();
-    test_phase5_negative_and_edge_cases();
-    test_phase6_security_and_performance();
+    test_phase5_serialization();
+    test_phase6_negative_and_edge_cases();
+    test_phase7_security_and_performance();
     
     printf("🎉 All tests completed successfully!\n");
     printf("✅ Phase 1: Basic URL parsing with scheme detection\n");
     printf("✅ Phase 2: Complete component parsing (username, password, etc.)\n");
     printf("✅ Phase 3: Relative URL resolution and path normalization\n");
     printf("✅ Phase 4: Enhanced relative URL resolution (WHATWG compliant)\n");
-    printf("✅ Phase 5: Negative tests and edge cases (robustness)\n");
-    printf("✅ Phase 6: Security and performance validation\n");
+    printf("✅ Phase 5: URL serialization and component reconstruction\n");
+    printf("✅ Phase 6: Negative tests and edge cases (robustness)\n");
+    printf("✅ Phase 7: Security and performance validation\n");
     printf("\nThe modern C URL parser is production-ready and secure!\n");
     
     return 0;

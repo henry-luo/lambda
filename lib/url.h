@@ -74,6 +74,15 @@ UrlError url_parse_into(const char* input, Url* url);
 
 // URL manipulation
 String* url_serialize(const Url* url);
+String* url_construct_href(const Url* url);
+String* url_serialize_without_fragment(const Url* url);
+String* url_serialize_origin(const Url* url);
+
+// Component serialization functions
+String* url_serialize_scheme(const Url* url);
+String* url_serialize_host(const Url* url);
+String* url_serialize_path(const Url* url);
+
 bool url_is_valid(const Url* url);
 bool url_equals(const Url* a, const Url* b);
 Url* url_clone(const Url* url);
