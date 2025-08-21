@@ -113,6 +113,10 @@ typedef struct TypeFloat : TypeConst {
     double double_val;
 } TypeFloat;
 
+typedef struct TypeDateTime : TypeConst {
+    DateTime datetime;
+} TypeDateTime;
+
 typedef struct TypeDecimal : TypeConst  {
     Decimal *decimal;
 } TypeDecimal;
@@ -122,10 +126,6 @@ typedef struct TypeString : TypeConst {
 } TypeString;
 
 typedef TypeString TypeSymbol;
-
-typedef struct TypeDateTime : TypeConst {
-    DateTime *datetime;
-} TypeDateTime;
 
 typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array

@@ -88,6 +88,9 @@ void writeType(Transpiler* tp, Type *type) {
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "double");
         break;
+    case LMD_TYPE_DTIME:
+        strbuf_append_str(tp->code_buf, "DateTime");
+        break;        
     case LMD_TYPE_DECIMAL:
         strbuf_append_str(tp->code_buf, "Decimal*");
         break;    
@@ -99,9 +102,6 @@ void writeType(Transpiler* tp, Type *type) {
         break;
     case LMD_TYPE_SYMBOL:
         strbuf_append_str(tp->code_buf, "String*");
-        break;
-    case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "DateTime*");
         break;
 
     case LMD_TYPE_RANGE:
@@ -574,11 +574,6 @@ void print_const(Script *script, Type* type) {
     TypeConst *const_type = (TypeConst*)type;
     void* data = script->const_list->data[const_type->const_index];
     switch (type->type_id) {
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
-        String* string = (String*)data;
-        printf("[const@%d, %s, %p, '%.*s']\n", const_type->const_index, type_name, string, (int)string->len, string->chars);
-        break;
-    }
     case LMD_TYPE_FLOAT: {
         double num = *(double*)data;
         printf("[const@%d, %s, %g]\n", const_type->const_index, type_name, num);
@@ -589,6 +584,20 @@ void print_const(Script *script, Type* type) {
         printf("[const@%d, %s, %lld]\n", const_type->const_index, type_name, num);
         break;
     }
+    case LMD_TYPE_DTIME: {
+        DateTime datetime = *(DateTime*)data;
+        StrBuf *strbuf = strbuf_new();
+        datetime_format_lambda(strbuf, &datetime);
+        printf("[const@%d, %s, '%s']\n", const_type->const_index, type_name, strbuf->str);
+        strbuf_free(strbuf);
+        break;
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
+        String* string = (String*)data;
+        printf("[const@%d, %s, %p, '%.*s']\n", const_type->const_index, 
+            type_name, string, (int)string->len, string->chars);
+        break;
+    }    
     case LMD_TYPE_DECIMAL: {
         Decimal *decimal = (Decimal*)data;
         StrBuf *strbuf = strbuf_new();
@@ -597,14 +606,7 @@ void print_const(Script *script, Type* type) {
         strbuf_free(strbuf);
         break;
     }
-    case LMD_TYPE_DTIME: {
-        DateTime *datetime = (DateTime*)data;
-        StrBuf *strbuf = strbuf_new();
-        datetime_format_lambda(strbuf, datetime);
-        printf("[const@%d, %s, '%s']\n", const_type->const_index, type_name, strbuf->str);
-        strbuf_free(strbuf);
-        break;
-    }
+
     default:  // LMD_TYPE_BOOL, LMD_TYPE_INT should not be in const pool
         printf("[const: %s, unexpected!!]\n", type_name);
     }
