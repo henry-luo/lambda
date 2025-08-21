@@ -386,12 +386,11 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
         return NULL;
     }
     
-    dt_type->datetime = dt;
+    dt_type->datetime = *dt;
     
     // Add to const list
-    arraylist_append(tp->const_list, dt_type->datetime);
+    arraylist_append(tp->const_list, &dt_type->datetime);
     dt_type->const_index = tp->const_list->length - 1;
-    
     printf("build lit datetime: %.*s, type: %d\n", datetime_len, datetime_start, dt_type->type_id);
     return (Type *)dt_type;
 }

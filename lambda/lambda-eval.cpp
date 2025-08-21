@@ -2465,7 +2465,7 @@ static DateTime static_dt;
 static bool static_dt_initialized = false;
 
 // DateTime system function - creates a current DateTime
-DateTime* fn_datetime() {
+DateTime fn_datetime() {
     // Use a static DateTime to avoid heap allocation issues - this is not roubust, not thread-safe
     if (!static_dt_initialized) {
         memset(&static_dt, 0, sizeof(DateTime));
@@ -2475,22 +2475,22 @@ DateTime* fn_datetime() {
     // Get current time
     time_t now = time(NULL);
     struct tm* tm_utc = gmtime(&now);
-    if (!tm_utc) { return NULL; }
-
-    // Set date and time from current UTC time
-    DATETIME_SET_YEAR_MONTH(&static_dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
-    static_dt.day = tm_utc->tm_mday;
-    static_dt.hour = tm_utc->tm_hour;
-    static_dt.minute = tm_utc->tm_min;
-    static_dt.second = tm_utc->tm_sec;
-    static_dt.millisecond = 0;
+    if (tm_utc) {
+        // Set date and time from current UTC time
+        DATETIME_SET_YEAR_MONTH(&static_dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
+        static_dt.day = tm_utc->tm_mday;
+        static_dt.hour = tm_utc->tm_hour;
+        static_dt.minute = tm_utc->tm_min;
+        static_dt.second = tm_utc->tm_sec;
+        static_dt.millisecond = 0;
+    }
     
     // Set as UTC timezone
     DATETIME_SET_TZ_OFFSET(&static_dt, 0);
     static_dt.precision = DATETIME_PRECISION_DATE_TIME;
     static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
-    return &static_dt;
+    return static_dt;
 }
 
 // ArrayFloat runtime functions

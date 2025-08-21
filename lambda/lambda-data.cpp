@@ -111,7 +111,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float", .type=&TYPE_FLOAT, .lit_type = (Type*)&LIT_TYPE_FLOAT},
     [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal", .type=&TYPE_DECIMAL, .lit_type = (Type*)&LIT_TYPE_DECIMAL},
     [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number", .type=&TYPE_NUMBER, .lit_type = (Type*)&LIT_TYPE_NUMBER},
-    [LMD_TYPE_DTIME] = {.byte_size = sizeof(DateTime*), .name = "datetime", .type=&TYPE_DTIME, .lit_type = (Type*)&LIT_TYPE_DTIME},
+    [LMD_TYPE_DTIME] = {.byte_size = sizeof(DateTime), .name = "datetime", .type=&TYPE_DTIME, .lit_type = (Type*)&LIT_TYPE_DTIME},
     [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .type=&TYPE_STRING, .lit_type = (Type*)&LIT_TYPE_STRING},
     [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .type=&TYPE_SYMBOL, .lit_type = (Type*)&LIT_TYPE_SYMBOL},
     [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .type=&TYPE_BINARY, .lit_type = (Type*)&LIT_TYPE_BINARY},
@@ -146,7 +146,7 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 
 Item push_d(double dval) {
     printf("TRACE: push_d: %g\n", dval);
-    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval); // stack_alloc(sizeof(double));
+    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval);
     Item result = {.item = d2it(dptr)};
     printf("TRACE: push_d result item: %llu, type_id: %d\n", result.item, result.type_id);
     return result;
@@ -154,15 +154,14 @@ Item push_d(double dval) {
 
 Item push_l(long lval) {
     printf("TRACE: push_l: %ld\n", lval);
-    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval); // stack_alloc(sizeof(long));
+    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval);
     Item result = {.item = l2it(lptr)};
     printf("TRACE: push_l result item: %llu, type_id: %d\n", result.item, result.type_id);
     return result;
 }
 
-Item push_k(long val) {
-    DateTime dtval = *(DateTime*)&val;
-    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, dtval); // stack_alloc(sizeof(DateTime));
+Item push_k(DateTime val) {
+    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, val);
     return {.item = k2it(dtptr)};
 }
 
@@ -265,8 +264,7 @@ Item array_get(Array *array, int index) {
         return push_d(dval);
     }
     case LMD_TYPE_DTIME: {
-        // DateTime dtval = *(DateTime*)item.pointer;
-        long dtval = *(long*)item.pointer;
+        DateTime dtval = *(DateTime*)item.pointer;
         return push_k(dtval);
     }
     default:
@@ -432,6 +430,9 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_DTIME:  {
                 DateTime dtval = va_arg(args, DateTime);
+                StrBuf *strbuf = strbuf_new();
+                datetime_format_lambda(strbuf, &dtval);
+                printf("set field of datetime type to: %s\n", strbuf->str);
                 *(DateTime*)field_ptr = dtval;
                 break;
             }
@@ -547,7 +548,7 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_FLOAT:
         return push_d(titem->double_val);
     case LMD_TYPE_DTIME:
-        return push_k(titem->long_val);
+        return push_k(titem->datetime_val);
     case LMD_TYPE_DECIMAL:
         return {.item = c2it(titem->decimal)};
     case LMD_TYPE_STRING:
@@ -598,8 +599,13 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return push_l(*(long*)field_ptr);
             case LMD_TYPE_FLOAT:
                 return push_d(*(double*)field_ptr);
-            case LMD_TYPE_DTIME:
-                return push_k(*(long*)field_ptr);
+            case LMD_TYPE_DTIME: {
+                DateTime dt = *(DateTime*)field_ptr;
+                StrBuf *strbuf = strbuf_new();
+                datetime_format_lambda(strbuf, &dt);
+                printf("map_get datetime: %s\n", strbuf->str);
+                return push_k(dt);
+            }
             case LMD_TYPE_DECIMAL:
                 return {.item = c2it(*(char**)field_ptr)};
             case LMD_TYPE_STRING:

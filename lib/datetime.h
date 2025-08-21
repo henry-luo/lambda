@@ -10,6 +10,8 @@
 extern "C" {
 #endif
 
+// Check if DateTime was already defined in lambda.h as uint64_t
+#ifndef _DATETIME_DEFINED_
 // Lambda DateTime Structure (Bitfield-packed)
 // Represents date and time with timezone information
 // Total size: 64 bits (8 bytes) exactly
@@ -26,6 +28,9 @@ typedef struct DateTime {
     uint64_t format_hint : 2;      // Format hint + UTC flag (2 bits = 4 combinations)
     // Total: 17+5+5+6+6+10+11+2+2 = 64 bits exactly
 } DateTime;
+
+#define _DATETIME_DEFINED_
+#endif
 
 // DateTime format types for parsing
 typedef enum {
