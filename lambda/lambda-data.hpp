@@ -240,9 +240,69 @@ static inline TypeId get_type_id(Item value) {
     return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
 }
 
-extern String EMPTY_STRING;
-String* strbuf_to_string(StrBuf *sb);
+extern Type TYPE_NULL;
+extern Type TYPE_BOOL;
+extern Type TYPE_INT;
+extern Type TYPE_INT64;
+extern Type TYPE_FLOAT;
+extern Type TYPE_DECIMAL;
+extern Type TYPE_NUMBER;
+extern Type TYPE_STRING;
+extern Type TYPE_BINARY;
+extern Type TYPE_SYMBOL;
+extern Type TYPE_DTIME;
+extern Type TYPE_LIST;
+extern Type TYPE_RANGE;
+extern TypeArray TYPE_ARRAY;
+extern Type TYPE_MAP;
+extern Type TYPE_ELMT;
+extern Type TYPE_TYPE;
+extern Type TYPE_FUNC;
+extern Type TYPE_ANY;
+extern Type TYPE_ERROR;
 
+extern Type CONST_BOOL;
+extern Type CONST_INT;
+extern Type CONST_FLOAT;
+extern Type CONST_STRING;
+
+extern Type LIT_NULL;
+extern Type LIT_BOOL;
+extern Type LIT_INT;
+extern Type LIT_FLOAT;
+extern Type LIT_DECIMAL;
+extern Type LIT_STRING;
+extern Type LIT_DTIME;
+extern Type LIT_TYPE;
+
+extern TypeType LIT_TYPE_NULL;
+extern TypeType LIT_TYPE_BOOL;
+extern TypeType LIT_TYPE_INT;
+extern TypeType LIT_TYPE_FLOAT;
+extern TypeType LIT_TYPE_DECIMAL;
+extern TypeType LIT_TYPE_NUMBER;
+extern TypeType LIT_TYPE_STRING;
+extern TypeType LIT_TYPE_BINARY;
+extern TypeType LIT_TYPE_SYMBOL;
+extern TypeType LIT_TYPE_DTIME;
+extern TypeType LIT_TYPE_LIST;
+extern TypeType LIT_TYPE_RANGE;
+extern TypeType LIT_TYPE_ARRAY;
+extern TypeType LIT_TYPE_MAP;
+extern TypeType LIT_TYPE_ELMT;
+extern TypeType LIT_TYPE_FUNC;
+extern TypeType LIT_TYPE_TYPE;
+extern TypeType LIT_TYPE_ANY;
+extern TypeType LIT_TYPE_ERROR;
+
+extern TypeMap EmptyMap;
+extern TypeElmt EmptyElmt;
+extern Item ItemNull;
+extern Item ItemError;
+extern String EMPTY_STRING;
+extern TypeInfo type_info[];
+
+String* strbuf_to_string(StrBuf *sb);
 CompResult equal_comp(Item a, Item b);
 
 typedef struct Input {
