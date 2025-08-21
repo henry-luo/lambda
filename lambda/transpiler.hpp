@@ -187,6 +187,7 @@ void heap_destroy();
 void frame_start();
 void frame_end();
 void free_item(Item item, bool clear_entry);
+void expand_list(List *list);
 
 #ifndef WASM_BUILD
 #include <mir.h>

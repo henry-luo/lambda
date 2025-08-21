@@ -1,0 +1,648 @@
+#include "transpiler.hpp"
+#include "../lib/datetime.h"
+
+Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
+Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
+Type TYPE_INT = {.type_id = LMD_TYPE_INT};
+Type TYPE_INT64 = {.type_id = LMD_TYPE_INT64};
+Type TYPE_FLOAT = {.type_id = LMD_TYPE_FLOAT};
+Type TYPE_DECIMAL = {.type_id = LMD_TYPE_DECIMAL};
+Type TYPE_NUMBER = {.type_id = LMD_TYPE_NUMBER};
+Type TYPE_STRING = {.type_id = LMD_TYPE_STRING};
+Type TYPE_BINARY = {.type_id = LMD_TYPE_BINARY};
+Type TYPE_SYMBOL = {.type_id = LMD_TYPE_SYMBOL};
+Type TYPE_DTIME = {.type_id = LMD_TYPE_DTIME};
+Type TYPE_LIST = {.type_id = LMD_TYPE_LIST};
+Type TYPE_RANGE = {.type_id = LMD_TYPE_RANGE};
+TypeArray TYPE_ARRAY;
+Type TYPE_MAP = {.type_id = LMD_TYPE_MAP};
+Type TYPE_ELMT = {.type_id = LMD_TYPE_ELEMENT};
+Type TYPE_TYPE = {.type_id = LMD_TYPE_TYPE};
+Type TYPE_FUNC = {.type_id = LMD_TYPE_FUNC};
+Type TYPE_ANY = {.type_id = LMD_TYPE_ANY};
+Type TYPE_ERROR = {.type_id = LMD_TYPE_ERROR};
+
+Type CONST_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1};
+Type CONST_INT = {.type_id = LMD_TYPE_INT, .is_const = 1};
+Type CONST_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1};
+Type CONST_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1};
+
+Type LIT_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1, .is_literal = 1};
+Type LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1, .is_literal = 1};
+Type LIT_INT = {.type_id = LMD_TYPE_INT, .is_const = 1, .is_literal = 1};
+Type LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
+Type LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_const = 1, .is_literal = 1};
+Type LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
+Type LIT_DTIME = {.type_id = LMD_TYPE_DTIME, .is_const = 1, .is_literal = 1};
+Type LIT_TYPE = {.type_id = LMD_TYPE_TYPE, .is_const = 1, .is_literal = 1};
+
+TypeType LIT_TYPE_NULL;
+TypeType LIT_TYPE_BOOL;
+TypeType LIT_TYPE_INT;
+TypeType LIT_TYPE_FLOAT;
+TypeType LIT_TYPE_DECIMAL;
+TypeType LIT_TYPE_NUMBER;
+TypeType LIT_TYPE_STRING;
+TypeType LIT_TYPE_BINARY;
+TypeType LIT_TYPE_SYMBOL;
+TypeType LIT_TYPE_DTIME;
+TypeType LIT_TYPE_LIST;
+TypeType LIT_TYPE_RANGE;
+TypeType LIT_TYPE_ARRAY;
+TypeType LIT_TYPE_MAP;
+TypeType LIT_TYPE_ELMT;
+TypeType LIT_TYPE_FUNC;
+TypeType LIT_TYPE_TYPE;
+TypeType LIT_TYPE_ANY;
+TypeType LIT_TYPE_ERROR;
+
+TypeMap EmptyMap;
+TypeElmt EmptyElmt;
+
+Item ItemNull = {.type_id = LMD_TYPE_NULL};
+Item ItemError = {.type_id = LMD_TYPE_ERROR};
+
+void init_typetype() {
+    *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
+    TYPE_ARRAY.nested = &TYPE_ANY;  // default nested type
+    TYPE_ARRAY.length = 0;  TYPE_ARRAY.type_index = -1;
+    *(Type*)(&LIT_TYPE_NULL) = LIT_TYPE;  LIT_TYPE_NULL.type = &TYPE_NULL;
+    *(Type*)(&LIT_TYPE_BOOL) = LIT_TYPE;  LIT_TYPE_BOOL.type = &TYPE_BOOL;
+    *(Type*)(&LIT_TYPE_INT) = LIT_TYPE;  LIT_TYPE_INT.type = &TYPE_INT64;
+    *(Type*)(&LIT_TYPE_FLOAT) = LIT_TYPE;  LIT_TYPE_FLOAT.type = &TYPE_FLOAT;
+    *(Type*)(&LIT_TYPE_DECIMAL) = LIT_TYPE;  LIT_TYPE_DECIMAL.type = &TYPE_DECIMAL;
+    *(Type*)(&LIT_TYPE_NUMBER) = LIT_TYPE;  LIT_TYPE_NUMBER.type = &TYPE_NUMBER;
+    *(Type*)(&LIT_TYPE_STRING) = LIT_TYPE;  LIT_TYPE_STRING.type = &TYPE_STRING;
+    *(Type*)(&LIT_TYPE_BINARY) = LIT_TYPE;  LIT_TYPE_BINARY.type = &TYPE_BINARY;
+    *(Type*)(&LIT_TYPE_SYMBOL) = LIT_TYPE;  LIT_TYPE_SYMBOL.type = &TYPE_SYMBOL;
+    *(Type*)(&LIT_TYPE_DTIME) = LIT_TYPE;  LIT_TYPE_DTIME.type = &TYPE_DTIME;
+    *(Type*)(&LIT_TYPE_LIST) = LIT_TYPE;  LIT_TYPE_LIST.type = &TYPE_LIST;
+    *(Type*)(&LIT_TYPE_RANGE) = LIT_TYPE;  LIT_TYPE_RANGE.type = &TYPE_RANGE;
+    *(Type*)(&LIT_TYPE_ARRAY) = LIT_TYPE;  LIT_TYPE_ARRAY.type = (Type*)&TYPE_ARRAY;
+    *(Type*)(&LIT_TYPE_MAP) = LIT_TYPE;  LIT_TYPE_MAP.type = &TYPE_MAP;
+    *(Type*)(&LIT_TYPE_ELMT) = LIT_TYPE;  LIT_TYPE_ELMT.type = &TYPE_ELMT;
+    *(Type*)(&LIT_TYPE_FUNC) = LIT_TYPE;  LIT_TYPE_FUNC.type = &TYPE_FUNC;
+    *(Type*)(&LIT_TYPE_TYPE) = LIT_TYPE;  LIT_TYPE_TYPE.type = &TYPE_TYPE;
+    *(Type*)(&LIT_TYPE_ANY) = LIT_TYPE;  LIT_TYPE_ANY.type = &TYPE_ANY;
+    *(Type*)(&LIT_TYPE_ERROR) = LIT_TYPE;  LIT_TYPE_ERROR.type = &TYPE_ERROR;
+
+    memset(&EmptyMap, 0, sizeof(TypeMap));
+    EmptyMap.type_id = LMD_TYPE_MAP;  EmptyMap.type_index = -1;
+
+    memset(&EmptyElmt, 0, sizeof(TypeElmt));
+    EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
+}
+
+struct Initializer {
+    Initializer() {
+        init_typetype();
+    }
+};
+static Initializer initializer; 
+
+String EMPTY_STRING = {.chars = "lambda.nil", .len = sizeof("lambda.nil") - 1, .ref_cnt = 0};
+
+TypeInfo type_info[] = {
+    [LMD_TYPE_RAW_POINTER] = {.byte_size = sizeof(void*), .name = "pointer", .type = &TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},
+    [LMD_TYPE_NULL] = {.byte_size = sizeof(bool), .name = "null", .type=&TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},
+    [LMD_TYPE_BOOL] = {.byte_size = sizeof(bool), .name = "bool", .type=&TYPE_BOOL, .lit_type = (Type*)&LIT_TYPE_BOOL},
+    [LMD_TYPE_INT] = {.byte_size = sizeof(long), .name = "int", .type=&TYPE_INT, .lit_type = (Type*)&LIT_TYPE_INT},
+    [LMD_TYPE_INT64] = {.byte_size = sizeof(long), .name = "int", .type=&TYPE_INT, .lit_type = (Type*)&LIT_TYPE_INT},
+    [LMD_TYPE_FLOAT] = {.byte_size = sizeof(double), .name = "float", .type=&TYPE_FLOAT, .lit_type = (Type*)&LIT_TYPE_FLOAT},
+    [LMD_TYPE_DECIMAL] = {.byte_size = sizeof(void*), .name = "decimal", .type=&TYPE_DECIMAL, .lit_type = (Type*)&LIT_TYPE_DECIMAL},
+    [LMD_TYPE_NUMBER] = {.byte_size = sizeof(double), .name = "number", .type=&TYPE_NUMBER, .lit_type = (Type*)&LIT_TYPE_NUMBER},
+    [LMD_TYPE_DTIME] = {.byte_size = sizeof(DateTime*), .name = "datetime", .type=&TYPE_DTIME, .lit_type = (Type*)&LIT_TYPE_DTIME},
+    [LMD_TYPE_STRING] = {.byte_size = sizeof(char*), .name = "string", .type=&TYPE_STRING, .lit_type = (Type*)&LIT_TYPE_STRING},
+    [LMD_TYPE_SYMBOL] = {.byte_size = sizeof(char*), .name = "symbol", .type=&TYPE_SYMBOL, .lit_type = (Type*)&LIT_TYPE_SYMBOL},
+    [LMD_TYPE_BINARY] = {.byte_size = sizeof(char*), .name = "binary", .type=&TYPE_BINARY, .lit_type = (Type*)&LIT_TYPE_BINARY},
+    [LMD_TYPE_LIST] = {.byte_size = sizeof(void*), .name = "list", .type=&TYPE_LIST, .lit_type = (Type*)&LIT_TYPE_LIST},
+    [LMD_TYPE_RANGE] = {.byte_size = sizeof(void*), .name = "array", .type=&TYPE_RANGE, .lit_type = (Type*)&LIT_TYPE_RANGE},
+    [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_ARRAY_FLOAT] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .type=&TYPE_MAP, .lit_type = (Type*)&LIT_TYPE_MAP},
+    [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .type=&TYPE_ELMT, .lit_type = (Type*)&LIT_TYPE_ELMT},
+    [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .type=&TYPE_TYPE, .lit_type = (Type*)&LIT_TYPE_TYPE},
+    [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function", .type=&TYPE_FUNC, .lit_type = (Type*)&LIT_TYPE_FUNC},
+    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any", .type=&TYPE_ANY, .lit_type = (Type*)&LIT_TYPE_ANY},
+    [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error", .type=&TYPE_ERROR, .lit_type = (Type*)&LIT_TYPE_ERROR},
+    [LMD_CONTAINER_HEAP_START] = {.byte_size = 0, .name = "container_start", .type=&TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},
+};
+
+extern __thread Context* context;
+
+Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
+    Type* t;
+    pool_variable_alloc(pool, size, (void**)&t);
+    memset(t, 0, size);
+    t->type_id = type;
+    // Defensive check: verify the type was properly initialized
+    if (t->is_const != 0) {
+        printf("Warning: alloc_type - is_const flag was not zeroed properly\n");
+        t->is_const = 0; // Force correction
+    }
+    return t;
+}
+
+Item push_d(double dval) {
+    printf("TRACE: push_d: %g\n", dval);
+    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval); // stack_alloc(sizeof(double));
+    Item result = {.item = d2it(dptr)};
+    printf("TRACE: push_d result item: %llu, type_id: %d\n", result.item, result.type_id);
+    return result;
+}
+
+Item push_l(long lval) {
+    printf("TRACE: push_l: %ld\n", lval);
+    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval); // stack_alloc(sizeof(long));
+    Item result = {.item = l2it(lptr)};
+    printf("TRACE: push_l result item: %llu, type_id: %d\n", result.item, result.type_id);
+    return result;
+}
+
+Item push_k(long val) {
+    DateTime dtval = *(DateTime*)&val;
+    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, dtval); // stack_alloc(sizeof(DateTime));
+    return {.item = k2it(dtptr)};
+}
+
+Array* array() {
+    Array *arr = (Array*)calloc(1, sizeof(Array));
+    arr->type_id = LMD_TYPE_ARRAY;
+    frame_start();
+    return arr;
+}
+
+Array* array_pooled(VariableMemPool *pool) {
+    Array *arr;
+    MemPoolError err = pool_variable_alloc(pool, sizeof(Array), (void**)&arr);
+    if (err != MEM_POOL_ERR_OK) return NULL;
+    memset(arr, 0, sizeof(Array));
+    arr->type_id = LMD_TYPE_ARRAY;
+    // frame_start();
+    return arr;
+}
+
+void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
+    arr->items[index] = itm;
+    printf("array set item: type: %d, index: %d, length: %ld, extra: %ld\n", 
+        itm.type_id, index, arr->length, arr->extra);
+    // input files uses pool, instead of extra slots in the array
+    if (pool) return;
+    switch (itm.type_id) {
+    case LMD_TYPE_FLOAT: {
+        double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
+        *dval = *(double*)itm.pointer;  arr->items[index] = {.item = d2it(dval)};
+        arr->extra++;
+        printf("array set float: %lf\n", *dval);
+        break;
+    }
+    case LMD_TYPE_INT64: {
+        long* ival = (long*)(arr->items + (arr->capacity - arr->extra - 1));
+        *ival = *(long*)itm.pointer;  arr->items[index] = {.item = l2it(ival)};
+        arr->extra++;
+        break;
+    }
+    case LMD_TYPE_DTIME:  {
+        DateTime* dtval = (DateTime*)(arr->items + (arr->capacity - arr->extra - 1));
+        *dtval = *(DateTime*)itm.pointer;  arr->items[index] = {.item = k2it(dtval)};
+        arr->extra++;
+        break;
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+        String *str = (String*)itm.pointer;
+        str->ref_cnt++;
+        break;
+    }
+    case LMD_TYPE_RAW_POINTER: {
+        TypeId type_id = *((uint8_t*)itm.raw_pointer);
+        if (type_id >= LMD_TYPE_LIST && type_id <= LMD_TYPE_ELEMENT) {
+            Container *container = itm.container;
+            container->ref_cnt++;
+        }
+        break;
+    }}
+}
+
+void array_append(Array* arr, Item itm, VariableMemPool *pool) {
+    if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
+    array_set(arr, arr->length, itm, pool);
+    arr->length++;
+}
+
+Array* array_fill(Array* arr, int count, ...) {
+    if (count > 0) {
+        va_list args;
+        va_start(args, count);
+        arr->capacity = count;
+        arr->items = (Item*)malloc(count * sizeof(Item));
+        for (int i = 0; i < count; i++) {
+            if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
+            array_set(arr, i, va_arg(args, Item), NULL);
+            arr->length++;
+        }
+        va_end(args);
+    }
+    frame_end();
+    StrBuf *strbuf = strbuf_new();
+    print_item(strbuf, {.array = arr});
+    printf("array_fill: %s\n", strbuf->str);
+    return arr;
+}
+
+Item array_get(Array *array, int index) {
+    printf("array_get: index: %d, length: %ld\n", index, array->length);
+    if (index < 0 || index >= array->length) {
+        printf("array_get: index out of bounds: %d\n", index);
+        return ItemNull;
+    }
+    Item item = array->items[index];
+    switch (item.type_id) {
+    case LMD_TYPE_INT64: {
+        long lval = *(long*)item.pointer;
+        return push_l(lval);
+    }
+    case LMD_TYPE_FLOAT: {
+        double dval = *(double*)item.pointer;
+        return push_d(dval);
+    }
+    case LMD_TYPE_DTIME: {
+        // DateTime dtval = *(DateTime*)item.pointer;
+        long dtval = *(long*)item.pointer;
+        return push_k(dtval);
+    }
+    default:
+        return item;
+    }    
+}
+
+List* list() {
+    List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
+    list->type_id = LMD_TYPE_LIST;
+    frame_start();
+    return list;
+}
+
+void list_push(List *list, Item item) {
+    if (item.item <= 1024) {
+        if (!item.item) { return; }  // NULL value
+        // treat as invalid pointer
+        printf("list_push: invalid raw pointer: %p\n", item.raw_pointer);
+        return;
+    }
+    TypeId type_id = get_type_id(item);
+    // printf("list_push: pushing item: type_id: %d\n", type_id);
+    if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
+    if (type_id == LMD_TYPE_LIST) { // nest list is flattened
+        // printf("list_push: pushing nested list: %p, type_id: %d\n", item.list, type_id);
+        // copy over the items
+        List *nest_list = item.list;
+        for (int i = 0; i < nest_list->length; i++) {
+            Item nest_item = nest_list->items[i];
+            list_push(list, nest_item);
+        }
+        return;
+    }
+    else if (type_id == LMD_TYPE_RANGE) {
+        // copy over the items
+        Range *range = item.range;
+        for (int i = range->start; i <= range->end; i++) {
+            // todo: handle value > 32-bit
+            list_push(list, {.item = i2it(i)});
+        }
+        return;
+    }
+    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
+        type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+        Container *container = item.container;
+        container->ref_cnt++;
+    }
+    
+    // store the value in the list (and we may need two slots for long/double)
+    //printf("list push item: type: %d, length: %ld\n", item.type_id, list->length);
+    if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
+    list->items[list->length++] = item;
+    switch (item.type_id) {
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+        String *str = (String*)item.pointer;
+        printf("DEBUG list_push: string/symbol/binary value: %s\n", str->chars);
+        str->ref_cnt++;
+        break;
+    }
+    case LMD_TYPE_DECIMAL: {
+        Decimal *dval = (Decimal*)item.pointer;
+        if (dval && dval->dec_val) {
+            char *buf = mpd_to_sci(dval->dec_val, 1);
+            printf("DEBUG list_push: pushed decimal value: %s\n", buf ? buf : "null");
+            if (buf) free(buf);
+        } else {
+            printf("DEBUG list_push: pushed null decimal value\n");
+        }
+        dval->ref_cnt++;
+        break;
+    }
+    case LMD_TYPE_FLOAT: {
+        double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
+        *dval = *(double*)item.pointer;
+        printf("DEBUG list_push: Pushed float value: %f\n", *dval);
+        list->items[list->length-1] = {.item = d2it(dval)};
+        list->extra++;
+        break;
+    }
+    case LMD_TYPE_INT64: {
+        long* ival = (long*)(list->items + (list->capacity - list->extra - 1));
+        *ival = *(long*)item.pointer;  list->items[list->length-1] = {.item = l2it(ival)};
+        list->extra++;
+        break;
+    }
+    case LMD_TYPE_DTIME:  {
+        DateTime* dtval = (DateTime*)(list->items + (list->capacity - list->extra - 1));
+        *dtval = *(DateTime*)item.pointer;  list->items[list->length-1] = {.item = k2it(dtval)};
+        list->extra++;
+        break;
+    }
+    }
+}
+
+Item list_fill(List *list, int count, ...) {
+    printf("list_fill cnt: %d\n", count);
+    va_list args;
+    va_start(args, count);
+    for (int i = 0; i < count; i++) {
+        list_push(list, {.item = va_arg(args, uint64_t)});
+    }
+    va_end(args);
+    frame_end();
+    printf("list_filled: %ld items\n", list->length);
+    if (list->length == 0) {
+        return ItemNull;
+    } else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
+        return list->items[0];
+    } else {
+        Item result = {.list = list};
+        result.type_id = LMD_TYPE_LIST;
+        return result;
+    }
+}
+
+Item list_get(List *list, int index) {
+    if (index < 0 || index >= list->length) { return ItemNull; }
+    Item item = list->items[index];
+    switch (item.type_id) {
+    case LMD_TYPE_INT64: {
+        long lval = *(long*)item.pointer;
+        return push_l(lval);
+    }
+    case LMD_TYPE_FLOAT: {
+        double dval = *(double*)item.pointer;
+        return push_d(dval);
+    }
+    default:
+        return item;
+    }
+}
+
+void set_fields(TypeMap *map_type, void* map_data, va_list args) {
+    long count = map_type->length;
+    printf("map length: %ld\n", count);
+    ShapeEntry *field = map_type->shape;
+    for (long i = 0; i < count; i++) {
+        // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
+        //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
+        void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
+        if (!field->name) { // nested map
+            Item itm = {.item = va_arg(args, uint64_t)};
+            if (itm.type_id == LMD_TYPE_RAW_POINTER && *((TypeId*)itm.raw_pointer) == LMD_TYPE_MAP) {
+                Map* nested_map = itm.map;
+                nested_map->ref_cnt++;
+                *(Map**)field_ptr = nested_map;
+            } else {
+                printf("expected a map, got type %d\n", itm.type_id );
+            }
+        } else {
+            switch (field->type->type_id) {
+            case LMD_TYPE_NULL: {
+                *(bool*)field_ptr = va_arg(args, bool);
+                break;
+            }
+            case LMD_TYPE_BOOL: {
+                *(bool*)field_ptr = va_arg(args, bool);
+                printf("field bool value: %s\n", *(bool*)field_ptr ? "true" : "false");
+                break;
+            }
+            case LMD_TYPE_INT:  case LMD_TYPE_INT64: {
+                *(long*)field_ptr = va_arg(args, long);
+                printf("field int value: %ld\n", *(long*)field_ptr);
+                break;
+            }
+            case LMD_TYPE_FLOAT: {
+                *(double*)field_ptr = va_arg(args, double);
+                printf("field float value: %f\n", *(double*)field_ptr);
+                break;
+            }
+            case LMD_TYPE_DTIME:  {
+                DateTime* dtval = va_arg(args, DateTime*);
+                *(DateTime**)field_ptr = dtval;
+                printf("field datetime value\n");
+                break;
+            }
+            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+                String *str = va_arg(args, String*);
+                printf("field string value: %s\n", str->chars);
+                *(String**)field_ptr = str;
+                str->ref_cnt++;
+                break;
+            }
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+                Container *container = va_arg(args, Container*);
+                *(Container**)field_ptr = container;
+                container->ref_cnt++;
+                break;
+            }
+            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC: {
+                void *arr = va_arg(args, void*);
+                *(void**)field_ptr = arr;
+                break;
+            }
+            case LMD_TYPE_ANY: { // a special case
+                Item item = va_arg(args, Item);
+                *(Item*)field_ptr = item;
+                break;
+            }
+            default:
+                printf("unknown type %d\n", field->type->type_id);
+            }
+        }
+        field = field->next;
+    }
+}
+
+Map* map(int type_index) {
+    printf("map with type %d\n", type_index);
+    Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
+    map->type_id = LMD_TYPE_MAP;
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
+    map->type = map_type;    
+    frame_start();
+    return map;
+}
+
+extern TypeMap EmptyMap;
+
+Map* map_pooled(VariableMemPool *pool) {
+    Map *map = (Map *)pool_calloc(pool, sizeof(Map));
+    map->type_id = LMD_TYPE_MAP;
+    map->type = &EmptyMap;
+    return map;
+}
+
+// zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
+Map* map_fill(Map* map, ...) {
+    TypeMap *map_type = (TypeMap*)map->type;
+    map->data = calloc(1, map_type->byte_size);
+    printf("map byte_size: %ld\n", map_type->byte_size);
+    // set map fields
+    va_list args;
+    va_start(args, map_type->length);
+    set_fields(map_type, map->data, args);
+    va_end(args);
+    frame_end();
+    printf("map filled with type: %d, length: %ld\n", map_type->type_id, map_type->length);
+    return map;
+}
+
+Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
+    ShapeEntry *field = map_type->shape;
+    while (field) {
+        if (!field->name) { // nested map, skip
+            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            bool nested_is_found;
+            Item result = _map_get((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found);
+            if (nested_is_found) {
+                *is_found = true;
+                return result;
+            }
+            field = field->next;
+            continue;
+        }
+        // printf("map_get compare field: %.*s\n", (int)field->name->length, field->name->str);
+        if (strncmp(field->name->str, key, field->name->length) == 0 && 
+            strlen(key) == field->name->length) {
+            *is_found = true;
+            TypeId type_id = field->type->type_id;
+            void* field_ptr = (char*)map_data + field->byte_offset;
+            printf("map_get found field: %.*s, type: %d, ptr: %p\n", 
+                (int)field->name->length, field->name->str, type_id, field_ptr);
+            switch (type_id) {
+            case LMD_TYPE_NULL:
+                return ItemNull;
+            case LMD_TYPE_BOOL:
+                return {.item = b2it(*(bool*)field_ptr)};
+            case LMD_TYPE_INT:
+                return {.item = i2it(*(int*)field_ptr)};
+            case LMD_TYPE_INT64: {
+                long lval = *(long*)field_ptr;
+                return push_l(lval);
+            }
+            case LMD_TYPE_FLOAT: {
+                double dval = *(double*)field_ptr;
+                return push_d(dval);
+            }
+            case LMD_TYPE_DECIMAL: {
+                printf("decimal not supported yet\n");
+                return ItemError;
+            }
+            case LMD_TYPE_STRING:
+                return {.item = s2it(*(char**)field_ptr)};
+            case LMD_TYPE_SYMBOL:
+                return {.item = y2it(*(char**)field_ptr)};
+            case LMD_TYPE_DTIME:
+                return {.item = k2it(*(char**)field_ptr)};
+            case LMD_TYPE_BINARY:
+                return {.item = x2it(*(char**)field_ptr)};
+                
+            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+                Container* container = *(Container**)field_ptr;
+                printf("map_get container: %p, type_id: %d\n", container, container->type_id);
+                // assert(container->type_id == type_id);
+                return {.raw_pointer = container};
+            }
+            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+                return {.raw_pointer = *(void**)field_ptr};
+            case LMD_TYPE_ANY:
+                return *(Item*)field_ptr;
+            default:
+                printf("unknown map item type %d\n", type_id);
+                return ItemError;
+            }
+        }
+        field = field->next;
+    }
+    *is_found = false;
+    printf("map_get: key %s not found\n", key);
+    return ItemNull;
+}
+
+Item map_get(Map* map, Item key) {
+    printf("map_get %p\n", map);
+    if (!map || !key.item) { return ItemNull;}
+    bool is_found;
+    char *key_str = NULL;
+    if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
+        key_str = ((String*)key.pointer)->chars;
+    } else {
+        printf("map_get: key must be string or symbol, got type %d\n", key.type_id);
+        return ItemNull;  // only string or symbol keys are supported
+    }
+    printf("map_get key: %s\n", key_str);
+    return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
+}
+
+Element* elmt(int type_index) {
+    printf("elmt with type %d\n", type_index);
+    Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    elmt->type_id = LMD_TYPE_ELEMENT;
+    ArrayList* type_list = (ArrayList*)context->type_list;
+    TypeElmt *elmt_type = (TypeElmt*)(type_list->data[type_index]);
+    elmt->type = elmt_type;
+    if (elmt_type->length || elmt_type->content_length) {
+        frame_start();
+    }
+    return elmt;
+}
+
+Element* elmt_pooled(VariableMemPool *pool) {
+    Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
+    elmt->type_id = LMD_TYPE_ELEMENT;
+    elmt->type = &EmptyElmt;
+    return elmt;
+}
+
+Element* elmt_fill(Element* elmt, ...) {
+    TypeElmt *elmt_type = (TypeElmt*)elmt->type;
+    elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
+    printf("elmt byte_size: %ld\n", elmt_type->byte_size);
+    // set attributes
+    long count = elmt_type->length;
+    printf("elmt length: %ld\n", count);
+    va_list args;
+    va_start(args, count);
+    set_fields((TypeMap*)elmt_type, elmt->data, args);
+    va_end(args);
+    return elmt;
+}
+
+Item elmt_get(Element* elmt, Item key) {
+    if (!elmt || !key.item) { return ItemNull;}
+    bool is_found;
+    char *key_str = NULL;
+    if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
+        key_str = ((String*)key.pointer)->chars;
+    } else {
+        return ItemNull;  // only string or symbol keys are supported
+    }
+    return _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
+}
