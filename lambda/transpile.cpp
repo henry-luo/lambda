@@ -658,7 +658,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     else if (bi_node->op == OPERATOR_ADD) {
         if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
             if (bi_node->left->type->type_id == LMD_TYPE_STRING) {
-                strbuf_append_str(tp->code_buf, "str_cat(");
+                strbuf_append_str(tp->code_buf, "fn_strcat(");
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, ',');
                 transpile_expr(tp, bi_node->right);
