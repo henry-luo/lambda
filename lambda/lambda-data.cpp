@@ -184,12 +184,12 @@ Array* array_pooled(VariableMemPool *pool) {
 }
 
 void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
-    arr->items[index] = itm;
-    printf("array set item: type: %d, index: %d, length: %ld, extra: %ld\n", 
-        itm.type_id, index, arr->length, arr->extra);
-    // input files uses pool, instead of extra slots in the array
     if (pool) return;
-    switch (itm.type_id) {
+    arr->items[index] = itm;
+    TypeId type_id = get_type_id(itm);
+    printf("array set item: type: %d, index: %d, length: %ld, extra: %ld\n", 
+        type_id, index, arr->length, arr->extra);
+    switch (type_id) {
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
         *dval = *(double*)itm.pointer;  arr->items[index] = {.item = d2it(dval)};
@@ -214,14 +214,12 @@ void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
         str->ref_cnt++;
         break;
     }
-    case LMD_TYPE_RAW_POINTER: {
-        TypeId type_id = *((uint8_t*)itm.raw_pointer);
-        if (type_id >= LMD_TYPE_LIST && type_id <= LMD_TYPE_ELEMENT) {
+    default:
+        if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_ELEMENT) {
             Container *container = itm.container;
             container->ref_cnt++;
         }
-        break;
-    }}
+    }
 }
 
 void array_append(Array* arr, Item itm, VariableMemPool *pool) {
@@ -379,9 +377,7 @@ Item list_fill(List *list, int count, ...) {
     } else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
         return list->items[0];
     } else {
-        Item result = {.list = list};
-        result.type_id = LMD_TYPE_LIST;
-        return result;
+        return {.list = list};
     }
 }
 
