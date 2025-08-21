@@ -1,0 +1,76 @@
+22
+"hello world"
+6.5
+100.5
+10.4
+2.5
+2
+27
+8
+true
+true
+false
+"helloworld"
+"great"
+123
+-456
+0.5
+true
+false
+[null]
+"hello"
+'world'
+t'2025-05-01'
+b'\xA0FE'
+120
+0.01
+[121]
+[true, 124]
+{a:'hello', b:0.5}
+127
+false
+false
+2
+-2
+error
+inf
+-inf
+nan
+234
+<elmt a:3
+ 9
+ "hello world"
+ true
+ true
+ true>
+678
+123
+456
+789
+<elmt a:12, b:34, c:56>
+12
+1
+2
+3
+1
+2
+3
+4
+[1, 2 to 5, 6]
+11
+12
+13
+14
+15
+16
+array
+true
+true
+false
+false
+2
+"str"
+16.28
+"aaa"
+{a:3, b:3}
+[1, ("great", "!"), 0.5]
