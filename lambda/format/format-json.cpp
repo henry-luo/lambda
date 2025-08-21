@@ -35,8 +35,9 @@ static void format_json_map_contents(StrBuf* sb, TypeMap* map_type, void* map_da
     bool first = true;
     
     for (int i = 0; i < map_type->length; i++) {
-        // Safety check for valid field pointer
+        // safety check for valid field pointer
         if (!field || (uintptr_t)field < 0x1000) {
+            strbuf_append_str(sb, "\"error\":\"invalid field pointer\"");
             break;
         }
         
@@ -122,15 +123,9 @@ static void format_json_map_contents(StrBuf* sb, TypeMap* map_type, void* map_da
             }
         }
         
-advance_field:
+        advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
-        
-        // Additional safety check: if we've reached the end early
-        if (!field) {
-            printf("missing next field\n");
-            break;
-        }
     }
     
     if (!first) {

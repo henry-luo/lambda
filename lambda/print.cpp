@@ -181,11 +181,6 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             break;
         }
         if (i) strbuf_append_str(strbuf, ", ");
-        if (!field) {
-            printf("field is null at index %d\n", i);
-            strbuf_append_str(strbuf, "[null field shape]");
-            break; // exit loop if field is null
-        }
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
             // printf("nested map at field %d: %p\n", i, data);
@@ -283,12 +278,6 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
-        
-        // Additional safety check: if we've reached the end early
-        if (!field) {
-            printf("missing next field\n");
-            break;
-        }
     }
 }
 

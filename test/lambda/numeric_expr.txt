@@ -180,5 +180,8 @@ nan
 "Large Numbers:"
 0
 -1
+"Concatenation:"
+"helloworld"
+'foobarbaz'
 "===== END OF COMPREHENSIVE TEST ====="
 "All numeric tests completed successfully."

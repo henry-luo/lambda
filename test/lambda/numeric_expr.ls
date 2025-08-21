@@ -224,6 +224,10 @@ true _/ false
 9223372036854775807 + 1
 -9223372036854775808 - 1
 
+"Concatenation:"
+"hello" + "world"
+'foo' + 'bar' + 'baz'
+
 "===== END OF COMPREHENSIVE TEST ====="
 
 "All numeric tests completed successfully."
