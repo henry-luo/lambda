@@ -49,3 +49,5 @@ type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3)
 // test TYPE_ANY support
 let v = sum([1, 2]);
 {a: v, b: 3}
+
+[1, ("great", "!"), 0.5]
