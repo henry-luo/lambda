@@ -237,6 +237,7 @@ void run_assertions() {
     static_assert(sizeof(int32_t) == 4, "int32_t size == 4 bytes");
     static_assert(sizeof(int64_t) == 8, "int64_t size == 8 bytes");
     static_assert(sizeof(Item) == 8, "Item size == 8 bytes");
+    static_assert(sizeof(TypedItem) == 9, "TypedItem size == 9 bytes");
 #else
     _Static_assert(sizeof(bool) == 1, "bool size == 1 byte");
     _Static_assert(sizeof(uint8_t) == 1, "uint8_t size == 1 byte");

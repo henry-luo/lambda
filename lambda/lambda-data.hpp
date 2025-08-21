@@ -65,6 +65,31 @@ struct Decimal {
     mpd_t* dec_val;  // libmpdec decimal number
 };
 
+#pragma pack(push, 1)
+typedef struct TypedItem {
+    TypeId type_id;
+    union {
+        // inline value types
+        bool bool_val;
+        int int_val;
+        long long_val;
+        float float_val;
+        double double_val;
+        DateTime datetime_val;
+
+        // pointer types
+        Decimal* decimal;
+        String* string;
+        Range* range;
+        Array* array;
+        List* list;
+        Map* map;
+        Element* element;
+        void* pointer;
+    };
+} TypedItem;
+#pragma pack(pop)
+
 struct Map : Container {
     void* type;  // map type/shape
     void* data;  // packed data struct of the map
