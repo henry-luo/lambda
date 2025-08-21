@@ -161,22 +161,22 @@ nan
 "Complex Expressions:"
 16
 11
-1.29883e+35
-"Operator Precedence Tests:"
-3.60394e+17
 25
-3.60394e+17
-3.60288e+17
-7.20576e+17
+"Operator Precedence Tests:"
+-6.2358078603
+25
+2
 21
-1.44115e+18
-3.60288e+17
--3.60288e+17
-3.60288e+17
+15
+21
+7
+17
+6
+5
 "Precision Tests:"
 0.3
 0.2
-1.08086e+18
+1
 "Large Numbers:"
 0
 -1

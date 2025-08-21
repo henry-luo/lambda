@@ -33,6 +33,5 @@ let elm = <elmt a: 1, b:{d:t'2025-12-01'}, c: 3; "text"; 'symbol'; [1,2,3]>
 "Index exprs: ============"
 let arr = [1, "str", true]
 [arr[-1],  arr[0],  arr[1],  arr[2],  arr[3], arr[1.0], arr[1.5]];
-// todo: list, range test
 
 // todo: negative cases, e.g. 1 + "str", 1 + null, etc.

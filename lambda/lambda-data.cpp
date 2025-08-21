@@ -323,7 +323,6 @@ void list_push(List *list, Item item) {
     switch (item.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         String *str = (String*)item.pointer;
-        printf("DEBUG list_push: string/symbol/binary value: %s\n", str->chars);
         str->ref_cnt++;
         break;
     }
@@ -331,7 +330,6 @@ void list_push(List *list, Item item) {
         Decimal *dval = (Decimal*)item.pointer;
         if (dval && dval->dec_val) {
             char *buf = mpd_to_sci(dval->dec_val, 1);
-            printf("DEBUG list_push: pushed decimal value: %s\n", buf ? buf : "null");
             if (buf) free(buf);
         } else {
             printf("DEBUG list_push: pushed null decimal value\n");
@@ -342,7 +340,6 @@ void list_push(List *list, Item item) {
     case LMD_TYPE_FLOAT: {
         double* dval = (double*)(list->items + (list->capacity - list->extra - 1));
         *dval = *(double*)item.pointer;
-        printf("DEBUG list_push: Pushed float value: %f\n", *dval);
         list->items[list->length-1] = {.item = d2it(dval)};
         list->extra++;
         break;
@@ -371,7 +368,7 @@ Item list_fill(List *list, int count, ...) {
     }
     va_end(args);
     frame_end();
-    printf("list_filled: %ld items\n", list->length);
+    // printf("list_filled: %ld items\n", list->length);
     if (list->length == 0) {
         return ItemNull;
     } else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
@@ -434,8 +431,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_DTIME:  {
-                DateTime* dtval = va_arg(args, DateTime*);
-                *(DateTime**)field_ptr = dtval;
+                DateTime dtval = va_arg(args, DateTime);
+                *(DateTime*)field_ptr = dtval;
                 break;
             }
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
@@ -544,7 +541,6 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_BOOL:
         return {.item = b2it(titem->bool_val)};
     case LMD_TYPE_INT:
-        printf("typeditem_to_item: INT value: %d\n", titem->int_val);
         return {.item = i2it(titem->int_val)};
     case LMD_TYPE_INT64:
         return push_l(titem->long_val);

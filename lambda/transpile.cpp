@@ -32,6 +32,40 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
     strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
 }
 
+// Helper function to determine if an expression produces an Item result
+bool expr_produces_item(AstNode* node) {
+    if (!node) return false;
+    
+    if (node->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* bin_node = (AstBinaryNode*)node;
+        // Division operations always produce Item results
+        if (bin_node->op == OPERATOR_DIV || bin_node->op == OPERATOR_IDIV || 
+            bin_node->op == OPERATOR_MOD || bin_node->op == OPERATOR_POW) {
+            return true;
+        }
+        // If any operand produces an Item, the whole expression needs to use runtime functions
+        if (expr_produces_item(bin_node->left) || expr_produces_item(bin_node->right)) {
+            return true;
+        }
+        // Mixed type operations often produce Items
+        if (bin_node->left->type && bin_node->right->type) {
+            bool left_numeric = (LMD_TYPE_INT <= bin_node->left->type->type_id && bin_node->left->type->type_id <= LMD_TYPE_FLOAT);
+            bool right_numeric = (LMD_TYPE_INT <= bin_node->right->type->type_id && bin_node->right->type->type_id <= LMD_TYPE_FLOAT);
+            if (left_numeric && right_numeric && bin_node->left->type->type_id != bin_node->right->type->type_id) {
+                return true; // Mixed int/float operations
+            }
+        }
+    }
+    else if (node->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* pri_node = (AstPrimaryNode*)node;
+        if (pri_node->expr) {
+            return expr_produces_item(pri_node->expr);
+        }
+    }
+    
+    return false;
+}
+
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         printf("transpile box item: NULL type, node_type: %d\n", item->node_type);
@@ -295,19 +329,47 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         else {
-            // Special case: if this is a binary expression with OPERATOR_POW, OPERATOR_DIV, OPERATOR_IDIV, or OPERATOR_MOD,
+            // Special case: if this is a binary expression that uses runtime functions,
             // don't wrap with push_d because these functions already return an Item
+            bool skip_push_d = false;
             if (item->node_type == AST_NODE_BINARY) {
                 AstBinaryNode* bin_node = (AstBinaryNode*)item;
                 if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || 
                     bin_node->op == OPERATOR_IDIV || bin_node->op == OPERATOR_MOD) {
-                    transpile_expr(tp, item);
-                    break;
+                    skip_push_d = true;
+                }
+                // Also skip for ADD/SUB/MUL when they use runtime functions (mixed types or complex expressions)
+                else if ((bin_node->op == OPERATOR_ADD || bin_node->op == OPERATOR_SUB || 
+                          bin_node->op == OPERATOR_MUL) &&
+                         (expr_produces_item(bin_node->left) || expr_produces_item(bin_node->right))) {
+                    skip_push_d = true;
                 }
             }
-            strbuf_append_str(tp->code_buf, "push_d(");
-            transpile_expr(tp, item);
-            strbuf_append_char(tp->code_buf, ')');
+            // Also check if this is a primary expression containing operations that use runtime functions
+            else if (item->node_type == AST_NODE_PRIMARY) {
+                AstPrimaryNode* pri_node = (AstPrimaryNode*)item;
+                if (pri_node->expr && pri_node->expr->node_type == AST_NODE_BINARY) {
+                    AstBinaryNode* bin_node = (AstBinaryNode*)pri_node->expr;
+                    if (bin_node->op == OPERATOR_POW || bin_node->op == OPERATOR_DIV || 
+                        bin_node->op == OPERATOR_IDIV || bin_node->op == OPERATOR_MOD) {
+                        skip_push_d = true;
+                    }
+                    // Also skip for ADD/SUB/MUL when they use runtime functions
+                    else if ((bin_node->op == OPERATOR_ADD || bin_node->op == OPERATOR_SUB || 
+                              bin_node->op == OPERATOR_MUL) &&
+                             (expr_produces_item(bin_node->left) || expr_produces_item(bin_node->right))) {
+                        skip_push_d = true;
+                    }
+                }
+            }
+            
+            if (skip_push_d) {
+                transpile_expr(tp, item);
+            } else {
+                strbuf_append_str(tp->code_buf, "push_d(");
+                transpile_expr(tp, item);
+                strbuf_append_char(tp->code_buf, ')');
+            }
         }
         break;
     case LMD_TYPE_DECIMAL: 
@@ -656,6 +718,16 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_ADD) {
+        // Check if any operand produces an Item result - if so, use runtime function
+        if (expr_produces_item(bi_node->left) || expr_produces_item(bi_node->right)) {
+            strbuf_append_str(tp->code_buf, "fn_add(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+        
         if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
             if (bi_node->left->type->type_id == LMD_TYPE_STRING) {
                 strbuf_append_str(tp->code_buf, "fn_strcat(");
@@ -694,6 +766,16 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');        
     }
     else if (bi_node->op == OPERATOR_SUB) {
+        // Check if any operand produces an Item result - if so, use runtime function
+        if (expr_produces_item(bi_node->left) || expr_produces_item(bi_node->right)) {
+            strbuf_append_str(tp->code_buf, "fn_sub(");
+            transpile_box_item(tp, bi_node->left);
+            strbuf_append_char(tp->code_buf, ',');
+            transpile_box_item(tp, bi_node->right);
+            strbuf_append_char(tp->code_buf, ')');
+            return;
+        }
+        
         if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
             if (bi_node->left->type->type_id == LMD_TYPE_INT || 
                 bi_node->left->type->type_id == LMD_TYPE_INT64 ||
@@ -724,26 +806,32 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');        
     }
     else if (bi_node->op == OPERATOR_MUL) {
-        if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
-            if (bi_node->left->type->type_id == LMD_TYPE_INT || 
-                bi_node->left->type->type_id == LMD_TYPE_INT64 ||
-                bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
-                strbuf_append_str(tp->code_buf, "(");
+        // Check if both operands are simple (primary expressions, not complex expressions)
+        bool left_is_simple = (bi_node->left->node_type == AST_NODE_PRIMARY);
+        bool right_is_simple = (bi_node->right->node_type == AST_NODE_PRIMARY);
+        
+        if (left_is_simple && right_is_simple) {
+            if (bi_node->left->type->type_id == bi_node->right->type->type_id) {
+                if (bi_node->left->type->type_id == LMD_TYPE_INT || 
+                    bi_node->left->type->type_id == LMD_TYPE_INT64 ||
+                    bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
+                    strbuf_append_str(tp->code_buf, "(");
+                    transpile_expr(tp, bi_node->left);
+                    strbuf_append_char(tp->code_buf, '*');
+                    transpile_expr(tp, bi_node->right);
+                    strbuf_append_char(tp->code_buf, ')');
+                    return;
+                }
+            }
+            else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
+                LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
+                strbuf_append_char(tp->code_buf, '(');
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, '*');
                 transpile_expr(tp, bi_node->right);
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-        }
-        else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
-            LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
-            strbuf_append_char(tp->code_buf, '(');
-            transpile_expr(tp, bi_node->left);
-            strbuf_append_char(tp->code_buf, '*');
-            transpile_expr(tp, bi_node->right);
-            strbuf_append_char(tp->code_buf, ')');
-            return;
         }
         // call runtime fn_mul()
         strbuf_append_str(tp->code_buf, "fn_mul(");

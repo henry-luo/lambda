@@ -403,7 +403,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }    
     case LMD_TYPE_LIST: {
         List *list = item.list;
-        printf("print list: %p, length: %ld, depth: %d\n", list, list->length, depth);
+        // printf("print list: %p, length: %ld, depth: %d\n", list, list->length, depth);
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
@@ -472,7 +472,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_TYPE: {
         TypeType *type = (TypeType*)item.type;
-        printf("print type: %p, type_id: %d\n", type, type->type->type_id);
+        // printf("print type: %p, type_id: %d\n", type, type->type->type_id);
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
             strbuf_append_format(strbuf, "type.%s", type_name);
