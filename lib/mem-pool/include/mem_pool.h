@@ -1,6 +1,9 @@
 #ifndef MEM_POOL_H
 #define MEM_POOL_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -103,5 +106,8 @@ MemPoolError pool_variable_aligned_sizeof(VariableMemPool *pool, void *ptr, size
  */
 size_t mem_align(size_t size);
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif

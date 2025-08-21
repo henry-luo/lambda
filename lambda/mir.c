@@ -45,7 +45,7 @@ func_obj_t func_list[] = {
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
     {"push_l", (fn_ptr) push_l},
-    {"push_k", (fn_ptr) push_k},
+    // {"push_k", (fn_ptr) push_k},
     
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},

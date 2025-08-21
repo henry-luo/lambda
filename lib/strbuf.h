@@ -9,6 +9,10 @@
 #include "strview.h"
 #include "mem-pool/include/mem_pool.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 typedef struct {
@@ -54,5 +58,9 @@ void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args);
 void strbuf_copy(StrBuf *dst, const StrBuf *src);
 bool strbuf_append_file(StrBuf *sb, FILE *file);
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

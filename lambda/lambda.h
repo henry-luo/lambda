@@ -80,7 +80,15 @@ typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
 typedef struct Element Element;
 typedef struct Function Function;
-typedef struct DateTime DateTime;
+// Only define DateTime if not already defined by lib/datetime.h
+#ifndef _DATETIME_DEFINED_
+#ifdef __cplusplus
+#include "../lib/datetime.h"
+#else
+typedef uint64_t DateTime;
+#endif
+#define _DATETIME_DEFINED_
+#endif
 typedef struct Decimal Decimal;
 
 /*
@@ -296,7 +304,7 @@ Item v2it(List *list);
 
 Item push_d(double dval);
 Item push_l(long lval);
-Item push_k(long dtval);
+Item push_k(DateTime dtval);
 
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
@@ -325,8 +333,8 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 #define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
 
 #define const_s(index)      ((String*)rt->consts[index])
-#define const_k(index)      ((DateTime*)*(rt->consts + index))
-#define const_c(index)      ((Decimal*)*(rt->consts + index))
+#define const_c(index)      ((Decimal*)rt->consts[index])
+#define const_k(index)      ((DateTime*)rt->consts[index])
 
 // item unboxing
 long it2l(Item item);
@@ -384,7 +392,7 @@ Type* fn_type(Item item);
 
 Item fn_input(Item url, Item type);
 String* fn_format(Item item, Item type);
-DateTime* fn_datetime();
+DateTime fn_datetime();
 
 // procedural functions
 void fn_print(Item item);
