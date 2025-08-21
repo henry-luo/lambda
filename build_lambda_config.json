@@ -48,6 +48,7 @@
         "lib/num_stack.c",
         "lib/string.c",
         "lib/datetime.c",
+        "lambda/lambda-data.cpp",
         "lambda/runner.cpp",
         "lambda/transpile.cpp",
         "lambda/transpile-mir.cpp",
@@ -190,7 +191,7 @@
             "sources": [],
             "objects": [
                 "build/print.o", "build/strview.o", "build/transpile.o", "build/utf.o",
-                "build/build_ast.o", "build/lambda-eval.o", "build/lambda-mem.o", 
+                "build/build_ast.o", "build/lambda-data.o", "build/lambda-eval.o", "build/lambda-mem.o", 
                 "build/runner.o", "build/mir.o", "build/url.o", "build/url_parser.o", "build/parse.o", 
                 "build/parser.o", "build/num_stack.o", "build/strbuf.o", "build/hashmap.o", 
                 "build/arraylist.o", "build/variable.o", "build/buffer.o", "build/utils.o", 
@@ -228,8 +229,8 @@
                 "build/format-ini.o", "build/format-json.o", "build/format-latex.o", "build/format-math.o", 
                 "build/format-md.o", "build/format-org.o", "build/format-rst.o", "build/format-toml.o", 
                 "build/format-xml.o", "build/format-yaml.o", "build/mime-detect.o", "build/mime-types.o",
-                "build/lambda-mem.o", "build/print.o", "build/lambda-eval.o", "build/num_stack.o", 
-                "build/file.o", "build/build_ast.o", "build/utf.o", "build/name_pool.o", "test/test_context.o"
+                "build/lambda-data.o", "build/lambda-mem.o", "build/num_stack.o", 
+                "build/print.o", "build/file.o", "build/utf.o", "build/name_pool.o", "test/test_context.o"
             ],
             "libraries": ["tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc"],
             "include": "lib/mem-pool/include",
