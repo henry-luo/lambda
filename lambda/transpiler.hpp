@@ -249,7 +249,7 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node);
 AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
-void print_ast_node(AstNode *node, int indent);
+void print_ast_node(Script* script, AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void find_errors(TSNode node);
 void writeNodeSource(Transpiler* tp, TSNode node);

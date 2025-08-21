@@ -115,7 +115,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         *(bool*)field_ptr = value.bool_val;             
         break;
     case LMD_TYPE_INT:
-        *(long*)field_ptr = value.long_val;
+        *(long*)field_ptr = value.int_val;
         break;
     case LMD_TYPE_INT64:
         *(long*)field_ptr = *(long*)value.pointer;
@@ -191,7 +191,7 @@ void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
         *(bool*)field_ptr = value.bool_val;             
         break;
     case LMD_TYPE_INT:
-        *(long*)field_ptr = value.long_val;
+        *(long*)field_ptr = value.int_val;
         break;
     case LMD_TYPE_INT64:
         *(long*)field_ptr = *(long*)value.pointer;
