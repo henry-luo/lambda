@@ -165,8 +165,8 @@ void init_module_import(Transpiler *tp, AstScript *script) {
 
 extern unsigned int lambda_lambda_h_len;
 
-void transpile_script(Transpiler *tp, const char* source, const char* script_path) {
-    if (!source) {
+void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
+    if (!script || !script->source) {
         printf("Error: Source code is NULL\n");
         return; 
     }
@@ -176,7 +176,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     // create a parser
     get_time(&start);
     // parse the source
-    tp->source = source;
+    tp->source = script->source;
     tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
     if (tp->syntax_tree == NULL) {
         printf("Error: Failed to parse the source code.\n");
@@ -197,7 +197,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
         printf("Root node is_error: %d\n", ts_node_is_error(root_node));
         printf("Root node is_missing: %d\n", ts_node_is_missing(root_node));
         printf("Root node has_error: %d\n", ts_node_has_error(root_node));
-        printf("Source pointer: %p\n", source);
+        printf("Source pointer: %p\n", script->source);
         
         // find and print syntax errors
         find_errors(root_node);
@@ -229,7 +229,7 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
     print_elapsed_time("building AST", start, end);
     // print the AST for debugging
     printf("AST: %s ---------\n", tp->reference);
-    print_ast_node(tp->ast_root, 0);
+    print_ast_node(tp, tp->ast_root, 0);
 
     // transpile the AST to C code
     printf("transpiling...\n");
@@ -255,6 +255,10 @@ void transpile_script(Transpiler *tp, const char* source, const char* script_pat
 
     printf("JIT compiled %s\n", script_path);
     printf("jit_context: %p, main_func: %p\n", tp->jit_context, tp->main_func);
+    // copy value back to script
+    memcpy(script, tp, sizeof(Script));
+    script->main_func = tp->main_func;
+
     print_elapsed_time(":", start, end);
 }
 
@@ -283,9 +287,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     Transpiler transpiler;  memset(&transpiler, 0, sizeof(Transpiler));
     memcpy(&transpiler, new_script, sizeof(Script));
     transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
-    transpile_script(&transpiler, new_script->source, script_path);
-    memcpy(new_script, &transpiler, sizeof(Script));
-    new_script->main_func = transpiler.main_func;
+    transpile_script(&transpiler, new_script, script_path);
     printf("loaded main func: %p\n", new_script->main_func);
     return new_script;
 }

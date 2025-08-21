@@ -243,6 +243,8 @@ static inline TypeId get_type_id(Item value) {
 extern String EMPTY_STRING;
 String* strbuf_to_string(StrBuf *sb);
 
+CompResult equal_comp(Item a, Item b);
+
 typedef struct Input {
     void* url;
     void* path;

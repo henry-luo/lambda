@@ -112,10 +112,6 @@ typedef union Item {
             struct {
                 int int_val: 32;
                 uint32_t _32: 32;
-            };            
-            struct {
-                uint64_t long_val: 56;
-                uint64_t _8: 8;
             };
             struct {
                 uint64_t bool_val: 8;
@@ -328,7 +324,7 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 #define const_k2it(index)    k2it((uint64_t)*(rt->consts + index))
 #define const_x2it(index)    x2it((uint64_t)*(rt->consts + index))
 
-#define const_s(index)      ((String*)*(rt->consts + index))
+#define const_s(index)      ((String*)rt->consts[index])
 #define const_k(index)      ((DateTime*)*(rt->consts + index))
 #define const_c(index)      ((Decimal*)*(rt->consts + index))
 
@@ -336,7 +332,6 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 long it2l(Item item);
 double it2d(Item item);
 
-double lambda_pow(double x, double y);
 Item fn_add(Item a, Item b);
 Item fn_mul(Item a, Item b);
 Item fn_sub(Item a, Item b);
@@ -354,10 +349,6 @@ Item fn_sum(Item a);
 Item fn_avg(Item a);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
-Item fn_normalize(Item str, Item type);
-Item fn_substring(Item str, Item start, Item end);
-Item fn_contains(Item str, Item substr);
-CompResult equal_comp(Item a, Item b);
 Item fn_eq(Item a, Item b);
 Item fn_ne(Item a, Item b);
 Item fn_lt(Item a, Item b);
@@ -367,7 +358,15 @@ Item fn_ge(Item a, Item b);
 Item fn_not(Item a);
 Item fn_and(Item a, Item b);
 Item fn_or(Item a, Item b);
-String *str_cat(String *left, String *right);
+bool fn_is(Item a, Item b);
+bool fn_in(Item a, Item b);
+Range* fn_to(Item a, Item b);
+
+String* fn_string(Item item);
+String *fn_strcat(String *left, String *right);
+Item fn_normalize(Item str, Item type);
+Item fn_substring(Item str, Item start, Item end);
+Item fn_contains(Item str, Item substr);
 
 typedef void* (*fn_ptr)();
 struct Function {
@@ -377,12 +376,6 @@ struct Function {
 };
 
 Function* to_fn(fn_ptr ptr);
-
-bool fn_is(Item a, Item b);
-bool fn_in(Item a, Item b);
-Range* fn_to(Item a, Item b);
-String* fn_string(Item item);
-
 Type* base_type(TypeId type_id);
 Type* const_type(int type_index);
 
@@ -390,6 +383,8 @@ Type* const_type(int type_index);
 Type* fn_type(Item item);
 
 Item fn_input(Item url, Item type);
-void fn_print(Item item);
 String* fn_format(Item item, Item type);
 DateTime* fn_datetime();
+
+// procedural functions
+void fn_print(Item item);
