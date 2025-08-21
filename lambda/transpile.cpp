@@ -525,10 +525,10 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
                 transpile_expr(tp, unary_node->operand);
                 strbuf_append_char(tp->code_buf, ')');
             } else { // OPERATOR_NEG
-                strbuf_append_char(tp->code_buf, '(');
-                strbuf_append_char(tp->code_buf, '-');
+                // two brackets to prevent '-' joining into '--'
+                strbuf_append_str(tp->code_buf, "(-(");
                 transpile_expr(tp, unary_node->operand);
-                strbuf_append_char(tp->code_buf, ')');
+                strbuf_append_str(tp->code_buf, "))");
             }
         }
         else {
