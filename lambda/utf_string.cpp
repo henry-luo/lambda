@@ -334,7 +334,7 @@ CompResult equal_comp_utf8proc(Item a_item, Item b_item) {
         return (a_item.bool_val == b_item.bool_val) ? COMP_TRUE : COMP_FALSE;
     }
     if (a_item.type_id == LMD_TYPE_INT) {
-        return (a_item.long_val == b_item.long_val) ? COMP_TRUE : COMP_FALSE;
+        return (a_item.int_val == b_item.int_val) ? COMP_TRUE : COMP_FALSE;
     }
     if (a_item.type_id == LMD_TYPE_INT64) {
         return (*(long*)a_item.pointer == *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
@@ -388,11 +388,9 @@ Item fn_lt_utf8proc(Item a_item, Item b_item) {
     if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
         (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
         double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
-                       *(double*)a_item.pointer;
+                       a_item.int_val : *(double*)a_item.pointer;
         double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
-                       *(double*)b_item.pointer;
+                       b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val < b_val)};
     }
     
@@ -422,11 +420,9 @@ Item fn_gt_utf8proc(Item a_item, Item b_item) {
     if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
         (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
         double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
-                       *(double*)a_item.pointer;
+                       a_item.int_val : *(double*)a_item.pointer;
         double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
-                       *(double*)b_item.pointer;
+                       b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val > b_val)};
     }
     
@@ -456,11 +452,9 @@ Item fn_le_utf8proc(Item a_item, Item b_item) {
     if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
         (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
         double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
-                       *(double*)a_item.pointer;
+                       a_item.int_val : *(double*)a_item.pointer;
         double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
-                       *(double*)b_item.pointer;
+                       b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val <= b_val)};
     }
     
@@ -490,11 +484,9 @@ Item fn_ge_utf8proc(Item a_item, Item b_item) {
     if ((a_item.type_id == LMD_TYPE_INT || a_item.type_id == LMD_TYPE_FLOAT) &&
         (b_item.type_id == LMD_TYPE_INT || b_item.type_id == LMD_TYPE_FLOAT)) {
         double a_val = (a_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : 
-                       *(double*)a_item.pointer;
+                       a_item.int_val : *(double*)a_item.pointer;
         double b_val = (b_item.type_id == LMD_TYPE_INT) ? 
-                       (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : 
-                       *(double*)b_item.pointer;
+                       b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val >= b_val)};
     }
     

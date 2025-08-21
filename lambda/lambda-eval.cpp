@@ -42,8 +42,7 @@ mpd_t* convert_to_decimal(Item item, mpd_context_t* ctx) {
     if (!result) return NULL;
     
     if (item.type_id == LMD_TYPE_INT) {
-        long signed_val = (long)((int64_t)(item.long_val << 8) >> 8);
-        mpd_set_ssize(result, signed_val, ctx);
+        mpd_set_ssize(result, item.int_val, ctx);
     } else if (item.type_id == LMD_TYPE_INT64) {
         long val = *(long*)item.pointer;
         mpd_set_ssize(result, val, ctx);
@@ -666,18 +665,17 @@ Item push_k(long val) {
     return {.item = k2it(dtptr)};
 }
 
-String *str_cat(String *left, String *right) {
-    printf("str_cat %p, %p\n", left, right);
+String *fn_strcat(String *left, String *right) {
+    printf("fn_strcat %p, %p\n", left, right);
     if (!left || !right) {
-        printf("Error: null pointer in str_cat: left=%p, right=%p\n", left, right);
+        printf("Error: null pointer in fn_strcat: left=%p, right=%p\n", left, right);
         return NULL;
     }
-    size_t left_len = left->len;
-    size_t right_len = right->len;
-    printf("left len %zu, right len %zu\n", left_len, right_len);
+    int left_len = left->len, right_len = right->len;
+    printf("left len %d, right len %d\n", left_len, right_len);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     if (!result) {
-        printf("Error: failed to allocate memory for str_cat result\n");
+        printf("Error: failed to allocate memory for fn_strcat result\n");
         return NULL;
     }
     printf("str result %p\n", result);
@@ -685,19 +683,29 @@ String *str_cat(String *left, String *right) {
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
-    printf("str_cat result: %s\n", result->chars);
+    printf("fn_strcat result: %s\n", result->chars);
     return result;
 }
 
 Item fn_add(Item item_a, Item item_b) {
-    // todo: join binary, list, array, map
+    // todo: join list, array, map
     if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_STRING) {
         String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
-        String *result = str_cat(str_a, str_b);
+        String *result = fn_strcat(str_a, str_b);
         return {.item = s2it(result)};
     }
+    else if (item_a.type_id == LMD_TYPE_SYMBOL && item_b.type_id == LMD_TYPE_SYMBOL) {
+        String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
+        String *result = fn_strcat(str_a, str_b);
+        return {.item = y2it(result)};
+    }
+    else if (item_a.type_id == LMD_TYPE_BINARY && item_b.type_id == LMD_TYPE_BINARY) {
+        String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
+        String *result = fn_strcat(str_a, str_b);
+        return {.item = x2it(result)};
+    }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
-        return {.item = i2it(item_a.long_val + item_b.long_val)};
+        return {.item = i2it(item_a.int_val + item_b.int_val)};
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         return push_l(*(long*)item_a.pointer + *(long*)item_b.pointer);
@@ -707,10 +715,10 @@ Item fn_add(Item item_a, Item item_b) {
         return push_d(*(double*)item_a.pointer + *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.long_val + *(double*)item_b.pointer);
+        return push_d((double)item_a.int_val + *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
-        return push_d(*(double*)item_a.pointer + (double)item_b.long_val);
+        return push_d(*(double*)item_a.pointer + (double)item_b.int_val);
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
@@ -776,7 +784,7 @@ String *str_repeat(String *str, long times) {
 
 Item fn_mul(Item item_a, Item item_b) {
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
-        return {.item = i2it(item_a.long_val * item_b.long_val)};
+        return {.item = i2it(item_a.int_val * item_b.int_val)};
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         return push_l(*(long*)item_a.pointer * *(long*)item_b.pointer);
@@ -786,19 +794,19 @@ Item fn_mul(Item item_a, Item item_b) {
         return push_d(*(double*)item_a.pointer * *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.long_val * *(double*)item_b.pointer);
+        return push_d((double)item_a.int_val * *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
-        return push_d(*(double*)item_a.pointer * (double)item_b.long_val);
+        return push_d(*(double*)item_a.pointer * (double)item_b.int_val);
     }
     else if (item_a.type_id == LMD_TYPE_STRING && item_b.type_id == LMD_TYPE_INT) {
         String *str_a = (String*)item_a.pointer;
-        String *result = str_repeat(str_a, item_b.long_val);
+        String *result = str_repeat(str_a, item_b.int_val);
         return {.item = s2it(result)};
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_STRING) {
         String *str_b = (String*)item_b.pointer;
-        String *result = str_repeat(str_b, item_a.long_val);
+        String *result = str_repeat(str_b, item_a.int_val);
         return {.item = s2it(result)};
     }
     // Add libmpdec decimal support
@@ -841,7 +849,7 @@ Item fn_mul(Item item_a, Item item_b) {
 
 Item fn_sub(Item item_a, Item item_b) {
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
-        return {.item = i2it(item_a.long_val - item_b.long_val)};
+        return {.item = i2it(item_a.int_val - item_b.int_val)};
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         return push_l(*(long*)item_a.pointer - *(long*)item_b.pointer);
@@ -851,10 +859,10 @@ Item fn_sub(Item item_a, Item item_b) {
         return push_d(*(double*)item_a.pointer - *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.long_val - *(double*)item_b.pointer);
+        return push_d((double)item_a.int_val - *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
-        return push_d(*(double*)item_a.pointer - (double)item_b.long_val);
+        return push_d(*(double*)item_a.pointer - (double)item_b.int_val);
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
@@ -896,11 +904,11 @@ Item fn_sub(Item item_a, Item item_b) {
 
 Item fn_div(Item item_a, Item item_b) {
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
-        if (item_b.long_val == 0) {
+        if (item_b.int_val == 0) {
             printf("integer division by zero error\n");
             return ItemError;
         }
-        return push_d((double)item_a.long_val / (double)item_b.long_val);
+        return push_d((double)item_a.int_val / (double)item_b.int_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         if (*(long*)item_b.pointer == 0) {
@@ -922,14 +930,14 @@ Item fn_div(Item item_a, Item item_b) {
             printf("float division by zero error\n");
             return ItemError;
         }
-        return push_d((double)item_a.long_val / *(double*)item_b.pointer);
+        return push_d((double)item_a.int_val / *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
-        if (item_b.long_val == 0) {
+        if (item_b.int_val == 0) {
             printf("integer division by zero error\n");
             return ItemError;
         }
-        return push_d(*(double*)item_a.pointer / (double)item_b.long_val);
+        return push_d(*(double*)item_a.pointer / (double)item_b.int_val);
     }
     // Add libmpdec decimal support
     else if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
@@ -1001,9 +1009,7 @@ Item fn_idiv(Item item_a, Item item_b) {
     // Check for division by zero
     bool is_zero = false;
     if (item_b.type_id == LMD_TYPE_INT) {
-        // Sign extend the 56-bit long_val to a proper signed long
-        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-        is_zero = (signed_val == 0);
+        is_zero = (item_b.int_val == 0);
     }
     else if (item_b.type_id == LMD_TYPE_INT64 && *(long*)item_b.pointer == 0) {
         is_zero = true;
@@ -1016,19 +1022,18 @@ Item fn_idiv(Item item_a, Item item_b) {
 
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
         // Sign extend both values to proper signed longs
-        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        long a_val = item_a.int_val, b_val = item_b.int_val;
         return (Item){.item = i2it(a_val / b_val)};
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         return push_l(*(long*)item_a.pointer / *(long*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
-        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
+        long a_val = item_a.int_val;
         return push_l(a_val / *(long*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
-        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
+        long b_val = item_b.int_val;
         return push_l(*(long*)item_a.pointer / b_val);
     }
     else {
@@ -1053,10 +1058,9 @@ Item fn_pow(Item item_a, Item item_b) {
         } else {
             // Convert non-decimal to double
             if (item_a.type_id == LMD_TYPE_INT) {
-                long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-                base = (double)signed_val;
+                base = item_a.int_val;
             } else if (item_a.type_id == LMD_TYPE_INT64) {
-                base = (double)(*(long*)item_a.pointer);
+                base = *(long*)item_a.pointer;
             } else if (item_a.type_id == LMD_TYPE_FLOAT) {
                 base = *(double*)item_a.pointer;
             } else {
@@ -1073,10 +1077,9 @@ Item fn_pow(Item item_a, Item item_b) {
         } else {
             // Convert non-decimal to double
             if (item_b.type_id == LMD_TYPE_INT) {
-                long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-                exponent = (double)signed_val;
+                exponent = item_b.int_val;
             } else if (item_b.type_id == LMD_TYPE_INT64) {
-                exponent = (double)(*(long*)item_b.pointer);
+                exponent = *(long*)item_b.pointer;
             } else if (item_b.type_id == LMD_TYPE_FLOAT) {
                 exponent = *(double*)item_b.pointer;
             } else {
@@ -1086,7 +1089,7 @@ Item fn_pow(Item item_a, Item item_b) {
         }
         
         // For decimal operations, return a decimal result
-        double result_val = lambda_pow(base, exponent);
+        double result_val = pow(base, exponent);
         
         mpd_t* result = mpd_new(context->decimal_ctx);
         if (!result) return ItemError;
@@ -1109,12 +1112,10 @@ Item fn_pow(Item item_a, Item item_b) {
     
     // Convert first argument to double
     if (item_a.type_id == LMD_TYPE_INT) {
-        // Sign extend the 56-bit long_val to a proper signed long
-        long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-        base = (double)signed_val;
+        base = item_a.int_val;
     }
     else if (item_a.type_id == LMD_TYPE_INT64) {
-        base = (double)(*(long*)item_a.pointer);
+        base = *(long*)item_a.pointer;
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT) {
         base = *(double*)item_a.pointer;
@@ -1126,12 +1127,10 @@ Item fn_pow(Item item_a, Item item_b) {
     
     // Convert second argument to double
     if (item_b.type_id == LMD_TYPE_INT) {
-        // Sign extend the 56-bit long_val to a proper signed long
-        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-        exponent = (double)signed_val;
+        exponent = item_b.int_val;
     }
     else if (item_b.type_id == LMD_TYPE_INT64) {
-        exponent = (double)(*(long*)item_b.pointer);
+        exponent = *(long*)item_b.pointer;
     }
     else if (item_b.type_id == LMD_TYPE_FLOAT) {
         exponent = *(double*)item_b.pointer;
@@ -1140,13 +1139,7 @@ Item fn_pow(Item item_a, Item item_b) {
         printf("unknown pow exponent type: %d\n", item_b.type_id);
         return ItemError;
     }
-    
-    return push_d(lambda_pow(base, exponent));
-}
-
-// Implementation of lambda_pow function
-double lambda_pow(double x, double y) {
-    return pow(x, y);
+    return push_d(pow(base, exponent));
 }
 
 Item fn_mod(Item item_a, Item item_b) {
@@ -1194,47 +1187,35 @@ Item fn_mod(Item item_a, Item item_b) {
     // Original non-decimal logic for integer mod
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
         // Sign extend both values to proper signed longs
-        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-        
+        long a_val = item_a.int_val, b_val = item_b.int_val;
         if (b_val == 0) {
             printf("modulo by zero error\n");
             return ItemError;
         }
-        
         return (Item){.item = i2it(a_val % b_val)};
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
-        long a_val = *(long*)item_a.pointer;
-        long b_val = *(long*)item_b.pointer;
-        
+        long a_val = *(long*)item_a.pointer, b_val = *(long*)item_b.pointer;
         if (b_val == 0) {
             printf("modulo by zero error\n");
             return ItemError;
         }
-        
         return push_l(a_val % b_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
-        long a_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-        long b_val = *(long*)item_b.pointer;
-        
+        long a_val = item_a.int_val, b_val = *(long*)item_b.pointer;
         if (b_val == 0) {
             printf("modulo by zero error\n");
             return ItemError;
         }
-        
         return push_l(a_val % b_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
-        long a_val = *(long*)item_a.pointer;
-        long b_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-        
+        long a_val = *(long*)item_a.pointer, b_val = item_b.int_val;
         if (b_val == 0) {
             printf("modulo by zero error\n");
             return ItemError;
         }
-        
         return push_l(a_val % b_val);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT || item_b.type_id == LMD_TYPE_FLOAT) {
@@ -1252,8 +1233,7 @@ Item fn_mod(Item item_a, Item item_b) {
 Item fn_abs(Item item) {
     // abs() - absolute value of a number
     if (item.type_id == LMD_TYPE_INT) {
-        // Sign extend the 56-bit long_val to a proper signed long
-        long val = (long)((int64_t)(item.long_val << 8) >> 8);
+        long val = item.int_val;
         return (Item){.item = i2it(val < 0 ? -val : val)};
     }
     else if (item.type_id == LMD_TYPE_INT64) {
@@ -1289,8 +1269,7 @@ Item fn_round(Item item) {
 Item fn_floor(Item item) {
     // floor() - round down to nearest integer
     if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
-        // Already an integer, return as-is
-        return item;
+        return item;  // return as-is
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
@@ -1305,8 +1284,7 @@ Item fn_floor(Item item) {
 Item fn_ceil(Item item) {
     // ceil() - round up to nearest integer
     if (item.type_id == LMD_TYPE_INT || item.type_id == LMD_TYPE_INT64) {
-        // Already an integer, return as-is
-        return item;
+        return item;  // return as-is
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
         double val = *(double*)item.pointer;
@@ -1416,8 +1394,7 @@ Item fn_min(Item item_a, Item item_b) {
     
     // Convert first argument
     if (item_a.type_id == LMD_TYPE_INT) {
-        long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-        a_val = (double)signed_val;
+        a_val = item_a.int_val;
     }
     else if (item_a.type_id == LMD_TYPE_INT64) {
         a_val = (double)(*(long*)item_a.pointer);
@@ -1433,11 +1410,10 @@ Item fn_min(Item item_a, Item item_b) {
     
     // Convert second argument
     if (item_b.type_id == LMD_TYPE_INT) {
-        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-        b_val = (double)signed_val;
+        b_val = item_b.int_val;
     }
     else if (item_b.type_id == LMD_TYPE_INT64) {
-        b_val = (double)(*(long*)item_b.pointer);
+        b_val = *(long*)item_b.pointer;
     }
     else if (item_b.type_id == LMD_TYPE_FLOAT) {
         b_val = *(double*)item_b.pointer;
@@ -1557,11 +1533,10 @@ Item fn_max(Item item_a, Item item_b) {
     
     // Convert first argument
     if (item_a.type_id == LMD_TYPE_INT) {
-        long signed_val = (long)((int64_t)(item_a.long_val << 8) >> 8);
-        a_val = (double)signed_val;
+        a_val = item_a.int_val;
     }
     else if (item_a.type_id == LMD_TYPE_INT64) {
-        a_val = (double)(*(long*)item_a.pointer);
+        a_val = *(long*)item_a.pointer;
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT) {
         a_val = *(double*)item_a.pointer;
@@ -1574,11 +1549,10 @@ Item fn_max(Item item_a, Item item_b) {
     
     // Convert second argument
     if (item_b.type_id == LMD_TYPE_INT) {
-        long signed_val = (long)((int64_t)(item_b.long_val << 8) >> 8);
-        b_val = (double)signed_val;
+        b_val = item_b.int_val;
     }
     else if (item_b.type_id == LMD_TYPE_INT64) {
-        b_val = (double)(*(long*)item_b.pointer);
+        b_val = *(long*)item_b.pointer;
     }
     else if (item_b.type_id == LMD_TYPE_FLOAT) {
         b_val = *(double*)item_b.pointer;
@@ -1845,7 +1819,7 @@ Item fn_neg(Item item) {
     // Unary - operator - negate numeric values or cast and negate strings/symbols
     if (item.type_id == LMD_TYPE_INT) {
         // Sign extend the 56-bit long_val to a proper signed long, then negate
-        long val = (long)((int64_t)(item.long_val << 8) >> 8);
+        int val = item.int_val;
         return (Item){.item = i2it(-val)};
     }
     else if (item.type_id == LMD_TYPE_INT64) {
@@ -1993,7 +1967,7 @@ Range* fn_to(Item item_a, Item item_b) {
 
 long it2l(Item itm) {
     if (itm.type_id == LMD_TYPE_INT) {
-        return itm.long_val;
+        return itm.int_val;
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
         return *(long*)itm.pointer;
@@ -2008,10 +1982,10 @@ long it2l(Item itm) {
 
 double it2d(Item itm) {
     if (itm.type_id == LMD_TYPE_INT) {
-        return (double)itm.long_val;
+        return itm.int_val;
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
-        return (double)*(long*)itm.pointer;
+        return *(long*)itm.pointer;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         return *(double*)itm.pointer;
@@ -2543,7 +2517,7 @@ String* fn_string(Item itm) {
     }
     else if (itm.type_id == LMD_TYPE_INT) {
         char buf[32];
-        int int_val = (int32_t)itm.long_val;
+        int int_val = itm.int_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
         int len = strlen(buf);
         String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);

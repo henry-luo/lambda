@@ -478,8 +478,6 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 }
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
-    StrView sv = ts_node_source(tp, node);
-    printf("build lit string: %.*s\n", (int)sv.length, sv.str);
     // todo: exclude zero-length string
     int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
     int len =  end - start;
@@ -496,10 +494,10 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
     str->chars[len] = '\0';  str->len = len;  
     str->ref_cnt = 1;  // set to 1 to prevent it from being freed
-    printf("build lit string: %.*s, type: %d\n", 
-        (int)str->len, str->chars, str_type->type_id);
+    printf("build lit string: %.*s, len: %d, type: %d\n", 
+        (int)str->len, str->chars, str->len, str_type->type_id);
     // add to const list
-    arraylist_append(tp->const_list, str_type->string);
+    arraylist_append(tp->const_list, str);
     str_type->const_index = tp->const_list->length - 1;
     return (Type *)str_type;
 }
@@ -792,8 +790,9 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     } 
     else if (ast_node->op == OPERATOR_ADD) {
-        if (left_type == right_type && (left_type == LMD_TYPE_STRING || left_type == LMD_TYPE_BINARY ||
-            left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST || left_type == LMD_TYPE_MAP)) {
+        if (left_type == right_type && (left_type == LMD_TYPE_STRING || 
+            left_type == LMD_TYPE_SYMBOL || left_type == LMD_TYPE_BINARY ||
+            left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST)) {
             type_id = left_type;
         } 
         else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
