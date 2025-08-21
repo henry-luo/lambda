@@ -124,7 +124,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .type=&TYPE_ELMT, .lit_type = (Type*)&LIT_TYPE_ELMT},
     [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .type=&TYPE_TYPE, .lit_type = (Type*)&LIT_TYPE_TYPE},
     [LMD_TYPE_FUNC] = {.byte_size = sizeof(void*), .name = "function", .type=&TYPE_FUNC, .lit_type = (Type*)&LIT_TYPE_FUNC},
-    [LMD_TYPE_ANY] = {.byte_size = sizeof(void*), .name = "any", .type=&TYPE_ANY, .lit_type = (Type*)&LIT_TYPE_ANY},
+    [LMD_TYPE_ANY] = {.byte_size = sizeof(TypedItem), .name = "any", .type=&TYPE_ANY, .lit_type = (Type*)&LIT_TYPE_ANY},
     [LMD_TYPE_ERROR] = {.byte_size = sizeof(void*), .name = "error", .type=&TYPE_ERROR, .lit_type = (Type*)&LIT_TYPE_ERROR},
     [LMD_CONTAINER_HEAP_START] = {.byte_size = 0, .name = "container_start", .type=&TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},
 };
@@ -427,28 +427,23 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_BOOL: {
                 *(bool*)field_ptr = va_arg(args, bool);
-                printf("field bool value: %s\n", *(bool*)field_ptr ? "true" : "false");
                 break;
             }
             case LMD_TYPE_INT:  case LMD_TYPE_INT64: {
                 *(long*)field_ptr = va_arg(args, long);
-                printf("field int value: %ld\n", *(long*)field_ptr);
                 break;
             }
             case LMD_TYPE_FLOAT: {
                 *(double*)field_ptr = va_arg(args, double);
-                printf("field float value: %f\n", *(double*)field_ptr);
                 break;
             }
             case LMD_TYPE_DTIME:  {
                 DateTime* dtval = va_arg(args, DateTime*);
                 *(DateTime**)field_ptr = dtval;
-                printf("field datetime value\n");
                 break;
             }
             case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
                 String *str = va_arg(args, String*);
-                printf("field string value: %s\n", str->chars);
                 *(String**)field_ptr = str;
                 str->ref_cnt++;
                 break;
@@ -467,7 +462,41 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_ANY: { // a special case
                 Item item = va_arg(args, Item);
-                *(Item*)field_ptr = item;
+                printf("set field of ANY type to: %d\n", item.type_id);
+                TypedItem titem = {.type_id = item.type_id, .pointer = item.raw_pointer};
+                switch (item.type_id) {
+                // case LMD_TYPE_NULL: ; // nothing extra
+                case LMD_TYPE_BOOL:
+                    titem.bool_val = item.bool_val;  break;
+                case LMD_TYPE_INT:
+                    titem.int_val = item.int_val;  break;
+                case LMD_TYPE_INT64:
+                    titem.long_val = *(long*)item.pointer;  break;
+                case LMD_TYPE_FLOAT:
+                    titem.double_val = *(double*)item.pointer;  break;
+                case LMD_TYPE_DTIME:
+                    titem.datetime_val = *(DateTime*)item.pointer;  break;
+                case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
+                    String *str = (String*)item.pointer;
+                    titem.string = str;  str->ref_cnt++;
+                    break;
+                }
+                case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+                case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+                    Container *container = item.container;
+                    titem.pointer = container;  container->ref_cnt++;
+                    break;
+                }
+                case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+                    titem.pointer = item.raw_pointer;  // just a pointer
+                    break;
+                default:
+                    printf("unknown type %d in set_fields\n", item.type_id);
+                    // set as ERROR
+                    titem = {.type_id = LMD_TYPE_ERROR};
+                }
+                // set in map
+                *(TypedItem*)field_ptr = titem;
                 break;
             }
             default:
@@ -513,6 +542,37 @@ Map* map_fill(Map* map, ...) {
     return map;
 }
 
+Item typeditem_to_item(TypedItem *titem) {
+    switch (titem->type_id) {
+    case LMD_TYPE_NULL:  return ItemNull;
+    case LMD_TYPE_BOOL:
+        return {.item = b2it(titem->bool_val)};
+    case LMD_TYPE_INT:
+        printf("typeditem_to_item: INT value: %d\n", titem->int_val);
+        return {.item = i2it(titem->int_val)};
+    case LMD_TYPE_INT64:
+        return push_l(titem->long_val);
+    case LMD_TYPE_FLOAT:
+        return push_d(titem->double_val);
+    case LMD_TYPE_DTIME:
+        return push_k(titem->long_val);
+    case LMD_TYPE_DECIMAL:
+        return {.item = c2it(titem->decimal)};
+    case LMD_TYPE_STRING:
+        return {.item = s2it(titem->string)};
+    case LMD_TYPE_SYMBOL:
+        return {.item = y2it(titem->string)};
+    case LMD_TYPE_BINARY:
+        return {.item = x2it(titem->string)};
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+        return {.raw_pointer = titem->pointer};
+    default:
+        printf("map_get ANY type is UNKNOWN: %d\n", titem->type_id);
+        return ItemError;
+    }
+}
+
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
     ShapeEntry *field = map_type->shape;
     while (field) {
@@ -542,24 +602,18 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return {.item = b2it(*(bool*)field_ptr)};
             case LMD_TYPE_INT:
                 return {.item = i2it(*(int*)field_ptr)};
-            case LMD_TYPE_INT64: {
-                long lval = *(long*)field_ptr;
-                return push_l(lval);
-            }
-            case LMD_TYPE_FLOAT: {
-                double dval = *(double*)field_ptr;
-                return push_d(dval);
-            }
-            case LMD_TYPE_DECIMAL: {
-                printf("decimal not supported yet\n");
-                return ItemError;
-            }
+            case LMD_TYPE_INT64:
+                return push_l(*(long*)field_ptr);
+            case LMD_TYPE_FLOAT:
+                return push_d(*(double*)field_ptr);
+            case LMD_TYPE_DTIME:
+                return push_k(*(long*)field_ptr);
+            case LMD_TYPE_DECIMAL:
+                return {.item = c2it(*(char**)field_ptr)};
             case LMD_TYPE_STRING:
                 return {.item = s2it(*(char**)field_ptr)};
             case LMD_TYPE_SYMBOL:
                 return {.item = y2it(*(char**)field_ptr)};
-            case LMD_TYPE_DTIME:
-                return {.item = k2it(*(char**)field_ptr)};
             case LMD_TYPE_BINARY:
                 return {.item = x2it(*(char**)field_ptr)};
                 
@@ -572,8 +626,10 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             }
             case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
                 return {.raw_pointer = *(void**)field_ptr};
-            case LMD_TYPE_ANY:
-                return *(Item*)field_ptr;
+            case LMD_TYPE_ANY: {
+                printf("map_get ANY type, pointer: %p\n", field_ptr);
+                return typeditem_to_item((TypedItem*)field_ptr);
+            }
             default:
                 printf("unknown map item type %d\n", type_id);
                 return ItemError;

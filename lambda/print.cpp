@@ -5,6 +5,8 @@
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
 
+Item typeditem_to_item(TypedItem *titem);
+
 // Static memory pool for DateTime formatting
 static VariableMemPool* datetime_format_pool = NULL;
 
@@ -265,10 +267,13 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
-            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_ANY:
+            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
                 // printf("print named item: %p, type: %d\n", data, field->type->type_id);
                 print_item(strbuf, *(Item*)data, depth + 1);
+                break;
+            case LMD_TYPE_ANY:
+                print_item(strbuf, typeditem_to_item((TypedItem*)data), depth + 1);
                 break;
             default:
                 strbuf_append_format(strbuf, "unknown");
