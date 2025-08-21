@@ -127,6 +127,10 @@ Test(lambda_tests, test_simple_expr_ls) {
     test_lambda_script_against_file("test/lambda/simple_expr.ls", "test/lambda/simple_expr.txt");
 }
 
+Test(lambda_tests, test_expr_ls) {
+    test_lambda_script_against_file("test/lambda/expr.ls", "test/lambda/expr.txt");
+}
+
 Test(lambda_tests, test_sys_fn_ls) {
     test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
 }
@@ -141,36 +145,6 @@ Test(lambda_tests, test_numeric_expr_ls) {
 
 Test(lambda_tests, test_comparison_expr_ls) {
     test_lambda_script_against_file("test/lambda/comparison_expr.ls", "test/lambda/comparison_expr.txt");
-}
-
-// Additional test cases for other lambda scripts
-Test(lambda_tests, test_expr_ls) {
-    // For expr.ls, we'll test if it runs without errors
-    // Since there's no expected output file, we just verify it doesn't crash
-    // Save current directory
-    char original_cwd[1024];
-    getcwd(original_cwd, sizeof(original_cwd));
-    
-    // Check if we're already in project root or in test directory
-    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
-        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
-        chdir("..");
-    }
-    
-    Runtime runtime;
-    runtime_init(&runtime);
-    runtime.current_dir = "";
-    
-    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/expr.ls", false);
-    
-    // Restore original directory
-    chdir(original_cwd);
-    
-    // Just verify the script runs without crashing
-    // We assume non-zero means success and 0 means error
-    cr_assert_neq(ret, 0, "expr.ls script should not return an error");
-    
-    runtime_cleanup(&runtime);
 }
 
 Test(lambda_tests, test_box_unbox_ls) {
