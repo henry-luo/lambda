@@ -259,7 +259,6 @@ TypeSchema* create_literal_schema(Item literal_value, VariableMemPool* pool);
 
 // Utility functions
 StrView strview_from_cstr(const char* str);
-String* string_from_strview(StrView view, VariableMemPool* pool);
 bool is_compatible_type(TypeId actual, TypeId expected);
 TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry);
 
@@ -420,7 +419,6 @@ bool item_is_element_with_tag(Item item, const char* tag);
 
 // String utilities (reuse existing string functions)
 StrView strview_from_cstr(const char* str);
-String* string_from_strview(StrView view, VariableMemPool* pool);
 bool strview_equals(StrView a, StrView b);
 int strview_compare(StrView a, StrView b);
 

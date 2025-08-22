@@ -1135,28 +1135,6 @@ StrView strview_from_cstr(const char* str) {
     return view;
 }
 
-String* string_from_strview(StrView view, VariableMemPool* pool) {
-    if (view.length == 0) return &EMPTY_STRING;
-    
-    if (!pool) {
-        // printf("Error: string_from_strview called with NULL pool!\n");
-        return &EMPTY_STRING;
-    }
-    
-    String* str;
-    MemPoolError err = pool_variable_alloc(pool, sizeof(String) + view.length + 1, (void**)&str);
-    if (err != MEM_POOL_ERR_OK) {
-        // printf("Error: pool_variable_alloc failed with error %d\n", err);
-        return &EMPTY_STRING;
-    }
-    
-    str->len = view.length;
-    str->ref_cnt = 1;
-    memcpy(str->chars, view.str, view.length);
-    str->chars[view.length] = '\0';
-    return str;
-}
-
 TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry) {
     if (!ref_schema || ref_schema->schema_type != LMD_SCHEMA_REFERENCE) {
         return nullptr;

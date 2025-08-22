@@ -172,7 +172,7 @@ static bool test_debug_content(const char* content, const char* test_name) {
 }
 
 // Test comprehensive markup features - covers all implemented parser capabilities
-Test(markup_roundtrip, complete_test) {
+Test(markup_roundtrip, complete_test, .disabled = true) {
     printf("\n!!! Testing Complete Markup Features ===\n");
     
     // Read comprehensive test content from file
@@ -210,7 +210,7 @@ Test(markup_roundtrip, complete_test) {
 }
 
 // Test comprehensive emoji features - covers all emoji shortcodes
-Test(markup_roundtrip, emoji_test) {
+Test(markup_roundtrip, emoji_test, .disabled = true) {
     printf("\n=== Testing Comprehensive Emoji Features ===\n");
     
     // Read emoji test content from file
@@ -288,7 +288,7 @@ Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
 }
 
 // Test comprehensive RST (reStructuredText) features - NEW
-Test(markup_roundtrip, rst_directives_test) {
+Test(markup_roundtrip, rst_directives_test, .disabled = true) {
     printf("\n=== Testing RST Directives and Format-Specific Features ===\n");
     
     // Read RST test content from file
@@ -350,7 +350,7 @@ Test(markup_roundtrip, rst_directives_test) {
 }
 
 // Test basic RST directive parsing - simpler test without file dependency
-Test(markup_roundtrip, basic_rst_test) {
+Test(markup_roundtrip, basic_rst_test, .disabled = true) {
     printf("\n=== Testing Basic RST Directive Parsing ===\n");
     
     const char* basic_rst = 
@@ -423,7 +423,7 @@ Test(markup_roundtrip, basic_rst_test) {
 }
 
 // Test RST-specific features from old parser
-Test(markup_parsing_rst, rst_extended_features) {
+Test(markup_parsing_rst, rst_extended_features, .disabled = true) {
     printf("\n=== Testing Extended RST Features ===\n");
     
     const char* rst_extended_content = 

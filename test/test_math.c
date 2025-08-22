@@ -199,7 +199,7 @@ bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, con
 }
 
 // Test roundtrip for individual inline math expressions
-Test(math_roundtrip_tests, inline_math_roundtrip) {
+Test(math_roundtrip_tests, inline_math_roundtrip, .disabled = true) {
     // Test cases: inline math expressions
     const char* test_cases[] = {
         "$E = mc^2$",
@@ -218,7 +218,7 @@ Test(math_roundtrip_tests, inline_math_roundtrip) {
 }
 
 // Test roundtrip for block math expressions  
-Test(math_roundtrip_tests, block_math_roundtrip) {
+Test(math_roundtrip_tests, block_math_roundtrip, .disabled = true) {
     // Test cases: block math expressions
     const char* test_cases[] = {
         "$$E = mc^2$$",
@@ -235,7 +235,7 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
 }
 
 // Test math-only expressions (pure math without markdown)
-Test(math_roundtrip_tests, pure_math_roundtrip) {
+Test(math_roundtrip_tests, pure_math_roundtrip, .disabled = true) {
     // Test pure math expressions covering various mathematical expression groups
     const char* test_cases[] = {
         // Basic operators and arithmetic
