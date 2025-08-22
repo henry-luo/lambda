@@ -127,19 +127,4 @@
 // These should use the Unicode path  
 ("abcdéfghijklmnöpqrstüvwxyz" == "abcdéfghijklmnöpqrstüvwxyz")
 
-"Performance tests completed"
-
-"===== UNICODE TEST SUITE SUMMARY ====="
-"ASCII equality and relational operators: TESTED"
-"Unicode normalization (NFC/NFD): TESTED"
-"Latin extended characters (accents, umlauts): TESTED"  
-"Unicode relational ordering: TESTED"
-"Emoji and symbols (including skin tone modifiers): TESTED"
-"Non-Latin scripts (Greek, Cyrillic): TESTED"
-"Edge cases and error handling: TESTED"
-"Mixed scripts and complex cases: TESTED"
-"Performance (ASCII fast path): TESTED"
-
-"🎉 Lambda Unicode support comprehensive test completed! 🚀"
-"String relational operators now work properly with Unicode collation"
-"Both ASCII fast path and Unicode correctness are maintained"
+"Unicode tests completed"

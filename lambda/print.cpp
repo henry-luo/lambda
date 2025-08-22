@@ -150,15 +150,13 @@ void print_decimal(StrBuf *strbuf, Decimal *decimal) {
         strbuf_append_str(strbuf, "null");
         return;
     }
-    
     // Use libmpdec to format the decimal
     char *buf = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
     if (buf == NULL) {
         strbuf_append_str(strbuf, "error");
         return;
     }
-    
-    printf("printed decimal: %s\n", buf);
+    // printf("printed decimal: %s\n", buf);
     strbuf_append_str(strbuf, buf);
     free(buf);  // libmpdec allocates the string, we need to free it
 }
@@ -339,7 +337,6 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_DECIMAL: {
         Decimal *decimal = (Decimal*)item.pointer;
-        printf("print_item: decimal: %p\n", decimal);
         print_decimal(strbuf, decimal);
         break;
     }
