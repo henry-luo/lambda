@@ -19,7 +19,7 @@ strcat("hello", " world")
 mul(2, 3.0)
 
 let f = fn(a, b) { a + b }
-f;  f(1,2);
+type(f);  f(1,2);
 
 let t = string
 t;  "abc" is t;  123 is t;  true is string;
