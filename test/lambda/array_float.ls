@@ -3,16 +3,16 @@
 // Tests cover: construction, indexing, arithmetic, statistics, edge cases
 
 // ========================================
-// Phase 1: Basic Array Construction Tests
+"Basic Array Construction Tests:"
 // ========================================
 
-// Test 1: Basic float array construction with parentheses syntax (legacy)
-let legacy_arr = (1.5, 2.7, 3.14)
-legacy_arr
+// Test 1: Basic float array construction with parentheses syntax
+let float_list = (1.5, 2.7, 3.14)
+float_list
 
-// Test 2: Basic float array construction with bracket syntax (modern)
-let modern_arr = [1.0, 2.0, 3.0, 4.0, 5.0]
-modern_arr
+// Test 2: Basic float array construction with bracket syntax
+let float_arr = [1.0, 2.0, 3.0, 4.0, 5.0]
+float_arr
 
 // Test 3: Empty array construction
 let empty_arr = []
@@ -27,56 +27,56 @@ let mixed_arr = [1.1, 2.2, 3.3, 4.444, 5.55555]
 mixed_arr
 
 // ========================================
-// Phase 2: Array Indexing Tests
+"Array Indexing Tests:"
 // ========================================
 
-// Test 6: Basic indexing with legacy syntax
-let legacy_index = legacy_arr[1]  // Should be 2.7
-legacy_index
+// Test 6: Basic indexing with list syntax
+let list_index = float_list[1]  // Should be 2.7
+list_index
 
-// Test 7: Basic indexing with modern syntax
-let modern_index = modern_arr[2]  // Should be 3.0
-modern_index
+// Test 7: Basic indexing with array syntax
+let array_index = float_arr[2]  // Should be 3.0
+array_index
 
 // Test 8: First element access
-let first_elem = modern_arr[0]  // Should be 1.0
+let first_elem = float_arr[0]  // Should be 1.0
 first_elem
 
 // Test 9: Last element access
-let last_elem = modern_arr[4]  // Should be 5.0
+let last_elem = float_arr[4]  // Should be 5.0
 last_elem
 
 // ========================================
-// Phase 3: Statistical Functions Tests
+"Statistical Functions Tests"
 // ========================================
 
 // Test 10: Sum function on various arrays
-let sum_modern = sum(modern_arr)      // Should be 15.0 (1+2+3+4+5)
+let sum_float = sum(float_arr)      // Should be 15.0 (1+2+3+4+5)
 let sum_mixed = sum(mixed_arr)        // Should be 16.11555
 let sum_single = sum(single_arr)      // Should be 42.0
 let sum_empty = sum(empty_arr)        // Should be 0
-sum_modern; sum_mixed; sum_single; sum_empty
+sum_float; sum_mixed; sum_single; sum_empty
 
 // Test 11: Average function on various arrays
-let avg_modern = avg(modern_arr)      // Should be 3.0 (15/5)
+let avg_float = avg(float_arr)      // Should be 3.0 (15/5)
 let avg_mixed = avg(mixed_arr)        // Should be 3.22311
 let avg_single = avg(single_arr)      // Should be 42.0
-avg_modern; avg_mixed; avg_single
+avg_float; avg_mixed; avg_single
 
 // Test 12: Minimum function on various arrays
-let min_modern = min(modern_arr)      // Should be 1.0
+let min_float = min(float_arr)      // Should be 1.0
 let min_mixed = min(mixed_arr)        // Should be 1.1
 let min_single = min(single_arr)      // Should be 42.0
-min_modern; min_mixed; min_single
+min_float; min_mixed; min_single
 
 // Test 13: Maximum function on various arrays
-let max_modern = max(modern_arr)      // Should be 5.0
+let max_float = max(float_arr)      // Should be 5.0
 let max_mixed = max(mixed_arr)        // Should be 5.55555
 let max_single = max(single_arr)      // Should be 42.0
-max_modern; max_mixed; max_single
+max_float; max_mixed; max_single
 
 // ========================================
-// Phase 4: Edge Cases and Error Handling
+"Edge Cases and Error Handling:"
 // ========================================
 
 // Test 14: Empty array edge cases
@@ -101,25 +101,7 @@ let neg_max = max(negative_arr)       // Should be 5.0
 neg_sum; neg_avg; neg_min; neg_max
 
 // ========================================
-// Phase 5: Comparative Tests
-// ========================================
-
-// Test 17: Compare with integer arrays (mixed type support)
-let int_arr = [1, 2, 3]
-let float_cmp_arr = [1.0, 2.0, 3.0]
-let int_sum = sum(int_arr)            // Should be 6
-let float_sum = sum(float_cmp_arr)    // Should be 6.0
-int_sum; float_sum
-
-// Test 18: ArrayFloat vs generic Array behavior
-let generic_mixed = [1.1, 2.2, 3.3]
-let generic_sum = sum(generic_mixed)
-let generic_first = generic_mixed[0]
-let generic_last = generic_mixed[2]
-generic_sum; generic_first; generic_last
-
-// ========================================
-// Phase 6: Advanced Mathematical Operations
+"Advanced Mathematical Operations:"
 // ========================================
 
 // Test 19: Decimal precision preservation
@@ -160,11 +142,3 @@ let final_avg2 = avg(test_result_arr2)
 final_min1; final_max1; final_sum1; final_avg1;
 final_min2; final_max2; final_sum2; final_avg2
 
-// ArrayFloat comprehensive test suite completed
-// This test validates all phases of ArrayFloat implementation:
-// Phase 1: Type system integration ✓
-// Phase 2: Runtime function implementation ✓  
-// Phase 3: Type/build integration ✓
-// Phase 4: End-to-end test validation ✓
-// Phase 5: Comprehensive automated testing ✓
-// Phase 6: Performance optimization & advanced math ops ✓

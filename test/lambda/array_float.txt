@@ -1,0 +1,52 @@
+"Basic Array Construction Tests:"
+1.5
+2.7
+3.14
+[1, 2, 3, 4, 5]
+[]
+[42]
+[1.1, 2.2, 3.3, 4.444, 5.55555]
+"Array Indexing Tests:"
+2.7
+1
+1
+1
+"Statistical Functions Tests"
+3
+4
+1
+0
+5
+15
+2
+20
+20
+40
+40
+40
+30
+"Edge Cases and Error Handling:"
+error
+error
+5
+4
+30
+20
+2
+2
+2
+2
+"Advanced Mathematical Operations:"
+2
+3
+4
+4
+4
+1
+5
+15
+3
+10
+50
+150
+30

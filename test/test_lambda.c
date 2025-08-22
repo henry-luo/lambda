@@ -131,6 +131,14 @@ Test(lambda_tests, test_expr_ls) {
     test_lambda_script_against_file("test/lambda/expr.ls", "test/lambda/expr.txt");
 }
 
+Test(lambda_tests, test_decimal_ls) {
+    test_lambda_script_against_file("test/lambda/decimal.ls", "test/lambda/decimal.txt");
+}
+
+Test(lambda_tests, test_box_unbox_ls) {
+    test_lambda_script_against_file("test/lambda/box_unbox.ls", "test/lambda/box_unbox.txt");
+}
+
 Test(lambda_tests, test_sys_fn_ls) {
     test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
 }
@@ -143,35 +151,24 @@ Test(lambda_tests, test_numeric_expr_ls) {
     test_lambda_script_against_file("test/lambda/numeric_expr.ls", "test/lambda/numeric_expr.txt");
 }
 
+Test(lambda_tests, test_array_float_ls) {
+    test_lambda_script_against_file("test/lambda/array_float.ls", "test/lambda/array_float.txt");
+}
+
 Test(lambda_tests, test_comparison_expr_ls) {
     test_lambda_script_against_file("test/lambda/comparison_expr.ls", "test/lambda/comparison_expr.txt");
 }
 
-Test(lambda_tests, test_box_unbox_ls) {
-    // Test box_unbox.ls script
-    // Save current directory
-    char original_cwd[1024];
-    getcwd(original_cwd, sizeof(original_cwd));
-    
-    // Check if we're already in project root or in test directory
-    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
-        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
-        chdir("..");
-    }
-    
-    Runtime runtime;
-    runtime_init(&runtime);
-    runtime.current_dir = "";
-    
-    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/box_unbox.ls", false);
-    
-    // Restore original directory
-    chdir(original_cwd);
-    
-    // Verify the script runs without errors
-    cr_assert_neq(ret, 0, "box_unbox.ls script should not return an error");
-    
-    runtime_cleanup(&runtime);
+Test(lambda_tests, test_unicode_ls) {
+    test_lambda_script_against_file("test/lambda/unicode.ls", "test/lambda/unicode.txt");
+}
+
+Test(lambda_tests, test_type_ls) {
+    test_lambda_script_against_file("test/lambda/type.ls", "test/lambda/type.txt");
+}
+
+Test(lambda_tests, test_func_ls) {
+    test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
 }
 
 Test(lambda_tests, test_csv_test_ls) {
