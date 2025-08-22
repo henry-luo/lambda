@@ -175,8 +175,12 @@ ensure_test_compiled() {
         return 0  # Executable is up to date
     fi
     
-    # Need to recompile
-    echo "🔄 Recompiling $base_name (source newer than executable)..." >&2
+    # Need to recompile (either executable doesn't exist or is older than source)
+    if [ ! -f "$test_exe" ]; then
+        echo "🔄 Compiling $base_name (executable missing)..." >&2
+    else
+        echo "🔄 Recompiling $base_name (source newer than executable)..." >&2
+    fi
     
     # Get the test suite category to determine compilation parameters
     local suite_category=$(get_test_suite_category "$base_name")
@@ -430,9 +434,12 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
     result_files=()
     
     for test_exe in "${test_executables[@]}"; do
-        if [ -x "$test_exe" ]; then
+        base_name=$(basename "$test_exe" .exe)
+        
+        # Check if we have a source file for this test
+        source_file="test/${base_name}.c"
+        if [ -f "$source_file" ] || [ -x "$test_exe" ]; then
             # Calculate result file path
-            base_name=$(basename "$test_exe" .exe)
             result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
             result_files+=("$result_file")
             
@@ -440,7 +447,7 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
             run_single_test "$test_exe" &
             test_pids+=($!)
         else
-            echo "⚠️  Skipping non-executable: $test_exe"
+            echo "⚠️  Skipping $test_exe (no source file and not executable)"
         fi
     done
     
@@ -498,8 +505,11 @@ else
     
     # Run each test executable sequentially
     for test_exe in "${test_executables[@]}"; do
-        if [ -x "$test_exe" ]; then
-            base_name=$(basename "$test_exe" .exe)
+        base_name=$(basename "$test_exe" .exe)
+        
+        # Check if we have a source file for this test
+        source_file="test/${base_name}.c"
+        if [ -f "$source_file" ] || [ -x "$test_exe" ]; then
             c_test_display_name=$(get_c_test_display_name "$base_name")
             suite_category=$(get_test_suite_category "$base_name")
             
@@ -569,7 +579,7 @@ else
                 echo "   ❌ Test execution failed"
             fi
         else
-            echo "⚠️  Skipping non-executable: $test_exe"
+            echo "⚠️  Skipping $test_exe (no source file and not executable)"
         fi
     done
 fi
