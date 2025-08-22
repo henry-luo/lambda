@@ -117,4 +117,6 @@ Cargo.lock
 
 # Test outputs and artifacts
 *.test
-test/test_validator.dSYM/Contents/Resources/DWARF/test_validator
+test/*.dSYM
+test*.ls
+test*.exe
