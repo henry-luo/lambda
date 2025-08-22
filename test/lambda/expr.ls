@@ -46,8 +46,19 @@ type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3)
 (let y = (let x=5, x + 3.14), y * 2) 
 "a" * 3
 
-// test TYPE_ANY support
+"Test TYPE_ANY support:"
 let v = sum([1, 2]);
 {a: v, b: 3}
 
 [1, ("great", "!"), 0.5]
+
+"Test datetime support:"
+t'2025-01-01'
+let dt: datetime = t'2025-01-02'
+dt
+let mp = {a:t'2025-01-03', b:3.14}
+mp
+mp.a
+let arr = [t'2025-01-04', t'2025-01-05']
+arr
+arr[0]
