@@ -276,12 +276,12 @@ distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup finished."
 
 # Development targets
-test:
+test: build
 	@echo "Running comprehensive test suite..."
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh; \
-	elif [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh; \
+	elif [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
@@ -291,8 +291,8 @@ test-dev:
 	@echo "Running comprehensive test suite (development mode)..."
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh || echo "Note: Some tests failed due to incomplete features (math parser, missing dependencies)"; \
-	elif [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh || echo "Note: Some tests failed due to incomplete features"; \
+	elif [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh || echo "Note: Some tests failed due to incomplete features"; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
@@ -302,8 +302,8 @@ test-library: build
 	@echo "Running library test suite..."
 	@echo "Pre-compiling URL test with correct dependencies..."
 	@clang -fms-extensions -Ilib/mem-pool/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -o test/test_url.exe test/test_url.c build/url.o build/url_parser.o build/strbuf.o build/variable.o build/buffer.o build/utils.o -L/opt/homebrew/Cellar/criterion/2.4.2_2/lib -lcriterion
-	@if [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=library --raw; \
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=library --raw; \
 	else \
 		echo "Error: No test script found"; \
 		exit 1; \
@@ -311,8 +311,8 @@ test-library: build
 
 test-mir: build
 	@echo "Running MIR test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=mir --raw; \
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=mir --raw; \
 	else \
 		echo "Error: No test script found"; \
 		exit 1; \
@@ -320,8 +320,8 @@ test-mir: build
 
 test-input: build
 	@echo "Running input processing test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=input --raw; \
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=input --raw; \
 	else \
 		echo "Error: No test script found"; \
 		exit 1; \
@@ -329,20 +329,20 @@ test-input: build
 
 test-validator: build
 	@echo "Running validator test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=validator --raw; \
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=validator --raw; \
 	else \
-		echo "Error: Test script not found at test/test_all.sh"; \
+		echo "Error: Test script not found at test/test_run.sh"; \
 		echo "Please ensure the test script exists and is executable."; \
 		exit 1; \
 	fi
 
 test-lambda: build
 	@echo "Running lambda test suite..."
-	@if [ -f "test/test_all.sh" ]; then \
-		./test/test_all.sh --target=lambda --raw; \
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=lambda --raw; \
 	else \
-		echo "Error: Test script not found at test/test_all.sh"; \
+		echo "Error: Test script not found at test/test_run.sh"; \
 		echo "Please ensure the test script exists and is executable."; \
 		exit 1; \
 	fi
@@ -352,7 +352,7 @@ test-coverage:
 	@if command -v gcov >/dev/null 2>&1 && command -v lcov >/dev/null 2>&1; then \
 		echo "Compiling with coverage flags..."; \
 		gcc --coverage -fprofile-arcs -ftest-coverage -o lambda_coverage.exe $(shell find lambda -name "*.c") -I./include -I./lambda; \
-		./test/test_all.sh; \
+		./test/test_run.sh; \
 		gcov $(shell find lambda -name "*.c"); \
 		lcov --capture --directory . --output-file coverage.info; \
 		genhtml coverage.info --output-directory coverage-report; \
@@ -476,6 +476,15 @@ test-typeset-workflow:
 	./test_workflow
 	@echo "Cleaning up test executable..."
 	rm -f test_workflow
+
+test-sequential: build
+	@echo "Running tests sequentially (not parallel)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --sequential; \
+	else \
+		echo "Error: Test script not found at test/test_run.sh"; \
+		exit 1; \
+	fi
 
 test-all:
 	@echo "Running complete test suite (all test types)..."
