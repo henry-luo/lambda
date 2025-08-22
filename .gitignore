@@ -120,3 +120,4 @@ Cargo.lock
 test/*.dSYM
 test*.ls
 test*.exe
+test_output/
