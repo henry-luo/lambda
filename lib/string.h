@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include "mem-pool/include/mem_pool.h"
+#include "strview.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,7 @@ typedef struct String {
 
 // String creation and manipulation functions
 String* create_string(VariableMemPool* pool, const char* str);
+String* string_from_strview(StrView view, VariableMemPool* pool);
 
 #ifdef __cplusplus
 }

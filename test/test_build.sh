@@ -4,14 +4,21 @@
 # This script provides compilation functions for the enhanced test runner
 
 # Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_CONFIG_FILE="$SCRIPT_DIR/build_lambda_config.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ "$(basename "$SCRIPT_DIR")" = "test" ]; then
+    # Script is in test directory, project root is parent
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+    # Script was sourced from project root
+    PROJECT_ROOT="$PWD"
+fi
+BUILD_CONFIG_FILE="$PROJECT_ROOT/build_lambda_config.json"
 
 # Source shared build utilities
-if [ -f "$SCRIPT_DIR/utils/build_utils.sh" ]; then
-    source "$SCRIPT_DIR/utils/build_utils.sh"
+if [ -f "$PROJECT_ROOT/utils/build_utils.sh" ]; then
+    source "$PROJECT_ROOT/utils/build_utils.sh"
 else
-    echo "Warning: utils/build_utils.sh not found"
+    echo "Warning: utils/build_utils.sh not found at $PROJECT_ROOT/utils/build_utils.sh"
 fi
 
 # Helper function to get configuration value
@@ -41,6 +48,30 @@ get_config_array() {
     jq -r ".test.test_suites[] | select(.suite == \"$suite\") | .$key | join(\"$separator\")" "$BUILD_CONFIG_FILE" 2>/dev/null || echo ""
 }
 
+# Function to get test index for a source file within a test suite
+get_test_index_for_source() {
+    local suite_type="$1"
+    local source_file="$2"
+    
+    if [ ! -f "$BUILD_CONFIG_FILE" ] || ! has_jq_support; then
+        echo "0"
+        return
+    fi
+    
+    # Extract just the filename from the source path
+    local source_filename=$(basename "$source_file")
+    
+    # Get the sources array from the test suite configuration and find the index directly with jq
+    local test_index=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_type\") | .sources | to_entries[] | select(.value == \"$source_filename\") | .key" "$BUILD_CONFIG_FILE" 2>/dev/null)
+    
+    # Return the index, or 0 if not found
+    if [ -z "$test_index" ] || [ "$test_index" = "null" ]; then
+        echo "0"
+    else
+        echo "$test_index"
+    fi
+}
+
 # Function to get library dependencies for a specific test
 get_library_dependencies_for_test() {
     local suite_type="$1"
@@ -56,8 +87,8 @@ get_library_dependencies_for_test() {
         return 1
     fi
     
-    # Get library dependencies for specific test index
-    local library_deps=$(echo "$test_suite" | jq -r ".library_dependencies[$test_index][]? // empty" | tr '\n' ' ')
+    # Get library dependencies for specific test index - note this is an array of strings
+    local library_deps=$(echo "$test_suite" | jq -r ".library_dependencies[$test_index] // empty | if . then .[] else empty end" | tr '\n' ' ')
     
     # Output space-separated library names
     echo "$library_deps"
@@ -82,7 +113,8 @@ build_library_based_compile_cmd() {
     
     if [ -n "$lib_deps_str" ]; then
         # Enhanced library name resolution with object file optimization
-        local lib_deps_array=($lib_deps_str)
+        # Convert space-separated string to array (shell-agnostic way)
+        eval "lib_deps_array=($lib_deps_str)"
         
         # Handle both prefixed and unprefixed paths
         local final_source="$source"
@@ -165,7 +197,31 @@ build_library_based_compile_cmd() {
                     fi
                 done
                 
-                echo "$compiler $final_flags $include_flags -o $final_binary $final_source $minimal_objects $static_libs $link_flags $utf8proc_libs $criterion_flags"
+                # Check if command would be too long and use response file if needed
+                local additional_sources=""
+                local additional_objects=""
+                # Special case: input tests need test_context.c for context definition
+                if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]]; then
+                    # Compile test_context.c separately as a C file to avoid C++ symbol mangling
+                    if ! clang -c test/test_context.c -o test/test_context.o -I./lambda -I./lib/mem-pool/include -I./lib -I/opt/homebrew/Cellar/mpdecimal/4.0.1/include -I/opt/homebrew/include 2>/dev/null; then
+                        echo "❌ Failed to compile test_context.c"
+                        return 1
+                    fi
+                    additional_objects="test/test_context.o"
+                fi
+                
+                local base_cmd="$compiler $final_flags $include_flags -o $final_binary $final_source $additional_sources"
+                local link_parts="$minimal_objects $additional_objects $static_libs $link_flags $utf8proc_libs $criterion_flags"
+                local full_cmd="$base_cmd $link_parts"
+                
+                # If command is longer than ~8000 characters, use response file
+                if [ ${#full_cmd} -gt 8000 ]; then
+                    local response_file="/tmp/test_build_$$.rsp"
+                    echo "$link_parts" | tr ' ' '\n' | grep -v '^$' > "$response_file"
+                    echo "$base_cmd @$response_file"
+                else
+                    echo "$full_cmd"
+                fi
                 return 0
             fi
         fi
@@ -173,7 +229,18 @@ build_library_based_compile_cmd() {
         # Fallback to legacy library resolution if object approach fails
         local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
         
-        echo "$compiler $final_flags -o $final_binary $final_source $resolved_flags"
+        # Add additional objects for specific tests
+        local additional_objects=""
+        if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]]; then
+            # Compile test_context.c separately as a C file to avoid C++ symbol mangling
+            if ! clang -c test/test_context.c -o test/test_context.o -I./lambda -I./lib/mem-pool/include -I./lib -I/opt/homebrew/Cellar/mpdecimal/4.0.1/include -I/opt/homebrew/include 2>/dev/null; then
+                echo "❌ Failed to compile test_context.c"
+                return 1
+            fi
+            additional_objects="test/test_context.o"
+        fi
+        
+        echo "$compiler $final_flags -o $final_binary $final_source $additional_objects $resolved_flags"
         return 0
     else
         # Fallback to legacy dependency strings if library_dependencies not available
@@ -259,7 +326,12 @@ build_test() {
     local suite_name="$1"
     local test_source="$2"
     local test_binary="$3"
-    local test_index="${4:-0}"
+    local test_index="${4:-}"
+    
+    # If test_index is not provided, determine it from the source file
+    if [ -z "$test_index" ]; then
+        test_index=$(get_test_index_for_source "$suite_name" "$test_source")
+    fi
     
     # Get special flags from config
     local special_flags=$(get_config "$suite_name" "special_flags")
@@ -269,12 +341,24 @@ build_test() {
     
     if [ $? -eq 0 ] && [ -n "$compile_cmd" ]; then
         echo "🔧 Building $test_source -> $test_binary"
-        echo "   Command: $compile_cmd"
-        if $compile_cmd; then
+        
+        # Check if command uses response file
+        if [[ "$compile_cmd" == *"@/tmp/test_build_"* ]]; then
+            echo "   Command: $compile_cmd (using response file for long argument list)"
+        else
+            echo "   Command: $compile_cmd"
+        fi
+        
+        # Execute the command and cleanup response file if used
+        if eval "$compile_cmd"; then
             echo "✅ Compiled successfully"
+            # Clean up any response files
+            rm -f /tmp/test_build_$$.rsp 2>/dev/null
             return 0
         else
             echo "❌ Compilation failed"
+            # Clean up any response files
+            rm -f /tmp/test_build_$$.rsp 2>/dev/null
             return 1
         fi
     else
@@ -282,3 +366,95 @@ build_test() {
         return 1
     fi
 }
+
+# Function to build all tests
+build_all_tests() {
+    echo "🔨 Building all test executables..."
+    echo ""
+    
+    if [ ! -f "$BUILD_CONFIG_FILE" ] || ! has_jq_support; then
+        echo "❌ Missing build configuration or jq support"
+        return 1
+    fi
+    
+    local total_tests=0
+    local successful_builds=0
+    local failed_builds=0
+    
+    # Get all test suites from configuration
+    local test_suites=$(jq -r '.test.test_suites[].suite' "$BUILD_CONFIG_FILE" 2>/dev/null)
+    
+    if [ -z "$test_suites" ]; then
+        echo "❌ No test suites found in configuration"
+        return 1
+    fi
+    
+    echo "📋 Found test suites: $(echo "$test_suites" | tr '\n' ' ')"
+    echo ""
+    
+    # Build each test suite
+    while IFS= read -r suite_name; do
+        [ -z "$suite_name" ] && continue
+        
+        # Get test sources for this suite
+        local test_sources=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_name\") | .sources[]?" "$BUILD_CONFIG_FILE" 2>/dev/null)
+        local test_binaries=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_name\") | .binaries[]?" "$BUILD_CONFIG_FILE" 2>/dev/null)
+        
+        if [ -n "$test_sources" ] && [ -n "$test_binaries" ]; then
+            # Convert to arrays
+            local sources_array=($test_sources)
+            local binaries_array=($test_binaries)
+            
+            # Build each test in the suite
+            for i in "${!sources_array[@]}"; do
+                local test_source="${sources_array[$i]}"
+                # Add test/ prefix only if it doesn't already start with test/
+                if [[ ! "$test_source" =~ ^test/ ]]; then
+                    test_source="test/$test_source"
+                fi
+                local test_binary="${binaries_array[$i]}"
+                # Add test/ prefix only if it doesn't already start with test/
+                if [[ ! "$test_binary" =~ ^test/ ]]; then
+                    test_binary="test/$test_binary"
+                fi
+                
+                if [ -f "$test_source" ]; then
+                    echo "🔧 Building $suite_name: $test_source -> $test_binary"
+                    total_tests=$((total_tests + 1))
+                    
+                    if build_test "$suite_name" "$test_source" "$test_binary" "$i"; then
+                        successful_builds=$((successful_builds + 1))
+                        echo "   ✅ Success"
+                    else
+                        failed_builds=$((failed_builds + 1))
+                        echo "   ❌ Failed"
+                    fi
+                    echo ""
+                else
+                    echo "⚠️  Skipping $test_source (source file not found)"
+                fi
+            done
+        else
+            echo "⚠️  No sources/binaries found for suite: $suite_name"
+        fi
+    done <<< "$test_suites"
+    
+    # Summary
+    echo "📊 Build Summary:"
+    echo "   Total tests: $total_tests"
+    echo "   ✅ Successful: $successful_builds"
+    echo "   ❌ Failed: $failed_builds"
+    
+    if [ $failed_builds -eq 0 ]; then
+        echo "🎉 All tests built successfully!"
+        return 0
+    else
+        echo "⚠️  Some tests failed to build"
+        return 1
+    fi
+}
+
+# If script is run directly with "all" argument, build all tests
+if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "$1" = "all" ]; then
+    build_all_tests
+fi
