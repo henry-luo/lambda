@@ -334,7 +334,7 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 
 #define const_s(index)      ((String*)rt->consts[index])
 #define const_c(index)      ((Decimal*)rt->consts[index])
-#define const_k(index)      ((DateTime*)rt->consts[index])
+#define const_k(index)      (*(DateTime*)rt->consts[index])
 
 // item unboxing
 long it2l(Item item);

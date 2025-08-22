@@ -372,6 +372,20 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             }
         }
         break;
+    case LMD_TYPE_DTIME: 
+        if (item->type->is_literal) {
+            strbuf_append_str(tp->code_buf, "const_k2it(");
+            TypeConst *item_type = (TypeConst*)item->type;
+            strbuf_append_int(tp->code_buf, item_type->const_index);
+            strbuf_append_char(tp->code_buf, ')');
+        }
+        else {
+            // non-literal datetime expression
+            strbuf_append_str(tp->code_buf, "push_k(");
+            transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ')');            
+        }
+        break;
     case LMD_TYPE_DECIMAL: 
         if (item->type->is_literal) {
             strbuf_append_str(tp->code_buf, "const_c2it(");
@@ -380,15 +394,17 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_char(tp->code_buf, ')');
         }
         else {
-            // Non-literal decimal expression - transpile the expression directly
+            // non-literal decimal expression
+            strbuf_append_str(tp->code_buf, "c2it(");
             transpile_expr(tp, item);
+            strbuf_append_char(tp->code_buf, ')');
         }
         break;
     case LMD_TYPE_NUMBER:
         // NUMBER type is a union of int/float - transpile the expression directly
         transpile_expr(tp, item);
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY: {
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
         char t = item->type->type_id == LMD_TYPE_STRING ? 's' :
             item->type->type_id == LMD_TYPE_SYMBOL ? 'y' : 
             item->type->type_id == LMD_TYPE_BINARY ? 'x':'k';

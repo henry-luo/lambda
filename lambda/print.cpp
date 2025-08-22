@@ -225,6 +225,13 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_FLOAT:
                 strbuf_append_format(strbuf, "%g", *(double*)data);
                 break;
+            case LMD_TYPE_DTIME: {
+                DateTime dt = *(DateTime*)data;
+                strbuf_append_str(strbuf, "t'"); 
+                datetime_format_lambda(strbuf, &dt);
+                strbuf_append_char(strbuf, '\'');
+                break;
+            }
             case LMD_TYPE_DECIMAL: {
                 Decimal *decimal = *(Decimal**)data;
                 print_decimal(strbuf, decimal);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
@@ -248,15 +255,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 }
                 break;
             }
-            case LMD_TYPE_DTIME: {
-                DateTime *dt = *(DateTime**)data;
-                if (dt) {
-                    strbuf_append_str(strbuf, "t'"); 
-                    datetime_format_lambda(strbuf, dt);
-                    strbuf_append_char(strbuf, '\'');
-                }
-                break;
-            }
+            
             case LMD_TYPE_BINARY: {
                 String *bin = *(String**)data;
                 if (bin && bin->chars) {
@@ -386,6 +385,9 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, "t'"); 
             datetime_format_lambda(strbuf, dt);
             strbuf_append_char(strbuf, '\'');
+        }
+        else {
+            strbuf_append_str(strbuf, "[null datetime]");
         }
         break;
     }
