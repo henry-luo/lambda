@@ -38,7 +38,7 @@ safe_echo() {
 TARGET_TEST=""
 SHOW_HELP=false
 RAW_OUTPUT=false
-KEEP_EXE=false
+KEEP_EXE=true  # Always keep test executables for enhanced test runner
 
 # Parse arguments
 for arg in "$@"; do
