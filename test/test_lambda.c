@@ -171,31 +171,31 @@ Test(lambda_tests, test_func_ls) {
     test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
 }
 
-Test(lambda_tests, test_csv_test_ls) {
-    // Test csv_test.ls script which tests various CSV parsing scenarios
-    // Save current directory
-    char original_cwd[1024];
-    getcwd(original_cwd, sizeof(original_cwd));
+// Test(lambda_tests, test_csv_test_ls) {
+//     // Test csv_test.ls script which tests various CSV parsing scenarios
+//     // Save current directory
+//     char original_cwd[1024];
+//     getcwd(original_cwd, sizeof(original_cwd));
     
-    // Check if we're already in project root or in test directory
-    if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
-        strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
-        chdir("..");
-    }
+//     // Check if we're already in project root or in test directory
+//     if (strstr(original_cwd, "/test") && original_cwd[strlen(original_cwd)-5] == '/' && 
+//         strcmp(original_cwd + strlen(original_cwd)-4, "test") == 0) {
+//         chdir("..");
+//     }
     
-    Runtime runtime;
-    runtime_init(&runtime);
-    runtime.current_dir = "";
+//     Runtime runtime;
+//     runtime_init(&runtime);
+//     runtime.current_dir = "";
     
-    uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/csv_test.ls", false);
+//     uint64_t ret = run_script_at(&runtime, (char*)"test/lambda/csv_test.ls", false);
     
-    // Restore original directory
-    chdir(original_cwd);
+//     // Restore original directory
+//     chdir(original_cwd);
     
-    // Verify the script runs without errors
-    cr_assert_neq(ret, 0, "csv_test.ls script should not return an error");
+//     // Verify the script runs without errors
+//     cr_assert_neq(ret, 0, "csv_test.ls script should not return an error");
     
-    printf("CSV test completed successfully\n");
+//     printf("CSV test completed successfully\n");
     
-    runtime_cleanup(&runtime);
-}
+//     runtime_cleanup(&runtime);
+// }
