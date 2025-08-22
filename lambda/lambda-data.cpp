@@ -147,17 +147,13 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 Item push_d(double dval) {
     printf("TRACE: push_d: %g\n", dval);
     double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval);
-    Item result = {.item = d2it(dptr)};
-    printf("TRACE: push_d result item: %llu, type_id: %d\n", result.item, result.type_id);
-    return result;
+    return {.item = d2it(dptr)};
 }
 
 Item push_l(long lval) {
     printf("TRACE: push_l: %ld\n", lval);
     long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval);
-    Item result = {.item = l2it(lptr)};
-    printf("TRACE: push_l result item: %llu, type_id: %d\n", result.item, result.type_id);
-    return result;
+    return {.item = l2it(lptr)};
 }
 
 Item push_k(DateTime val) {
@@ -350,7 +346,11 @@ void list_push(List *list, Item item) {
     }
     case LMD_TYPE_DTIME:  {
         DateTime* dtval = (DateTime*)(list->items + (list->capacity - list->extra - 1));
-        *dtval = *(DateTime*)item.pointer;  list->items[list->length-1] = {.item = k2it(dtval)};
+        DateTime dt = *dtval = *(DateTime*)item.pointer;  list->items[list->length-1] = {.item = k2it(dtval)};
+        StrBuf *strbuf = strbuf_new();
+        datetime_format_lambda(strbuf, &dt);
+        printf("list_push: pushed datetime value: %s\n", strbuf->str);
+        strbuf_free(strbuf);
         list->extra++;
         break;
     }
@@ -459,7 +459,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 printf("set field of ANY type to: %d\n", item.type_id);
                 TypedItem titem = {.type_id = item.type_id, .pointer = item.raw_pointer};
                 switch (item.type_id) {
-                // case LMD_TYPE_NULL: ; // nothing extra
+                // case LMD_TYPE_NULL: ; // no extra work
                 case LMD_TYPE_BOOL:
                     titem.bool_val = item.bool_val;  break;
                 case LMD_TYPE_INT:

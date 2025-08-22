@@ -45,7 +45,7 @@ func_obj_t func_list[] = {
     {"v2it", (fn_ptr) v2it},
     {"push_d", (fn_ptr) push_d},
     {"push_l", (fn_ptr) push_l},
-    // {"push_k", (fn_ptr) push_k},
+    {"push_k", (fn_ptr) push_k},
     
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},
@@ -129,35 +129,35 @@ void print_module_item(MIR_item_t mitem) {
     switch (mitem->item_type) {
     case MIR_func_item:
         // Function mitem->addr is the address to call the function
-        printf("module item func: %d %s, addr %p, call addr %p\n", 
+        log_debug("module item func: %d %s, addr %p, call addr %p\n", 
             mitem->item_type, mitem->u.func->name, mitem->addr, mitem->u.func->call_addr);
         break;
     case MIR_proto_item:
-        printf("module item proto: %d %s\n", mitem->item_type, mitem->u.proto->name);
+        log_debug("module item proto: %d %s\n", mitem->item_type, mitem->u.proto->name);
         break;
     case MIR_import_item:
-        printf("module item import: %d %s\n", mitem->item_type, mitem->u.import_id);
+        log_debug("module item import: %d %s\n", mitem->item_type, mitem->u.import_id);
         break;
     case MIR_export_item:
-        printf("module item export: %d %s\n", mitem->item_type, mitem->u.export_id);
+        log_debug("module item export: %d %s\n", mitem->item_type, mitem->u.export_id);
         break;
     case MIR_forward_item:
-        printf("module item forward: %d %s\n", mitem->item_type, mitem->u.forward_id);
+        log_debug("module item forward: %d %s\n", mitem->item_type, mitem->u.forward_id);
         break;
     case MIR_data_item:
-        printf("module item data: %d %s\n", mitem->item_type, mitem->u.data->name);
+        log_debug("module item data: %d %s\n", mitem->item_type, mitem->u.data->name);
         break;
     case MIR_ref_data_item:
-        printf("module item ref_data: %d %s\n", mitem->item_type, mitem->u.ref_data->name);
+        log_debug("module item ref_data: %d %s\n", mitem->item_type, mitem->u.ref_data->name);
         break;
     case MIR_lref_data_item:
-        printf("module item lref_data: %d %s\n", mitem->item_type, mitem->u.lref_data->name);
+        log_debug("module item lref_data: %d %s\n", mitem->item_type, mitem->u.lref_data->name);
         break;
     case MIR_expr_data_item:
-        printf("module item expr_data: %d %s\n", mitem->item_type, mitem->u.expr_data->name);
+        log_debug("module item expr_data: %d %s\n", mitem->item_type, mitem->u.expr_data->name);
         break;
     case MIR_bss_item:
-        printf("module item bss: %d %s\n", mitem->item_type, mitem->u.bss->name);
+        log_debug("module item bss: %d %s\n", mitem->item_type, mitem->u.bss->name);
         break;
     }
 }
