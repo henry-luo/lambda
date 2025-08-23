@@ -95,178 +95,91 @@ get_test_index_for_source() {
     echo "0"
 }
 
-# Enhanced library dependency resolution using main build system
-resolve_test_library_dependencies() {
-    local library_deps_array=("$@")
-    
-    if [ ! -f "$BUILD_CONFIG_FILE" ] || ! has_jq_support; then
-        echo "Error: Build configuration not available" >&2
-        return 1
-    fi
-    
-    local resolved_flags=""
-    local all_includes=""
-    local all_objects=""
-    local all_static_libs=""
-    local all_dynamic_libs=""
-    local all_special_flags=""
-    
-    # Use main build system's library resolution
-    resolved_flags=$(resolve_library_dependencies "${library_deps_array[@]}")
-    
-    echo "$resolved_flags"
-}
-
-# Build test executable using the SAME build process as main build
-# This ensures perfect alignment between main and test builds
+# Enhanced function to build a test executable using unified build functions
 build_test_executable() {
-    local suite_type="$1"
-    local source="$2" 
-    local binary="$3"
-    local test_index="$4"
+    local suite_name="$1"
+    local test_source="$2"
+    local test_binary="$3"
+    local test_index="${4:-0}"
     
-    # Get library dependencies for this specific test
-    local lib_deps_str=""
-    if [ -n "$test_index" ]; then
-        lib_deps_str=$(jq -r ".test.test_suites[] | select(.suite == \"$suite_type\") | .library_dependencies[$test_index] // [] | join(\" \")" "$BUILD_CONFIG_FILE" 2>/dev/null)
-    fi
+    # Work from the script directory (test/) and resolve relative to repo root
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local repo_root="$(cd "$script_dir/.." && pwd)"
+    cd "$repo_root" || return 1
     
-    if [ -z "$lib_deps_str" ] || [ "$lib_deps_str" = "null" ]; then
-        echo "Error: No library dependencies found for test $test_index in suite $suite_type" >&2
-        return 1
-    fi
-    
-    # Convert to array
-    eval "lib_deps_array=($lib_deps_str)"
-    
-    # Handle prefixed paths
-    local final_source="$source"
-    local final_binary="$binary"
+    local source_path="$test_source"
+    local binary_path="$test_binary"
     
     # Add test/ prefix if not already present
-    if [[ "$final_source" != test/* ]]; then
-        final_source="test/$final_source"
+    if [[ "$source_path" != test/* ]]; then
+        source_path="test/$source_path"
     fi
-    if [[ "$final_binary" != test/* ]]; then
-        final_binary="test/$final_binary"
-    fi
-    
-    # Get build configuration - SAME as main build
-    local base_flags=""
-    local base_warnings=""
-    
-    # Extract flags from main config (SAME as main build)
-    while IFS= read -r flag; do
-        [ -n "$flag" ] && base_flags="$base_flags -$flag"
-    done < <(get_json_array "flags" "$BUILD_CONFIG_FILE")
-    
-    # Extract warnings from main config (SAME as main build)
-    while IFS= read -r warning; do
-        [ -n "$warning" ] && base_warnings="$base_warnings -Werror=$warning"
-    done < <(get_json_array "warnings" "$BUILD_CONFIG_FILE")
-    
-    # Add suite-specific special flags
-    local special_flags=$(get_config "$suite_type" "special_flags")
-    if [ -n "$special_flags" ] && [ "$special_flags" != "null" ]; then
-        base_flags="$base_flags $special_flags"
+    if [[ "$binary_path" != test/* ]]; then
+        binary_path="test/$binary_path"
     fi
     
-    # Add C++ specific flags if needed
-    if is_cpp_file "$final_source"; then
-        local cpp_flags=$(get_config "$suite_type" "cpp_flags")
-        if [ -n "$cpp_flags" ] && [ "$cpp_flags" != "null" ]; then
-            base_flags="$base_flags $cpp_flags"
-        fi
+    # Final paths
+    local final_source="$source_path"
+    local final_binary="$binary_path"
+    
+    echo "🔧 Building test: $suite_name"
+    echo "   Source: $final_source"
+    echo "   Binary: $final_binary"
+    
+    # Ensure we have unified build functions available
+    if ! command -v unified_compile_sources >/dev/null 2>&1; then
+        echo "🔧 Sourcing unified build functions..."
+        source "utils/build_core.sh"
+        source "utils/build_utils.sh"
     fi
     
-    # Resolve library dependencies using main build system
-    local resolved_flags=$(resolve_library_dependencies "${lib_deps_array[@]}")
+    # Determine test configuration and dependencies based on test index or source path
+    local test_config=""
+    local library_names=""
     
-    # Parse resolved flags into components
-    local includes=$(echo "$resolved_flags" | grep -o '\-I[^[:space:]]*' | tr '\n' ' ')
-    local lib_sources=$(echo "$resolved_flags" | grep -o '[^[:space:]]*\.\(c\|cpp\)' | tr '\n' ' ')
-    
-    # Check if this test uses object-based dependencies (like lambda-runtime-full or lambda-input-format)
-    local uses_runtime_objects=false
-    for dep in "${lib_deps_array[@]}"; do
-        if [[ "$dep" == "lambda-test-runtime" ]] || [[ "$dep" == "lambda-test-input-full" ]]; then
-            uses_runtime_objects=true
-            break
-        fi
-    done
-    
-    # Extract non-source flags - exclude .o files only for source-based libraries to avoid duplication
-    if [ "$uses_runtime_objects" = "true" ]; then
-        # Include .o files for runtime tests that depend on pre-built objects
-        local libs_and_links=$(echo "$resolved_flags" | sed 's/-I[^[:space:]]*//g' | sed 's/[^[:space:]]*\.[c|cpp][^[:space:]]*//g' | sed 's/  */ /g' | sed 's/^ *//' | sed 's/ *$//')
+    if [[ "$final_source" == *"test_validator"* ]] || [[ "$final_source" == *"test_mem"* ]] || [[ "$final_source" == *"test_string"* ]] || [[ "$final_source" == *"test_lambda_data"* ]] || [[ "$final_source" == *"test_ast"* ]] || [[ "$final_source" == *"test_lambda_eval"* ]] || [[ "$final_source" == *"test_mir"* ]] || [[ "$final_source" == *"test_lambda"* ]]; then
+        # Tests requiring lambda-runtime-full with criterion (includes MIR, Lambda runtime, and validator tests)
+        test_config="test-runtime-full"
+        library_names="lambda-test-runtime"
+    elif [[ "$final_source" == *"test_input"* ]] || [[ "$final_source" == *"test_format"* ]] || [[ "$final_source" == *"test_markup"* ]] || [[ "$final_source" == *"test_math"* ]]; then
+        # Tests requiring lambda-input-format with criterion (complex input/format tests)
+        test_config="test-input-format"
+        library_names="lambda-test-input-full"
+    elif [[ "$final_source" == *"test_mime_detect"* ]]; then
+        # Tests requiring only MIME detection (simpler input test)
+        test_config="test-input-simple"
+        library_names="lambda-test-input"
+    elif [[ "$final_source" == *"test_datetime"* ]] || [[ "$final_source" == *"test_url"* ]] || [[ "$final_source" == *"test_num_stack"* ]] || [[ "$final_source" == *"test_context"* ]] || [[ "$final_source" == *"test_layout"* ]]; then
+        # Tests requiring extended libraries (datetime, url, num_stack, etc.) with criterion
+        test_config="test-extended"
+        library_names="lambda-test-extended"
     else
-        # Exclude .o files for source-based libraries to prevent duplication
-        local libs_and_links=$(echo "$resolved_flags" | sed 's/-I[^[:space:]]*//g' | sed 's/[^[:space:]]*\.[c|cpp][^[:space:]]*//g' | sed 's/[^[:space:]]*\.o[^[:space:]]*//g' | sed 's/  */ /g' | sed 's/^ *//' | sed 's/ *$//')
+        # Default minimal configuration with criterion  
+        test_config="test-minimal"
+        library_names="lambda-test-minimal"
     fi
     
-    # STEP 1: Compile main test source to object file using SAME process as main build
-    local test_obj="${final_binary}.o"
-    echo "🔧 Step 1: Compiling test source"
-    if ! build_compile_to_object "$final_source" "$test_obj" "$includes" "$base_warnings" "$base_flags" "false"; then
-        echo "❌ Failed to compile test source: $final_source"
+    echo "🎯 Test configuration: $test_config"
+    
+    # Prepare source files for compilation
+    local all_sources="$final_source"
+    
+    # Add test_context.c for specific tests that need it
+    if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]]; then
+        all_sources="$all_sources test/test_context.c"
+    fi
+    
+    # STEP 1: Use unified compilation function
+    echo "🔧 Step 1: Compiling sources using unified build functions"
+    local object_files
+    if ! object_files=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build"); then
+        echo "❌ Failed to compile sources for test: $suite_name"
         return 1
     fi
     
-    # STEP 2: Compile any additional sources needed (like test_context.c)
-    local additional_objects=""
-    if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]]; then
-        echo "🔧 Step 2: Compiling test_context.c"
-        if ! build_compile_to_object "test/test_context.c" "test/test_context.o" "$includes" "$base_warnings" "$base_flags" "false"; then
-            echo "❌ Failed to compile test_context.c"
-            return 1
-        fi
-        additional_objects="test/test_context.o"
-    fi
-    
-    # STEP 3: Collect object files - reuse existing main build objects for library sources
-    local object_files="$test_obj"
-    
-    # Add pre-built object files from main build for library sources
-    for src in $lib_sources; do
-        local obj_name=$(basename "$src" | sed 's/\.[^.]*$/.o/')
-        local obj_path="build/$obj_name"
-        if [ -f "$obj_path" ]; then
-            object_files="$object_files $obj_path"
-        else
-            echo "⚠️  Warning: Object file not found for $src: $obj_path"
-            # Fallback: compile the source file using SAME process as main build
-            local temp_obj="test/$(basename "$src" | sed 's/\.[^.]*$/.o/')"
-            echo "🔧 Compiling missing dependency: $src"
-            if ! build_compile_to_object "$src" "$temp_obj" "$includes" "$base_warnings" "$base_flags" "false"; then
-                echo "❌ Failed to compile dependency: $src"
-                return 1
-            fi
-            object_files="$object_files $temp_obj"
-        fi
-    done
-    
-    # Add additional objects
-    if [ -n "$additional_objects" ]; then
-        object_files="$object_files $additional_objects"
-    fi
-    
-    # Deduplicate object files to prevent linking errors
-    local deduplicated_objects=""
-    for obj in $object_files; do
-        if [[ "$deduplicated_objects" != *"$obj"* ]]; then
-            deduplicated_objects="$deduplicated_objects $obj"
-        fi
-    done
-    object_files=$(echo "$deduplicated_objects" | sed 's/^ *//')
-
-    # STEP 4: Link using SAME process as main build
-    echo "🔧 Step 3: Linking executable"
-    local force_cxx="false"
-    if is_cpp_file "$final_source" || [[ "$object_files" == *".cpp"* ]]; then
-        force_cxx="true"
-    fi
-    
-    if ! build_link_executable "$final_binary" "$object_files" "" "$libs_and_links" "" "$force_cxx"; then
+    # STEP 2: Use unified linking function
+    echo "🔧 Step 2: Linking executable using unified build functions"
+    if ! unified_link_objects "$final_binary" "$object_files" "$library_names" "$repo_root/build_lambda_config.json"; then
         echo "❌ Failed to link executable: $final_binary"
         return 1
     fi

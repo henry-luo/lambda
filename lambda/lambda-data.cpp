@@ -457,7 +457,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             case LMD_TYPE_ANY: { // a special case
                 Item item = va_arg(args, Item);
                 printf("set field of ANY type to: %d\n", item.type_id);
-                TypedItem titem = {.type_id = item.type_id, .pointer = item.raw_pointer};
+                TypedItem titem = {.type_id = static_cast<TypeId>(item.type_id), .pointer = item.raw_pointer};
                 switch (item.type_id) {
                 // case LMD_TYPE_NULL: ; // no extra work
                 case LMD_TYPE_BOOL:

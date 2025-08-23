@@ -960,7 +960,7 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
     case SYM_SYMBOL:  case SYM_STRING: {
         int start_byte = ts_node_start_byte(key_node) + 1; // skip the first quote
         int end_byte = ts_node_end_byte(key_node) - 1; // skip the last quote
-        return (StrView){.str = tp->source + start_byte, .length = end_byte - start_byte};
+        return (StrView){.str = tp->source + start_byte, .length = static_cast<size_t>(end_byte - start_byte)};
     }
     case SYM_IDENT: {
         return (StrView)ts_node_source(tp, key_node);
