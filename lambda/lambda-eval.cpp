@@ -1,7 +1,17 @@
 #include "transpiler.hpp"
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
+
+// Define Unicode support levels to match the existing flag system
+#ifdef LAMBDA_UTF8PROC_SUPPORT
+#define LAMBDA_UNICODE_LEVEL 2
+#define LAMBDA_UNICODE_UTF8PROC 2
+#define LAMBDA_UNICODE_COMPACT 1
 #include "utf_string.h"
+#else
+#define LAMBDA_UNICODE_LEVEL 0
+#define LAMBDA_UNICODE_UTF8PROC 2
+#define LAMBDA_UNICODE_COMPACT 1
 #endif
+
 #include <stdarg.h>
 #include <time.h>
 #include <cstdlib>  // for abs function
@@ -1554,7 +1564,7 @@ CompResult equal_comp(Item a_item, Item b_item) {
         return (a_item.bool_val == b_item.bool_val) ? COMP_TRUE : COMP_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT) {
-        return (a_item.long_val == b_item.long_val) ? COMP_TRUE : COMP_FALSE;
+        return (a_item.int_val == b_item.int_val) ? COMP_TRUE : COMP_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
         return (*(long*)a_item.pointer == *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
@@ -1585,15 +1595,15 @@ Item fn_eq(Item a_item, Item b_item) {
 #else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.long_val == b_item.long_val)};
+        return {.item = b2it(a_item.int_val == b_item.int_val)};
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
         return {.item = b2it(*(double*)a_item.pointer == *(double*)b_item.pointer)};
     }
     else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
              (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.long_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.long_val : *(double*)b_item.pointer;
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val == b_val)};
     }
     else if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
@@ -1621,15 +1631,15 @@ Item fn_ne(Item a_item, Item b_item) {
 #else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.long_val != b_item.long_val)};
+        return {.item = b2it(a_item.int_val != b_item.int_val)};
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
         return {.item = b2it(*(double*)a_item.pointer != *(double*)b_item.pointer)};
     }
     else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
              (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.long_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.long_val : *(double*)b_item.pointer;
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val != b_val)};
     }
     else if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
@@ -1657,17 +1667,15 @@ Item fn_lt(Item a_item, Item b_item) {
 #else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
-        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
-        return {.item = b2it(a_val < b_val)};
+        return {.item = b2it(a_item.int_val < b_item.int_val)};
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
         return {.item = b2it(*(double*)a_item.pointer < *(double*)b_item.pointer)};
     }
     else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
              (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val < b_val)};
     }
     // Error for non-numeric types - relational comparisons not supported
@@ -1693,17 +1701,15 @@ Item fn_gt(Item a_item, Item b_item) {
 #else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
-        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
-        return {.item = b2it(a_val > b_val)};
+        return {.item = b2it(a_item.int_val > b_item.int_val)};
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
         return {.item = b2it(*(double*)a_item.pointer > *(double*)b_item.pointer)};
     }
     else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
              (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val > b_val)};
     }
     // Error for non-numeric types - relational comparisons not supported
@@ -1729,17 +1735,15 @@ Item fn_le(Item a_item, Item b_item) {
 #else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
-        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
-        return {.item = b2it(a_val <= b_val)};
+        return {.item = b2it(a_item.int_val <= b_item.int_val)};
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
         return {.item = b2it(*(double*)a_item.pointer <= *(double*)b_item.pointer)};
     }
     else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
              (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val <= b_val)};
     }
     // Error for non-numeric types - relational comparisons not supported
@@ -1765,17 +1769,15 @@ Item fn_ge(Item a_item, Item b_item) {
 #else
     // Fast path for numeric types
     if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        long a_val = (long)((int64_t)(a_item.long_val << 8) >> 8);
-        long b_val = (long)((int64_t)(b_item.long_val << 8) >> 8);
-        return {.item = b2it(a_val >= b_val)};
+        return {.item = b2it(a_item.int_val >= b_item.int_val)};
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
         return {.item = b2it(*(double*)a_item.pointer >= *(double*)b_item.pointer)};
     }
     else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
              (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(a_item.long_val << 8) >> 8)) : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)((long)((int64_t)(b_item.long_val << 8) >> 8)) : *(double*)b_item.pointer;
+        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
+        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
         return {.item = b2it(a_val >= b_val)};
     }
     // Error for non-numeric types - relational comparisons not supported
