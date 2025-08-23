@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlog.h>
 #include "mir.h"
 #include "mir-gen.h"
 #include "c2mir.h"
