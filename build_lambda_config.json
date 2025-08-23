@@ -421,7 +421,7 @@
                 "name": "🧪 Lambda Standard Tests",
                 "sources": ["test/lambda_test_runner.cpp"],
                 "library_dependencies": [
-                    ["lambda-test-runtime"]
+                    ["lambda-runtime-full"]
                 ],
                 "binaries": ["test/lambda_test_runner.exe"],
                 "type": "lambda-std",
