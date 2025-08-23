@@ -270,7 +270,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 print_item(strbuf, *(Item*)data, depth + 1);
                 break;
             case LMD_TYPE_ANY:
-                print_item(strbuf, typeditem_to_item((TypedItem*)data), depth + 1);
+                print_typeditem(strbuf, (TypedItem*)data, depth + 1);
                 break;
             default:
                 strbuf_append_format(strbuf, "unknown");
@@ -280,6 +280,83 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
+    }
+}
+
+void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth) {
+    if (depth > MAX_DEPTH) { 
+        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  
+        return; 
+    }
+    if (!titem) { 
+        strbuf_append_str(strbuf, "null"); 
+        return; 
+    }
+
+    switch (titem->type_id) {
+    case LMD_TYPE_NULL:
+        strbuf_append_str(strbuf, "null");
+        break;
+    case LMD_TYPE_BOOL:
+        strbuf_append_str(strbuf, titem->bool_val ? "true" : "false");
+        break;
+    case LMD_TYPE_INT:
+        strbuf_append_format(strbuf, "%d", titem->int_val);
+        break;
+    case LMD_TYPE_INT64:
+        strbuf_append_format(strbuf, "%ld", titem->long_val);
+        break;
+    case LMD_TYPE_FLOAT:
+        strbuf_append_format(strbuf, "%.6g", titem->double_val);
+        break;
+    case LMD_TYPE_DTIME:
+        strbuf_append_format(strbuf, "%ld", titem->datetime_val);
+        break;
+    case LMD_TYPE_DECIMAL:
+        if (titem->decimal && titem->decimal->dec_val) {
+            char *decimal_str = mpd_to_sci(titem->decimal->dec_val, 1);
+            if (decimal_str) {
+                strbuf_append_str(strbuf, decimal_str);
+                mpd_free(decimal_str);
+            } else {
+                strbuf_append_str(strbuf, "0");
+            }
+        } else {
+            strbuf_append_str(strbuf, "0");
+        }
+        break;
+    case LMD_TYPE_STRING:
+        if (titem->string && titem->string->chars) {
+            strbuf_append_format(strbuf, "\"%s\"", titem->string->chars);
+        } else {
+            strbuf_append_str(strbuf, "\"\"");
+        }
+        break;
+    case LMD_TYPE_SYMBOL:
+        if (titem->string && titem->string->chars) {
+            strbuf_append_str(strbuf, titem->string->chars);
+        } else {
+            strbuf_append_str(strbuf, "");
+        }
+        break;
+    case LMD_TYPE_BINARY:
+        if (titem->string && titem->string->chars) {
+            strbuf_append_format(strbuf, "0x%s", titem->string->chars);
+        } else {
+            strbuf_append_str(strbuf, "0x");
+        }
+        break;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+        // For complex types, create a temporary Item and use existing print_item logic
+        {
+            Item temp_item = {.raw_pointer = titem->pointer};
+            print_item(strbuf, temp_item, depth + 1);
+        }
+        break;
+    default:
+        strbuf_append_format(strbuf, "unknown_type_%d", titem->type_id);
+        break;
     }
 }
 
