@@ -220,8 +220,13 @@ run_test_with_timeout() {
             timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" --verbose
             local exit_code=$?
         else
-            timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" >/dev/null 2>&1
+            timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" > /dev/null 2>&1
             local exit_code=$?
+        fi
+        
+        # Generate CSV report from JSON output using C++ generator
+        if [ -f "$json_file" ] && [ -f "test/csv_generator.exe" ]; then
+            "./test/csv_generator.exe" "$json_file" "$TEST_OUTPUT_DIR/${base_name}_results.csv" > /dev/null 2>&1 || echo "Warning: CSV generation failed" >&2
         fi
     else
         # Standard Criterion-based tests
