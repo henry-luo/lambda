@@ -116,6 +116,9 @@ get_test_suite_category() {
         # Lambda suite tests
         "test_lambda")
             echo "lambda" ;;
+        # Lambda Standard Tests (Custom Test Runner)
+        "lambda_test_runner")
+            echo "lambda-std" ;;
         # Validator suite tests
         "test_validator")
             echo "validator" ;;
@@ -132,6 +135,7 @@ get_suite_category_display_name() {
         "input") echo "📄 Input Processing Tests" ;;
         "mir") echo "⚡ MIR JIT Tests" ;;
         "lambda") echo "🐑 Lambda Runtime Tests" ;;
+        "lambda-std") echo "🧪 Lambda Standard Tests" ;;
         "validator") echo "🔍 Validator Tests" ;;
         "unknown") echo "🧪 Other Tests" ;;
         *) echo "🧪 $category Tests" ;;
@@ -155,6 +159,7 @@ get_c_test_display_name() {
         "test_url") echo "🔗 URL Tests" ;;
         "test_validator") echo "🔍 Validator Tests" ;;
         "test_variable_pool") echo "🏊 Variable Pool Tests" ;;
+        "lambda_test_runner") echo "🧪 Lambda Standard Tests" ;;
         *) echo "🧪 $exe_name" ;;
     esac
 }
@@ -208,15 +213,27 @@ run_test_with_timeout() {
     
     echo "📋 Running $base_name..." >&2
     
-    # Run test with timeout
-    if [ "$RAW_OUTPUT" = true ]; then
-        # Raw mode: show output directly without JSON redirect
-        timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file"
-        local exit_code=$?
+    # Handle custom test runner differently
+    if [ "$base_name" = "lambda_test_runner" ]; then
+        # Custom Lambda Test Runner - use its own output format
+        if [ "$RAW_OUTPUT" = true ]; then
+            timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" --verbose
+            local exit_code=$?
+        else
+            timeout "$TIMEOUT_DURATION" "./$test_exe" --test-dir test/std --format both --json-output "$json_file" --tap-output "$TEST_OUTPUT_DIR/${base_name}_results.tap" >/dev/null 2>&1
+            local exit_code=$?
+        fi
     else
-        # Normal mode: capture output for processing
-        timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file" >/dev/null 2>&1
-        local exit_code=$?
+        # Standard Criterion-based tests
+        if [ "$RAW_OUTPUT" = true ]; then
+            # Raw mode: show output directly without JSON redirect
+            timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file"
+            local exit_code=$?
+        else
+            # Normal mode: capture output for processing
+            timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file" >/dev/null 2>&1
+            local exit_code=$?
+        fi
     fi
     
     if [ $exit_code -eq 0 ]; then
@@ -246,14 +263,22 @@ run_test_with_timeout() {
 # Function to parse JSON results and extract counts
 parse_json_results() {
     local json_file="$1"
+    local base_name="$(basename "$json_file" _results.json)"
     
     if [ ! -f "$json_file" ]; then
         return 1
     fi
     
-    # Extract counts using jq
-    local passed=$(jq -r '.passed // 0' "$json_file" 2>/dev/null || echo "0")
-    local failed=$(jq -r '.failed // 0' "$json_file" 2>/dev/null || echo "0")
+    # Handle different JSON formats
+    if [ "$base_name" = "lambda_test_runner" ]; then
+        # Custom Lambda Test Runner JSON format
+        local passed=$(jq -r '.summary.passed // 0' "$json_file" 2>/dev/null || echo "0")
+        local failed=$(jq -r '.summary.failed // 0' "$json_file" 2>/dev/null || echo "0")
+    else
+        # Standard Criterion JSON format
+        local passed=$(jq -r '.passed // 0' "$json_file" 2>/dev/null || echo "0")
+        local failed=$(jq -r '.failed // 0' "$json_file" 2>/dev/null || echo "0")
+    fi
     
     echo "$passed $failed"
 }
@@ -366,13 +391,20 @@ run_single_test() {
 # Function to extract failed test names
 extract_failed_test_names() {
     local json_file="$1"
+    local base_name="$(basename "$json_file" _results.json)"
     
     if [ ! -f "$json_file" ]; then
         return
     fi
     
-    # Extract failed test names using jq - handle Criterion JSON structure
-    jq -r '.test_suites[]?.tests[]? | select(.status == "FAILED") | .name' "$json_file" 2>/dev/null || true
+    # Handle different JSON formats for failed test extraction
+    if [ "$base_name" = "lambda_test_runner" ]; then
+        # Custom Lambda Test Runner JSON format
+        jq -r '.tests[]? | select(.passed == false) | .name' "$json_file" 2>/dev/null || true
+    else
+        # Standard Criterion JSON format
+        jq -r '.test_suites[]?.tests[]? | select(.status == "FAILED") | .name' "$json_file" 2>/dev/null || true
+    fi
 }
 
 echo "🔍 Finding test executables and sources..."
@@ -380,13 +412,27 @@ echo "🔍 Finding test executables and sources..."
 # Find existing executables
 test_executables=($(find test -name "test_*.exe" -type f 2>/dev/null | sort))
 
+# Add custom test runner executable
+if [ -f "test/lambda_test_runner.exe" ] || [ -f "test/lambda_test_runner.cpp" ]; then
+    test_executables+=("test/lambda_test_runner.exe")
+fi
+
 # Also find source files that might need compilation
 test_sources=($(find test -name "test_*.c" -type f 2>/dev/null | sort))
+
+# Add custom test runner source
+if [ -f "test/lambda_test_runner.cpp" ]; then
+    test_sources+=("test/lambda_test_runner.cpp")
+fi
 
 # Create a list of expected executables from source files
 expected_executables=()
 for source_file in "${test_sources[@]}"; do
-    base_name=$(basename "$source_file" .c)
+    if [[ "$source_file" == *.cpp ]]; then
+        base_name=$(basename "$source_file" .cpp)
+    else
+        base_name=$(basename "$source_file" .c)
+    fi
     exe_file="test/${base_name}.exe"
     expected_executables+=("$exe_file")
 done
@@ -416,7 +462,7 @@ if [ -n "$TARGET_SUITE" ]; then
     
     if [ ${#test_executables[@]} -eq 0 ]; then
         echo "❌ No test executables found for target suite: $TARGET_SUITE"
-        echo "   Available suites: library, input, mir, lambda, validator"
+        echo "   Available suites: library, input, mir, lambda, lambda-std, validator"
         exit 1
     fi
 fi
@@ -655,7 +701,7 @@ echo "=============================================================="
 echo "📊 Test Results:"
 
 # Show tests in tree structure grouped by suite category
-for suite_cat in library input mir lambda validator unknown; do
+for suite_cat in library input mir lambda lambda-std validator unknown; do
     suite_display=$(get_suite_category_display_name "$suite_cat")
     suite_has_tests=false
     suite_total=0
