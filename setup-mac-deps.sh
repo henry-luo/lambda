@@ -66,6 +66,31 @@ check_tool "make" "xcode-select --install" || exit 1
 check_tool "gcc" "xcode-select --install" || exit 1
 check_tool "git" "xcode-select --install" || exit 1
 
+# Check for Node.js and npm (needed for tree-sitter CLI via npx)
+if ! command -v node >/dev/null 2>&1; then
+    echo "Installing Node.js..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install node
+    else
+        echo "Error: Node.js is required for tree-sitter CLI. Install it manually or install Homebrew first."
+        echo "Download from: https://nodejs.org/"
+        exit 1
+    fi
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+    echo "Error: npm is required for tree-sitter CLI but not found with Node.js installation."
+    exit 1
+fi
+
+# Verify npx can access tree-sitter CLI
+echo "Verifying tree-sitter CLI access via npx..."
+if npx tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
+    echo "Tree-sitter CLI 0.24.7 accessible via npx"
+else
+    echo "Warning: tree-sitter CLI may need to be downloaded on first use"
+fi
+
 # Check for cmake (needed for some dependencies)
 if ! command -v cmake >/dev/null 2>&1; then
     echo "Installing cmake..."
@@ -302,9 +327,10 @@ build_mir_for_mac() {
 
 echo "Found native compiler: $(which gcc)"
 
-# Build tree-sitter for Mac
+# Build tree-sitter library for Mac
+# Note: tree-sitter CLI is not installed globally - it's used via npx in Makefile
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
-    echo "Building tree-sitter for Mac..."
+    echo "Building tree-sitter library for Mac..."
     cd lambda/tree-sitter
     
     # Clean previous builds
@@ -314,9 +340,9 @@ if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
     make libtree-sitter.a
     
     cd - > /dev/null
-    echo "Tree-sitter built successfully"
+    echo "Tree-sitter library built successfully"
 else
-    echo "Tree-sitter already built for Mac"
+    echo "Tree-sitter library already built for Mac"
 fi
 
 # Build tree-sitter-lambda for Mac

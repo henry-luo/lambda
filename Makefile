@@ -70,15 +70,13 @@ UPDATE_TS_ENUM_SCRIPT = ./update_ts_enum.sh
 # Auto-generate parser and ts-enum.h when grammar.js changes
 $(TS_ENUM_H): $(GRAMMAR_JS)
 	@echo "Grammar changed, regenerating parser and ts-enum.h..."
-	@command -v tree-sitter >/dev/null 2>&1 || { echo "Error: tree-sitter CLI not found. Install with: npm install -g tree-sitter-cli"; exit 1; }
-	cd lambda/tree-sitter-lambda && tree-sitter generate
+	@cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate
 	$(UPDATE_TS_ENUM_SCRIPT)
 	@echo "Updated ts-enum.h from grammar changes"
 
 $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 	@echo "Generating parser from grammar.js..."
-	@command -v tree-sitter >/dev/null 2>&1 || { echo "Error: tree-sitter CLI not found. Install with: npm install -g tree-sitter-cli"; exit 1; }
-	cd lambda/tree-sitter-lambda && tree-sitter generate
+	@cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate
 
 # Tree-sitter library targets
 TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
