@@ -705,7 +705,9 @@ build_link_objects() {
         echo "Flags: $link_flags"
     fi
     
-    local link_result=$($linker $unique_objects $link_libraries $link_flags -o "$output_file" 2>&1)
+    # Execute linking with proper error handling
+    local link_result
+    link_result=$($linker $unique_objects $link_libraries $link_flags -o "$output_file" 2>&1)
     local link_status=$?
     
     if [ -n "$link_result" ]; then
