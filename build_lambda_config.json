@@ -2,36 +2,10 @@
     "compiler": "clang",
     "output": "lambda.exe",
     "source_dirs":[
-    ],
-    "_source_dirs": [
         "lambda/input",
         "lambda/format"
     ],
     "source_files": [
-        "lambda/input/input.cpp",
-        "lambda/input/input-json.cpp",
-        "lambda/input/input-ini.cpp",
-        "lambda/input/input-xml.cpp",
-        "lambda/input/input-yaml.cpp",
-        "lambda/input/input-toml.cpp",
-        "lambda/input/input-common.cpp",
-        "lambda/input/input-css.cpp",
-        "lambda/input/input-csv.cpp",
-        "lambda/input/input-eml.cpp",
-        "lambda/input/input-html.cpp",
-        "lambda/input/input-ics.cpp",
-        "lambda/input/input-latex.cpp",
-        "lambda/input/input-man.cpp",
-        "lambda/input/input-vcf.cpp",
-        "lambda/input/input-mark.cpp",
-        "lambda/input/input-org.cpp",
-        "lambda/input/input-math.cpp",
-        "lambda/input/input-math-ascii.cpp",
-        "lambda/input/input-rtf.cpp",
-        "lambda/input/input-pdf.cpp",
-        "lambda/input/input-markup.cpp",
-        "lambda/input/mime-detect.c",
-        "lambda/input/mime-types.c",
         "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
         "lib/strbuf.c",
@@ -58,19 +32,6 @@
         "lambda/mir.c",
         "lambda/pack.cpp",
         "lambda/print.cpp",
-        "lambda/format/format.cpp",
-        "lambda/format/format-css.cpp",
-        "lambda/format/format-latex.cpp",
-        "lambda/format/format-html.cpp",
-        "lambda/format/format-ini.cpp",
-        "lambda/format/format-json.cpp",
-        "lambda/format/format-math.cpp",
-        "lambda/format/format-md.cpp",
-        "lambda/format/format-org.cpp",
-        "lambda/format/format-rst.cpp",
-        "lambda/format/format-toml.cpp",
-        "lambda/format/format-xml.cpp",
-        "lambda/format/format-yaml.cpp",
         "lambda/lambda-eval.cpp",
         "lambda/utf_string.cpp",
         "lambda/lambda-mem.cpp",
@@ -350,25 +311,6 @@
     "test": {
         "test_suites": [
             {
-                "suite": "validator",
-                "name": "🔍 Validator Tests",
-                "sources": ["test/test_validator.cpp"],
-                "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
-                ],
-                "binaries": ["test/test_validator.exe"],
-                "type": "validator",
-                "special_flags": "-std=c++17 -lstdc++",
-                "uses_build_config": true,
-                "environment": {
-                    "TEST_DIR_PATH": "$PWD/test/lambda/validator",
-                    "LAMBDA_EXE_PATH": "$PWD/lambda.exe"
-                },
-                "requires_lambda_exe": true,
-                "parallel": false,
-                "compiler": "clang++"
-            },
-            {
                 "suite": "library",
                 "name": "📚 Library Tests",
                 "sources": [
@@ -387,7 +329,8 @@
                     ["lambda-lib", "criterion"],
                     ["lambda-lib", "criterion"],
                     ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"]
+                    ["lambda-lib", "criterion"],
+                    "one for each of the test executable"
                 ],
                 "binaries": [
                     "test_strbuf.exe",
@@ -413,7 +356,8 @@
                 "library_dependencies": [
                     ["lambda-input-full", "criterion"],
                     ["lambda-input-full", "criterion"],
-                    ["lambda-input-full", "criterion"]
+                    ["lambda-input-full", "criterion"],
+                    "one for each of the test executable"
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
@@ -425,6 +369,25 @@
                 "cpp_flags": "-std=c++17",
                 "parallel": true
             },
+            {
+                "suite": "validator",
+                "name": "🔍 Validator Tests",
+                "sources": ["test/test_validator.cpp"],
+                "library_dependencies": [
+                    ["lambda-runtime-full", "criterion"]
+                ],
+                "binaries": ["test/test_validator.exe"],
+                "type": "validator",
+                "special_flags": "-std=c++17 -lstdc++",
+                "uses_build_config": true,
+                "environment": {
+                    "TEST_DIR_PATH": "$PWD/test/lambda/validator",
+                    "LAMBDA_EXE_PATH": "$PWD/lambda.exe"
+                },
+                "requires_lambda_exe": true,
+                "parallel": false,
+                "compiler": "clang++"
+            },            
             {
                 "suite": "mir",
                 "name": "⚡ MIR JIT Tests",
