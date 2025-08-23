@@ -1,16 +1,10 @@
 #include "transpiler.hpp"
 
-// Define Unicode support levels to match the existing flag system
-#ifdef LAMBDA_UTF8PROC_SUPPORT
+// Always enable Unicode support with utf8proc
 #define LAMBDA_UNICODE_LEVEL 2
 #define LAMBDA_UNICODE_UTF8PROC 2
 #define LAMBDA_UNICODE_COMPACT 1
 #include "utf_string.h"
-#else
-#define LAMBDA_UNICODE_LEVEL 0
-#define LAMBDA_UNICODE_UTF8PROC 2
-#define LAMBDA_UNICODE_COMPACT 1
-#endif
 
 #include <stdarg.h>
 #include <time.h>
@@ -1658,139 +1652,33 @@ Item fn_ne(Item a_item, Item b_item) {
 }
 
 Item fn_lt(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced less-than comparison (supports string comparison)
-    return fn_lt_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced less-than comparison (deprecated)
-    return fn_lt_unicode(a_item, b_item);
-#else
-    // Fast path for numeric types
-    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.int_val < b_item.int_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
-        return {.item = b2it(*(double*)a_item.pointer < *(double*)b_item.pointer)};
-    }
-    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
-             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
-        return {.item = b2it(a_val < b_val)};
-    }
-    // Error for non-numeric types - relational comparisons not supported
-    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
-        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
-        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        printf("less than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
+    // Always use utf8proc Unicode-enhanced less-than comparison (supports string comparison)
+    CompResult result = less_comp_unicode(a_item, b_item);
+    if (result == COMP_ERROR) {
         return ItemError;
     }
-    // Fallback error for any other type combination
-    printf("less than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-    return ItemError;
-#endif
+    return {.item = b2it(result == COMP_TRUE)};
 }
 
 Item fn_gt(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced greater-than comparison (supports string comparison)
-    return fn_gt_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced greater-than comparison (deprecated)
-    return fn_gt_unicode(a_item, b_item);
-#else
-    // Fast path for numeric types
-    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.int_val > b_item.int_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
-        return {.item = b2it(*(double*)a_item.pointer > *(double*)b_item.pointer)};
-    }
-    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
-             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
-        return {.item = b2it(a_val > b_val)};
-    }
-    // Error for non-numeric types - relational comparisons not supported
-    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
-        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
-        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        printf("greater than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    // Fallback error for any other type combination
-    printf("greater than not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-    return ItemError;
-#endif
+    // Always use utf8proc Unicode-enhanced greater-than comparison (supports string comparison)
+    CompResult result = greater_comp_unicode(a_item, b_item);
+    if (result == COMP_ERROR) return ItemError;
+    return {.item = b2it(result == COMP_TRUE)};
 }
 
 Item fn_le(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced less-than-or-equal comparison (supports string comparison)
-    return fn_le_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced less-than-or-equal comparison (deprecated)
-    return fn_le_unicode(a_item, b_item);
-#else
-    // Fast path for numeric types
-    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.int_val <= b_item.int_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
-        return {.item = b2it(*(double*)a_item.pointer <= *(double*)b_item.pointer)};
-    }
-    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
-             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
-        return {.item = b2it(a_val <= b_val)};
-    }
-    // Error for non-numeric types - relational comparisons not supported
-    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
-        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
-        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        printf("less than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    // Fallback error for any other type combination
-    printf("less than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-    return ItemError;
-#endif
+    // Always use utf8proc Unicode-enhanced less-than-or-equal comparison (supports string comparison)
+    CompResult result = less_equal_comp_unicode(a_item, b_item);
+    if (result == COMP_ERROR) return ItemError;
+    return {.item = b2it(result == COMP_TRUE)};
 }
 
 Item fn_ge(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced greater-than-or-equal comparison (supports string comparison)
-    return fn_ge_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced greater-than-or-equal comparison (deprecated)
-    return fn_ge_unicode(a_item, b_item);
-#else
-    // Fast path for numeric types
-    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.int_val >= b_item.int_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
-        return {.item = b2it(*(double*)a_item.pointer >= *(double*)b_item.pointer)};
-    }
-    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
-             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
-        return {.item = b2it(a_val >= b_val)};
-    }
-    // Error for non-numeric types - relational comparisons not supported
-    if (a_item.type_id == LMD_TYPE_BOOL || b_item.type_id == LMD_TYPE_BOOL ||
-        a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING ||
-        a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        printf("greater than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    // Fallback error for any other type combination
-    printf("greater than or equal not supported for types: %d, %d\n", a_item.type_id, b_item.type_id);
-    return ItemError;
-#endif
+    // Always use utf8proc Unicode-enhanced greater-than-or-equal comparison (supports string comparison)
+    CompResult result = greater_equal_comp_unicode(a_item, b_item);
+    if (result == COMP_ERROR) return ItemError;
+    return {.item = b2it(result == COMP_TRUE)};
 }
 
 Item fn_not(Item item) {

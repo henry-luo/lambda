@@ -1790,7 +1790,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
-    printf("transpile call expr\n");
+    // printf("transpile call expr\n");
     // Defensive validation: ensure all required pointers and components are valid
     if (!call_node) {
         printf("Error: transpile_call_expr called with null call node\n");
@@ -2382,7 +2382,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
 void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
-    printf("define_ast_node...\n");
+    // printf("define_ast_node...\n");
     strbuf_append_str(tp->code_buf, "\n\nContext *rt;\n");  // defines global runtime context
     AstNode* child = script->child;
     while (child) {
@@ -2391,7 +2391,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     }    
 
     // global evaluation, wrapped inside main()
-    printf("transpile_ast_node...\n");
+    // printf("transpile_ast_node...\n");
     strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n return ");
     child = script->child;
     bool has_content = false;
