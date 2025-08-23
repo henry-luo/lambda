@@ -293,7 +293,7 @@ distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup finished."
 
 # Development targets
-test: build
+test: build-test
 	@echo "Running comprehensive test suite..."
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh; \
@@ -327,7 +327,7 @@ test-parallel: build
 build-test: build
 	@echo "Building all test executables..."
 	@if [ -f "test/test_build.sh" ]; then \
-		./test/test_build.sh all; \
+		PARALLEL_JOBS=$(NPROCS) ./test/test_build.sh all; \
 	else \
 		echo "Error: test_build.sh not found"; \
 		exit 1; \
