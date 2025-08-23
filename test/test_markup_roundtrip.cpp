@@ -73,7 +73,7 @@ Test(markup_roundtrip, simple_test, .disabled = true) {
     cr_assert(strstr(formatted->chars, "{") != NULL, "JSON should contain object structure");
     
     // Print with length limit to avoid hanging
-    printf("Simple test - JSON formatted (length %zu chars):\n", formatted->len);
+    printf("Simple test - JSON formatted (length %zu chars):\n", (size_t)formatted->len);
     if (formatted->chars && formatted->len > 0) {
         size_t print_len = formatted->len > 200 ? 200 : formatted->len;
         printf("%.200s", formatted->chars);
@@ -115,7 +115,7 @@ Test(markup_roundtrip, empty_test, .disabled = true) {
     cr_assert_not_null(formatted, "Should format empty content to JSON");
     
     printf("Empty test - JSON formatted: '%s' (length: %zu)\n", 
-           formatted->chars ? formatted->chars : "(null)", formatted->len);
+           formatted->chars ? formatted->chars : "(null)", (size_t)formatted->len);
     
     // Cleanup
     free(content_copy);
@@ -159,7 +159,7 @@ static bool test_debug_content(const char* content, const char* test_name) {
         return false;
     }
     
-    printf("SUCCESS: %s completed (formatted length: %zu)\n", test_name, formatted->len);
+    printf("SUCCESS: %s completed (formatted length: %zu)\n", test_name, (size_t)formatted->len);
     printf("Formatted content (first 150 chars): %.150s\n", 
            formatted->chars ? formatted->chars : "(null)");
     if (formatted->len > 150) {
@@ -203,7 +203,7 @@ Test(markup_roundtrip, complete_test, .disabled = true) {
     String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
     cr_assert_not_null(formatted, "Failed to format to Markdown");
     cr_assert(formatted->len > 0, "Formatted Markdown should not be empty");
-    printf("Formatted content (length %zu): %s\n", formatted->len, formatted->chars ? formatted->chars : "(null)");
+    printf("Formatted content (length %zu): %s\n", (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
 
     // Cleanup
     free(comprehensive_content);
@@ -239,7 +239,7 @@ Test(markup_roundtrip, emoji_test, .disabled = true) {
     String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
     cr_assert_not_null(formatted, "Failed to format emoji content to Markdown");
     cr_assert(formatted->len > 0, "Formatted emoji Markdown should not be empty");
-    printf("Formatted emoji content (length %zu): %s\n", formatted->len, formatted->chars ? formatted->chars : "(null)");
+    printf("Formatted emoji content (length %zu): %s\n", (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
 
     // Cleanup
     free(emoji_content);
@@ -280,7 +280,7 @@ Test(markup_roundtrip, comprehensive_math_test, .disabled = true) {
     String* formatted = format_data(input->root, markdown_type, flavor_str, input->pool);
     cr_assert_not_null(formatted, "Failed to format math content to Markdown");
     cr_assert(formatted->len > 0, "Formatted math Markdown should not be empty");
-    printf("Formatted math content (length %zu): %s\n", formatted->len, formatted->chars ? formatted->chars : "(null)");
+    printf("Formatted math content (length %zu): %s\n", (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
 
     // Cleanup
     free(math_content);
@@ -327,7 +327,7 @@ Test(markup_roundtrip, rst_directives_test, .disabled = true) {
     cr_assert_not_null(formatted, "Failed to format RST content to JSON");
     cr_assert(formatted->len > 0, "Formatted RST JSON should not be empty");
     printf("RST JSON structure (length %zu, first 200 chars): %.200s\n", 
-           formatted->len, formatted->chars ? formatted->chars : "(null)");
+           (size_t)formatted->len, formatted->chars ? formatted->chars : "(null)");
     
     // Check that RST-specific elements are present
     if (formatted->chars) {

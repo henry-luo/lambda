@@ -236,6 +236,44 @@
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "inline"
+        },
+        {
+            "name": "lambda-test-minimal",
+            "description": "Minimal runtime for basic library tests",
+            "libraries": ["strbuf", "strview", "mem-pool"],
+            "include": "lib/mem-pool/include",
+            "link": "inline"
+        },
+        {
+            "name": "lambda-test-extended",
+            "description": "Extended runtime with additional utilities for comprehensive tests",
+            "libraries": ["lambda-test-minimal", "datetime", "string", "num_stack", "url"],
+            "include": "lib/mem-pool/include",
+            "link": "inline"
+        },
+        {
+            "name": "lambda-test-input",
+            "description": "Input processing libraries for input/format tests",
+            "libraries": ["lambda-test-extended", "mime-detect"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "inline"
+        },
+        {
+            "name": "lambda-test-input-full",
+            "description": "Full input processing with runtime for complex input tests",
+            "libraries": ["lambda-input-format"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "inline"
+        },
+        {
+            "name": "lambda-test-runtime",
+            "description": "Full runtime for complex lambda and MIR tests",
+            "libraries": ["lambda-runtime-full"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "inline"
         }
     ],
     "warnings": [
@@ -244,7 +282,6 @@
         "multichar"
     ],
     "flags": [
-        "std=c++17",
         "fms-extensions",
         "pedantic",
         "fcolor-diagnostics",
@@ -334,7 +371,7 @@
                 "name": "🔍 Validator Tests",
                 "sources": ["test/test_validator.cpp"],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-test-runtime", "criterion"]
                 ],
                 "binaries": ["test/test_validator.exe"],
                 "type": "validator",
@@ -361,13 +398,13 @@
                     "test_url_extra.c"
                 ],
                 "library_dependencies": [
-                    ["strbuf", "mem-pool", "criterion"],
-                    ["strview", "criterion"],
-                    ["mem-pool", "criterion"],
-                    ["num_stack", "criterion"],
-                    ["datetime", "string", "strbuf", "strview", "mem-pool", "criterion"],
-                    ["url", "strbuf", "mem-pool", "criterion"],
-                    ["url", "strbuf", "mem-pool", "criterion"]
+                    ["lambda-test-minimal", "criterion"],
+                    ["lambda-test-minimal", "criterion"],
+                    ["lambda-test-minimal", "criterion"],
+                    ["lambda-test-extended", "criterion"],
+                    ["lambda-test-extended", "criterion"],
+                    ["lambda-test-extended", "criterion"],
+                    ["lambda-test-extended", "criterion"]
                 ],
                 "binaries": [
                     "test_strbuf.exe",
@@ -391,9 +428,9 @@
                     "test/test_markup_roundtrip.cpp"
                 ],
                 "library_dependencies": [
-                    ["mime-detect", "criterion"],
-                    ["lambda-input-format", "criterion"],
-                    ["lambda-input-format", "criterion"]
+                    ["lambda-test-input", "criterion"],
+                    ["lambda-test-input-full", "criterion"],
+                    ["lambda-test-input-full", "criterion"]
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
@@ -410,7 +447,7 @@
                 "name": "⚡ MIR JIT Tests",
                 "sources": ["test/test_mir.c"],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-test-runtime", "criterion"]
                 ],
                 "binaries": ["test/test_mir.exe"],
                 "type": "mir",
@@ -424,7 +461,7 @@
                 "name": "🐑 Lambda Runtime Tests",
                 "sources": ["test/test_lambda.c"],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-test-runtime", "criterion"]
                 ],
                 "binaries": ["test/test_lambda.exe"],
                 "type": "lambda",
