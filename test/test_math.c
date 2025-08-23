@@ -316,29 +316,48 @@ Test(math_roundtrip_tests, pure_math_roundtrip, .disabled = true) {
 bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_path, const char* test_description) {
     printf("=== %s ===\n", test_description ? test_description : "Markdown roundtrip test");
     
-    Url* current_dir = get_current_dir();
-    String* file_url_str = create_lambda_string(test_file_path);
-    String* type_str = create_lambda_string("markdown");
-    String* flavor_str = create_lambda_string("");
-
-    // Read original content for comparison
-    Url* input_url = parse_url(current_dir, test_file_path);
-    char* original_content = read_text_doc(input_url);
-    if (!original_content) {
-        printf("❌ Could not read %s\n", test_file_path);
+    // Get current working directory and build absolute path for file reading
+    char cwd_path[1024];
+    if (getcwd(cwd_path, sizeof(cwd_path)) == NULL) {
+        printf("❌ Could not get current directory\n");
         return false;
     }
-
+    
+    char abs_path[1200];
+    snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd_path, test_file_path);
+    printf("DEBUG: Absolute file path: %s\n", abs_path);
+    
+    // Read original content directly using absolute path
+    char* original_content = read_text_file(abs_path);
+    if (!original_content) {
+        printf("❌ Could not read %s\n", abs_path);
+        return false;
+    }
+    
     printf("Original content length: %zu\n", strlen(original_content));
-    printf("Original content:\n%s\n", original_content);
+    printf("Original content preview: %.100s%s\n", original_content, strlen(original_content) > 100 ? "..." : "");
 
-    // Parse the markdown content with math using input_from_url
-    Input* input = input_from_url(file_url_str, type_str, flavor_str, current_dir);
+    // Use exact same pattern as working test
+    String* type_str = create_lambda_string("markdown");
+    String* flavor_str = NULL;
+    
+    // Get current directory for URL resolution
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.md");
+    
+    // Make a mutable copy of the file content
+    char* md_copy = strdup(original_content);
+    
+    // Parse the input content (identical to working test)
+    printf("DEBUG: About to call input_from_source\n");
+    Input* input = input_from_source(md_copy, dummy_url, type_str, flavor_str);
+    printf("DEBUG: After input_from_url call\n");
     if (!input) {
-        printf("❌ Failed to parse markdown file: %s\n", test_file_path);
+        printf("❌ Failed to parse markdown file: %s\n", abs_path);
         free(original_content);
         return false;
     }
+    printf("DEBUG: Successfully parsed input\n");
     
     // Debug: Print AST structure
     printf("AST structure sample:\n");
@@ -390,16 +409,23 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
     
     // Cleanup
     free(original_content);
-    url_destroy(current_dir);
-    url_destroy(input_url);
+    free(md_copy);
     
     return length_ok;
 }
 
 // Test roundtrip for simple markdown with multiple math expressions  
+Test(math_roundtrip_tests, minimal_markdown_test) {
+    bool result = test_markdown_roundtrip(
+        "test/input/minimal_test.md", "./temp/minimal_debug.txt",
+        "Minimal markdown test without math"
+    );
+    cr_assert(result, "Minimal markdown test failed");
+}
+
 Test(math_roundtrip_tests, simple_markdown_roundtrip) {
     bool result = test_markdown_roundtrip(
-        "./test/input/simple_math_test.md", "./temp/simple_debug.txt",
+        "test/input/math_simple.md", "./temp/simple_debug.txt",
         "Simple markdown test with multiple math expressions"
     );
     cr_assert(result, "Simple markdown roundtrip test failed");
@@ -407,20 +433,11 @@ Test(math_roundtrip_tests, simple_markdown_roundtrip) {
 
 Test(math_roundtrip_tests, curated_markdown_roundtrip) {
     bool result = test_markdown_roundtrip(
-        "./test/input/simple_curated_math_test.md", "./temp/curated_debug.txt",
+        "test/input/comprehensive_math_test.md", "./temp/curated_debug.txt",
         "Curated markdown test with supported math expressions"
     );
     cr_assert(result, "Curated markdown roundtrip test failed");
 }
-
-// Test(math_roundtrip_tests, comprehensive_markdown_roundtrip) {
-//     printf("=== Comprehensive markdown test with curated math expressions ===\n");
-//     bool result = test_markdown_roundtrip(
-//         "./test/input/comprehensive_math_test.md", "./temp/comprehensive_debug.txt",
-//         "Comprehensive markdown test with curated math expressions"
-//     );
-//     cr_assert(result, "Comprehensive markdown roundtrip test failed");
-// }
 
 // Helper function implementations for new URL parser
 
