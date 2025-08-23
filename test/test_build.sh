@@ -28,38 +28,7 @@ else
     echo "Warning: build_utils.sh not found at $PROJECT_ROOT/utils/build_utils.sh"
 fi
 
-# Check prerequisites
-check_build_prerequisites() {
-    # Check if main build is completed
-    if [ ! -f "$PROJECT_ROOT/lambda.exe" ]; then
-        echo "Main build not found. Run 'make build' first." >&2
-        return 1
-    fi
-    
-    # Check if build directory exists with essential objects
-    if [ ! -d "$PROJECT_ROOT/build" ]; then
-        echo "Build directory not found. Run 'make build' first." >&2
-        return 1
-    fi
-    
-    # Check for essential object files
-    local essential_objects=(
-        "lambda-eval.o"
-        "lambda-mem.o"
-        "strbuf.o"
-        "hashmap.o"
-        "variable.o"
-    )
-    
-    for obj in "${essential_objects[@]}"; do
-        if [ ! -f "$PROJECT_ROOT/build/$obj" ]; then
-            echo "Essential object file 'build/$obj' not found. Run 'make build' first." >&2
-            return 1
-        fi
-    done
-    
-    return 0
-}
+# Prerequisites are ensured by Makefile dependency: build-test depends on build
 
 # Enhanced function to get configuration value with inheritance
 get_config() {
@@ -155,12 +124,6 @@ build_test_executable() {
     local source="$2" 
     local binary="$3"
     local test_index="$4"
-    
-    # Check build prerequisites
-    if ! check_build_prerequisites; then
-        echo "Build prerequisites check failed. Please run 'make build' first."
-        return 1
-    fi
     
     # Get library dependencies for this specific test
     local lib_deps_str=""
@@ -337,11 +300,6 @@ build_test() {
 build_all_tests() {
     echo "🔨 Enhanced Test Build System - Building all test executables..."
     echo ""
-    
-    if ! check_build_prerequisites; then
-        echo "❌ Build prerequisites not met"
-        return 1
-    fi
     
     if [ ! -f "$BUILD_CONFIG_FILE" ] || ! has_jq_support; then
         echo "❌ Missing build configuration or jq support"
