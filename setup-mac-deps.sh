@@ -164,69 +164,6 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
-# Function to build GMP for Mac
-build_gmp_for_mac() {
-    echo "Building GMP for Mac..."
-    
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.dylib" ]; then
-        echo "GMP already installed in system location"
-        return 0
-    fi
-    
-    # Try Homebrew first for easier installation
-    if command -v brew >/dev/null 2>&1; then
-        echo "Attempting to install GMP via Homebrew..."
-        if brew list gmp >/dev/null 2>&1; then
-            echo "GMP already installed via Homebrew"
-            return 0
-        else
-            echo "Installing GMP via Homebrew..."
-            if brew install gmp; then
-                echo "✅ GMP installed successfully via Homebrew"
-                return 0
-            else
-                echo "Homebrew installation failed, building from source..."
-            fi
-        fi
-    fi
-    
-    # Build from source if Homebrew is not available or failed
-    GMP_VERSION="6.3.0"
-    GMP_DIR="gmp-${GMP_VERSION}"
-    GMP_ARCHIVE="${GMP_DIR}.tar.xz"
-    GMP_URL="https://gmplib.org/download/gmp/${GMP_ARCHIVE}"
-    
-    download_extract "$GMP_DIR" "$GMP_URL" "$GMP_ARCHIVE"
-    
-    cd "build_temp/$GMP_DIR"
-    
-    echo "Configuring GMP..."
-    if ./configure \
-        --prefix="$SYSTEM_PREFIX" \
-        --enable-static \
-        --enable-shared \
-        --enable-cxx; then
-        
-        echo "Building GMP..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing GMP to system location (requires sudo)..."
-            sudo make install
-            
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ]; then
-                echo "✅ GMP library installed successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-    
-    echo "❌ GMP build failed"
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build lexbor for Mac
 build_lexbor_for_mac() {
     echo "Building lexbor for Mac..."
@@ -414,21 +351,6 @@ else
     fi
 fi
 
-# Build GMP for Mac  
-echo "Setting up GMP..."
-if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.dylib" ]; then
-    echo "GMP already available"
-elif command -v brew >/dev/null 2>&1 && brew list gmp >/dev/null 2>&1; then
-    echo "GMP already installed via Homebrew"
-else
-    if ! build_gmp_for_mac; then
-        echo "Warning: GMP build failed"
-        exit 1
-    else
-        echo "GMP built successfully"
-    fi
-fi
-
 # Build MIR for Mac
 echo "Setting up MIR..."
 if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
@@ -440,6 +362,57 @@ else
     else
         echo "MIR built successfully"
     fi
+fi
+
+# Install Homebrew dependencies that are required by build_lambda_config.json
+echo "Installing Homebrew dependencies..."
+
+# Required dependencies from build_lambda_config.json
+HOMEBREW_DEPS=(
+    "mpdecimal"  # For decimal arithmetic - referenced in build config
+    "utf8proc"   # For Unicode processing - referenced in build config  
+    "readline"   # For command line editing - referenced in build config
+    "criterion"  # For testing framework - referenced in build config
+    "coreutils"  # For timeout command needed by test suite
+)
+
+if command -v brew >/dev/null 2>&1; then
+    for dep in "${HOMEBREW_DEPS[@]}"; do
+        echo "Installing $dep..."
+        if brew list "$dep" >/dev/null 2>&1; then
+            echo "$dep already installed"
+        else
+            if brew install "$dep"; then
+                echo "✅ $dep installed successfully"
+            else
+                echo "❌ Failed to install $dep"
+                exit 1
+            fi
+        fi
+    done
+else
+    echo "❌ Homebrew not available - cannot install required dependencies"
+    exit 1
+fi
+
+# Set up timeout command for test suite
+echo "Setting up timeout command for test suite..."
+if command -v brew >/dev/null 2>&1; then
+    BREW_PREFIX=$(brew --prefix)
+    TIMEOUT_PATH="$BREW_PREFIX/bin/timeout"
+    GNU_TIMEOUT_PATH="$BREW_PREFIX/opt/coreutils/libexec/gnubin/timeout"
+    
+    if [ ! -f "$TIMEOUT_PATH" ] && [ -f "$GNU_TIMEOUT_PATH" ]; then
+        echo "Creating timeout symlink..."
+        ln -sf "$GNU_TIMEOUT_PATH" "$TIMEOUT_PATH"
+        echo "✅ timeout command linked successfully"
+    elif [ -f "$TIMEOUT_PATH" ]; then
+        echo "✅ timeout command already available"
+    else
+        echo "⚠️  Warning: timeout command not found, test suite may not work properly"
+    fi
+else
+    echo "⚠️  Warning: Cannot set up timeout command without Homebrew"
 fi
 
 # Clean up intermediate files
@@ -454,11 +427,14 @@ echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lam
 # Check system locations and Homebrew
 if command -v brew >/dev/null 2>&1; then
     BREW_PREFIX=$(brew --prefix)
-    echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.dylib" ] || [ -f "$BREW_PREFIX/lib/libgmp.a" ] || [ -f "$BREW_PREFIX/lib/libgmp.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$BREW_PREFIX/lib/liblexbor_static.a" ] || [ -f "$BREW_PREFIX/lib/liblexbor.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- mpdecimal: $([ -f "$BREW_PREFIX/lib/libmpdec.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- readline: $([ -f "$BREW_PREFIX/lib/libreadline.a" ] || [ -f "$BREW_PREFIX/lib/libreadline.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 else
-    echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- Homebrew not available for dependency checks"
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"

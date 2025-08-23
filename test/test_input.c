@@ -11,7 +11,7 @@
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
 #include "../lib/mem-pool/include/mem_pool.h"
-#include <lexbor/url/url.h>
+#include "../lib/url.h"
 
 // Include the Input struct definition (matching lambda-data.hpp)
 typedef struct Input {
@@ -24,12 +24,12 @@ typedef struct Input {
 } Input;
 
 // Forward declarations
-Input* input_from_source(char* source, lxb_url_t* abs_url, String* type, String* flavor);
-Input* input_from_url(String* url, String* type, String* flavor, lxb_url_t* cwd);
+Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
+Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-lxb_url_t* get_current_dir();
-lxb_url_t* parse_url(lxb_url_t *base, const char* doc_url);
-char* read_text_doc(lxb_url_t *url);
+Url* get_current_dir();
+Url* parse_url(Url *base, const char* doc_url);
+char* read_text_doc(Url *url);
 void print_item(StrBuf *strbuf, Item item);
 
 // Forward declarations for Lambda runtime 
@@ -506,7 +506,7 @@ bool test_format_roundtrip(const char* test_file, const char* format_type, const
     String* flavor_str = NULL; // Use default flavor
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
+    Url* cwd = get_current_dir();
     if (!cwd) {
         printf("ERROR: Failed to get current directory\n");
         free(original_content);
@@ -514,7 +514,7 @@ bool test_format_roundtrip(const char* test_file, const char* format_type, const
     }
     
     // Parse the URL for the test file
-    lxb_url_t* file_url = parse_url(cwd, test_file);
+    Url* file_url = parse_url(cwd, test_file);
     if (!file_url) {
         printf("ERROR: Failed to parse URL for test file\n");
         free(original_content);
@@ -610,8 +610,8 @@ Test(json_tests, json_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.json");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.json");
     
     // Make a mutable copy of the JSON string
     char* json_copy = strdup(complex_json);
@@ -672,8 +672,8 @@ Test(xml_tests, xml_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.xml");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.xml");
     
     // Make a mutable copy of the XML string
     char* xml_copy = strdup(complex_xml);
@@ -735,8 +735,8 @@ Test(markdown_tests, markdown_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.md");
     
     // Make a mutable copy of the Markdown string
     char* md_copy = strdup(complex_md);
@@ -797,8 +797,8 @@ Test(json_tests, simple_json_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.json");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.json");
     
     // Make a mutable copy of the JSON string
     char* json_copy = strdup(simple_json);
@@ -858,8 +858,8 @@ Test(xml_tests, simple_xml_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.xml");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.xml");
     
     // Make a mutable copy of the XML string
     char* xml_copy = strdup(simple_xml);
@@ -905,8 +905,8 @@ Test(markdown_tests, simple_markdown_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.md");
     
     // Make a mutable copy of the Markdown string
     char* md_copy = strdup(simple_md);
@@ -968,8 +968,8 @@ Test(org_tests, simple_org_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.org");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.org");
     
     // Make a mutable copy of the Org string
     char* org_copy = strdup(simple_org);
@@ -1040,8 +1040,8 @@ Test(markup_tests, markup_markdown_roundtrip) {
     String* flavor_str = NULL; // Should detect as markdown
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.md");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(markdown_content);
@@ -1096,8 +1096,8 @@ Test(markup_tests, markup_rst_roundtrip) {
     String* flavor_str = create_lambda_string("rst");
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "comprehensive_test.rst");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "comprehensive_test.rst");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(rst_content);
@@ -1147,8 +1147,8 @@ Test(markup_tests, markup_wiki_detection) {
     String* flavor_str = NULL; // Should auto-detect as wiki format
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "test.wiki");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "test.wiki");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(wiki_content);
@@ -1234,8 +1234,8 @@ Test(markup_tests, phase2_comprehensive_roundtrip) {
     String* flavor_str = NULL; // Should detect as markdown
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "phase2_test.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "phase2_test.md");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(complex_content);
@@ -1328,8 +1328,8 @@ Test(markup_tests, phase2_block_elements) {
         "---\n";
     
     String* type_str = create_lambda_string("markup");
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "blocks.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "blocks.md");
     char* content_copy = strdup(block_content);
     
     Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
@@ -1367,8 +1367,8 @@ Test(markup_tests, phase2_inline_elements) {
         "Multiple `code` spans and **nested *formatting* works**.";
     
     String* type_str = create_lambda_string("markup");
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* dummy_url = parse_url(cwd, "inline.md");
+    Url* cwd = get_current_dir();
+    Url* dummy_url = parse_url(cwd, "inline.md");
     char* content_copy = strdup(inline_content);
     
     Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
@@ -1430,8 +1430,8 @@ Test(markup_tests, markup_format_detection) {
         String* type_str = create_lambda_string("markup");
         String* flavor_str = NULL;
         
-        lxb_url_t* cwd = get_current_dir();
-        lxb_url_t* dummy_url = parse_url(cwd, "test.txt");
+        Url* cwd = get_current_dir();
+        Url* dummy_url = parse_url(cwd, "test.txt");
         
         char* content_copy = strdup(test_cases[i].content);
         
@@ -1480,8 +1480,8 @@ Test(markup_roundtrip_tests, comprehensive_file_roundtrip) {
     String* flavor_str = NULL; // Auto-detect flavor
     
     // Get current directory for URL resolution
-    lxb_url_t* cwd = get_current_dir();
-    lxb_url_t* file_url = parse_url(cwd, "sample.md");
+    Url* cwd = get_current_dir();
+    Url* file_url = parse_url(cwd, "sample.md");
     
     // Make a mutable copy of the content
     char* content_copy = strdup(original_content);
@@ -1541,8 +1541,8 @@ Test(markup_roundtrip_tests, element_specific_tests) {
         String* flavor_str = NULL;
         
         // Get current directory for URL resolution
-        lxb_url_t* cwd = get_current_dir();
-        lxb_url_t* test_url = parse_url(cwd, "test.md");
+        Url* cwd = get_current_dir();
+        Url* test_url = parse_url(cwd, "test.md");
         
         // Make a mutable copy of the content
         char* content_copy = strdup(test_cases[i].content);

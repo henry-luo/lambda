@@ -80,6 +80,23 @@ $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 	@command -v tree-sitter >/dev/null 2>&1 || { echo "Error: tree-sitter CLI not found. Install with: npm install -g tree-sitter-cli"; exit 1; }
 	cd lambda/tree-sitter-lambda && tree-sitter generate
 
+# Tree-sitter library targets
+TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
+TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
+
+# Build tree-sitter library
+$(TREE_SITTER_LIB):
+	@echo "Building tree-sitter library..."
+	$(MAKE) -C lambda/tree-sitter libtree-sitter.a
+
+# Build tree-sitter-lambda library (depends on parser generation)
+$(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
+	@echo "Building tree-sitter-lambda library..."
+	$(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a
+
+# Combined target for all tree-sitter libraries
+tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
+
 # Default target
 .DEFAULT_GOAL := build
 
@@ -87,7 +104,8 @@ $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
         build-windows build-debug build-release build-test clean-all distclean \
-        verify-windows test-windows
+        build-windows build-debug build-release clean-all distclean \
+        verify-windows test-windows tree-sitter-libs
 
 # Help target - shows available commands
 help:
@@ -118,6 +136,7 @@ help:
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
 	@echo "                     (automatic when grammar.js changes)"
+	@echo "  tree-sitter-libs - Build tree-sitter and tree-sitter-lambda libraries"
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run comprehensive unit tests"
@@ -155,7 +174,7 @@ help:
 	@echo "  make rebuild              # Force complete rebuild"
 
 # Main build target (incremental)
-build: $(TS_ENUM_H)
+build: $(TS_ENUM_H) tree-sitter-libs
 	@echo "Building $(PROJECT_NAME) (incremental)..."
 	UNICODE_FLAGS="$(UNICODE_FLAGS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
@@ -187,7 +206,7 @@ rebuild:
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --force --jobs=$(JOBS)
 
 # Specific project builds
-lambda: $(TS_ENUM_H)
+lambda: $(TS_ENUM_H) tree-sitter-libs
 	@echo "Building lambda project..."
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
