@@ -143,6 +143,7 @@ help:
 	@echo "  test-validator- Run validator tests only"
 	@echo "  test-mir      - Run MIR JIT tests only"
 	@echo "  test-lambda   - Run lambda runtime tests only"
+	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
@@ -374,6 +375,16 @@ test-lambda: build
 	@echo "Running lambda test suite..."
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --target=lambda --raw; \
+	else \
+		echo "Error: Test script not found at test/test_run.sh"; \
+		echo "Please ensure the test script exists and is executable."; \
+		exit 1; \
+	fi
+
+test-std: build
+	@echo "Running Lambda Standard Tests (custom test runner)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --target=lambda-std; \
 	else \
 		echo "Error: Test script not found at test/test_run.sh"; \
 		echo "Please ensure the test script exists and is executable."; \
