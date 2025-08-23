@@ -415,6 +415,29 @@
                 "uses_build_config": true,
                 "requires_jq": true,
                 "parallel": true
+            },
+            {
+                "suite": "lambda-std",
+                "name": "🧪 Lambda Standard Tests",
+                "sources": ["test/lambda_test_runner.cpp"],
+                "library_dependencies": [
+                    ["lambda-test-runtime"]
+                ],
+                "binaries": ["test/lambda_test_runner.exe"],
+                "type": "lambda-std",
+                "special_flags": "-std=c++17 -lstdc++",
+                "uses_build_config": true,
+                "requires_jq": false,
+                "parallel": true,
+                "test_runner": {
+                    "type": "custom",
+                    "executable": "test/lambda_test_runner.exe",
+                    "test_dir": "test/std",
+                    "output_formats": ["json", "tap"],
+                    "json_output": "test_output/lambda_test_runner_results.json",
+                    "tap_output": "test_output/lambda_test_runner_results.tap",
+                    "command_args": ["--test-dir", "test/std", "--format", "both", "--json-output", "test_output/lambda_test_runner_results.json", "--tap-output", "test_output/lambda_test_runner_results.tap"]
+                }
             }
         ],
         "output_dir": "test_output"
