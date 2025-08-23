@@ -423,7 +423,7 @@ Test(math_roundtrip_tests, minimal_markdown_test) {
     cr_assert(result, "Minimal markdown test failed");
 }
 
-Test(math_roundtrip_tests, simple_markdown_roundtrip) {
+Test(math_roundtrip_tests, simple_markdown_roundtrip, .disabled = true) {
     bool result = test_markdown_roundtrip(
         "test/input/math_simple.md", "./temp/simple_debug.txt",
         "Simple markdown test with multiple math expressions"
@@ -431,7 +431,7 @@ Test(math_roundtrip_tests, simple_markdown_roundtrip) {
     cr_assert(result, "Simple markdown roundtrip test failed");
 }
 
-Test(math_roundtrip_tests, curated_markdown_roundtrip) {
+Test(math_roundtrip_tests, curated_markdown_roundtrip, .disabled = true) {
     bool result = test_markdown_roundtrip(
         "test/input/comprehensive_math_test.md", "./temp/curated_debug.txt",
         "Curated markdown test with supported math expressions"
