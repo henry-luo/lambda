@@ -137,7 +137,7 @@ build_test_executable() {
     local test_config=""
     local library_names=""
     
-    if [[ "$final_source" == *"test_validator"* ]] || [[ "$final_source" == *"test_mem"* ]] || [[ "$final_source" == *"test_string"* ]] || [[ "$final_source" == *"test_lambda_data"* ]] || [[ "$final_source" == *"test_ast"* ]] || [[ "$final_source" == *"test_lambda_eval"* ]] || [[ "$final_source" == *"test_mir"* ]] || [[ "$final_source" == *"test_lambda"* ]]; then
+    if [[ "$final_source" == *"test_validator"* ]] || [[ "$final_source" == *"test_mem"* ]] || [[ "$final_source" == *"test_string"* ]] || [[ "$final_source" == *"test_lambda_data"* ]] || [[ "$final_source" == *"test_ast"* ]] || [[ "$final_source" == *"test_lambda_eval"* ]] || [[ "$final_source" == *"test_mir"* ]] || [[ "$final_source" == *"test_lambda"* ]] || [[ "$final_source" == *"lambda_test_runner"* ]]; then
         # Tests requiring lambda-runtime-full with criterion (includes MIR, Lambda runtime, and validator tests)
         test_config="test-runtime-full"
         library_names="lambda-runtime-full"

@@ -80,7 +80,7 @@ void teardown_math_tests(void) {
     }
 }
 
-TestSuite(math_roundtrip_tests, .init = setup_math_tests, .fini = teardown_math_tests, .disabled = true);
+TestSuite(math_roundtrip_tests, .init = setup_math_tests, .fini = teardown_math_tests);
 
 // Use the existing function from lib/file.c
 char* read_text_file(const char *filename);
