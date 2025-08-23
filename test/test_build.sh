@@ -140,23 +140,19 @@ build_test_executable() {
     if [[ "$final_source" == *"test_validator"* ]] || [[ "$final_source" == *"test_mem"* ]] || [[ "$final_source" == *"test_string"* ]] || [[ "$final_source" == *"test_lambda_data"* ]] || [[ "$final_source" == *"test_ast"* ]] || [[ "$final_source" == *"test_lambda_eval"* ]] || [[ "$final_source" == *"test_mir"* ]] || [[ "$final_source" == *"test_lambda"* ]]; then
         # Tests requiring lambda-runtime-full with criterion (includes MIR, Lambda runtime, and validator tests)
         test_config="test-runtime-full"
-        library_names="lambda-test-runtime"
-    elif [[ "$final_source" == *"test_input"* ]] || [[ "$final_source" == *"test_format"* ]] || [[ "$final_source" == *"test_markup"* ]] || [[ "$final_source" == *"test_math"* ]]; then
-        # Tests requiring lambda-input-format with criterion (complex input/format tests)
-        test_config="test-input-format"
-        library_names="lambda-test-input-full"
-    elif [[ "$final_source" == *"test_mime_detect"* ]]; then
-        # Tests requiring only MIME detection (simpler input test)
-        test_config="test-input-simple"
-        library_names="lambda-test-input"
+        library_names="lambda-runtime-full"
+    elif [[ "$final_source" == *"test_input"* ]] || [[ "$final_source" == *"test_format"* ]] || [[ "$final_source" == *"test_markup"* ]] || [[ "$final_source" == *"test_math"* ]] || [[ "$final_source" == *"test_mime_detect"* ]]; then
+        # Tests requiring lambda-input-full with criterion (all input/format tests)
+        test_config="test-input-full"
+        library_names="lambda-input-full"
     elif [[ "$final_source" == *"test_datetime"* ]] || [[ "$final_source" == *"test_url"* ]] || [[ "$final_source" == *"test_num_stack"* ]] || [[ "$final_source" == *"test_context"* ]] || [[ "$final_source" == *"test_layout"* ]]; then
-        # Tests requiring extended libraries (datetime, url, num_stack, etc.) with criterion
-        test_config="test-extended"
-        library_names="lambda-test-extended"
+        # Tests requiring basic libraries (datetime, url, num_stack, etc.) with criterion
+        test_config="test-lib"
+        library_names="lambda-lib"
     else
-        # Default minimal configuration with criterion  
-        test_config="test-minimal"
-        library_names="lambda-test-minimal"
+        # Default basic configuration with criterion  
+        test_config="test-lib"
+        library_names="lambda-lib"
     fi
     
     echo "🎯 Test configuration: $test_config"
@@ -165,7 +161,7 @@ build_test_executable() {
     local all_sources="$final_source"
     
     # Add test_context.c for specific tests that need it
-    if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]]; then
+    if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]] || [[ "$final_source" == *"test_mime_detect.c" ]]; then
         all_sources="$all_sources test/test_context.c"
     fi
     
