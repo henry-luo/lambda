@@ -5,10 +5,21 @@
 
 # Source shared build utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/lib/build_utils.sh" ]; then
+if [ -f "$SCRIPT_DIR/utils/build_utils.sh" ]; then
+    source "$SCRIPT_DIR/utils/build_utils.sh"
+elif [ -f "$SCRIPT_DIR/lib/build_utils.sh" ]; then
     source "$SCRIPT_DIR/lib/build_utils.sh"
 else
     echo "Warning: build_utils.sh not found, using legacy functions"
+fi
+
+# Source shared build core functions  
+if [ -f "$SCRIPT_DIR/utils/build_core.sh" ]; then
+    source "$SCRIPT_DIR/utils/build_core.sh"
+elif [ -f "$SCRIPT_DIR/lib/build_core.sh" ]; then
+    source "$SCRIPT_DIR/lib/build_core.sh"
+else
+    echo "Warning: build_core.sh not found, unified functions unavailable"
 fi
 
 # Configuration file default
@@ -722,144 +733,41 @@ compile_single_file() {
     $compiler $INCLUDES -MMD -MP -c "$source" -o "$obj_file" $warnings $flags 2>&1
 }
 
-# Pre-scan all files to determine what needs compilation
-echo "Scanning files for changes..."
-FILES_TO_COMPILE=()
-FILES_TO_COMPILE_OBJ=()
-FILES_TO_COMPILE_COMPILER=()
-FILES_TO_COMPILE_WARNINGS=()
-FILES_TO_COMPILE_FLAGS=()
+# ===== UNIFIED BUILD SYSTEM: Compilation Phase =====
+echo "🚀 Starting unified compilation process..."
 
-# Initialize compilation tracking variables
-output=""
-OBJECT_FILES=""
-compilation_success=true
-files_compiled=0
-files_skipped=0
+# Use the new unified compilation function to replace the manual scanning and compilation logic
+OBJECT_FILES_LIST=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}")
+compilation_exit_code=$?
 
-# Scan all source files (unified C and C++ handling with auto-detection)
-# Optimized: Pre-calculate commonly used values to avoid repeated function calls
-for source in "${SOURCE_FILES_ARRAY[@]}"; do
-    if [ -f "$source" ]; then
-        obj_name=$(basename "$source" | sed 's/\.[^.]*$//')
-        obj_file="$BUILD_DIR/${obj_name}.o"
-        OBJECT_FILES="$OBJECT_FILES $obj_file"
-        
-        if needs_recompilation "$source" "$obj_file"; then
-            # Auto-detect file type and get appropriate compiler settings
-            FILES_TO_COMPILE+=("$source")
-            FILES_TO_COMPILE_OBJ+=("$obj_file")
-            FILES_TO_COMPILE_COMPILER+=("$(get_compiler_for_file "$source")")
-            FILES_TO_COMPILE_WARNINGS+=("$(get_warnings_for_file "$source")")
-            FILES_TO_COMPILE_FLAGS+=("$(get_flags_for_file "$source")")
-            files_compiled=$((files_compiled + 1))
-        else
-            echo "Up-to-date: $source"
-            files_skipped=$((files_skipped + 1))
-        fi
-    else
-        echo "Warning: Source file '$source' not found"
-        compilation_success=false
-    fi
-done
-
-
-# Perform compilation (parallel if multiple files)
-output=""
-if [ ${#FILES_TO_COMPILE[@]} -gt 0 ]; then
-    if [ ${#FILES_TO_COMPILE[@]} -gt 1 ] && [ "$PARALLEL_JOBS" -gt 1 ]; then
-        echo "Compiling ${#FILES_TO_COMPILE[@]} files in parallel (max $PARALLEL_JOBS jobs)..."
-        
-        # Use background processes for parallel compilation
-        declare -a pids
-        job_count=0
-        
-        for ((i=0; i<${#FILES_TO_COMPILE[@]}; i++)); do
-            source="${FILES_TO_COMPILE[$i]}"
-            obj_file="${FILES_TO_COMPILE_OBJ[$i]}"
-            compiler="${FILES_TO_COMPILE_COMPILER[$i]}"
-            warnings="${FILES_TO_COMPILE_WARNINGS[$i]}"
-            flags="${FILES_TO_COMPILE_FLAGS[$i]}"
-            
-            # Start compilation in background
-            (
-                compile_result=$(compile_single_file "$source" "$obj_file" "$compiler" "$warnings" "$flags")
-                echo "$compile_result" > "${obj_file}.compile_log"
-                echo $? > "${obj_file}.compile_status"
-            ) &
-            
-            pids+=($!)
-            job_count=$((job_count + 1))
-            
-            # Limit parallel jobs
-            if [ $job_count -ge $PARALLEL_JOBS ]; then
-                wait ${pids[0]}
-                pids=("${pids[@]:1}")  # Remove first element
-                job_count=$((job_count - 1))
-            fi
-        done
-        
-        # Wait for remaining jobs
-        for pid in "${pids[@]}"; do
-            wait $pid
-        done
-        
-        # Collect results
-        for ((i=0; i<${#FILES_TO_COMPILE[@]}; i++)); do
-            obj_file="${FILES_TO_COMPILE_OBJ[$i]}"
-            if [ -f "${obj_file}.compile_log" ]; then
-                compile_output=$(cat "${obj_file}.compile_log")
-                if [ -n "$compile_output" ]; then
-                    output="$output\n$compile_output"
-                fi
-                rm -f "${obj_file}.compile_log"
-            fi
-            
-            if [ -f "${obj_file}.compile_status" ]; then
-                status=$(cat "${obj_file}.compile_status")
-                if [ "$status" -ne 0 ]; then
-                    compilation_success=false
-                fi
-                rm -f "${obj_file}.compile_status"
-            fi
-        done
-    else
-        # Sequential compilation for single file or when parallel is disabled
-        for ((i=0; i<${#FILES_TO_COMPILE[@]}; i++)); do
-            source="${FILES_TO_COMPILE[$i]}"
-            obj_file="${FILES_TO_COMPILE_OBJ[$i]}"
-            compiler="${FILES_TO_COMPILE_COMPILER[$i]}"
-            warnings="${FILES_TO_COMPILE_WARNINGS[$i]}"
-            flags="${FILES_TO_COMPILE_FLAGS[$i]}"
-            
-            compile_output=$(compile_single_file "$source" "$obj_file" "$compiler" "$warnings" "$flags")
-            if [ $? -ne 0 ]; then
-                compilation_success=false
-            fi
-            if [ -n "$compile_output" ]; then
-                output="$output\n$compile_output"
-            fi
-        done
-    fi
+if [ $compilation_exit_code -eq 0 ]; then
+    # Convert newline-separated object list to space-separated for linking compatibility
+    OBJECT_FILES=$(echo "$OBJECT_FILES_LIST" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    echo "✅ Compilation completed successfully"
+    compilation_success=true
 else
-    echo "No files need compilation."
+    echo "❌ Compilation failed"
+    compilation_success=false
+    OBJECT_FILES=""
 fi
+
+# Preserve original output variable for error reporting compatibility
+output=""
 
 # Link final executable only if compilation was successful
 linking_performed=false
 if [ "$compilation_success" = true ]; then
-    if needs_linking "$OUTPUT" "$OBJECT_FILES"; then
-        echo "Linking: $OUTPUT"
-        link_output=$($CXX $OBJECT_FILES $LIBS $LINK_LIBS $LINKER_FLAGS -o "$OUTPUT" 2>&1)
-        if [ $? -ne 0 ]; then
-            compilation_success=false
-        fi
-        if [ -n "$link_output" ]; then
-            output="$output\n$link_output"
-        fi
+    # ===== UNIFIED BUILD SYSTEM: Linking Phase =====
+    echo "🔗 Starting unified linking process..."
+    
+    # Use the new unified linking function
+    if build_link_objects "$OUTPUT" "$OBJECT_FILES" "" "$LIBS $LINK_LIBS" "$LINKER_FLAGS" "auto"; then
+        echo "✅ Linking completed successfully"
         linking_performed=true
     else
-        echo "Up-to-date: $OUTPUT"
+        echo "❌ Linking failed"
+        compilation_success=false
+        linking_performed=false
     fi
 fi
 
@@ -942,8 +850,7 @@ else
     echo -e "Errors:   $num_errors"
 fi
 echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
-echo "Files compiled: $files_compiled"
-echo "Files up-to-date: $files_skipped"
+echo "Build system: Unified (Step 1 & 2 implementation)"
 if [ "$linking_performed" = true ]; then
     echo "Linking: performed"
 else

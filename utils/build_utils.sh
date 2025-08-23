@@ -542,3 +542,127 @@ check_build_prerequisites() {
     
     return 0
 }
+
+# Function to map source files to their corresponding object files
+# This replaces hardcoded object lists with auto-detection
+map_sources_to_objects() {
+    local build_dir="$1"
+    shift
+    local sources=("$@")
+    
+    local objects=()
+    
+    for source in "${sources[@]}"; do
+        if [ -n "$source" ]; then
+            # Extract base filename without extension
+            local basename=$(basename "$source")
+            local obj_name="${basename%.*}"
+            local obj_path="$build_dir/${obj_name}.o"
+            
+            objects+=("$obj_path")
+        fi
+    done
+    
+    # Output object paths (one per line for easy processing)
+    printf '%s\n' "${objects[@]}"
+}
+
+# Function to expand source patterns into actual source files
+# Supports glob patterns like "lambda/input/*.cpp"
+expand_source_patterns() {
+    local patterns=("$@")
+    local expanded_sources=()
+    
+    for pattern in "${patterns[@]}"; do
+        if [ -n "$pattern" ]; then
+            # Use shell globbing to expand pattern
+            # For zsh/bash compatibility, use a different approach
+            local matches=()
+            
+            # Enable glob expansion
+            if [ -n "$ZSH_VERSION" ]; then
+                # zsh
+                setopt local_options null_glob
+                matches=($~pattern)
+            else
+                # bash
+                local old_nullglob=$(shopt -p nullglob 2>/dev/null || echo "shopt -u nullglob")
+                shopt -s nullglob
+                matches=($pattern)
+                eval "$old_nullglob"
+            fi
+            
+            # Add matches to expanded sources
+            for match in "${matches[@]}"; do
+                if [ -f "$match" ]; then
+                    expanded_sources+=("$match")
+                fi
+            done
+        fi
+    done
+    
+    # Output expanded sources (one per line)
+    printf '%s\n' "${expanded_sources[@]}"
+}
+
+# Function to collect sources from library definition with pattern support
+# This replaces the need for hardcoded object lists
+collect_library_sources() {
+    local lib_name="$1"
+    local config_file="$2"
+    
+    if [ ! -f "$config_file" ] || ! has_jq_support; then
+        return 1
+    fi
+    
+    # Get library definition
+    local lib_def=$(jq -r ".libraries[] | select(.name == \"$lib_name\")" "$config_file" 2>/dev/null)
+    
+    if [ -z "$lib_def" ] || [ "$lib_def" = "null" ]; then
+        return 1
+    fi
+    
+    local all_sources=()
+    
+    # Get explicit source files
+    local explicit_sources=$(echo "$lib_def" | jq -r '.source_files[]? // empty')
+    while IFS= read -r source; do
+        [ -n "$source" ] && all_sources+=("$source")
+    done <<< "$explicit_sources"
+    
+    # Get legacy sources array (for backward compatibility)
+    local legacy_sources=$(echo "$lib_def" | jq -r '.sources[]? // empty')
+    while IFS= read -r source; do
+        [ -n "$source" ] && all_sources+=("$source")
+    done <<< "$legacy_sources"
+    
+    # Get and expand source patterns
+    local source_patterns=$(echo "$lib_def" | jq -r '.source_patterns[]? // empty')
+    if [ -n "$source_patterns" ]; then
+        local pattern_sources=()
+        while IFS= read -r pattern; do
+            if [ -n "$pattern" ]; then
+                pattern_sources+=("$pattern")
+            fi
+        done <<< "$source_patterns"
+        
+        # Expand patterns and add to sources
+        while IFS= read -r source; do
+            [ -n "$source" ] && all_sources+=("$source")
+        done < <(expand_source_patterns "${pattern_sources[@]}")
+    fi
+    
+    # Remove duplicates and output
+    local unique_sources=()
+    local seen_sources=""
+    
+    for source in "${all_sources[@]}"; do
+        if [[ "$seen_sources" != *"|$source|"* ]]; then
+            unique_sources+=("$source")
+            seen_sources="$seen_sources|$source|"
+        fi
+    done
+    
+    # Output unique sources (one per line)
+    printf '%s\n' "${unique_sources[@]}"
+}
