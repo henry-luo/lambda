@@ -56,7 +56,7 @@ int strview_find(const StrView* s, const char* substr) {
     if (!s || !substr || !s->length) {
         return -1;
     }
-    char* found = strstr(s->str, substr);
+    const char* found = strstr(s->str, substr);
     if (!found) {
         return -1;
     }

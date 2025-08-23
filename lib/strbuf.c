@@ -13,7 +13,7 @@ StrBuf* _strbuf_new_cap(size_t size, VariableMemPool *pool) {
     } else {
         sb = (StrBuf*) malloc(sizeof(StrBuf));
         if (!sb) return NULL;
-        sb->str = malloc(size);
+        sb->str = (char*) malloc(size);
         if (!sb->str) { free(sb);  return NULL; }
         sb->str[0] = '\0';  sb->length = 0;
         sb->capacity = size;  sb->pool = NULL;
