@@ -222,6 +222,10 @@ build_all_tests() {
     local files_compiled=0
     local files_skipped=0
     
+    # Parallel job management variables
+    local pids=()
+    local active_jobs=0
+    
     # Set up parallel jobs
     local parallel_jobs=$(setup_parallel_jobs "${PARALLEL_JOBS:-}")
     echo "Parallel jobs: $parallel_jobs"
@@ -292,25 +296,115 @@ build_all_tests() {
     if [ ${#compilation_data[@]} -gt 0 ]; then
         echo "Compiling ${#compilation_data[@]} test files..."
         
-        # Execute compilations
-        for task in "${compilation_data[@]}"; do
+        # Execute compilations in parallel using background processes
+        local task_outputs=()
+        local task_results=()
+        local max_jobs=$parallel_jobs
+        
+        # Start all background jobs with controlled parallelism
+        for i in "${!compilation_data[@]}"; do
+            local task="${compilation_data[$i]}"
             IFS='|' read -r suite_name test_source test_binary index <<< "$task"
             
             echo "🔧 Building $suite_name: $test_source -> $test_binary"
             
-            # Execute compilation and capture output
-            local compile_output
-            if compile_output=$(build_test_executable "$suite_name" "$test_source" "$test_binary" "$index" 2>&1); then
-                echo "   ✅ Success"
-                successful_builds=$((successful_builds + 1))
+            # Create unique output files for this job
+            local output_file="/tmp/test_build_$$_$i"
+            local result_file="/tmp/test_build_$$_$i.result"
+            task_outputs+=("$output_file")
+            task_results+=("$result_file")
+            
+            # Wait if we've reached the max parallel jobs
+            while [ $active_jobs -ge $max_jobs ]; do
+                # Simple wait - check for any completed job
+                local job_completed=false
+                for pid in "${pids[@]}"; do
+                    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+                        # Job completed
+                        active_jobs=$((active_jobs - 1))
+                        job_completed=true
+                        break
+                    fi
+                done
+                
+                if [ "$job_completed" = false ]; then
+                    sleep 0.1
+                fi
+            done
+            
+            # Start compilation in background
+            {
+                if build_test_executable "$suite_name" "$test_source" "$test_binary" "$index" >"$output_file" 2>&1; then
+                    echo "SUCCESS|$suite_name|$test_source|$test_binary" > "$result_file"
+                else
+                    echo "FAILED|$suite_name|$test_source|$test_binary" > "$result_file"
+                fi
+            } &
+            
+            local pid=$!
+            pids+=($pid)
+            active_jobs=$((active_jobs + 1))
+        done
+        
+        # Wait for all remaining jobs to complete
+        echo "Waiting for all test builds to complete..."
+        for pid in "${pids[@]}"; do
+            if [ -n "$pid" ]; then
+                wait $pid
+            fi
+        done
+        
+        # Process results
+        for i in "${!task_results[@]}"; do
+            local result_file="${task_results[$i]}"
+            local output_file="${task_outputs[$i]}"
+            
+            if [ -f "$result_file" ]; then
+                local result_line=$(cat "$result_file")
+                IFS='|' read -r status suite_name test_source test_binary <<< "$result_line"
+                
+                if [ "$status" = "SUCCESS" ]; then
+                    echo "   ✅ Success: $suite_name/$test_source"
+                    successful_builds=$((successful_builds + 1))
+                else
+                    echo "   ❌ Failed: $suite_name/$test_source"
+                    failed_builds=$((failed_builds + 1))
+                    # Accumulate error output for summary
+                    if [ -f "$output_file" ]; then
+                        build_output="$build_output\n$(cat "$output_file")"
+                    fi
+                fi
+                
+                # Clean up temporary files
+                rm -f "$result_file" "$output_file"
             else
-                echo "   ❌ Failed"
+                echo "   ❌ Failed: Missing result file for task $i"
                 failed_builds=$((failed_builds + 1))
-                # Accumulate error output for summary
-                build_output="$build_output\n$compile_output"
             fi
         done
     fi
+
+wait_for_job() {
+    # Wait for any job to complete
+    local completed=false
+    while [ "$completed" = false ]; do
+        for i in "${!pids[@]}"; do
+            local pid="${pids[$i]}"
+            if ! kill -0 "$pid" 2>/dev/null; then
+                # Job completed, remove from active list
+                unset pids[$i]
+                pids=("${pids[@]}")  # Re-index array
+                active_jobs=$((active_jobs - 1))
+                completed=true
+                break
+            fi
+        done
+        
+        if [ "$completed" = false ]; then
+            sleep 0.1
+        fi
+    done
+}
     
     # Generate comprehensive build summary
     echo ""
