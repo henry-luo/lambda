@@ -2552,8 +2552,7 @@
   },
   {
     "type": "comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "contains",
