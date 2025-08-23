@@ -518,7 +518,7 @@ build_compile_sources() {
                 files_to_compile_flags+=("$(get_flags_for_file "$source" "$flags")")
                 files_compiled=$((files_compiled + 1))
             else
-                echo "Up-to-date: $source"
+                echo "Up-to-date: $source" >&2
                 files_skipped=$((files_skipped + 1))
             fi
         else
@@ -532,7 +532,7 @@ build_compile_sources() {
     local output=""
     
     if [ ${#files_to_compile[@]} -gt 0 ]; then
-        echo "Compiling ${#files_to_compile[@]} source files..."
+        echo "Compiling ${#files_to_compile[@]} source files..." >&2
         
         # Set up parallel jobs
         local parallel_jobs="${max_parallel:-1}"
@@ -541,7 +541,7 @@ build_compile_sources() {
         fi
         
         if [ ${#files_to_compile[@]} -gt 1 ] && [ "$parallel_jobs" -gt 1 ]; then
-            echo "Using parallel compilation (max $parallel_jobs jobs)..."
+            echo "Using parallel compilation (max $parallel_jobs jobs)..." >&2
             
             # Use background processes for parallel compilation
             declare -a pids
@@ -615,23 +615,23 @@ build_compile_sources() {
             done
         fi
     else
-        echo "All sources up-to-date."
+        echo "All sources up-to-date." >&2
     fi
-    
-    # Output compilation messages
+
+    # Output compilation messages to stderr to avoid contaminating object file list
     if [ -n "$output" ]; then
-        echo -e "$output"
+        echo -e "$output" >&2
     fi
-    
-    # Generate summary
-    echo "Compilation summary: $files_compiled compiled, $files_skipped up-to-date"
-    
+
+    # Generate summary to stderr
+    echo "Compilation summary: $files_compiled compiled, $files_skipped up-to-date" >&2
+
     # Return object files list on success, empty on failure
     if [ "$compilation_success" = "true" ]; then
         printf '%s\n' "${object_files[@]}"
         return 0
     else
-        echo "Compilation failed"
+        echo "Compilation failed" >&2
         return 1
     fi
 }
