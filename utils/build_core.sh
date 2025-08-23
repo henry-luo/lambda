@@ -464,7 +464,264 @@ build_link_executable() {
     $linker $object_files $libs $link_libs $linker_flags -o "$output" 2>&1
 }
 
-# Legacy function - kept for compatibility, now uses common functions
+# Unified function to compile multiple sources to object files
+# This is the core compilation function used by both main build and test builds
+build_compile_sources() {
+    local build_dir="$1"           # Output directory for objects
+    local includes="$2"            # Include flags (-I...)
+    local warnings="$3"            # Warning flags (-Werror=...)
+    local flags="$4"               # Compiler flags (-g, -O0...)
+    local enable_deps="$5"         # true/false for .d file generation
+    local max_parallel="$6"        # Maximum parallel jobs
+    shift 6
+    local sources=("$@")           # Array of source files
+    
+    # Validate inputs
+    if [ -z "$build_dir" ]; then
+        echo "Error: build_dir is required" >&2
+        return 1
+    fi
+    
+    if [ ${#sources[@]} -eq 0 ]; then
+        echo "Error: No source files provided" >&2
+        return 1
+    fi
+    
+    # Create build directory
+    mkdir -p "$build_dir"
+    
+    # Prepare compilation data
+    local files_to_compile=()
+    local files_to_compile_obj=()
+    local files_to_compile_compiler=()
+    local files_to_compile_warnings=()
+    local files_to_compile_flags=()
+    local object_files=()
+    local files_compiled=0
+    local files_skipped=0
+    
+    # Scan sources and determine what needs compilation
+    for source in "${sources[@]}"; do
+        if [ -f "$source" ]; then
+            # Map source to object file
+            local obj_name=$(basename "$source" | sed 's/\.[^.]*$//')
+            local obj_file="$build_dir/${obj_name}.o"
+            object_files+=("$obj_file")
+            
+            # Check if recompilation is needed
+            if needs_recompilation "$source" "$obj_file"; then
+                # Auto-detect file type and get appropriate compiler settings
+                files_to_compile+=("$source")
+                files_to_compile_obj+=("$obj_file")
+                files_to_compile_compiler+=("$(get_compiler_for_file "$source")")
+                files_to_compile_warnings+=("$(get_warnings_for_file "$source" "$warnings")")
+                files_to_compile_flags+=("$(get_flags_for_file "$source" "$flags")")
+                files_compiled=$((files_compiled + 1))
+            else
+                echo "Up-to-date: $source"
+                files_skipped=$((files_skipped + 1))
+            fi
+        else
+            echo "Warning: Source file '$source' not found" >&2
+            return 1
+        fi
+    done
+    
+    # Perform compilation if needed
+    local compilation_success=true
+    local output=""
+    
+    if [ ${#files_to_compile[@]} -gt 0 ]; then
+        echo "Compiling ${#files_to_compile[@]} source files..."
+        
+        # Set up parallel jobs
+        local parallel_jobs="${max_parallel:-1}"
+        if [ -z "$parallel_jobs" ] || [ "$parallel_jobs" -lt 1 ]; then
+            parallel_jobs=$(setup_parallel_jobs)
+        fi
+        
+        if [ ${#files_to_compile[@]} -gt 1 ] && [ "$parallel_jobs" -gt 1 ]; then
+            echo "Using parallel compilation (max $parallel_jobs jobs)..."
+            
+            # Use background processes for parallel compilation
+            declare -a pids
+            local job_count=0
+            
+            for ((i=0; i<${#files_to_compile[@]}; i++)); do
+                local source="${files_to_compile[$i]}"
+                local obj_file="${files_to_compile_obj[$i]}"
+                local compiler="${files_to_compile_compiler[$i]}"
+                local file_warnings="${files_to_compile_warnings[$i]}"
+                local file_flags="${files_to_compile_flags[$i]}"
+                
+                # Start compilation in background
+                (
+                    local compile_result=$(compile_single_file "$source" "$obj_file" "$compiler" "$includes" "$file_warnings" "$file_flags" "$enable_deps")
+                    echo "$compile_result" > "${obj_file}.compile_log"
+                    echo $? > "${obj_file}.compile_status"
+                ) &
+                
+                pids+=($!)
+                job_count=$((job_count + 1))
+                
+                # Limit parallel jobs
+                if [ $job_count -ge $parallel_jobs ]; then
+                    wait ${pids[0]}
+                    pids=("${pids[@]:1}")  # Remove first element
+                    job_count=$((job_count - 1))
+                fi
+            done
+            
+            # Wait for remaining jobs
+            for pid in "${pids[@]}"; do
+                wait $pid
+            done
+            
+            # Collect results from parallel compilation
+            for ((i=0; i<${#files_to_compile[@]}; i++)); do
+                local obj_file="${files_to_compile_obj[$i]}"
+                
+                if [ -f "${obj_file}.compile_status" ]; then
+                    local status=$(cat "${obj_file}.compile_status")
+                    if [ "$status" -ne 0 ]; then
+                        compilation_success=false
+                    fi
+                fi
+                
+                if [ -f "${obj_file}.compile_log" ]; then
+                    output="$output$(cat "${obj_file}.compile_log")"
+                    rm -f "${obj_file}.compile_log"
+                fi
+                
+                rm -f "${obj_file}.compile_status"
+            done
+        else
+            # Sequential compilation
+            for ((i=0; i<${#files_to_compile[@]}; i++)); do
+                local source="${files_to_compile[$i]}"
+                local obj_file="${files_to_compile_obj[$i]}"
+                local compiler="${files_to_compile_compiler[$i]}"
+                local file_warnings="${files_to_compile_warnings[$i]}"
+                local file_flags="${files_to_compile_flags[$i]}"
+                
+                local compile_result=$(compile_single_file "$source" "$obj_file" "$compiler" "$includes" "$file_warnings" "$file_flags" "$enable_deps")
+                local compile_status=$?
+                
+                output="$output$compile_result"
+                
+                if [ $compile_status -ne 0 ]; then
+                    compilation_success=false
+                fi
+            done
+        fi
+    else
+        echo "All sources up-to-date."
+    fi
+    
+    # Output compilation messages
+    if [ -n "$output" ]; then
+        echo -e "$output"
+    fi
+    
+    # Generate summary
+    echo "Compilation summary: $files_compiled compiled, $files_skipped up-to-date"
+    
+    # Return object files list on success, empty on failure
+    if [ "$compilation_success" = "true" ]; then
+        printf '%s\n' "${object_files[@]}"
+        return 0
+    else
+        echo "Compilation failed"
+        return 1
+    fi
+}
+
+# Unified function to link object files into executable
+# This is the core linking function used by both main build and test builds
+build_link_objects() {
+    local output_file="$1"         # Output executable path
+    local main_objects="$2"        # Primary object files (space-separated)
+    local additional_objects="$3"  # Additional objects (space-separated)
+    local link_libraries="$4"      # Link libraries (-l...)
+    local link_flags="$5"          # Linker flags
+    local force_cpp="${6:-auto}"   # true/false/auto for C++ linking
+    
+    # Validate inputs
+    if [ -z "$output_file" ]; then
+        echo "Error: output_file is required" >&2
+        return 1
+    fi
+    
+    if [ -z "$main_objects" ]; then
+        echo "Error: main_objects is required" >&2
+        return 1
+    fi
+    
+    # Combine all object files
+    local all_objects="$main_objects"
+    if [ -n "$additional_objects" ]; then
+        all_objects="$all_objects $additional_objects"
+    fi
+    
+    # Remove duplicates from object files list
+    local unique_objects=""
+    for obj in $all_objects; do
+        if [[ "$unique_objects" != *"$obj"* ]]; then
+            unique_objects="$unique_objects $obj"
+        fi
+    done
+    unique_objects=$(echo "$unique_objects" | sed 's/^ *//')
+    
+    # Check if linking is needed
+    local object_files_array=($unique_objects)
+    if ! needs_linking "$output_file" "${object_files_array[@]}"; then
+        echo "Executable up-to-date: $output_file"
+        return 0
+    fi
+    
+    # Determine linker
+    local linker=""
+    if [ "$force_cpp" = "true" ] || [[ "$unique_objects" == *".cpp"* ]] || [[ "$link_libraries" == *".cpp"* ]]; then
+        linker="${CXX:-clang++}"
+    elif [ "$force_cpp" = "false" ]; then
+        linker="${CC:-clang}"
+    else
+        # Auto-detect based on object files and libraries
+        if [[ "$unique_objects" == *".cpp"* ]] || [[ "$link_libraries" == *".cpp"* ]]; then
+            linker="${CXX:-clang++}"
+        else
+            linker="${CC:-clang}"
+        fi
+    fi
+    
+    # Execute linking
+    echo "Linking: $output_file"
+    echo "Linker: $linker"
+    echo "Objects: $unique_objects"
+    if [ -n "$link_libraries" ]; then
+        echo "Libraries: $link_libraries"
+    fi
+    if [ -n "$link_flags" ]; then
+        echo "Flags: $link_flags"
+    fi
+    
+    local link_result=$($linker $unique_objects $link_libraries $link_flags -o "$output_file" 2>&1)
+    local link_status=$?
+    
+    if [ -n "$link_result" ]; then
+        echo "$link_result"
+    fi
+    
+    if [ $link_status -eq 0 ]; then
+        echo "✅ Successfully linked: $output_file"
+        return 0
+    else
+        echo "❌ Failed to link: $output_file"
+        return 1
+    fi
+}
+
+# Legacy function - kept for compatibility, now uses unified functions
 build_compile_cmd() {
     local mode=""
     local source=""
@@ -547,28 +804,31 @@ build_compile_cmd() {
         return 1
     fi
     
-    # Build command based on mode using common functions
+    # Build command based on mode using unified functions
     case "$mode" in
         compile)
-            # Use common compile function
-            build_compile_to_object "$source" "$output" "$includes" "$warnings" "$flags" "$enable_deps"
-            return $?
+            # Use unified compile function
+            local sources_array=("$source")
+            if [ -n "$additional_sources" ]; then
+                for src in $additional_sources; do
+                    sources_array+=("$src")
+                done
+            fi
+            
+            local build_dir=$(dirname "$output")
+            local objects=$(build_compile_sources "$build_dir" "$includes" "$warnings" "$flags" "$enable_deps" "1" "${sources_array[@]}")
+            if [ $? -eq 0 ]; then
+                echo "$objects"
+                return 0
+            else
+                return 1
+            fi
             ;;
             
         link)
-            # For legacy compatibility - compile all sources and link directly
-            local all_sources="$source"
-            if [ -n "$additional_sources" ]; then
-                all_sources="$all_sources $additional_sources"
-            fi
-            
-            # This is a simplified version - real usage should use the two-step process
-            local compiler=$(get_compiler_for_file "$source")
-            local final_warnings=$(get_warnings_for_file "$source" "$warnings")
-            local final_flags=$(get_flags_for_file "$source" "$flags")
-            
-            echo "$compiler $final_flags $final_warnings $includes $all_sources -o \"$output\" $libs $link_libs $linker_flags"
-            return 0
+            # Use unified link function
+            build_link_objects "$output" "$source" "$additional_sources" "$libs $link_libs" "$linker_flags" "auto"
+            return $?
             ;;
             
         *)
