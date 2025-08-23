@@ -597,11 +597,7 @@ if command -v jq >/dev/null 2>&1; then
         [ -n "$flag" ] && LINKER_FLAGS="$LINKER_FLAGS -$flag"
     done < <(get_json_array "linker_flags" "$CONFIG_FILE" "$PLATFORM")
     
-    # Add Unicode support flags if environment variables are set
-    if [ -n "$UNICODE_FLAGS" ]; then
-        echo "Adding Unicode support flags: $UNICODE_FLAGS"
-        FLAGS="$FLAGS $UNICODE_FLAGS"
-    fi
+    # Unicode support is always enabled - no conditional flags needed
     
     # Get all source files (unified approach with auto-detection)
     SOURCE_FILES_ARRAY=()

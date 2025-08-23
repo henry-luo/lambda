@@ -40,8 +40,8 @@ TYPESET_SOURCES = \
     $(TYPESET_DIR)/integration/lambda_bridge.c \
     $(TYPESET_DIR)/integration/stylesheet.c
 
-# Unicode support configuration (utf8proc-based)
-UNICODE_FLAGS = -DLAMBDA_UTF8PROC_SUPPORT
+# Unicode support is always enabled (utf8proc-based)
+# No longer using conditional compilation flags
 
 # Auto-detect number of jobs for parallel compilation
 NPROCS := 1
@@ -174,15 +174,13 @@ help:
 # Main build target (incremental)
 build: $(TS_ENUM_H) tree-sitter-libs
 	@echo "Building $(PROJECT_NAME) (incremental)..."
-	UNICODE_FLAGS="$(UNICODE_FLAGS)" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
 
-# ASCII-only build (no Unicode support)
-build-ascii:
-	@echo "Building $(PROJECT_NAME) with ASCII-only support (no Unicode)..."
-	UNICODE_FLAGS="" $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+# Legacy ASCII-only target (now same as regular build since Unicode is always enabled)
+build-ascii: build
 
 print-vars:
-	@echo "UNICODE_FLAGS=$(UNICODE_FLAGS)"
+	@echo "Unicode support: Always enabled (utf8proc)"
 
 $(LAMBDA_EXE): build
 
