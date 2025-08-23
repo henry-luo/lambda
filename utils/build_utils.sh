@@ -248,8 +248,6 @@ resolve_single_library_dependency() {
     
     # Parse library definition and build flags
     local include_path=$(echo "$lib_def" | jq -r '.include // empty')
-    local lib_sources=$(echo "$lib_def" | jq -r '.sources[]? // empty' | tr '\n' ' ')
-    local lib_objects_raw=$(echo "$lib_def" | jq -r '.objects[]? // empty')
     local lib_path=$(echo "$lib_def" | jq -r '.lib // empty')
     local link_type=$(echo "$lib_def" | jq -r '.link // "dynamic"')
     local nested_libs=$(echo "$lib_def" | jq -r '.libraries[]? // empty' | tr '\n' ' ')
@@ -260,15 +258,54 @@ resolve_single_library_dependency() {
         includes="-I$include_path"
     fi
     
-    # Add source files (with deduplication)
-    if [ -n "$lib_sources" ]; then
-        for source in $lib_sources; do
+    # ===== NEW: Handle source patterns and explicit source files =====
+    
+    # Collect sources from all possible sources
+    local all_lib_sources=""
+    
+    # 1. Legacy sources array (for backward compatibility)
+    local legacy_sources=$(echo "$lib_def" | jq -r '.sources[]? // empty')
+    if [ -n "$legacy_sources" ]; then
+        all_lib_sources="$all_lib_sources $legacy_sources"
+    fi
+    
+    # 2. Explicit source_files array
+    local explicit_sources=$(echo "$lib_def" | jq -r '.source_files[]? // empty')
+    if [ -n "$explicit_sources" ]; then
+        while IFS= read -r source; do
+            [ -n "$source" ] && all_lib_sources="$all_lib_sources $source"
+        done <<< "$explicit_sources"
+    fi
+    
+    # 3. Source patterns that need to be expanded
+    local source_patterns=$(echo "$lib_def" | jq -r '.source_patterns[]? // empty')
+    if [ -n "$source_patterns" ]; then
+        local patterns_array=()
+        while IFS= read -r pattern; do
+            [ -n "$pattern" ] && patterns_array+=("$pattern")
+        done <<< "$source_patterns"
+        
+        # Expand patterns using our utility function
+        if [ ${#patterns_array[@]} -gt 0 ]; then
+            local expanded_sources=$(expand_source_patterns "${patterns_array[@]}")
+            while IFS= read -r source; do
+                [ -n "$source" ] && all_lib_sources="$all_lib_sources $source"
+            done <<< "$expanded_sources"
+        fi
+    fi
+    
+    # Add collected sources (with deduplication)
+    if [ -n "$all_lib_sources" ]; then
+        for source in $all_lib_sources; do
             if [[ "$included_sources" != *"$source"* ]]; then
                 sources="$sources $source"
                 included_sources="$included_sources $source "
             fi
         done
     fi
+    
+    # ===== Handle legacy object files (for backward compatibility) =====
+    local lib_objects_raw=$(echo "$lib_def" | jq -r '.objects[]? // empty')
     
     # Add object files (with deduplication)
     if [ -n "$lib_objects_raw" ]; then
@@ -665,4 +702,181 @@ collect_library_sources() {
     
     # Output unique sources (one per line)
     printf '%s\n' "${unique_sources[@]}"
+}
+
+# Unified Build Functions for Lambda Project
+# These functions bridge between the new library configuration system and build_core.sh functions
+
+# Unified function to compile sources with library dependencies
+unified_compile_sources() {
+    local sources_str="$1"        # Space-separated list of source files
+    local library_names="$2"      # Space-separated list of library names to include
+    local config_file="$3"        # Path to build config JSON
+    local build_dir="$4"          # Build directory (e.g., "build")
+    
+    # Default build directory
+    if [ -z "$build_dir" ]; then
+        build_dir="build"
+    fi
+    
+    # Ensure build_core.sh functions are available
+    if ! command -v build_compile_sources >/dev/null 2>&1; then
+        source "utils/build_core.sh"
+    fi
+    
+    # Parse sources into array (compatible with both bash and zsh)
+    local main_sources=()
+    if [ -n "$sources_str" ]; then
+        # Use a more compatible method for string splitting
+        local temp_ifs="$IFS"
+        IFS=' '
+        for source in $sources_str; do
+            main_sources+=("$source")
+        done
+        IFS="$temp_ifs"
+    fi
+    
+    # For test builds, compile only the test sources and reuse pre-compiled library objects
+    local all_sources=("${main_sources[@]}")
+    
+    # Prepare includes, warnings, and flags using the same method as compile.sh
+    local includes=""
+    local warnings=""
+    local flags=""
+    
+    # Process includes - use the working method from compile.sh
+    if command -v jq >/dev/null 2>&1; then
+        while IFS= read -r include; do
+            [ -n "$include" ] && includes="$includes -I$include"
+        done < <(jq -r ".includes[]? // empty" "$config_file" 2>/dev/null)
+    fi
+    
+    # Process warnings
+    if command -v jq >/dev/null 2>&1; then
+        while IFS= read -r warning; do
+            [ -n "$warning" ] && warnings="$warnings -Werror=$warning"
+        done < <(jq -r ".warnings[]? // empty" "$config_file" 2>/dev/null)
+    fi
+    
+    # Process flags
+    if command -v jq >/dev/null 2>&1; then
+        while IFS= read -r flag; do
+            [ -n "$flag" ] && flags="$flags -$flag"
+        done < <(jq -r ".flags[]? // empty" "$config_file" 2>/dev/null)
+    fi
+    
+    # Add library includes and flags if library names are provided
+    if [ -n "$library_names" ]; then
+        local library_deps=$(resolve_library_dependencies $library_names)
+        if [ -n "$library_deps" ]; then
+            # Extract includes from library dependencies (starts with -I)
+            local lib_includes=$(echo "$library_deps" | grep -o '\-I[^[:space:]]*' | tr '\n' ' ')
+            includes="$includes $lib_includes"
+            
+            # Extract special flags from library dependencies
+            local lib_flags=$(echo "$library_deps" | grep -o '\-l[^[:space:]]*\|\-L[^[:space:]]*' | tr '\n' ' ')
+            flags="$flags $lib_flags"
+        fi
+    fi
+    
+    # Compile test sources only (don't compile library sources, use pre-built objects)
+    local test_object_list=$(build_compile_sources "$build_dir" "$includes" "$warnings" "$flags" "false" "1" "${all_sources[@]}" 2>&1)
+    local compile_result=$?
+    
+    if [ $compile_result -eq 0 ]; then
+        # Get test object files from compilation output
+        local test_objects=$(echo "$test_object_list" | grep -E '\.o$' | grep -v ":" | grep -v "Up-to-date:" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+        
+        # If no test objects found in output, try manual mapping
+        if [ -z "$test_objects" ]; then
+            for source in "${all_sources[@]}"; do
+                if [ -f "$source" ]; then
+                    local obj_name=$(basename "$source" | sed 's/\.[^.]*$//')
+                    local obj_file="$build_dir/${obj_name}.o"
+                    if [ -f "$obj_file" ]; then
+                        test_objects="$test_objects $obj_file"
+                    fi
+                fi
+            done
+            test_objects=$(echo "$test_objects" | sed 's/^ *//' | sed 's/ *$//')
+        fi
+        
+        # For tests, we only return the test objects - library objects are linked separately
+        echo "$test_objects" | sed 's/^ *//' | sed 's/ *$//'
+        return 0
+    else
+        echo "$test_object_list" >&2  # Show error messages
+        return 1
+    fi
+}
+
+# Unified function to link objects with library dependencies
+unified_link_objects() {
+    local output_file="$1"         # Output executable path
+    local test_objects="$2"        # Space-separated list of test object files  
+    local library_names="$3"       # Space-separated list of library names
+    local config_file="$4"         # Path to build config JSON
+    
+    # Ensure build_core.sh functions are available
+    if ! command -v build_link_objects >/dev/null 2>&1; then
+        source "utils/build_core.sh"
+    fi
+    
+    # Start with test objects
+    local all_objects="$test_objects"
+    
+    # Resolve library dependencies to get library objects and flags
+    local library_flags=""
+    local library_objects=""
+    
+    if [ -n "$library_names" ]; then
+        local library_deps=$(resolve_library_dependencies $library_names)
+        if [ -n "$library_deps" ]; then
+            # Extract static libraries (.a files) - need word boundaries
+            local static_libs=$(echo "$library_deps" | grep -oE '[^[:space:]]+\.a' | tr '\n' ' ')
+            
+            # Extract library paths (-L flags)
+            local lib_paths=$(echo "$library_deps" | grep -oE '\-L[^[:space:]]+' | tr '\n' ' ')
+            
+            # Extract link libraries (-l flags) with proper word boundaries
+            local link_libs=$(echo "$library_deps" | grep -o ' -l[a-zA-Z][a-zA-Z0-9_+-]*' | tr '\n' ' ')
+            
+            # Extract object files (.o files) from pre-built objects
+            # For tests, we need to get the corresponding .o files for the .cpp/.c source files
+            local source_files=$(echo "$library_deps" | grep -oE '[^[:space:]]+\.(cpp|c)' | tr '\n' ' ')
+            
+            # Convert source files to object files in build directory
+            local lib_obj_files=""
+            for source_file in $source_files; do
+                if [ -f "$source_file" ]; then
+                    local obj_name=$(basename "$source_file" | sed 's/\.[^.]*$//')
+                    local obj_file="build/${obj_name}.o"
+                    if [ -f "$obj_file" ]; then
+                        lib_obj_files="$lib_obj_files $obj_file"
+                    fi
+                fi
+            done
+            
+            # Combine library flags
+            library_flags="$static_libs $lib_paths $link_libs"
+            library_objects="$lib_obj_files"
+        fi
+    fi
+    
+    # Combine test objects with library objects
+    all_objects="$all_objects $library_objects"
+    
+    # Get linker flags from config
+    local linker_flags=""
+    while IFS= read -r flag; do
+        [ -n "$flag" ] && linker_flags="$linker_flags -$flag"
+    done < <(get_json_array "linker_flags" "$config_file" "")
+    
+    # Use the existing build_link_objects from build_core.sh
+    if ! build_link_objects "$output_file" "$all_objects" "" "$library_flags" "$linker_flags" "auto"; then
+        echo "❌ Failed to link executable: $output_file" >&2
+        return 1
+    fi
+    
+    return 0
 }
