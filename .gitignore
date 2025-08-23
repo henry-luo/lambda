@@ -33,7 +33,7 @@ cache/
 # Executables and other project-specific generated files
 flexbox
 transpile
-core
+/core
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
 output.pgm
@@ -119,5 +119,7 @@ Cargo.lock
 *.test
 test/*.dSYM
 test*.ls
+!test/std/**/*.ls
+!test/std/**/*.expected
 test*.exe
 test_output/
