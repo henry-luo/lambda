@@ -168,9 +168,24 @@ build_test_executable() {
     # STEP 1: Use unified compilation function
     echo "🔧 Step 1: Compiling sources using unified build functions"
     local object_files
-    if ! object_files=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build"); then
-        echo "❌ Failed to compile sources for test: $suite_name"
-        return 1
+    
+    # Special handling for lambda_test_runner.cpp - unified system doesn't handle standalone test files
+    if [[ "$final_source" == *"lambda_test_runner.cpp"* ]]; then
+        local obj_name=$(basename "$final_source" | sed 's/\.[^.]*$//')
+        local obj_file="build/${obj_name}.o"
+        
+        echo "🔧 Compiling standalone test file directly: $final_source"
+        clang++ -std=c++17 -fms-extensions -I. -Ilib/mem-pool/include -Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/Cellar/mpdecimal/4.0.1/include -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -c "$final_source" -o "$obj_file"
+        if [ $? -ne 0 ]; then
+            echo "❌ Failed to compile $final_source"
+            return 1
+        fi
+        object_files="$obj_file"
+    else
+        if ! object_files=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build"); then
+            echo "❌ Failed to compile sources for test: $suite_name"
+            return 1
+        fi
     fi
     
     # STEP 2: Use unified linking function
