@@ -86,7 +86,7 @@ $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
-        build-windows build-debug build-release clean-all distclean \
+        build-windows build-debug build-release build-test clean-all distclean \
         verify-windows test-windows
 
 # Help target - shows available commands
