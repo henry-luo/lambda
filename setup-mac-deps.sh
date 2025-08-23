@@ -373,6 +373,7 @@ HOMEBREW_DEPS=(
     "utf8proc"   # For Unicode processing - referenced in build config  
     "readline"   # For command line editing - referenced in build config
     "criterion"  # For testing framework - referenced in build config
+    "coreutils"  # For timeout command needed by test suite
 )
 
 if command -v brew >/dev/null 2>&1; then
@@ -394,6 +395,26 @@ else
     exit 1
 fi
 
+# Set up timeout command for test suite
+echo "Setting up timeout command for test suite..."
+if command -v brew >/dev/null 2>&1; then
+    BREW_PREFIX=$(brew --prefix)
+    TIMEOUT_PATH="$BREW_PREFIX/bin/timeout"
+    GNU_TIMEOUT_PATH="$BREW_PREFIX/opt/coreutils/libexec/gnubin/timeout"
+    
+    if [ ! -f "$TIMEOUT_PATH" ] && [ -f "$GNU_TIMEOUT_PATH" ]; then
+        echo "Creating timeout symlink..."
+        ln -sf "$GNU_TIMEOUT_PATH" "$TIMEOUT_PATH"
+        echo "✅ timeout command linked successfully"
+    elif [ -f "$TIMEOUT_PATH" ]; then
+        echo "✅ timeout command already available"
+    else
+        echo "⚠️  Warning: timeout command not found, test suite may not work properly"
+    fi
+else
+    echo "⚠️  Warning: Cannot set up timeout command without Homebrew"
+fi
+
 # Clean up intermediate files
 cleanup_intermediate_files
 
@@ -410,9 +431,10 @@ if command -v brew >/dev/null 2>&1; then
     echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- readline: $([ -f "$BREW_PREFIX/lib/libreadline.a" ] || [ -f "$BREW_PREFIX/lib/libreadline.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$BREW_PREFIX/lib/liblexbor_static.a" ] || [ -f "$BREW_PREFIX/lib/liblexbor.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 else
-    echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- Homebrew not available for dependency checks"
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
