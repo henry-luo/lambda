@@ -186,9 +186,9 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     print_elapsed_time("parsing", start, end);
 
     // print the syntax tree as an s-expr.
-    printf("Syntax tree: ---------\n");
+    // printf("Syntax tree: ---------\n");
     TSNode root_node = ts_tree_root_node(tp->syntax_tree);
-    print_ts_node(tp->source, root_node, 0);
+    // print_ts_node(tp->source, root_node, 0);
     
     // check if the syntax tree is valid
     if (ts_node_has_error(root_node)) {
@@ -228,11 +228,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("building AST", start, end);
     // print the AST for debugging
-    printf("AST: %s ---------\n", tp->reference);
-    print_ast_node(tp, tp->ast_root, 0);
+    // printf("AST: %s ---------\n", tp->reference);
+    // print_ast_node(tp, tp->ast_root, 0);
 
     // transpile the AST to C code
-    printf("transpiling...\n");
+    // printf("transpiling...\n");
     get_time(&start);
     tp->code_buf = strbuf_new_cap(1024);
     transpile_ast(tp, (AstScript*)tp->ast_root);
@@ -263,7 +263,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
-    printf("loading script: %s\n", script_path);
+    // printf("loading script: %s\n", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
@@ -273,7 +273,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     // script not found, create a new one
-    printf("Loading %s ...\n", script_path);
+    // printf("Loading %s ...\n", script_path);
     Script *new_script = (Script*)calloc(1, sizeof(Script));
     new_script->reference = strdup(script_path);
     new_script->source = source ? source : read_text_file(script_path);

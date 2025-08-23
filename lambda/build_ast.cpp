@@ -353,8 +353,8 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
     str->chars[len] = '\0';  str->len = len;  
     str->ref_cnt = 1;  // set to 1 to prevent it from being freed
-    printf("build lit string: %.*s, len: %d, type: %d\n", 
-        (int)str->len, str->chars, str->len, str_type->type_id);
+    // printf("build lit string: %.*s, len: %d, type: %d\n", 
+    //     (int)str->len, str->chars, str->len, str_type->type_id);
     // add to const list
     arraylist_append(tp->const_list, str);
     str_type->const_index = tp->const_list->length - 1;
@@ -451,7 +451,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
-    printf("build primary expr\n");
+    // printf("build primary expr\n");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
     TSNode child = ts_node_named_child(pri_node, 0);
     if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
@@ -512,7 +512,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-    printf("end build primary expr\n");
+    // printf("end build primary expr\n");
     return (AstNode*)ast_node;
 }
 
@@ -566,12 +566,12 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
 
-    printf("end build unary expr\n");
+    // printf("end build unary expr\n");
     return (AstNode*)ast_node;
 }
 
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
-    printf("build binary expr\n");
+    // printf("build binary expr\n");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
     ast_node->left = build_expr(tp, left_node);
@@ -629,9 +629,9 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
-    printf("get binary type\n");
+    // printf("get binary type\n");
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
-    printf("left type: %d, right type: %d\n", left_type, right_type);
+    // printf("left type: %d, right type: %d\n", left_type, right_type);
     TypeId type_id;
     if (ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
@@ -703,7 +703,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         type_id = LMD_TYPE_ANY;
     }
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
-    printf("end build binary expr\n");
+    // printf("end build binary expr\n");
     return (AstNode*)ast_node;
 }
 
@@ -1661,7 +1661,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 }
 
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
-    printf("build content\n");
+    // printf("build content\n");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
     TypeList *type = (TypeList*)ast_node->type;
@@ -1683,7 +1683,7 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
         // else comment or error
         child = ts_node_next_named_sibling(child);
     }
-    printf("end building content item: %p, %ld\n", ast_node->item, type->length);
+    // printf("end building content item: %p, %ld\n", ast_node->item, type->length);
     if (flattern && type->length == 1) { return ast_node->item;}
     return (AstNode*)ast_node;
 }
@@ -1873,7 +1873,7 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
 }
 
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
-    printf("build script\n");
+    // printf("build script\n");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
     tp->current_scope = ast_node->global_vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
 

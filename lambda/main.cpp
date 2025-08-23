@@ -6,10 +6,8 @@ extern "C" int exec_validation(int argc, char* argv[]);
 #include "input/input.h"
 #include <unistd.h>  // for getcwd
 
-// Unicode support
-#ifdef LAMBDA_UTF8PROC_SUPPORT
+// Unicode support (always enabled)
 #include "utf_string.h"
-#endif
 
 // Forward declare additional transpiler functions
 extern "C" {
@@ -284,14 +282,12 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "TRACE: Runtime initialized\n");
     fflush(stderr);
 
-#ifdef LAMBDA_UTF8PROC_SUPPORT
-    // Initialize utf8proc Unicode support
+    // Initialize utf8proc Unicode support (always enabled)
     fprintf(stderr, "TRACE: About to initialize utf8proc Unicode support\n");
     fflush(stderr);
     init_utf8proc_support();
     fprintf(stderr, "TRACE: utf8proc Unicode support initialized\n");
     fflush(stderr);
-#endif
 
     // Handle validate command
     fprintf(stderr, "TRACE: Checking for validate command\n");
@@ -373,10 +369,8 @@ int main(int argc, char *argv[]) {
         run_repl(&runtime, use_mir);
     }
     
-#ifdef LAMBDA_UTF8PROC_SUPPORT
-    // Clean up utf8proc Unicode support
+    // Clean up utf8proc Unicode support (always enabled)
     cleanup_utf8proc_support();
-#endif
     
     return 0;
 }
