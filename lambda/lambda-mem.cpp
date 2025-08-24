@@ -97,7 +97,7 @@ void print_heap_entries() {
             TypeId type_id = *((uint8_t*)data);
             printf("heap entry data: type: %s\n", type_info[type_id].name);
             if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || 
-                type_id == LMD_TYPE_ARRAY_INT || type_id == LMD_TYPE_ARRAY_FLOAT || type_id == LMD_TYPE_MAP || 
+                type_id == LMD_TYPE_ARRAY_INT || type_id == LMD_TYPE_ARRAY_INT64 || type_id == LMD_TYPE_ARRAY_FLOAT || type_id == LMD_TYPE_MAP || 
                 type_id == LMD_TYPE_ELEMENT) {
                 Container *cont = (Container*)data;
                 printf("heap entry container: type: %s, ref_cnt: %d\n", 
@@ -131,8 +131,12 @@ void check_memory_leak() {
                 printf("heap entry array: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_ARRAY_INT) {
-                ArrayLong *arr = (ArrayLong*)data;
+                ArrayInt *arr = (ArrayInt*)data;
                 printf("heap entry array int: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
+            }
+            else if (type_id == LMD_TYPE_ARRAY_INT64) {
+                ArrayInt64 *arr = (ArrayInt64*)data;
+                printf("heap entry array int64: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
                 ArrayFloat *arr = (ArrayFloat*)data;
@@ -218,7 +222,14 @@ void free_container(Container* cont, bool clear_entry) {
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayLong *arr = (ArrayLong*)cont;
+        ArrayInt *arr = (ArrayInt*)cont;
+        if (!arr->ref_cnt) {
+            if (arr->items) free(arr->items);
+            pool_variable_free(context->heap->pool, cont);
+        }
+    }
+    else if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64 *arr = (ArrayInt64*)cont;
         if (!arr->ref_cnt) {
             if (arr->items) free(arr->items);
             pool_variable_free(context->heap->pool, cont);

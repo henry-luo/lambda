@@ -43,6 +43,7 @@ enum EnumTypeId {
     LMD_TYPE_LIST,
     LMD_TYPE_RANGE,
     LMD_TYPE_ARRAY_INT,
+    LMD_TYPE_ARRAY_INT64,
     LMD_TYPE_ARRAY_FLOAT,
     LMD_TYPE_ARRAY,
     LMD_TYPE_MAP,
@@ -75,7 +76,8 @@ typedef struct Container Container;
 typedef struct Range Range;
 typedef struct List List;
 typedef struct List Array;
-typedef struct ArrayLong ArrayLong;
+typedef struct ArrayInt ArrayInt;
+typedef struct ArrayInt64 ArrayInt64;
 typedef struct ArrayFloat ArrayFloat;
 typedef struct Map Map;
 typedef struct Element Element;
@@ -139,7 +141,8 @@ typedef union Item {
     Range* range;
     List* list;
     Array* array;
-    ArrayLong* array_long;
+    ArrayInt* array_int;      // Renamed from array_long
+    ArrayInt64* array_int64;  // New: 64-bit integer arrays
     ArrayFloat* array_float;
     Map* map;
     Element* element;
@@ -232,19 +235,39 @@ void list_push(List *list, Item item);
 Item list_get(List *list, int index);
 
 #ifndef __cplusplus
-    struct ArrayLong {
+    struct ArrayInt {
         TypeId type_id;
         uint8_t flags;
         uint16_t ref_cnt;  // reference count
         //---------------------
-        long* items;  // pointer to items
+        int* items;  // pointer to 32-bit integer items
         long length;  // number of items
         long extra;   // count of extra items stored at the end of the array
         long capacity;  // allocated capacity
     };
 #else
-    struct ArrayLong : Container {
-        long* items;
+    struct ArrayInt : Container {
+        int* items;  // 32-bit integer items
+        long length;
+        long extra;  // count of extra items
+        long capacity;
+    };
+#endif
+
+#ifndef __cplusplus
+    struct ArrayInt64 {
+        TypeId type_id;
+        uint8_t flags;
+        uint16_t ref_cnt;  // reference count
+        //---------------------
+        int64_t* items;  // pointer to 64-bit integer items
+        long length;  // number of items
+        long extra;   // count of extra items stored at the end of the array
+        long capacity;  // allocated capacity
+    };
+#else
+    struct ArrayInt64 : Container {
+        int64_t* items;  // 64-bit integer items
         long length;
         long extra;  // count of extra items
         long capacity;
@@ -272,13 +295,19 @@ Item list_get(List *list, int index);
 #endif
 
 Array* array();
-ArrayLong* array_long_new(int count, ...);
-ArrayFloat* array_float_new(int count, ...);
-Item array_float_new_item(int count, ...);
-double array_float_get(ArrayFloat* array, int index);
-void array_float_set(ArrayFloat* array, int index, double value);
+ArrayInt* array_int();
+ArrayInt64* array_int64();
+ArrayFloat* array_float();
+
+ArrayInt* array_int_new(int length);
+ArrayInt64* array_int64_new(int length);
+ArrayFloat* array_float_new(int length);
+
 Array* array_fill(Array* arr, int count, ...);
-Item array_to_item(Array* arr);
+ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
+ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
+ArrayFloat* array_float_fill(ArrayFloat* arr, int count, ...);
+
 // void array_push(Array *array, Item item);
 Item array_get(Array *array, int index);
 
@@ -355,6 +384,7 @@ Item fn_min(Item a, Item b);
 Item fn_max(Item a, Item b);
 Item fn_sum(Item a);
 Item fn_avg(Item a);
+Item fn_int64(Item a);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
 Item fn_eq(Item a, Item b);

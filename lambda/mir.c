@@ -29,8 +29,15 @@ func_obj_t func_list[] = {
     {"array", (fn_ptr) array},
     {"array_fill", (fn_ptr) array_fill},
     {"array_get", (fn_ptr) array_get},
-    {"array_long_new", (fn_ptr) array_long_new},
-    {"array_to_item", (fn_ptr) array_to_item},
+    {"array_int", (fn_ptr) array_int},
+    {"array_int64", (fn_ptr) array_int64},
+    {"array_float", (fn_ptr) array_float},
+    {"array_int_fill", (fn_ptr) array_int_fill},
+    {"array_int64_fill", (fn_ptr) array_int64_fill},
+    {"array_float_fill", (fn_ptr) array_float_fill},
+    // {"array_int_get_item", (fn_ptr) array_int_get_item},
+    // {"array_int64_get_item", (fn_ptr) array_int64_get_item},
+    // {"array_float_get_item", (fn_ptr) array_float_get_item},
     {"list", (fn_ptr) list},
     {"list_fill", (fn_ptr) list_fill},
     {"list_push", (fn_ptr) list_push},
@@ -47,6 +54,7 @@ func_obj_t func_list[] = {
     {"push_l", (fn_ptr) push_l},
     {"push_k", (fn_ptr) push_k},
     
+    {"fn_int64", (fn_ptr) fn_int64},
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},
     {"fn_mul", (fn_ptr) fn_mul},
@@ -97,12 +105,16 @@ func_obj_t func_list[] = {
 };
 
 void *import_resolver(const char *name) {
-    // printf("resolving name: %s\n", name);
+    printf("resolving name: %s\n", name);
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
-    for (int i = 0; i < len; i++) 
-        if (strcmp(func_list[i].name, name) == 0)
+    for (int i = 0; i < len; i++) {
+        printf("checking fn: %s", func_list[i].name);
+        if (strcmp(func_list[i].name, name) == 0) {
+            printf("found function: %s at %p\n", name, func_list[i].func);
             return func_list[i].func;
-    printf("failed to resolve native fn: %s\n", name);
+        }
+    }
+    printf("failed to resolve native fn:: %s\n", name);
     return NULL;
 }
 
