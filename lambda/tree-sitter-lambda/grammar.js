@@ -106,7 +106,8 @@ function built_in_types(include_null) {
     'error',
     'bool',
     // 'int8', 'int16', 'int32', 'int64',
-    'int',  // int64
+    'int',    // int32
+    'int64',  // int64
     // 'float32', 'float64',
     'float',  // float64
     'decimal',  // big decimal
@@ -531,7 +532,7 @@ module.exports = grammar({
     // prec(50) to make it higher priority than base types
     sys_func: $ => prec(50, seq(
       field('function', choice(
-        'len', 'type', 'int', 'float', 'number', 'string', 'char', 'symbol',
+        'len', 'type', 'int', 'int64', 'float', 'number', 'string', 'char', 'symbol',
         'datetime', 'date', 'time', 'today', 'justnow',
         'set', 'slice',
         'all', 'any', 'min', 'max', 'sum', 'avg', 'abs', 'round', 'floor', 'ceil',

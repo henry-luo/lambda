@@ -118,8 +118,6 @@ Cargo.lock
 # Test outputs and artifacts
 *.test
 test/*.dSYM
-test*.ls
-!test/std/**/*.ls
-!test/std/**/*.expected
+test.ls
 test*.exe
 test_output/

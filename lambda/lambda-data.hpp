@@ -113,6 +113,10 @@ typedef struct TypeFloat : TypeConst {
     double double_val;
 } TypeFloat;
 
+typedef struct TypeInt64 : TypeConst {
+    int64_t int64_val;
+} TypeInt64;
+
 typedef struct TypeDateTime : TypeConst {
     DateTime datetime;
 } TypeDateTime;
@@ -192,6 +196,7 @@ typedef enum SysFunc {
     SYSFUNC_LEN,
     SYSFUNC_TYPE,
     SYSFUNC_INT,
+    SYSFUNC_INT64,
     SYSFUNC_FLOAT,
     SYSFUNC_NUMBER,
     SYSFUNC_STRING,
@@ -294,6 +299,7 @@ extern Type CONST_STRING;
 extern Type LIT_NULL;
 extern Type LIT_BOOL;
 extern Type LIT_INT;
+extern Type LIT_INT64;
 extern Type LIT_FLOAT;
 extern Type LIT_DECIMAL;
 extern Type LIT_STRING;
