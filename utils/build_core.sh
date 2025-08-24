@@ -83,7 +83,24 @@ compile_single_file() {
         dep_flags="-MMD -MP"
     fi
     
-    $compiler $includes $dep_flags -c "$source" -o "$obj_file" $warnings $flags 2>&1
+    # Capture compilation output and status
+    local compile_output
+    compile_output=$($compiler $includes $dep_flags -c "$source" -o "$obj_file" $warnings $flags 2>&1)
+    local compile_status=$?
+    
+    # If compilation failed, clean up any partial .d files to prevent stale dependencies
+    if [ $compile_status -ne 0 ]; then
+        local dep_file="${obj_file%.o}.d"
+        rm -f "$dep_file" 2>/dev/null || true
+        rm -f "$obj_file" 2>/dev/null || true
+    fi
+    
+    # Output compilation messages
+    if [ -n "$compile_output" ]; then
+        echo "$compile_output"
+    fi
+    
+    return $compile_status
 }
 
 # Function to check if source file needs recompilation

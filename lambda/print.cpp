@@ -82,7 +82,10 @@ void writeType(Transpiler* tp, Type *type) {
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "bool");
         break;
-    case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+    case LMD_TYPE_INT:
+        strbuf_append_str(tp->code_buf, "int");
+        break;
+    case LMD_TYPE_INT64:
         strbuf_append_str(tp->code_buf, "long");
         break;
     case LMD_TYPE_FLOAT:
@@ -116,7 +119,7 @@ void writeType(Transpiler* tp, Type *type) {
             (uintptr_t)array_type->nested >= 0x1000 && 
             (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
             array_type->nested->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "ArrayLong*");
+            strbuf_append_str(tp->code_buf, "ArrayInt*");
         } else {
             strbuf_append_str(tp->code_buf, "Array*");
         }
@@ -263,7 +266,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
                 }
                 break;
             }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_LIST:  
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_LIST:  
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
                 // printf("print named item: %p, type: %d\n", data, field->type->type_id);
@@ -346,12 +349,12 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth) {
             strbuf_append_str(strbuf, "0x");
         }
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
         // For complex types, create a temporary Item and use existing print_item logic
         {
             Item temp_item = {.raw_pointer = titem->pointer};
-            print_item(strbuf, temp_item, depth + 1);
+            print_item(strbuf, temp_item, depth + 1, NULL);
         }
         break;
     default:
@@ -370,6 +373,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
 
     TypeId type_id = get_type_id(item);
+    printf("TRACE: print_item - item type: %d\n", type_id);
     switch (type_id) { // packed value
     case LMD_TYPE_NULL:
         strbuf_append_str(strbuf, "null");
@@ -501,13 +505,23 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_ARRAY_INT: {
         strbuf_append_char(strbuf, '[');
-        ArrayLong *array = item.array_long;
+        ArrayInt *array = item.array_int;
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_str(strbuf, ", ");
-            strbuf_append_format(strbuf, "%ld", array->items[i]);
+            strbuf_append_format(strbuf, "%d", array->items[i]);
         }
         strbuf_append_char(strbuf, ']');
         break;       
+    }
+    case LMD_TYPE_ARRAY_INT64: {
+        strbuf_append_str(strbuf, "[#");
+        ArrayInt64 *array = item.array_int64;
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_str(strbuf, ", ");
+            strbuf_append_format(strbuf, "%lld", array->items[i]);
+        }
+        strbuf_append_str(strbuf, "#]");
+        break;
     }
     case LMD_TYPE_MAP: {
         Map *map = item.map;
@@ -533,7 +547,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, "  "); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
         }
@@ -619,11 +633,17 @@ char* format_type(Type *type) {
             (uintptr_t)array_type->nested >= 0x1000 && 
             (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
             array_type->nested->type_id == LMD_TYPE_INT) {
-            return "ArrayLong*";
+            return "ArrayInt*";
         } else {
             return "Array*";
         }
     }
+    case LMD_TYPE_ARRAY_INT:
+        return "ArrayInt*";
+    case LMD_TYPE_ARRAY_INT64:
+        return "ArrayInt64*";
+    case LMD_TYPE_ARRAY_FLOAT:
+        return "ArrayFloat*";
     case LMD_TYPE_MAP:
         return "Map*";
     case LMD_TYPE_ELEMENT:

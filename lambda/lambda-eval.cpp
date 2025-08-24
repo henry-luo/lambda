@@ -76,53 +76,94 @@ bool decimal_is_zero(mpd_t* dec_val) {
     return mpd_iszero(dec_val);
 }
 
-Item array_to_item(Array* arr) {
-    if (!arr) {
-        return ItemError;
-    }
-    Item item;
-    item.type_id = LMD_TYPE_ARRAY;
-    item.array = arr;
-    return item;
+ArrayInt* array_int() {
+    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
+    arr->type_id = LMD_TYPE_ARRAY_INT;
+    return arr;
 }
 
-ArrayLong* array_long_new(int count, ...) {
-    if (count <= 0) { return NULL; }
+ArrayInt* array_int_new(int length) {
+    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
+    arr->type_id = LMD_TYPE_ARRAY_INT;
+    arr->length = length;  arr->capacity = length;
+    arr->items = (int32_t*)Malloc(length * sizeof(int32_t));
+    return arr;
+}
+
+ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
+    if (count < 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    ArrayLong *arr = (ArrayLong*)heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
-    arr->type_id = LMD_TYPE_ARRAY_INT;  arr->capacity = count;
-    arr->items = (long*)Malloc(count * sizeof(long));
-    arr->length = count;
+    arr->items = (int32_t*)Malloc(count * sizeof(int32_t));
+    arr->length = count;  arr->capacity = count;
     for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, long);
+        arr->items[i] = va_arg(args, int32_t);
     }       
     va_end(args);
     return arr;
 }
 
-// Wrapper function to return an Item instead of raw ArrayLong*
-Item array_long_new_item(int count, ...) {
-    if (count <= 0) { 
-        ArrayLong *arr = (ArrayLong*)heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
-        arr->type_id = LMD_TYPE_ARRAY_INT;
-        arr->capacity = 0;
-        arr->items = NULL;
-        arr->length = 0;
-        return (Item){.array_long = arr};
-    }
+ArrayInt64* array_int64() {
+    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
+    arr->type_id = LMD_TYPE_ARRAY_INT64;
+    return arr;
+}
+
+ArrayInt64* array_int64_new(int length) {
+    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
+    arr->type_id = LMD_TYPE_ARRAY_INT64;
+    arr->length = length;  arr->capacity = length;
+    arr->items = (int64_t*)Malloc(length * sizeof(int64_t));
+    return arr;
+}
+
+ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
+    if (count < 0) { return NULL; }
     va_list args;
     va_start(args, count);
-    ArrayLong *arr = (ArrayLong*)heap_alloc(sizeof(ArrayLong), LMD_TYPE_ARRAY_INT);
-    arr->type_id = LMD_TYPE_ARRAY_INT;  
-    arr->capacity = count;
-    arr->items = (long*)Malloc(count * sizeof(long));
-    arr->length = count;
+    arr->items = (int64_t*)Malloc(count * sizeof(int64_t));
+    arr->length = count;  arr->capacity = count;
     for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, long);
+        arr->items[i] = va_arg(args, int64_t);
     }       
     va_end(args);
-    return (Item){.array_long = arr};
+    printf("returning array_int64_fill: %d\n", arr->type_id);
+    return arr;
+}
+
+Item array_int64_get_item(ArrayInt64* array, int index) {
+    if (!array || index < 0 || index >= array->length) {
+        return ItemNull;
+    }
+    return push_l(array->items[index]);
+}
+
+ArrayFloat* array_float() {
+    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    return arr;
+}
+
+ArrayFloat* array_float_new(int length) {
+    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    arr->length = length;  arr->capacity = length;
+    arr->items = (double*)Malloc(length * sizeof(double));
+    return arr;
+}
+
+ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
+    if (count < 0) { return NULL; } 
+    va_list args;
+    va_start(args, count);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
+    arr->items = (double*)Malloc(count * sizeof(double));
+    arr->length = count;  arr->capacity = count;
+    for (int i = 0; i < count; i++) {
+        arr->items[i] = va_arg(args, double);
+    }       
+    va_end(args);
+    return arr;
 }
 
 bool item_true(Item item) {
@@ -207,7 +248,46 @@ Item fn_add(Item item_a, Item item_b) {
         return {.item = i2it(item_a.int_val + item_b.int_val)};
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
-        return push_l(*(long*)item_a.pointer + *(long*)item_b.pointer);
+        return push_l(*(int64_t*)item_a.pointer + *(int64_t*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
+        return push_l((int64_t)item_a.int_val + *(int64_t*)item_b.pointer);
+    }
+    else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
+        return push_l(*(int64_t*)item_a.pointer + (int64_t)item_b.int_val);
+    }
+    // ArrayInt and ArrayInt64 support
+    else if (item_a.type_id == LMD_TYPE_ARRAY_INT && item_b.type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr_a = item_a.array_int;
+        ArrayInt* arr_b = item_b.array_int;
+        if (arr_a->length != arr_b->length) {
+            printf("Array length mismatch in addition\n");
+            return ItemError;
+        }
+        ArrayInt* result = array_int_new(arr_a->length);
+        for (long i = 0; i < arr_a->length; i++) {
+            result->items[i] = arr_a->items[i] + arr_b->items[i];
+        }
+        Item result_item;
+        result_item.type_id = LMD_TYPE_ARRAY_INT;
+        result_item.array_int = result;
+        return result_item;
+    }
+    else if (item_a.type_id == LMD_TYPE_ARRAY_INT64 && item_b.type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr_a = item_a.array_int64;
+        ArrayInt64* arr_b = item_b.array_int64;
+        if (arr_a->length != arr_b->length) {
+            printf("Array length mismatch in addition\n");
+            return ItemError;
+        }
+        ArrayInt64* result = array_int64_new(arr_a->length);
+        for (long i = 0; i < arr_a->length; i++) {
+            result->items[i] = arr_a->items[i] + arr_b->items[i];
+        }
+        Item result_item;
+        result_item.type_id = LMD_TYPE_ARRAY_INT64;
+        result_item.array_int64 = result;
+        return result_item;
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
         printf("add float: %g + %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
@@ -340,6 +420,38 @@ Item fn_mul(Item item_a, Item item_b) {
         
         return push_decimal(result);
     }
+    else if (item_a.type_id == LMD_TYPE_ARRAY_INT && item_b.type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr_a = item_a.array_int;
+        ArrayInt* arr_b = item_b.array_int;
+        if (arr_a->length != arr_b->length) {
+            printf("Array length mismatch in multiplication\n");
+            return ItemError;
+        }
+        ArrayInt* result = array_int_new(arr_a->length);
+        for (long i = 0; i < arr_a->length; i++) {
+            result->items[i] = arr_a->items[i] * arr_b->items[i];
+        }
+        Item result_item;
+        result_item.type_id = LMD_TYPE_ARRAY_INT;
+        result_item.array_int = result;
+        return result_item;
+    }
+    else if (item_a.type_id == LMD_TYPE_ARRAY_INT64 && item_b.type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr_a = item_a.array_int64;
+        ArrayInt64* arr_b = item_b.array_int64;
+        if (arr_a->length != arr_b->length) {
+            printf("Array length mismatch in multiplication\n");
+            return ItemError;
+        }
+        ArrayInt64* result = array_int64_new(arr_a->length);
+        for (long i = 0; i < arr_a->length; i++) {
+            result->items[i] = arr_a->items[i] * arr_b->items[i];
+        }
+        Item result_item;
+        result_item.type_id = LMD_TYPE_ARRAY_INT64;
+        result_item.array_int64 = result;
+        return result_item;
+    }
     else {
         printf("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
@@ -394,6 +506,38 @@ Item fn_sub(Item item_a, Item item_b) {
         }
         
         return push_decimal(result);
+    }
+    else if (item_a.type_id == LMD_TYPE_ARRAY_INT && item_b.type_id == LMD_TYPE_ARRAY_INT) {
+        ArrayInt* arr_a = item_a.array_int;
+        ArrayInt* arr_b = item_b.array_int;
+        if (arr_a->length != arr_b->length) {
+            printf("Array length mismatch in subtraction\n");
+            return ItemError;
+        }
+        ArrayInt* result = array_int_new(arr_a->length);
+        for (long i = 0; i < arr_a->length; i++) {
+            result->items[i] = arr_a->items[i] - arr_b->items[i];
+        }
+        Item result_item;
+        result_item.type_id = LMD_TYPE_ARRAY_INT;
+        result_item.array_int = result;
+        return result_item;
+    }
+    else if (item_a.type_id == LMD_TYPE_ARRAY_INT64 && item_b.type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr_a = item_a.array_int64;
+        ArrayInt64* arr_b = item_b.array_int64;
+        if (arr_a->length != arr_b->length) {
+            printf("Array length mismatch in subtraction\n");
+            return ItemError;
+        }
+        ArrayInt64* result = array_int64_new(arr_a->length);
+        for (long i = 0; i < arr_a->length; i++) {
+            result->items[i] = arr_a->items[i] - arr_b->items[i];
+        }
+        Item result_item;
+        result_item.type_id = LMD_TYPE_ARRAY_INT64;
+        result_item.array_int64 = result;
+        return result_item;
     }
     else {
         printf("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
@@ -815,17 +959,30 @@ Item fn_min(Item item_a, Item item_b) {
             return push_d(min_val);
         }
         else if (type_id == LMD_TYPE_ARRAY_INT) {
-            ArrayLong* arr = item_a.array_long;
+            ArrayInt* arr = item_a.array_int;
             if (!arr || arr->length == 0) {
                 return ItemError; // Empty array has no minimum
             }
-            long min_val = arr->items[0];
+            int32_t min_val = arr->items[0];
             for (size_t i = 1; i < arr->length; i++) {
                 if (arr->items[i] < min_val) {
                     min_val = arr->items[i];
                 }
             }
-            return (Item){.item = i2it(min_val)};
+            return {.item = i2it(min_val)};
+        }
+        else if (type_id == LMD_TYPE_ARRAY_INT64) {
+            ArrayInt64* arr = item_a.array_int64;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no minimum
+            }
+            int64_t min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
+            }
+            return push_l(min_val);
         }
         else if (type_id == LMD_TYPE_ARRAY) {
             Array* arr = item_a.array;
@@ -954,17 +1111,30 @@ Item fn_max(Item item_a, Item item_b) {
             return push_d(max_val);
         }
         else if (type_id == LMD_TYPE_ARRAY_INT) {
-            ArrayLong* arr = item_a.array_long;
+            ArrayInt* arr = item_a.array_int;
             if (!arr || arr->length == 0) {
                 return ItemError; // Empty array has no maximum
             }
-            long max_val = arr->items[0];
+            int32_t max_val = arr->items[0];
             for (size_t i = 1; i < arr->length; i++) {
                 if (arr->items[i] > max_val) {
                     max_val = arr->items[i];
                 }
             }
-            return (Item){.item = i2it(max_val)};
+            return {.item = i2it(max_val)};
+        }
+        else if (type_id == LMD_TYPE_ARRAY_INT64) {
+            ArrayInt64* arr = item_a.array_int64;
+            if (!arr || arr->length == 0) {
+                return ItemError; // Empty array has no maximum
+            }
+            int64_t max_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] > max_val) {
+                    max_val = arr->items[i];
+                }
+            }
+            return push_l(max_val);
         }
         else if (type_id == LMD_TYPE_ARRAY) {
             Array* arr = item_a.array;
@@ -1117,15 +1287,26 @@ Item fn_sum(Item item) {
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayLong* arr = item.array_long;  // Use the correct field
+        ArrayInt* arr = item.array_int;  // Use the correct field
         if (!arr || arr->length == 0) {
             return (Item){.item = i2it(0)};  // Empty array sums to 0
         }
-        long sum = 0;
+        int64_t sum = 0;
         for (size_t i = 0; i < arr->length; i++) {
             sum += arr->items[i];
         }
-        return (Item){.item = i2it(sum)};
+        return push_l(sum);
+    }
+    else if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
+        if (!arr || arr->length == 0) {
+            return (Item){.item = i2it(0)};  // Empty array sums to 0
+        }
+        int64_t sum = 0;
+        for (size_t i = 0; i < arr->length; i++) {
+            sum += arr->items[i];
+        }
+        return push_l(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat* arr = item.array_float;  // Use the correct field
@@ -1214,7 +1395,18 @@ Item fn_avg(Item item) {
         return push_d(sum / (double)arr->length);
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
-        ArrayLong* arr = item.array_long;  // Use the correct field
+        ArrayInt* arr = item.array_int;  // Use the correct field
+        if (!arr || arr->length == 0) {
+            return ItemError;
+        }
+        double sum = 0.0;
+        for (size_t i = 0; i < arr->length; i++) {
+            sum += (double)arr->items[i];
+        }
+        return push_d(sum / (double)arr->length);
+    }
+    else if (type_id == LMD_TYPE_ARRAY_INT64) {
+        ArrayInt64* arr = item.array_int64;
         if (!arr || arr->length == 0) {
             return ItemError;
         }
@@ -1370,6 +1562,81 @@ Item fn_neg(Item item) {
 }
 
 // Unicode string normalization function
+Item fn_int(Item item) {
+    // Convert item to int32
+    if (item.type_id == LMD_TYPE_INT) {
+        return item;  // Already int32
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        int64_t val = *(int64_t*)item.pointer;
+        if (val > INT32_MAX || val < INT32_MIN) {
+            printf("int64 value %lld out of int32 range\n", val);
+            return ItemError;
+        }
+        return {.item = i2it((int32_t)val)};
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        if (val > INT32_MAX || val < INT32_MIN) {
+            printf("float value %g out of int32 range\n", val);
+            return ItemError;
+        }
+        return {.item = i2it((int32_t)val)};
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            return {.item = i2it(0)};
+        }
+        char* endptr;
+        long val = strtol(str->chars, &endptr, 10);
+        if (endptr == str->chars) {
+            printf("Cannot convert string '%s' to int\n", str->chars);
+            return ItemError;
+        }
+        if (val > INT32_MAX || val < INT32_MIN) {
+            printf("String value %ld out of int32 range\n", val);
+            return ItemError;
+        }
+        return {.item = i2it((int32_t)val)};
+    }
+    printf("Cannot convert type %d to int\n", item.type_id);
+    return ItemError;
+}
+
+Item fn_int64(Item item) {
+    // Convert item to int64
+    if (item.type_id == LMD_TYPE_INT64) {
+        return item;  // Already int64
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        return push_l((int64_t)item.int_val);
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        double val = *(double*)item.pointer;
+        if (val > INT64_MAX || val < INT64_MIN) {
+            printf("float value %g out of int64 range\n", val);
+            return ItemError;
+        }
+        return push_l((int64_t)val);
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            return push_l(0);
+        }
+        char* endptr;
+        long long val = strtoll(str->chars, &endptr, 10);
+        if (endptr == str->chars) {
+            printf("Cannot convert string '%s' to int64\n", str->chars);
+            return ItemError;
+        }
+        return push_l((int64_t)val);
+    }
+    printf("Cannot convert type %d to int64\n", item.type_id);
+    return ItemError;
+}
+
 Item fn_normalize(Item str_item, Item type_item) {
     // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
     if (str_item.type_id != LMD_TYPE_STRING) {
@@ -1377,56 +1644,50 @@ Item fn_normalize(Item str_item, Item type_item) {
         return ItemError;
     }
     
-    if (type_item.type_id != LMD_TYPE_SYMBOL) {
-        printf("normalize: second argument must be a symbol (normalization type), got type: %d\n", type_item.type_id);
-        return ItemError;
+    String* str = (String*)str_item.pointer;
+    if (!str || str->len == 0) {
+        return str_item;  // Return empty string as-is
     }
     
-    String* input_str = (String*)str_item.pointer;
-    String* norm_type = (String*)type_item.pointer;
+    // Default to NFC if no type specified or invalid type
+    int options = UTF8PROC_STABLE | UTF8PROC_COMPOSE;
     
-    if (!input_str || !norm_type) {
-        printf("normalize: null string arguments\n");
-        return ItemError;
+    if (type_item.type_id == LMD_TYPE_STRING) {
+        String* type_str = (String*)type_item.pointer;
+        if (type_str && type_str->len > 0) {
+            if (strncmp(type_str->chars, "nfd", 3) == 0) {
+                options = UTF8PROC_STABLE | UTF8PROC_DECOMPOSE;
+            } else if (strncmp(type_str->chars, "nfkc", 4) == 0) {
+                options = UTF8PROC_STABLE | UTF8PROC_COMPOSE | UTF8PROC_COMPAT;
+            } else if (strncmp(type_str->chars, "nfkd", 4) == 0) {
+                options = UTF8PROC_STABLE | UTF8PROC_DECOMPOSE | UTF8PROC_COMPAT;
+            }
+            // Default case (nfc) already set above
+        }
     }
     
 #if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc for normalization
-    int result_len = 0;
-    char* result = NULL;
+    // Use utf8proc for Unicode normalization
+    utf8proc_uint8_t* normalized = NULL;
+    utf8proc_ssize_t normalized_len = utf8proc_map(
+        (const utf8proc_uint8_t*)str->chars, str->len, &normalized, (utf8proc_option_t)options);
     
-    if (strncmp(norm_type->chars, "nfc", norm_type->len) == 0) {
-        result = normalize_utf8proc_nfc(input_str->chars, input_str->len, &result_len);
-    } else if (strncmp(norm_type->chars, "nfd", norm_type->len) == 0) {
-        result = normalize_utf8proc_nfd(input_str->chars, input_str->len, &result_len);
-    } else if (strncmp(norm_type->chars, "nfkc", norm_type->len) == 0) {
-        result = normalize_utf8proc_nfkc(input_str->chars, input_str->len, &result_len);
-    } else if (strncmp(norm_type->chars, "nfkd", norm_type->len) == 0) {
-        result = normalize_utf8proc_nfkd(input_str->chars, input_str->len, &result_len);
-    } else {
-        printf("normalize: unknown normalization type '%.*s', supported: nfc, nfd, nfkc, nfkd\n", 
-               (int)norm_type->len, norm_type->chars);
+    if (normalized_len < 0) {
+        printf("normalize: utf8proc_map failed with error: %zd\n", normalized_len);
         return ItemError;
     }
     
-    if (!result || result_len == 0) {
-        printf("normalize: normalization failed\n");
-        return ItemError;
-    }
+    // Create new string with normalized content
+    String* result = (String*)heap_alloc(sizeof(String) + normalized_len + 1, LMD_TYPE_STRING);
+    result->ref_cnt = 0;
+    result->len = normalized_len;
+    memcpy(result->chars, normalized, normalized_len);
+    result->chars[normalized_len] = '\0';
     
-    // Create a new string from the normalized result
-    String* output_str = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
-    if (!output_str) {
-        free(result);
-        printf("normalize: failed to allocate output string\n");
-        return ItemError;
-    }
+    // Free the utf8proc allocated buffer
+    free(normalized);
     
-    memcpy(output_str->chars, result, result_len);
-    output_str->len = result_len;
-    free(result);  // utf8proc allocates with malloc, so we need to free
-    
-    return (Item){.item = s2it(output_str)};
+    return (Item){.item = s2it(result)};
     
 #elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
     // Use ICU for normalization (fallback for compatibility)
@@ -1773,7 +2034,7 @@ bool fn_in(Item a_item, Item b_item) {
             return false;
         }
         else if (b_type == LMD_TYPE_ARRAY_INT) {
-            ArrayLong *arr = b_item.array_long;
+            ArrayInt *arr = b_item.array_int;
             for (int i = 0; i < arr->length; i++) {
                 if (arr->items[i] == it2l(a_item)) {
                     return true;
@@ -2154,7 +2415,7 @@ Item fn_index(Item item, Item index_item) {
     case LMD_TYPE_ARRAY:
         return array_get(item.array, (int)index);
     case LMD_TYPE_ARRAY_INT: {
-        ArrayLong *arr = item.array_long;
+        ArrayInt *arr = item.array_int;
         if (index < 0 || index >= arr->length) { return ItemNull; }
         return {.item = i2it(arr->items[index])};
     }
@@ -2221,7 +2482,10 @@ Item fn_len(Item item) {
         size = item.array->length;
         break;
     case LMD_TYPE_ARRAY_INT:
-        size = item.array_long->length;
+        size = item.array_int->length;
+        break;
+    case LMD_TYPE_ARRAY_INT64:
+        size = item.array_int64->length;
         break;
     case LMD_TYPE_ARRAY_FLOAT:
         size = item.array_float->length;
@@ -2385,7 +2649,7 @@ DateTime fn_datetime() {
 
 // ArrayFloat runtime functions
 
-ArrayFloat* array_float_new(int count, ...) {
+ArrayFloat* array_float(int count, ...) {
     if (count <= 0) { return NULL; }
     va_list args;
     va_start(args, count);
@@ -2402,7 +2666,7 @@ ArrayFloat* array_float_new(int count, ...) {
 }
 
 // Wrapper function to return an Item instead of raw ArrayFloat*
-Item array_float_new_item(int count, ...) {
+Item array_float_item(int count, ...) {
     if (count <= 0) { 
         ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
         arr->type_id = LMD_TYPE_ARRAY_FLOAT;

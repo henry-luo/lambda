@@ -1,0 +1,62 @@
+"===== INT64 COMPREHENSIVE TEST SUITE ====="
+"=== Basic Int64 Literals and Type Inference ==="
+9223372036854775807
+-9223372036854775808
+42
+-123
+1234567890123456789
+-9876543210987654321
+3
+-2
+"=== Int64 Arithmetic Operations ==="
+300
+200
+200
+100
+1000000000042
+1999999999900
+150000000000
+40000000000
+"=== ArrayInt64 Construction and Operations ==="
+[1, 2, 3, 4, 5]
+[1000000000000, 2000000000000, 3000000000000]
+[42, 1000000000000, 100]
+"=== ArrayInt64 Utility Functions ==="
+5
+150
+30
+10
+50
+"=== ArrayInt64 vs ArrayInt Comparison ==="
+5
+150
+30
+10
+50
+4
+10000000000000
+2500000000000
+1000000000000
+4000000000000
+"=== ArrayInt64 Arithmetic Operations ==="
+[400, 600]
+[400, 400]
+[50, 60]
+"=== Edge Cases and Type Conversions ==="
+0
+0
+1
+9223372036854775807
+9223372036854775807
+9223372036854775807
+0
+[0, 0, 0]
+0
+-600
+-300
+-100
+"=== Complex Mixed Operations ==="
+3000
+10000000003150
+200
+"===== END INT64 COMPREHENSIVE TEST ====="
