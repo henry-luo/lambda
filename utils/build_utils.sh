@@ -780,12 +780,12 @@ unified_compile_sources() {
     fi
     
     # Compile test sources only (don't compile library sources, use pre-built objects)
-    local test_object_list=$(build_compile_sources "$build_dir" "$includes" "$warnings" "$flags" "false" "1" "${all_sources[@]}" 2>&1)
+    local test_object_list=$(build_compile_sources "$build_dir" "$includes" "$warnings" "$flags" "false" "1" "${all_sources[@]}")
     local compile_result=$?
     
     if [ $compile_result -eq 0 ]; then
-        # Get test object files from compilation output
-        local test_objects=$(echo "$test_object_list" | grep -E '\.o$' | grep -v ":" | grep -v "Up-to-date:" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+        # Convert newline-separated object list to space-separated for linking compatibility
+        local test_objects=$(echo "$test_object_list" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
         
         # If no test objects found in output, try manual mapping
         if [ -z "$test_objects" ]; then
