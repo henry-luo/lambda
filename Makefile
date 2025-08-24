@@ -243,6 +243,9 @@ clean:
 	@rm -rf $(BUILD_DIR)/*.o
 	@rm -rf $(BUILD_DEBUG_DIR)/*.o
 	@rm -rf $(BUILD_WINDOWS_DIR)/*.o
+	@rm -f $(BUILD_DIR)/*.d
+	@rm -f $(BUILD_DEBUG_DIR)/*.d
+	@rm -f $(BUILD_WINDOWS_DIR)/*.d
 	@rm -f $(BUILD_DIR)/*.compile_log
 	@rm -f $(BUILD_DIR)/*.compile_status
 	@rm -f $(BUILD_DEBUG_DIR)/*.compile_log

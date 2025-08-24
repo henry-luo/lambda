@@ -94,15 +94,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     }
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
-        // Check if this is actually a call expression that returns void
-        if (item->node_type == AST_NODE_PRIMARY) {
-            AstPrimaryNode* pri = (AstPrimaryNode*)item;
-            if (pri->expr && pri->expr->node_type == AST_NODE_CALL_EXPR) {
-                printf("transpile_box_item: Found call expression, using ITEM_NULL placeholder\n");
-                strbuf_append_str(tp->code_buf, "ITEM_NULL");
-                break;
-            }
-        }
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         break;
     case LMD_TYPE_BOOL:
@@ -316,7 +307,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_str(tp->code_buf, ")");
         }
         else {
-            strbuf_append_str(tp->code_buf, "push_l(");
+            strbuf_append_str(tp->code_buf, "l2it(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }
@@ -477,7 +468,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         break;
     }
-    case LMD_TYPE_LIST:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:
+    case LMD_TYPE_LIST:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:
         transpile_expr(tp, item);  // raw pointer
         break;
@@ -548,7 +539,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_int(tp->code_buf, dt_type->const_index);
                 strbuf_append_char(tp->code_buf, ')');
             }
-            else if (pri_node->type->type_id == LMD_TYPE_INT || pri_node->type->type_id == LMD_TYPE_INT64) {
+            else if (pri_node->type->type_id == LMD_TYPE_INT) {
+                writeNodeSource(tp, pri_node->node);
+                // int32 literals don't need 'L' suffix
+            }
+            else if (pri_node->type->type_id == LMD_TYPE_INT64) {
                 writeNodeSource(tp, pri_node->node);
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
@@ -1520,7 +1515,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     
     strbuf_append_str(tp->code_buf, 
         expr_type->type_id == LMD_TYPE_RANGE ? " Range *rng=" :
-        (item_type->type_id == LMD_TYPE_INT) ? " ArrayLong *arr=" : " Array *arr=");
+        (item_type->type_id == LMD_TYPE_INT) ? " ArrayInt *arr=" : " Array *arr=");
     transpile_expr(tp, loop_node->as);
     strbuf_append_str(tp->code_buf, expr_type->type_id == LMD_TYPE_RANGE ? 
         ";\n for (long i=rng->start; i<=rng->end; i++) {\n " : 
@@ -1597,18 +1592,29 @@ void transpile_items(Transpiler* tp, AstNode *item) {
 void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
     TypeArray *type = (TypeArray*)array_node->type;
     bool is_int_array = type->nested && type->nested->type_id == LMD_TYPE_INT;
-    strbuf_append_str(tp->code_buf, is_int_array ? "array_long_new(" : 
-        "({Array* arr = array(); array_fill(arr,");
-    strbuf_append_int(tp->code_buf, type->length);
+    bool is_int64_array = type->nested && type->nested->type_id == LMD_TYPE_INT64;
+    bool is_float_array = type->nested && type->nested->type_id == LMD_TYPE_FLOAT;
     
-    // Only add comma if there are items to follow
+    if (is_int_array) {
+        strbuf_append_str(tp->code_buf, "({ArrayInt* arr = array_int(); array_int_fill(arr,");
+    } else if (is_int64_array) {
+        strbuf_append_str(tp->code_buf, "({ArrayInt64* arr = array_int64(); array_int64_fill(arr,");
+    } else if (is_float_array) {
+        strbuf_append_str(tp->code_buf, "({ArrayFloat* arr = array_float(); array_float_fill(arr,");
+    } else {
+        strbuf_append_str(tp->code_buf, "({Array* arr = array(); array_fill(arr,");
+    }
+    
+    strbuf_append_int(tp->code_buf, type->length);
+    // only add comma if there are items to follow
     if (array_node->item) {
         strbuf_append_char(tp->code_buf, ',');
     }
     
-    if (is_int_array) {
+    if (is_int_array || is_int64_array || is_float_array) {
         AstNode *item = array_node->item;
         while (item) {
+            // transpile as unboxed items
             transpile_expr(tp, item);
             if (item->next) {
                 strbuf_append_char(tp->code_buf, ',');
@@ -1616,10 +1622,10 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
             item = item->next;
         }
     } else {
+        // transpile as boxed items
         transpile_items(tp, array_node->item);
-        strbuf_append_str(tp->code_buf, ");}");
     }
-    strbuf_append_char(tp->code_buf, ')');
+    strbuf_append_str(tp->code_buf, "); })");
 }
 
 void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
@@ -1980,7 +1986,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_expr(tp, field_node->object);
         strbuf_append_str(tp->code_buf, "->items[");
         transpile_expr(tp, field_node->field);
-        strbuf_append_char(tp->code_buf, ']');
+        strbuf_append_str(tp->code_buf, "]");
         return;
     }
     else if (object_type == LMD_TYPE_ARRAY && field_type == LMD_TYPE_INT) {
@@ -1990,7 +1996,7 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
         transpile_expr(tp, field_node->field);
         strbuf_append_char(tp->code_buf, ')');
         return;
-    }    
+    }
     else if (object_type == LMD_TYPE_LIST && field_type == LMD_TYPE_INT) {
         strbuf_append_str(tp->code_buf, "list_get(");
         transpile_expr(tp, field_node->object);

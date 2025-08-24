@@ -2210,6 +2210,10 @@
             "named": false
           },
           {
+            "type": "int64",
+            "named": false
+          },
+          {
             "type": "justnow",
             "named": false
           },
@@ -2564,11 +2568,11 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
@@ -2604,11 +2608,11 @@
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "floor",
@@ -2664,6 +2668,10 @@
   },
   {
     "type": "int",
+    "named": false
+  },
+  {
+    "type": "int64",
     "named": false
   },
   {
@@ -2780,11 +2788,11 @@
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "to",

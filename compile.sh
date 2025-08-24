@@ -725,19 +725,37 @@ compile_single_file() {
     local flags="$5"
     
     echo "Compiling: $source -> $obj_file"
-    # Add -MMD -MP flags for automatic dependency generation
-    $compiler $INCLUDES -MMD -MP -c "$source" -o "$obj_file" $warnings $flags 2>&1
+    
+    # Capture compilation output and status
+    local compile_output
+    compile_output=$($compiler $INCLUDES -MMD -MP -c "$source" -o "$obj_file" $warnings $flags 2>&1)
+    local compile_status=$?
+    
+    # If compilation failed, clean up any partial .d files to prevent stale dependencies
+    if [ $compile_status -ne 0 ]; then
+        local dep_file="${obj_file%.o}.d"
+        rm -f "$dep_file" 2>/dev/null || true
+        rm -f "$obj_file" 2>/dev/null || true
+    fi
+    
+    # Output compilation messages
+    if [ -n "$compile_output" ]; then
+        echo "$compile_output"
+    fi
+    
+    return $compile_status
 }
 
 # ===== UNIFIED BUILD SYSTEM: Compilation Phase =====
 echo "🚀 Starting unified compilation process..."
 
-# Use the new unified compilation function to replace the manual scanning and compilation logic
-OBJECT_FILES_LIST=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}")
+# Use the new unified compilation function and capture both stdout and stderr
+compilation_output=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}" 2>&1)
 compilation_exit_code=$?
 
 if [ $compilation_exit_code -eq 0 ]; then
-    # Convert newline-separated object list to space-separated for linking compatibility
+    # Extract object files list from stdout (first part before stderr messages)
+    OBJECT_FILES_LIST=$(echo "$compilation_output" | grep -E '^build/.*\.o$')
     OBJECT_FILES=$(echo "$OBJECT_FILES_LIST" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
     echo "✅ Compilation completed successfully"
     compilation_success=true
@@ -747,8 +765,8 @@ else
     OBJECT_FILES=""
 fi
 
-# Preserve original output variable for error reporting compatibility
-output=""
+# Capture all compilation output for error reporting
+output="$compilation_output"
 
 # Link final executable only if compilation was successful
 linking_performed=false

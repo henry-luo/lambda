@@ -30,6 +30,7 @@ Type CONST_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1};
 Type LIT_NULL = {.type_id = LMD_TYPE_NULL, .is_const = 1, .is_literal = 1};
 Type LIT_BOOL = {.type_id = LMD_TYPE_BOOL, .is_const = 1, .is_literal = 1};
 Type LIT_INT = {.type_id = LMD_TYPE_INT, .is_const = 1, .is_literal = 1};
+Type LIT_INT64 = {.type_id = LMD_TYPE_INT64, .is_const = 1, .is_literal = 1};
 Type LIT_FLOAT = {.type_id = LMD_TYPE_FLOAT, .is_const = 1, .is_literal = 1};
 Type LIT_DECIMAL = {.type_id = LMD_TYPE_DECIMAL, .is_const = 1, .is_literal = 1};
 Type LIT_STRING = {.type_id = LMD_TYPE_STRING, .is_const = 1, .is_literal = 1};
@@ -120,6 +121,7 @@ TypeInfo type_info[] = {
     [LMD_TYPE_ARRAY] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
     [LMD_TYPE_ARRAY_INT] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
     [LMD_TYPE_ARRAY_FLOAT] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
+    [LMD_TYPE_ARRAY_INT64] = {.byte_size = sizeof(void*), .name = "array", .type=(Type*)&TYPE_ARRAY, .lit_type = (Type*)&LIT_TYPE_ARRAY},
     [LMD_TYPE_MAP] = {.byte_size = sizeof(void*), .name = "map", .type=&TYPE_MAP, .lit_type = (Type*)&LIT_TYPE_MAP},
     [LMD_TYPE_ELEMENT] = {.byte_size = sizeof(void*), .name = "element", .type=&TYPE_ELMT, .lit_type = (Type*)&LIT_TYPE_ELMT},
     [LMD_TYPE_TYPE] = {.byte_size = sizeof(void*), .name = "type", .type=&TYPE_TYPE, .lit_type = (Type*)&LIT_TYPE_TYPE},
@@ -252,9 +254,9 @@ Array* array_fill(Array* arr, int count, ...) {
         va_end(args);
     }
     frame_end();
-    StrBuf *strbuf = strbuf_new();
-    print_item(strbuf, {.array = arr});
-    printf("array_fill: %s\n", strbuf->str);
+    // StrBuf *strbuf = strbuf_new();
+    // print_item(strbuf, {.array = arr}, 0, NULL);
+    // printf("array_fill: %s\n", strbuf->str);
     return arr;
 }
 
@@ -319,8 +321,7 @@ void list_push(List *list, Item item) {
         }
         return;
     }
-    else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_ARRAY_INT || 
-        type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
+    else if (LMD_TYPE_ARRAY_INT <= type_id && type_id <= LMD_TYPE_ELEMENT) {
         Container *container = item.container;
         container->ref_cnt++;
     }
@@ -435,7 +436,11 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 *(bool*)field_ptr = va_arg(args, bool);
                 break;
             }
-            case LMD_TYPE_INT:  case LMD_TYPE_INT64: {
+            case LMD_TYPE_INT: {
+                *(int*)field_ptr = va_arg(args, int);
+                break;
+            }
+            case LMD_TYPE_INT64: {
                 *(long*)field_ptr = va_arg(args, long);
                 break;
             }

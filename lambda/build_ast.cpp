@@ -42,9 +42,14 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
         AstNode* item = build_expr(tp, child);
         if (!prev_item) { 
             ast_node->item = item;  nested_type = item->type;
+            printf("DEBUG: First array item type_id: %d\n", item->type ? item->type->type_id : -1);
         } else {  
             prev_item->next = item;
+            printf("DEBUG: Array item type_id: %d, nested_type_id: %d\n", 
+                   item->type ? item->type->type_id : -1, 
+                   nested_type ? nested_type->type_id : -1);
             if (nested_type && item->type->type_id != nested_type->type_id) {
+                printf("DEBUG: Type mismatch, resetting nested_type to NULL\n");
                 nested_type = NULL;  // type mismatch, reset the nested type to NULL
             }
         }
@@ -53,6 +58,7 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
         child = ts_node_next_named_sibling(child);
     }
     type->nested = nested_type;
+    printf("DEBUG: Final array nested_type_id: %d\n", nested_type ? nested_type->type_id : -1);
     return (AstNode*)ast_node;
 }
 
@@ -113,6 +119,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         else if (strview_equal(&func_name, "int")) {
             fn_node->fn = SYSFUNC_INT;
             fn_node->type = &TYPE_INT;
+        }
+        else if (strview_equal(&func_name, "int64")) {
+            fn_node->fn = SYSFUNC_INT64;
+            fn_node->type = &TYPE_INT64;
         }
         else if (strview_equal(&func_name, "float")) {
             fn_node->fn = SYSFUNC_FLOAT;
@@ -395,6 +405,18 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     return (Type *)dt_type;
 }
 
+Type* build_lit_int64(Transpiler* tp, TSNode node) {
+    TypeInt64 *item_type = (TypeInt64 *)alloc_type(tp->ast_pool, LMD_TYPE_INT64, sizeof(TypeInt64));
+    StrView source = ts_node_source(tp, node);
+    char* endptr;
+    int64_t value = strtoll(source.str, &endptr, 10);
+    item_type->int64_val = value;
+    arraylist_append(tp->const_list, &item_type->int64_val);
+    item_type->const_index = tp->const_list->length - 1;
+    item_type->is_const = 1;  item_type->is_literal = 1;
+    return (Type *)item_type;
+}
+
 Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
     TypeFloat *item_type = (TypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
@@ -451,13 +473,14 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
-    // printf("build primary expr\n");
+    printf("*** DEBUG: build_primary_expr called ***\n");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
     TSNode child = ts_node_named_child(pri_node, 0);
     if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
 
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
+    printf("*** DEBUG: symbol=%d (SYM_INT=%d) ***\n", symbol, SYM_INT);
     if (symbol == SYM_NULL) {
         ast_node->type = &LIT_NULL;
     }
@@ -465,7 +488,27 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = &LIT_BOOL;
     }
     else if (symbol == SYM_INT) {
-        ast_node->type = &LIT_INT;  // todo: check int value range
+        // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
+        StrView source = ts_node_source(tp, child);
+        
+        // Create a null-terminated string for strtoll
+        char* num_str = (char*)malloc(source.length + 1);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+        
+        char* endptr;
+        int64_t value = strtoll(num_str, &endptr, 10);
+        free(num_str);
+        
+        fprintf(stderr, "build_primary_expr SYM_INT: parsed value %lld\n", value);
+        fflush(stderr);
+        
+        // Check if the value fits in 32-bit signed integer range
+        if (value >= INT32_MIN && value <= INT32_MAX) {
+            ast_node->type = &LIT_INT;
+        } else {
+            ast_node->type = build_lit_int64(tp, child);
+        }
     }
     else if (symbol == SYM_DECIMAL) {
         ast_node->type = build_lit_decimal(tp, child);
@@ -1750,7 +1793,31 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
     }
     case SYM_INT: {
         AstPrimaryNode* i_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        i_node->type = &LIT_INT;   // todo: check int value range
+        
+        // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
+        StrView source = ts_node_source(tp, expr_node);
+        
+        // Create a null-terminated string for strtoll
+        char* num_str = (char*)malloc(source.length + 1);
+        memcpy(num_str, source.str, source.length);
+        num_str[source.length] = '\0';
+        
+        char* endptr;
+        int64_t value = strtoll(num_str, &endptr, 10);
+        free(num_str);
+        
+        fprintf(stderr, "SYM_INT: parsed value %lld, checking range\n", value);
+        fflush(stderr);
+        
+        // Check if the value fits in 32-bit signed integer range
+        if (value >= INT32_MIN && value <= INT32_MAX) {
+            printf("Using LIT_INT for value %lld\n", value);
+            i_node->type = &LIT_INT;
+        } else {
+            printf("Using LIT_INT64 for value %lld\n", value);
+            i_node->type = build_lit_int64(tp, expr_node);
+        }
+        
         return (AstNode*)i_node;
     }
     case SYM_FLOAT: {

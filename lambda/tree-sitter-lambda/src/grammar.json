@@ -4897,6 +4897,10 @@
                 },
                 {
                   "type": "STRING",
+                  "value": "int64"
+                },
+                {
+                  "type": "STRING",
                   "value": "float"
                 },
                 {
@@ -5464,6 +5468,10 @@
         },
         {
           "type": "STRING",
+          "value": "int64"
+        },
+        {
+          "type": "STRING",
           "value": "float"
         },
         {
@@ -5550,6 +5558,10 @@
         {
           "type": "STRING",
           "value": "int"
+        },
+        {
+          "type": "STRING",
+          "value": "int64"
         },
         {
           "type": "STRING",
