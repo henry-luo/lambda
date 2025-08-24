@@ -749,7 +749,7 @@ compile_single_file() {
 # ===== UNIFIED BUILD SYSTEM: Compilation Phase =====
 echo "🚀 Starting unified compilation process..."
 
-# Use the new unified compilation function - separate stdout (object files) from stderr (messages)
+# Use the new unified compilation function to replace the manual scanning and compilation logic
 OBJECT_FILES_LIST=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}")
 compilation_exit_code=$?
 
