@@ -525,10 +525,6 @@ get_minimal_object_set() {
     
     # Process each library dependency
     for lib_name in "${library_deps[@]}"; do
-        # Skip criterion as it's handled separately
-        if [ "$lib_name" = "criterion" ]; then
-            continue
-        fi
         
         local lib_objects=$(get_library_object_files "$lib_name" "$build_dir")
         
