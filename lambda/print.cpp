@@ -82,7 +82,7 @@ void write_type(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "bool");
         break;
     case LMD_TYPE_INT:
-        // Lambda int is computed as int64 under C
+        // Lambda int computed as int64 under C
         strbuf_append_str(tp->code_buf, "int64_t");
         break;
     case LMD_TYPE_INT64:

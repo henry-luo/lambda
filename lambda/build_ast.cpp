@@ -118,7 +118,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
         else if (strview_equal(&func_name, "int")) {
             fn_node->fn = SYSFUNC_INT;
-            fn_node->type = &TYPE_INT;
+            fn_node->type = &TYPE_ANY;
         }
         else if (strview_equal(&func_name, "int64")) {
             fn_node->fn = SYSFUNC_INT64;
@@ -130,7 +130,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
         else if (strview_equal(&func_name, "number")) {
             fn_node->fn = SYSFUNC_NUMBER;
-            fn_node->type = &TYPE_FLOAT; // TYPE_NUMBER;
+            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
         }
         else if (strview_equal(&func_name, "string")) {
             fn_node->fn = SYSFUNC_STRING;
