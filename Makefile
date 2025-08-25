@@ -103,7 +103,8 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
         lambda radiant window cross-compile format lint check docs \
         build-windows build-debug build-release build-test clean-all distclean \
         build-windows build-debug build-release clean-all distclean \
-        verify-windows test-windows tree-sitter-libs
+        verify-windows test-windows tree-sitter-libs \
+        generate-premake clean-premake build-test-premake
 
 # Help target - shows available commands
 help:
@@ -295,7 +296,7 @@ distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup finished."
 
 # Development targets
-test: build-test
+test: build-test-premake
 	@echo "Running comprehensive test suite..."
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh; \
@@ -701,3 +702,24 @@ benchmark:
 		time $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --force --jobs=$(JOBS) >/dev/null; \
 		echo ""; \
 	done
+
+# Premake5 Build System Targets
+generate-premake:
+	@echo "Generating Premake5 configuration from JSON..."
+	python3 utils/generate_premake.py
+
+clean-premake:
+	@echo "Cleaning Premake5 build artifacts..."
+	@rm -rf build/premake
+	@rm -f premake5.lua
+	@rm -f *.make
+	@rm -f dummy.cpp
+	@echo "Premake5 artifacts cleaned."
+
+build-test-premake: generate-premake
+	@echo "Building tests using Premake5..."
+	@echo "Building configurations..."
+	@mkdir -p build/premake
+	cd build/premake && premake5 gmake --file=../../premake5.lua
+	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
+	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64
