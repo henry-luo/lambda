@@ -422,11 +422,7 @@ class PremakeGenerator:
                                     else:
                                         self.premake_content.append(f'        "{dep}-c",')
                                 
-                                # Also link required inline libraries and core dependencies
-                                core_libs = ['mem-pool', 'strbuf', 'strview', 'string', 'num_stack', 'datetime', 'url', 'mime-detect']
-                                for inline_lib in core_libs:
-                                    self.premake_content.append(f'        "{inline_lib}",')
-                                # Add lambda-lib which contains additional utilities
+                                # Add lambda-lib which now contains all core dependencies
                                 self.premake_content.append('        "lambda-lib",')
                         
                         # Close the links block
