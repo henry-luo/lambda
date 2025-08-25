@@ -58,7 +58,7 @@ void writeNodeSource(Transpiler* tp, TSNode node) {
 }
 
 // write the native C type for the lambda type
-void writeType(Transpiler* tp, Type *type) {
+void write_type(Transpiler* tp, Type *type) {
     if (!type) {
         strbuf_append_str(tp->code_buf, "void*");
         return;
@@ -83,10 +83,11 @@ void writeType(Transpiler* tp, Type *type) {
         strbuf_append_str(tp->code_buf, "bool");
         break;
     case LMD_TYPE_INT:
-        strbuf_append_str(tp->code_buf, "int");
+        // Lambda int is computed as int64 under C
+        strbuf_append_str(tp->code_buf, "int64_t");
         break;
     case LMD_TYPE_INT64:
-        strbuf_append_str(tp->code_buf, "long");
+        strbuf_append_str(tp->code_buf, "int64_t");
         break;
     case LMD_TYPE_FLOAT:
         strbuf_append_str(tp->code_buf, "double");
