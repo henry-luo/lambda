@@ -1607,15 +1607,16 @@ Item fn_int(Item item) {
             return ItemError;
         }
         char* endptr;
-        // Try to parse as int32 first
+        // try to parse as int32 first
+        errno = 0;  // clear errno before calling strtoll
         int32_t val = strtol(str->chars, &endptr, 10);
         if (endptr == str->chars) {
             printf("Cannot convert string '%s' to int\n", str->chars);
             return ItemError;
         }
         // check for overflow - if errno is set or we couldn't parse the full string
-        if (errno == ERANGE || (*endptr != '\0' && *endptr != '\n' && *endptr != ' ')) {
-            // Try to parse as decimal
+        if (errno == ERANGE || (*endptr != '\0')) {
+            // try to parse as decimal
             mpd_t* dec_val = mpd_new(context->decimal_ctx);
             if (!dec_val) {
                 printf("Failed to allocate decimal for string conversion\n");
@@ -1686,7 +1687,7 @@ int64_t fn_int64(Item item) {
         }
         char* endptr;
         printf("convert string/symbol to int64: %s\n", str->chars);
-        errno = 0;  // Clear errno before calling strtoll
+        errno = 0;  // clear errno before calling strtoll
         int64_t val = strtoll(str->chars, &endptr, 10);
         if (endptr == str->chars) {
             printf("Cannot convert string '%s' to int64\n", str->chars);
@@ -2534,10 +2535,10 @@ Item fn_member(Item item, Item key) {
 }
 
 // length of an item's content, relates to indexed access, i.e. item[index] 
-Item fn_len(Item item) {
+int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     printf("fn_len item: %d\n", type_id);
-    long size = 0;
+    int64_t size = 0;
     switch (type_id) {
     case LMD_TYPE_LIST:
         size = item.list->length;
@@ -2574,12 +2575,12 @@ Item fn_len(Item item) {
         break;
     }
     case LMD_TYPE_ERROR:
-        return ItemError;
+        return INT_ERROR;
     default: // NULL and scalar types
         size = 0;
         break;
     }
-    return {.item = i2it(size)};
+    return size;
 }
 
 // substring system function - extracts a substring from start to end (exclusive)

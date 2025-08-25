@@ -110,7 +110,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         StrView func_name = ts_node_source(tp, function_node);
         if (strview_equal(&func_name, "len")) {
             fn_node->fn = SYSFUNC_LEN;
-            fn_node->type = &TYPE_INT;
+            fn_node->type = &TYPE_INT64;  // int64 is preferred over any, as it is more specific
         }
         else if (strview_equal(&func_name, "type")) {
             fn_node->fn = SYSFUNC_TYPE;
