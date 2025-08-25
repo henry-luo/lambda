@@ -160,9 +160,11 @@ build_test_executable() {
     # Prepare source files for compilation
     local all_sources="$final_source"
     
-    # Add test_context.c for specific tests that need it
-    if [[ "$final_source" == *"test_markup_roundtrip.cpp" ]] || [[ "$final_source" == *"test_math.c" ]] || [[ "$final_source" == *"test_mime_detect.c" ]]; then
+    # Add appropriate context file based on test type
+    if [[ "$final_source" == *"test_mime_detect.c" ]]; then
         all_sources="$all_sources test/test_context.c"
+    elif [[ "$final_source" == *"test_math.c" ]] || [[ "$final_source" == *"test_markup_roundtrip.cpp" ]]; then
+        all_sources="$all_sources test/test_context_minimal.c"
     fi
     
     # STEP 1: Use unified compilation function
@@ -187,9 +189,13 @@ build_test_executable() {
         fi
         object_files="$obj_file"
     else
-        # Capture compilation output for diagnostics
-        compile_output=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build" 2>&1)
-        if [ $? -ne 0 ]; then
+        # Capture compilation output for diagnostics - separate stdout (object files) from stderr (messages)
+        {
+            object_files=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build")
+            compile_status=$?
+        } 2> >(compile_output=$(cat); echo "$compile_output" >&2)
+        
+        if [ $compile_status -ne 0 ]; then
             echo "❌ Failed to compile sources for test: $suite_name"
             # Display compilation diagnostics at the end
             if [ -n "$compile_output" ]; then
@@ -197,7 +203,6 @@ build_test_executable() {
             fi
             return 1
         fi
-        object_files="$compile_output"
     fi
     
     # STEP 2: Use unified linking function
