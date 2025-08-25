@@ -100,54 +100,6 @@
             }
         },
         {
-            "name": "mem-pool",
-            "include": "lib/mem-pool/include",
-            "sources": [
-                "lib/mem-pool/src/variable.c",
-                "lib/mem-pool/src/buffer.c",
-                "lib/mem-pool/src/utils.c"
-            ],
-            "link": "inline"
-        },
-        {
-            "name": "strbuf",
-            "sources": ["lib/strbuf.c"],
-            "link": "inline"
-        },
-        {
-            "name": "strview", 
-            "sources": ["lib/strview.c"],
-            "link": "inline"
-        },
-        {
-            "name": "string",
-            "sources": ["lib/string.c"],
-            "link": "inline"
-        },
-        {
-            "name": "num_stack",
-            "sources": ["lib/num_stack.c"],
-            "link": "inline"
-        },
-        {
-            "name": "datetime",
-            "sources": ["lib/datetime.c"],
-            "link": "inline"
-        },
-        {
-            "name": "url",
-            "sources": ["lib/url.c", "lib/url_parser.c"],
-            "link": "inline"
-        },
-        {
-            "name": "mime-detect",
-            "sources": [
-                "lambda/input/mime-detect.c",
-                "lambda/input/mime-types.c"
-            ],
-            "link": "inline"
-        },
-        {
             "name": "lambda-runtime-full",
             "description": "Complete Lambda runtime with all dependencies for complex tests",
             "source_patterns": [
@@ -209,7 +161,7 @@
                 "lib/log.c",
                 "lib/utf.c"
             ],
-            "libraries": ["mem-pool", "strbuf", "strview", "string", "num_stack", "datetime", "url", "mime-detect", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "mir", "criterion"],
+            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "mir", "criterion"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++ -lcriterion",
             "link": "inline"
@@ -217,8 +169,22 @@
         {
             "name": "lambda-lib",
             "description": "Unified runtime with all basic libraries for tests",
-            "libraries": ["strbuf", "strview", "mem-pool", "datetime", "string", "num_stack", "url", "criterion"],
             "include": "lib/mem-pool/include",
+            "sources": [
+                "lib/mem-pool/src/variable.c",
+                "lib/mem-pool/src/buffer.c",
+                "lib/mem-pool/src/utils.c",
+                "lib/strbuf.c",
+                "lib/strview.c",
+                "lib/string.c",
+                "lib/num_stack.c",
+                "lib/datetime.c",
+                "lib/url.c",
+                "lib/url_parser.c",
+                "lambda/input/mime-detect.c",
+                "lambda/input/mime-types.c"
+            ],
+            "libraries": ["criterion"],
             "special_flags": "-lcriterion",
             "link": "inline"
         }

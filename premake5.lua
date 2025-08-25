@@ -26,7 +26,7 @@ workspace "LambdaTests"
     
     filter {}
 
-project "mem-pool"
+project "lambda-lib"
     kind "StaticLib"
     language "C"
     targetdir "build/lib"
@@ -36,131 +36,19 @@ project "mem-pool"
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
+        "lib/strbuf.c",
+        "lib/strview.c",
+        "lib/string.c",
+        "lib/num_stack.c",
+        "lib/datetime.c",
+        "lib/url.c",
+        "lib/url_parser.c",
+        "lambda/input/mime-detect.c",
+        "lambda/input/mime-types.c",
     }
     
     includedirs {
         "lib/mem-pool/include",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "strbuf"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lib/strbuf.c",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "strview"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lib/strview.c",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "string"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lib/string.c",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "num_stack"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lib/num_stack.c",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "datetime"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lib/datetime.c",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "url"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lib/url.c",
-        "lib/url_parser.c",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
-project "mime-detect"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lambda/input/mime-detect.c",
-        "lambda/input/mime-types.c",
     }
     
     buildoptions {
@@ -322,14 +210,7 @@ project "lambda-input-full-c"
     }
     
     links {
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
+        "lambda-lib",
         "tree-sitter-lambda",
         "tree-sitter",
         "mpdec",
@@ -382,14 +263,7 @@ project "lambda-input-full-cpp"
     }
     
     links {
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
+        "lambda-lib",
         "tree-sitter-lambda",
         "tree-sitter",
         "mpdec",
@@ -419,16 +293,6 @@ project "lambda-lib"
     
     -- Meta-library: combines source files from dependencies
     files {
-        "lib/strbuf.c",
-        "lib/strview.c",
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
-        "lib/datetime.c",
-        "lib/string.c",
-        "lib/num_stack.c",
-        "lib/url.c",
-        "lib/url_parser.c",
     }
     
     includedirs {
@@ -775,14 +639,6 @@ project "test_mime_detect"
     
     links {
         "lambda-runtime-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
         "criterion",
     }
@@ -837,14 +693,6 @@ project "test_math"
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
         "criterion",
     }
@@ -901,14 +749,6 @@ project "test_markup_roundtrip"
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
         "criterion",
     }
@@ -964,14 +804,6 @@ project "test_validator"
     links {
         "lambda-runtime-full-cpp",
         "lambda-runtime-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
         "criterion",
     }
@@ -1028,14 +860,6 @@ project "test_mir"
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
         "criterion",
     }
@@ -1090,14 +914,6 @@ project "test_lambda"
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
         "criterion",
     }
@@ -1152,14 +968,6 @@ project "test_lambda_runner"
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
-        "mem-pool",
-        "strbuf",
-        "strview",
-        "string",
-        "num_stack",
-        "datetime",
-        "url",
-        "mime-detect",
         "lambda-lib",
     }
     
