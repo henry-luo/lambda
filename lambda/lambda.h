@@ -91,6 +91,7 @@ typedef struct Function Function;
 #else
 typedef uint64_t DateTime;
 #endif
+#define _DATETIME_DEFINED_
 #endif
 typedef struct Decimal Decimal;
 

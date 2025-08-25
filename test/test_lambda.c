@@ -15,6 +15,10 @@ extern size_t strlen(const char *s);
 extern int strcmp(const char *s1, const char *s2);
 extern char *strstr(const char *haystack, const char *needle);
 
+// Declare functions from lib/file.c
+extern char* read_text_file(const char *filename);
+extern void write_text_file(const char *filename, const char *content);
+
 // Forward declarations for C interface functions from the lambda runtime
 typedef struct Runtime Runtime;
 
@@ -42,34 +46,6 @@ void teardown(void) {
 
 TestSuite(lambda_tests, .init = setup, .fini = teardown);
 
-// Function to read file contents into a string
-char* read_file_to_string(const char* filename) {
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        printf("Error: Could not open file %s\n", filename);
-        return NULL;
-    }
-    
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    
-    // Allocate buffer and read file
-    char* buffer = malloc(file_size + 1);
-    if (!buffer) {
-        printf("Error: Could not allocate memory for file %s\n", filename);
-        fclose(file);
-        return NULL;
-    }
-    
-    size_t bytes_read = fread(buffer, 1, file_size, file);
-    buffer[bytes_read] = '\0';
-    fclose(file);
-    
-    return buffer;
-}
-
 // Function to trim whitespace from the end of a string
 void trim_trailing_whitespace(char* str) {
     if (!str) return;
@@ -95,9 +71,25 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     // Cast uint64_t to Item (which is uint64_t in C)
     format_item(output_buf, (Item)ret, 0, " ");
     printf("TRACE: test runner - formatted output: '%s'\n", output_buf->str);
+    
+    // Extract script name from path for output file
+    const char* script_name = strrchr(script_path, '/');
+    script_name = script_name ? script_name + 1 : script_path;
+    
+    // Create output filename by replacing .ls with .txt
+    char output_filename[512];
+    snprintf(output_filename, sizeof(output_filename), "test_output/%s", script_name);
+    char* dot = strrchr(output_filename, '.');
+    if (dot) {
+        strcpy(dot, ".txt");
+    }
+    
+    // Save actual output to test_output directory
+    write_text_file(output_filename, output_buf->str);
+    printf("TRACE: Saved actual output to %s\n", output_filename);
         
     // Read expected output to verify the file exists
-    char* expected_output = read_file_to_string(expected_output_path);
+    char* expected_output = read_text_file(expected_output_path);
     
     cr_assert_neq(expected_output, NULL, "Failed to read expected output file: %s", expected_output_path);
     
