@@ -254,7 +254,7 @@ void print_ast_node(Script* script, AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void find_errors(TSNode node);
 void writeNodeSource(Transpiler* tp, TSNode node);
-void writeType(Transpiler* tp, Type *type);
+void write_type(Transpiler* tp, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
