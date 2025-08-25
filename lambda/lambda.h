@@ -303,7 +303,7 @@ Item fn_index(Item item, Item index);
 Item fn_member(Item item, Item key);
 
 // length function
-Item fn_len(Item item);
+int64_t fn_len(Item item);
 
 typedef struct Element Element;
 Element* elmt(int type_index);
