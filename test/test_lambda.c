@@ -5,10 +5,13 @@
 #include <unistd.h>  // for getcwd and chdir
 #include <assert.h>
 #include <string.h>
+#include <tree_sitter/api.h>
+#include <mpdecimal.h>
 
 // Include C header and declare extern C functions from the lambda project
 #include "../lambda/lambda.h"
 #include "../lib/strbuf.h"
+#include "../lib/num_stack.h"
 
 // Explicitly declare string functions to avoid macro interference
 extern size_t strlen(const char *s);
@@ -18,6 +21,38 @@ extern char *strstr(const char *haystack, const char *needle);
 // Declare functions from lib/file.c
 extern char* read_text_file(const char *filename);
 extern void write_text_file(const char *filename, const char *content);
+
+// Missing function implementations to avoid linking conflicts
+Context* create_test_context(void) {
+    Context* ctx = (Context*)calloc(1, sizeof(Context));
+    if (!ctx) return NULL;
+    
+    // Initialize basic context fields
+    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    if (ctx->decimal_ctx) {
+        mpd_defaultcontext(ctx->decimal_ctx);
+    }
+    
+    // Initialize num_stack and heap to avoid crashes
+    ctx->num_stack = num_stack_create(1024);
+    ctx->heap = NULL;
+    
+    return ctx;
+}
+
+// Tree-sitter function declarations
+const TSLanguage *tree_sitter_lambda(void);
+
+TSParser* lambda_parser(void) {
+    TSParser *parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_lambda());
+    return parser;
+}
+
+TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
+    TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
+    return tree;
+}
 
 // Forward declarations for C interface functions from the lambda runtime
 typedef struct Runtime Runtime;

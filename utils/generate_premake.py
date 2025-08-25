@@ -402,21 +402,25 @@ class PremakeGenerator:
                                 # Lambda-lib contains all the core libraries
                                 self.premake_content.append('        "lambda-lib",')
                             elif dep in ['lambda-runtime-full', 'lambda-input-full']:
-                                # For C++ tests, link both C++ and C versions (C++ depends on C for core utilities)
-                                if language == "C++":
-                                    self.premake_content.append(f'        "{dep}-cpp",')
-                                    self.premake_content.append(f'        "{dep}-c",')
-                                else:
-                                    self.premake_content.append(f'        "{dep}-c",')
-                                
-                                # MIR and Lambda tests need both runtime and input libraries, and functions from C++ versions
-                                if ('mir' in test_name.lower() or 'lambda' in test_name.lower()) and dep == 'lambda-runtime-full':
-                                    # These tests need C++ versions for complete runtime functions even if test is in C
+                                # Special handling for MIR, Lambda, Math, and Markup tests
+                                if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
                                     if language == "C":
-                                        # Override: C tests still need C++ runtime for runner functions
+                                        # C tests need C++ runtime for runner functions but avoid symbol conflicts
                                         self.premake_content.append('        "lambda-runtime-full-cpp",')
-                                    self.premake_content.append('        "lambda-input-full-cpp",')
-                                    self.premake_content.append('        "lambda-input-full-c",')
+                                        self.premake_content.append('        "lambda-input-full-cpp",')
+                                        self.premake_content.append('        "lambda-input-full-c",')
+                                    else:
+                                        # C++ tests only need C++ versions to avoid symbol conflicts
+                                        self.premake_content.append('        "lambda-runtime-full-cpp",')
+                                        self.premake_content.append('        "lambda-input-full-cpp",')
+                                        self.premake_content.append('        "lambda-input-full-c",')
+                                else:
+                                    # Regular tests: For C++ tests, link both C++ and C versions (C++ depends on C for core utilities)
+                                    if language == "C++":
+                                        self.premake_content.append(f'        "{dep}-cpp",')
+                                        self.premake_content.append(f'        "{dep}-c",')
+                                    else:
+                                        self.premake_content.append(f'        "{dep}-c",')
                                 
                                 # Also link required inline libraries and core dependencies
                                 core_libs = ['mem-pool', 'strbuf', 'strview', 'string', 'num_stack', 'datetime', 'url', 'mime-detect']

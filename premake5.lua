@@ -819,13 +819,13 @@ project "test_mime_detect"
 
 project "test_math"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_math.c",
+        "/Users/henryluo/Projects/lambda/test/test_math.cpp",
     }
     
     includedirs {
@@ -848,7 +848,9 @@ project "test_math"
     }
     
     links {
-        "lambda-runtime-full-c",
+        "lambda-runtime-full-cpp",
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
         "mem-pool",
         "strbuf",
         "strview",
@@ -869,11 +871,13 @@ project "test_math"
         "/usr/local/lib/libmir.a",
     }
     
+    links { "stdc++" }
+    
     buildoptions {
         "-fms-extensions",
         "-fcolor-diagnostics",
         "-pedantic",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
@@ -909,7 +913,8 @@ project "test_markup_roundtrip"
     
     links {
         "lambda-runtime-full-cpp",
-        "lambda-runtime-full-c",
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
         "mem-pool",
         "strbuf",
         "strview",
@@ -1034,7 +1039,6 @@ project "test_mir"
     }
     
     links {
-        "lambda-runtime-full-c",
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1097,7 +1101,6 @@ project "test_lambda"
     }
     
     links {
-        "lambda-runtime-full-c",
         "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1161,7 +1164,6 @@ project "test_lambda_runner"
     
     links {
         "lambda-runtime-full-cpp",
-        "lambda-runtime-full-c",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "mem-pool",
