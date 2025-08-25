@@ -1434,7 +1434,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
         strbuf_append_str(tp->code_buf, "Item");
         printf("transpile_assign_expr: using Item type due to expression boxing\n");
     } else {
-        writeType(tp, var_type);
+        write_type(tp, var_type);
     }
     
     strbuf_append_char(tp->code_buf, ' ');
@@ -1520,7 +1520,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     strbuf_append_str(tp->code_buf, expr_type->type_id == LMD_TYPE_RANGE ? 
         ";\n for (long i=rng->start; i<=rng->end; i++) {\n " : 
         ";\n for (int i=0; i<arr->length; i++) {\n ");
-    writeType(tp, item_type);
+    write_type(tp, item_type);
     strbuf_append_str(tp->code_buf, " _");
     strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
     if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -2045,7 +2045,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     strbuf_append_char(tp->code_buf, '\n');
     // use function body type as the return type for the time being
     Type *ret_type = fn_node->body->type;
-    writeType(tp, ret_type);
+    write_type(tp, ret_type);
 
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, as_pointer ? " (*" :" ");
@@ -2057,7 +2057,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (param != fn_node->param) strbuf_append_str(tp->code_buf, ",");
-        writeType(tp, param->type);
+        write_type(tp, param->type);
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
         param = (AstNamedNode*)param->next;
@@ -2223,7 +2223,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
                 AstNamedNode *asn_node = (AstNamedNode*)declare;
                 // declare the type
                 Type *type = asn_node->type;
-                writeType(tp, type);
+                write_type(tp, type);
                 strbuf_append_char(tp->code_buf, ' ');
                 write_var_name(tp->code_buf, asn_node, NULL);
                 strbuf_append_str(tp->code_buf, ";\n");
