@@ -17,9 +17,44 @@
 
 // Include Lambda runtime headers
 extern "C" {
+#include <tree_sitter/api.h>
+#include <mpdecimal.h>
 #include "../lambda/lambda.h"
 #include "../lambda/transpiler.hpp"
 #include "../lib/strbuf.h"
+#include "../lib/num_stack.h"
+}
+
+// Implement missing functions locally to avoid linking conflicts
+extern "C" Context* create_test_context() {
+    Context* ctx = (Context*)calloc(1, sizeof(Context));
+    if (!ctx) return NULL;
+    
+    // Initialize basic context fields
+    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    if (ctx->decimal_ctx) {
+        mpd_defaultcontext(ctx->decimal_ctx);
+    }
+    
+    // Initialize num_stack and heap to avoid crashes
+    ctx->num_stack = num_stack_create(1024);  // Create with reasonable initial capacity
+    ctx->heap = NULL;  // Will be initialized by heap_init()
+    
+    return ctx;
+}
+
+// Tree-sitter function declarations
+extern "C" const TSLanguage *tree_sitter_lambda(void);
+
+extern "C" TSParser* lambda_parser(void) {
+    TSParser *parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_lambda());
+    return parser;
+}
+
+extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
+    TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
+    return tree;
 }
 
 // Test result structure
