@@ -11,6 +11,8 @@ typedef signed char int8_t;
 typedef short int16_t;
 typedef int int32_t;
 typedef long long int64_t;
+#define INT32_MAX  2147483647
+#define INT32_MIN  (-2147483647 - 1)
 #endif
 
 #if !defined(__cplusplus) && !defined(_STDBOOL_H) && !defined(_STDBOOL_H_) && !defined(__bool_true_false_are_defined)
@@ -101,7 +103,8 @@ typedef union Item {
         union {
             struct {
                 int int_val: 32;
-                uint32_t _32: 32;
+                uint32_t _24: 24;
+                uint32_t _type: 8;
             };
             struct {
                 uint64_t bool_val: 8;
@@ -132,7 +135,6 @@ typedef union Item {
 
 extern Item ItemNull;
 extern Item ItemError;
-
 #endif
 
 // a fat string with prefixed length and flags
@@ -314,6 +316,11 @@ Item v2it(List *list);
 Item push_d(double dval);
 Item push_l(long lval);
 Item push_k(DateTime dtval);
+Item push_c(long cval);
+
+#define INT_ERROR           INT64_MAX
+#define INT_MAX             INT_MAX
+#define LAMBDA_INT64_MAX    (INT64_MAX - 1)
 
 #define ITEM_UNDEFINED      0
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
@@ -322,8 +329,13 @@ Item push_k(DateTime dtval);
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
 Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
-// todo: int overflow check and promotion to decimal
-#define i2it(int_val)        (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF))
+// int overflow check and promotion to decimal
+#ifndef __cplusplus
+// int overflow check and promotion to decimal
+#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val))
+#else
+#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val).item)
+#endif
 #define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
 #define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
 #define c2it(decimal_ptr)    ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr))
@@ -346,8 +358,11 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 #define const_k(index)      (*(DateTime*)rt->consts[index])
 
 // item unboxing
-long it2l(Item item);
+int64_t it2l(Item item);
 double it2d(Item item);
+
+Item fn_int(Item a);
+int64_t fn_int64(Item a);
 
 Item fn_add(Item a, Item b);
 Item fn_mul(Item a, Item b);
@@ -364,7 +379,6 @@ Item fn_min(Item a, Item b);
 Item fn_max(Item a, Item b);
 Item fn_sum(Item a);
 Item fn_avg(Item a);
-Item fn_int64(Item a);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
 Item fn_eq(Item a, Item b);

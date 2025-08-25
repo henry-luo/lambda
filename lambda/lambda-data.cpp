@@ -164,6 +164,7 @@ Item push_l(long lval) {
         fprintf(stderr, "WARNING: push_l called with invalid context\n");
         return ItemError;
     }
+    if (lval == INT_ERROR) return ItemError;
     long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval);
     return {.item = l2it(lptr)};
 }
