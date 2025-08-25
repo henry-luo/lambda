@@ -141,10 +141,10 @@ needs_recompilation() {
                 }
             }' "$dep_file" | while read -r dep; do
                 [ -n "$dep" ] && [ -f "$dep" ] && [ "$dep" -nt "$object_file" ] && echo "$dep" && break
-            done)
+            done 2>/dev/null)
         
         if [ -n "$newer_deps" ]; then
-            echo "Dependency changed: $newer_deps"
+            echo "Dependency changed: $newer_deps" >&2
             return 0
         fi
         
@@ -152,8 +152,16 @@ needs_recompilation() {
         return 1
     fi
     
-    # No .d file exists, assume recompilation needed for safety
-    return 0
+    # No .d file exists, fall back to header cache method for compatibility
+    if [ -n "$NEWEST_HEADER_TIME" ]; then
+        local obj_time=$(stat -f "%m" "$object_file" 2>/dev/null || stat -c "%Y" "$object_file" 2>/dev/null)
+        if [ -n "$obj_time" ] && [ "$NEWEST_HEADER_TIME" -gt "$obj_time" ]; then
+            return 0
+        fi
+    fi
+    
+    # No recompilation needed
+    return 1
 }
 
 # Function to check if linking is needed
@@ -163,47 +171,34 @@ needs_linking() {
     local object_files=("$@")
     local force_rebuild="${FORCE_REBUILD:-false}"
     
-    echo "DEBUG: needs_linking called with output_file=$output_file" >&2
-    echo "DEBUG: needs_linking received ${#object_files[@]} object files" >&2
-    echo "DEBUG: force_rebuild=$force_rebuild" >&2
     
     # If force rebuild is enabled, always link
     if [ "$force_rebuild" = "true" ]; then
-        echo "DEBUG: Force rebuild enabled, linking needed" >&2
         return 0
     fi
     
     # If output file doesn't exist, link
     if [ ! -f "$output_file" ]; then
-        echo "DEBUG: Output file doesn't exist, linking needed" >&2
         return 0
     fi
-    echo "DEBUG: Output file exists: $output_file" >&2
     
     # Get output file timestamp once
     local output_time=$(stat -f "%m" "$output_file" 2>/dev/null || stat -c "%Y" "$output_file" 2>/dev/null)
     if [ -z "$output_time" ]; then
-        echo "DEBUG: Can't get timestamp for $output_file, linking needed" >&2
         return 0  # Can't get timestamp, safer to link
     fi
-    echo "DEBUG: Output file $output_file timestamp: $output_time" >&2
     
     # Check object files
     for obj_file in "${object_files[@]}"; do
         if [ -f "$obj_file" ]; then
             local obj_time=$(stat -f "%m" "$obj_file" 2>/dev/null || stat -c "%Y" "$obj_file" 2>/dev/null)
-            echo "DEBUG: Object file $obj_file timestamp: $obj_time" >&2
             if [ -n "$obj_time" ] && [ "$obj_time" -gt "$output_time" ]; then
-                echo "Object file newer than executable: $obj_file (obj: $obj_time > exe: $output_time)" >&2
                 return 0
             fi
         else
-            echo "Missing object file: $obj_file" >&2
-            return 0
+            return 0  # Missing object file, need to link
         fi
     done
-    
-    # No linking needed
     return 1
 }
 
@@ -664,7 +659,7 @@ build_compile_sources() {
         printf '%s\n' "${object_files[@]}"
         return 0
     else
-        echo "Compilation failed" >&2
+        echo "❌ Compilation failed with errors" >&2
         return 1
     fi
 }
@@ -689,7 +684,6 @@ build_link_objects() {
         echo "Error: main_objects is required" >&2
         return 1
     fi
-    echo "DEBUG: main_objects received: $main_objects" >&2
     
     # Combine all object files
     local all_objects="$main_objects"
@@ -708,17 +702,12 @@ build_link_objects() {
     
     # Check if linking is needed
     local object_files_array=($unique_objects)
-    echo "DEBUG: Checking if linking needed for $output_file" >&2
-    echo "DEBUG: Object files: ${object_files_array[*]}" >&2
-    echo "DEBUG: Array length: ${#object_files_array[@]}" >&2
-    echo "DEBUG: About to call needs_linking..." >&2
-    echo "DEBUG: First few object files: ${object_files_array[0]} ${object_files_array[1]} ${object_files_array[2]}" >&2
     
     # Call needs_linking and capture the result
     if needs_linking "$output_file" "${object_files_array[@]}"; then
-        echo "DEBUG: needs_linking returned true, proceeding with linking" >&2
+        # Proceed with linking
+        :
     else
-        echo "DEBUG: needs_linking returned false, executable up-to-date" >&2
         echo "Executable up-to-date: $output_file"
         return 0
     fi
@@ -882,4 +871,135 @@ build_compile_cmd() {
             return 1
             ;;
     esac
+}
+
+# Format and display compilation diagnostics with clickable links
+format_compilation_diagnostics() {
+    local output="$1"
+    
+    # Count errors and warnings (ignores color codes)
+    local num_errors=$(echo "$output" | grep -c "error:")
+    local num_warnings=$(echo "$output" | grep -c "warning:")
+    local num_notes=$(echo "$output" | grep -c "note:")
+    
+    # Extract and format errors and warnings with clickable links
+    format_diagnostics() {
+        local diagnostic_type="$1"
+        local grep_pattern="$2"
+        local color="$3"
+        
+        local diagnostics=$(echo "$output" | grep "$grep_pattern" | head -20)  # Limit to 20 entries
+        if [ -n "$diagnostics" ]; then
+            echo
+            echo -e "${color}${diagnostic_type} Summary (clickable links):${RESET}"
+            echo -e "${color}=====================================${RESET}"
+            
+            echo "$diagnostics" | while IFS= read -r line; do
+                # Extract file path and line number from compiler output
+                # Supports formats like: file.c:123:45: error: message
+                if echo "$line" | grep -qE '^[^:]+:[0-9]+:[0-9]*:'; then
+                    # Extract components using more robust pattern
+                    local file_path=$(echo "$line" | sed -E 's/^([^:]+):[0-9]+:[0-9]*:.*/\1/')
+                    local line_num=$(echo "$line" | sed -E 's/^[^:]+:([0-9]+):[0-9]*:.*/\1/')
+                    local col_num=$(echo "$line" | sed -E 's/^[^:]+:[0-9]+:([0-9]*):.*$/\1/')
+                    local message=$(echo "$line" | sed -E 's/^[^:]+:[0-9]+:[0-9]*:[[:space:]]*(.*)/\1/')
+                    
+                    # Handle case where column number might be missing
+                    if [ -z "$col_num" ]; then
+                        col_num="1"
+                    fi
+                    
+                    # Convert absolute path to relative path if needed
+                    if [[ "$file_path" == /* ]]; then
+                        # Convert absolute path to relative path
+                        local current_dir="$(pwd)"
+                        if [[ "$file_path" == "$current_dir"/* ]]; then
+                            file_path="${file_path#$current_dir/}"
+                        fi
+                    fi
+                    
+                    # Output clickable link (VS Code and most modern terminals support this format)
+                    echo -e "  ${color}${file_path}:${line_num}:${col_num}${RESET} - $message"
+                else
+                    # Fallback for non-standard format
+                    echo -e "  ${color}$line${RESET}"
+                fi
+            done
+            
+            local total_count=$(echo "$output" | grep -c "$grep_pattern")
+            if [ "$total_count" -gt 20 ]; then
+                echo -e "  ${color}... and $(($total_count - 20)) more${RESET}"
+            fi
+        fi
+    }
+    
+    # Define colors
+    local RED="\033[0;31m"
+    local YELLOW="\033[1;33m"
+    local GREEN="\033[0;32m"
+    local BLUE="\033[0;34m"
+    local RESET="\033[0m"
+    
+    # Format errors with clickable links (warnings and notes only show count)
+    if [ "$num_errors" -gt 0 ]; then
+        format_diagnostics "ERRORS" "error:" "$RED"
+    fi
+    
+    echo
+    echo -e "${YELLOW}Build Summary:${RESET}"
+    if [ "$num_errors" -gt 0 ]; then
+        echo -e "${RED}Errors:   $num_errors${RESET}"
+    else
+        echo -e "Errors:   $num_errors"
+    fi
+    echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
+    
+    # Return error count for caller to determine success/failure
+    return $num_errors
+}
+
+# Display build status summary
+display_build_status() {
+    local compilation_success="$1"
+    local linking_performed="$2"
+    local output_file="$3"
+    local build_dir="$4"
+    local cross_compile="${5:-false}"
+    
+    # Define colors
+    local RED="\033[0;31m"
+    local YELLOW="\033[1;33m"
+    local GREEN="\033[0;32m"
+    local RESET="\033[0m"
+    
+    echo "Build system: Unified (Step 1 & 2 implementation)"
+    if [ "$linking_performed" = true ]; then
+        echo "Linking: performed"
+    else
+        echo "Linking: skipped (up-to-date)"
+    fi
+    
+    # Show dependency tracking info
+    local dep_files_count=$(find "$build_dir" -name "*.d" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$dep_files_count" -gt 0 ]; then
+        echo "Dependency tracking: $dep_files_count .d files (precise tracking)"
+    else
+        echo "Dependency tracking: header cache fallback"
+    fi
+    
+    # Final build status
+    if [ "$compilation_success" = true ]; then
+        echo -e "${GREEN}Build successful: $output_file${RESET}"
+        
+        # Show file info for cross-compiled binaries
+        if [ "$cross_compile" = "true" ]; then
+            echo "File type information:"
+            file "$output_file" 2>/dev/null || echo "file command not available"
+        fi
+        
+        return 0
+    else
+        echo -e "${RED}Build failed${RESET}"
+        return 1
+    fi
 }
