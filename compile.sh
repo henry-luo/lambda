@@ -381,50 +381,6 @@ needs_recompilation() {
     fi
 }
 
-# Function to check if linking is needed
-needs_linking() {
-    local output_file="$1"
-    local object_files="$2"
-    
-    # If force rebuild is enabled, always link
-    if [ "$FORCE_REBUILD" = true ]; then
-        return 0
-    fi
-    
-    # If output file doesn't exist, link
-    if [ ! -f "$output_file" ]; then
-        return 0
-    fi
-    
-    # Get output file timestamp once
-    local output_time=$(stat -f "%m" "$output_file" 2>/dev/null || stat -c "%Y" "$output_file" 2>/dev/null)
-    if [ -z "$output_time" ]; then
-        return 0  # Can't get timestamp, safer to link
-    fi
-    
-    # Check object files (batch processing)
-    for obj_file in $object_files; do
-        if [ -f "$obj_file" ]; then
-            local obj_time=$(stat -f "%m" "$obj_file" 2>/dev/null || stat -c "%Y" "$obj_file" 2>/dev/null)
-            if [ -n "$obj_time" ] && [ "$obj_time" -gt "$output_time" ]; then
-                return 0
-            fi
-        fi
-    done
-    
-    # Check static libraries (batch processing)
-    for lib_file in $LIBS; do
-        if [ -f "$lib_file" ]; then
-            local lib_time=$(stat -f "%m" "$lib_file" 2>/dev/null || stat -c "%Y" "$lib_file" 2>/dev/null)
-            if [ -n "$lib_time" ] && [ "$lib_time" -gt "$output_time" ]; then
-                return 0
-            fi
-        fi
-    done
-    
-    # No linking needed
-    return 1
-}
 
 # Read configuration with platform override support
 BUILD_DIR=$(get_json_value "build_dir" "$CONFIG_FILE" "$PLATFORM")
