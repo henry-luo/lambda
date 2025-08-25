@@ -307,7 +307,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_str(tp->code_buf, ")");
         }
         else {
-            strbuf_append_str(tp->code_buf, "l2it(");
+            strbuf_append_str(tp->code_buf, "push_l(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
         }

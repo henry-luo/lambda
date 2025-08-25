@@ -53,8 +53,11 @@ func_obj_t func_list[] = {
     {"push_d", (fn_ptr) push_d},
     {"push_l", (fn_ptr) push_l},
     {"push_k", (fn_ptr) push_k},
+    {"push_c", (fn_ptr) push_c},
     
+    {"fn_int", (fn_ptr) fn_int},
     {"fn_int64", (fn_ptr) fn_int64},
+
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},
     {"fn_mul", (fn_ptr) fn_mul},
@@ -108,7 +111,7 @@ void *import_resolver(const char *name) {
     printf("resolving name: %s\n", name);
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) {
-        printf("checking fn: %s", func_list[i].name);
+        // printf("checking fn: %s\n", func_list[i].name);
         if (strcmp(func_list[i].name, name) == 0) {
             printf("found function: %s at %p\n", name, func_list[i].func);
             return func_list[i].func;

@@ -10,6 +10,7 @@
 #include <time.h>
 #include <cstdlib>  // for abs function
 #include <cmath>    // for pow function
+#include <errno.h>  // for errno checking
 
 extern __thread Context* context;
 
@@ -36,6 +37,14 @@ Item push_decimal(mpd_t* dec_val) {
     Item result;
     result.item = c2it(decimal);
     return result;
+}
+
+Item push_c(long cval) {
+    if (cval == INT_ERROR) { return ItemError; }
+    mpd_t* result = mpd_new(context->decimal_ctx);
+    if (!result) return ItemError;
+    mpd_set_ssize(result, cval, context->decimal_ctx);
+    return push_decimal(result);
 }
 
 mpd_t* convert_to_decimal(Item item, mpd_context_t* ctx) {
@@ -1561,82 +1570,140 @@ Item fn_neg(Item item) {
     }
 }
 
-// Unicode string normalization function
 Item fn_int(Item item) {
-    // Convert item to int32
+    double dval;
     if (item.type_id == LMD_TYPE_INT) {
-        return item;  // Already int32
+        return item;
     }
     else if (item.type_id == LMD_TYPE_INT64) {
-        int64_t val = *(int64_t*)item.pointer;
-        if (val > INT32_MAX || val < INT32_MIN) {
-            printf("int64 value %lld out of int32 range\n", val);
-            return ItemError;
-        }
-        return {.item = i2it((int32_t)val)};
+        dval = *(int64_t*)item.pointer;
+        goto CHECK_DVAL;
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
-        double val = *(double*)item.pointer;
-        if (val > INT32_MAX || val < INT32_MIN) {
-            printf("float value %g out of int32 range\n", val);
-            return ItemError;
+        // cast down to int
+        dval = *(double*)item.pointer;
+        CHECK_DVAL:
+        if (dval > INT32_MAX || dval < INT32_MIN) {
+            // Promote to decimal if out of int32 range
+            printf("promote float to decimal: %g\n", dval);
+            mpd_t* dec_val = mpd_new(context->decimal_ctx);
+            if (!dec_val) {
+                printf("Failed to allocate decimal for float conversion\n");
+                return ItemError;
+            }
+            char str_buf[64];
+            snprintf(str_buf, sizeof(str_buf), "%.17g", dval);
+            mpd_set_string(dec_val, str_buf, context->decimal_ctx);
+            return push_decimal(dec_val);
         }
-        return {.item = i2it((int32_t)val)};
+        return {._type= LMD_TYPE_INT, .int_val = (int32_t)dval};
+    }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        return item;  // keep it as it is
     }
     else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
-            return {.item = i2it(0)};
+            return ItemError;
         }
         char* endptr;
-        long val = strtol(str->chars, &endptr, 10);
+        // Try to parse as int32 first
+        int32_t val = strtol(str->chars, &endptr, 10);
         if (endptr == str->chars) {
             printf("Cannot convert string '%s' to int\n", str->chars);
             return ItemError;
         }
-        if (val > INT32_MAX || val < INT32_MIN) {
-            printf("String value %ld out of int32 range\n", val);
-            return ItemError;
+        // check for overflow - if errno is set or we couldn't parse the full string
+        if (errno == ERANGE || (*endptr != '\0' && *endptr != '\n' && *endptr != ' ')) {
+            // Try to parse as decimal
+            mpd_t* dec_val = mpd_new(context->decimal_ctx);
+            if (!dec_val) {
+                printf("Failed to allocate decimal for string conversion\n");
+                return ItemError;
+            }
+            mpd_set_string(dec_val, str->chars, context->decimal_ctx);
+            if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+                printf("Cannot convert string '%s' to decimal\n", str->chars);
+                mpd_del(dec_val);
+                return ItemError;
+            }
+            printf("promote string to decimal: %s\n", str->chars);
+            return push_decimal(dec_val);
         }
-        return {.item = i2it((int32_t)val)};
+        return {._type= LMD_TYPE_INT, .int_val = val};
     }
-    printf("Cannot convert type %d to int\n", item.type_id);
-    return ItemError;
+    else {
+        printf("Cannot convert type %d to int\n", item.type_id);
+        return ItemError;
+    }
 }
 
-Item fn_int64(Item item) {
+int64_t fn_int64(Item item) {
     // Convert item to int64
-    if (item.type_id == LMD_TYPE_INT64) {
-        return item;  // Already int64
+    int64_t val;
+    if (item.type_id == LMD_TYPE_INT) {
+        printf("convert int to int64: %d\n", item.int_val);
+        return item.int_val;
     }
-    else if (item.type_id == LMD_TYPE_INT) {
-        return push_l((int64_t)item.int_val);
+    else if (item.type_id == LMD_TYPE_INT64) {
+        return *(int64_t*)item.pointer;
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
-        double val = *(double*)item.pointer;
-        if (val > INT64_MAX || val < INT64_MIN) {
-            printf("float value %g out of int64 range\n", val);
-            return ItemError;
+        double dval = *(double*)item.pointer;
+        if (dval > LAMBDA_INT64_MAX || dval < INT64_MIN) {
+            printf("float value %g out of int64 range\n", dval);
+            return INT_ERROR;
         }
-        return push_l((int64_t)val);
+        return (int64_t)dval;
+    }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        // Convert decimal to int64
+        Decimal* dec_ptr = (Decimal*)item.pointer;
+        mpd_t* dec = dec_ptr->dec_val;
+        if (!dec) {
+            printf("decimal pointer is NULL\n");
+            return INT_ERROR;
+        }
+        char* endptr;
+        char* dec_str = mpd_to_sci(dec, 1);
+        if (!dec_str) {
+            printf("mpd_to_sci failed\n");
+            return INT_ERROR;
+        }
+        printf("convert decimal to int64: %s\n", dec_str);
+        val = strtoll(dec_str, &endptr, 10);
+        mpd_free(dec_str);
+        if (endptr == dec_str) {
+            printf("Cannot convert decimal to int64\n");
+            return INT_ERROR;
+        }
+        return val;
     }
     else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
-            return push_l(0);
+            return 0;
         }
         char* endptr;
-        long long val = strtoll(str->chars, &endptr, 10);
+        printf("convert string/symbol to int64: %s\n", str->chars);
+        errno = 0;  // Clear errno before calling strtoll
+        int64_t val = strtoll(str->chars, &endptr, 10);
         if (endptr == str->chars) {
             printf("Cannot convert string '%s' to int64\n", str->chars);
-            return ItemError;
+            return INT_ERROR;
         }
-        return push_l((int64_t)val);
+        if (errno == ERANGE) {
+            printf("String value '%s' out of int64 range\n", str->chars);
+            return INT_ERROR;
+        }
+        printf("converted string to int64: %" PRId64 "\n", val);
+        return val;
     }
     printf("Cannot convert type %d to int64\n", item.type_id);
-    return ItemError;
+    return INT_ERROR;
 }
 
+// Unicode string normalization function
 Item fn_normalize(Item str_item, Item type_item) {
     // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
     if (str_item.type_id != LMD_TYPE_STRING) {
@@ -1725,15 +1792,15 @@ Range* fn_to(Item item_a, Item item_b) {
     }
 }
 
-long it2l(Item itm) {
+int64_t it2l(Item itm) {
     if (itm.type_id == LMD_TYPE_INT) {
         return itm.int_val;
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
-        return *(long*)itm.pointer;
+        return *(int64_t*)itm.pointer;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
-        return (long)*(double*)itm.pointer;
+        return (int64_t)*(double*)itm.pointer;
     }
     printf("invalid type %d\n", itm.type_id);
     // todo: push error
@@ -2021,7 +2088,7 @@ bool fn_in(Item a_item, Item b_item) {
         }
         else if (b_type == LMD_TYPE_RANGE) {
             Range *range = b_item.range;
-            long a_val = it2l(a_item);
+            int64_t a_val = it2l(a_item);
             return range->start <= a_val && a_val <= range->end;
         }
         else if (b_type == LMD_TYPE_ARRAY) {
@@ -2537,11 +2604,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         return str_item; // return empty string
     }
     
-    long start = it2l(start_item);
-    long end = it2l(end_item);
+    int64_t start = it2l(start_item);
+    int64_t end = it2l(end_item);
     
     // handle negative indices (count from end)
-    long char_len = utf8_char_count(str->chars);
+    int64_t char_len = utf8_char_count(str->chars);
     if (start < 0) start = char_len + start;
     if (end < 0) end = char_len + end;
     

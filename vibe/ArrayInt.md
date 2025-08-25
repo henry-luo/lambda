@@ -157,7 +157,7 @@ ArrayInt* array_int64_to_int(ArrayInt64* arr);  // with overflow checking
 #### Updated System Functions
 ```c
 // Enhanced system functions
-Item fn_int64(Item item);     // Cast to int64
+int64_t fn_int64(Item item);     // Cast to int64
 Item fn_int(Item item);       // Cast to int32 (with overflow check)
 ```
 
