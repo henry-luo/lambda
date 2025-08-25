@@ -168,6 +168,7 @@ build_test_executable() {
     # STEP 1: Use unified compilation function
     echo "🔧 Step 1: Compiling sources using unified build functions"
     local object_files
+    local compile_output=""
     
     # Special handling for lambda_test_runner.cpp - unified system doesn't handle standalone test files
     if [[ "$final_source" == *"lambda_test_runner.cpp"* ]]; then
@@ -175,17 +176,28 @@ build_test_executable() {
         local obj_file="build/${obj_name}.o"
         
         echo "🔧 Compiling standalone test file directly: $final_source"
-        clang++ -std=c++17 -fms-extensions -I. -Ilib/mem-pool/include -Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/Cellar/mpdecimal/4.0.1/include -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -c "$final_source" -o "$obj_file"
+        compile_output=$(clang++ -std=c++17 -fms-extensions -I. -Ilib/mem-pool/include -Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/Cellar/mpdecimal/4.0.1/include -I/opt/homebrew/include -I/opt/homebrew/Cellar/criterion/2.4.2_2/include -c "$final_source" -o "$obj_file" 2>&1)
         if [ $? -ne 0 ]; then
             echo "❌ Failed to compile $final_source"
+            # Display compilation diagnostics at the end
+            if [ -n "$compile_output" ]; then
+                format_compilation_diagnostics "$compile_output"
+            fi
             return 1
         fi
         object_files="$obj_file"
     else
-        if ! object_files=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build"); then
+        # Capture compilation output for diagnostics
+        compile_output=$(unified_compile_sources "$all_sources" "$library_names" "$repo_root/build_lambda_config.json" "build" 2>&1)
+        if [ $? -ne 0 ]; then
             echo "❌ Failed to compile sources for test: $suite_name"
+            # Display compilation diagnostics at the end
+            if [ -n "$compile_output" ]; then
+                format_compilation_diagnostics "$compile_output"
+            fi
             return 1
         fi
+        object_files="$compile_output"
     fi
     
     # STEP 2: Use unified linking function
@@ -193,6 +205,11 @@ build_test_executable() {
     if ! unified_link_objects "$final_binary" "$object_files" "$library_names" "$repo_root/build_lambda_config.json"; then
         echo "❌ Failed to link executable: $final_binary"
         return 1
+    fi
+    
+    # Display compilation diagnostics at the end for successful builds too
+    if [ -n "$compile_output" ]; then
+        format_compilation_diagnostics "$compile_output"
     fi
     
     echo "✅ Successfully built: $final_binary"
