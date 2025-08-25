@@ -648,6 +648,13 @@ echo "🚀 Starting unified compilation process..."
 output=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}" 2>&1)
 compilation_exit_code=$?
 
+# Extract object files from output (last line should be object files if successful)
+if [ $compilation_exit_code -eq 0 ]; then
+    OBJECT_FILES_LIST="$output"
+else
+    OBJECT_FILES_LIST=""
+fi
+
 # Check for compilation errors in the output (but don't display diagnostics yet)
 format_compilation_diagnostics "$output" >/dev/null
 error_count=$?

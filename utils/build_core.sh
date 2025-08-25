@@ -888,27 +888,8 @@ format_compilation_diagnostics() {
         local grep_pattern="$2"
         local color="$3"
         
-        # Extract full diagnostic lines with file paths
-        # For errors, we need to find the file:line:col pattern that comes after error messages
-        if [ "$grep_pattern" = "error:" ]; then
-            # For errors, capture the file path lines that follow error messages
-            local diagnostics=$(echo "$output" | awk '
-                /error:/ { 
-                    error_msg = $0; 
-                    sub(/^[[:space:]]*/, "", error_msg);  # Remove leading whitespace
-                    getline; 
-                    if (/^[^:]+:[0-9]+:[0-9]*:/) {
-                        # Extract just the error message part and clean it up
-                        gsub(/^[[:space:]]*error: /, "", error_msg);
-                        # Replace the note with error for proper formatting
-                        gsub(/: note:.*$/, "", $0);
-                        print $0 ": error: " error_msg
-                    }
-                }' | head -20)
-        else
-            # For warnings, use the standard pattern
-            local diagnostics=$(echo "$output" | grep -E "^[^:]+:[0-9]+:[0-9]*:.*$grep_pattern" | head -20)
-        fi
+        # Extract full diagnostic lines with file paths using the same pattern as compile.bk.sh
+        local diagnostics=$(echo "$output" | grep "$grep_pattern" | head -20)  # Limit to 20 entries
         if [ -n "$diagnostics" ]; then
             echo
             echo -e "${color}${diagnostic_type} Summary (clickable links):${RESET}"
