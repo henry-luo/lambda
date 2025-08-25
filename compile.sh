@@ -320,66 +320,6 @@ init_header_cache() {
     fi
 }
 
-# Optimized function to check if source file needs recompilation
-needs_recompilation() {
-    local source_file="$1"
-    local object_file="$2"
-    local dep_file="${object_file%.o}.d"
-    
-    # If force rebuild is enabled, always recompile
-    if [ "$FORCE_REBUILD" = true ]; then
-        return 0
-    fi
-    
-    # If object file doesn't exist, recompile
-    if [ ! -f "$object_file" ]; then
-        return 0
-    fi
-    
-    # If source file is newer than object file, recompile
-    if [ "$source_file" -nt "$object_file" ]; then
-        return 0
-    fi
-    
-    # Check precise dependencies from .d file if it exists
-    if [ -f "$dep_file" ]; then
-        # Optimized: Use find with newer to check all dependencies at once
-        # This is much faster than checking each file individually
-        local newer_deps=$(awk '
-            { 
-                # Remove line continuations and target
-                gsub(/\\$/, "")
-                gsub(/^[^:]*:/, "")
-                # Split into individual files
-                for(i=1; i<=NF; i++) {
-                    if($i != "" && $i != "'$object_file'") {
-                        print $i
-                    }
-                }
-            }' "$dep_file" | while read -r dep; do
-                [ -n "$dep" ] && [ -f "$dep" ] && [ "$dep" -nt "$object_file" ] && echo "$dep" && break
-            done)
-        
-        if [ -n "$newer_deps" ]; then
-            echo "Dependency changed: $newer_deps"
-            return 0
-        fi
-        
-        # All dependencies checked, no rebuild needed
-        return 1
-    else
-        # No .d file exists, fall back to header cache method for compatibility
-        if [ -n "$NEWEST_HEADER_TIME" ]; then
-            local obj_time=$(stat -f "%m" "$object_file" 2>/dev/null || stat -c "%Y" "$object_file" 2>/dev/null)
-            if [ -n "$obj_time" ] && [ "$NEWEST_HEADER_TIME" -gt "$obj_time" ]; then
-                return 0
-            fi
-        fi
-        
-        # No recompilation needed
-        return 1
-    fi
-}
 
 
 # Read configuration with platform override support
@@ -668,9 +608,8 @@ else
 fi
 
 if [ "$SOURCE_DIRS_COUNT" -gt 0 ]; then
-    echo "Source directories: $SOURCE_DIRS_COUNT directories scanned for source files"
+    echo "Sources=$4"
 fi
-echo
 
 # Function to compile a single file (for parallel execution)
 compile_single_file() {
@@ -705,27 +644,27 @@ compile_single_file() {
 # ===== UNIFIED BUILD SYSTEM: Compilation Phase =====
 echo "🚀 Starting unified compilation process..."
 
-# Use the new unified compilation function - separate stdout (object files) from stderr (messages)
-OBJECT_FILES_LIST=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}")
+# Capture compilation output for error reporting
+output=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}" 2>&1)
 compilation_exit_code=$?
 
-if [ $compilation_exit_code -eq 0 ]; then
-    # Convert newline-separated object list to space-separated for linking compatibility
-    OBJECT_FILES=$(echo "$OBJECT_FILES_LIST" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
-    echo "✅ Compilation completed successfully"
-    compilation_success=true
-else
+# Check for compilation errors in the output (but don't display diagnostics yet)
+format_compilation_diagnostics "$output" >/dev/null
+error_count=$?
+
+# Determine compilation success based on both exit code and error detection
+if [ $compilation_exit_code -ne 0 ] || [ $error_count -gt 0 ]; then
     echo "❌ Compilation failed"
     compilation_success=false
     OBJECT_FILES=""
-fi
-
-# Preserve original output variable for error reporting compatibility
-output=""
-
-# Link final executable only if compilation was successful
-linking_performed=false
-if [ "$compilation_success" = true ]; then
+    linking_performed=false
+else
+    # Extract object files list from successful compilation
+    OBJECT_FILES_LIST=$(build_compile_sources "$BUILD_DIR" "$INCLUDES" "$WARNINGS" "$FLAGS" "true" "$PARALLEL_JOBS" "${SOURCE_FILES_ARRAY[@]}" 2>/dev/null)
+    OBJECT_FILES=$(echo "$OBJECT_FILES_LIST" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+    echo "✅ Compilation completed successfully"
+    compilation_success=true
+    
     # ===== UNIFIED BUILD SYSTEM: Linking Phase =====
     echo "🔗 Starting unified linking process..."
     
@@ -740,112 +679,12 @@ if [ "$compilation_success" = true ]; then
     fi
 fi
 
-# Output the captured messages
-echo -e "$output"
+# Display compilation diagnostics at the end
+format_compilation_diagnostics "$output"
 
-# Count errors and warnings (ignores color codes)
-num_errors=$(echo "$output" | grep -c "error:")
-num_warnings=$(echo "$output" | grep -c "warning:")
-num_notes=$(echo "$output" | grep -c "note:")
+# Display build status using centralized function
+display_build_status "$compilation_success" "$linking_performed" "$OUTPUT" "$BUILD_DIR" "$CROSS_COMPILE"
+exit_code=$?
 
-# Extract and format errors and warnings with clickable links
-format_diagnostics() {
-    local diagnostic_type="$1"
-    local grep_pattern="$2"
-    local color="$3"
-    
-    local diagnostics=$(echo "$output" | grep "$grep_pattern" | head -20)  # Limit to 20 entries
-    if [ -n "$diagnostics" ]; then
-        echo
-        echo -e "${color}${diagnostic_type} Summary (clickable links):${RESET}"
-        echo -e "${color}=====================================${RESET}"
-        
-        echo "$diagnostics" | while IFS= read -r line; do
-            # Extract file path and line number from compiler output
-            # Supports formats like: file.c:123:45: error: message
-            if echo "$line" | grep -qE '^[^:]+:[0-9]+:[0-9]*:'; then
-                # Extract components using more robust pattern
-                local file_path=$(echo "$line" | sed -E 's/^([^:]+):[0-9]+:[0-9]*:.*/\1/')
-                local line_num=$(echo "$line" | sed -E 's/^[^:]+:([0-9]+):[0-9]*:.*/\1/')
-                local col_num=$(echo "$line" | sed -E 's/^[^:]+:[0-9]+:([0-9]*):.*$/\1/')
-                local message=$(echo "$line" | sed -E 's/^[^:]+:[0-9]+:[0-9]*:[[:space:]]*(.*)/\1/')
-                
-                # Handle case where column number might be missing
-                if [ -z "$col_num" ]; then
-                    col_num="1"
-                fi
-                
-                # Convert absolute path to relative path if needed
-                if [[ "$file_path" == /* ]]; then
-                    # Convert absolute path to relative path
-                    local current_dir="$(pwd)"
-                    if [[ "$file_path" == "$current_dir"/* ]]; then
-                        file_path="${file_path#$current_dir/}"
-                    fi
-                fi
-                
-                # Output clickable link (VS Code and most modern terminals support this format)
-                echo -e "  ${color}${file_path}:${line_num}:${col_num}${RESET} - $message"
-            else
-                # Fallback for non-standard format
-                echo -e "  ${color}$line${RESET}"
-            fi
-        done
-        
-        local total_count=$(echo "$output" | grep -c "$grep_pattern")
-        if [ "$total_count" -gt 20 ]; then
-            echo -e "  ${color}... and $(($total_count - 20)) more${RESET}"
-        fi
-    fi
-}
-
-# Print summary with optional coloring
-RED="\033[0;31m"
-YELLOW="\033[1;33m"
-GREEN="\033[0;32m"
-BLUE="\033[0;34m"
-RESET="\033[0m"
-
-# Format errors with clickable links (warnings and notes only show count)
-if [ "$num_errors" -gt 0 ]; then
-    format_diagnostics "ERRORS" "error:" "$RED"
-fi
-
-echo
-echo -e "${YELLOW}Build Summary:${RESET}"
-if [ "$num_errors" -gt 0 ]; then
-    echo -e "${RED}Errors:   $num_errors${RESET}"
-else
-    echo -e "Errors:   $num_errors"
-fi
-echo -e "${YELLOW}Warnings: $num_warnings${RESET}"
-echo "Build system: Unified (Step 1 & 2 implementation)"
-if [ "$linking_performed" = true ]; then
-    echo "Linking: performed"
-else
-    echo "Linking: skipped (up-to-date)"
-fi
-
-# Show dependency tracking info
-dep_files_count=$(find "$BUILD_DIR" -name "*.d" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$dep_files_count" -gt 0 ]; then
-    echo "Dependency tracking: $dep_files_count .d files (precise tracking)"
-else
-    echo "Dependency tracking: header cache fallback"
-fi
-
-# Final build status
-if [ "$compilation_success" = true ]; then
-    echo -e "${GREEN}Build successful: $OUTPUT${RESET}"
-    
-    # Show file info for cross-compiled binaries
-    if [ "$CROSS_COMPILE" = "true" ]; then
-        echo "File type information:"
-        file "$OUTPUT" 2>/dev/null || echo "file command not available"
-    fi
-    
-    exit 0
-else
-    echo -e "${RED}Build failed${RESET}"
-    exit 1
+exit $exit_code
 fi
