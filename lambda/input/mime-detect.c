@@ -1,11 +1,14 @@
+// Define _GNU_SOURCE before any includes for memmem
+#define _GNU_SOURCE
+
 #include "mime-detect.h"
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
 
-// Define _GNU_SOURCE for memmem on Linux, not needed on macOS
-#if defined(__linux__) && !defined(_GNU_SOURCE)
-#define _GNU_SOURCE
+// Declare memmem if not available
+#ifndef __GLIBC__
+void *memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
 #endif
 
 // Define memmem if not available on some older platforms
