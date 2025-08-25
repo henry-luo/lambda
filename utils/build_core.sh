@@ -163,29 +163,43 @@ needs_linking() {
     local object_files=("$@")
     local force_rebuild="${FORCE_REBUILD:-false}"
     
+    echo "DEBUG: needs_linking called with output_file=$output_file" >&2
+    echo "DEBUG: needs_linking received ${#object_files[@]} object files" >&2
+    echo "DEBUG: force_rebuild=$force_rebuild" >&2
+    
     # If force rebuild is enabled, always link
     if [ "$force_rebuild" = "true" ]; then
+        echo "DEBUG: Force rebuild enabled, linking needed" >&2
         return 0
     fi
     
     # If output file doesn't exist, link
     if [ ! -f "$output_file" ]; then
+        echo "DEBUG: Output file doesn't exist, linking needed" >&2
         return 0
     fi
+    echo "DEBUG: Output file exists: $output_file" >&2
     
     # Get output file timestamp once
     local output_time=$(stat -f "%m" "$output_file" 2>/dev/null || stat -c "%Y" "$output_file" 2>/dev/null)
     if [ -z "$output_time" ]; then
+        echo "DEBUG: Can't get timestamp for $output_file, linking needed" >&2
         return 0  # Can't get timestamp, safer to link
     fi
+    echo "DEBUG: Output file $output_file timestamp: $output_time" >&2
     
     # Check object files
     for obj_file in "${object_files[@]}"; do
         if [ -f "$obj_file" ]; then
             local obj_time=$(stat -f "%m" "$obj_file" 2>/dev/null || stat -c "%Y" "$obj_file" 2>/dev/null)
+            echo "DEBUG: Object file $obj_file timestamp: $obj_time" >&2
             if [ -n "$obj_time" ] && [ "$obj_time" -gt "$output_time" ]; then
+                echo "Object file newer than executable: $obj_file (obj: $obj_time > exe: $output_time)" >&2
                 return 0
             fi
+        else
+            echo "Missing object file: $obj_file" >&2
+            return 0
         fi
     done
     
@@ -645,6 +659,8 @@ build_compile_sources() {
 
     # Return object files list on success, empty on failure
     if [ "$compilation_success" = "true" ]; then
+        # Always return the complete list of object files, even if no compilation occurred
+        # This is needed for linking detection to work properly
         printf '%s\n' "${object_files[@]}"
         return 0
     else
@@ -673,6 +689,7 @@ build_link_objects() {
         echo "Error: main_objects is required" >&2
         return 1
     fi
+    echo "DEBUG: main_objects received: $main_objects" >&2
     
     # Combine all object files
     local all_objects="$main_objects"
@@ -691,7 +708,17 @@ build_link_objects() {
     
     # Check if linking is needed
     local object_files_array=($unique_objects)
-    if ! needs_linking "$output_file" "${object_files_array[@]}"; then
+    echo "DEBUG: Checking if linking needed for $output_file" >&2
+    echo "DEBUG: Object files: ${object_files_array[*]}" >&2
+    echo "DEBUG: Array length: ${#object_files_array[@]}" >&2
+    echo "DEBUG: About to call needs_linking..." >&2
+    echo "DEBUG: First few object files: ${object_files_array[0]} ${object_files_array[1]} ${object_files_array[2]}" >&2
+    
+    # Call needs_linking and capture the result
+    if needs_linking "$output_file" "${object_files_array[@]}"; then
+        echo "DEBUG: needs_linking returned true, proceeding with linking" >&2
+    else
+        echo "DEBUG: needs_linking returned false, executable up-to-date" >&2
         echo "Executable up-to-date: $output_file"
         return 0
     fi
