@@ -6,7 +6,60 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>  // for getcwd and chdir
+
+extern "C" {
+#include <tree_sitter/api.h>
+#include <mpdecimal.h>
 #include "../lambda/lambda.h"
+#include "../lib/url.h"
+#include "../lib/num_stack.h"
+
+// Additional function declarations that need C linkage
+void print_item(StrBuf* strbuf, Item item);
+String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool);
+void frame_start();
+void frame_end();
+void heap_init();
+void heap_destroy();
+Item input_from_source(char* source, Url* url, String* type, String* flavor);
+void num_stack_destroy(num_stack_t* stack);
+num_stack_t* num_stack_create(size_t initial_capacity);
+char* read_text_file(const char* filename);
+TSParser* lambda_parser(void);
+TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+}
+
+// Implement missing functions locally to avoid linking conflicts
+extern "C" Context* create_test_context() {
+    Context* ctx = (Context*)calloc(1, sizeof(Context));
+    if (!ctx) return NULL;
+    
+    // Initialize basic context fields
+    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    if (ctx->decimal_ctx) {
+        mpd_defaultcontext(ctx->decimal_ctx);
+    }
+    
+    // Initialize num_stack and heap to avoid crashes
+    ctx->num_stack = num_stack_create(1024);  // Create with reasonable initial capacity
+    ctx->heap = NULL;  // Will be initialized by heap_init()
+    
+    return ctx;
+}
+
+// Tree-sitter function declarations
+extern "C" const TSLanguage *tree_sitter_lambda(void);
+
+extern "C" TSParser* lambda_parser(void) {
+    TSParser *parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_lambda());
+    return parser;
+}
+
+extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
+    TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
+    return tree;
+}
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
@@ -24,25 +77,12 @@ typedef struct Input {
 } Input;
 
 // Forward declarations
-Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
-Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
-String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
 Url* get_current_dir();
 Url* parse_url(Url *base, const char* doc_url);
 char* read_text_doc(Url *url);
-char* read_text_file(const char *filename);  // From lib/file.c
-void print_item(StrBuf *strbuf, Item item);
 
 // Forward declarations for Lambda runtime 
 extern __thread Context* context;
-
-// Functions we need for setting up the context
-void heap_init();
-void frame_start();
-void frame_end();
-void heap_destroy();
-
-Context* create_test_context();
 void destroy_test_context(Context* ctx);
 
 // Common test function for markdown roundtrip testing
@@ -61,9 +101,11 @@ void setup_math_tests(void) {
     // Set the global context BEFORE calling heap_init
     context = test_context;
     
-    // Now initialize heap and frame
-    heap_init();
-    frame_start();
+    // Initialize the memory system properly
+    if (context && context->decimal_ctx) {
+        heap_init();
+        frame_start();
+    }
 }
 
 void teardown_math_tests(void) {
@@ -115,7 +157,7 @@ Url* create_test_url(const char* virtual_path) {
 
 // Helper function to print AST structure for debugging
 void print_ast_debug(Input* input) {
-    if (input && input->root) {
+    if (input && input->root.type != ITEM_UNDEFINED) {
         StrBuf* debug_buf = strbuf_new();
         printf("AST: ");
         print_item(debug_buf, input->root);
@@ -159,7 +201,8 @@ bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, con
         if (strcmp(type, "math") == 0) {
             printf("Content to parse: '%s' (length: %zu)\n", content_copy, strlen(content_copy));
         }
-        Input* input = input_from_source(content_copy, test_url, type_str, flavor_str);
+        Item input_item = input_from_source(content_copy, test_url, type_str, flavor_str);
+        Input* input = input_item.element ? (Input*)input_item.element : nullptr;
         
         if (!input) {
             printf("Failed to parse - skipping case %d\n", i);
@@ -351,7 +394,8 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
     
     // Parse the input content (identical to working test)
     printf("DEBUG: About to call input_from_source\n");
-    Input* input = input_from_source(md_copy, dummy_url, type_str, flavor_str);
+    Item input_item = input_from_source(md_copy, dummy_url, type_str, flavor_str);
+    Input* input = input_item.element ? (Input*)input_item.element : nullptr;
     printf("DEBUG: After input_from_url call\n");
     if (!input) {
         printf("❌ Failed to parse markdown file: %s\n", abs_path);
