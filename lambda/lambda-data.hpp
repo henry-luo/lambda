@@ -23,16 +23,12 @@ typedef struct NamePool NamePool;
 #include "../lib/strview.h"
 #include "../lib/num_stack.h"
 #include "../lib/datetime.h"
+#include "../lib/url.h"
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
-
 #include "lambda.h"
-
-#pragma clang diagnostic pop
 
 #ifdef __cplusplus
 }

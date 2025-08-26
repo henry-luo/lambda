@@ -28,10 +28,12 @@ Lambda header files defined the runtime data. They are layer one up on the other
 	- the C++ version is for the manual-written/AOT-compiled Lambda runtime code;
 - *lambda-data.hpp*:
 	- the full C++ definitions of the data structures and the API functions to work with the data;
+	- input parsers work at this level;
 - *ast.hpp*:
 	- the AST built from Tree-sitter syntax tree;
+	- Lambda validator, formatter works at this level;
 - *transpiler.hpp*:
-	- the full transpiler and code runner;
+	- the full Lambda transpiler and code runner;
 ### Coding Guidelines
 - Start comments in lowercase.
 - **Add debug logging** for development and troubleshooting.

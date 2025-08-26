@@ -101,10 +101,10 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs \
-        build-windows build-debug build-release build-test clean-all distclean \
+        build-windows build-debug build-release build-test-legacy clean-all distclean \
         build-windows build-debug build-release clean-all distclean \
         verify-windows test-windows tree-sitter-libs \
-        generate-premake clean-premake build-test-premake
+        generate-premake clean-premake build-test
 
 # Help target - shows available commands
 help:
@@ -296,7 +296,7 @@ distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup finished."
 
 # Development targets
-test: build-test-premake
+test: build-test
 	@echo "Running comprehensive test suite..."
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh; \
@@ -327,7 +327,7 @@ test-parallel: build
 		exit 1; \
 	fi
 
-build-test: build
+build-test-legacy: build
 	@echo "Building all test executables..."
 	@if [ -f "test/test_build.sh" ]; then \
 		PARALLEL_JOBS=$(NPROCS) ./test/test_build.sh all; \
@@ -716,7 +716,7 @@ clean-premake:
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
 
-build-test-premake: generate-premake
+build-test: generate-premake
 	@echo "Building tests using Premake5..."
 	@echo "Building configurations..."
 	@mkdir -p build/premake
