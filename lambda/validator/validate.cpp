@@ -37,15 +37,12 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     // Context validation_context = {0};
     // validation_context.num_stack = num_stack_create(16);
     
-    fprintf(stderr, "TRACE: About to set global context\n");
-    fflush(stderr);
-    
     // Set the global context for Lambda evaluation functions
     // extern __thread Context* context;
     // Context* old_context = context;
     // context = &validation_context;
     
-    fprintf(stderr, "TRACE: Global context set, about to read schema file: %s\n", schema_file);
+    fprintf(stderr, "TRACE: about to read schema file: %s\n", schema_file);
     fflush(stderr);
     
     // Track if we created a temp_runner for cleanup
@@ -270,7 +267,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
 int exec_validation(int argc, char* argv[]) {
     // Extract validation argument parsing logic from main() function
     // This allows tests to call validation directly without spawning new processes
-    
+    printf("Starting validation with arguments\n");
     if (argc < 2) {
         printf("Error: No file specified for validation\n");
         printf("Usage: validate [-s <schema>] [-f <format>] <file> [files...]\n");
@@ -393,6 +390,7 @@ int exec_validation(int argc, char* argv[]) {
     }
     
     // Call the validation function
+    printf("Starting validation of '%s' using schema '%s'...\n", data_file, schema_file);
     run_validation(data_file, schema_file, input_format);
     return 0;
 }
