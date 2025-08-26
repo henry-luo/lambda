@@ -130,6 +130,9 @@ TypeInfo type_info[] = {
     [LMD_CONTAINER_HEAP_START] = {.byte_size = 0, .name = "container_start", .type=&TYPE_NULL, .lit_type = (Type*)&LIT_TYPE_NULL},
 };
 
+TypedItem error_result = {.type_id = LMD_TYPE_ERROR};
+TypedItem null_result = {.type_id = LMD_TYPE_NULL};
+
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     Type* t;
     pool_variable_alloc(pool, size, (void**)&t);
@@ -302,6 +305,78 @@ void list_push(List *list, Item item) {
     }
 }
 
+TypedItem list_get_typed(List* list, int index) {
+    printf("list_get_type %p, index: %d\n", list, index);
+    if (!list) { return null_result; }
+    if (index < 0 || index >= list->length) { 
+        printf("list_get_type: index out of bounds: %d\n", index);
+        return null_result; 
+    }
+    
+    Item item = list->items[index];
+    TypeId type_id = get_type_id(item);
+    TypedItem result = {.type_id = type_id};
+    
+    switch (type_id) {
+    case LMD_TYPE_NULL:
+        return null_result;
+    case LMD_TYPE_BOOL:
+        result.bool_val = *(bool*)&item.item;
+        return result;
+    case LMD_TYPE_INT:
+        result.int_val = *(int*)&item.item;
+        return result;
+    case LMD_TYPE_INT64: {
+        long lval = *(long*)item.pointer;
+        result.long_val = lval;
+        return result;
+    }
+    case LMD_TYPE_FLOAT: {
+        double dval = *(double*)item.pointer;
+        result.double_val = dval;
+        return result;
+    }
+    case LMD_TYPE_DTIME: {
+        DateTime dtval = *(DateTime*)item.pointer;
+        result.datetime_val = dtval;
+        return result;
+    }
+    case LMD_TYPE_DECIMAL:
+        result.decimal = (Decimal*)item.pointer;
+        return result;
+    case LMD_TYPE_STRING:
+        result.string = (String*)item.pointer;
+        return result;
+    case LMD_TYPE_SYMBOL:
+        result.string = (String*)item.pointer;
+        return result;
+    case LMD_TYPE_BINARY:
+        result.string = (String*)item.pointer;
+        return result;
+    case LMD_TYPE_RANGE:
+        result.range = (Range*)item.pointer;
+        return result;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+        result.array = (Array*)item.pointer;
+        return result;
+    case LMD_TYPE_LIST:
+        result.list = (List*)item.pointer;
+        return result;
+    case LMD_TYPE_MAP:
+        result.map = (Map*)item.pointer;
+        return result;
+    case LMD_TYPE_ELEMENT:
+        result.element = (Element*)item.pointer;
+        return result;
+    case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+        result.pointer = item.raw_pointer;
+        return result;
+    default:
+        printf("unknown list item type %d\n", type_id);
+        return error_result;
+    }
+}
+
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
     printf("map length: %ld\n", count);
@@ -424,9 +499,6 @@ Map* map_pooled(VariableMemPool *pool) {
 }
 
 TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
-    TypedItem error_result = {.type_id = LMD_TYPE_ERROR};
-    TypedItem null_result = {.type_id = LMD_TYPE_NULL};
-    
     ShapeEntry *field = map_type->shape;
     while (field) {
         if (!field->name) { // nested map, skip
@@ -521,8 +593,6 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
 }
 
 TypedItem map_get_typed(Map* map, Item key) {
-    TypedItem null_result = {.type_id = LMD_TYPE_NULL};
-    
     printf("map_get_typed %p\n", map);
     if (!map || !key.item) { return null_result; }
     
@@ -543,4 +613,16 @@ Element* elmt_pooled(VariableMemPool *pool) {
     elmt->type_id = LMD_TYPE_ELEMENT;
     elmt->type = &EmptyElmt;
     return elmt;
+}
+
+TypedItem elmt_get_typed(Element* elmt, Item key) {
+    if (!elmt || !key.item) { return null_result;}
+    bool is_found;
+    char *key_str = NULL;
+    if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
+        key_str = ((String*)key.pointer)->chars;
+    } else {
+        return null_result;  // only string or symbol keys are supported
+    }
+    return _map_get_typed((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
 }

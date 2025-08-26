@@ -163,7 +163,7 @@ typedef struct ValidationOptions {
 typedef struct ValidationContext ValidationContext;
 
 // Custom validator function type
-typedef ValidationResult* (*CustomValidatorFunc)(Item item, TypeSchema* schema, 
+typedef ValidationResult* (*CustomValidatorFunc)(TypedItem typed_item, TypeSchema* schema, 
                                                 ValidationContext* context);
 
 // Custom validator registration
@@ -278,7 +278,7 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
 int schema_validator_load_schema_file(SchemaValidator* validator, const char* schema_path);
 
 // Validation functions
-ValidationResult* validate_item(SchemaValidator* validator, Item item, 
+ValidationResult* validate_item(SchemaValidator* validator, TypedItem typed_item, 
                                TypeSchema* schema, ValidationContext* context);
 ValidationResult* validate_document(SchemaValidator* validator, Item document, 
                                    const char* schema_name);
@@ -287,14 +287,14 @@ ValidationResult* validate_with_options(SchemaValidator* validator, Item item,
                                        ValidationOptions* options);
 
 // Type-specific validation functions
-ValidationResult* validate_primitive(Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_union(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_array(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_map(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_element(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_occurrence(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_reference(SchemaValidator* validator, Item item, TypeSchema* schema, ValidationContext* ctx);
-ValidationResult* validate_literal(Item item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_primitive(TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_union(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_array(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_element(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_occurrence(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_reference(SchemaValidator* validator, TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
+ValidationResult* validate_literal(TypedItem typed_item, TypeSchema* schema, ValidationContext* ctx);
 
 // Custom validator registration
 void register_custom_validator(SchemaValidator* validator, const char* name,

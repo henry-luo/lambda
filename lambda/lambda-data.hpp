@@ -346,7 +346,9 @@ Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, Item itm, VariableMemPool *pool);
 Map* map_pooled(VariableMemPool *pool);
 TypedItem map_get_typed(Map* map, Item key);
+TypedItem list_get_typed(List* list, int index);
 Element* elmt_pooled(VariableMemPool *pool);
+TypedItem elmt_get_typed(Element* elmt, Item key);
 void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool);
 
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
