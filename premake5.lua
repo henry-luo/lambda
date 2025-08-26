@@ -190,6 +190,7 @@ project "lambda-input-full-c"
     objdir "build/obj/%{prj.name}"
     
     files {
+        "lambda/parse.c",
         "lib/arraylist.c",
         "lib/hashmap.c",
         "lib/file.c",
@@ -233,6 +234,9 @@ project "lambda-input-full-cpp"
         "lambda/utf_string.cpp",
         "lambda/name_pool.cpp",
         "lambda/lambda-data.cpp",
+        "lambda/validator/validate.cpp",
+        "lambda/validator/schema_parser.cpp",
+        "lambda/validator/validator.cpp",
     }
     
     files {
@@ -801,8 +805,8 @@ project "test_validator"
     }
     
     links {
-        "lambda-runtime-full-cpp",
-        "lambda-runtime-full-c",
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
         "lambda-lib",
         "criterion",
     }
