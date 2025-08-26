@@ -359,7 +359,7 @@ void url_normalize_path(char* path) {
         // Add segment
         size_t segment_len = strlen(segments[i]);
         if (current_len + segment_len < 2047) {
-            strncpy(path + current_len, segments[i], 2047 - current_len - 1);
+            strncpy(path + current_len, segments[i], segment_len);
             current_len += segment_len;
             path[current_len] = '\0';
         }

@@ -67,8 +67,26 @@ void strbuf_full_reset(StrBuf *sb) {
 
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     if (min_capacity <= sb->capacity) return true;
+    
+    // Check for unreasonable allocation sizes to prevent overflow
+    // Use >= instead of > to catch SIZE_MAX/2 exactly
+    if (min_capacity >= SIZE_MAX / 2) {
+        return false; // Refuse to allocate more than half of address space
+    }
+    
     size_t new_capacity = sb->capacity ? sb->capacity : INITIAL_CAPACITY;
-    while (new_capacity < min_capacity) { new_capacity *= 2; }
+    
+    while (new_capacity < min_capacity) { 
+        // Check for overflow before doubling
+        if (new_capacity > SIZE_MAX / 2) {
+            printf("DEBUG: Overflow detected in doubling loop - new_capacity=%zu, min_capacity=%zu\n", 
+                   new_capacity, min_capacity);
+            new_capacity = min_capacity; // Use minimum required instead of doubling
+            break;
+        }
+        printf("DEBUG: Doubling - new_capacity=%zu -> %zu\n", new_capacity, new_capacity * 2);
+        new_capacity *= 2; 
+    }
     char *new_s;
     if (!sb->pool) new_s = (char*)realloc(sb->str, new_capacity);
     else {
