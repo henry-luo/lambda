@@ -146,10 +146,17 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
     parse_all_type_definitions(parser, root);
     
     // Try to find the requested root type
+    printf("[SCHEMA] DEBUG: Looking for root type '%s'\n", schema_name);
     TypeSchema* root_schema = find_type_definition(parser, schema_name);
     if (!root_schema) {
+        printf("[SCHEMA] DEBUG: Root type '%s' not found, trying 'Document'\n", schema_name);
         // Fallback: if the requested type isn't found, try "Document"
         root_schema = find_type_definition(parser, "Document");
+        if (!root_schema) {
+            printf("[SCHEMA] DEBUG: 'Document' type also not found\n");
+        } else {
+            printf("[SCHEMA] DEBUG: Found 'Document' type as fallback\n");
+        }
     }
     if (!root_schema) {
         // If still no root schema found, use the first available type
@@ -177,8 +184,8 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
                     printf("[SCHEMA] WARNING: Failed to register type definition: %.*s\n",
                            (int)def->name.length, def->name.str);
                 } else {
-                    // printf("[SCHEMA] DEBUG: Registered type definition: %.*s\n",
-                    //        (int)def->name.length, def->name.str);
+                    printf("[SCHEMA] DEBUG: Registered type definition: %.*s\n",
+                           (int)def->name.length, def->name.str);
                 }
             }
         }
@@ -193,7 +200,7 @@ int schema_validator_load_schema(SchemaValidator* validator, const char* schema_
         return -1;
     }
     
-    //// printf("[SCHEMA] DEBUG: Registered root schema as: %s\n", schema_name);
+    printf("[SCHEMA] DEBUG: Registered root schema as: %s\n", schema_name);
     
     schema_parser_destroy(parser);
     return 0;
@@ -1735,9 +1742,17 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document, c
     
     SchemaEntry lookup = { .name = lookup_name };
     const SchemaEntry* found_entry = (const SchemaEntry*)hashmap_get(validator->schemas, &lookup);
+    
+    // Debug: Print available schemas
+    printf("DEBUG: Looking for schema '%s'\n", schema_name);
+    printf("DEBUG: Available schemas in registry:\n");
+    // TODO: Add schema registry enumeration for debugging
+    
     if (!found_entry) {
         // If schema not found, fall back to a basic validation
-        // printf("Warning: Schema '%s' not found, using basic validation\n", schema_name);
+        printf("Warning: Schema '%s' not found, using basic validation\n", schema_name);
+        printf("DEBUG: Schema lookup failed - using fallback\n");
+        printf("DEBUG: This means the Document type was not properly parsed from the schema\n");
         TypeSchema* fallback_schema = create_primitive_schema(LMD_TYPE_ANY, validator->pool);
         if (!fallback_schema) {
             return nullptr;
