@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" 
-               encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-    <soap:Header mustUnderstand="true" actor="http://example.com/actor">
+<Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" 
+          encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+    <Header mustUnderstand="true" actor="http://example.com/actor">
         Authentication Required
-    </soap:Header>
-    <soap:Body>
+    </Header>
+    <Body>
         <content method="getUserInfo" namespace="http://example.com/userservice">
             <param name="userId" type="string" value="12345" />
             <param name="includeDetails" type="boolean" value="true" />
             <param name="format" type="string" value="json" />
         </content>
-    </soap:Body>
-</soap:Envelope>
+    </Body>
+</Envelope>

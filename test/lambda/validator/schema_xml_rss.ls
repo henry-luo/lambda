@@ -7,26 +7,49 @@ type Document = <rss
     RssChannel                        // single channel (required child element)
 >
 
+// Channel contains child elements, not attributes
 type RssChannel = <channel
-    title: string,                    // channel title (text content)
-    link: string,                     // channel URL (text content)
-    description: string,              // channel description (text content)
-    language: string?,                // optional language (text content)
-    copyright: string?,               // optional copyright (text content)
-    managingEditor: string?,          // optional editor (text content)
-    webMaster: string?,               // optional webmaster (text content)
-    pubDate: string?,                 // optional publication date (as string)
-    lastBuildDate: string?,           // optional last build date (as string)
-    ttl: string?,                     // optional time to live (as string)
-    RssItem*                          // zero or more items
+    RssTitle,                         // required title child element
+    RssLink,                          // required link child element
+    RssDescription,                   // required description child element
+    RssLanguage?,                     // optional language child element
+    RssCopyright?,                    // optional copyright child element
+    RssManagingEditor?,               // optional managingEditor child element
+    RssWebMaster?,                    // optional webMaster child element
+    RssPubDate?,                      // optional pubDate child element
+    RssLastBuildDate?,                // optional lastBuildDate child element
+    RssTtl?,                          // optional ttl child element
+    RssItem*                          // zero or more item child elements
 >
 
+// Define child element types with text content
+type RssTitle = <title string>
+type RssLink = <link string>
+type RssDescription = <description string>
+type RssLanguage = <language string>
+type RssCopyright = <copyright string>
+type RssManagingEditor = <managingEditor string>
+type RssWebMaster = <webMaster string>
+type RssPubDate = <pubDate string>
+type RssLastBuildDate = <lastBuildDate string>
+type RssTtl = <ttl string>
+
+// Item contains child elements, not attributes
 type RssItem = <item
-    title: string,                    // item title (text content)
-    link: string,                     // item URL (text content)
-    description: string,              // item description (text content)
-    pubDate: string?,                 // publication date (as string)
-    author: string?,                  // optional author (text content)
-    category: string?,                // single category (text content) - simplified
-    guid: string?                     // optional unique identifier (text content)
+    RssItemTitle,                     // required title child element
+    RssItemLink,                      // required link child element
+    RssItemDescription,               // required description child element
+    RssItemPubDate?,                  // optional pubDate child element
+    RssItemAuthor?,                   // optional author child element
+    RssItemCategory*,                 // zero or more category child elements
+    RssItemGuid?                      // optional guid child element
 >
+
+// Define item child element types with text content
+type RssItemTitle = <title string>
+type RssItemLink = <link string>
+type RssItemDescription = <description string>
+type RssItemPubDate = <pubDate string>
+type RssItemAuthor = <author string>
+type RssItemCategory = <category string>
+type RssItemGuid = <guid string>

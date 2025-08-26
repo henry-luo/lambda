@@ -15,7 +15,13 @@ type BookElement = <book
     price: string                     // price text content
 >
 
-// Bookstore root element containing books - this is now the root with our parsing fix
-type Document = <bookstore
-    BookElement*               // zero or more book elements
+// Root element containing simple elements
+type Document = <root
+    SimpleElement*             // zero or more simple elements
+>
+
+// Simple element with name and text attributes
+type SimpleElement = <element
+    name: string,              // element name attribute
+    text: string               // element text attribute
 >

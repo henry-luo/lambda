@@ -6,54 +6,50 @@ type IngredientType = <ingredient
     name: string,                     // ingredient name (required)
     amount: string,                   // ingredient amount (required)
     unit: string?,                    // optional unit of measurement
-    optional: bool?                   // optional flag for optional ingredients
+    optional: string?                 // optional flag for optional ingredients
 >
 
 // Cooking step with step number and instructions
 type StepType = <step
-    number: int,                      // step number (positiveInteger)
+    number: string,                   // step number as string
     text: string                      // step instructions
+>
+
+// Instructions container
+type InstructionsType = <instructions
+    StepType+                         // one or more instruction steps
+>
+
+// Ingredients container
+type IngredientsType = <ingredients
+    IngredientType+                   // one or more ingredients
 >
 
 // Preparation time with unit and duration
 type PrepTimeType = <prepTime
     unit: string,                     // unit: "minutes" or "hours"
-    text: string                      // duration as text (positiveInteger)
+    text: string                      // duration as text
 >
 
-// Recipe with all details
+// Recipe with all details as child elements
 type RecipeType = <recipe
     id: string,                       // unique recipe ID
     difficulty: string,               // difficulty: "easy", "medium", "hard"
-    servings: int?,                   // optional number of servings
-    name: string,                     // recipe name
-    description: string,              // recipe description  
-    prepTime: PrepTimeType,           // preparation time
-    ingredients: IngredientType+,     // one or more ingredients
-    instructions: StepType+,          // one or more instruction steps
-    notes: string?                    // optional cooking notes
+    servings: string?,                // optional number of servings
+    name: string,                     // recipe name as child element
+    description: string,              // recipe description as child element
+    prepTime: PrepTimeType,           // preparation time as child element
+    ingredients: IngredientsType,     // ingredients container
+    instructions: InstructionsType,   // instructions container
+    notes: string?                    // optional cooking notes as child element
 >
 
-// Cookbook root element
-type CookbookType = <cookbook
-    title: string,                    // cookbook title
-    author: string,                   // cookbook author
-    year: string?,                    // optional publication year (gYear)
-    introduction: string,             // cookbook introduction
-    recipes: RecipeType+              // one or more recipes
->
-
-// Document structure - cookbook is now the root with our parsing fix  
+// Document structure - cookbook root element
 type Document = <cookbook
     title: string,                    // cookbook title (required attribute)
     author: string,                   // cookbook author (required attribute)
     year: string,                     // publication year (required attribute)
     xmlns: string?,                   // optional namespace
-    RecipeType*                       // zero or more recipes
->
-
-// Processing instruction for XML declaration
-type XmlProcessingInstruction = <?xml
-    version: string,                  // XML version
-    encoding: string?                 // optional encoding
+    introduction: string,             // introduction as child element
+    RecipeType*                       // zero or more recipes as child elements
 >
