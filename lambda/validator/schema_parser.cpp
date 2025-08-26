@@ -110,9 +110,11 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
 }
 
 TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node) {
-    if (!parser) return NULL;
+    if (!parser || ts_node_is_null(type_node)) return NULL;
     
     TypeDefinition* def = (TypeDefinition*)pool_calloc(parser->pool, sizeof(TypeDefinition));
+    if (!def) return NULL;
+    
     def->source_node = type_node;
     
     // For type_stam nodes, we need to get the assign_expr child
@@ -137,6 +139,9 @@ TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node) {
         TSNode type_expr_node = ts_node_child(assign_expr_node, 2);
         if (!ts_node_is_null(type_expr_node)) {
             def->schema_type = build_schema_type(parser, type_expr_node);
+            if (!def->schema_type) {
+                def->schema_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+            }
         } else {
             def->schema_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
         }
@@ -1174,10 +1179,24 @@ TypeSchema* find_type_definition(SchemaParser* parser, const char* type_name) {
     if (!parser || !type_name || !parser->type_definitions) return NULL;
     
     size_t name_len = strlen(type_name);
+    if (name_len == 0) return NULL;
+    
+    // Add bounds checking
+    if (parser->type_definitions->length < 0 || parser->type_definitions->length > 10000) {
+        fprintf(stderr, "[SCHEMA_PARSER] ERROR: Invalid type_definitions length: %d\n", (int)parser->type_definitions->length);
+        return NULL;
+    }
     
     for (long i = 0; i < parser->type_definitions->length; i++) {
         TypeDefinition* def = (TypeDefinition*)parser->type_definitions->data[i];
-        if (def && def->name.length == name_len && 
+        if (!def) continue;
+        
+        // Add safety checks for the definition
+        if (def->name.str == NULL || def->name.length == 0 || def->name.length > 1000) {
+            continue;
+        }
+        
+        if (def->name.length == name_len && 
             memcmp(def->name.str, type_name, name_len) == 0) {
             return def->schema_type;
         }
