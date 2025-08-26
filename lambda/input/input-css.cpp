@@ -1076,7 +1076,7 @@ static Item flatten_single_array(Array* arr) {
     
     // For single-element arrays, return the single item directly
     // Use array_get to safely access the item
-    Item single_item = list_get((List*)arr, 0);
+    Item single_item = arr->items[0];
     
     // Debug: check what type we're flattening
     if (single_item .item != ITEM_ERROR) {
@@ -1134,7 +1134,7 @@ static Item parse_css_function(Input *input, const char **css) {
     // Add parameters as child content using list_push
     if (params && params->length > 0) {
         for (long i = 0; i < params->length; i++) {
-            Item param = list_get((List*)params, i);
+            Item param = params->items[i];
             list_push((List*)func_element, param);
         }
     }

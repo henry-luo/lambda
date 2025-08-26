@@ -252,8 +252,12 @@ class PremakeGenerator:
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
             '    ',
-            '    -- Wrapper project - no source files, just dependencies',
+            '    -- Wrapper library with empty source file',
             '    files {',
+            '        "utils/empty.cpp",',
+            '    }',
+            '    ',
+            '    links {',
         ])
         for source in sub_projects:
             self.premake_content.append(f'        "{source}",')

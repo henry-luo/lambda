@@ -89,6 +89,8 @@ extern "C" {
 }
 #endif
 
+#include "lambda-data.hpp"
+
 typedef struct NamePool NamePool;
 typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
