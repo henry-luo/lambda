@@ -226,15 +226,9 @@ project "lambda-input-full-cpp"
     objdir "build/obj/%{prj.name}"
     
     files {
-        "lambda/lambda-data.cpp",
-        "lambda/lambda-eval.cpp",
-        "lambda/lambda-mem.cpp",
         "lambda/print.cpp",
         "lambda/utf_string.cpp",
         "lambda/name_pool.cpp",
-        "lambda/input/input.cpp",
-        "lambda/input/input-common.cpp",
-        "lambda/format/format.cpp",
     }
     
     files {
@@ -638,7 +632,7 @@ project "test_mime_detect"
     }
     
     links {
-        "lambda-runtime-full-c",
+        "lambda-input-full-c",
         "lambda-lib",
         "criterion",
     }
@@ -690,7 +684,6 @@ project "test_math"
     }
     
     links {
-        "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
@@ -746,7 +739,6 @@ project "test_markup_roundtrip"
     }
     
     links {
-        "lambda-runtime-full-cpp",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",

@@ -76,6 +76,39 @@ void expand_list(List *list) {
     }
 }
 
+Item push_d(double dval) {
+    printf("TRACE: push_d: %g\n", dval);
+    // Safety check: if context is num_stack is NULL
+    if (!context->num_stack) {
+        fprintf(stderr, "WARNING: push_d called with invalid context\n");
+        return ItemError;
+    }
+    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval);
+    return {.item = d2it(dptr)};
+}
+
+Item push_l(long lval) {
+    printf("TRACE: push_l: %ld\n", lval);
+    // Safety check: if context is num_stack is NULL
+    if (!context->num_stack) {
+        fprintf(stderr, "WARNING: push_l called with invalid context\n");
+        return ItemError;
+    }
+    if (lval == INT_ERROR) return ItemError;
+    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval);
+    return {.item = l2it(lptr)};
+}
+
+Item push_k(DateTime val) {
+    // Safety check: if context is num_stack is NULL
+    if (!context->num_stack) {
+        fprintf(stderr, "WARNING: push_k called with invalid context\n");
+        return ItemError;
+    }    
+    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, val);
+    return {.item = k2it(dtptr)};
+}
+
 void heap_destroy() {
     if (context->heap) {
         if (context->heap->pool) pool_variable_destroy(context->heap->pool);

@@ -1,10 +1,9 @@
-#include "transpiler.hpp"
-#include "../lib/datetime.h"
+#include "lambda-data.hpp"
+
+#include "ast.hpp"
 
 #define MAX_DEPTH 2000
 #define MAX_FIELD_COUNT 10000
-
-Item typeditem_to_item(TypedItem *titem);
 
 // Static memory pool for DateTime formatting
 static VariableMemPool* datetime_format_pool = NULL;
@@ -50,68 +49,62 @@ void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     printf(")\n");
 }
 
-void writeNodeSource(Transpiler* tp, TSNode node) {
-    int start_byte = ts_node_start_byte(node);
-    const char* start = tp->source + start_byte;
-    strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
-}
-
 // write the native C type for the lambda type
-void write_type(Transpiler* tp, Type *type) {
+void write_type(StrBuf* code_buf, Type *type) {
     if (!type) {
-        strbuf_append_str(tp->code_buf, "void*");
+        strbuf_append_str(code_buf, "void*");
         return;
     }
     // Defensive check: verify the pointer is in a reasonable range
     if ((uintptr_t)type < 0x1000 || (uintptr_t)type > 0x7FFFFFFFFFFF) {
-        strbuf_append_str(tp->code_buf, "invalid*");
+        strbuf_append_str(code_buf, "invalid*");
         return;
     }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
-        strbuf_append_str(tp->code_buf, "void*");
+        strbuf_append_str(code_buf, "void*");
         break;
     case LMD_TYPE_ANY:
-        strbuf_append_str(tp->code_buf, "Item");
+        strbuf_append_str(code_buf, "Item");
         break;
     case LMD_TYPE_ERROR:
-        strbuf_append_str(tp->code_buf, "Item");
+        strbuf_append_str(code_buf, "Item");
         break;        
     case LMD_TYPE_BOOL:
-        strbuf_append_str(tp->code_buf, "bool");
+        strbuf_append_str(code_buf, "bool");
         break;
     case LMD_TYPE_INT:
         // Lambda int computed as int64 under C
-        strbuf_append_str(tp->code_buf, "int64_t");
+        strbuf_append_str(code_buf, "int64_t");
         break;
     case LMD_TYPE_INT64:
-        strbuf_append_str(tp->code_buf, "int64_t");
+        strbuf_append_str(code_buf, "int64_t");
         break;
     case LMD_TYPE_FLOAT:
-        strbuf_append_str(tp->code_buf, "double");
+        strbuf_append_str(code_buf, "double");
         break;
     case LMD_TYPE_DTIME:
-        strbuf_append_str(tp->code_buf, "DateTime");
+        strbuf_append_str(code_buf, "DateTime");
         break;        
     case LMD_TYPE_DECIMAL:
-        strbuf_append_str(tp->code_buf, "Decimal*");
+        strbuf_append_str(code_buf, "Decimal*");
         break;    
     case LMD_TYPE_STRING:
-        strbuf_append_str(tp->code_buf, "String*");
+        strbuf_append_str(code_buf, "String*");
         break;
     case LMD_TYPE_BINARY:
-        strbuf_append_str(tp->code_buf, "String*");
+        strbuf_append_str(code_buf, "String*");
         break;
     case LMD_TYPE_SYMBOL:
-        strbuf_append_str(tp->code_buf, "String*");
+        strbuf_append_str(code_buf, "String*");
         break;
 
     case LMD_TYPE_RANGE:
-        strbuf_append_str(tp->code_buf, "Range*");
+        strbuf_append_str(code_buf, "Range*");
         break;
     case LMD_TYPE_LIST:
-        strbuf_append_str(tp->code_buf, "List*");
+        strbuf_append_str(code_buf, "List*");
         break;
     case LMD_TYPE_ARRAY: {
         TypeArray *array_type = (TypeArray*)type;
@@ -119,23 +112,23 @@ void write_type(Transpiler* tp, Type *type) {
             (uintptr_t)array_type->nested >= 0x1000 && 
             (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
             array_type->nested->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(tp->code_buf, "ArrayInt*");
+            strbuf_append_str(code_buf, "ArrayInt*");
         } else {
-            strbuf_append_str(tp->code_buf, "Array*");
+            strbuf_append_str(code_buf, "Array*");
         }
         break;
     }
     case LMD_TYPE_MAP:
-        strbuf_append_str(tp->code_buf, "Map*");
+        strbuf_append_str(code_buf, "Map*");
         break;
     case LMD_TYPE_ELEMENT:
-        strbuf_append_str(tp->code_buf, "Element*");
+        strbuf_append_str(code_buf, "Element*");
         break;
     case LMD_TYPE_FUNC:
-        strbuf_append_str(tp->code_buf, "Function*");
+        strbuf_append_str(code_buf, "Function*");
         break;
     case LMD_TYPE_TYPE:
-        strbuf_append_str(tp->code_buf, "Type*");
+        strbuf_append_str(code_buf, "Type*");
         break;
     default:
         printf("unknown type to write %d\n", type_id);
