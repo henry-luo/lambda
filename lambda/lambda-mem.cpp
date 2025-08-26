@@ -43,39 +43,6 @@ void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
-void expand_list(List *list) {
-    //printf("expand list: %p, length: %ld, capacity: %ld\n", 
-    //    list, list->length, list->capacity);
-    list->capacity = list->capacity ? list->capacity * 2 : 8;
-    // list items are allocated from C heap, instead of Lambda heap
-    // to consider: could also alloc directly from Lambda heap without the heap entry
-    // need to profile to see which is faster
-    Item* old_items = list->items;
-    list->items = (Item*)realloc(list->items, list->capacity * sizeof(Item));
-    // copy extra items to the end of the list
-    if (list->extra) {
-        memcpy(list->items + (list->capacity - list->extra), 
-            list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));
-        // scan the list, if the item is long/double,
-        // and is stored in the list extra slots, need to update the pointer
-        for (int i = 0; i < list->length; i++) {
-            Item itm = list->items[i];
-            if (itm.type_id == LMD_TYPE_FLOAT || itm.type_id == LMD_TYPE_INT64 ||
-                itm.type_id == LMD_TYPE_DTIME) {
-                Item* old_pointer = (Item*)itm.pointer;
-                // Only update pointers that are in the old list buffer's extra space
-                if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
-                    int offset = old_items + list->capacity/2 - old_pointer;
-                    void* new_pointer = list->items + list->capacity - offset;
-                    list->items[i] = {.item = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : 
-                        itm.type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
-                }
-                // if the pointer is not in the old buffer, it should not be updated
-            }
-        }
-    }
-}
-
 Item push_d(double dval) {
     printf("TRACE: push_d: %g\n", dval);
     // Safety check: if context is num_stack is NULL

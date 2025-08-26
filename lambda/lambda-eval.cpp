@@ -2291,7 +2291,13 @@ Type* fn_type(Item item) {
     return (Type*)type;
 }
 
-Input* input_data(Context* ctx, String* url, String* type, String* flavor);
+extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
+
+Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
+    printf("input_data at: %s, type: %s, flavor: %s\n", url->chars, 
+        type ? type->chars : "null", flavor ? flavor->chars : "null");
+    return input_from_url(url, type, flavor, (Url*)ctx->cwd);
+}
 
 Item fn_input(Item url, Item type) {
     String* url_str;

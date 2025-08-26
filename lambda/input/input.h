@@ -1,3 +1,4 @@
+#define LAMBDA_STATIC
 #include "../lambda-data.hpp"
 #include "../../lib/url.h"
 

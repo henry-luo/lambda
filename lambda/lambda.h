@@ -148,22 +148,6 @@ typedef struct String {
 #define STRING_STRUCT_DEFINED
 #endif
 
-typedef struct Heap Heap;
-typedef struct Pack Pack;
-typedef struct mpd_context_t mpd_context_t;
-
-typedef struct Context {
-    Heap* heap;   
-    void* ast_pool;
-    void** consts;
-    void* type_list;
-    void* num_stack;  // for long and double pointers
-    void* type_info;  // meta info for the base types
-    void* cwd;  // current working directory
-    Item result; // final exec result
-    mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
-} Context;
-
 // Array and List struct defintions needed for for-loop
 struct Container {
     TypeId type_id;
@@ -215,7 +199,6 @@ long range_get(Range *range, int index);
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
-Item list_get(List *list, int index);
 
 #ifndef __cplusplus
     struct ArrayInt {
@@ -277,47 +260,12 @@ Item list_get(List *list, int index);
     };
 #endif
 
-Array* array();
-ArrayInt* array_int();
-ArrayInt64* array_int64();
-ArrayFloat* array_float();
-
-ArrayInt* array_int_new(int length);
-ArrayInt64* array_int64_new(int length);
-ArrayFloat* array_float_new(int length);
-
-Array* array_fill(Array* arr, int count, ...);
-ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
-ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
-ArrayFloat* array_float_fill(ArrayFloat* arr, int count, ...);
-
-// void array_push(Array *array, Item item);
-Item array_get(Array *array, int index);
-
-typedef struct Map Map;
-Map* map(int type_index);
-Map* map_fill(Map* map, ...);
-Item map_get(Map* map, Item key);
-
-// generic field access function
-Item fn_index(Item item, Item index);
-Item fn_member(Item item, Item key);
-
-// length function
-int64_t fn_len(Item item);
-
-typedef struct Element Element;
-Element* elmt(int type_index);
-Element* elmt_fill(Element *elmt, ...);
-Item elmt_get(Element *elmt, Item key);
-
-bool item_true(Item item);
-Item v2it(List *list);
-
-Item push_d(double dval);
-Item push_l(long lval);
-Item push_k(DateTime dtval);
-Item push_c(long cval);
+typedef void* (*fn_ptr)();
+struct Function {
+    uint8_t type_id;
+    void* fn;  // fn definition, TypeFunc
+    fn_ptr ptr;
+};
 
 #define INT_ERROR           INT64_MAX
 #define INT_MAX             INT_MAX
@@ -329,14 +277,6 @@ Item push_c(long cval);
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
-Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
-// int overflow check and promotion to decimal
-#ifndef __cplusplus
-// int overflow check and promotion to decimal
-#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val))
-#else
-#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val).item)
-#endif
 #define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
 #define d2it(double_ptr)     ((((uint64_t)LMD_TYPE_FLOAT)<<56) | (uint64_t)(double_ptr))
 #define c2it(decimal_ptr)    ((((uint64_t)LMD_TYPE_DECIMAL)<<56) | (uint64_t)(decimal_ptr))
@@ -345,6 +285,71 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 #define x2it(bin_ptr)        ((((uint64_t)LMD_TYPE_BINARY)<<56) | (uint64_t)(bin_ptr))
 #define k2it(dtime_ptr)      ((((uint64_t)LMD_TYPE_DTIME)<<56) | (uint64_t)(dtime_ptr))
 #define r2it(range_ptr)      ((((uint64_t)LMD_TYPE_RANGE)<<56) | (uint64_t)(range_ptr))
+
+Array* array_fill(Array* arr, int count, ...);
+ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
+ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
+ArrayFloat* array_float_fill(ArrayFloat* arr, int count, ...);
+
+// void array_push(Array *array, Item item);
+
+typedef struct Map Map;
+Map* map_fill(Map* map, ...);
+
+typedef struct Element Element;
+Element* elmt_fill(Element *elmt, ...);
+
+typedef struct Heap Heap;
+typedef struct Pack Pack;
+typedef struct mpd_context_t mpd_context_t;
+
+typedef struct Context {
+    Heap* heap;   
+    void* ast_pool;
+    void** consts;
+    void* type_list;
+    void* num_stack;  // for long and double pointers
+    void* type_info;  // meta info for the base types
+    void* cwd;  // current working directory
+    Item result; // final exec result
+    mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
+} Context;
+
+#ifndef LAMBDA_STATIC
+Array* array();
+ArrayInt* array_int();
+ArrayInt64* array_int64();
+ArrayFloat* array_float();
+
+ArrayInt* array_int_new(int length);
+ArrayInt64* array_int64_new(int length);
+ArrayFloat* array_float_new(int length);
+
+Map* map(int type_index);
+Element* elmt(int type_index);
+
+// these getters use runtime num_stack
+Item array_get(Array *array, int index);
+Item list_get(List *list, int index);
+Item map_get(Map* map, Item key);
+Item elmt_get(Element *elmt, Item key);
+
+bool item_true(Item item);
+Item v2it(List *list);
+
+Item push_d(double dval);
+Item push_l(long lval);
+Item push_k(DateTime dtval);
+Item push_c(long cval);
+
+Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
+// int overflow check and promotion to decimal
+#ifndef __cplusplus
+// int overflow check and promotion to decimal
+#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val))
+#else
+#define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val).item)
+#endif
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
 #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))
@@ -362,6 +367,11 @@ Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 int64_t it2l(Item item);
 double it2d(Item item);
 
+// generic field access function
+Item fn_index(Item item, Item index);
+Item fn_member(Item item, Item key);
+// length function
+int64_t fn_len(Item item);
 Item fn_int(Item a);
 int64_t fn_int64(Item a);
 
@@ -401,13 +411,6 @@ Item fn_normalize(Item str, Item type);
 Item fn_substring(Item str, Item start, Item end);
 Item fn_contains(Item str, Item substr);
 
-typedef void* (*fn_ptr)();
-struct Function {
-    uint8_t type_id;
-    void* fn;  // fn definition, TypeFunc
-    fn_ptr ptr;
-};
-
 Function* to_fn(fn_ptr ptr);
 Type* base_type(TypeId type_id);
 Type* const_type(int type_index);
@@ -421,3 +424,5 @@ DateTime fn_datetime();
 
 // procedural functions
 void fn_print(Item item);
+
+#endif
