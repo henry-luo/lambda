@@ -334,11 +334,11 @@ class PremakeGenerator:
                 test_name = binary_name.replace('/', '_').replace('test_', '') 
                 test_name = f"test_{test_name}"
                 
-                # Determine correct file path - use absolute paths to avoid Premake5 path resolution issues
+                # Determine correct file path - use relative paths from project root
                 if source.startswith("test/"):
-                    test_file_path = os.path.abspath(source)
+                    test_file_path = source
                 else:
-                    test_file_path = os.path.abspath(f"test/{source}")
+                    test_file_path = f"test/{source}"
                 
                 # Ensure path exists before adding to project
                 actual_path = source if source.startswith("test/") else f"test/{source}"

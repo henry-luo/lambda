@@ -319,7 +319,7 @@ project "test_strbuf"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_strbuf.c",
+        "test/test_strbuf.c",
     }
     
     includedirs {
@@ -362,7 +362,7 @@ project "test_strview"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_strview.c",
+        "test/test_strview.c",
     }
     
     includedirs {
@@ -405,7 +405,7 @@ project "test_variable_pool"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_variable_pool.c",
+        "test/test_variable_pool.c",
     }
     
     includedirs {
@@ -448,7 +448,7 @@ project "test_num_stack"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_num_stack.c",
+        "test/test_num_stack.c",
     }
     
     includedirs {
@@ -491,7 +491,7 @@ project "test_datetime"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_datetime.c",
+        "test/test_datetime.c",
     }
     
     includedirs {
@@ -534,7 +534,7 @@ project "test_url"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_url.c",
+        "test/test_url.c",
     }
     
     includedirs {
@@ -577,7 +577,7 @@ project "test_url_extra"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_url_extra.c",
+        "test/test_url_extra.c",
     }
     
     includedirs {
@@ -620,7 +620,7 @@ project "test_mime_detect"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_mime_detect.c",
+        "test/test_mime_detect.c",
     }
     
     includedirs {
@@ -672,7 +672,7 @@ project "test_math"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_math.cpp",
+        "test/test_math.cpp",
     }
     
     includedirs {
@@ -727,7 +727,7 @@ project "test_markup_roundtrip"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_markup_roundtrip.cpp",
+        "test/test_markup_roundtrip.cpp",
     }
     
     includedirs {
@@ -782,7 +782,7 @@ project "test_validator"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_validator.cpp",
+        "test/test_validator.cpp",
     }
     
     includedirs {
@@ -837,7 +837,7 @@ project "test_mir"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_mir.c",
+        "test/test_mir.c",
     }
     
     includedirs {
@@ -892,7 +892,7 @@ project "test_lambda"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_lambda.cpp",
+        "test/test_lambda.cpp",
     }
     
     includedirs {
@@ -948,7 +948,7 @@ project "test_lambda_runner"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/lambda_test_runner.cpp",
+        "test/lambda_test_runner.cpp",
     }
     
     includedirs {
