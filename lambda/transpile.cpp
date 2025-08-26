@@ -6,6 +6,12 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer);
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol);
 Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol);
 
+void write_node_source(Transpiler* tp, TSNode node) {
+    int start_byte = ts_node_start_byte(node);
+    const char* start = tp->source + start_byte;
+    strbuf_append_str_n(tp->code_buf, start, ts_node_end_byte(node) - start_byte);
+}
+
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import) {
     if (import) {
         strbuf_append_format(strbuf, "m%d.", import->script->index);
@@ -517,7 +523,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             else {
                 printf("Warning: ident_node->entry is null or entry->node is null\n");
                 // Handle the case where entry is null - perhaps write the identifier directly
-                writeNodeSource(tp, ident_node->node);
+                write_node_source(tp, ident_node->node);
             }
         } else { 
             transpile_expr(tp, pri_node->expr);
@@ -540,11 +546,11 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 strbuf_append_char(tp->code_buf, ')');
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT) {
-                writeNodeSource(tp, pri_node->node);
+                write_node_source(tp, pri_node->node);
                 // int32 literals don't need 'L' suffix
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT64) {
-                writeNodeSource(tp, pri_node->node);
+                write_node_source(tp, pri_node->node);
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
             else if (pri_node->type->type_id == LMD_TYPE_DECIMAL) {
@@ -557,10 +563,10 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             else { // bool, null, float
                 TSNode child = ts_node_named_child(pri_node->node, 0);
                 TSSymbol symbol = ts_node_symbol(child);
-                writeNodeSource(tp, pri_node->node);
+                write_node_source(tp, pri_node->node);
             }
         } else {
-            writeNodeSource(tp, pri_node->node);
+            write_node_source(tp, pri_node->node);
         }
     }
 }
@@ -1434,7 +1440,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
         strbuf_append_str(tp->code_buf, "Item");
         printf("transpile_assign_expr: using Item type due to expression boxing\n");
     } else {
-        write_type(tp, var_type);
+        write_type(tp->code_buf, var_type);
     }
     
     strbuf_append_char(tp->code_buf, ' ');
@@ -1520,7 +1526,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     strbuf_append_str(tp->code_buf, expr_type->type_id == LMD_TYPE_RANGE ? 
         ";\n for (long i=rng->start; i<=rng->end; i++) {\n " : 
         ";\n for (int i=0; i<arr->length; i++) {\n ");
-    write_type(tp, item_type);
+    write_type(tp->code_buf, item_type);
     strbuf_append_str(tp->code_buf, " _");
     strbuf_append_str_n(tp->code_buf, loop_node->name->chars, loop_node->name->len);
     if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -1834,7 +1840,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                         (AstImportNode*)ident_node->entry->import);
                 } else { // variable
                     strbuf_append_char(tp->code_buf, '_');
-                    writeNodeSource(tp, fn_node->expr->node);
+                    write_node_source(tp, fn_node->expr->node);
                 }
             }
             else {
@@ -2045,7 +2051,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     strbuf_append_char(tp->code_buf, '\n');
     // use function body type as the return type for the time being
     Type *ret_type = fn_node->body->type;
-    write_type(tp, ret_type);
+    write_type(tp->code_buf, ret_type);
 
     // write the function name, with a prefix '_', so as to diff from built-in functions
     strbuf_append_str(tp->code_buf, as_pointer ? " (*" :" ");
@@ -2057,7 +2063,7 @@ void define_func(Transpiler* tp, AstFuncNode *fn_node, bool as_pointer) {
     AstNamedNode *param = fn_node->param;
     while (param) {
         if (param != fn_node->param) strbuf_append_str(tp->code_buf, ",");
-        write_type(tp, param->type);
+        write_type(tp->code_buf, param->type);
         strbuf_append_str(tp->code_buf, " _");
         strbuf_append_str_n(tp->code_buf, param->name->chars, param->name->len);
         param = (AstNamedNode*)param->next;
@@ -2223,7 +2229,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
                 AstNamedNode *asn_node = (AstNamedNode*)declare;
                 // declare the type
                 Type *type = asn_node->type;
-                write_type(tp, type);
+                write_type(tp->code_buf, type);
                 strbuf_append_char(tp->code_buf, ' ');
                 write_var_name(tp->code_buf, asn_node, NULL);
                 strbuf_append_str(tp->code_buf, ";\n");

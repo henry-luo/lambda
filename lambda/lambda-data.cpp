@@ -146,39 +146,6 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     return t;
 }
 
-Item push_d(double dval) {
-    printf("TRACE: push_d: %g\n", dval);
-    // Safety check: if context is num_stack is NULL
-    if (!context->num_stack) {
-        fprintf(stderr, "WARNING: push_d called with invalid context\n");
-        return ItemError;
-    }
-    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval);
-    return {.item = d2it(dptr)};
-}
-
-Item push_l(long lval) {
-    printf("TRACE: push_l: %ld\n", lval);
-    // Safety check: if context is num_stack is NULL
-    if (!context->num_stack) {
-        fprintf(stderr, "WARNING: push_l called with invalid context\n");
-        return ItemError;
-    }
-    if (lval == INT_ERROR) return ItemError;
-    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval);
-    return {.item = l2it(lptr)};
-}
-
-Item push_k(DateTime val) {
-    // Safety check: if context is num_stack is NULL
-    if (!context->num_stack) {
-        fprintf(stderr, "WARNING: push_k called with invalid context\n");
-        return ItemError;
-    }    
-    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, val);
-    return {.item = k2it(dtptr)};
-}
-
 Array* array() {
     Array *arr = (Array*)calloc(1, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
@@ -674,6 +641,121 @@ Item map_get(Map* map, Item key) {
     }
     printf("map_get key: %s\n", key_str);
     return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
+}
+
+TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
+    TypedItem error_result = {.type_id = LMD_TYPE_ERROR};
+    TypedItem null_result = {.type_id = LMD_TYPE_NULL};
+    
+    ShapeEntry *field = map_type->shape;
+    while (field) {
+        if (!field->name) { // nested map, skip
+            Map* nested_map = *(Map**)((char*)map_data + field->byte_offset);
+            bool nested_is_found;
+            TypedItem result = _map_get_typed((TypeMap*)nested_map->type, nested_map->data, key, &nested_is_found);
+            if (nested_is_found) {
+                *is_found = true;
+                return result;
+            }
+            field = field->next;
+            continue;
+        }
+        // printf("map_get_typed compare field: %.*s\n", (int)field->name->length, field->name->str);
+        if (strncmp(field->name->str, key, field->name->length) == 0 && 
+            strlen(key) == field->name->length) {
+            *is_found = true;
+            TypeId type_id = field->type->type_id;
+            void* field_ptr = (char*)map_data + field->byte_offset;
+            printf("map_get_typed found field: %.*s, type: %d, ptr: %p\n", 
+                (int)field->name->length, field->name->str, type_id, field_ptr);
+            
+            TypedItem result = {.type_id = type_id};
+            switch (type_id) {
+            case LMD_TYPE_NULL:
+                return null_result;
+            case LMD_TYPE_BOOL:
+                result.bool_val = *(bool*)field_ptr;
+                return result;
+            case LMD_TYPE_INT:
+                result.int_val = *(int*)field_ptr;
+                return result;
+            case LMD_TYPE_INT64:
+                result.long_val = *(long*)field_ptr;
+                return result;
+            case LMD_TYPE_FLOAT:
+                result.double_val = *(double*)field_ptr;
+                return result;
+            case LMD_TYPE_DTIME: {
+                result.datetime_val = *(DateTime*)field_ptr;
+                StrBuf *strbuf = strbuf_new();
+                datetime_format_lambda(strbuf, &result.datetime_val);
+                printf("map_get_typed datetime: %s\n", strbuf->str);
+                strbuf_free(strbuf);
+                return result;
+            }
+            case LMD_TYPE_DECIMAL:
+                result.decimal = *(Decimal**)field_ptr;
+                return result;
+            case LMD_TYPE_STRING:
+                result.string = *(String**)field_ptr;
+                return result;
+            case LMD_TYPE_SYMBOL:
+                result.string = *(String**)field_ptr;
+                return result;
+            case LMD_TYPE_BINARY:
+                result.string = *(String**)field_ptr;
+                return result;
+                
+            case LMD_TYPE_RANGE:
+                result.range = *(Range**)field_ptr;
+                return result;
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+                result.array = *(Array**)field_ptr;
+                return result;
+            case LMD_TYPE_LIST:
+                result.list = *(List**)field_ptr;
+                return result;
+            case LMD_TYPE_MAP:
+                result.map = *(Map**)field_ptr;
+                return result;
+            case LMD_TYPE_ELEMENT:
+                result.element = *(Element**)field_ptr;
+                return result;
+            case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
+                result.pointer = *(void**)field_ptr;
+                return result;
+            case LMD_TYPE_ANY: {
+                printf("map_get_typed ANY type, pointer: %p\n", field_ptr);
+                return *(TypedItem*)field_ptr;
+            }
+            default:
+                printf("unknown map item type %d\n", type_id);
+                return error_result;
+            }
+        }
+        field = field->next;
+    }
+    *is_found = false;
+    printf("map_get_typed: key %s not found\n", key);
+    return null_result;
+}
+
+TypedItem map_get_typed(Map* map, Item key) {
+    TypedItem null_result = {.type_id = LMD_TYPE_NULL};
+    
+    printf("map_get_typed %p\n", map);
+    if (!map || !key.item) { return null_result; }
+    
+    bool is_found;
+    char *key_str = NULL;
+    if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
+        key_str = ((String*)key.pointer)->chars;
+    } else {
+        printf("map_get_typed: key must be string or symbol, got type %d\n", key.type_id);
+        return null_result;  // only string or symbol keys are supported
+    }
+    printf("map_get_typed key: %s\n", key_str);
+    return _map_get_typed((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
 Element* elmt(int type_index) {

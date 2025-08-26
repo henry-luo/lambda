@@ -145,16 +145,10 @@
                 "lambda/format/format*.cpp"
             ],
             "source_files": [
-                "lambda/lambda-data.cpp",
-                "lambda/lambda-eval.cpp",
-                "lambda/lambda-mem.cpp",
                 "lambda/print.cpp", 
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
                 "lambda/mir.c",
-                "lambda/input/input.cpp", 
-                "lambda/input/input-common.cpp",
-                "lambda/format/format.cpp",
                 "lib/arraylist.c", 
                 "lib/hashmap.c",
                 "lib/file.c", 
@@ -323,9 +317,9 @@
                     "test/test_markup_roundtrip.cpp"
                 ],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"],
-                    ["lambda-runtime-full", "criterion"],
-                    ["lambda-runtime-full", "criterion"],
+                    ["lambda-input-full", "criterion"],
+                    ["lambda-input-full", "criterion"],
+                    ["lambda-input-full", "criterion"],
                     "one for each of the test executable"
                 ],
                 "binaries": [

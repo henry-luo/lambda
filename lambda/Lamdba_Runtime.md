@@ -1,5 +1,6 @@
 # Lambda Runtime Data Management
 
+### Lambda Data Structures
 Lambda runtime uses the following design/convention to represent and manage its runtime data:
 - for simple scalar types: LMD_TYPE_NULL, LMD_TYPE_BOOL, LMD_TYPE_INT
 	- they are packed into Item, with high bits set to TypeId;
@@ -18,6 +19,19 @@ Lambda runtime uses the following design/convention to represent and manage its 
 	- note that it can be casted as List directly, but not Map directly;
 - can use get_type_id() function to get the TypeId of an Item in a general manner;
 
+### Header Files
+Lambda header files defined the runtime data. They are layer one up on the other, from basic data structs, to the full runtime transpiler and runner definition.
+- *lambda.h*: 
+	- the fundamental data structures of Lambda;
+	- the C version is for MIR JIT compiler; 
+		- thus it defines the API of Lambda runtime that is exposed to C2MIR JIT compiler;
+	- the C++ version is for the manual-written/AOT-compiled Lambda runtime code;
+- *lambda-data.hpp*:
+	- the full C++ definitions of the data structures and the API functions to work with the data;
+- *ast.hpp*:
+	- the AST built from Tree-sitter syntax tree;
+- *transpiler.hpp*:
+	- the full transpiler and code runner;
 ### Coding Guidelines
 - Start comments in lowercase.
 - **Add debug logging** for development and troubleshooting.
