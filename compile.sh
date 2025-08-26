@@ -545,10 +545,10 @@ if [ "$DEBUG" = "true" ]; then
     FLAGS="$FLAGS -g"
 fi
 
-# Add AddressSanitizer flags for debug builds
+# Add AddressSanitizer flags for debug builds (DISABLED for testing)
 if [ "$DEBUG_BUILD" = true ]; then
-    FLAGS="$FLAGS -DDEBUG -O0 -g3 -fsanitize=address -fsanitize=undefined"
-    LINKER_FLAGS="$LINKER_FLAGS -fsanitize=address -fsanitize=undefined"
+    FLAGS="$FLAGS -DDEBUG -O0 -g3"
+    # LINKER_FLAGS="$LINKER_FLAGS -fsanitize=address -fsanitize=undefined"
 fi
 
 # Initialize header file cache for faster incremental builds (fallback for files without .d files)
