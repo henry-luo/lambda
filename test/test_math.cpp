@@ -17,34 +17,10 @@ extern "C" {
 // Additional function declarations that need C linkage
 void print_item(StrBuf* strbuf, Item item);
 String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool);
-void frame_start();
-void frame_end();
-void heap_init();
-void heap_destroy();
 Item input_from_source(char* source, Url* url, String* type, String* flavor);
-void num_stack_destroy(num_stack_t* stack);
-num_stack_t* num_stack_create(size_t initial_capacity);
 char* read_text_file(const char* filename);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-}
-
-// Implement missing functions locally to avoid linking conflicts
-extern "C" Context* create_test_context() {
-    Context* ctx = (Context*)calloc(1, sizeof(Context));
-    if (!ctx) return NULL;
-    
-    // Initialize basic context fields
-    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
-    if (ctx->decimal_ctx) {
-        mpd_defaultcontext(ctx->decimal_ctx);
-    }
-    
-    // Initialize num_stack and heap to avoid crashes
-    ctx->num_stack = num_stack_create(1024);  // Create with reasonable initial capacity
-    ctx->heap = NULL;  // Will be initialized by heap_init()
-    
-    return ctx;
 }
 
 // Tree-sitter function declarations
@@ -81,10 +57,6 @@ Url* get_current_dir();
 Url* parse_url(Url *base, const char* doc_url);
 char* read_text_doc(Url *url);
 
-// Forward declarations for Lambda runtime 
-extern __thread Context* context;
-void destroy_test_context(Context* ctx);
-
 // Common test function for markdown roundtrip testing
 bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_path, const char* test_description);
 
@@ -92,35 +64,12 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
 bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, const char* flavor, 
                                     const char* url_prefix, const char* test_name, const char* error_prefix);
 
-// Global test context
-static Context* test_context = NULL;
 
 // Setup and teardown functions
 void setup_math_tests(void) {
-    test_context = create_test_context();
-    // Set the global context BEFORE calling heap_init
-    context = test_context;
-    
-    // Initialize the memory system properly
-    if (context && context->decimal_ctx) {
-        heap_init();
-        frame_start();
-    }
 }
 
 void teardown_math_tests(void) {
-    if (test_context && context) {
-        frame_end();
-        heap_destroy();
-        
-        if (test_context->num_stack) {
-            num_stack_destroy((num_stack_t*)test_context->num_stack);
-        }
-        
-        free(test_context);
-        test_context = NULL;
-        context = NULL;
-    }
 }
 
 TestSuite(math_roundtrip_tests, .init = setup_math_tests, .fini = teardown_math_tests);

@@ -349,6 +349,7 @@ typedef struct Input {
 Array* array_pooled(VariableMemPool *pool);
 void array_append(Array* arr, Item itm, VariableMemPool *pool);
 Map* map_pooled(VariableMemPool *pool);
+TypedItem map_get_typed(Map* map, Item key);
 Element* elmt_pooled(VariableMemPool *pool);
 void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool);
 

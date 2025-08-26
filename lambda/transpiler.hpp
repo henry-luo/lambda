@@ -2,177 +2,7 @@
 
 #include "lambda-data.hpp"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include "ast.h"
-
-// Forward declaration to avoid circular dependency
-typedef struct NamePool NamePool;
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
-
-typedef struct AstNode AstNode;
-typedef struct AstImportNode AstImportNode;
-
-// entry in the name_stack
-typedef struct NameEntry {
-    String* name;               // Changed from StrView to String* (from name pool)
-    AstNode* node;              // AST node that defines the name
-    struct NameEntry* next;
-    AstImportNode* import;      // the module that the name is imported from, if any
-} NameEntry;
-
-// name_scope
-typedef struct NameScope {
-    NameEntry* first;  // start name entry in the current scope
-    NameEntry* last;  // last name entry in the current scope
-    struct NameScope* parent;  // parent scope
-} NameScope;
-
-typedef enum AstNodeType {
-    AST_NODE_NULL,
-    AST_NODE_PRIMARY,
-    AST_NODE_UNARY,
-    AST_NODE_BINARY,
-    AST_NODE_LIST,
-    AST_NODE_CONTENT,
-    AST_NODE_ARRAY,
-    AST_NODE_MAP,
-    AST_NODE_ELEMENT,
-    AST_NODE_KEY_EXPR,
-    AST_NODE_ASSIGN,
-    AST_NODE_LOOP,
-    AST_NODE_IF_EXPR,
-    AST_NODE_IF_STAM,
-    AST_NODE_FOR_EXPR,
-    AST_NODE_FOR_STAM,
-    AST_NODE_LET_STAM,
-    AST_NODE_PUB_STAM,
-    AST_NODE_INDEX_EXPR,
-    AST_NODE_MEMBER_EXPR,
-    AST_NODE_CALL_EXPR,
-    AST_NODE_SYS_FUNC,
-    AST_NODE_IDENT,
-    AST_NODE_PARAM,
-    AST_NODE_TYPE,
-    AST_NODE_CONTENT_TYPE,
-    AST_NODE_LIST_TYPE,
-    AST_NODE_ARRAY_TYPE,
-    AST_NODE_MAP_TYPE,
-    AST_NODE_ELMT_TYPE,
-    AST_NODE_FUNC_TYPE,
-    AST_NODE_BINARY_TYPE,
-    AST_NODE_FUNC,
-    AST_NODE_FUNC_EXPR,
-    AST_NODE_IMPORT,
-    AST_SCRIPT,
-} AstNodeType;
-
-struct AstNode {
-    AstNodeType node_type;
-    Type *type;
-    struct AstNode* next;
-    TSNode node;
-};
-
-typedef struct AstFieldNode : AstNode {
-    AstNode *object, *field;
-} AstFieldNode;
-
-typedef struct AstCallNode : AstNode {
-    AstNode *function;
-    AstNode *argument;
-} AstCallNode;
-
-typedef struct AstSysFuncNode : AstNode {
-    SysFunc fn;
-} AstSysFuncNode;
-
-typedef struct AstPrimaryNode : AstNode {
-    AstNode *expr;
-} AstPrimaryNode;
-
-typedef AstNode AstTypeNode;
-
-typedef struct AstUnaryNode : AstNode {
-    AstNode *operand;
-    StrView op_str;
-    Operator op;
-} AstUnaryNode;
-
-typedef struct AstBinaryNode : AstNode {
-    AstNode *left, *right;
-    StrView op_str;
-    Operator op;
-} AstBinaryNode;
-
-// for AST_NODE_ASSIGN, AST_NODE_KEY_EXPR, AST_NODE_LOOP, AST_NODE_PARAM
-typedef struct AstNamedNode : AstNode {
-    String* name;               // Changed from StrView to String* (from name pool)
-    AstNode *as;
-} AstNamedNode;
-
-typedef struct AstIdentNode : AstNode {
-    String* name;               // Changed from StrView to String* (from name pool)
-    NameEntry *entry;
-} AstIdentNode;
-
-struct AstImportNode : AstNode {
-    String* alias;              // Changed from StrView to String* (from name pool)
-    StrView module;             // Keep module as StrView (file path)
-    Script* script;             // imported script
-    bool is_relative;
-};
-
-typedef struct AstLetNode : AstNode {
-    AstNode *declare;  // declarations in let expression
-} AstLetNode;
-
-typedef struct AstForNode : AstNode {
-    AstNode *loop;
-    AstNode *then;
-    NameScope *vars;  // scope for the variables in the loop
-} AstForNode;
-
-typedef struct AstIfNode : AstNode {
-    AstNode *cond;
-    AstNode *then;
-    AstNode *otherwise;
-} AstIfNode;
-
-typedef struct AstArrayNode : AstNode {
-    AstNode *item;  // first item in the array
-} AstArrayNode;
-
-typedef struct AstListNode : AstArrayNode {
-    AstNode *declare;  // declarations in the list
-    NameScope *vars;  // scope for the variables in the list
-} AstListNode;
-
-typedef struct AstMapNode : AstNode {
-    AstNode *item;  // first item in the map
-} AstMapNode;
-
-typedef struct AstElementNode : AstMapNode {
-    AstNode *content;  // first content node
-} AstElementNode;
-
-// aligned with AstNamedNode on name
-typedef struct AstFuncNode : AstNode {
-    String* name;               // Changed from StrView to String* (from name pool)
-    AstNamedNode *param;        // first parameter of the function
-    AstNode *body;
-    NameScope *vars;            // vars including params and local variables
-} AstFuncNode;
-
-// root of the AST
-typedef struct AstScript : AstNode {
-    AstNode *child;  // first child
-    NameScope *global_vars;  // global variables
-} AstScript;
+#include "ast.hpp"
 
 typedef struct Heap {
     VariableMemPool *pool;  // memory pool for the heap
@@ -189,44 +19,17 @@ void frame_end();
 void free_item(Item item, bool clear_entry);
 void expand_list(List *list);
 
-#ifndef WASM_BUILD
-#include <mir.h>
-#include <mir-gen.h>
-#include <c2mir.h>
-#else
-#include "../wasm-deps/include/mir.h"
-#include "../wasm-deps/include/mir-gen.h"
-#include "../wasm-deps/include/c2mir.h"
-#endif
-
-typedef Item (*main_func_t)(Context*);
-typedef struct Runtime Runtime;
-
-struct Script {
-    const char* reference;      // path (relative to the main script) and name of the script
-    int index;                  // index of the script in the runtime scripts list
-    const char* source;
-    TSTree* syntax_tree;
-
-    // AST and Memory Management
-    VariableMemPool* ast_pool;
-    NamePool* name_pool;        // centralized name management for this script
-    AstNode *ast_root;
-    NameScope* current_scope;   // current name scope
-    ArrayList* type_list;       // list of types
-    ArrayList* const_list;      // list of constants
-
-    // each script is JIT compiled its own MIR context
-    MIR_context_t jit_context;
-    main_func_t main_func;      // transpiled main function
-    mpd_context_t* decimal_ctx;  // libmpdec context for decimal operations
-};
-
-typedef struct Transpiler : Script {
-    TSParser* parser;
-    StrBuf* code_buf;
-    Runtime* runtime;
-} Transpiler;
+extern "C" {
+    #ifndef WASM_BUILD
+    #include <mir.h>
+    #include <mir-gen.h>
+    #include <c2mir.h>
+    #else
+    #include "../wasm-deps/include/mir.h"
+    #include "../wasm-deps/include/mir-gen.h"
+    #include "../wasm-deps/include/c2mir.h"
+    #endif
+}
 
 typedef struct Runner {
     Script* script;
@@ -253,12 +56,13 @@ AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_node(Script* script, AstNode *node, int indent);
 void print_ts_node(const char *source, TSNode node, uint32_t indent);
 void find_errors(TSNode node);
-void writeNodeSource(Transpiler* tp, TSNode node);
-void write_type(Transpiler* tp, Type *type);
+void write_node_source(Transpiler* tp, TSNode node);
+void write_type(StrBuf* code_buf, Type *type);
 NameEntry *lookup_name(Transpiler* tp, StrView var_name);
 void write_fn_name(StrBuf *strbuf, AstFuncNode* fn_node, AstImportNode* import);
 void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* import);
 
+extern"C" {
 MIR_context_t jit_init();
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name);
 void* jit_gen_func(MIR_context_t ctx, char *func_name);
@@ -266,6 +70,7 @@ MIR_item_t find_import(MIR_context_t ctx, const char *mod_name);
 void* find_func(MIR_context_t ctx, const char *fn_name);
 void* find_data(MIR_context_t ctx, const char *data_name);
 void jit_cleanup(MIR_context_t ctx);
+}
 
 // MIR transpiler functions
 Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
@@ -276,15 +81,6 @@ void runner_setup_context(Runner* runner);
 void runner_cleanup(Runner* runner);
 Item run_script(Runtime *runtime, const char* source, char* script_path, bool transpile_only = false);
 Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only = false);
-void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
-void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth=0);
-extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
 
 void runtime_init(Runtime* runtime);
 void runtime_cleanup(Runtime* runtime);
-
-#pragma clang diagnostic pop
-
-#ifdef __cplusplus
-}
-#endif

@@ -5,9 +5,8 @@
  * @license MIT
  */
 
-#include "validator.h"
-#include "../ts-enum.h"  // Include Tree-sitter symbols and field IDs
-#include "../ast.h"      // Include field constants
+#include "validator.hpp"
+#include "../ast.hpp"      // Include field constants
 #include "../../lib/arraylist.h"
 #include "../../lib/strview.h"
 #include <string.h>

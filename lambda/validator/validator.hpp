@@ -10,14 +10,11 @@
  * Integrates with existing Lambda transpiler infrastructure.
  */
 
-#include "../transpiler.hpp"
-#include "../../lib/hashmap.h"
-
-#ifdef __cplusplus
-// #include "../../lib/hashmap.hpp"
-// using namespace hashmap_cpp;
 extern "C" {
-#endif
+#include "../../lib/hashmap.h"
+}
+#include "../lambda-data.hpp"
+#include "../ast.hpp"
 
 // ==================== Schema Type System Extensions ====================
 
@@ -468,9 +465,6 @@ SchemaMapField* find_map_field_by_name(SchemaMap* map_schema, StrView field_name
  */
 List* generate_field_name_suggestions(const char* field_name, SchemaMap* map_schema, VariableMemPool* pool);
 
-#ifdef __cplusplus
-}
-#endif
 
 
 
