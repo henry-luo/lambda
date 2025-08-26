@@ -150,7 +150,11 @@
                 "lambda/print.cpp", 
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
-                "lambda/lambda-data.cpp", 
+                "lambda/lambda-data.cpp",
+                "lambda/validator/validate.cpp",
+                "lambda/validator/schema_parser.cpp",
+                "lambda/validator/validator.cpp",
+                "lambda/parse.c",
                 "lib/arraylist.c", 
                 "lib/hashmap.c",
                 "lib/file.c", 
@@ -339,7 +343,7 @@
                 "name": "🔍 Validator Tests",
                 "sources": ["test/test_validator.cpp"],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-input-full", "criterion"]
                 ],
                 "binaries": ["test/test_validator.exe"],
                 "type": "validator",

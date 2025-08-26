@@ -132,9 +132,10 @@ void test_cli_validation_helper(const char* data_file, const char* schema_file,
     cr_log_info("TEST DEBUG: Schema file path: %s", schema_file ? schema_file : "NULL");
     cr_log_info("TEST DEBUG: Data file path: %s", data_file);
 
-    cr_log_info("Calling exec_validation with %d arguments for %s", test_argc, data_file);    // Call the validation function directly
+    cr_log_info("Calling exec_validation:: with %d arguments for %s", test_argc, data_file);    // Call the validation function directly
     int validation_result = exec_validation(test_argc, test_argv);
-    
+    printf("after exec_validation\n");
+
     // Restore stdout and stderr
     fflush(stdout);
     fflush(stderr);
