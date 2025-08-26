@@ -2,11 +2,11 @@
 // Tests XML for SOAP messages with complex nested structures
 // Note: Using unqualified names, assuming validator strips namespaces
 
-type SoapFault = <Fault
-    faultcode: string,                // fault code
-    faultstring: string,              // fault message
-    faultactor: string?,              // optional fault actor
-    detail: string?                   // optional fault details
+// Root document type - must be first to be recognized as root
+type Document = <Envelope
+    encodingStyle: string?,           // optional encoding style
+    SoapHeader?,                      // optional header  
+    SoapBody                          // required body
 >
 
 type SoapHeader = <Header
@@ -31,9 +31,9 @@ type SoapBody = <Body
     content: SoapBodyContent | SoapFault  // either content or fault
 >
 
-type Document = <Envelope
-    xmlns:soap: string,               // SOAP namespace
-    encodingStyle: string?,           // optional encoding style
-    SoapHeader?,                      // optional header  
-    SoapBody                          // required body
+type SoapFault = <Fault
+    faultcode: string,                // fault code
+    faultstring: string,              // fault message
+    faultactor: string?,              // optional fault actor
+    detail: string?                   // optional fault details
 >
