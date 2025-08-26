@@ -576,7 +576,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
 }
 
-void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
+extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     print_item(strbuf, item, depth, indent);
 }
 
