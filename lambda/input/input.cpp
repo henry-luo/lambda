@@ -605,8 +605,3 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url*
     return input;
 }
 
-Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
-    printf("input_data at: %s, type: %s, flavor: %s\n", url->chars, 
-        type ? type->chars : "null", flavor ? flavor->chars : "null");
-    return input_from_url(url, type, flavor, (Url*)ctx->cwd);
-}

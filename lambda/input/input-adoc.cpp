@@ -508,7 +508,7 @@ static Item parse_asciidoc_inline(Input *input, const char* text) {
     // If container has only one child, return the child directly
     if (((TypeElmt*)container->type)->content_length == 1) {
         List* container_list = (List*)container;
-        return list_get(container_list, 0);
+        return container_list->items[0];
     }
     
     // If container is empty, return a simple string

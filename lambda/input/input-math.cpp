@@ -721,7 +721,12 @@ static Item parse_math_number(Input *input, const char **math) {
         // Parse as float
         double value = strtod(num_string->chars, NULL);
         if (is_negative) value = -value;
-        result = push_d(value);
+
+        double *dval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval); 
+        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        *dval = value;
+        result = {.item = d2it(dval)};
     } else {
         // Parse as integer
         long value = strtol(num_string->chars, NULL, 10);
@@ -729,9 +734,13 @@ static Item parse_math_number(Input *input, const char **math) {
         
         // Use appropriate integer type based on size
         if (value >= INT32_MIN && value <= INT32_MAX) {
-            result = {.item = i2it((int)value)};
+            result = {.item = (ITEM_INT | ((int64_t)(value) & 0x00FFFFFFFFFFFFFF))};
         } else {
-            result = push_l(value);
+            long *lval;
+            MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+            if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+            *lval = value;
+            result = {.item = l2it(lval)};
         }
     }
     

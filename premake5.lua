@@ -117,6 +117,7 @@ project "lambda-runtime-full-cpp"
         "lambda/utf_string.cpp",
         "lambda/build_ast.cpp",
         "lambda/lambda-data.cpp",
+        "lambda/lambda-data-runtime.cpp",
         "lambda/lambda-eval.cpp",
         "lambda/lambda-mem.cpp",
         "lambda/runner.cpp",
@@ -171,8 +172,12 @@ project "lambda-runtime-full"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
     
-    -- Wrapper project - no source files, just dependencies
+    -- Wrapper library with empty source file
     files {
+        "utils/empty.cpp",
+    }
+    
+    links {
         "lambda-runtime-full-c",
         "lambda-runtime-full-cpp",
     }
@@ -185,7 +190,6 @@ project "lambda-input-full-c"
     objdir "build/obj/%{prj.name}"
     
     files {
-        "lambda/mir.c",
         "lib/arraylist.c",
         "lib/hashmap.c",
         "lib/file.c",
@@ -215,7 +219,6 @@ project "lambda-input-full-c"
         "tree-sitter",
         "mpdec",
         "utf8proc",
-        "mir",
     }
     
 
@@ -262,7 +265,6 @@ project "lambda-input-full-cpp"
         "tree-sitter",
         "mpdec",
         "utf8proc",
-        "mir",
     }
     
 
@@ -272,8 +274,12 @@ project "lambda-input-full"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
     
-    -- Wrapper project - no source files, just dependencies
+    -- Wrapper library with empty source file
     files {
+        "utils/empty.cpp",
+    }
+    
+    links {
         "lambda-input-full-c",
         "lambda-input-full-cpp",
     }

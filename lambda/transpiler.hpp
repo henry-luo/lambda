@@ -1,5 +1,6 @@
 #pragma once
 
+#undef LAMBDA_STATIC
 #include "lambda-data.hpp"
 
 #include "ast.hpp"

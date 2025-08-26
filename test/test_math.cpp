@@ -6,51 +6,35 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>  // for getcwd and chdir
-
+#include "../lib/arraylist.h"
+#include "../lib/strbuf.h"
+#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/url.h"  // Use new URL parser instead of lexbor
 extern "C" {
-#include <tree_sitter/api.h>
-#include <mpdecimal.h>
-#include "../lambda/lambda.h"
-#include "../lib/url.h"
-#include "../lib/num_stack.h"
-
-// Additional function declarations that need C linkage
-void print_item(StrBuf* strbuf, Item item);
-String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool);
-Item input_from_source(char* source, Url* url, String* type, String* flavor);
-char* read_text_file(const char* filename);
-TSParser* lambda_parser(void);
-TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
+    #include <tree_sitter/api.h>
+    #include <mpdecimal.h>
 }
+#define LAMBDA_STATIC
+#include "../lambda/lambda-data.hpp"
 
+extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool);
+extern "C" Item input_from_source(char* source, Url* url, String* type, String* flavor);
+extern "C" char* read_text_file(const char* filename);
 // Tree-sitter function declarations
 extern "C" const TSLanguage *tree_sitter_lambda(void);
-
 extern "C" TSParser* lambda_parser(void) {
     TSParser *parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_lambda());
     return parser;
 }
-
 extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
     TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
     return tree;
 }
-#include "../lib/arraylist.h"
-#include "../lib/num_stack.h"
-#include "../lib/strbuf.h"
-#include "../lib/mem-pool/include/mem_pool.h"
-#include "../lib/url.h"  // Use new URL parser instead of lexbor
+// Use the existing function from lib/file.c
+extern "C" char* read_text_file(const char *filename);
 
-// Include the Input struct definition (matching lambda-data.hpp)
-typedef struct Input {
-    void* url;
-    void* path;
-    VariableMemPool* pool; // memory pool
-    ArrayList* type_list;  // list of types
-    Item root;
-    StrBuf* sb;
-} Input;
+void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
 
 // Forward declarations
 Url* get_current_dir();
@@ -73,9 +57,6 @@ void teardown_math_tests(void) {
 }
 
 TestSuite(math_roundtrip_tests, .init = setup_math_tests, .fini = teardown_math_tests);
-
-// Use the existing function from lib/file.c
-char* read_text_file(const char *filename);
 
 // Helper function to create a Lambda String from C string
 String* create_lambda_string(const char* text) {

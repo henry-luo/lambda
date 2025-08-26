@@ -1,6 +1,7 @@
 #ifndef FORMAT_H
 #define FORMAT_H
 
+#define LAMBDA_STATIC
 #include "../lambda-data.hpp"
 
 // Common function declarations
