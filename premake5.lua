@@ -232,6 +232,7 @@ project "lambda-input-full-cpp"
         "lambda/print.cpp",
         "lambda/utf_string.cpp",
         "lambda/name_pool.cpp",
+        "lambda/lambda-data.cpp",
     }
     
     files {
@@ -856,6 +857,7 @@ project "test_mir"
     
     links {
         "lambda-runtime-full-cpp",
+        "lambda-runtime-full-c",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
@@ -880,13 +882,13 @@ project "test_mir"
 
 project "test_lambda"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "/Users/henryluo/Projects/lambda/test/test_lambda.c",
+        "/Users/henryluo/Projects/lambda/test/test_lambda.cpp",
     }
     
     includedirs {
@@ -910,6 +912,7 @@ project "test_lambda"
     
     links {
         "lambda-runtime-full-cpp",
+        "lambda-runtime-full-c",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
@@ -924,11 +927,12 @@ project "test_lambda"
         "/usr/local/lib/libmir.a",
     }
     
+    links { "stdc++" }
+    
     buildoptions {
         "-fms-extensions",
         "-fcolor-diagnostics",
         "-pedantic",
-        "-std=c99",
     }
     
 
@@ -964,6 +968,7 @@ project "test_lambda_runner"
     
     links {
         "lambda-runtime-full-cpp",
+        "lambda-runtime-full-c",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",

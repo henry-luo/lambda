@@ -250,16 +250,7 @@ void list_push(List *list, Item item) {
         }
         return;
     }
-    else if (type_id == LMD_TYPE_RANGE) {
-        // copy over the items
-        Range *range = item.range;
-        for (int i = range->start; i <= range->end; i++) {
-            // todo: handle value > 32-bit
-            list_push(list, {.item = i2it(i)});
-        }
-        return;
-    }
-    else if (LMD_TYPE_ARRAY_INT <= type_id && type_id <= LMD_TYPE_ELEMENT) {
+    else if (LMD_TYPE_RANGE <= type_id && type_id <= LMD_TYPE_ELEMENT) {
         Container *container = item.container;
         container->ref_cnt++;
     }

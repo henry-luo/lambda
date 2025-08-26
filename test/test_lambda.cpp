@@ -10,17 +10,10 @@
 
 // Include C header and declare extern C functions from the lambda project
 #include "../lambda/lambda.h"
+extern "C" {
 #include "../lib/strbuf.h"
 #include "../lib/num_stack.h"
-
-// Explicitly declare string functions to avoid macro interference
-extern size_t strlen(const char *s);
-extern int strcmp(const char *s1, const char *s2);
-extern char *strstr(const char *haystack, const char *needle);
-
-// Declare functions from lib/file.c
-extern char* read_text_file(const char *filename);
-extern void write_text_file(const char *filename, const char *content);
+}
 
 // Missing function implementations to avoid linking conflicts
 Context* create_test_context(void) {
@@ -40,8 +33,8 @@ Context* create_test_context(void) {
     return ctx;
 }
 
-// Tree-sitter function declarations
-const TSLanguage *tree_sitter_lambda(void);
+
+extern "C" const TSLanguage *tree_sitter_lambda(void);
 
 TSParser* lambda_parser(void) {
     TSParser *parser = ts_parser_new();
@@ -57,10 +50,18 @@ TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
 // Forward declarations for C interface functions from the lambda runtime
 typedef struct Runtime Runtime;
 
-extern void runtime_init(Runtime* runtime);
-extern void runtime_cleanup(Runtime* runtime);
-extern uint64_t run_script_at(Runtime *runtime, char* script_path, bool transpile_only);
-extern void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
+// C++ function declarations
+void runtime_init(Runtime* runtime);
+void runtime_cleanup(Runtime* runtime);
+Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only);
+
+extern "C" {
+    char* read_text_file(const char* file_path);
+    void write_text_file(const char* file_path, const char* content);
+    const TSLanguage *tree_sitter_lambda(void);
+    num_stack_t* num_stack_create(size_t capacity);
+    void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
+}
 
 // Simple C-compatible Runtime structure definition
 // This should match the actual Runtime structure
@@ -96,15 +97,15 @@ void trim_trailing_whitespace(char* str) {
 void test_lambda_script_against_file(const char* script_path, const char* expected_output_path) { 
     // Initialize runtime
     Runtime runtime;
-    runtime_init(&runtime);  runtime.current_dir = "";
+    runtime_init(&runtime);  runtime.current_dir = (char*)"";
     
     // Run the script
-    uint64_t ret = run_script_at(&runtime, (char*)script_path, false);
-    printf("TRACE: test runner - ret: %llu\n", ret);
+    Item ret = run_script_at(&runtime, (char*)script_path, false);
+    printf("TRACE: test runner - ret: %llu\n", ret.item);
     
     StrBuf* output_buf = strbuf_new_cap(1024);
     // Cast uint64_t to Item (which is uint64_t in C)
-    format_item(output_buf, (Item)ret, 0, " ");
+    format_item(output_buf, ret, 0, (char*)" ");
     printf("TRACE: test runner - formatted output: '%s'\n", output_buf->str);
     
     // Extract script name from path for output file
@@ -129,7 +130,7 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     cr_assert_neq(expected_output, NULL, "Failed to read expected output file: %s", expected_output_path);
     
     // Check that the script ran without error (assuming 0 means error)
-    cr_assert_neq(ret, 0, "Lambda script returned error. Script: %s", script_path);
+    cr_assert_neq(ret.item, 0ULL, "Lambda script returned error. Script: %s", script_path);
 
     // Verify the expected output matches the actual output
     cr_assert_eq(strcmp(expected_output, output_buf->str), 0,

@@ -8,21 +8,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string.h>
 #include <cassert>
 #include <iostream>
 #include <unistd.h>  // for getcwd
 #include <criterion/criterion.h>
 #include <criterion/logging.h>
 
-// Include the validation execution header
-#include "../lambda/validator/validation_exec.h"
-
-// Include basic headers for direct validation testing
-// Note: Internal validator headers disabled due to linking complexity
-// extern "C" {
-// #include "mem_pool.h"  
-// }
-// #include "validator/validator.h"
+int exec_validation(int argc, char* argv[]);
 
 // Memory pool disabled for CLI-only tests
 // static VariableMemPool* test_pool = NULL;
