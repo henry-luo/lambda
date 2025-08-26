@@ -1105,10 +1105,82 @@ void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
         TSSymbol child_symbol = ts_node_symbol(child);
         const char* child_type = ts_node_type(child);
         
-        // Look for type_stam nodes (which contain type definitions)
-        if (child_symbol == sym_type_stam) {
+        // Look for type_stam and entity_type nodes (which contain type definitions)
+        if (child_symbol == 65535) { // ERROR node - try to extract type definition
+            uint32_t start_byte = ts_node_start_byte(child);
+            uint32_t end_byte = ts_node_end_byte(child);
+            if (end_byte > start_byte && end_byte - start_byte < 500) {
+                // Try to extract type definition from ERROR node
+                const char* error_text = parser->current_source + start_byte;
+                int error_len = (int)(end_byte - start_byte);
+                
+                // Look for pattern: "TypeName = <element"
+                char* equals_pos = (char*)memchr(error_text, '=', error_len);
+                char* bracket_pos = (char*)memchr(error_text, '<', error_len);
+                
+                if (equals_pos && bracket_pos && equals_pos < bracket_pos) {
+                    // Extract type name (everything before '=')
+                    int name_len = equals_pos - error_text;
+                    while (name_len > 0 && isspace(error_text[name_len - 1])) name_len--; // trim trailing spaces
+                    
+                    if (name_len > 0) {
+                        // Create a synthetic TypeDefinition for this ERROR node type
+                        TypeDefinition* def = (TypeDefinition*)pool_calloc(parser->pool, sizeof(TypeDefinition));
+                        if (def) {
+                            def->name = (StrView){.str = error_text, .length = (size_t)name_len};
+                            // Parse the element definition from the ERROR node text
+                            // Look for pattern: "TypeName = <elementName ..."
+                            char* element_start = bracket_pos + 1; // Skip '<'
+                            char* element_end = (char*)memchr(element_start, '>', error_len - (element_start - error_text));
+                            
+                            if (element_end) {
+                                // Extract element name (first word after '<')
+                                char* element_name_end = element_start;
+                                while (element_name_end < element_end && !isspace(*element_name_end) && *element_name_end != '>') {
+                                    element_name_end++;
+                                }
+                                
+                                int element_name_len = element_name_end - element_start;
+                                if (element_name_len > 0) {
+                                    // Create element schema with the correct tag name
+                                    char* tag_name = (char*)pool_calloc(parser->pool, element_name_len + 1);
+                                    memcpy(tag_name, element_start, element_name_len);
+                                    tag_name[element_name_len] = '\0';
+                                    
+                                    def->schema_type = create_element_schema(tag_name, parser->pool);
+                                } else {
+                                    def->schema_type = build_element_schema(parser, child);
+                                }
+                            } else {
+                                def->schema_type = build_element_schema(parser, child);
+                            }
+                            
+                            if (def->schema_type) {
+                                // Check for duplicates and add to type definitions
+                                bool is_duplicate = false;
+                                for (int j = 0; j < parser->type_definitions->length; j++) {
+                                    TypeDefinition* existing_def = (TypeDefinition*)parser->type_definitions->data[j];
+                                    if (existing_def && existing_def->name.length == def->name.length &&
+                                        memcmp(existing_def->name.str, def->name.str, def->name.length) == 0) {
+                                        is_duplicate = true;
+                                        break;
+                                    }
+                                }
+                                
+                                if (!is_duplicate) {
+                                    arraylist_append(parser->type_definitions, def);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (child_symbol == sym_type_stam || child_symbol == sym_entity_type) {
+            printf("[SCHEMA_PARSER] DEBUG: Processing %s node\n", child_symbol == sym_type_stam ? "type_stam" : "entity_type");
             TypeDefinition* def = build_type_definition(parser, child);
             if (def) {
+                printf("[SCHEMA_PARSER] DEBUG: Built type definition: %.*s\n", (int)def->name.length, def->name.str);
                 // Check for duplicate type names before adding
                 bool is_duplicate = false;
                 for (int j = 0; j < parser->type_definitions->length; j++) {
@@ -1145,9 +1217,9 @@ void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node) {
         TSNode child = ts_node_child(node, i);
         const char* child_type = ts_node_type(child);
         
-        // Look for type_stam nodes (which contain type definitions)
+        // Look for type_stam and entity_type nodes (which contain type definitions)
         TSSymbol child_symbol = ts_node_symbol(child);
-        if (child_symbol == sym_type_stam) {
+        if (child_symbol == sym_type_stam || child_symbol == sym_entity_type) {
             TypeDefinition* def = build_type_definition(parser, child);
             if (def) {
                 // Check for duplicate type names before adding
