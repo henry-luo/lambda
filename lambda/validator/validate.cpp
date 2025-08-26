@@ -34,16 +34,16 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     fflush(stderr);
     
     // Initialize minimal Lambda context for number stack (needed by map_get when retrieving floats)
-    Context validation_context = {0};
-    validation_context.num_stack = num_stack_create(16);
+    // Context validation_context = {0};
+    // validation_context.num_stack = num_stack_create(16);
     
     fprintf(stderr, "TRACE: About to set global context\n");
     fflush(stderr);
     
     // Set the global context for Lambda evaluation functions
-    extern __thread Context* context;
-    Context* old_context = context;
-    context = &validation_context;
+    // extern __thread Context* context;
+    // Context* old_context = context;
+    // context = &validation_context;
     
     fprintf(stderr, "TRACE: Global context set, about to read schema file: %s\n", schema_file);
     fflush(stderr);
@@ -260,10 +260,10 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     free(schema_contents);
     
     // Restore the original context and cleanup number stack
-    context = old_context;
-    if (validation_context.num_stack) {
-        num_stack_destroy((num_stack_t*)validation_context.num_stack);
-    }
+    // context = old_context;
+    // if (validation_context.num_stack) {
+    //     num_stack_destroy((num_stack_t*)validation_context.num_stack);
+    // }
 }
 
 // Validation execution function that can be called directly by tests

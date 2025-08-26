@@ -71,6 +71,14 @@ void test_schema_parsing_helper(const char* schema_file) {
 void test_cli_validation_helper(const char* data_file, const char* schema_file, 
                                const char* format, bool should_pass) {
     
+    // Debug trace - function entry
+    fprintf(stderr, "TRACE: test_cli_validation_helper ENTRY - data_file: %s, schema_file: %s, format: %s, should_pass: %d\n",
+            data_file ? data_file : "NULL", 
+            schema_file ? schema_file : "NULL", 
+            format ? format : "NULL", 
+            should_pass);
+    fflush(stderr);
+    
     // Capture stdout and stderr for validation output analysis
     fflush(stdout);
     fflush(stderr);
@@ -112,13 +120,19 @@ void test_cli_validation_helper(const char* data_file, const char* schema_file,
         test_argv[test_argc++] = (char*)"-s";
         test_argv[test_argc++] = (char*)schema_file;
     }
-    
+
     test_argv[test_argc++] = (char*)data_file;
     test_argv[test_argc] = nullptr;  // Null terminate
-    
-    cr_log_info("Calling exec_validation with %d arguments for %s", test_argc, data_file);
-    
-    // Call the validation function directly
+
+    // Add debugging for current working directory and file paths
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+        cr_log_info("TEST DEBUG: Current working directory: %s", cwd);
+    }
+    cr_log_info("TEST DEBUG: Schema file path: %s", schema_file ? schema_file : "NULL");
+    cr_log_info("TEST DEBUG: Data file path: %s", data_file);
+
+    cr_log_info("Calling exec_validation with %d arguments for %s", test_argc, data_file);    // Call the validation function directly
     int validation_result = exec_validation(test_argc, test_argv);
     
     // Restore stdout and stderr
