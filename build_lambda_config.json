@@ -131,8 +131,7 @@
                 "lib/hashmap.c",
                 "lib/file.c", 
                 "lib/log.c", 
-                "lib/utf.c",
-                "test/test_context_minimal.c"
+                "lib/utf.c"
             ],
             "libraries": ["mem-pool", "strbuf", "strview", "string", "num_stack", "datetime", "url", "mime-detect", "criterion"],
             "include": "lib/mem-pool/include",
