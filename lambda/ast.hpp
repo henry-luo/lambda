@@ -285,4 +285,5 @@ typedef struct Transpiler : Script {
 
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
 void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth=0);
+// for C to access
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent);

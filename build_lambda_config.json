@@ -150,6 +150,7 @@
                 "lambda/print.cpp", 
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
+                "lambda/lambda-data.cpp", 
                 "lib/arraylist.c", 
                 "lib/hashmap.c",
                 "lib/file.c", 
@@ -369,7 +370,7 @@
             {
                 "suite": "lambda",
                 "name": "🐑 Lambda Runtime Tests",
-                "sources": ["test/test_lambda.c"],
+                "sources": ["test/test_lambda.cpp"],
                 "library_dependencies": [
                     ["lambda-runtime-full", "criterion"]
                 ],

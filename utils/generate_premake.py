@@ -409,13 +409,15 @@ class PremakeGenerator:
                                 # Special handling for MIR, Lambda, Math, and Markup tests
                                 if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
                                     if language == "C":
-                                        # C tests need C++ runtime for runner functions but avoid symbol conflicts
+                                        # C tests need both C and C++ runtime libraries
                                         self.premake_content.append('        "lambda-runtime-full-cpp",')
+                                        self.premake_content.append('        "lambda-runtime-full-c",')
                                         self.premake_content.append('        "lambda-input-full-cpp",')
                                         self.premake_content.append('        "lambda-input-full-c",')
                                     else:
-                                        # C++ tests only need C++ versions to avoid symbol conflicts
+                                        # C++ tests need both C and C++ versions
                                         self.premake_content.append('        "lambda-runtime-full-cpp",')
+                                        self.premake_content.append('        "lambda-runtime-full-c",')
                                         self.premake_content.append('        "lambda-input-full-cpp",')
                                         self.premake_content.append('        "lambda-input-full-c",')
                                 else:
