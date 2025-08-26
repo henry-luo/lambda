@@ -20,10 +20,10 @@ extern "C" {
 #include <tree_sitter/api.h>
 #include <mpdecimal.h>
 #include "../lambda/lambda.h"
-#include "../lambda/transpiler.hpp"
 #include "../lib/strbuf.h"
 #include "../lib/num_stack.h"
 }
+#include "../lambda/transpiler.hpp"
 
 // Implement missing functions locally to avoid linking conflicts
 extern "C" Context* create_test_context() {
