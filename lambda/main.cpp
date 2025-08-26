@@ -1,13 +1,8 @@
-#include "transpiler.hpp"
-// Forward declare the validation function to avoid C++ compilation issues
-extern "C" void run_validation(const char *data_file, const char *schema_file, const char *input_format);
-// Forward declare validation execution function for direct calls by tests
-extern "C" int exec_validation(int argc, char* argv[]);
 #include "input/input.h"
 #include <unistd.h>  // for getcwd
-
 // Unicode support (always enabled)
 #include "utf_string.h"
+#include "transpiler.hpp"
 
 // Forward declare additional transpiler functions
 extern "C" {
@@ -16,7 +11,8 @@ extern "C" {
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
 
-// C++ functions
+void run_validation(const char *data_file, const char *schema_file, const char *input_format);
+int exec_validation(int argc, char* argv[]);
 void transpile_ast(Transpiler* tp, AstScript *script);
 
 // External function declarations
@@ -43,7 +39,7 @@ extern "C" {
 #endif
 
 // Forward declare MIR transpiler function
-extern "C" Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
+Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
 
 // Forward declare readline functions to avoid header conflicts
 #ifndef _WIN32

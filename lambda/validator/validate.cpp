@@ -1,5 +1,4 @@
-#include "validator.h"
-#include "validation_exec.h"
+#include "validator.hpp"
 #include "../../lib/url.h"
 #include <unistd.h>  // for getcwd
 #include <cstring>   // for C++ string functions
@@ -8,14 +7,10 @@
 #include "../../lib/num_stack.h"
 
 extern "C" {
-    // Forward declare read_text_file from lib/file.c
     char* read_text_file(const char *filename);
-
-    // Forward declare input_from_url
     Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 }
 
-extern "C" {
 void run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     fprintf(stderr, "TRACE: run_validation() started\n");
     fflush(stderr);
@@ -31,9 +26,9 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     fflush(stderr);
     
     // Initialize runtime for Lambda script parsing if needed
-    Runtime runtime;
-    runtime_init(&runtime);
-    runtime.current_dir = (char*)"./";
+    // Runtime runtime;
+    // runtime_init(&runtime);
+    // runtime.current_dir = (char*)"./";
     
     fprintf(stderr, "TRACE: Runtime initialized, about to initialize validation context\n");
     fflush(stderr);
@@ -54,7 +49,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     fflush(stderr);
     
     // Track if we created a temp_runner for cleanup
-    Runner* temp_runner_ptr = NULL;
+    // Runner* temp_runner_ptr = NULL;
     
     // Read schema file using read_text_file from lib/file.c
     char* schema_contents = read_text_file(schema_file);
@@ -400,5 +395,4 @@ int exec_validation(int argc, char* argv[]) {
     // Call the validation function
     run_validation(data_file, schema_file, input_format);
     return 0;
-}
 }
