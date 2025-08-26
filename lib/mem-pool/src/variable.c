@@ -128,7 +128,10 @@ void* pool_variable_realloc(VariableMemPool *pool, void *ptr, size_t data_size, 
     // copy the old data to the new block
     assert(new_ptr != ptr);
     if (ptr) {
-        if (data_size) memcpy(new_ptr, ptr, data_size);
+        if (data_size) {
+            // Use memmove instead of memcpy to handle overlapping memory regions
+            memmove(new_ptr, ptr, data_size);
+        }
         pool_variable_free(pool, ptr);
     }
     return new_ptr;

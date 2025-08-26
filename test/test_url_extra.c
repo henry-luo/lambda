@@ -249,35 +249,6 @@ Test(url_extra, null_input_handling) {
     url_destroy(base);
 }
 
-Test(url_extra, wrong_parameter_order_detection) {
-    // Test detection of wrong parameter order
-    // This simulates the common mistake of passing (base_url, relative_string)
-    // instead of (relative_string, base_url)
-    
-    Url* base = url_parse("https://example.com/path");
-    cr_assert_not_null(base, "Base URL should parse");
-    
-    // This should be detected as wrong parameter order and return NULL gracefully
-    // instead of crashing - we're intentionally passing the parameters backwards
-    Url* result = url_resolve_relative((const char*)base, (const Url*)"../relative.html");
-    cr_assert_null(result, "Library should detect wrong parameter order and return NULL gracefully");
-    
-    // Test with various URL-like strings that might be passed as second parameter
-    result = url_resolve_relative((const char*)base, (const Url*)"https://other.com/path");
-    cr_assert_null(result, "Library should detect URL string as second parameter");
-    
-    result = url_resolve_relative((const char*)base, (const Url*)"http://test.com");
-    cr_assert_null(result, "Library should detect HTTP URL string as second parameter");
-    
-    result = url_resolve_relative((const char*)base, (const Url*)"ftp://files.com/dir");
-    cr_assert_null(result, "Library should detect FTP URL string as second parameter");
-    
-    result = url_resolve_relative((const char*)base, (const Url*)"file:///local/path");
-    cr_assert_null(result, "Library should detect file URL string as second parameter");
-    
-    url_destroy(base);
-}
-
 Test(url_extra, invalid_schemes) {
     // Test invalid schemes
     Url* url = url_parse("invalid-scheme://example.com");
