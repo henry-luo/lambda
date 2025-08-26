@@ -716,6 +716,13 @@ Test(validator_tests, xml_cookbook_simple_validation) {
                               "xml", true);
 }
 
+// Test duplicate type definition handling
+Test(validator_tests, duplicate_definition_handling) {
+    test_cli_validation_helper("test/lambda/validator/test_xml_duplicate_test.xml",
+                              "test/lambda/validator/schema_duplicate_test.ls", 
+                              "xml", true);
+}
+
 // Comprehensive negative tests
 Test(validator_tests, invalid_html_validation) {
     // Create a truly invalid HTML file that should cause parsing/validation errors
