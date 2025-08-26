@@ -1104,7 +1104,23 @@ void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
         if (child_symbol == sym_type_stam) {
             TypeDefinition* def = build_type_definition(parser, child);
             if (def) {
-                arraylist_append(parser->type_definitions, def);
+                // Check for duplicate type names before adding
+                bool is_duplicate = false;
+                for (int j = 0; j < parser->type_definitions->length; j++) {
+                    TypeDefinition* existing_def = (TypeDefinition*)parser->type_definitions->data[j];
+                    if (existing_def && existing_def->name.length == def->name.length &&
+                        memcmp(existing_def->name.str, def->name.str, def->name.length) == 0) {
+                        // Found duplicate - log warning and skip
+                        fprintf(stderr, "[SCHEMA_PARSER] WARNING: Duplicate type definition '%.*s' found, using first definition\n", 
+                               (int)def->name.length, def->name.str);
+                        is_duplicate = true;
+                        break;
+                    }
+                }
+                
+                if (!is_duplicate) {
+                    arraylist_append(parser->type_definitions, def);
+                }
             }
         } else {
             // Recursively search in child nodes for nested type definitions
@@ -1129,7 +1145,23 @@ void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node) {
         if (child_symbol == sym_type_stam) {
             TypeDefinition* def = build_type_definition(parser, child);
             if (def) {
-                arraylist_append(parser->type_definitions, def);
+                // Check for duplicate type names before adding
+                bool is_duplicate = false;
+                for (int j = 0; j < parser->type_definitions->length; j++) {
+                    TypeDefinition* existing_def = (TypeDefinition*)parser->type_definitions->data[j];
+                    if (existing_def && existing_def->name.length == def->name.length &&
+                        memcmp(existing_def->name.str, def->name.str, def->name.length) == 0) {
+                        // Found duplicate - log warning and skip
+                        fprintf(stderr, "[SCHEMA_PARSER] WARNING: Duplicate type definition '%.*s' found, using first definition\n", 
+                               (int)def->name.length, def->name.str);
+                        is_duplicate = true;
+                        break;
+                    }
+                }
+                
+                if (!is_duplicate) {
+                    arraylist_append(parser->type_definitions, def);
+                }
             }
         }
         
