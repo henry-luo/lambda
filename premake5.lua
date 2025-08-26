@@ -73,7 +73,6 @@ project "lambda-runtime-full-c"
         "lib/file.c",
         "lib/log.c",
         "lib/utf.c",
-        "test/test_context_minimal.c",
     }
     
     includedirs {
