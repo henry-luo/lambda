@@ -100,7 +100,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
-        lambda radiant window cross-compile format lint check docs \
+        lambda radiant window cross-compile format lint check docs intellisense \
         build-windows build-debug build-release build-test-legacy clean-all distclean \
         build-windows build-debug build-release clean-all distclean \
         verify-windows test-windows tree-sitter-libs \
@@ -131,6 +131,7 @@ help:
 	@echo "  clean-grammar - Remove generated grammar files (parser.c, ts-enum.h)"
 	@echo "  clean-all     - Remove all build directories"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
+	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
@@ -274,6 +275,11 @@ clean-grammar:
 	@rm -f $(GRAMMAR_JSON)
 	@rm -f $(NODE_TYPES_JSON)
 	@echo "Generated grammar files cleaned."
+
+# IntelliSense support
+intellisense:
+	@echo "Updating IntelliSense database..."
+	@./utils/update_intellisense.sh
 
 # Generate grammar explicitly (useful for development)
 generate-grammar: $(TS_ENUM_H)
