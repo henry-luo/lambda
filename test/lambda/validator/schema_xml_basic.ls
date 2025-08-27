@@ -6,17 +6,22 @@ type XmlProcessingInstruction = <?xml
     version: string                   // version attribute
 >
 
-// Book element with id and category attributes
+// Book element with id and category attributes and child elements
 type BookElement = <book
     id: string,                       // book id attribute
-    category: string,                 // book category attribute
-    title: string,                    // title text content
-    author: string,                   // author text content  
-    price: string                     // price text content
+    category: string;                 // book category attribute
+    BookTitle,                        // title child element
+    BookAuthor,                       // author child element  
+    BookPrice                         // price child element
 >
 
-// Root element containing simple elements
-type Document = <root
+// Child element types
+type BookTitle = <title string>
+type BookAuthor = <author string>
+type BookPrice = <price string>
+
+// Root element containing simple elements  
+type Document = <root;
     SimpleElement*             // zero or more simple elements
 >
 
