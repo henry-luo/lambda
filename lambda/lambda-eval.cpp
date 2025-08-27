@@ -406,7 +406,7 @@ Item fn_mul(Item item_a, Item item_b) {
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
             if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
-            printf("decimal conversion failed in fn_mul\n");
+        log_error("decimal conversion failed in fn_mul");
             return ItemError;
         }
         
@@ -424,7 +424,7 @@ Item fn_mul(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-            printf("decimal multiplication failed\n");
+        log_error("decimal multiplication failed");
             return ItemError;
         }
         
@@ -434,7 +434,7 @@ Item fn_mul(Item item_a, Item item_b) {
         ArrayInt* arr_a = item_a.array_int;
         ArrayInt* arr_b = item_b.array_int;
         if (arr_a->length != arr_b->length) {
-            printf("Array length mismatch in multiplication\n");
+        log_error("Array length mismatch in multiplication");
             return ItemError;
         }
         ArrayInt* result = array_int_new(arr_a->length);
@@ -450,7 +450,7 @@ Item fn_mul(Item item_a, Item item_b) {
         ArrayInt64* arr_a = item_a.array_int64;
         ArrayInt64* arr_b = item_b.array_int64;
         if (arr_a->length != arr_b->length) {
-            printf("Array length mismatch in multiplication\n");
+        log_error("Array length mismatch in multiplication");
             return ItemError;
         }
         ArrayInt64* result = array_int64_new(arr_a->length);
@@ -493,7 +493,7 @@ Item fn_sub(Item item_a, Item item_b) {
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
             if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
-            printf("decimal conversion failed in fn_sub\n");
+        log_error("decimal conversion failed in fn_sub");
             return ItemError;
         }
         
@@ -511,7 +511,7 @@ Item fn_sub(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-            printf("decimal subtraction failed\n");
+        log_error("decimal subtraction failed");
             return ItemError;
         }
         
@@ -521,7 +521,7 @@ Item fn_sub(Item item_a, Item item_b) {
         ArrayInt* arr_a = item_a.array_int;
         ArrayInt* arr_b = item_b.array_int;
         if (arr_a->length != arr_b->length) {
-            printf("Array length mismatch in subtraction\n");
+        log_error("Array length mismatch in subtraction");
             return ItemError;
         }
         ArrayInt* result = array_int_new(arr_a->length);
@@ -537,7 +537,7 @@ Item fn_sub(Item item_a, Item item_b) {
         ArrayInt64* arr_a = item_a.array_int64;
         ArrayInt64* arr_b = item_b.array_int64;
         if (arr_a->length != arr_b->length) {
-            printf("Array length mismatch in subtraction\n");
+        log_error("Array length mismatch in subtraction");
             return ItemError;
         }
         ArrayInt64* result = array_int64_new(arr_a->length);
@@ -558,21 +558,21 @@ Item fn_sub(Item item_a, Item item_b) {
 Item fn_div(Item item_a, Item item_b) {
     if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT) {
         if (item_b.int_val == 0) {
-            printf("integer division by zero error\n");
+        log_error("integer division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / (double)item_b.int_val);
     }
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         if (*(long*)item_b.pointer == 0) {
-            printf("integer division by zero error\n");
+        log_error("integer division by zero error");
             return ItemError;
         }
         return push_d((double)*(long*)item_a.pointer / (double)*(long*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-            printf("float division by zero error\n");
+        log_error("float division by zero error");
             return ItemError;
         }
         log_debug("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
@@ -580,14 +580,14 @@ Item fn_div(Item item_a, Item item_b) {
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-            printf("float division by zero error\n");
+        log_error("float division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_INT) {
         if (item_b.int_val == 0) {
-            printf("integer division by zero error\n");
+        log_error("integer division by zero error");
             return ItemError;
         }
         return push_d(*(double*)item_a.pointer / (double)item_b.int_val);
@@ -600,7 +600,7 @@ Item fn_div(Item item_a, Item item_b) {
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
             if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
-            printf("decimal conversion failed in fn_div\n");
+        log_error("decimal conversion failed in fn_div");
             return ItemError;
         }
         
@@ -615,7 +615,7 @@ Item fn_div(Item item_a, Item item_b) {
         if (b_dec && decimal_is_zero(b_dec)) {
             cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
-            printf("decimal division by zero error\n");
+        log_error("decimal division by zero error");
             return ItemError;
         }
         log_debug(" Division by zero check passed\n");
@@ -646,7 +646,7 @@ Item fn_div(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-            printf("decimal division failed\n");
+        log_error("decimal division failed");
             return ItemError;
         }
         
@@ -669,7 +669,7 @@ Item fn_idiv(Item item_a, Item item_b) {
     }
     
     if (is_zero) {
-        printf("integer division by zero error\n");
+        log_error("integer division by zero error");
         return ItemError;
     }
 
@@ -753,7 +753,7 @@ Item fn_pow(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-            printf("decimal power operation failed\n");
+        log_debug("decimal power operation failed");
             return ItemError;
         }
         
@@ -809,7 +809,7 @@ Item fn_mod(Item item_a, Item item_b) {
         
         // Check for division by zero
         if (decimal_is_zero(val_b)) {
-            printf("modulo by zero error\n");
+        log_error("modulo by zero error");
             cleanup_temp_decimal(val_a, item_a.type_id == LMD_TYPE_DECIMAL);
             cleanup_temp_decimal(val_b, item_b.type_id == LMD_TYPE_DECIMAL);
             return ItemError;
@@ -830,7 +830,7 @@ Item fn_mod(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-            printf("decimal modulo operation failed\n");
+        log_debug("decimal modulo operation failed");
             return ItemError;
         }
         
@@ -842,7 +842,7 @@ Item fn_mod(Item item_a, Item item_b) {
         // Sign extend both values to proper signed longs
         long a_val = item_a.int_val, b_val = item_b.int_val;
         if (b_val == 0) {
-            printf("modulo by zero error\n");
+        log_error("modulo by zero error");
             return ItemError;
         }
         return (Item){.item = i2it(a_val % b_val)};
@@ -850,7 +850,7 @@ Item fn_mod(Item item_a, Item item_b) {
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT64) {
         long a_val = *(long*)item_a.pointer, b_val = *(long*)item_b.pointer;
         if (b_val == 0) {
-            printf("modulo by zero error\n");
+        log_error("modulo by zero error");
             return ItemError;
         }
         return push_l(a_val % b_val);
@@ -858,7 +858,7 @@ Item fn_mod(Item item_a, Item item_b) {
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_INT64) {
         long a_val = item_a.int_val, b_val = *(long*)item_b.pointer;
         if (b_val == 0) {
-            printf("modulo by zero error\n");
+        log_error("modulo by zero error");
             return ItemError;
         }
         return push_l(a_val % b_val);
@@ -866,13 +866,13 @@ Item fn_mod(Item item_a, Item item_b) {
     else if (item_a.type_id == LMD_TYPE_INT64 && item_b.type_id == LMD_TYPE_INT) {
         long a_val = *(long*)item_a.pointer, b_val = item_b.int_val;
         if (b_val == 0) {
-            printf("modulo by zero error\n");
+        log_error("modulo by zero error");
             return ItemError;
         }
         return push_l(a_val % b_val);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT || item_b.type_id == LMD_TYPE_FLOAT) {
-        printf("modulo not supported for float types\n");
+        log_debug("modulo not supported for float types");
         return ItemError;
     }
     else {
@@ -898,7 +898,7 @@ Item fn_abs(Item item) {
         return push_d(fabs(val));
     }
     else {
-        printf("abs not supported for type: %d\n", item.type_id);
+        log_error("abs not supported for type: %d", item.type_id);
         return ItemError;
     }
 }
@@ -914,7 +914,7 @@ Item fn_round(Item item) {
         return push_d(round(val));
     }
     else {
-        printf("round not supported for type: %d\n", item.type_id);
+        log_debug("round not supported for type: %d", item.type_id);
         return ItemError;
     }
 }
@@ -929,7 +929,7 @@ Item fn_floor(Item item) {
         return push_d(floor(val));
     }
     else {
-        printf("floor not supported for type: %d\n", item.type_id);
+        log_debug("floor not supported for type: %d", item.type_id);
         return ItemError;
     }
 }
@@ -944,7 +944,7 @@ Item fn_ceil(Item item) {
         return push_d(ceil(val));
     }
     else {
-        printf("ceil not supported for type: %d\n", item.type_id);
+        log_debug("ceil not supported for type: %d", item.type_id);
         return ItemError;
     }
 }
@@ -1049,7 +1049,7 @@ Item fn_min(Item item_a, Item item_b) {
             }
         }
         else {
-            printf("min not supported for single argument type: %d\n", type_id);
+        log_debug("min not supported for single argument type: %d", type_id);
             return ItemError;
         }
     }
@@ -1070,7 +1070,7 @@ Item fn_min(Item item_a, Item item_b) {
         is_float = true;
     }
     else {
-        printf("min not supported for type: %d\n", item_a.type_id);
+        log_debug("min not supported for type: %d", item_a.type_id);
         return ItemError;
     }
     
@@ -1086,7 +1086,7 @@ Item fn_min(Item item_a, Item item_b) {
         is_float = true;
     }
     else {
-        printf("min not supported for type: %d\n", item_b.type_id);
+        log_debug("min not supported for type: %d", item_b.type_id);
         return ItemError;
     }
     
@@ -1201,7 +1201,7 @@ Item fn_max(Item item_a, Item item_b) {
             }
         }
         else {
-            printf("max not supported for single argument type: %d\n", type_id);
+        log_debug("max not supported for single argument type: %d", type_id);
             return ItemError;
         }
     }
@@ -1222,7 +1222,7 @@ Item fn_max(Item item_a, Item item_b) {
         is_float = true;
     }
     else {
-        printf("max not supported for type: %d\n", item_a.type_id);
+        log_debug("max not supported for type: %d", item_a.type_id);
         return ItemError;
     }
     
@@ -1238,7 +1238,7 @@ Item fn_max(Item item_a, Item item_b) {
         is_float = true;
     }
     else {
-        printf("max not supported for type: %d\n", item_b.type_id);
+        log_debug("max not supported for type: %d", item_b.type_id);
         return ItemError;
     }
     
@@ -1256,13 +1256,13 @@ Item fn_max(Item item_a, Item item_b) {
 Item fn_sum(Item item) {
     // sum() - sum of all elements in an array or list
     TypeId type_id = get_type_id(item);
-    printf("DEBUG fn_sum: called with type_id: %d, pointer: %p\n", type_id, item.raw_pointer);
+        log_debug("DEBUG fn_sum: called with type_id: %d, pointer: %p", type_id, item.raw_pointer);
     if (type_id == LMD_TYPE_ARRAY) {
-        printf("DEBUG fn_sum: Processing LMD_TYPE_ARRAY\n");
+        log_debug("DEBUG fn_sum: Processing LMD_TYPE_ARRAY");
         Array* arr = item.array;  // Use item.array, not item.pointer
-        printf("DEBUG fn_sum: Array pointer: %p, length: %ld\n", arr, arr ? arr->length : -1);
+        log_debug("DEBUG fn_sum: Array pointer: %p, length: %ld", arr, arr ? arr->length : -1);
         if (!arr || arr->length == 0) {
-            printf("DEBUG fn_sum: Empty array, returning 0\n");
+        log_debug("DEBUG fn_sum: Empty array, returning 0");
             return (Item){.item = i2it(0)};  // Empty array sums to 0
         }
         double sum = 0.0;
@@ -1271,22 +1271,22 @@ Item fn_sum(Item item) {
             Item elem_item = array_get(arr, i);
             if (elem_item.type_id == LMD_TYPE_INT) {
                 long val = elem_item.int_val;
-                printf("DEBUG fn_sum: Adding int value: %ld\n", val);
+        log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_INT64) {
                 long val = *(long*)elem_item.pointer;
-                printf("DEBUG fn_sum: Adding int64 value: %ld\n", val);
+        log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_FLOAT) {
                 double val = *(double*)elem_item.pointer;
-                printf("DEBUG fn_sum: Adding float value: %f\n", val);
+        log_error("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
             else {
-                printf("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+        log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
@@ -1330,11 +1330,11 @@ Item fn_sum(Item item) {
         return push_d(sum);
     }
     else if (type_id == LMD_TYPE_LIST) {
-        printf("DEBUG fn_sum: Processing LMD_TYPE_LIST\n");
+        log_debug("DEBUG fn_sum: Processing LMD_TYPE_LIST");
         List* list = item.list;
-        printf("DEBUG fn_sum: List pointer: %p, length: %ld\n", list, list ? list->length : -1);
+        log_debug("DEBUG fn_sum: List pointer: %p, length: %ld", list, list ? list->length : -1);
         if (!list || list->length == 0) {
-            printf("DEBUG fn_sum: Empty list, returning 0\n");
+        log_debug("DEBUG fn_sum: Empty list, returning 0");
             return (Item){.item = i2it(0)};  // Empty list sums to 0
         }
         double sum = 0.0;
@@ -1343,35 +1343,35 @@ Item fn_sum(Item item) {
             Item elem_item = list_get(list, i);
             if (elem_item.type_id == LMD_TYPE_INT) {
                 long val = elem_item.int_val;
-                printf("DEBUG fn_sum: Adding int value: %ld\n", val);
+        log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_INT64) {
                 long val = *(long*)elem_item.pointer;
-                printf("DEBUG fn_sum: Adding int64 value: %ld\n", val);
+        log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_FLOAT) {
                 double val = *(double*)elem_item.pointer;
-                printf("DEBUG fn_sum: Adding float value: %f\n", val);
+        log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
             else {
-                printf("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+        log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
         if (has_float) {
-            printf("DEBUG fn_sum: Returning sum as double: %f\n", sum);
+        log_debug("DEBUG fn_sum: Returning sum as double: %f", sum);
             return push_d(sum);
         } else {
-            printf("DEBUG fn_sum: Returning sum as long: %ld\n", (long)sum);
+        log_error("DEBUG fn_sum: Returning sum as long: %ld", (long)sum);
             return push_l((long)sum);
         }
     }
     else {
-        printf("DEBUG fn_sum: sum not supported for type: %d\n", type_id);
+        log_debug("DEBUG fn_sum: sum not supported for type: %d", type_id);
         return ItemError;
     }
 }
@@ -1398,7 +1398,7 @@ Item fn_avg(Item item) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-                printf("avg: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+        log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
@@ -1456,14 +1456,14 @@ Item fn_avg(Item item) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-                printf("avg: non-numeric element at index %zu, type: %d\n", i, elem_item.type_id);
+        log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
         return push_d(sum / (double)list->length);
     }
     else {
-        printf("avg not supported for type: %d\n", type_id);
+        log_debug("avg not supported for type: %d", type_id);
         return ItemError;
     }
 }
@@ -1486,7 +1486,7 @@ Item fn_pos(Item item) {
         // Cast string/symbol to number
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
-            printf("unary + error: empty string/symbol\n");
+        log_error("unary + error: empty string/symbol");
             return ItemError;
         }
         
@@ -1506,12 +1506,12 @@ Item fn_pos(Item item) {
         }
         
         // Not a valid number
-        printf("unary + error: cannot convert '%.*s' to number\n", (int)str->len, str->chars);
+        log_error("unary + error: cannot convert '%.*s' to number", (int)str->len, str->chars);
         return ItemError;
     }
     else {
         // For other types (bool, datetime, etc.), unary + is an error
-        printf("unary + not supported for type: %d\n", item.type_id);
+        log_debug("unary + not supported for type: %d", item.type_id);
         return ItemError;
     }
 }
@@ -1534,14 +1534,14 @@ Item fn_neg(Item item) {
     else if (item.type_id == LMD_TYPE_DECIMAL) {
         // For decimal types, we'd need to negate the libmpdec value
         // This would require more complex decimal arithmetic with libmpdec
-        printf("unary - for decimal type not yet implemented\n");
+        log_debug("unary - for decimal type not yet implemented");
         return ItemError;
     }
     else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
         // Cast string/symbol to number, then negate
         String* str = (String*)item.pointer;
         if (!str || str->len == 0) {
-            printf("unary - error: empty string/symbol\n");
+        log_debug("unary - error: empty string/symbol");
             return ItemError;
         }
         
@@ -1561,12 +1561,12 @@ Item fn_neg(Item item) {
         }
         
         // Not a valid number
-        printf("unary - error: cannot convert '%.*s' to number\n", (int)str->len, str->chars);
+        log_debug("unary - error: cannot convert '%.*s' to number", (int)str->len, str->chars);
         return ItemError;
     }
     else {
         // For other types (bool, datetime, etc.), unary - is an error
-        printf("unary - not supported for type: %d\n", item.type_id);
+        log_debug("unary - not supported for type: %d", item.type_id);
         return ItemError;
     }
 }
@@ -1586,10 +1586,10 @@ Item fn_int(Item item) {
         CHECK_DVAL:
         if (dval > INT32_MAX || dval < INT32_MIN) {
             // Promote to decimal if out of int32 range
-            printf("promote float to decimal: %g\n", dval);
+        log_debug("promote float to decimal: %g", dval);
             mpd_t* dec_val = mpd_new(context->decimal_ctx);
             if (!dec_val) {
-                printf("Failed to allocate decimal for float conversion\n");
+        log_debug("Failed to allocate decimal for float conversion");
                 return ItemError;
             }
             char str_buf[64];
@@ -1612,7 +1612,7 @@ Item fn_int(Item item) {
         errno = 0;  // clear errno before calling strtoll
         int32_t val = strtol(str->chars, &endptr, 10);
         if (endptr == str->chars) {
-            printf("Cannot convert string '%s' to int\n", str->chars);
+        log_debug("Cannot convert string '%s' to int", str->chars);
             return ItemError;
         }
         // check for overflow - if errno is set or we couldn't parse the full string
@@ -1620,22 +1620,22 @@ Item fn_int(Item item) {
             // try to parse as decimal
             mpd_t* dec_val = mpd_new(context->decimal_ctx);
             if (!dec_val) {
-                printf("Failed to allocate decimal for string conversion\n");
+        log_debug("Failed to allocate decimal for string conversion");
                 return ItemError;
             }
             mpd_set_string(dec_val, str->chars, context->decimal_ctx);
             if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-                printf("Cannot convert string '%s' to decimal\n", str->chars);
+        log_debug("Cannot convert string '%s' to decimal", str->chars);
                 mpd_del(dec_val);
                 return ItemError;
             }
-            printf("promote string to decimal: %s\n", str->chars);
+        log_debug("promote string to decimal: %s", str->chars);
             return push_decimal(dec_val);
         }
         return {._type= LMD_TYPE_INT, .int_val = val};
     }
     else {
-        printf("Cannot convert type %d to int\n", item.type_id);
+        log_debug("Cannot convert type %d to int", item.type_id);
         return ItemError;
     }
 }
@@ -1644,7 +1644,7 @@ int64_t fn_int64(Item item) {
     // Convert item to int64
     int64_t val;
     if (item.type_id == LMD_TYPE_INT) {
-        printf("convert int to int64: %d\n", item.int_val);
+        log_debug("convert int to int64: %d", item.int_val);
         return item.int_val;
     }
     else if (item.type_id == LMD_TYPE_INT64) {
@@ -1653,7 +1653,7 @@ int64_t fn_int64(Item item) {
     else if (item.type_id == LMD_TYPE_FLOAT) {
         double dval = *(double*)item.pointer;
         if (dval > LAMBDA_INT64_MAX || dval < INT64_MIN) {
-            printf("float value %g out of int64 range\n", dval);
+        log_debug("float value %g out of int64 range", dval);
             return INT_ERROR;
         }
         return (int64_t)dval;
@@ -1663,20 +1663,20 @@ int64_t fn_int64(Item item) {
         Decimal* dec_ptr = (Decimal*)item.pointer;
         mpd_t* dec = dec_ptr->dec_val;
         if (!dec) {
-            printf("decimal pointer is NULL\n");
+        log_debug("decimal pointer is NULL");
             return INT_ERROR;
         }
         char* endptr;
         char* dec_str = mpd_to_sci(dec, 1);
         if (!dec_str) {
-            printf("mpd_to_sci failed\n");
+        log_debug("mpd_to_sci failed");
             return INT_ERROR;
         }
-        printf("convert decimal to int64: %s\n", dec_str);
+        log_debug("convert decimal to int64: %s", dec_str);
         val = strtoll(dec_str, &endptr, 10);
         mpd_free(dec_str);
         if (endptr == dec_str) {
-            printf("Cannot convert decimal to int64\n");
+        log_debug("Cannot convert decimal to int64");
             return INT_ERROR;
         }
         return val;
@@ -1687,21 +1687,21 @@ int64_t fn_int64(Item item) {
             return 0;
         }
         char* endptr;
-        printf("convert string/symbol to int64: %s\n", str->chars);
+        log_debug("convert string/symbol to int64: %s", str->chars);
         errno = 0;  // clear errno before calling strtoll
         int64_t val = strtoll(str->chars, &endptr, 10);
         if (endptr == str->chars) {
-            printf("Cannot convert string '%s' to int64\n", str->chars);
+        log_debug("Cannot convert string '%s' to int64", str->chars);
             return INT_ERROR;
         }
         if (errno == ERANGE) {
-            printf("String value '%s' out of int64 range\n", str->chars);
+        log_debug("String value '%s' out of int64 range", str->chars);
             return INT_ERROR;
         }
         printf("converted string to int64: %" PRId64 "\n", val);
         return val;
     }
-    printf("Cannot convert type %d to int64\n", item.type_id);
+        log_debug("Cannot convert type %d to int64", item.type_id);
     return INT_ERROR;
 }
 
@@ -1709,7 +1709,7 @@ int64_t fn_int64(Item item) {
 Item fn_normalize(Item str_item, Item type_item) {
     // normalize(string, 'nfc'|'nfd'|'nfkc'|'nfkd') - Unicode normalization
     if (str_item.type_id != LMD_TYPE_STRING) {
-        printf("normalize: first argument must be a string, got type: %d\n", str_item.type_id);
+        log_debug("normalize: first argument must be a string, got type: %d", str_item.type_id);
         return ItemError;
     }
     
@@ -1742,7 +1742,7 @@ Item fn_normalize(Item str_item, Item type_item) {
         (const utf8proc_uint8_t*)str->chars, str->len, &normalized, (utf8proc_option_t)options);
     
     if (normalized_len < 0) {
-        printf("normalize: utf8proc_map failed with error: %zd\n", normalized_len);
+        log_debug("normalize: utf8proc_map failed with error: %zd", normalized_len);
         return ItemError;
     }
     
@@ -1760,12 +1760,12 @@ Item fn_normalize(Item str_item, Item type_item) {
     
 #elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
     // Use ICU for normalization (fallback for compatibility)
-    printf("normalize: ICU normalization not implemented yet\n");
+        log_debug("normalize: ICU normalization not implemented yet");
     return ItemError;
     
 #else
     // ASCII-only mode: return original string (no normalization)
-    printf("normalize: Unicode normalization disabled (ASCII-only mode)\n");
+        log_debug("normalize: Unicode normalization disabled (ASCII-only mode)");
     return str_item;  // Return original string unchanged
 #endif
 }
@@ -1778,14 +1778,14 @@ Range* fn_to(Item item_a, Item item_b) {
         long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : *(long*)item_b.pointer;
         if (start > end) {
             // todo: should raise error
-            printf("Error: start of range is greater than end: %ld > %ld\n", start, end);
+        log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
             return NULL;
         }
         Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
         range->type_id = LMD_TYPE_RANGE;
         range->start = start;  range->end = end;
         range->length = end - start + 1;
-        printf("create range: %ld to %ld, length: %ld\n", range->start, range->end, range->length);
+        log_debug("create range: %ld to %ld, length: %ld", range->start, range->end, range->length);
         return range;
     }
     else {
@@ -1804,7 +1804,7 @@ int64_t it2l(Item itm) {
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         return (int64_t)*(double*)itm.pointer;
     }
-    printf("invalid type %d\n", itm.type_id);
+        log_debug("invalid type %d", itm.type_id);
     // todo: push error
     return 0;
 }
@@ -1819,13 +1819,13 @@ double it2d(Item itm) {
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         return *(double*)itm.pointer;
     }
-    printf("invalid type %d\n", itm.type_id);
+        log_debug("invalid type %d", itm.type_id);
     // todo: push error
     return 0;
 }
 
 Function* to_fn(fn_ptr ptr) {
-    printf("create fn %p\n", ptr);
+        log_debug("create fn %p", ptr);
     Function *fn = (Function*)calloc(1, sizeof(Function));
     fn->type_id = LMD_TYPE_FUNC;
     fn->ptr = ptr;
@@ -1833,21 +1833,21 @@ Function* to_fn(fn_ptr ptr) {
 }
 
 bool fn_is(Item a, Item b) {
-    printf("is expr\n");
+        log_debug("is expr");
     TypeId b_type_id = get_type_id(b);
     if (b_type_id != LMD_TYPE_TYPE) {
         return false;
     }
     TypeType *type_b = (TypeType *)b.type;
     TypeId a_type_id = get_type_id(a);
-    printf("is type %d, %d\n", a_type_id, type_b->type->type_id);
+        log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
         return a_type_id != LMD_TYPE_ERROR;
     case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
     case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-        printf("is array type: %d, %d\n", a_type_id, type_b->type->type_id);
+        log_debug("is array type: %d, %d", a_type_id, type_b->type->type_id);
         return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT || a_type_id == LMD_TYPE_ARRAY_FLOAT;
     default:
         return a_type_id == type_b->type->type_id;
@@ -1868,7 +1868,7 @@ CompResult equal_comp(Item a_item, Item b_item) {
     return equal_comp_unicode(a_item, b_item);
 #else
     // Original ASCII-only implementation
-    printf("equal_comp expr\n");
+        log_debug("equal_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
@@ -1935,10 +1935,10 @@ Item fn_eq(Item a_item, Item b_item) {
     }
     
     // Fallback to 3-state comparison function
-    printf("fn_eq fallback\n");
+        log_debug("fn_eq fallback");
     CompResult result = equal_comp(a_item, b_item);
     if (result == COMP_ERROR) {
-        printf("equality type error for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("equality type error for types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     return {.item = b2it(result == COMP_TRUE)};
@@ -1971,10 +1971,10 @@ Item fn_ne(Item a_item, Item b_item) {
     }
     
     // Fallback to 3-state comparison function
-    printf("fn_ne fallback\n");
+        log_debug("fn_ne fallback");
     CompResult result = equal_comp(a_item, b_item);
     if (result == COMP_ERROR) {
-        printf("inequality type error for types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("inequality type error for types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     return {.item = b2it(result == COMP_FALSE)};
@@ -2013,33 +2013,33 @@ Item fn_ge(Item a_item, Item b_item) {
 
 Item fn_not(Item item) {
     // Logical NOT - invert the truthiness of the item
-    printf("fn_not expr\n");
+        log_debug("fn_not expr");
     return {.item = b2it(!item_true(item))};
 }
 
 Item fn_and(Item a_item, Item b_item) {
-    printf("fn_and called with types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("fn_and called with types: %d, %d", a_item.type_id, b_item.type_id);
     
     // Fast path for boolean types
     if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
-        printf("fn_and: bool fast path\n");
+        log_debug("fn_and: bool fast path");
         return {.item = b2it(a_item.bool_val && b_item.bool_val)};
     }
     
     // Type error for string operands in logical operations
     if (a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING) {
-        printf("logical AND not supported with string types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("logical AND not supported with string types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     
     // Type error for null operands in logical operations
     if (a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        printf("logical AND not supported with null types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("logical AND not supported with null types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     
     // Fallback to generic truthiness evaluation for numeric and boolean combinations
-    printf("fn_and: generic truthiness fallback\n");
+        log_debug("fn_and: generic truthiness fallback");
     bool a_truth = item_true(a_item);
     bool b_truth = item_true(b_item);
     return {.item = b2it(a_truth && b_truth)};
@@ -2053,13 +2053,13 @@ Item fn_or(Item a_item, Item b_item) {
     
     // Type error for string operands in logical operations
     if (a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING) {
-        printf("logical OR not supported with string types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("logical OR not supported with string types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     
     // Type error for null operands in logical operations
     if (a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        printf("logical OR not supported with null types: %d, %d\n", a_item.type_id, b_item.type_id);
+        log_debug("logical OR not supported with null types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     
@@ -2070,7 +2070,7 @@ Item fn_or(Item a_item, Item b_item) {
 }
 
 bool fn_in(Item a_item, Item b_item) {
-    printf("in expr\n");
+        log_debug("in expr");
     if (b_item.type_id) { // b is scalar
         if (b_item.type_id == LMD_TYPE_STRING && a_item.type_id == LMD_TYPE_STRING) {
             String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
@@ -2118,7 +2118,7 @@ bool fn_in(Item a_item, Item b_item) {
             // check if a is in element
         }
         else {
-            printf("invalid type %d\n", b_type);
+        log_debug("invalid type %d", b_type);
         }
     }
     return false;
@@ -2260,7 +2260,7 @@ String* fn_string(Item itm) {
         str->len = len;  str->ref_cnt = 0;
         return (String*)str;
     }
-    printf("unhandled type %d\n", itm.type_id);
+        log_debug("unhandled type %d", itm.type_id);
     return NULL;
 }
 
@@ -2275,7 +2275,7 @@ Type* const_type(int type_index) {
         return &LIT_TYPE_ERROR;
     }    
     Type* type = (Type*)(type_list->data[type_index]);
-    printf("const_type %d, %d, %p\n", type_index, type->type_id, type);
+        log_debug("const_type %d, %d, %p", type_index, type->type_id, type);
     return type;
 }
 
@@ -2303,7 +2303,7 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
 Item fn_input(Item url, Item type) {
     String* url_str;
     if (url.type_id != LMD_TYPE_STRING && url.type_id != LMD_TYPE_SYMBOL) {
-        printf("input url must be a string or symbol, got type %d\n", url.type_id);
+        log_debug("input url must be a string or symbol, got type %d", url.type_id);
         return ItemNull;  // todo: push error
     }
     else {
@@ -2323,7 +2323,7 @@ Item fn_input(Item url, Item type) {
         type_str = (String*)type.pointer;
     }
     else if (type_id == LMD_TYPE_MAP) {
-        printf("input type is a map\n");
+        log_debug("input type is a map");
         // New behavior: type is a map with options
         Map* options_map = type.map;
         
@@ -2338,7 +2338,7 @@ Item fn_input(Item url, Item type) {
                 type_str = (String*)input_type.pointer;
             }
             else {
-                printf("input type must be a string or symbol, got type %d\n", type_value_type);
+        log_debug("input type must be a string or symbol, got type %d", type_value_type);
                 // todo: push error
                 type_str = NULL;  // input type ignored
             }
@@ -2354,14 +2354,14 @@ Item fn_input(Item url, Item type) {
                 flavor_str = (String*)input_flavor.pointer;
             }
             else {
-                printf("input flavor must be a string or symbol, got type %d\n", flavor_value_type);
+        log_debug("input flavor must be a string or symbol, got type %d", flavor_value_type);
                 // todo: push error
                 flavor_str = NULL;  // input flavor ignored
             }
         }
     }
     else {
-        printf("input type must be a string, symbol, or map, got type %d\n", type_id);
+        log_debug("input type must be a string, symbol, or map, got type %d", type_id);
         return ItemNull;  // todo: push error
     }
     
@@ -2373,7 +2373,7 @@ Item fn_input(Item url, Item type) {
 void fn_print(Item item) {
     String *str = fn_string(item);
     if (str) {
-        printf("%s\n", str->chars);
+        log_debug("%s", str->chars);
     }
 }
 
@@ -2397,7 +2397,7 @@ String* fn_format(Item item, Item type) {
         type_str = (String*)type.pointer;
     }
     else if (type_id == LMD_TYPE_MAP) {
-        printf("format type is a map\n");
+        log_debug("format type is a map");
         // New behavior: type is a map with options
         Map* options_map = (Map*)type.pointer;
         
@@ -2412,7 +2412,7 @@ String* fn_format(Item item, Item type) {
                 type_str = (String*)format_type.pointer;
             }
             else {
-                printf("format type must be a string or symbol, got type %d\n", type_value_type);
+        log_debug("format type must be a string or symbol, got type %d", type_value_type);
                 // todo: push error
                 type_str = NULL;  // format type ignored
             }
@@ -2428,18 +2428,18 @@ String* fn_format(Item item, Item type) {
                 flavor_str = (String*)format_flavor.pointer;
             }
             else {
-                printf("format flavor must be a string or symbol, got type %d\n", flavor_value_type);
+        log_debug("format flavor must be a string or symbol, got type %d", flavor_value_type);
                 // todo: push error
                 flavor_str = NULL;  // format flavor ignored
             }
         }
     }
     else {
-        printf("format type must be a string, symbol, or map, got type %d\n", type_id);
+        log_debug("format type must be a string, symbol, or map, got type %d", type_id);
         return NULL;  // todo: push error
     }
     
-    // printf("format item type: %s, flavor: %s\n", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
+        log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     String* result = format_data(item, type_str, flavor_str, context->heap->pool);
     if (result) {
          arraylist_append(context->heap->entries, (void*)s2it(result));
@@ -2466,7 +2466,7 @@ Item fn_index(Item item, Item index_item) {
         if (dval == (long)dval) {
             index = (long)dval;
         } else {
-            printf("index must be an integer, got float %g\n", dval);
+        log_debug("index must be an integer, got float %g", dval);
             return ItemNull;  // todo: push error
         }
         break;
@@ -2474,11 +2474,11 @@ Item fn_index(Item item, Item index_item) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:
         return fn_member(item, index_item);
     default:
-        printf("invalid index type %d\n", index_item.type_id);
+        log_debug("invalid index type %d", index_item.type_id);
         return ItemNull;
     }
 
-    printf("fn_index item index: %ld\n", index);
+        log_debug("fn_index item index: %ld", index);
     TypeId type_id = get_type_id(item);
     switch (type_id) {
     case LMD_TYPE_RANGE: {
@@ -2544,7 +2544,7 @@ Item fn_member(Item item, Item key) {
 // length of an item's content, relates to indexed access, i.e. item[index] 
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
-    printf("fn_len item: %d\n", type_id);
+        log_debug("fn_len item: %d", type_id);
     int64_t size = 0;
     switch (type_id) {
     case LMD_TYPE_LIST:
@@ -2593,17 +2593,17 @@ int64_t fn_len(Item item) {
 // substring system function - extracts a substring from start to end (exclusive)
 Item fn_substring(Item str_item, Item start_item, Item end_item) {
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        printf("fn_substring: first argument must be a string\n");
+        log_debug("fn_substring: first argument must be a string");
         return ItemError;
     }
     
     if (get_type_id(start_item) != LMD_TYPE_INT && get_type_id(start_item) != LMD_TYPE_INT64) {
-        printf("fn_substring: start index must be an integer\n");
+        log_debug("fn_substring: start index must be an integer");
         return ItemError;
     }
     
     if (get_type_id(end_item) != LMD_TYPE_INT && get_type_id(end_item) != LMD_TYPE_INT64) {
-        printf("fn_substring: end index must be an integer\n");
+        log_debug("fn_substring: end index must be an integer");
         return ItemError;
     }
     
@@ -2655,12 +2655,12 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
 // contains system function - checks if a string contains a substring
 Item fn_contains(Item str_item, Item substr_item) {
     if (get_type_id(str_item) != LMD_TYPE_STRING) {
-        printf("fn_contains: first argument must be a string\n");
+        log_debug("fn_contains: first argument must be a string");
         return ItemError;
     }
     
     if (get_type_id(substr_item) != LMD_TYPE_STRING) {
-        printf("fn_contains: second argument must be a string\n");
+        log_debug("fn_contains: second argument must be a string");
         return ItemError;
     }
     
