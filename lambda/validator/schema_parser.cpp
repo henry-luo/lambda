@@ -155,129 +155,172 @@ TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node) {
     return def;
 }
 
+// Recursion depth tracking to prevent infinite recursion
+static int schema_parse_depth = 0;
+static const int MAX_SCHEMA_PARSE_DEPTH = 50;
+
 TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     if (!parser || ts_node_is_null(type_expr_node)) return NULL;
+    
+    // Prevent infinite recursion
+    if (schema_parse_depth >= MAX_SCHEMA_PARSE_DEPTH) {
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: max recursion depth reached\n");
+        return create_primitive_schema(LMD_TYPE_STRING, parser->pool);
+    }
+    
+    schema_parse_depth++;
     
     TSSymbol symbol = ts_node_symbol(type_expr_node);
     const char* node_type = ts_node_type(type_expr_node);
     
-    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s'\n", symbol, node_type);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s', depth=%d\n", 
+                                   symbol, node_type, schema_parse_depth);
     if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type=%d, sym_primary_type=%d, sym_identifier=%d\n", 
            sym_base_type, sym_primary_type, sym_identifier);
+    
+    TypeSchema* result = NULL;
     
     // Handle different node types based on Tree-sitter symbols from ts-enum.h
     switch (symbol) {
         // Base type nodes
         case anon_sym_int:
         case sym_integer:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_INT);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_INT);
+            break;
             
         case anon_sym_float:
         case sym_float:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_FLOAT);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_FLOAT);
+            break;
             
         case anon_sym_number:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_FLOAT);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_FLOAT);
+            break;
             
         case anon_sym_string:
         case sym_string:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);
+            break;
             
         case anon_sym_bool:
         case sym_true:
         case sym_false:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_BOOL);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_BOOL);
+            break;
             
         case anon_sym_char:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);  // Char is represented as string
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);  // Char is represented as string
+            break;
             
         case anon_sym_symbol:
         case sym_symbol:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_SYMBOL);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_SYMBOL);
+            break;
             
         case anon_sym_datetime:
         case sym_datetime:
         case anon_sym_date:
         case anon_sym_time:
         case sym_time:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_DTIME);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_DTIME);
+            break;
             
         case anon_sym_decimal:
         case sym_decimal:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_DECIMAL);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_DECIMAL);
+            break;
             
         case anon_sym_binary:
         case sym_binary:
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_BINARY);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_BINARY);
+            break;
             
         case anon_sym_null:
         case sym_null:
             if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] get_type_id: null case triggered\n");
-            return build_primitive_schema(parser, type_expr_node, LMD_TYPE_NULL);
+            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_NULL);
+            break;
             
         // Complex type nodes
         case anon_sym_list:
         case sym_list:
-            return build_list_schema(parser, type_expr_node);
+            result = build_list_schema(parser, type_expr_node);
+            break;
             
         case anon_sym_array:
         case sym_array:
-            return build_array_schema(parser, type_expr_node);
+            result = build_array_schema(parser, type_expr_node);
+            break;
             
         case anon_sym_map:
         case sym_map:
-            return build_map_schema(parser, type_expr_node);
+            result = build_map_schema(parser, type_expr_node);
+            break;
             
         case anon_sym_element:
         case sym_element:
-            return build_element_schema(parser, type_expr_node);
+            result = build_element_schema(parser, type_expr_node);
+            break;
             
         case anon_sym_object:
-            return build_object_schema(parser, type_expr_node);
+            result = build_object_schema(parser, type_expr_node);
+            break;
             
         case anon_sym_function:
-            return build_function_schema(parser, type_expr_node);
+            result = build_function_schema(parser, type_expr_node);
+            break;
             
         // Type expressions
         case sym_base_type:
         case sym_primary_type:
             if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_base_type/sym_primary_type case, calling build_primary_type_schema\n");
-            return build_primary_type_schema(parser, type_expr_node);
+            result = build_primary_type_schema(parser, type_expr_node);
+            break;
             
         case sym_list_type:
-            return build_list_type_schema(parser, type_expr_node);
+            result = build_list_type_schema(parser, type_expr_node);
+            break;
             
         case sym_array_type:
-            return build_array_type_schema(parser, type_expr_node);
+            result = build_array_type_schema(parser, type_expr_node);
+            break;
             
         case sym_map_type:
-            return build_map_type_schema(parser, type_expr_node);
+            result = build_map_type_schema(parser, type_expr_node);
+            break;
             
         case sym_element_type:
             if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_element_type case matched, calling build_element_type_schema\n");
-            return build_element_type_schema(parser, type_expr_node);
+            result = build_element_type_schema(parser, type_expr_node);
+            break;
         
         case sym_content_type:
             if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_content_type case matched\n");
-            return build_content_type_schema(parser, type_expr_node);
+            result = build_content_type_schema(parser, type_expr_node);
+            break;
             
         case sym_fn_type:
-            return build_function_type_schema(parser, type_expr_node);
+            result = build_function_type_schema(parser, type_expr_node);
+            break;
             
         case sym_binary_type:
-            return build_binary_type_schema(parser, type_expr_node);
+            result = build_binary_type_schema(parser, type_expr_node);
+            break;
             
         case sym_type_occurrence:
-            return build_occurrence_schema(parser, type_expr_node);
+            result = build_occurrence_schema(parser, type_expr_node);
+            break;
             
         // Identifiers and references
         case sym_identifier:
             if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: sym_identifier case, calling build_reference_schema\n");
-            return build_reference_schema(parser, type_expr_node);
+            result = build_reference_schema(parser, type_expr_node);
+            break;
             
         // Binary expressions (for union types: Type1 | Type2)
         case sym_binary_expr:
-            return build_binary_expression_schema(parser, type_expr_node);
+            result = build_binary_expression_schema(parser, type_expr_node);
+            break;
             
         default:
             if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: default case for symbol=%d, type='%s'\n", symbol, node_type);
@@ -286,7 +329,8 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
                 TSNode op_node = ts_node_child(type_expr_node, 1);
                 StrView op = get_node_source(parser, op_node);
                 if (strview_equal(&op, "|")) {
-                    return build_union_schema(parser, type_expr_node);
+                    result = build_union_schema(parser, type_expr_node);
+                    break;
                 }
             }
             
@@ -308,8 +352,13 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
             fprintf(stderr, "[SCHEMA_PARSER]   Defaulting to LMD_TYPE_ANY.\n");
             
             // Default to any type
-            return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+            result = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+            break;
     }
+    
+    // Cleanup recursion depth and return result
+    schema_parse_depth--;
+    return result;
 }
 
 // ==================== Type Building Functions ====================
@@ -511,16 +560,219 @@ TypeSchema* build_content_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_element_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    // Extract element tag name
-    // TODO: Parse actual element structure
-    return create_element_schema("element", parser->pool);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Parsing element_type node\n");
+    
+    // Extract element tag name from first identifier child
+    const char* tag_name = "element"; // default
+    TSNode tag_node = ts_node_named_child(node, 0);
+    if (ts_node_symbol(tag_node) == sym_identifier) {
+        StrView tag_view = get_node_source(parser, tag_node);
+        char* tag_str = (char*)pool_calloc(parser->pool, tag_view.length + 1);
+        memcpy(tag_str, tag_view.str, tag_view.length);
+        tag_str[tag_view.length] = '\0';
+        tag_name = tag_str;
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Element tag: '%s'\n", tag_name);
+    }
+    
+    // Create element schema with proper tag name
+    TypeSchema* schema = (TypeSchema*)pool_calloc(parser->pool, sizeof(TypeSchema));
+    schema->schema_type = LMD_SCHEMA_ELEMENT;
+    
+    SchemaElement* element_data = (SchemaElement*)pool_calloc(parser->pool, sizeof(SchemaElement));
+    element_data->tag = strview_from_cstr(tag_name);
+    element_data->attributes = NULL;
+    element_data->content_types = NULL;
+    element_data->content_count = 0;
+    element_data->is_open = true;
+    
+    // Parse attributes and content from the element_type node
+    // Look for attr and content_type children
+    int child_count = ts_node_named_child_count(node);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Element has %d children\n", child_count);
+    
+    // Limit the number of children we process to prevent infinite loops
+    int max_children = child_count < 100 ? child_count : 100;
+    
+    for (int i = 1; i < max_children; i++) { // Skip tag name (index 0)
+        TSNode child = ts_node_named_child(node, i);
+        if (ts_node_is_null(child)) {
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Child %d is null, skipping\n", i);
+            continue;
+        }
+        
+        uint16_t child_symbol = ts_node_symbol(child);
+        
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Child %d symbol: %d\n", i, child_symbol);
+        
+        if (child_symbol == sym_attr) {
+            // Parse attribute: name: type
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Parsing attribute\n");
+            
+            TSNode name_node = ts_node_child_by_field_name(child, "name", 4);
+            TSNode type_node = ts_node_child_by_field_name(child, "as", 2);
+            
+            if (!ts_node_is_null(name_node) && !ts_node_is_null(type_node)) {
+                StrView attr_name = get_node_source(parser, name_node);
+                
+                // Validate attribute name length
+                if (attr_name.length > 0 && attr_name.length < 256) {
+                    TypeSchema* attr_type = build_schema_type(parser, type_node);
+                    
+                    if (attr_type) {
+                        // Create new attribute field
+                        SchemaMapField* attr_field = (SchemaMapField*)pool_calloc(parser->pool, sizeof(SchemaMapField));
+                        if (attr_field) {
+                            attr_field->name = attr_name;
+                            attr_field->type = attr_type;
+                            attr_field->required = true; // default for now
+                            attr_field->next = element_data->attributes;
+                            element_data->attributes = attr_field;
+                            
+                            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Added attribute '%.*s'\n", 
+                                   (int)attr_name.length, attr_name.str);
+                        }
+                    }
+                }
+            }
+        } else if (child_symbol == sym_content_type) {
+            // Parse content types
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Parsing content_type\n");
+            
+            // Count number of content types in the content_type node
+            int content_child_count = ts_node_named_child_count(child);
+            if (content_child_count > 0) {
+                element_data->content_count = content_child_count;
+                element_data->content_types = (TypeSchema**)pool_calloc(parser->pool, 
+                    sizeof(TypeSchema*) * content_child_count);
+                
+                for (int j = 0; j < content_child_count; j++) {
+                    TSNode content_child = ts_node_named_child(child, j);
+                    element_data->content_types[j] = build_schema_type(parser, content_child);
+                    
+                    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Added content type %d\n", j);
+                }
+            }
+        } else {
+            // Check if this child could be content (type references, identifiers, etc.)
+            // Skip punctuation and comments
+            const char* node_type_str = ts_node_type(child);
+            if (child_symbol != sym_comment && 
+                child_symbol != anon_sym_LT && child_symbol != anon_sym_GT &&
+                child_symbol != 27 && child_symbol != 51 && child_symbol != 52 && child_symbol != 4 &&
+                strcmp(node_type_str, ",") != 0 && strcmp(node_type_str, "ERROR") != 0) {
+                
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Found potential content child: symbol=%d, type='%s'\n", 
+                       child_symbol, node_type_str);
+                
+                // Try to parse this as content
+                TypeSchema* content_schema = build_schema_type(parser, child);
+                if (content_schema) {
+                    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Successfully parsed content schema\n");
+                    
+                    // Add to content types (reallocate if needed)
+                    element_data->content_count++;
+                    if (element_data->content_types == NULL) {
+                        element_data->content_types = (TypeSchema**)pool_calloc(parser->pool, 
+                            sizeof(TypeSchema*) * element_data->content_count);
+                    } else {
+                        // Reallocate to accommodate new content
+                        TypeSchema** new_content_types = (TypeSchema**)pool_calloc(parser->pool, 
+                            sizeof(TypeSchema*) * element_data->content_count);
+                        for (int k = 0; k < element_data->content_count - 1; k++) {
+                            new_content_types[k] = element_data->content_types[k];
+                        }
+                        element_data->content_types = new_content_types;
+                    }
+                    element_data->content_types[element_data->content_count - 1] = content_schema;
+                    
+                    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Added content type %d (total: %d)\n", 
+                           element_data->content_count - 1, element_data->content_count);
+                }
+            }
+        }
+    }
+    
+    schema->schema_data = element_data;
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Built element schema for '%s' with %d content types\n", 
+           tag_name, element_data->content_count);
+    
+    return schema;
 }
 
 TypeSchema* build_occurrence_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-    TypeSchema* base_type = create_primitive_schema(LMD_TYPE_STRING, parser->pool);
-    return create_occurrence_schema(base_type, 0, 1, parser->pool);
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Parsing type_occurrence node\n");
+    
+    // type_occurrence: base_type occurrence
+    // First child should be the base type, second should be the occurrence
+    if (ts_node_named_child_count(node) < 2) {
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: type_occurrence has insufficient children\n");
+        return create_primitive_schema(LMD_TYPE_STRING, parser->pool);
+    }
+    
+    TSNode base_type_node = ts_node_named_child(node, 0);
+    TSNode occurrence_node = ts_node_named_child(node, 1);
+    
+    // Parse the base type
+    TypeSchema* base_type = build_schema_type(parser, base_type_node);
+    if (!base_type) {
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Failed to parse base type\n");
+        base_type = create_primitive_schema(LMD_TYPE_STRING, parser->pool);
+    }
+    
+    // Parse the occurrence modifier
+    char modifier = '?'; // default
+    long min_count = 0;
+    long max_count = 1;
+    
+    if (ts_node_symbol(occurrence_node) == sym_occurrence) {
+        StrView occ_text = get_node_source(parser, occurrence_node);
+        if (occ_text.length > 0) {
+            modifier = occ_text.str[0];
+            
+            switch (modifier) {
+                case '?':
+                    min_count = 0;
+                    max_count = 1;
+                    break;
+                case '+':
+                    min_count = 1;
+                    max_count = -1; // unlimited
+                    break;
+                case '*':
+                    min_count = 0;
+                    max_count = -1; // unlimited
+                    break;
+                default:
+                    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Unknown occurrence modifier '%c'\n", modifier);
+                    modifier = '?';
+                    min_count = 0;
+                    max_count = 1;
+                    break;
+            }
+            
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Occurrence modifier: '%c' (min=%ld, max=%ld)\n", 
+                   modifier, min_count, max_count);
+        }
+    } else {
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Expected occurrence node, got symbol %d\n", 
+               ts_node_symbol(occurrence_node));
+    }
+    
+    // Create occurrence schema
+    TypeSchema* schema = (TypeSchema*)pool_calloc(parser->pool, sizeof(TypeSchema));
+    schema->schema_type = LMD_SCHEMA_OCCURRENCE;
+    
+    SchemaOccurrence* occ_data = (SchemaOccurrence*)pool_calloc(parser->pool, sizeof(SchemaOccurrence));
+    occ_data->base_type = base_type;
+    occ_data->modifier = modifier;
+    
+    schema->schema_data = occ_data;
+    
+    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_PARSER] DEBUG: Built occurrence schema with modifier '%c'\n", modifier);
+    
+    return schema;
 }
 
 TypeSchema* build_reference_schema(SchemaParser* parser, TSNode node) {
@@ -961,6 +1213,27 @@ TypeSchema* build_element_type_schema(SchemaParser* parser, TSNode node) {
                 content_types[content_count] = literal_schema;
                 content_count++;
                 if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: added content literal, count now %d\n", content_count);
+            }
+            continue;
+        }
+        
+        // Check if this is a direct type reference for content (like RecipeType+, StepType, etc.)
+        if (child_symbol == sym_type_occurrence || child_symbol == sym_primary_type || 
+            (child_symbol == sym_identifier && strcmp(child_type, "identifier") == 0)) {
+            if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: found direct type reference for content: symbol=%d, type='%s'\n", child_symbol, child_type);
+            // Parse the direct type reference as content
+            TypeSchema* type_schema = build_schema_type(parser, child);
+            if (type_schema) {
+                // Allocate new content array
+                TypeSchema** new_content_types = (TypeSchema**)pool_calloc(parser->pool, (content_count + 1) * sizeof(TypeSchema*));
+                // Copy old content if any
+                if (content_types) {
+                    memcpy(new_content_types, content_types, content_count * sizeof(TypeSchema*));
+                }
+                content_types = new_content_types;
+                content_types[content_count] = type_schema;
+                content_count++;
+                if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_element_type_schema: added direct type reference, count now %d\n", content_count);
             }
             continue;
         }
