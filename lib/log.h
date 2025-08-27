@@ -35,12 +35,31 @@ typedef enum {
     LOG_LEVEL_FATAL = 120
 } log_level;
 
+/* Format configuration structure */
+typedef struct log_format_s {
+    char name[64];           /* format name */
+    char pattern[256];       /* format pattern */
+    int show_timestamp;      /* show timestamp */
+    int show_date;          /* show date part of timestamp */
+    int show_category;      /* show category name */
+    int hide_default_category; /* hide category if it's "default" */
+} log_format_t;
+
+/* Rule configuration structure */
+typedef struct log_rule_s {
+    char category[64];      /* category name */
+    int level;              /* minimum log level */
+    char output_file[256];  /* output file path, empty for stdout/stderr */
+    char format_name[64];   /* format to use */
+} log_rule_t;
+
 /* log category structure */
 typedef struct log_category_s {
-    char name[64];      /* category name */
-    int level;          /* current log level */
-    FILE *output;       /* output stream (stdout, stderr, or file) */
-    int enabled;        /* whether this category is enabled */
+    char name[64];          /* category name */
+    int level;              /* current log level */
+    FILE *output;           /* output stream (stdout, stderr, or file) */
+    int enabled;            /* whether this category is enabled */
+    log_format_t *format;   /* format configuration */
 } log_category_t;
 
 /* Basic log function declarations */
@@ -97,6 +116,11 @@ void log_default_fini(void);
 void log_enable_timestamps(int enable);
 void log_enable_colors(int enable);
 const char* log_level_to_string(int level);
+
+/* Format management */
+log_format_t* log_get_format(const char *name);
+int log_add_format(const char *name, const char *pattern);
+void log_set_default_format(const char *pattern);
 
 /* Configuration parsing */
 int log_parse_config_file(const char *filename);
