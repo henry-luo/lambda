@@ -78,3 +78,15 @@ more text">
  "test"
  " and "
  "more text!">
+<a b:123, c:true
+ "test"
+ 123
+ "a"
+ <a b:123, c:true
+  "test"
+  <a b:123, c:true
+   "test"
+   123
+   "a">
+  123
+  "a">>
