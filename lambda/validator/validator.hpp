@@ -436,8 +436,9 @@ void print_validation_path(PathSegment* path);
  * @param data_file Path to the data file to validate
  * @param schema_file Path to the schema file
  * @param input_format Format of the input file (e.g., "html", "json", etc.) or NULL for auto-detect
+ * @return ValidationResult* containing validation outcome and errors, or NULL on system failure
  */
-void run_validation(const char *data_file, const char *schema_file, const char *input_format);
+ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
 
 // ==================== Enhanced Utility Functions ====================
 
