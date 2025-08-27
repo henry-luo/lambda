@@ -1013,7 +1013,78 @@ TypeSchema* build_array_type_schema(SchemaParser* parser, TSNode node) {
 TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
     if (!parser) return NULL;
     
-        // //printf("[SCHEMA_PARSER] DEBUG: Building map type schema from node\n");    // Create map schema with proper field parsing
+    // First pass: count actual fields to detect single-field maps
+    int actual_field_count = 0;
+    TypeSchema* single_field_type = NULL;
+    
+    uint32_t child_count = ts_node_child_count(node);
+    for (uint32_t i = 0; i < child_count; i++) {
+        TSNode child = ts_node_child(node, i);
+        TSSymbol child_symbol = ts_node_symbol(child);
+        
+        if (child_symbol == sym_map_type_item) {
+            actual_field_count++;
+            
+            // If this is the first field, capture its type for potential unwrapping
+            if (actual_field_count == 1) {
+                TSNode type_node = ts_node_child_by_field_id(child, FIELD_TYPE);
+                if (ts_node_is_null(type_node)) {
+                    // Try to find type in child nodes
+                    uint32_t item_child_count = ts_node_child_count(child);
+                    for (uint32_t j = 0; j < item_child_count; j++) {
+                        TSNode item_child = ts_node_child(child, j);
+                        const char* item_child_type = ts_node_type(item_child);
+                        if (j > 0 && (strcmp(item_child_type, "identifier") == 0 || 
+                                     strstr(item_child_type, "type") != NULL)) {
+                            type_node = item_child;
+                            break;
+                        }
+                    }
+                }
+                if (!ts_node_is_null(type_node)) {
+                    single_field_type = build_schema_type(parser, type_node);
+                }
+            }
+        }
+    }
+    
+    // For single-field maps with field name "content", return the field type directly
+    // This handles cases like EmailBody = { content: EmailPart }
+    if (actual_field_count == 1 && single_field_type) {
+        TSNode first_field_node = {0};
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(node, i);
+            if (ts_node_symbol(child) == sym_map_type_item) {
+                first_field_node = child;
+                break;
+            }
+        }
+        
+        if (!ts_node_is_null(first_field_node)) {
+            TSNode name_node = ts_node_child_by_field_id(first_field_node, FIELD_NAME);
+            if (ts_node_is_null(name_node)) {
+                // Find name in child nodes
+                uint32_t item_child_count = ts_node_child_count(first_field_node);
+                for (uint32_t j = 0; j < item_child_count; j++) {
+                    TSNode item_child = ts_node_child(first_field_node, j);
+                    if (strcmp(ts_node_type(item_child), "identifier") == 0) {
+                        name_node = item_child;
+                        break;
+                    }
+                }
+            }
+            
+            if (!ts_node_is_null(name_node)) {
+                StrView field_name = get_node_source(parser, name_node);
+                if (field_name.length == 7 && memcmp(field_name.str, "content", 7) == 0) {
+                    if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_map_type_schema: unwrapping single 'content' field to direct type\n");
+                    return single_field_type;
+                }
+            }
+        }
+    }
+    
+    // //printf("[SCHEMA_PARSER] DEBUG: Building map type schema from node\n");    // Create map schema with proper field parsing
     TypeSchema* schema = create_map_schema(
         create_primitive_schema(LMD_TYPE_STRING, parser->pool), 
         create_primitive_schema(LMD_TYPE_ANY, parser->pool), 
@@ -1031,7 +1102,6 @@ TypeSchema* build_map_type_schema(SchemaParser* parser, TSNode node) {
     SchemaMapField* last_field = NULL;
     int field_count = 0;
     
-    uint32_t child_count = ts_node_child_count(node);
     //printf("[SCHEMA_PARSER] DEBUG: Map type node has %d children\n", child_count);
     
     for (uint32_t i = 0; i < child_count; i++) {
