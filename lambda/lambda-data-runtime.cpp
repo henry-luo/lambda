@@ -93,7 +93,7 @@ List* list() {
 }
 
 Item list_fill(List *list, int count, ...) {
-        log_debug("list_fill cnt: %d", count);
+    log_debug("list_fill cnt: %d", count);
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {

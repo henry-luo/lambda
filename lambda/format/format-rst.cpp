@@ -1,4 +1,10 @@
 #include "format.h"
+#include <string.h>
+#include <ctype.h>
+
+// Global recursion depth counter to prevent infinite recursion
+static thread_local int recursion_depth = 0;
+#define MAX_RECURSION_DEPTH 50
 
 static void format_item(StrBuf* sb, Item item);
 static void format_element(StrBuf* sb, Element* elem);
@@ -84,16 +90,22 @@ static void format_heading(StrBuf* sb, Element* elem) {
     char underline_chars[] = {'=', '-', '~', '^', '"', '\''};
     char underline_char = underline_chars[(level - 1) % 6];
     
-    // First, format the heading text
+    // Format the heading text
+    size_t start_length = sb->length;
     format_element_children(sb, elem);
+    size_t end_length = sb->length;
+    
+    // Calculate text length (excluding newlines)
+    int title_length = 0;
+    for (size_t i = start_length; i < end_length; i++) {
+        if (sb->str[i] != '\n' && sb->str[i] != '\r') {
+            title_length++;
+        }
+    }
+    
     strbuf_append_char(sb, '\n');
     
-    // Calculate the length of the heading text for underline
-    // This is a simplification - we'd need to track actual text length
-    // For now, we'll use a reasonable default length
-    int title_length = 40; // Default underline length
-    
-    // Add the underline
+    // Add the underline with the same length as the title
     for (int i = 0; i < title_length; i++) {
         strbuf_append_char(sb, underline_char);
     }
@@ -190,8 +202,8 @@ static void format_list(StrBuf* sb, Element* elem) {
                         snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
                         strbuf_append_str(sb, num_buf);
                     } else {
-                        // RST uses * for bullet points
-                        strbuf_append_str(sb, "* ");
+                        // RST uses - for bullet points to match input format
+                        strbuf_append_str(sb, "- ");
                     }
                     
                     format_element_children(sb, li_elem);
@@ -292,14 +304,27 @@ static void format_thematic_break(StrBuf* sb) {
 }
 
 static void format_element_children(StrBuf* sb, Element* elem) {
+    // Prevent infinite recursion
+    if (recursion_depth >= MAX_RECURSION_DEPTH) {
+        printf("RST formatter: Maximum recursion depth reached, stopping element_children\n");
+        return;
+    }
+    
+    recursion_depth++;
+    
     // Element extends List, so access content through List interface
     List* list = (List*)elem;
-    if (list->length == 0) return;
+    if (list->length == 0) {
+        recursion_depth--;
+        return;
+    }
     
     for (long i = 0; i < list->length; i++) {
         Item child_item = list->items[i];
         format_item(sb, child_item);
     }
+    
+    recursion_depth--;
 }
 
 // format Lambda element to RST
@@ -345,6 +370,14 @@ static void format_element(StrBuf* sb, Element* elem) {
 
 // Format any item to RST
 static void format_item(StrBuf* sb, Item item) {
+    // Prevent infinite recursion
+    if (recursion_depth >= MAX_RECURSION_DEPTH) {
+        printf("RST formatter: Maximum recursion depth reached, stopping format_item\n");
+        return;
+    }
+    
+    recursion_depth++;
+    
     TypeId type = get_type_id(item);
     
     switch (type) {
@@ -376,6 +409,8 @@ static void format_item(StrBuf* sb, Item item) {
         // For other types, skip or handle gracefully
         break;
     }
+    
+    recursion_depth--;
 }
 
 // formats RST to a provided StrBuf
@@ -384,6 +419,9 @@ void format_rst(StrBuf* sb, Item root_item) {
     
     // Handle null/empty root item
     if (root_item .item == ITEM_NULL || (root_item.item == ITEM_NULL)) return;
+    
+    // Reset recursion depth for each top-level call
+    recursion_depth = 0;
     
     format_item(sb, root_item);
 }
