@@ -1770,8 +1770,10 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         skip_math_whitespace(math);
         
         Item right = parse_addition_expression(input, math, flavor);
-        if (right .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
+        if (right .item == ITEM_ERROR || right .item == ITEM_NULL) {
+            // If we can't parse the right side, break out of the loop
+            // This prevents infinite loops when encountering unparseable expressions
+            break;
         }
         
         left = create_binary_expr(input, op_name, left, right);

@@ -140,11 +140,11 @@ static void format_code(StrBuf* sb, Element* elem) {
         // Code block using RST code-block directive
         strbuf_append_str(sb, ".. code-block:: ");
         strbuf_append_str(sb, lang_attr->chars);
-        strbuf_append_str(sb, "\n\n");
+        strbuf_append_str(sb, "\n\n   ");
         
-        // Add indentation to all lines
-        strbuf_append_str(sb, "   ");
+        // Format children with proper indentation
         format_element_children(sb, elem);
+        
         strbuf_append_str(sb, "\n\n");
     } else {
         // Inline code

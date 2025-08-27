@@ -247,12 +247,15 @@ ValidationResult* validate_item(SchemaValidator* validator, TypedItem typed_item
            LMD_SCHEMA_PRIMITIVE, LMD_SCHEMA_UNION, LMD_SCHEMA_ARRAY);
     if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: LMD_SCHEMA_MAP=%d, LMD_SCHEMA_ELEMENT=%d, LMD_SCHEMA_REFERENCE=%d\n", 
            LMD_SCHEMA_MAP, LMD_SCHEMA_ELEMENT, LMD_SCHEMA_REFERENCE);
+    printf("[EMERGENCY_DEBUG] About to switch on schema_type=%d\n", schema->schema_type); fflush(stdout);
     switch (schema->schema_type) {
         case LMD_SCHEMA_PRIMITIVE:
+            printf("[EMERGENCY_DEBUG] Matched LMD_SCHEMA_PRIMITIVE case\n"); fflush(stdout);
             if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_primitive\n");
             result = validate_primitive(typed_item, schema, context);
             break;
         case LMD_SCHEMA_UNION:
+            printf("[EMERGENCY_DEBUG] Matched LMD_SCHEMA_UNION case\n"); fflush(stdout);
             if (ENABLE_SCHEMA_DEBUG) if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG] validate_item: Calling validate_union\n");
             result = validate_union(validator, typed_item, schema, context);
             break;
