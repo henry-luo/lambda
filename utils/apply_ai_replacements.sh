@@ -54,6 +54,12 @@ while IFS= read -r line; do
             continue
         fi
         
+        # Skip sprintf/snprintf lines (these are string formatting, not logging)
+        if [[ "$original_line" =~ (sprintf|snprintf)\( ]]; then
+            echo "  Skipping: Line $line_num contains sprintf/snprintf (string formatting, not logging)"
+            continue
+        fi
+        
         # Generate replacement based on the printf pattern
         if [[ "$original_line" =~ printf\( ]]; then
             # Handle printf statements
