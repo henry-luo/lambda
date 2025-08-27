@@ -1778,7 +1778,7 @@ Range* fn_to(Item item_a, Item item_b) {
         long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : *(long*)item_b.pointer;
         if (start > end) {
             // todo: should raise error
-        log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
+            log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
             return NULL;
         }
         Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
