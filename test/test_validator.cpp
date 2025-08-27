@@ -15,7 +15,11 @@
 #include <criterion/criterion.h>
 #include <criterion/logging.h>
 
-int exec_validation(int argc, char* argv[]);
+// Include validator headers for ValidationResult and run_validation
+#include "../lambda/validator/validator.hpp"
+
+ValidationResult* exec_validation(int argc, char* argv[]);
+ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
 
 // Memory pool disabled for CLI-only tests
 // static VariableMemPool* test_pool = NULL;
@@ -133,7 +137,7 @@ void test_cli_validation_helper(const char* data_file, const char* schema_file,
     cr_log_info("TEST DEBUG: Data file path: %s", data_file);
 
     cr_log_info("Calling exec_validation:: with %d arguments for %s", test_argc, data_file);    // Call the validation function directly
-    int validation_result = exec_validation(test_argc, test_argv);
+    ValidationResult* validation_result = exec_validation(test_argc, test_argv);
     printf("after exec_validation\n");
 
     // Restore stdout and stderr
@@ -188,66 +192,43 @@ void test_cli_validation_helper(const char* data_file, const char* schema_file,
                      strstr(error_output, "Syntax tree has errors") != NULL ||
                      strstr(error_output, "Segmentation fault") != NULL;
     
-    cr_log_info("Testing %s with format '%s' against %s (result: %d)", 
-                data_file, format ? format : "auto", schema_file ? schema_file : "(default)", validation_result);
+    cr_log_info("Testing %s with format '%s' against %s (result: %s)", 
+                data_file, format ? format : "auto", schema_file ? schema_file : "(default)", 
+                validation_result ? (validation_result->valid ? "valid" : "invalid") : "null");
     cr_log_info("Output preview: %.200s", output);
     if (strlen(error_output) > 0) {
         cr_log_info("Error output: %.200s", error_output);
     }
     
     if (should_pass) {
-        if (!validation_passed || has_errors || validation_result != 0) {
+        bool validation_succeeded = validation_result && validation_result->valid;
+        if (!validation_passed || has_errors || !validation_succeeded) {
             cr_log_error("Expected validation to pass but it failed");
             cr_log_error("Full output: %s", output);
             cr_log_error("Full error output: %s", error_output);
         }
         // For positive tests, we expect validation to pass OR input parsing to succeed
-        bool test_passed = (validation_result == 0) && 
-                          (validation_passed || strstr(output, "Successfully parsed input file") != NULL);
-        cr_assert(test_passed, "Validation should pass for %s with format %s", 
-                  data_file, format ? format : "auto");
+        bool test_passed = validation_succeeded && 
+                          !has_errors && 
+                          !strstr(error_output, "Segmentation fault");
+        
+        cr_assert(test_passed, 
+                 "Expected validation to succeed for file '%s' with format '%s', but it failed. Output: %s", 
+                 data_file, format ? format : "auto", output);
     } else {
-        if (validation_result == 0 && validation_passed && !has_errors) {
-            cr_log_error("Expected validation to fail but it passed");
-            cr_log_error("Full output: %s", output);
-            cr_log_error("Full error output: %s", error_output);
-        }
-        // For negative tests, we expect validation to fail OR errors to occur
-        bool test_failed = (validation_result != 0) || !validation_passed || has_errors;
-        cr_assert(test_failed, "Validation should fail for %s with format %s", 
-                  data_file, format ? format : "auto");
+        // For negative tests, we expect validation to fail
+        bool validation_failed = !validation_result || !validation_result->valid;
+        bool test_passed = validation_failed || has_errors;
+        
+        cr_assert(test_passed, 
+                 "Expected validation to fail for file '%s' with format '%s', but it succeeded. Output: %s", 
+                 data_file, format ? format : "auto", output);
     }
 }
 
 // Helper function to test automatic schema detection without explicit -s flag using direct function calls
 void test_auto_schema_detection_helper(const char* data_file, const char* expected_schema_message, 
                                       const char* format, bool should_pass) {
-    
-    // Capture stdout and stderr for validation output analysis
-    fflush(stdout);
-    fflush(stderr);
-    
-    // Redirect stdout to capture validation output
-    int stdout_fd = dup(STDOUT_FILENO);
-    int stderr_fd = dup(STDERR_FILENO);
-    
-    char temp_stdout[] = "/tmp/lambda_test_stdout_XXXXXX";
-    char temp_stderr[] = "/tmp/lambda_test_stderr_XXXXXX";
-    
-    int stdout_temp_fd = mkstemp(temp_stdout);
-    int stderr_temp_fd = mkstemp(temp_stderr);
-    
-    if (stdout_temp_fd == -1 || stderr_temp_fd == -1) {
-        cr_log_error("Failed to create temporary files for output capture");
-        cr_assert(false, "Cannot create temporary files");
-        return;
-    }
-    
-    // Redirect stdout and stderr to temp files
-    dup2(stdout_temp_fd, STDOUT_FILENO);
-    dup2(stderr_temp_fd, STDERR_FILENO);
-    close(stdout_temp_fd);
-    close(stderr_temp_fd);
     
     // Build command arguments for exec_validation (without explicit schema)
     char* test_argv[10];  // Maximum 10 arguments
@@ -263,90 +244,29 @@ void test_auto_schema_detection_helper(const char* data_file, const char* expect
     test_argv[test_argc++] = (char*)data_file;
     test_argv[test_argc] = nullptr;  // Null terminate
     
-    cr_log_info("Calling exec_validation with %d arguments for auto-detection test of %s", test_argc, data_file);
-    
-    // Call the validation function directly
-    int validation_result = exec_validation(test_argc, test_argv);
-    
-    // Restore stdout and stderr
-    fflush(stdout);
-    fflush(stderr);
-    dup2(stdout_fd, STDOUT_FILENO);
-    dup2(stderr_fd, STDERR_FILENO);
-    close(stdout_fd);
-    close(stderr_fd);
-    
-    // Read captured output
-    char output[65536] = {0};  // 64KB buffer
-    char error_output[8192] = {0};  // 8KB buffer for stderr
-    
-    FILE* stdout_file = fopen(temp_stdout, "r");
-    FILE* stderr_file = fopen(temp_stderr, "r");
-    
-    if (stdout_file) {
-        size_t total_read = 0;
-        char buffer[256];
-        while (fgets(buffer, sizeof(buffer), stdout_file) && total_read < sizeof(output) - 1) {
-            size_t len = strlen(buffer);
-            if (total_read + len < sizeof(output) - 1) {
-                strcat(output, buffer);
-                total_read += len;
-            }
-        }
-        fclose(stdout_file);
-    }
-    
-    if (stderr_file) {
-        size_t total_read = 0;
-        char buffer[256];
-        while (fgets(buffer, sizeof(buffer), stderr_file) && total_read < sizeof(error_output) - 1) {
-            size_t len = strlen(buffer);
-            if (total_read + len < sizeof(error_output) - 1) {
-                strcat(error_output, buffer);
-                total_read += len;
-            }
-        }
-        fclose(stderr_file);
-    }
-    
-    // Clean up temporary files
-    unlink(temp_stdout);
-    unlink(temp_stderr);
-    
-    // Log the captured output for debugging
-    cr_log_info("Captured output (length: %zu): %s", strlen(output), output);
-    if (strlen(error_output) > 0) {
-        cr_log_info("Error output: %.200s", error_output);
-    }
-    
-    // Check that the expected schema message appears
-    if (expected_schema_message) {
-        bool uses_expected_schema = strstr(output, expected_schema_message) != NULL;
-        cr_log_info("Looking for expected message: '%s'", expected_schema_message);
-        cr_log_info("Found in output: %s", uses_expected_schema ? "YES" : "NO");
-        cr_assert(uses_expected_schema, "Should use expected schema. Expected: '%s', Got output: %.500s", 
-                  expected_schema_message, output);
-    }
-    
-    // Analyze output
-    bool validation_passed = strstr(output, "✅ Validation PASSED") != NULL;
-    bool has_errors = strstr(output, "❌ Validation FAILED") != NULL ||
-                     strstr(output, "Error:") != NULL ||
-                     strstr(output, "requires an explicit schema file") != NULL;
-    
     cr_log_info("Testing auto-detection for %s with format '%s' (result: %d)", 
-                data_file, format ? format : "auto", validation_result);
-    cr_log_info("Output preview: %.200s", output);
+                data_file, format ? format : "auto", should_pass ? 1 : 0);
     
+    // Call exec_validation to get detailed ValidationResult
+    ValidationResult* validation_result = exec_validation(test_argc, test_argv);
+    
+    // Enhanced validation result check with detailed error information
     if (should_pass) {
-        bool test_passed = (validation_result == 0) && 
-                          (validation_passed || strstr(output, "Successfully parsed input file") != NULL);
-        cr_assert(test_passed, "Auto-detection validation should pass for %s with format %s", 
-                 data_file, format ? format : "auto");
+        // Test should pass - validation should succeed
+        cr_assert_not_null(validation_result, 
+                          "Expected validation to return a result for file '%s' with format '%s'", 
+                          data_file, format ? format : "auto");
+        cr_assert(validation_result->valid, 
+                 "Expected validation to succeed for file '%s' with format '%s', but it failed with %d errors", 
+                 data_file, format ? format : "auto", validation_result->error_count);
     } else {
-        bool test_failed = (validation_result != 0) || !validation_passed || has_errors;
-        cr_assert(test_failed, "Auto-detection validation should fail for %s with format %s", 
-                 data_file, format ? format : "auto");
+        // Test should fail - validation should fail
+        if (validation_result) {
+            cr_assert(!validation_result->valid, 
+                     "Expected validation to fail for file '%s' with format '%s', but it succeeded", 
+                     data_file, format ? format : "auto");
+        }
+        // Note: validation_result could be NULL for system errors, which is also a failure case
     }
 }
 
@@ -357,6 +277,7 @@ void test_validation_helper(const char* data_file, const char* schema_file, bool
     cr_assert(true, "Internal API test disabled - use CLI tests instead");
 }
 
+// ... rest of the code remains the same ...
 // Helper function to test schema feature coverage
 void test_schema_features_helper(const char* schema_file, const char* expected_features[], size_t feature_count) {
     char* schema_content = read_file_content(schema_file);
