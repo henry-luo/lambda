@@ -545,6 +545,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
         }
+        // if (indent) {
+        //     strbuf_append_char(strbuf, '\n');
+        //     for (int i=0; i<depth-1; i++) strbuf_append_str(strbuf, indent); 
+        // }
         strbuf_append_char(strbuf, '>');
         break;
     }
@@ -574,6 +578,10 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
+    }
+
+    if (depth == 0) { // append last '\n'
+        strbuf_append_char(strbuf, '\n');
     }
 }
 

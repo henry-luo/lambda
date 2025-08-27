@@ -129,7 +129,7 @@ Item list_get(List *list, int index) {
 }
 
 Map* map(int type_index) {
-        log_debug("map with type %d", type_index);
+    log_debug("map with type %d", type_index);
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -143,14 +143,14 @@ Map* map(int type_index) {
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
     map->data = calloc(1, map_type->byte_size);
-        log_debug("map byte_size: %ld", map_type->byte_size);
+    log_debug("map byte_size: %ld", map_type->byte_size);
     // set map fields
     va_list args;
     va_start(args, map_type->length);
     set_fields(map_type, map->data, args);
     va_end(args);
     frame_end();
-        log_debug("map filled with type: %d, length: %ld", map_type->type_id, map_type->length);
+    log_debug("map filled with type: %d, length: %ld", map_type->type_id, map_type->length);
     return map;
 }
 
@@ -191,7 +191,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 DateTime dt = *(DateTime*)field_ptr;
                 StrBuf *strbuf = strbuf_new();
                 datetime_format_lambda(strbuf, &dt);
-        log_debug("map_get datetime: %s", strbuf->str);
+                log_debug("map_get datetime: %s", strbuf->str);
                 return push_k(dt);
             }
             case LMD_TYPE_DECIMAL:

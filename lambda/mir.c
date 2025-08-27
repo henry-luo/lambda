@@ -144,35 +144,35 @@ void print_module_item(MIR_item_t mitem) {
     switch (mitem->item_type) {
     case MIR_func_item:
         // Function mitem->addr is the address to call the function
-        log_debug("module item func: %d %s, addr %p, call addr %p\n", 
+        log_debug("module item func: %d %s, addr %p, call addr %p", 
             mitem->item_type, mitem->u.func->name, mitem->addr, mitem->u.func->call_addr);
         break;
     case MIR_proto_item:
-        log_debug("module item proto: %d %s\n", mitem->item_type, mitem->u.proto->name);
+        log_debug("module item proto: %d %s", mitem->item_type, mitem->u.proto->name);
         break;
     case MIR_import_item:
-        log_debug("module item import: %d %s\n", mitem->item_type, mitem->u.import_id);
+        log_debug("module item import: %d %s", mitem->item_type, mitem->u.import_id);
         break;
     case MIR_export_item:
-        log_debug("module item export: %d %s\n", mitem->item_type, mitem->u.export_id);
+        log_debug("module item export: %d %s", mitem->item_type, mitem->u.export_id);
         break;
     case MIR_forward_item:
-        log_debug("module item forward: %d %s\n", mitem->item_type, mitem->u.forward_id);
+        log_debug("module item forward: %d %s", mitem->item_type, mitem->u.forward_id);
         break;
     case MIR_data_item:
-        log_debug("module item data: %d %s\n", mitem->item_type, mitem->u.data->name);
+        log_debug("module item data: %d %s", mitem->item_type, mitem->u.data->name);
         break;
     case MIR_ref_data_item:
-        log_debug("module item ref_data: %d %s\n", mitem->item_type, mitem->u.ref_data->name);
+        log_debug("module item ref_data: %d %s", mitem->item_type, mitem->u.ref_data->name);
         break;
     case MIR_lref_data_item:
-        log_debug("module item lref_data: %d %s\n", mitem->item_type, mitem->u.lref_data->name);
+        log_debug("module item lref_data: %d %s", mitem->item_type, mitem->u.lref_data->name);
         break;
     case MIR_expr_data_item:
-        log_debug("module item expr_data: %d %s\n", mitem->item_type, mitem->u.expr_data->name);
+        log_debug("module item expr_data: %d %s", mitem->item_type, mitem->u.expr_data->name);
         break;
     case MIR_bss_item:
-        log_debug("module item bss: %d %s\n", mitem->item_type, mitem->u.bss->name);
+        log_debug("module item bss: %d %s", mitem->item_type, mitem->u.bss->name);
         break;
     }
 }
@@ -184,7 +184,7 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
         MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
-        log_debug("Loaded module: %p, items: %p\n", module, (void*)mitem);
+        log_info("Loaded module: %p, items: %p\n", module, (void*)mitem);
         for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
             print_module_item(mitem);
             if (mitem->item_type != MIR_func_item) { continue; }
@@ -197,7 +197,7 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
         return NULL;
     }
 
-    log_notice("generating native code...");
+    log_notice("Generating native code...");
     // link MIR code with external functions
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
     // generate native code
