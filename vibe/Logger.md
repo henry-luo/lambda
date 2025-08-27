@@ -59,6 +59,22 @@ log_info("Function end");
 - `log_reset_indent()` - Reset to no indentation
 - Max indentation: 40 spaces (20 levels)
 
+### Smart Color Management (Phase 3 ✅)
+**File extension-based coloring** with VS Code integration:
+- **`.log` files**: ANSI color codes for syntax highlighting in VS Code
+- **`.txt` files**: Plain text without color codes  
+- **Console output**: Colors enabled when output is a terminal (TTY)
+- **VS Code setup**: ANSI Colors extension auto-configured for `.log` files
+
+**Configuration:**
+```ini
+[rules]
+default.DEBUG "lambda.log"; simple    # Colored output for VS Code viewing
+default.DEBUG "output.txt"; simple    # Plain text output
+```
+
+Log files are automatically cleared on program startup for fresh debugging sessions.
+
 ### Configuration File Support
 **zlog-compatible** `log.conf` format:
 ```ini
