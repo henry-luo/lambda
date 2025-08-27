@@ -11,6 +11,32 @@
 extern "C" {
 #endif
 
+/* Thread-local indentation support */
+#ifdef _WIN32
+    #define THREAD_LOCAL __declspec(thread)
+#elif defined(__GNUC__) || defined(__clang__)
+    #define THREAD_LOCAL __thread
+#else
+    #define THREAD_LOCAL _Thread_local
+#endif
+
+/* Maximum indentation level (default 20 levels = 40 spaces) */
+#ifndef LOG_MAX_INDENT_LEVEL
+#define LOG_MAX_INDENT_LEVEL 20
+#endif
+
+/* Thread-local indentation variables */
+extern THREAD_LOCAL int log_indent;
+
+/* Indentation control macros */
+#define log_enter() do { \
+    if (log_indent < LOG_MAX_INDENT_LEVEL * 2) log_indent += 2; \
+} while(0)
+
+#define log_leave() do { \
+    if (log_indent >= 2) log_indent -= 2; \
+} while(0)
+
 /* log version */
 #define LOG_VERSION_MAJOR 1
 #define LOG_VERSION_MINOR 0
@@ -125,6 +151,11 @@ void log_set_default_format(const char *pattern);
 /* Configuration parsing */
 int log_parse_config_file(const char *filename);
 int log_parse_config_string(const char *config);
+
+/* Indentation management functions */
+void log_set_indent(int indent);
+int log_get_indent(void);
+void log_reset_indent(void);
 
 #ifdef __cplusplus
 }
