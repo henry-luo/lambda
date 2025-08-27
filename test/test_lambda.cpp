@@ -116,9 +116,7 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     char output_filename[512];
     snprintf(output_filename, sizeof(output_filename), "test_output/%s", script_name);
     char* dot = strrchr(output_filename, '.');
-    if (dot) {
-        strcpy(dot, ".txt");
-    }
+    if (dot) { strcpy(dot, ".txt"); }
     
     // Save actual output to test_output directory
     write_text_file(output_filename, output_buf->str);

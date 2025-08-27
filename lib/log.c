@@ -73,6 +73,23 @@ const char* log_level_to_string(int level) {
     }
 }
 
+/* Helper function to write formatted log message to a stream */
+static void write_log_message_to_stream(FILE *stream, const char *timestamp, const char *level_str, 
+                                       const char *color, const char *reset_color, const char *category_name,
+                                       const char *format, va_list args) {
+    // Print log prefix
+    if (timestamps_enabled && timestamp[0]) {
+        fprintf(stream, "%s[%s] %s[%s]%s ", timestamp, level_str, color, category_name, reset_color);
+    } else {
+        fprintf(stream, "%s[%s] [%s]%s ", color, level_str, category_name, reset_color);
+    }
+    
+    // Print the actual message
+    vfprintf(stream, format, args);
+    fprintf(stream, "\n");
+    fflush(stream);
+}
+
 /* Core logging implementation */
 static int log_output(log_category_t *category, int level, const char *format, va_list args) {
     if (!category || !category->enabled) {
@@ -83,7 +100,6 @@ static int log_output(log_category_t *category, int level, const char *format, v
         return LOG_OK;
     }
     
-    FILE *output = category->output ? category->output : stdout;
     char timestamp[MAX_TIMESTAMP_LEN];
     get_timestamp(timestamp, sizeof(timestamp));
     
@@ -91,17 +107,35 @@ static int log_output(log_category_t *category, int level, const char *format, v
     const char *color = get_level_color(level);
     const char *reset_color = colors_enabled ? COLOR_RESET : "";
     
-    // Print log prefix
-    if (timestamps_enabled && timestamp[0]) {
-        fprintf(output, "%s[%s] %s[%s]%s ", timestamp, level_str, color, category->name, reset_color);
-    } else {
-        fprintf(output, "%s[%s] [%s]%s ", color, level_str, category->name, reset_color);
+    // 1. Always log to file if category has file output configured
+    if (category->output && category->output != stdout && category->output != stderr) {
+        va_list args_copy;
+        va_copy(args_copy, args);
+        write_log_message_to_stream(category->output, timestamp, level_str, color, reset_color, 
+                                  category->name, format, args_copy);
+        va_end(args_copy);
     }
     
-    // Print the actual message
-    vfprintf(output, format, args);
-    fprintf(output, "\n");
-    fflush(output);
+    // 2. Additionally send to console streams based on log level
+    FILE *console_output = NULL;
+    if (level >= LOG_LEVEL_WARN) {
+        // error and warn -> stderr
+        console_output = stderr;
+    } else if (level == LOG_LEVEL_NOTICE) {
+        // notice -> stdout  
+        console_output = stdout;
+    } else {
+        // info, debug -> default to stdout (can be configured via category->output)
+        console_output = category->output ? category->output : stdout;
+    }
+    
+    if (console_output) {
+        va_list args_copy;
+        va_copy(args_copy, args);
+        write_log_message_to_stream(console_output, timestamp, level_str, color, reset_color,
+                                  category->name, format, args_copy);
+        va_end(args_copy);
+    }
     
     return LOG_OK;
 }

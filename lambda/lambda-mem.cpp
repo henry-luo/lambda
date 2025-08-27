@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../lib/log.h"
 
 extern __thread Context* context;
 
@@ -14,7 +15,7 @@ uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 }
 
 void heap_init() {
-    printf("heap init: %p\n", context);
+    log_debug("heap init: %p", context);
     context->heap = (Heap*)calloc(1, sizeof(Heap));
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
@@ -27,7 +28,7 @@ void* heap_alloc(size_t size, TypeId type_id) {
     void *data;
     pool_variable_alloc(heap->pool, size, (void**)&data);
     if (!data) {
-        printf("Error: Failed to allocate memory for heap entry.\n");
+        log_error("Failed to allocate memory for heap entry");
         return NULL;
     }
     // scalar pointers needs to be tagged
@@ -44,10 +45,10 @@ void* heap_calloc(size_t size, TypeId type_id) {
 }
 
 Item push_d(double dval) {
-    printf("TRACE: push_d: %g\n", dval);
+    log_debug("push_d: %g", dval);
     // Safety check: if context is num_stack is NULL
     if (!context->num_stack) {
-        fprintf(stderr, "WARNING: push_d called with invalid context\n");
+        log_error("push_d called with invalid context");
         return ItemError;
     }
     double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval);
@@ -55,10 +56,10 @@ Item push_d(double dval) {
 }
 
 Item push_l(long lval) {
-    printf("TRACE: push_l: %ld\n", lval);
+    log_debug("push_l: %ld", lval);
     // Safety check: if context is num_stack is NULL
     if (!context->num_stack) {
-        fprintf(stderr, "WARNING: push_l called with invalid context\n");
+        log_error("push_l called with invalid context");
         return ItemError;
     }
     if (lval == INT_ERROR) return ItemError;
@@ -69,7 +70,7 @@ Item push_l(long lval) {
 Item push_k(DateTime val) {
     // Safety check: if context is num_stack is NULL
     if (!context->num_stack) {
-        fprintf(stderr, "WARNING: push_k called with invalid context\n");
+        log_error("push_k called with invalid context");
         return ItemError;
     }    
     DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, val);
@@ -87,20 +88,20 @@ Item HEAP_ENTRY_START = {.item = ((uint64_t)LMD_CONTAINER_HEAP_START << 56)};
 
 void print_heap_entries() {
     ArrayList *entries = context->heap->entries;
-    printf("after exec heap entries: %d\n", entries->length);
+    log_debug("after exec heap entries: %d", entries->length);
     for (int i = 0; i < entries->length; i++) {
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
         Item itm = {.raw_pointer = data};
-        printf("heap entry index: %d, type: %d, data: %p\n", i, itm.type_id, data);
+        log_debug("heap entry index: %d, type: %d, data: %p", i, itm.type_id, data);
         if (itm.type_id == LMD_TYPE_RAW_POINTER) {
             TypeId type_id = *((uint8_t*)data);
-            printf("heap entry data: type: %s\n", type_info[type_id].name);
+            log_debug("heap entry data: type: %s", type_info[type_id].name);
             if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || 
                 type_id == LMD_TYPE_ARRAY_INT || type_id == LMD_TYPE_ARRAY_INT64 || type_id == LMD_TYPE_ARRAY_FLOAT || type_id == LMD_TYPE_MAP || 
                 type_id == LMD_TYPE_ELEMENT) {
                 Container *cont = (Container*)data;
-                printf("heap entry container: type: %s, ref_cnt: %d\n", 
+                log_debug("heap entry container: type: %s, ref_cnt: %d", 
                     type_info[type_id].name, cont->ref_cnt);
             }
         }        
@@ -110,41 +111,41 @@ void print_heap_entries() {
 void check_memory_leak() {
     StrBuf *strbuf = strbuf_new_cap(1024);
     ArrayList *entries = context->heap->entries;
-    printf("check heap entries: %d\n", entries->length);
+    log_debug("check heap entries: %d", entries->length);
     for (int i = 0; i < entries->length; i++) {
         void *data = entries->data[i];
         Item itm = {.raw_pointer = data};
-        printf("heap entry index: %d, type: %s, data: %p\n", i, type_info[itm.type_id].name, data);
+        log_debug("heap entry index: %d, type: %s, data: %p", i, type_info[itm.type_id].name, data);
         if (!data) { continue; }  // skip NULL entries
         if (itm.type_id == LMD_TYPE_RAW_POINTER) {
             TypeId type_id = *((uint8_t*)itm.raw_pointer);
-            printf("heap entry data: type: %s\n", type_info[type_id].name);
+            log_debug("heap entry data: type: %s", type_info[type_id].name);
             if (type_id == LMD_TYPE_LIST) {
                 List *list = (List*)data;
-                printf("heap entry list: %p, length: %ld, ref_cnt: %d\n", list, list->length, list->ref_cnt);
+                log_debug("heap entry list: %p, length: %ld, ref_cnt: %d", list, list->length, list->ref_cnt);
                 strbuf_reset(strbuf);
                 print_item(strbuf, itm);
-                printf("heap entry list: %s\n", strbuf->str);
+                log_debug("heap entry list: %s", strbuf->str);
             }
             else if (type_id == LMD_TYPE_ARRAY) {
                 Array *arr = (Array*)data;
-                printf("heap entry array: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
+                log_debug("heap entry array: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_ARRAY_INT) {
                 ArrayInt *arr = (ArrayInt*)data;
-                printf("heap entry array int: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
+                log_debug("heap entry array int: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_ARRAY_INT64) {
                 ArrayInt64 *arr = (ArrayInt64*)data;
-                printf("heap entry array int64: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
+                log_debug("heap entry array int64: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
                 ArrayFloat *arr = (ArrayFloat*)data;
-                printf("heap entry array float: %p, length: %ld, ref_cnt: %d\n", arr, arr->length, arr->ref_cnt);
+                log_debug("heap entry array float: %p, length: %ld, ref_cnt: %d", arr, arr->length, arr->ref_cnt);
             }
             else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
                 Map *map = (Map*)data;
-                printf("heap entry map: %p, length: %ld, ref_cnt: %d\n", map, 
+                log_debug("heap entry map: %p, length: %ld, ref_cnt: %d", map, 
                     ((TypeMap*)map->type)->length, map->ref_cnt);
             }
         }
@@ -155,7 +156,7 @@ void free_container(Container* cont, bool clear_entry);
 
 void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
     while (field) {
-        // printf("freeing map field: %.*s, type: %d\n", (int)field->name.length, field->name.str, field->type->type_id);
+        // log_debug("freeing map field: %.*s, type: %d", (int)field->name.length, field->name.str, field->type->type_id);
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
             Map *nested_map = *(Map**)field_ptr;
@@ -195,14 +196,14 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
 
 void free_container(Container* cont, bool clear_entry) {
     if (!cont) return;  // Add null pointer check
-    printf("free container: %p\n", cont);
+    log_debug("free container: %p", cont);
     assert(cont->ref_cnt == 0);
     TypeId type_id = cont->type_id;
     if (type_id == LMD_TYPE_LIST) {
         List *list = (List *)cont;
         if (!list->ref_cnt) {
             // free list items
-            printf("freeing list items: %p, length: %ld\n", list, list->length);
+            log_debug("freeing list items: %p, length: %ld", list, list->length);
             for (int j = 0; j < list->length; j++) {
                 free_item(list->items[j], clear_entry);
             }
@@ -311,19 +312,19 @@ void frame_start() {
 
 void frame_end() {
     ArrayList *entries = context->heap->entries;
-    printf("entering frame_end with entries: %d\n", entries->length);
+    log_debug("entering frame_end with entries: %d", entries->length);
     // free heap allocations
     int loop_count = 0;
     int original_length = entries->length;
     for (int i = entries->length - 1; i >= 0; i--) {
-        printf("frame_end loop: %d, i: %d, original_length: %d\n", loop_count, i, original_length);
+        log_debug("frame_end loop: %d, i: %d, original_length: %d", loop_count, i, original_length);
         loop_count++;
         if (loop_count > original_length + 100) {
-            printf("ERROR: frame_end infinite loop detected! loop_count=%d, i=%d, original_length=%d\n", 
+            log_error("frame_end infinite loop detected! loop_count=%d, i=%d, original_length=%d", 
                    loop_count, i, original_length);
             break;
         }
-        printf("free heap entry index: %d\n", i);
+        log_debug("free heap entry index: %d", i);
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
         Item itm = {.raw_pointer = data};
@@ -331,14 +332,14 @@ void frame_end() {
             itm.type_id == LMD_TYPE_BINARY) {
             String *str = (String*)itm.pointer;
             if (str && !str->ref_cnt) {
-                printf("freeing heap string: %s\n", str->chars);
+                log_debug("freeing heap string: %s", str->chars);
                 pool_variable_free(context->heap->pool, (void*)str);
             }
         }
         else if (itm.type_id == LMD_TYPE_DECIMAL) {
             Decimal *dec = (Decimal*)itm.pointer;
             if (dec && !dec->ref_cnt) {
-                printf("freeing heap decimal\n");
+                log_debug("freeing heap decimal");
                 pool_variable_free(context->heap->pool, (void*)dec);
             }
         }
@@ -353,13 +354,13 @@ void frame_end() {
             }
         }
         else if (itm.type_id == LMD_CONTAINER_HEAP_START) {
-            printf("reached container start: %d\n", i);
+            log_debug("reached container start: %d", i);
             size_t stack_pos = (size_t)(((uint64_t)entries->data[i-1]) & 0x00FFFFFFFFFFFFFF);
             num_stack_reset_to_index((num_stack_t*)context->num_stack, stack_pos);
             entries->length = i-1;
-            printf("reset num stack to index: %zu, new entries length: %d\n", stack_pos, entries->length);
+            log_debug("reset num stack to index: %zu, new entries length: %d", stack_pos, entries->length);
             return;
         }
     }
-    printf("end of frame_end with entries: %d\n", entries->length);
+    log_debug("end of frame_end with entries: %d", entries->length);
 }
