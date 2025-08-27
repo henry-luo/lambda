@@ -86,6 +86,7 @@ typedef struct log_category_s {
     FILE *output;           /* output stream (stdout, stderr, or file) */
     int enabled;            /* whether this category is enabled */
     log_format_t *format;   /* format configuration */
+    char output_filename[256]; /* output file name (for color decision) */
 } log_category_t;
 
 /* Basic log function declarations */
