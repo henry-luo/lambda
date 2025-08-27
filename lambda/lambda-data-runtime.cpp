@@ -1,5 +1,6 @@
 
 #include "transpiler.hpp"
+#include "../lib/log.h"
 
 extern __thread Context* context;
 void array_set(Array* arr, int index, Item itm, VariableMemPool *pool);
@@ -30,7 +31,7 @@ Item typeditem_to_item(TypedItem *titem) {
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
         return {.raw_pointer = titem->pointer};
     default:
-        printf("map_get ANY type is UNKNOWN: %d\n", titem->type_id);
+        log_error("map_get ANY type is UNKNOWN: %d", titem->type_id);
         return ItemError;
     }
 }
@@ -60,9 +61,9 @@ Array* array_fill(Array* arr, int count, ...) {
 }
 
 Item array_get(Array *array, int index) {
-    printf("array_get: index: %d, length: %ld\n", index, array->length);
+        log_debug("array_get: index: %d, length: %ld", index, array->length);
     if (index < 0 || index >= array->length) {
-        printf("array_get: index out of bounds: %d\n", index);
+        log_error("array_get: index out of bounds: %d", index);
         return ItemNull;
     }
     Item item = array->items[index];
@@ -92,7 +93,7 @@ List* list() {
 }
 
 Item list_fill(List *list, int count, ...) {
-    printf("list_fill cnt: %d\n", count);
+        log_debug("list_fill cnt: %d", count);
     va_list args;
     va_start(args, count);
     for (int i = 0; i < count; i++) {
@@ -128,7 +129,7 @@ Item list_get(List *list, int index) {
 }
 
 Map* map(int type_index) {
-    printf("map with type %d\n", type_index);
+        log_debug("map with type %d", type_index);
     Map *map = (Map *)heap_calloc(sizeof(Map), LMD_TYPE_MAP);
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -142,14 +143,14 @@ Map* map(int type_index) {
 Map* map_fill(Map* map, ...) {
     TypeMap *map_type = (TypeMap*)map->type;
     map->data = calloc(1, map_type->byte_size);
-    printf("map byte_size: %ld\n", map_type->byte_size);
+        log_debug("map byte_size: %ld", map_type->byte_size);
     // set map fields
     va_list args;
     va_start(args, map_type->length);
     set_fields(map_type, map->data, args);
     va_end(args);
     frame_end();
-    printf("map filled with type: %d, length: %ld\n", map_type->type_id, map_type->length);
+        log_debug("map filled with type: %d, length: %ld", map_type->type_id, map_type->length);
     return map;
 }
 
@@ -173,7 +174,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
-            printf("map_get found field: %.*s, type: %d, ptr: %p\n", 
+            log_debug("map_get found field: %.*s, type: %d, ptr: %p", 
                 (int)field->name->length, field->name->str, type_id, field_ptr);
             switch (type_id) {
             case LMD_TYPE_NULL:
@@ -190,7 +191,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 DateTime dt = *(DateTime*)field_ptr;
                 StrBuf *strbuf = strbuf_new();
                 datetime_format_lambda(strbuf, &dt);
-                printf("map_get datetime: %s\n", strbuf->str);
+        log_debug("map_get datetime: %s", strbuf->str);
                 return push_k(dt);
             }
             case LMD_TYPE_DECIMAL:
@@ -205,45 +206,45 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container* container = *(Container**)field_ptr;
-                printf("map_get container: %p, type_id: %d\n", container, container->type_id);
+        log_debug("map_get container: %p, type_id: %d", container, container->type_id);
                 // assert(container->type_id == type_id);
                 return {.raw_pointer = container};
             }
             case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
                 return {.raw_pointer = *(void**)field_ptr};
             case LMD_TYPE_ANY: {
-                printf("map_get ANY type, pointer: %p\n", field_ptr);
+        log_debug("map_get ANY type, pointer: %p", field_ptr);
                 return typeditem_to_item((TypedItem*)field_ptr);
             }
             default:
-                printf("unknown map item type %d\n", type_id);
+        log_error("unknown map item type %d", type_id);
                 return ItemError;
             }
         }
         field = field->next;
     }
     *is_found = false;
-    printf("map_get: key %s not found\n", key);
+        log_debug("map_get: key %s not found", key);
     return ItemNull;
 }
 
 Item map_get(Map* map, Item key) {
-    printf("map_get %p\n", map);
+        log_debug("map_get %p", map);
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
     if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
         key_str = ((String*)key.pointer)->chars;
     } else {
-        printf("map_get: key must be string or symbol, got type %d\n", key.type_id);
+        log_error("map_get: key must be string or symbol, got type %d", key.type_id);
         return ItemNull;  // only string or symbol keys are supported
     }
-    printf("map_get key: %s\n", key_str);
+        log_debug("map_get key: %s", key_str);
     return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
 Element* elmt(int type_index) {
-    printf("elmt with type %d\n", type_index);
+        log_debug("elmt with type %d", type_index);
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -258,10 +259,10 @@ Element* elmt(int type_index) {
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
     elmt->data = calloc(1, elmt_type->byte_size);  // heap_alloc(rt->heap, elmt_type->byte_size);
-    printf("elmt byte_size: %ld\n", elmt_type->byte_size);
+        log_debug("elmt byte_size: %ld", elmt_type->byte_size);
     // set attributes
     long count = elmt_type->length;
-    printf("elmt length: %ld\n", count);
+        log_debug("elmt length: %ld", count);
     va_list args;
     va_start(args, count);
     set_fields((TypeMap*)elmt_type, elmt->data, args);

@@ -79,7 +79,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         return;
     }
         log_debug("transpile box item: %d", item->type->type_id);
-    printf("transpile box item type name: %s, node_type: %d\n", 
+    log_debug("transpile box item type name: %s, node_type: %d", 
         item->type->type_id == LMD_TYPE_DTIME ? "DateTime" : 
         item->type->type_id == LMD_TYPE_STRING ? "String" :
         item->type->type_id == LMD_TYPE_LIST ? "List" :
@@ -91,10 +91,10 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         AstPrimaryNode* pri = (AstPrimaryNode*)item;
         if (pri->expr && pri->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident = (AstIdentNode*)pri->expr;
-            printf("transpile_box_item: identifier found: %.*s\n", 
+            log_debug("transpile_box_item: identifier found: %.*s", 
                 (int)ident->name->len, ident->name->chars);
             if (ident->entry && ident->entry->node) {
-                printf("transpile_box_item: identifier entry type: %d\n", 
+                log_debug("transpile_box_item: identifier entry type: %d", 
                     ident->entry->node->type->type_id);
             }
         }
@@ -497,7 +497,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
-            printf("transpile_primary_expr: identifier %.*s, type: %d\n", 
+            log_debug("transpile_primary_expr: identifier %.*s, type: %d", 
                 (int)ident_node->name->len, ident_node->name->chars, pri_node->type->type_id);
                 
             if (ident_node->entry && ident_node->entry->node && 
@@ -506,7 +506,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                     (AstImportNode*)ident_node->entry->import);
             }
             else if (ident_node->entry && ident_node->entry->node) {
-                printf("transpile_primary_expr: writing var name for %.*s, entry type: %d\n",
+                log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
                     (int)ident_node->name->len, ident_node->name->chars,
                     ident_node->entry->node->type->type_id);
                 
@@ -1861,7 +1861,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     strbuf_append_str(tp->code_buf, "(");
     AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
-        printf("transpile_call_expr: processing arg type %d, node_type %d\n", 
+        log_debug("transpile_call_expr: processing arg type %d, node_type %d", 
             arg->type->type_id, arg->node_type);
         
         // For system functions, box DateTime arguments
