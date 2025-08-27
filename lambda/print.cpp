@@ -1,4 +1,5 @@
 #include "lambda-data.hpp"
+#include "../lib/log.h"
 
 #include "ast.hpp"
 
@@ -18,35 +19,35 @@ static void init_datetime_format_pool() {
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
     for (uint32_t i = 0; i < indent; i++) {
-        printf("  ");  // 2 spaces per indent level
+        log_debug("  ");
     }
     const char *type = ts_node_type(node);
     if (isalpha(*type)) {
-        printf("(%s", type);
+        log_debug("(%s", type);
     } else if (*type == '\'') {
         printf("(\"%s\"", type);
     } else { // special char
-        printf("('%s'", type);
+        log_debug("('%s'", type);
     }
   
     uint32_t child_count = ts_node_child_count(node);
     if (child_count > 0) {
-        printf("\n");
+        log_debug("");
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(node, i);
             print_ts_node(source, child, indent + 1);
         }
         for (uint32_t i = 0; i < indent; i++) {
-            printf("  ");
+        log_debug("  ");
         }
     }
     else if (isalpha(*type)) {
       int start_byte = ts_node_start_byte(node);
       int end_byte = ts_node_end_byte(node);
       const char* start = source + start_byte;
-      printf(" '%.*s'", end_byte - start_byte, start);
+        log_debug(" '%.*s'", end_byte - start_byte, start);
     }
-    printf(")\n");
+        log_debug(")");
 }
 
 // write the native C type for the lambda type
@@ -131,7 +132,7 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "Type*");
         break;
     default:
-        printf("unknown type to write %d\n", type_id);
+        log_error("unknown type to write %d", type_id);
     }
 }
 
@@ -152,7 +153,7 @@ void print_decimal(StrBuf *strbuf, Decimal *decimal) {
         strbuf_append_str(strbuf, "error");
         return;
     }
-    // printf("printed decimal: %s\n", buf);
+        log_debug("printed decimal: %s", buf);
     strbuf_append_str(strbuf, buf);
     free(buf);  // libmpdec allocates the string, we need to free it
 }
@@ -168,18 +169,18 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
     }
 
     ShapeEntry *field = map_type->shape;
-    // printf("printing named items: %p, type: %d, length: %ld\n", map_data, map_type->type_id, map_type->length);
+        log_debug("printing named items: %p, type: %d, length: %ld", map_data, map_type->type_id, map_type->length);
     for (int i = 0; i < map_type->length; i++) {
         // Safety check for valid field pointer
         if (!field || (uintptr_t)field < 0x1000) {
-            printf("invalid field pointer: %p\n", field);
+        log_error("invalid field pointer: %p", field);
             strbuf_append_str(strbuf, "[invalid field pointer]");
             break;
         }
         if (i) strbuf_append_str(strbuf, ", ");
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
-            // printf("nested map at field %d: %p\n", i, data);
+        log_debug("nested map at field %d: %p", i, data);
             Map *nest_map = *(Map**)data;
             TypeMap *nest_map_type = (TypeMap*)nest_map->type;
             print_named_items_with_depth(strbuf, nest_map_type, nest_map->data, depth + 1);
@@ -189,18 +190,18 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             //     i, field, (int)field->name->length, field->name->str, field->type->type_id, data);
             // Safety check for field name and type
             if (!field->name || (uintptr_t)field->name < 0x1000) {
-                printf("invalid field name: %p\n", field->name);
+        log_error("invalid field name: %p", field->name);
                 strbuf_append_str(strbuf, "[invalid field name]");
                 goto advance_field;
             }
             if (!field->type || (uintptr_t)field->type < 0x1000) {
-                printf("invalid field type: %p\n", field->type);
+        log_error("invalid field type: %p", field->type);
                 strbuf_append_str(strbuf, "[invalid field type]");
                 goto advance_field;
             }
             // Safety check for type_id range
             if (field->type->type_id < 0 || field->type->type_id > 50) {
-                printf("invalid type_id: %d\n", field->type->type_id);
+        log_error("invalid type_id: %d", field->type->type_id);
                 strbuf_append_str(strbuf, "[invalid type_id]");
                 goto advance_field;
             }
@@ -262,7 +263,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_LIST:  
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
-                // printf("print named item: %p, type: %d\n", data, field->type->type_id);
+        log_debug("print named item: %p, type: %d", data, field->type->type_id);
                 print_item(strbuf, *(Item*)data, depth + 1);
                 break;
             case LMD_TYPE_ANY:
@@ -279,7 +280,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
     }
 }
 
-void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth) {
+void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) {
     if (depth > MAX_DEPTH) { 
         strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  
         return; 
@@ -347,7 +348,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth) {
         // For complex types, create a temporary Item and use existing print_item logic
         {
             Item temp_item = {.raw_pointer = titem->pointer};
-            print_item(strbuf, temp_item, depth + 1, NULL);
+            print_item(strbuf, temp_item, depth + 1, indent);
         }
         break;
     default:
@@ -360,13 +361,13 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!item.item) { 
-        printf("TRACE: print_item - item is NULL, appending null\n");
+        log_debug("TRACE: print_item - item is NULL, appending null");
         strbuf_append_str(strbuf, "null"); 
         return; 
     }
 
     TypeId type_id = get_type_id(item);
-    printf("TRACE: print_item - item type: %d\n", type_id);
+    // printf("TRACE: print_item - item type: %d\n", type_id);
     switch (type_id) { // packed value
     case LMD_TYPE_NULL:
         strbuf_append_str(strbuf, "null");
@@ -487,7 +488,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_ARRAY: {
         Array *array = item.array;
-        // printf("print array: %p, length: %ld\n", array, array->length);
+        log_debug("print array: %p, length: %ld", array, array->length);
         strbuf_append_char(strbuf, '[');
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_str(strbuf, ", ");
@@ -540,7 +541,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, "  "); }
+                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
         }
@@ -652,7 +653,7 @@ char* format_type(Type *type) {
 
 void print_label(int indent, const char *label) {
     for (int i = 0; i < indent; i++) { printf("  "); }
-    printf("%s\n", label);
+        log_debug("%s", label);
 }
 
 void print_const(Script *script, Type* type) {
@@ -677,7 +678,7 @@ void print_const(Script *script, Type* type) {
         DateTime datetime = *(DateTime*)data;
         StrBuf *strbuf = strbuf_new();
         datetime_format_lambda(strbuf, &datetime);
-        printf("[const@%d, %s, '%s']\n", const_type->const_index, type_name, strbuf->str);
+        log_debug("[const@%d, %s, '%s']", const_type->const_index, type_name, strbuf->str);
         strbuf_free(strbuf);
         break;
     }
@@ -710,7 +711,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             ((AstIdentNode*)node)->name->chars, type_name, node->type ? node->type->is_const : -1);
         break;
     case AST_NODE_PRIMARY:
-        printf("[primary expr:%s,const:%d]\n", type_name, node->type ? node->type->is_const : -1);
+        log_debug("[primary expr:%s,const:%d]", type_name, node->type ? node->type->is_const : -1);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(script, ((AstPrimaryNode*)node)->expr, indent + 1);
         } else {
@@ -907,7 +908,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         TypeType* actual_type = (TypeType*)node->type;
         assert(node->type->type_id == LMD_TYPE_TYPE && actual_type->type);
         char* actual_type_name = type_info[actual_type->type->type_id].name;
-        printf("[%s: %s]\n", type_name, actual_type_name);
+        log_debug("[%s: %s]", type_name, actual_type_name);
         break;
     }
     case AST_NODE_LIST_TYPE: {

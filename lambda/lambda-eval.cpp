@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../lib/log.h"
 
 // Always enable Unicode support with utf8proc
 #define LAMBDA_UNICODE_LEVEL 2
@@ -136,7 +137,7 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
         arr->items[i] = va_arg(args, int64_t);
     }       
     va_end(args);
-    printf("returning array_int64_fill: %d\n", arr->type_id);
+    log_debug("returning array_int64_fill: %d", arr->type_id);
     return arr;
 }
 
@@ -208,31 +209,31 @@ Item safe_b2it(Item item) {
 // list to item
 Item v2it(List* list) {
     if (!list) { return ItemNull; }
-    printf("v2it %p, length: %ld\n", list, list->length);
+    log_debug("v2it %p, length: %ld", list, list->length);
     if (list->length == 0) { return ItemNull; }
     if (list->length == 1) { return list->items[0]; }
     return {.list = list};
 }
 
 String *fn_strcat(String *left, String *right) {
-    printf("fn_strcat %p, %p\n", left, right);
+    log_debug("fn_strcat %p, %p", left, right);
     if (!left || !right) {
-        printf("Error: null pointer in fn_strcat: left=%p, right=%p\n", left, right);
+        log_error("null pointer in fn_strcat: left=%p, right=%p", left, right);
         return NULL;
     }
     int left_len = left->len, right_len = right->len;
-    printf("left len %d, right len %d\n", left_len, right_len);
+    log_debug("left len %d, right len %d", left_len, right_len);
     String *result = (String *)heap_alloc(sizeof(String) + left_len + right_len + 1, LMD_TYPE_STRING);
     if (!result) {
-        printf("Error: failed to allocate memory for fn_strcat result\n");
+        log_error("failed to allocate memory for fn_strcat result");
         return NULL;
     }
-    printf("str result %p\n", result);
+    log_debug("str result %p", result);
     result->ref_cnt = 0;  result->len = left_len + right_len;
     memcpy(result->chars, left->chars, left_len);
     // copy the string and '\0'
     memcpy(result->chars + left_len, right->chars, right_len + 1);
-    printf("fn_strcat result: %s\n", result->chars);
+    log_debug("fn_strcat result: %s", result->chars);
     return result;
 }
 
@@ -270,7 +271,7 @@ Item fn_add(Item item_a, Item item_b) {
         ArrayInt* arr_a = item_a.array_int;
         ArrayInt* arr_b = item_b.array_int;
         if (arr_a->length != arr_b->length) {
-            printf("Array length mismatch in addition\n");
+            log_error("Array length mismatch in addition");
             return ItemError;
         }
         ArrayInt* result = array_int_new(arr_a->length);
@@ -286,7 +287,7 @@ Item fn_add(Item item_a, Item item_b) {
         ArrayInt64* arr_a = item_a.array_int64;
         ArrayInt64* arr_b = item_b.array_int64;
         if (arr_a->length != arr_b->length) {
-            printf("Array length mismatch in addition\n");
+            log_error("Array length mismatch in addition");
             return ItemError;
         }
         ArrayInt64* result = array_int64_new(arr_a->length);
@@ -299,7 +300,7 @@ Item fn_add(Item item_a, Item item_b) {
         return result_item;
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
-        printf("add float: %g + %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        log_debug("add float: %g + %g", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer + *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
@@ -316,7 +317,7 @@ Item fn_add(Item item_a, Item item_b) {
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
             if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
-            printf("decimal conversion failed in fn_add\n");
+            log_error("decimal conversion failed in fn_add");
             return ItemError;
         }
         
@@ -334,14 +335,14 @@ Item fn_add(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-            printf("decimal addition failed\n");
+            log_error("decimal addition failed");
             return ItemError;
         }
         
         return push_decimal(result);
     }
     else {
-        printf("unknown add type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown add type: %d, %d", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -378,7 +379,7 @@ Item fn_mul(Item item_a, Item item_b) {
         return push_l(*(long*)item_a.pointer * *(long*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
-        printf("mul float: %g * %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        log_debug("mul float: %g * %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer * *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
@@ -462,7 +463,7 @@ Item fn_mul(Item item_a, Item item_b) {
         return result_item;
     }
     else {
-        printf("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -475,7 +476,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return push_l(*(long*)item_a.pointer - *(long*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_FLOAT && item_b.type_id == LMD_TYPE_FLOAT) {
-        printf("sub float: %g - %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        log_debug("sub float: %g - %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer - *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
@@ -549,7 +550,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return result_item;
     }
     else {
-        printf("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -574,7 +575,7 @@ Item fn_div(Item item_a, Item item_b) {
             printf("float division by zero error\n");
             return ItemError;
         }
-        printf("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        log_debug("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer / *(double*)item_b.pointer);
     }
     else if (item_a.type_id == LMD_TYPE_INT && item_b.type_id == LMD_TYPE_FLOAT) {
@@ -604,11 +605,11 @@ Item fn_div(Item item_a, Item item_b) {
         }
         
         // Check for division by zero
-        printf("DEBUG: Checking division by zero, b_dec=%p\n", b_dec);
+        log_debug(" Checking division by zero, b_dec=%p\n", b_dec);
         if (b_dec) {
             char *b_str = mpd_to_sci(b_dec, 1);
-            printf("DEBUG: b_dec value as string: '%s'\n", b_str ? b_str : "NULL");
-            printf("DEBUG: mpd_iszero result: %d\n", mpd_iszero(b_dec));
+            log_debug(" b_dec value as string: '%s'\n", b_str ? b_str : "NULL");
+            log_debug(" mpd_iszero result: %d\n", mpd_iszero(b_dec));
             if (b_str) mpd_free(b_str);
         }
         if (b_dec && decimal_is_zero(b_dec)) {
@@ -617,14 +618,14 @@ Item fn_div(Item item_a, Item item_b) {
             printf("decimal division by zero error\n");
             return ItemError;
         }
-        printf("DEBUG: Division by zero check passed\n");
+        log_debug(" Division by zero check passed\n");
         
         // Debug the values and context before division
         if (a_dec && b_dec) {
             char *a_str = mpd_to_sci(a_dec, 1);
             char *b_str = mpd_to_sci(b_dec, 1);
-            printf("DEBUG: About to divide '%s' / '%s'\n", a_str ? a_str : "NULL", b_str ? b_str : "NULL");
-            printf("DEBUG: Context prec=%lld, emax=%lld, emin=%lld\n", (long long)context->decimal_ctx->prec, (long long)context->decimal_ctx->emax, (long long)context->decimal_ctx->emin);
+            log_debug(" About to divide '%s' / '%s'\n", a_str ? a_str : "NULL", b_str ? b_str : "NULL");
+            log_debug(" Context prec=%lld, emax=%lld, emin=%lld\n", (long long)context->decimal_ctx->prec, (long long)context->decimal_ctx->emax, (long long)context->decimal_ctx->emin);
             if (a_str) mpd_free(a_str);
             if (b_str) mpd_free(b_str);
         }
@@ -636,9 +637,9 @@ Item fn_div(Item item_a, Item item_b) {
             return ItemError;
         }
         
-        printf("DEBUG: Calling mpd_div...\n");
+        log_debug(" Calling mpd_div...\n");
         mpd_div(result, a_dec, b_dec, context->decimal_ctx);
-        printf("DEBUG: mpd_div completed\n");
+        log_debug(" mpd_div completed\n");
         
         cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
         cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
@@ -652,7 +653,7 @@ Item fn_div(Item item_a, Item item_b) {
         return push_decimal(result);
     }
     else {
-        printf("unknown div type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown div type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -689,7 +690,7 @@ Item fn_idiv(Item item_a, Item item_b) {
         return push_l(*(long*)item_a.pointer / b_val);
     }
     else {
-        printf("unknown idiv type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown idiv type: %d, %d\n", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -716,7 +717,7 @@ Item fn_pow(Item item_a, Item item_b) {
             } else if (item_a.type_id == LMD_TYPE_FLOAT) {
                 base = *(double*)item_a.pointer;
             } else {
-                printf("unsupported pow base type with decimal: %d\n", item_a.type_id);
+                log_error("unsupported pow base type with decimal: %d\n", item_a.type_id);
                 return ItemError;
             }
         }
@@ -735,7 +736,7 @@ Item fn_pow(Item item_a, Item item_b) {
             } else if (item_b.type_id == LMD_TYPE_FLOAT) {
                 exponent = *(double*)item_b.pointer;
             } else {
-                printf("unsupported pow exponent type with decimal: %d\n", item_b.type_id);
+                log_error("unsupported pow exponent type with decimal: %d\n", item_b.type_id);
                 return ItemError;
             }
         }
@@ -773,7 +774,7 @@ Item fn_pow(Item item_a, Item item_b) {
         base = *(double*)item_a.pointer;
     }
     else {
-        printf("unknown pow base type: %d\n", item_a.type_id);
+        log_error("unknown pow base type: %d\n", item_a.type_id);
         return ItemError;
     }
     
@@ -788,7 +789,7 @@ Item fn_pow(Item item_a, Item item_b) {
         exponent = *(double*)item_b.pointer;
     }
     else {
-        printf("unknown pow exponent type: %d\n", item_b.type_id);
+        log_error("unknown pow exponent type: %d\n", item_b.type_id);
         return ItemError;
     }
     return push_d(pow(base, exponent));
@@ -875,7 +876,7 @@ Item fn_mod(Item item_a, Item item_b) {
         return ItemError;
     }
     else {
-        printf("unknown mod type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown mod type: %d, %d\n", item_a.type_id, item_b.type_id);
         return ItemError;
     }
 }
@@ -1788,7 +1789,7 @@ Range* fn_to(Item item_a, Item item_b) {
         return range;
     }
     else {
-        printf("unknown range type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown range type: %d, %d\n", item_a.type_id, item_b.type_id);
         return NULL;
     }
 }
@@ -1901,7 +1902,7 @@ CompResult equal_comp(Item a_item, Item b_item) {
         bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
         return result ? COMP_TRUE : COMP_FALSE;
     }
-    printf("unknown comparing type %d\n", a_item.type_id);
+    log_error("unknown comparing type %d\n", a_item.type_id);
     return COMP_ERROR;
 #endif
 }

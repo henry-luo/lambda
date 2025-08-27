@@ -53,28 +53,28 @@ nan
 <elmt>
 <elmt a:123>
 <elmt
-  "text">
+ "text">
 <elmt a:123
-  "text"
-  111>
+ "text"
+ 111>
 <elmt a:123, b:'symbol', c:<d>
-  "text"
-  222
-  <br>
-  <br>
-  <br>
-  "test"
-  " and "
-  "
+ "text"
+ 222
+ <br>
+ <br>
+ <br>
+ "test"
+ " and "
+ "
 more text">
 <elmt
-  [456]
-  "text"
-  789
-  {a:123}
-  <br>
-  <br>
-  <br>
-  "test"
-  " and "
-  "more text!">
+ [456]
+ "text"
+ 789
+ {a:123}
+ <br>
+ <br>
+ <br>
+ "test"
+ " and "
+ "more text!">

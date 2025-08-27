@@ -2,7 +2,26 @@
 
 This directory contains utility scripts and tools for the Lambda Script project.
 
-## Scripts
+## 🚀 Logging Migration Tools
+
+**Complete AI-assisted workflow for migrating printf statements to proper logging system.**
+
+See **[Printf_Migration.md](Printf_Migration.md)** for comprehensive documentation.
+
+### Quick Start
+```bash
+# Convert printf statements to proper logging
+./utils/logging_workflow.sh lambda/your_file.cpp
+
+# Follow the step-by-step AI-assisted process
+```
+
+**Key Tools:**
+- `logging_workflow.sh` - Main orchestration script
+- `extract_for_ai.sh` - Extract printf statements with context  
+- `apply_ai_replacements.sh` - Apply AI-classified log levels
+
+## 🛠️ Development Scripts
 
 ### `update_intellisense.sh`
 Updates VS Code IntelliSense database by regenerating `compile_commands.json`.
