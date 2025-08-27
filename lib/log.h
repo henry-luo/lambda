@@ -90,7 +90,7 @@ typedef struct log_category_s {
 
 /* Basic log function declarations */
 int log_init(const char *config);
-void log_fini(void);
+void log_finish(void);
 int log_reload(const char *config);
 log_category_t* log_get_category(const char *cname);
 
@@ -136,7 +136,7 @@ extern log_category_t *log_default_category;
 
 /* Default category initialization/finalization with dzlog-compatible names */
 int log_default_init(const char *config, const char *default_category);
-void log_default_fini(void);
+void log_default_finish(void);
 
 /* Utility functions */
 void log_enable_timestamps(int enable);
