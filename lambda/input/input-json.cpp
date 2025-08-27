@@ -128,9 +128,9 @@ static Item parse_value(Input *input, const char **json) {
     skip_whitespace(json);
     switch (**json) {
         case '{':
-            return {.item = (uint64_t)parse_object(input, json)};
+            return {.raw_pointer = parse_object(input, json)};
         case '[':
-            return {.item = (uint64_t)parse_array(input, json)};
+            return {.raw_pointer = parse_array(input, json)};
         case '"': {
             String* str = parse_string(input, json);
             return str ? (str == &EMPTY_STRING ? (Item){.item = ITEM_NULL} : (Item){.item = s2it(str)}) : (Item){.item = 0};
