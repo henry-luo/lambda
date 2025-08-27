@@ -32,7 +32,7 @@ nested.a;  nested.b;  nested.c;  nested.d;
 
 <elmt a:12, &{b:34}, c:56>
 
-// range exprs
+"Test range exprs:"
 1 to 0;  // should be error
 12 to 12;  1 to 3;  (1, 2 to 3, 4);  
 [1, (2 to 5), 6]
