@@ -6,45 +6,25 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <ctype.h>
-#include "../lambda/lambda.h"
+#include "../lambda/lambda-data.hpp"
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/url.h"
 
-// Include the Input struct definition (matching lambda-data.hpp)
-typedef struct Input {
-    void* url;
-    void* path;
-    VariableMemPool* pool; // memory pool
-    ArrayList* type_list;  // list of types
-    Item root;
-    StrBuf* sb;
-} Input;
-
-// Forward declarations
-Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
-Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
-String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-Url* get_current_dir();
-Url* parse_url(Url *base, const char* doc_url);
+extern "C" {
+    Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
+    Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
+    String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
+    
+    // Use actual URL library functions
+    Url* url_parse(const char* input);
+    Url* url_parse_with_base(const char* input, const Url* base);
+    void url_destroy(Url* url);
+}
 char* read_text_doc(Url *url);
 void print_item(StrBuf *strbuf, Item item);
-
-// Forward declarations for Lambda runtime 
-extern __thread Context* context;
-
-// Functions we need for setting up the context
-void heap_init();
-void frame_start();
-void frame_end();
-void heap_destroy();
-num_stack_t* num_stack_create(size_t initial_capacity);
-void num_stack_destroy(num_stack_t *stack);
-
-Context* create_test_context();
-void destroy_test_context(Context* ctx);
 
 // Helper function to create a Lambda String from C string
 String* create_lambda_string(const char* text) {
@@ -72,7 +52,7 @@ char* read_file_content(const char* filepath) {
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
     
-    char* content = malloc(size + 1);
+    char* content = (char*)malloc(size + 1);
     if (!content) {
         fclose(file);
         return NULL;
@@ -92,7 +72,7 @@ char* normalize_whitespace(const char* str) {
     if (!str) return NULL;
     
     size_t len = strlen(str);
-    char* normalized = malloc(len + 1);
+    char* normalized = (char*)malloc(len + 1);
     if (!normalized) return NULL;
     
     char* dst = normalized;
@@ -423,60 +403,11 @@ bool compare_markup_semantically(const char* original, const char* formatted) {
     return result;
 }
 
-// Context management
-static Context* test_ctx = NULL;
-
-Context* create_test_context() {
-    Context* ctx = (Context*)calloc(1, sizeof(Context));
-    if (!ctx) return NULL;
-    
-    // Initialize minimal context for testing
-    ctx->num_stack = num_stack_create(16);
-    ctx->ast_pool = NULL;
-    ctx->consts = NULL;
-    ctx->type_list = NULL;
-    ctx->type_info = NULL;
-    ctx->cwd = NULL;
-    ctx->result = ITEM_NULL;
-    ctx->heap = NULL;  // Will be initialized in setup
-    
-    return ctx;
-}
-
-void destroy_test_context(Context* ctx) {
-    if (!ctx) return;
-    if (ctx->num_stack) {
-        num_stack_destroy((num_stack_t*)ctx->num_stack);
-    }
-    // free(ctx);
-}
-
 // Setup and teardown functions
 void input_setup(void) {
-    test_ctx = create_test_context();
-    // Set the global context BEFORE calling heap_init
-    context = test_ctx;
-    
-    // Now initialize heap and frame
-    heap_init();
-    frame_start();
-    
-    cr_assert_not_null(test_ctx, "Failed to create test context");
 }
 
 void input_teardown(void) {
-    if (test_ctx && context) {
-        frame_end();
-        heap_destroy();
-        
-        if (test_ctx->num_stack) {
-            num_stack_destroy((num_stack_t*)test_ctx->num_stack);
-        }
-        
-        free(test_ctx);
-        test_ctx = NULL;
-        context = NULL;
-    }
 }
 
 TestSuite(input_roundtrip_tests, .init = input_setup, .fini = input_teardown);
@@ -505,16 +436,16 @@ bool test_format_roundtrip(const char* test_file, const char* format_type, const
     String* type_str = create_lambda_string(format_type);
     String* flavor_str = NULL; // Use default flavor
     
-    // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
+    // Get current directory for URL resolution - use a simple file URL
+    Url* cwd = url_parse("file://./");
     if (!cwd) {
-        printf("ERROR: Failed to get current directory\n");
+        printf("ERROR: Failed to create base URL\n");
         free(original_content);
         return false;
     }
     
     // Parse the URL for the test file
-    Url* file_url = parse_url(cwd, test_file);
+    Url* file_url = url_parse_with_base(test_file, cwd);
     if (!file_url) {
         printf("ERROR: Failed to parse URL for test file\n");
         free(original_content);
@@ -529,7 +460,7 @@ bool test_format_roundtrip(const char* test_file, const char* format_type, const
         return false;
     }
     
-    printf("Input parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Input parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -610,8 +541,8 @@ Test(json_tests, json_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.json");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.json", cwd);
     
     // Make a mutable copy of the JSON string
     char* json_copy = strdup(complex_json);
@@ -620,7 +551,7 @@ Test(json_tests, json_roundtrip) {
     Input* input = input_from_source(json_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse comprehensive JSON input");
     
-    printf("Comprehensive JSON parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Comprehensive JSON parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -672,8 +603,8 @@ Test(xml_tests, xml_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.xml");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.xml", cwd);
     
     // Make a mutable copy of the XML string
     char* xml_copy = strdup(complex_xml);
@@ -682,7 +613,7 @@ Test(xml_tests, xml_roundtrip) {
     Input* input = input_from_source(xml_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse comprehensive XML input");
     
-    printf("Comprehensive XML parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Comprehensive XML parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -735,8 +666,8 @@ Test(markdown_tests, markdown_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.md", cwd);
     
     // Make a mutable copy of the Markdown string
     char* md_copy = strdup(complex_md);
@@ -745,7 +676,7 @@ Test(markdown_tests, markdown_roundtrip) {
     Input* input = input_from_source(md_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse comprehensive Markdown input");
     
-    printf("Comprehensive Markdown parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Comprehensive Markdown parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -797,8 +728,8 @@ Test(json_tests, simple_json_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.json");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.json", cwd);
     
     // Make a mutable copy of the JSON string
     char* json_copy = strdup(simple_json);
@@ -807,7 +738,7 @@ Test(json_tests, simple_json_roundtrip) {
     Input* input = input_from_source(json_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse simple JSON input");
     
-    printf("Simple JSON parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Simple JSON parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -858,8 +789,8 @@ Test(xml_tests, simple_xml_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.xml");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.xml", cwd);
     
     // Make a mutable copy of the XML string
     char* xml_copy = strdup(simple_xml);
@@ -868,7 +799,7 @@ Test(xml_tests, simple_xml_roundtrip) {
     Input* input = input_from_source(xml_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse simple XML input");
     
-    printf("Simple XML parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Simple XML parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -905,8 +836,8 @@ Test(markdown_tests, simple_markdown_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.md", cwd);
     
     // Make a mutable copy of the Markdown string
     char* md_copy = strdup(simple_md);
@@ -915,7 +846,7 @@ Test(markdown_tests, simple_markdown_roundtrip) {
     Input* input = input_from_source(md_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse simple Markdown input");
     
-    printf("Simple Markdown parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Simple Markdown parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -968,8 +899,8 @@ Test(org_tests, simple_org_roundtrip) {
     String* flavor_str = NULL;
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.org");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.org", cwd);
     
     // Make a mutable copy of the Org string
     char* org_copy = strdup(simple_org);
@@ -978,7 +909,7 @@ Test(org_tests, simple_org_roundtrip) {
     Input* input = input_from_source(org_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse simple Org-mode input");
     
-    printf("Simple Org-mode parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Simple Org-mode parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -1040,8 +971,8 @@ Test(markup_tests, markup_markdown_roundtrip) {
     String* flavor_str = NULL; // Should detect as markdown
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.md");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.md", cwd);
     
     // Make a mutable copy of the content
     char* content_copy = strdup(markdown_content);
@@ -1050,7 +981,7 @@ Test(markup_tests, markup_markdown_roundtrip) {
     Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse Markdown content with markup parser");
     
-    printf("Markup parser (Markdown) parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Markup parser (Markdown) parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string using markup formatter (should default to markdown)
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -1096,8 +1027,8 @@ Test(markup_tests, markup_rst_roundtrip) {
     String* flavor_str = create_lambda_string("rst");
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "comprehensive_test.rst");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("comprehensive_test.rst", cwd);
     
     // Make a mutable copy of the content
     char* content_copy = strdup(rst_content);
@@ -1106,7 +1037,7 @@ Test(markup_tests, markup_rst_roundtrip) {
     Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse RST content with markup parser");
     
-    printf("Markup parser (RST) parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Markup parser (RST) parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string using markup formatter with RST flavor
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -1147,8 +1078,8 @@ Test(markup_tests, markup_wiki_detection) {
     String* flavor_str = NULL; // Should auto-detect as wiki format
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "test.wiki");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("test.wiki", cwd);
     
     // Make a mutable copy of the content
     char* content_copy = strdup(wiki_content);
@@ -1157,7 +1088,7 @@ Test(markup_tests, markup_wiki_detection) {
     Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse Wiki content with markup parser");
     
-    printf("Markup parser (Wiki detected) parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Markup parser (Wiki detected) parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string (should default to markdown since wiki formatter isn't implemented)
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -1234,8 +1165,8 @@ Test(markup_tests, phase2_comprehensive_roundtrip) {
     String* flavor_str = NULL; // Should detect as markdown
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "phase2_test.md");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("phase2_test.md", cwd);
     
     // Make a mutable copy of the content
     char* content_copy = strdup(complex_content);
@@ -1246,12 +1177,11 @@ Test(markup_tests, phase2_comprehensive_roundtrip) {
     Input* input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse complex Phase 2 content with markup parser");
     
-    printf("Phase 2 Test: Parsing successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Phase 2 Test: Parsing successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Validate the parsed structure contains expected elements
-    cr_assert_not_null(input->root, "Parsed root should not be null");
-    cr_assert(input->root != ITEM_NULL, "Parsed root should not be ITEM_NULL");
-    cr_assert(input->root != ITEM_ERROR, "Parsed root should not be ITEM_ERROR");
+    cr_assert(input->root.item != ITEM_NULL, "Parsed root should not be ITEM_NULL");
+    cr_assert(input->root.item != ITEM_ERROR, "Parsed root should not be ITEM_ERROR");
     
     // Format the parsed data back to string using markup formatter
     String* formatted = format_data(input->root, type_str, flavor_str, input->pool);
@@ -1328,8 +1258,8 @@ Test(markup_tests, phase2_block_elements) {
         "---\n";
     
     String* type_str = create_lambda_string("markup");
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "blocks.md");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("blocks.md", cwd);
     char* content_copy = strdup(block_content);
     
     Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
@@ -1367,8 +1297,8 @@ Test(markup_tests, phase2_inline_elements) {
         "Multiple `code` spans and **nested *formatting* works**.";
     
     String* type_str = create_lambda_string("markup");
-    Url* cwd = get_current_dir();
-    Url* dummy_url = parse_url(cwd, "inline.md");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("inline.md", cwd);
     char* content_copy = strdup(inline_content);
     
     Input* input = input_from_source(content_copy, dummy_url, type_str, NULL);
@@ -1430,8 +1360,8 @@ Test(markup_tests, markup_format_detection) {
         String* type_str = create_lambda_string("markup");
         String* flavor_str = NULL;
         
-        Url* cwd = get_current_dir();
-        Url* dummy_url = parse_url(cwd, "test.txt");
+        Url* cwd = url_parse("file://./");
+        Url* dummy_url = url_parse_with_base("test.txt", cwd);
         
         char* content_copy = strdup(test_cases[i].content);
         
@@ -1480,8 +1410,8 @@ Test(markup_roundtrip_tests, comprehensive_file_roundtrip) {
     String* flavor_str = NULL; // Auto-detect flavor
     
     // Get current directory for URL resolution
-    Url* cwd = get_current_dir();
-    Url* file_url = parse_url(cwd, "sample.md");
+    Url* cwd = url_parse("file://./");
+    Url* file_url = url_parse_with_base("sample.md", cwd);
     
     // Make a mutable copy of the content
     char* content_copy = strdup(original_content);
@@ -1490,7 +1420,7 @@ Test(markup_roundtrip_tests, comprehensive_file_roundtrip) {
     Input* input = input_from_source(content_copy, file_url, type_str, flavor_str);
     cr_assert_not_null(input, "Failed to parse markup content with unified parser");
     
-    printf("Markup parser successful, root item: 0x%llx\n", (unsigned long long)input->root);
+    printf("Markup parser successful, root item: 0x%llx\n", (unsigned long long)input->root.item);
     
     // Format the parsed data back to string using markdown formatter (detected format)
     String* markdown_type = create_lambda_string("markdown");
@@ -1541,8 +1471,8 @@ Test(markup_roundtrip_tests, element_specific_tests) {
         String* flavor_str = NULL;
         
         // Get current directory for URL resolution
-        Url* cwd = get_current_dir();
-        Url* test_url = parse_url(cwd, "test.md");
+        Url* cwd = url_parse("file://./");
+        Url* test_url = url_parse_with_base("test.md", cwd);
         
         // Make a mutable copy of the content
         char* content_copy = strdup(test_cases[i].content);

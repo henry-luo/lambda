@@ -34,10 +34,33 @@ project "lambda-lib"
     
     -- Meta-library: combines source files from dependencies
     files {
+        "lib/mem-pool/src/variable.c",
+        "lib/mem-pool/src/buffer.c",
+        "lib/mem-pool/src/utils.c",
+        "lib/strbuf.c",
+        "lib/strview.c",
+        "lib/string.c",
+        "lib/num_stack.c",
+        "lib/datetime.c",
+        "lib/url.c",
+        "lib/url_parser.c",
+        "lib/log.c",
+        "lambda/input/mime-detect.c",
+        "lambda/input/mime-types.c",
     }
     
     includedirs {
         "lib/mem-pool/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+    }
+    
+    links {
+        "criterion",
     }
     
     buildoptions {
@@ -78,12 +101,19 @@ project "lambda-input-full-c"
         "-pedantic"
     }
     
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+    }
+    
     links {
         "lambda-lib",
         "tree-sitter-lambda",
         "tree-sitter",
         "mpdec",
         "utf8proc",
+        "criterion",
     }
     
 
@@ -128,12 +158,19 @@ project "lambda-input-full-cpp"
         "-std=c++17"
     }
     
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+    }
+    
     links {
         "lambda-lib",
         "tree-sitter-lambda",
         "tree-sitter",
         "mpdec",
         "utf8proc",
+        "criterion",
     }
     
 
@@ -187,6 +224,12 @@ project "lambda-runtime-full-c"
         "-pedantic"
     }
     
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+    }
+    
     links {
         "mem-pool",
         "strbuf",
@@ -196,6 +239,7 @@ project "lambda-runtime-full-c"
         "datetime",
         "url",
         "mime-detect",
+        "criterion",
     }
     
 
@@ -249,6 +293,12 @@ project "lambda-runtime-full-cpp"
         "-std=c++17"
     }
     
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+    }
+    
     links {
         "mem-pool",
         "strbuf",
@@ -258,6 +308,7 @@ project "lambda-runtime-full-cpp"
         "datetime",
         "url",
         "mime-detect",
+        "criterion",
     }
     
 
@@ -310,6 +361,7 @@ project "test_strbuf"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -352,6 +404,7 @@ project "test_strview"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -394,6 +447,7 @@ project "test_variable_pool"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -436,6 +490,7 @@ project "test_num_stack"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -478,6 +533,7 @@ project "test_datetime"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -520,6 +576,7 @@ project "test_url"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -562,6 +619,7 @@ project "test_url_extra"
     
     links {
         "lambda-lib",
+        "criterion",
     }
     
     buildoptions {
@@ -605,6 +663,7 @@ project "test_mime_detect"
     links {
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
@@ -657,6 +716,7 @@ project "test_math"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
@@ -708,9 +768,67 @@ project "test_markup_roundtrip"
     }
     
     links {
+        "lambda-runtime-full-cpp",
+        "lambda-runtime-full-c",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
+    }
+    
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic",
+        "-std=c++17",
+    }
+    
+
+project "test_input_roundtrip"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_input_roundtrip.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-runtime-full-cpp",
+        "lambda-runtime-full-c",
+        "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
@@ -765,6 +883,7 @@ project "test_validator"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
@@ -821,6 +940,7 @@ project "test_mir"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
@@ -875,6 +995,7 @@ project "test_lambda"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
@@ -930,6 +1051,7 @@ project "test_lambda_runner"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "criterion",
     }
     
     linkoptions {
