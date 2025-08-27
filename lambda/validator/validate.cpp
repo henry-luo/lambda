@@ -11,7 +11,7 @@ extern "C" {
     Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 }
 
-void run_validation(const char *data_file, const char *schema_file, const char *input_format) {
+ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     fprintf(stderr, "TRACE: run_validation() started\n");
     fflush(stderr);
     
@@ -53,7 +53,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     if (!schema_contents) {
         fprintf(stderr, "TRACE: Failed to read schema file\n");
         fflush(stderr);
-        return;
+        return NULL;
     }
     
     fprintf(stderr, "TRACE: Schema file read successfully, about to create memory pool\n");
@@ -62,12 +62,17 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     // Create memory pool for validation
     VariableMemPool* pool = NULL;
     MemPoolError pool_err = pool_variable_init(&pool, 1024 * 1024, 10); // 1MB chunks, 10% tolerance
-    if (pool_err != MEM_POOL_ERR_OK || !pool) {
-        printf("Error: Cannot create memory pool\n");
-        free(schema_contents);
-        fprintf(stderr, "TRACE: Memory pool creation failed\n");
+    if (pool_err != MEM_POOL_ERR_OK) {
+        fprintf(stderr, "TRACE: Failed to create memory pool\n");
         fflush(stderr);
-        return;
+        free(schema_contents);
+        return NULL;
+    }
+    if (!pool) {
+        fprintf(stderr, "TRACE: Failed to create memory pool\n");
+        fflush(stderr);
+        free(schema_contents);
+        return NULL;
     }
     
     fprintf(stderr, "TRACE: Memory pool created successfully, about to create validator\n");
@@ -78,10 +83,9 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     if (!validator) {
         fprintf(stderr, "TRACE: Failed to create validator\n");
         fflush(stderr);
-        printf("Error: Cannot create validator\n");
         pool_variable_destroy(pool);
         free(schema_contents);
-        return;
+        return NULL;
     }
     
     // Load schema
@@ -105,12 +109,19 @@ void run_validation(const char *data_file, const char *schema_file, const char *
     
     // Use the refactored schema parser
     int schema_result = schema_validator_load_schema(validator, schema_contents, root_type);
+    if (!root_type) {
+        printf("Error: Could not find root type 'Document' in schema\n");
+        schema_validator_destroy(validator);
+        pool_variable_destroy(pool);
+        free(schema_contents);
+        return NULL;
+    }
     if (schema_result != 0) {
         printf("Error: Failed to load schema\n");
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
         free(schema_contents);
-        return;
+        return NULL;
     }
     
     // Parse data file using input parsing functions
@@ -124,7 +135,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
         free(schema_contents);
-        return;
+        return NULL;
     }
 
     char file_url[1200];
@@ -172,7 +183,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
         free(schema_contents);
-        return;
+        return NULL;
     }
     
     // Validate using the loaded schema
@@ -184,7 +195,7 @@ void run_validation(const char *data_file, const char *schema_file, const char *
         schema_validator_destroy(validator);
         pool_variable_destroy(pool);
         free(schema_contents);
-        return;
+        return NULL;
     }
     
     // Print results
@@ -246,32 +257,29 @@ void run_validation(const char *data_file, const char *schema_file, const char *
             }
         }
     }
+    // Note: We cannot destroy the memory pool here because ValidationResult 
+    // and its error messages are allocated from it. The caller is responsible
+    // for cleanup by calling validation_result_destroy() when done.
     
-    // Cleanup
-    if (result) {
-        // TODO: Implement proper validation result cleanup
-        // validation_result_destroy(result);
-    }
+    // Only cleanup what we can safely cleanup
     schema_validator_destroy(validator);
-    pool_variable_destroy(pool);
     free(schema_contents);
     
-    // Restore the original context and cleanup number stack
-    // context = old_context;
-    // if (validation_context.num_stack) {
-    //     num_stack_destroy((num_stack_t*)validation_context.num_stack);
-    // }
+    fprintf(stderr, "TRACE: run_validation() completed\n");
+    fflush(stderr);
+    
+    return result;
 }
 
 // Validation execution function that can be called directly by tests
-int exec_validation(int argc, char* argv[]) {
+ValidationResult* exec_validation(int argc, char* argv[]) {
     // Extract validation argument parsing logic from main() function
     // This allows tests to call validation directly without spawning new processes
     printf("Starting validation with arguments\n");
     if (argc < 2) {
         printf("Error: No file specified for validation\n");
         printf("Usage: validate [-s <schema>] [-f <format>] <file> [files...]\n");
-        return 1;
+        return NULL;
     }
     
     const char* data_file = nullptr;
@@ -294,20 +302,20 @@ int exec_validation(int argc, char* argv[]) {
                 data_file = argv[i];
             } else {
                 printf("Error: Multiple input files not yet supported\n");
-                return 1;
+                return NULL;
             }
         } else {
             printf("Error: Unknown validation option '%s'\n", argv[i]);
             printf("Usage: validate [-s <schema>] [-f <format>] <file>\n");
             printf("Formats: auto, json, csv, ini, toml, yaml, xml, markdown, rst, html, latex, rtf, pdf, wiki, asciidoc, man, eml, vcf, ics, text\n");
-            return 1;
+            return NULL;
         }
     }
     
     if (!data_file) {
         printf("Error: No input file specified\n");
         printf("Usage: validate [-s <schema>] [-f <format>] <file>\n");
-        return 1;
+        return NULL;
     }
     
     // Auto-detect format if not specified
@@ -385,12 +393,14 @@ int exec_validation(int argc, char* argv[]) {
             // For other formats (json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text), require explicit schema
             printf("Error: Input format '%s' requires an explicit schema file. Use -s <schema_file> option.\n", input_format);
             printf("Formats with default schemas: html, eml, ics, vcf, asciidoc, man, markdown, rst, textile, wiki\n");
-            return 1;
+            return NULL;
         }
     }
     
-    // Call the validation function
+    // Call the validation function and return the ValidationResult directly
     printf("Starting validation of '%s' using schema '%s'...\n", data_file, schema_file);
-    run_validation(data_file, schema_file, input_format);
-    return 0;
+    ValidationResult* result = run_validation(data_file, schema_file, input_format);
+    
+    // Return the ValidationResult directly to the caller
+    return result;
 }

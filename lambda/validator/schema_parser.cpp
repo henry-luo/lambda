@@ -162,6 +162,12 @@ static const int MAX_SCHEMA_PARSE_DEPTH = 50;
 TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     if (!parser || ts_node_is_null(type_expr_node)) return NULL;
     
+    // Additional safety check for invalid nodes
+    if (!ts_node_is_named(type_expr_node) && ts_node_child_count(type_expr_node) == 0) {
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: invalid/empty node, returning ANY schema\n");
+        return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+    }
+    
     // Prevent infinite recursion
     if (schema_parse_depth >= MAX_SCHEMA_PARSE_DEPTH) {
         if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: max recursion depth reached\n");
@@ -171,6 +177,14 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     schema_parse_depth++;
     
     TSSymbol symbol = ts_node_symbol(type_expr_node);
+    
+    // Check for ERROR nodes and handle them gracefully
+    if (symbol == 65535) { // ERROR node symbol
+        if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: ERROR node detected, returning ANY schema\n");
+        schema_parse_depth--;
+        return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
+    }
+    
     const char* node_type = ts_node_type(type_expr_node);
     
     if (ENABLE_SCHEMA_DEBUG) printf("[SCHEMA_DEBUG] build_schema_type: symbol=%d, node_type='%s', depth=%d\n", 
