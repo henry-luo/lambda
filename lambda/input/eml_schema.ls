@@ -60,7 +60,7 @@ type TextContent = {
     type: 'text/plain' | 'text/html',
     charset: Charset?,
     encoding: Encoding?,
-    content: string
+    string
 }
 
 type Attachment = {
@@ -70,7 +70,7 @@ type Attachment = {
     'content-transfer-encoding': Encoding?,
     'content-id': string?,
     size: int?,
-    content: string  // Base64 encoded or raw content
+    string  // Base64 encoded or raw content
 }
 
 type MultipartContent = {
@@ -82,7 +82,7 @@ type MultipartContent = {
 type EmailPart = TextContent | Attachment | MultipartContent
 
 type EmailBody = {
-    content: EmailPart
+    EmailPart
 }
 
 // Complete email message structure
