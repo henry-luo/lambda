@@ -17,6 +17,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Ensure temp directory exists
+mkdir -p "$PROJECT_ROOT/temp"
+
 echo "=== Lambda Script Logging Conversion Workflow ==="
 echo ""
 
@@ -34,7 +37,7 @@ for file in "$@"; do
     
     # Step 1: Extract statements with context
     echo "Step 1: Extracting printf statements with context..."
-    context_file="${basename_file}_for_ai.txt"
+    context_file="temp/${basename_file}_for_ai.txt"
     "$SCRIPT_DIR/extract_for_ai.sh" "$file" > /dev/null 2>&1
     mv print_statements_for_ai.txt "$context_file"
     echo "  Context data saved to: $context_file"
@@ -79,15 +82,15 @@ for file in "$@"; do
     echo "================================"
     echo ""
     echo "After getting AI response:"
-    echo "1. Save the AI response to: ${basename_file}_ai_response.txt"
-    echo "2. Run: $SCRIPT_DIR/apply_ai_replacements.sh ${basename_file}_ai_response.txt $file"
+    echo "1. Save the AI response to: temp/${basename_file}_ai_response.txt"
+    echo "2. Run: $SCRIPT_DIR/apply_ai_replacements.sh temp/${basename_file}_ai_response.txt $file"
     echo "3. Check if $file needs #include \"../lib/log.h\" added"
     echo "4. Verify the changes and compile to ensure correctness"
     echo ""
     
     echo "Files generated:"
     echo "  - $context_file (send this to AI)"
-    echo "  - ${basename_file}_ai_response.txt (save AI response here)"
+    echo "  - temp/${basename_file}_ai_response.txt (save AI response here)"
     echo ""
 done
 

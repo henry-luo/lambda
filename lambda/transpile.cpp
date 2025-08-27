@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../lib/log.h"
 
 extern Type TYPE_ANY, TYPE_INT;
 void transpile_expr(Transpiler* tp, AstNode *expr_node);
@@ -74,10 +75,10 @@ bool expr_produces_item(AstNode* node) {
 
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
-        printf("transpile box item: NULL type, node_type: %d\n", item->node_type);
+        log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
         return;
     }
-    printf("transpile box item: %d\n", item->type->type_id);
+        log_debug("transpile box item: %d", item->type->type_id);
     printf("transpile box item type name: %s, node_type: %d\n", 
         item->type->type_id == LMD_TYPE_DTIME ? "DateTime" : 
         item->type->type_id == LMD_TYPE_STRING ? "String" :
@@ -146,7 +147,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                 
                 // Use runtime function if types are incompatible or operation is invalid or one side returns Item
                 if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
-                    printf("transpile_box_item: Using runtime function for comparison op=%d, no b2it wrapping\n", bin_node->op);
+        log_debug("transpile_box_item: Using runtime function for comparison op=%d, no b2it wrapping", bin_node->op);
                     transpile_expr(tp, item);  // Don't wrap with b2it
                     break;
                 }
@@ -164,7 +165,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                 }
                 
                 if (needs_runtime_check) {
-                    printf("transpile_box_item: Using runtime function for logical op=%d, no b2it wrapping\n", bin_node->op);
+        log_debug("transpile_box_item: Using runtime function for logical op=%d, no b2it wrapping", bin_node->op);
                     transpile_expr(tp, item);  // Don't wrap with b2it
                     break;
                 }
@@ -214,7 +215,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     
                     // Use runtime function if types are incompatible or operation is invalid or one side returns Item
                     if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
-                        printf("transpile_box_item: Using runtime function for Primary->comparison op=%d, no b2it wrapping\n", bin_node->op);
+        log_debug("transpile_box_item: Using runtime function for Primary->comparison op=%d, no b2it wrapping", bin_node->op);
                         transpile_expr(tp, item);  // Don't wrap with b2it
                         break;
                     }
@@ -232,7 +233,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     }
                     
                     if (needs_runtime_check) {
-                        printf("transpile_box_item: Using runtime function for Primary->logical op=%d, no b2it wrapping\n", bin_node->op);
+        log_debug("transpile_box_item: Using runtime function for Primary->logical op=%d, no b2it wrapping", bin_node->op);
                         transpile_expr(tp, item);  // Don't wrap with b2it
                         break;
                     }
@@ -281,7 +282,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     
                     if (expression_needs_boxing) {
                         // This variable was declared as Item, so just output the variable name without boxing
-                        printf("transpile_box_item: int variable declared as Item, no boxing needed\n");
+        log_debug("transpile_box_item: int variable declared as Item, no boxing needed");
                         transpile_expr(tp, item);
                         break;
                     }
@@ -460,7 +461,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                         
                         if (expression_needs_boxing) {
                             // This variable was declared as Item, so just output the variable name without boxing
-                            printf("transpile_box_item: variable declared as Item, no boxing needed\n");
+        log_debug("transpile_box_item: variable declared as Item, no boxing needed");
                             transpile_expr(tp, item);
                             break;
                         }
@@ -487,12 +488,12 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         transpile_expr(tp, item);  // no boxing needed
         break;
     default:
-        printf("unknown box item type: %d\n", item->type->type_id);
+        log_debug("unknown box item type: %d", item->type->type_id);
     }
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
-    printf("transpile primary expr\n");
+        log_debug("transpile primary expr");
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
@@ -521,7 +522,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 }
             }
             else {
-                printf("Warning: ident_node->entry is null or entry->node is null\n");
+        log_warn("Warning: ident_node->entry is null or entry->node is null");
                 // Handle the case where entry is null - perhaps write the identifier directly
                 write_node_source(tp, ident_node->node);
             }
@@ -572,7 +573,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
 }
 
 void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
-    // printf("transpile unary expr\n");
+        log_debug("transpile unary expr");
     if (unary_node->op == OPERATOR_NOT) {
         TypeId operand_type = unary_node->operand->type->type_id;
         
@@ -623,7 +624,7 @@ void transpile_unary_expr(Transpiler* tp, AstUnaryNode *unary_node) {
     }
     else {
         // Fallback for unknown operators (should not happen with proper AST)
-        printf("Error: transpile_unary_expr unknown operator %d\n", unary_node->op);
+        log_error("Error: transpile_unary_expr unknown operator %d", unary_node->op);
         strbuf_append_str(tp->code_buf, "null");
     }
 }
@@ -1207,13 +1208,13 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
     }    
     else {
-        printf("Error: unknown binary operator %d\n", bi_node->op);
+        log_error("Error: unknown binary operator %d", bi_node->op);
         strbuf_append_str(tp->code_buf, "null");  // should be error
     }
 }
 
 void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
-    printf("transpile if expr\n");
+        log_debug("transpile if expr");
     
     // Check types for proper conditional expression handling
     Type* if_type = if_node->type;
@@ -1227,7 +1228,7 @@ void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
         need_coercion = true;
     }
     if (need_coercion) {
-        printf("transpile if expr with type coercion\n");
+        log_debug("transpile if expr with type coercion");
         // When we need coercion, always box to Item to ensure runtime safety
         strbuf_append_str(tp->code_buf, "(");
         
@@ -1374,30 +1375,30 @@ void transpile_if_expr(Transpiler* tp, AstIfNode *if_node) {
         } else {
             // Defensive code: according to grammar, else clause is required for if_expr,
             // but we handle the missing case gracefully with proper null representation
-            printf("Warning: if_expr missing else clause (should not happen per grammar)\n");
+        log_warn("Warning: if_expr missing else clause (should not happen per grammar)");
             strbuf_append_str(tp->code_buf, "ITEM_NULL");
         }
         strbuf_append_char(tp->code_buf, ')');
     }
     
-    printf("end if expr\n");
+        log_debug("end if expr");
 }
 
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
-    printf("transpile assign expr\n");
+        log_debug("transpile assign expr");
     // Defensive validation: ensure all required pointers and components are valid
     if (!asn_node) {
-        printf("Error: transpile_assign_expr called with null assign node\n");
+        log_error("Error: transpile_assign_expr called with null assign node");
         strbuf_append_str(tp->code_buf, "\n /* invalid assignment */");
         return;
     }
     if (!asn_node->type) {
-        printf("Error: transpile_assign_expr missing type information\n");
+        log_error("Error: transpile_assign_expr missing type information");
         strbuf_append_str(tp->code_buf, "\n /* assignment missing type */");
         return;
     }
     if (!asn_node->as) {
-        printf("Error: transpile_assign_expr missing assignment expression\n");
+        log_error("Error: transpile_assign_expr missing assignment expression");
         strbuf_append_str(tp->code_buf, "\n /* assignment missing expression */");
         return;
     }
@@ -1438,7 +1439,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     if (expression_needs_boxing) {
         // Override the variable type to Item when the expression will be boxed
         strbuf_append_str(tp->code_buf, "Item");
-        printf("transpile_assign_expr: using Item type due to expression boxing\n");
+        log_debug("transpile_assign_expr: using Item type due to expression boxing");
     } else {
         write_type(tp->code_buf, var_type);
     }
@@ -1454,7 +1455,7 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
 void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!let_node) {
-        printf("Error: transpile_let_stam called with null let node\n");
+        log_error("Error: transpile_let_stam called with null let node");
         return;
     }
     
@@ -1462,7 +1463,7 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     while (declare) {
         // Additional validation for each declaration node
         if (declare->node_type != AST_NODE_ASSIGN) {
-            printf("Error: transpile_let_stam found non-assign node in declare chain\n");
+        log_error("Error: transpile_let_stam found non-assign node in declare chain");
             // Skip this node and continue - defensive recovery
             declare = declare->next;
             continue;
@@ -1476,15 +1477,15 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
 void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!loop_node) {
-        printf("Error: transpile_loop_expr called with null loop node\n");
+        log_error("Error: transpile_loop_expr called with null loop node");
         return;
     }
     if (!loop_node->as || !loop_node->as->type) {
-        printf("Error: transpile_loop_expr missing iterable expression or type\n");
+        log_error("Error: transpile_loop_expr missing iterable expression or type");
         return;
     }
     if (!then) {
-        printf("Error: transpile_loop_expr missing then expression\n");
+        log_error("Error: transpile_loop_expr missing then expression");
         return;
     }
     
@@ -1498,7 +1499,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             item_type = array_type->nested;
         } else {
-            printf("Warning: Invalid nested type in array, using TYPE_ANY\n");
+        log_warn("Warning: Invalid nested type in array, using TYPE_ANY");
             item_type = &TYPE_ANY;
         }
     } else if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -1509,13 +1510,13 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         
     // Validate that we have a proper type for item_type
     if (!item_type) {
-        printf("Error: transpile_loop_expr failed to determine item type\n");
+        log_error("Error: transpile_loop_expr failed to determine item type");
         item_type = &TYPE_ANY; // fallback to ANY type for safety
     }
         
     // Defensive check: verify item_type is valid before accessing type_id
     if (!item_type || (uintptr_t)item_type < 0x1000 || (uintptr_t)item_type > 0x7FFFFFFFFFFF) {
-        printf("Warning: item_type pointer is invalid (%p), using TYPE_ANY\n", item_type);
+        log_warn("Warning: item_type pointer is invalid (%p), using TYPE_ANY", item_type);
         item_type = &TYPE_ANY;
     }
     
@@ -1538,7 +1539,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     }
     AstNode *next_loop = loop_node->next;
     if (next_loop) {
-        printf("transpile nested loop\n");
+        log_debug("transpile nested loop");
         transpile_loop_expr(tp, (AstNamedNode*)next_loop, then);
     } else {
         Type *then_type = then->type;
@@ -1552,17 +1553,17 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
 void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!for_node) {
-        printf("Error: transpile_for_expr called with null for node\n");
+        log_error("Error: transpile_for_expr called with null for node");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!for_node->then) {
-        printf("Error: transpile_for_expr missing then expression\n");
+        log_error("Error: transpile_for_expr missing then expression");
         strbuf_append_str(tp->code_buf, "({\n List* ls=list();\n ls;})");
         return;
     }
     if (!for_node->then->type) {
-        printf("Error: transpile_for_expr then expression missing type information\n");
+        log_error("Error: transpile_for_expr then expression missing type information");
         strbuf_append_str(tp->code_buf, "({\n List* ls=list();\n ls;})");
         return;
     }
@@ -1635,28 +1636,28 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 }
 
 void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
-    printf("transpile list expr: dec - %p, itm - %p\n", list_node->declare, list_node->item);
+        log_debug("transpile list expr: dec - %p, itm - %p", list_node->declare, list_node->item);
     // Defensive validation: ensure all required pointers and components are valid
     if (!list_node) {
-        printf("Error: transpile_list_expr called with null list node\n");
+        log_error("Error: transpile_list_expr called with null list node");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!list_node->type) {
-        printf("Error: transpile_list_expr missing type information\n");
+        log_error("Error: transpile_list_expr missing type information");
         strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n ls;})");
         return;
     }
     
     TypeArray *type = (TypeArray*)list_node->type;
-    printf("transpile_list_expr: type->length = %ld\n", type->length);
+        log_debug("transpile_list_expr: type->length = %ld", type->length);
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");
     // let declare first
     AstNode *declare = list_node->declare;
     while (declare) {
         if (declare->node_type != AST_NODE_ASSIGN) {
-            printf("Error: transpile_list_expr found non-assign node in declare chain\n");
+        log_error("Error: transpile_list_expr found non-assign node in declare chain");
             // Skip invalid node - defensive recovery
             declare = declare->next;
             continue;
@@ -1666,7 +1667,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         declare = declare->next;
     }
     if (type->length == 0) {
-        printf("transpile_list_expr: type->length is 0, outputting null\n");
+        log_debug("transpile_list_expr: type->length is 0, outputting null");
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }    
@@ -1678,7 +1679,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
-    printf("transpile content expr\n");
+        log_debug("transpile content expr");
     TypeArray *type = (TypeArray*)list_node->type;
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
@@ -1709,12 +1710,12 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!map_node) {
-        printf("Error: transpile_map_expr called with null map node\n");
+        log_error("Error: transpile_map_expr called with null map node");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!map_node->type) {
-        printf("Error: transpile_map_expr missing type information\n");
+        log_error("Error: transpile_map_expr missing type information");
         strbuf_append_str(tp->code_buf, "({Map* m = map(0); m;})");
         return;
     }
@@ -1731,7 +1732,7 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                 if (key_expr->as) {
                     transpile_expr(tp, key_expr->as);
                 } else {
-                    printf("Error: transpile_map_expr key expression missing assignment\n");
+        log_error("Error: transpile_map_expr key expression missing assignment");
                     strbuf_append_str(tp->code_buf, "ITEM_NULL");
                 }
             } else {
@@ -1751,12 +1752,12 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
 void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!elmt_node) {
-        printf("Error: transpile_element called with null element node\n");
+        log_error("Error: transpile_element called with null element node");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!elmt_node->type) {
-        printf("Error: transpile_element missing type information\n");
+        log_error("Error: transpile_element missing type information");
         strbuf_append_str(tp->code_buf, "({Element* el=elmt(0); el;})");
         return;
     }
@@ -1774,7 +1775,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
                 if (key_expr->as) {
                     transpile_expr(tp, key_expr->as);
                 } else {
-                    printf("Error: transpile_element key expression missing assignment\n");
+        log_error("Error: transpile_element key expression missing assignment");
                     strbuf_append_str(tp->code_buf, "ITEM_NULL");
                 }
             } else {
@@ -1792,7 +1793,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         if (elmt_node->content) {
             transpile_items(tp, ((AstListNode*)elmt_node->content)->item);
         } else {
-            printf("Error: transpile_element content missing despite content_length > 0\n");
+        log_error("Error: transpile_element content missing despite content_length > 0");
         }
         strbuf_append_str(tp->code_buf, ");");
     }
@@ -1802,20 +1803,20 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
-    // printf("transpile call expr\n");
+        log_debug("transpile call expr");
     // Defensive validation: ensure all required pointers and components are valid
     if (!call_node) {
-        printf("Error: transpile_call_expr called with null call node\n");
+        log_error("Error: transpile_call_expr called with null call node");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!call_node->function) {
-        printf("Error: transpile_call_expr missing function\n");
+        log_error("Error: transpile_call_expr missing function");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!call_node->function->type) {
-        printf("Error: transpile_call_expr function missing type information\n");
+        log_error("Error: transpile_call_expr function missing type information");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
@@ -1850,7 +1851,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 strbuf_append_str(tp->code_buf, "->ptr");
             }
         } else { // handle Item
-            printf("call function type is not func\n");
+        log_debug("call function type is not func");
             strbuf_append_str(tp->code_buf, "ITEM_NULL");
             return;
         }       
@@ -1865,7 +1866,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         
         // For system functions, box DateTime arguments
         if (call_node->function->node_type == AST_NODE_SYS_FUNC && arg->type->type_id == LMD_TYPE_DTIME) {
-            printf("transpile_call_expr: BOXING DateTime for sys func\n");
+        log_debug("transpile_call_expr: BOXING DateTime for sys func");
             strbuf_append_str(tp->code_buf, "k2it(");
             transpile_expr(tp, arg);
             strbuf_append_str(tp->code_buf, ")");
@@ -1958,17 +1959,17 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
 void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // Defensive validation: ensure all required pointers and types are valid
     if (!field_node) {
-        printf("Error: transpile_index_expr called with null field_node\n");
+        log_error("Error: transpile_index_expr called with null field_node");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!field_node->object || !field_node->field) {
-        printf("Error: transpile_index_expr missing object or field\n");
+        log_error("Error: transpile_index_expr missing object or field");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
     if (!field_node->object->type || !field_node->field->type) {
-        printf("Error: transpile_index_expr missing type information\n");
+        log_error("Error: transpile_index_expr missing type information");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
@@ -2092,7 +2093,7 @@ void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     if (!expr_node) {
-        printf("missing expression node\n");  return;
+        log_debug("missing expression node");
     }
     // get the function name
     switch (expr_node->node_type) {
@@ -2187,36 +2188,36 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_binary_type(tp, (AstBinaryNode*)expr_node);
         break;
     case AST_NODE_IMPORT:
-        printf("import module\n");
+        log_debug("import module");
         break;
     default:
-        printf("unknown expression type: %d!!!\n", expr_node->node_type);
+        log_debug("unknown expression type: %d!!!", expr_node->node_type);
         break;
     }
 }
 
 void define_module_import(Transpiler* tp, AstImportNode *import_node) {
-    printf("define import module\n");
+        log_debug("define import module");
     // import module
-    if (!import_node->script) { printf("misssing script\n");  return; }
-    printf("script reference: %s\n", import_node->script->reference);
+        log_debug("misssing script");
+        log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
-    if (!node) { printf("misssing root node\n");  return; }
+        log_debug("misssing root node");
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
-    printf("finding content node\n");
+        log_debug("finding content node");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-    if (!node) { printf("misssing content node\n");  return; }
+        log_debug("misssing content node");
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-            printf("got fn: %.*s, is_public: %d\n", (int)func_node->name->len, func_node->name->chars, 
+        log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
@@ -2384,7 +2385,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         // should define its params
         break;
     default:
-        printf("unknown expression type: %d\n", node->node_type);
+        log_debug("unknown expression type: %d", node->node_type);
         break;
     }
 }
@@ -2394,7 +2395,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
 void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
-    // printf("define_ast_node...\n");
+        log_debug("define_ast_node...");
     strbuf_append_str(tp->code_buf, "\n\nContext *rt;\n");  // defines global runtime context
     AstNode* child = script->child;
     while (child) {
@@ -2403,7 +2404,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     }    
 
     // global evaluation, wrapped inside main()
-    // printf("transpile_ast_node...\n");
+        log_debug("transpile_ast_node...");
     strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n return ");
     child = script->child;
     bool has_content = false;

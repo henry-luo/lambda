@@ -2,10 +2,13 @@
 
 # Extract printf statements with context for AI classification
 # This script prepares data for AI model to decide appropriate log levels
+# 
+# IMPORTANT: Excludes sprintf/snprintf (they're string formatting, not logging)
 
 if [ $# -eq 0 ]; then
     echo "Usage: $0 <file1.cpp> [file2.cpp] ..."
     echo "Extracts printf statements with context for AI classification"
+    echo "Note: Excludes sprintf/snprintf (string formatting functions)"
     exit 1
 fi
 
@@ -14,8 +17,8 @@ extract_with_context() {
     echo "=== FILE: $file ==="
     echo ""
     
-    # Find all printf/fprintf/perror statements with more context
-    grep -n -A 3 -B 3 -E "(printf|fprintf|perror)\s*\(" "$file" | \
+    # Find all printf/fprintf/perror statements with more context (excluding sprintf/snprintf)
+    grep -n -A 3 -B 3 -E "(printf|fprintf|perror)\s*\(" "$file" | grep -v -E "(sprintf|snprintf)\s*\(" | \
     awk '
     BEGIN { 
         entry_num = 0
