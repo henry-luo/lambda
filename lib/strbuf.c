@@ -1,5 +1,6 @@
 #include "strbuf.h"
 #include <string.h>
+#include "log.h"
 
 #define INITIAL_CAPACITY 32
 
@@ -84,7 +85,7 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
             new_capacity = min_capacity; // Use minimum required instead of doubling
             break;
         }
-        printf("DEBUG: Doubling - new_capacity=%zu -> %zu\n", new_capacity, new_capacity * 2);
+        log_debug("Doubling - new_capacity=%zu -> %zu\n", new_capacity, new_capacity * 2);
         new_capacity *= 2; 
     }
     char *new_s;

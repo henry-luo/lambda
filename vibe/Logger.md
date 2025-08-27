@@ -96,7 +96,7 @@ Add thread-local indentation for hierarchical debugging and function tracing.
 
 - **error/warn** → **stderr** (+ log file)
 - **notice** → **stdout** (+ log file)  
-- **info/debug** → **stdout** (+ log file, configurable via category output)
+- **info/debug** → **log file only** (no console output for cleaner interface)
 
 ### 1. `log_error()` - Error Messages
 - **Output**: **Log file + stderr**
@@ -118,7 +118,7 @@ Add thread-local indentation for hierarchical debugging and function tracing.
   - Performance concerns
 
 ### 3. `log_info()` - Informational Messages
-- **Output**: **Log file + stdout** (configurable)
+- **Output**: **Log file only**
 - **Usage**: Important operational information
 - **Examples**:
   - Successful compilation phases
@@ -136,7 +136,7 @@ Add thread-local indentation for hierarchical debugging and function tracing.
   - "Generating output..."
 
 ### 5. `log_debug()` - Debug/Trace Messages
-- **Output**: **Log file + stdout** (configurable)
+- **Output**: **Log file only**
 - **Usage**: Detailed execution flow and debugging information
 - **Examples**:
   - Function entry/exit traces
@@ -152,7 +152,7 @@ Add thread-local indentation for hierarchical debugging and function tracing.
 - **Console Separation**: 
   - **Error/Warning messages**: Go to **stderr** (+ log file) via `log_error()` and `log_warn()`
   - **Notice messages**: Go to **stdout** (+ log file) for major status updates
-  - **Info/Debug messages**: Go to **stdout** (+ log file, configurable per category)
+  - **Info/Debug messages**: Go to **log file only** (no console output for cleaner interface)
 - **Final script output**: Continue printing directly to stdout (no change)
 
 ### 2. Log Level Configuration
@@ -263,7 +263,7 @@ clog_debug(parser, "Parsing expression");  // Output: 12:24:40 [DEBUG] [parser] 
 Add cleanup in exit paths:
 ```cpp
 // In cleanup functions
-log_fini();
+log_finish();
 ```
 
 ### 4. Migration Pattern
@@ -399,6 +399,7 @@ log_set_default_format("%T [%L] %m%n");
 8. **Performance**: Can disable expensive debug operations
 9. **Maintainability**: Centralized logging configuration and formatting
 10. **Industry Standards**: zlog-compatible configuration format
+11. **Clean Console Output**: Debug/info messages go to log file only, keeping console uncluttered
 
 ## Implementation Status
 

@@ -3,6 +3,7 @@
 // Unicode support (always enabled)
 #include "utf_string.h"
 #include "transpiler.hpp"
+#include "../lib/log.h"  // Add logging support
 
 // Forward declare additional transpiler functions
 extern "C" {
@@ -250,47 +251,47 @@ void run_assertions() {
 }
 
 int main(int argc, char *argv[]) {
+    // Initialize logging system with config file if available
+    if (access("log.conf", F_OK) == 0) {
+        // log.conf exists, load it
+        if (log_parse_config_file("log.conf") != LOG_OK) {
+            fprintf(stderr, "Warning: Failed to parse log.conf, using defaults\n");
+        }
+    }
+    log_init("");  // Initialize with parsed config or defaults
+    
     // Add trace statement at start of main
-    fprintf(stderr, "TRACE: main() started with %d arguments\n", argc);
-    fflush(stderr);
+    log_debug("main() started with %d arguments", argc);
     
     // Run basic assertions
-    fprintf(stderr, "TRACE: About to run assertions\n");
-    fflush(stderr);
+    log_debug("About to run assertions");
     run_assertions();
-    fprintf(stderr, "TRACE: Assertions completed\n");
-    fflush(stderr);
+    log_debug("Assertions completed");
     
     // Parse command line arguments
-    fprintf(stderr, "TRACE: Parsing command line arguments\n");
-    fflush(stderr);
+    log_debug("Parsing command line arguments");
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
+        log_finish();  // Cleanup logging before exit
         return 0;
     }
     
     // Initialize runtime (needed for all operations)
-    fprintf(stderr, "TRACE: About to initialize runtime\n");
-    fflush(stderr);
+    log_debug("About to initialize runtime");
     Runtime runtime;
     runtime_init(&runtime);
     runtime.current_dir = const_cast<char*>("./");
-    fprintf(stderr, "TRACE: Runtime initialized\n");
-    fflush(stderr);
+    log_debug("Runtime initialized");
 
     // Initialize utf8proc Unicode support (always enabled)
-    fprintf(stderr, "TRACE: About to initialize utf8proc Unicode support\n");
-    fflush(stderr);
+    log_debug("About to initialize utf8proc Unicode support");
     init_utf8proc_support();
-    fprintf(stderr, "TRACE: utf8proc Unicode support initialized\n");
-    fflush(stderr);
+    log_debug("utf8proc Unicode support initialized");
 
     // Handle validate command
-    fprintf(stderr, "TRACE: Checking for validate command\n");
-    fflush(stderr);
+    log_debug("Checking for validate command");
     if (argc >= 2 && strcmp(argv[1], "validate") == 0) {
-        fprintf(stderr, "TRACE: Entering validate command handler\n");
-        fflush(stderr);
+        log_debug("Entering validate command handler");
         
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
@@ -319,6 +320,7 @@ int main(int argc, char *argv[]) {
             printf("  %s validate -s custom_schema.ls document.ls\n", argv[0]);
             printf("  %s validate -f html input.html  # Uses html5_schema.ls automatically\n", argv[0]);
             printf("  %s validate -f html -s schema.ls input.html\n", argv[0]);
+            log_finish();  // Cleanup logging before exit
             return 0;
         }
         
@@ -329,8 +331,8 @@ int main(int argc, char *argv[]) {
         // Call the extracted validation function
         int validation_result = exec_validation(validation_argc, validation_argv);
         
-        fprintf(stderr, "TRACE: exec_validation completed with result: %d\n", validation_result);
-        fflush(stderr);
+        log_debug("exec_validation completed with result: %d", validation_result);
+        log_finish();  // Cleanup logging before exit
         return validation_result;
     }
     
@@ -346,11 +348,13 @@ int main(int argc, char *argv[]) {
         } else if (argv[i][0] != '-') {
             // This is a script file
             run_script_file(&runtime, argv[i], use_mir, transpile_only);
+            log_finish();  // Cleanup logging before exit
             return 0;
         } else {
             // Unknown option
             printf("Error: Unknown option '%s'\n", argv[i]);
             print_help();
+            log_finish();  // Cleanup logging before exit
             return 1;
         }
     }
@@ -359,6 +363,7 @@ int main(int argc, char *argv[]) {
     if (transpile_only) {
         printf("Error: --transpile-only requires a script file\n");
         print_help();
+        log_finish();  // Cleanup logging before exit
         return 1;
     } else {
         // Start REPL mode by default (with or without MIR)
@@ -367,6 +372,9 @@ int main(int argc, char *argv[]) {
     
     // Clean up utf8proc Unicode support (always enabled)
     cleanup_utf8proc_support();
+    
+    // Cleanup logging system
+    log_finish();
     
     return 0;
 }
