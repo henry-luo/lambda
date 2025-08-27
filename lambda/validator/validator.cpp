@@ -482,6 +482,17 @@ ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item,
     }
     
     Map* map = (Map*)typed_item.pointer;
+    
+    // Safety check: ensure map pointer is valid
+    if (!map) {
+        //printf("[TRACE] validate_map: NULL map pointer\n");
+        //fflush(stdout);
+        add_validation_error(result, create_validation_error(
+            VALID_ERROR_TYPE_MISMATCH, "Null map pointer", 
+            ctx->path, ctx->pool));
+        return result;
+    }
+    
     ////if (ENABLE_SCHEMA_DEBUG) printf("[DEBUG].*: Validating map with %d fields in schema\n", 
     //       map_schema->field_count);
     
@@ -576,11 +587,21 @@ ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item,
                 }
             }
         } else {
-            // For Maps, use map_get_typed
+            // For Maps, use map_get_typed with safety checks
             //printf("[TRACE] validate_map: calling map_get_typed for map\n");
             //fflush(stdout);
-            field_value_typed = map_get_typed(map, field_key);
-            field_value.item = (uint64_t)field_value_typed.pointer;
+            
+            // Safety check: ensure map and field_key are valid
+            if (!map || !map->type || !map->data || field_key.item == ITEM_NULL) {
+                //printf("[TRACE] validate_map: SAFETY CHECK FAILED - invalid map or key\n");
+                //fflush(stdout);
+                field_value.item = ITEM_NULL;
+                field_value_typed.type_id = LMD_TYPE_NULL;
+                field_value_typed.pointer = nullptr;
+            } else {
+                field_value_typed = map_get_typed(map, field_key);
+                field_value.item = (uint64_t)field_value_typed.pointer;
+            }
         }
         
         //printf("[TRACE] validate_map: map_get returned, field_value.item=%llu\n", field_value.item);
@@ -1059,7 +1080,22 @@ ValidationResult* validate_reference(SchemaValidator* validator, TypedItem typed
     hashmap_set(ctx->visited, &entry);
     
     validation_result_destroy(result);
-    result = validate_item(validator, typed_item, resolved, ctx);
+    
+    // Enhanced type reference matching: if resolved type is primitive string
+    // and we have a string value, allow direct validation
+    if (resolved->schema_type == LMD_SCHEMA_PRIMITIVE) {
+        SchemaPrimitive* prim = (SchemaPrimitive*)resolved->schema_data;
+        if (prim && prim->primitive_type == LMD_TYPE_STRING && 
+            typed_item.type_id == LMD_TYPE_STRING) {
+            // Direct string match for type aliases like EmailAddress = string
+            result = create_validation_result(ctx->pool);
+            result->valid = true;
+        } else {
+            result = validate_item(validator, typed_item, resolved, ctx);
+        }
+    } else {
+        result = validate_item(validator, typed_item, resolved, ctx);
+    }
     
     // Unmark as visited
     VisitedEntry unmark_entry = { .key = schema->name, .visited = false };
@@ -1813,5 +1849,18 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document, c
     TypedItem document_typed;
     document_typed.type_id = get_type_id(document);
     document_typed.pointer = document.raw_pointer;
+    
+    // Safety check: ensure validation context is valid
+    if (!validator->context) {
+        printf("ERROR: Validation context is null\n");
+        return nullptr;
+    }
+    
+    // Safety check: ensure schema is valid
+    if (!found_entry->schema) {
+        printf("ERROR: Found schema entry has null schema\n");
+        return nullptr;
+    }
+    
     return validate_item(validator, document_typed, found_entry->schema, validator->context);
 }
