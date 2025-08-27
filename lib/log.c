@@ -339,10 +339,8 @@ static int log_output(log_category_t *category, int level, const char *format, v
     } else if (level == LOG_LEVEL_NOTICE) {
         // notice -> stdout  
         console_output = stdout;
-    } else {
-        // info, debug -> stdout
-        console_output = stdout;
     }
+    // info and debug -> log file only (no console output)
     
     if (console_output) {
         write_log_message_to_stream(console_output, category, timestamp, level_str,
@@ -387,7 +385,7 @@ int log_init(const char *config) {
 }
 
 /* Cleanup logging system */
-void log_fini(void) {
+void log_finish(void) {
     if (!log_initialized) {
         return;
     }
@@ -409,7 +407,7 @@ void log_fini(void) {
 
 /* Reload configuration */
 int log_reload(const char *config) {
-    log_fini();
+    log_finish();
     return log_init(config);
 }
 
@@ -626,8 +624,8 @@ int log_default_init(const char *config, const char *default_category_name) {
     return ret;
 }
 
-void log_default_fini(void) {
-    log_fini();
+void log_default_finish(void) {
+    log_finish();
     default_category.format = &default_format;
     log_default_category = &default_category;
 }

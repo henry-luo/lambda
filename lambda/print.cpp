@@ -169,7 +169,7 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
     }
 
     ShapeEntry *field = map_type->shape;
-        log_debug("printing named items: %p, type: %d, length: %ld", map_data, map_type->type_id, map_type->length);
+    // log_debug("printing named items: %p, type: %d, length: %ld", map_data, map_type->type_id, map_type->length);
     for (int i = 0; i < map_type->length; i++) {
         // Safety check for valid field pointer
         if (!field || (uintptr_t)field < 0x1000) {
