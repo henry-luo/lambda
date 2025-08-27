@@ -25,8 +25,8 @@ type UserPreferences = {
     newsletter: bool?                 // optional newsletter subscription
 }
 
-// Status can be string or int (union type for testing)
-type UserStatus = string | int
+// Status can be string or int (union type for testing)  
+type UserStatus = string
 
 // User profile information
 type UserProfile = {
@@ -58,3 +58,6 @@ type UserProfileDocument = {
     tags: [string]*,                 // zero or more tags (max 10) (array)
     metadata: UserMetadata           // required metadata
 }
+
+// Root document type for validation
+type Document = UserProfileDocument

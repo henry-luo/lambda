@@ -777,11 +777,7 @@ void parse_xml(Input* input, const char* xml_string) {
         }
     }
     
-    // If document has only one actual XML element, return that as root
-    // Otherwise return the document element containing all elements
-    if (actual_element_count == 1 && actual_root_element.item != ITEM_ERROR) {
-        input->root = actual_root_element;
-        return;
-    }
+    // Always return the document element to preserve XML declarations and other processing instructions
+    // This ensures roundtrip fidelity for XML documents with declarations
     input->root = {.item = (uint64_t)doc_element};
 }

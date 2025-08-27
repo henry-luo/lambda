@@ -397,50 +397,56 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
     
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
     
-    // Check if we have an XML document structure with declaration
-    bool has_xml_declaration = false;
-    Item actual_root = root_item;
-    
+    // Check if we have a document structure with multiple children (XML declaration + root element)
     if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
         Element* root_element = (Element*)root_item.pointer;
         if (root_element && root_element->type) {
             TypeElmt* root_type = (TypeElmt*)root_element->type;
             
-            // Check if this element has child elements
-            if (root_type->content_length > 0) {
-                List* root_as_list = (List*)root_element;
+            printf("format_xml: root element name='%.*s', length=%ld, content_length=%ld\n", 
+                   (int)root_type->name.length, root_type->name.str, root_type->name.length, root_type->content_length);
+            
+            // Check if this is a "document" element containing multiple children
+            if (root_type->name.length == 8 && strncmp(root_type->name.str, "document", 8) == 0 && 
+                root_type->content_length > 0) {
                 
-                // Check if first child is XML declaration
-                if (root_as_list->length > 0) {
-                    Item first_child = root_as_list->items[0];
-                    if (get_type_id(first_child) == LMD_TYPE_ELEMENT) {
-                        Element* first_elem = (Element*)first_child.pointer;
-                        if (first_elem && first_elem->type) {
-                            TypeElmt* first_type = (TypeElmt*)first_elem->type;
-                            if (first_type->name.length == 4 && 
-                                strncmp(first_type->name.str, "?xml", 4) == 0) {
-                                has_xml_declaration = true;
-                                
-                                // Format XML declaration first
-                                format_item(sb, first_child, NULL);
-                                
-                                // If there's a second child, use it as the real root
-                                if (root_as_list->length > 1) {
-                                    actual_root = root_as_list->items[1];
-                                    printf("format_xml: found XML declaration, using second child as root\n");
-                                }
+                List* root_as_list = (List*)root_element;
+                printf("format_xml: document element with %ld children\n", root_as_list->length);
+                
+                // Format all children in order (XML declaration, then actual elements)
+                for (long i = 0; i < root_as_list->length; i++) {
+                    Item child = root_as_list->items[i];
+                    if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                        Element* child_elem = (Element*)child.pointer;
+                        if (child_elem && child_elem->type) {
+                            TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                            
+                            // Check if this is XML declaration
+                            if (child_type->name.length == 4 && 
+                                strncmp(child_type->name.str, "?xml", 4) == 0) {
+                                printf("format_xml: formatting XML declaration\n");
+                                format_item(sb, child, NULL);
+                                strbuf_append_char(sb, '\n');
+                            } else {
+                                // Format actual XML element with its proper name
+                                char* element_name = strndup(child_type->name.str, child_type->name.length);
+                                printf("format_xml: formatting element '%s'\n", element_name);
+                                format_item(sb, child, element_name);
+                                free(element_name);
                             }
                         }
                     }
                 }
+                
+                return strbuf_to_string(sb);
             }
         }
     }
     
-    // Format the actual root element
+    // Fallback: format as single element
     const char* tag_name = NULL;
-    if (get_type_id(actual_root) == LMD_TYPE_ELEMENT) {
-        Element* element = (Element*)actual_root.pointer;
+    if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
+        Element* element = (Element*)root_item.pointer;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             if (elmt_type->name.length > 0 && elmt_type->name.str) {
@@ -456,7 +462,7 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
         printf("format_xml: using default name 'root'\n");
     }
     
-    format_item(sb, actual_root, tag_name);
+    format_item(sb, root_item, tag_name);
     
     // Free the allocated element name if we created one
     if (tag_name && strcmp(tag_name, "root") != 0) {
