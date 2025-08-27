@@ -1,9 +1,12 @@
 #include "input/input.h"
 #include <unistd.h>  // for getcwd
 // Unicode support (always enabled)
-#include "utf_string.h"
-#include "transpiler.hpp"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 #include "../lib/log.h"  // Add logging support
+#include "validator/validator.hpp"  // For ValidationResult
 
 // Forward declare additional transpiler functions
 extern "C" {
@@ -13,7 +16,7 @@ extern "C" {
 }
 
 void run_validation(const char *data_file, const char *schema_file, const char *input_format);
-int exec_validation(int argc, char* argv[]);
+ValidationResult* exec_validation(int argc, char* argv[]);
 void transpile_ast(Transpiler* tp, AstScript *script);
 
 // External function declarations
@@ -330,11 +333,17 @@ int main(int argc, char *argv[]) {
         char** validation_argv = argv + 1;  // Skip the program name, start from "validate"
         
         // Call the extracted validation function
-        int validation_result = exec_validation(validation_argc, validation_argv);
+        ValidationResult* validation_result = exec_validation(validation_argc, validation_argv);
         
-        log_debug("exec_validation completed with result: %d", validation_result);
+        // Convert ValidationResult to exit code
+        int exit_code = 1; // Default to failure
+        if (validation_result) {
+            exit_code = validation_result->valid ? 0 : 1;
+        }
+        
+        log_debug("exec_validation completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
-        return validation_result;
+        return exit_code;
     }
     
     bool use_mir = false;
