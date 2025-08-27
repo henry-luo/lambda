@@ -1,4 +1,5 @@
 #include "ast.hpp"
+#include "../lib/log.h"
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};
@@ -140,7 +141,7 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     t->type_id = type;
     // Defensive check: verify the type was properly initialized
     if (t->is_const != 0) {
-        printf("Warning: alloc_type - is_const flag was not zeroed properly\n");
+        log_warn("Warning: alloc_type - is_const flag was not zeroed properly");
         t->is_const = 0; // Force correction
     }
     return t;
@@ -199,7 +200,7 @@ void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
         double* dval = (double*)(arr->items + (arr->capacity - arr->extra - 1));
         *dval = *(double*)itm.pointer;  arr->items[index] = {.item = d2it(dval)};
         arr->extra++;
-        printf("array set float: %lf\n", *dval);
+        log_debug("array set float: %lf", *dval);
         break;
     }
     case LMD_TYPE_INT64: {
@@ -237,14 +238,14 @@ void list_push(List *list, Item item) {
     if (item.item <= 1024) {
         if (!item.item) { return; }  // NULL value
         // treat as invalid pointer
-        printf("list_push: invalid raw pointer: %p\n", item.raw_pointer);
+        log_error("list_push: invalid raw pointer: %p", item.raw_pointer);
         return;
     }
     TypeId type_id = get_type_id(item);
-    // printf("list_push: pushing item: type_id: %d\n", type_id);
+        log_debug("list_push: pushing item: type_id: %d", type_id);
     if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (type_id == LMD_TYPE_LIST) { // nest list is flattened
-        // printf("list_push: pushing nested list: %p, type_id: %d\n", item.list, type_id);
+        log_debug("list_push: pushing nested list: %p, type_id: %d", item.list, type_id);
         // copy over the items
         List *nest_list = item.list;
         for (int i = 0; i < nest_list->length; i++) {
@@ -259,7 +260,7 @@ void list_push(List *list, Item item) {
     }
     
     // store the value in the list (and we may need two slots for long/double)
-    //printf("list push item: type: %d, length: %ld\n", item.type_id, list->length);
+        log_debug("list push item: type: %d, length: %ld", item.type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     switch (item.type_id) {
@@ -274,7 +275,7 @@ void list_push(List *list, Item item) {
             char *buf = mpd_to_sci(dval->dec_val, 1);
             if (buf) free(buf);
         } else {
-            printf("DEBUG list_push: pushed null decimal value\n");
+        log_debug("DEBUG list_push: pushed null decimal value");
         }
         dval->ref_cnt++;
         break;
@@ -297,7 +298,7 @@ void list_push(List *list, Item item) {
         DateTime dt = *dtval = *(DateTime*)item.pointer;  list->items[list->length-1] = {.item = k2it(dtval)};
         StrBuf *strbuf = strbuf_new();
         datetime_format_lambda(strbuf, &dt);
-        printf("list_push: pushed datetime value: %s\n", strbuf->str);
+        log_debug("list_push: pushed datetime value: %s", strbuf->str);
         strbuf_free(strbuf);
         list->extra++;
         break;
@@ -306,10 +307,10 @@ void list_push(List *list, Item item) {
 }
 
 TypedItem list_get_typed(List* list, int index) {
-    printf("list_get_type %p, index: %d\n", list, index);
+        log_debug("list_get_type %p, index: %d", list, index);
     if (!list) { return null_result; }
     if (index < 0 || index >= list->length) { 
-        printf("list_get_type: index out of bounds: %d\n", index);
+        log_error("list_get_type: index out of bounds: %d", index);
         return null_result; 
     }
     
@@ -372,14 +373,14 @@ TypedItem list_get_typed(List* list, int index) {
         result.pointer = item.raw_pointer;
         return result;
     default:
-        printf("unknown list item type %d\n", type_id);
+        log_error("unknown list item type %d", type_id);
         return error_result;
     }
 }
 
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
-    printf("map length: %ld\n", count);
+        log_debug("map length: %ld", count);
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
         // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
@@ -392,7 +393,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
-                printf("expected a map, got type %d\n", itm.type_id );
+        log_error("expected a map, got type %d", itm.type_id );
             }
         } else {
             switch (field->type->type_id) {
@@ -420,7 +421,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 DateTime dtval = va_arg(args, DateTime);
                 StrBuf *strbuf = strbuf_new();
                 datetime_format_lambda(strbuf, &dtval);
-                printf("set field of datetime type to: %s\n", strbuf->str);
+        log_debug("set field of datetime type to: %s", strbuf->str);
                 *(DateTime*)field_ptr = dtval;
                 break;
             }
@@ -444,7 +445,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_ANY: { // a special case
                 Item item = va_arg(args, Item);
-                printf("set field of ANY type to: %d\n", item.type_id);
+        log_debug("set field of ANY type to: %d", item.type_id);
                 TypedItem titem = {.type_id = static_cast<TypeId>(item.type_id), .pointer = item.raw_pointer};
                 switch (item.type_id) {
                 // case LMD_TYPE_NULL: ; // no extra work
@@ -473,7 +474,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.pointer = item.raw_pointer;  // just a pointer
                     break;
                 default:
-                    printf("unknown type %d in set_fields\n", item.type_id);
+        log_error("unknown type %d in set_fields", item.type_id);
                     // set as ERROR
                     titem = {.type_id = LMD_TYPE_ERROR};
                 }
@@ -482,7 +483,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             default:
-                printf("unknown type %d\n", field->type->type_id);
+        log_error("unknown type %d", field->type->type_id);
             }
         }
         field = field->next;
@@ -512,7 +513,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
             field = field->next;
             continue;
         }
-        // printf("map_get_typed compare field: %.*s\n", (int)field->name->length, field->name->str);
+        log_debug("map_get_typed compare field: %.*s", (int)field->name->length, field->name->str);
         if (strncmp(field->name->str, key, field->name->length) == 0 && 
             strlen(key) == field->name->length) {
             *is_found = true;
@@ -541,7 +542,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
                 result.datetime_val = *(DateTime*)field_ptr;
                 StrBuf *strbuf = strbuf_new();
                 datetime_format_lambda(strbuf, &result.datetime_val);
-                printf("map_get_typed datetime: %s\n", strbuf->str);
+        log_debug("map_get_typed datetime: %s", strbuf->str);
                 strbuf_free(strbuf);
                 return result;
             }
@@ -577,23 +578,23 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
                 result.pointer = *(void**)field_ptr;
                 return result;
             case LMD_TYPE_ANY: {
-                printf("map_get_typed ANY type, pointer: %p\n", field_ptr);
+        log_debug("map_get_typed ANY type, pointer: %p", field_ptr);
                 return *(TypedItem*)field_ptr;
             }
             default:
-                printf("unknown map item type %d\n", type_id);
+        log_error("unknown map item type %d", type_id);
                 return error_result;
             }
         }
         field = field->next;
     }
     *is_found = false;
-    printf("map_get_typed: key %s not found\n", key);
+        log_debug("map_get_typed: key %s not found", key);
     return null_result;
 }
 
 TypedItem map_get_typed(Map* map, Item key) {
-    printf("map_get_typed %p\n", map);
+        log_debug("map_get_typed %p", map);
     if (!map || !key.item) { return null_result; }
     
     bool is_found;
@@ -601,10 +602,10 @@ TypedItem map_get_typed(Map* map, Item key) {
     if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {
         key_str = ((String*)key.pointer)->chars;
     } else {
-        printf("map_get_typed: key must be string or symbol, got type %d\n", key.type_id);
+        log_error("map_get_typed: key must be string or symbol, got type %d", key.type_id);
         return null_result;  // only string or symbol keys are supported
     }
-    printf("map_get_typed key: %s\n", key_str);
+        log_debug("map_get_typed key: %s", key_str);
     return _map_get_typed((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
