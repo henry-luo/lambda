@@ -46,7 +46,7 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
         log_debug("DEBUG: First array item type_id: %d", item->type ? item->type->type_id : -1);
         } else {  
             prev_item->next = item;
-            printf("DEBUG: Array item type_id: %d, nested_type_id: %d\n", 
+            log_debug("DEBUG: Array item type_id: %d, nested_type_id: %d", 
                    item->type ? item->type->type_id : -1, 
                    nested_type ? nested_type->type_id : -1);
             if (nested_type && item->type->type_id != nested_type->type_id) {
@@ -262,7 +262,7 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
         }
         
         StrView entry_name = strview_init(entry->name->chars, entry->name->len);
-        printf("checking name: %.*s vs. %.*s\n", 
+        log_debug("checking name: %.*s vs. %.*s", 
             (int)entry_name.length, entry_name.str, (int)var_name.length, var_name.str);
         if (strview_eq(&entry_name, &var_name)) { 
             break; 
@@ -309,7 +309,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
         if (entry->import && entry->node->type->type_id != LMD_TYPE_FUNC) {
             // clone and remove is_const flag
             // todo: full type clone
-            printf("got imported identifier %.*s from module %.*s\n", 
+            log_debug("got imported identifier %.*s from module %.*s", 
                 (int)entry->name->len, entry->name->chars, 
                 (int)entry->import->module.length, entry->import->module.str);
             ast_node->type = alloc_type(tp->ast_pool, entry->node->type->type_id, sizeof(Type));
@@ -320,15 +320,15 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
             }
         }
         else { 
-            printf("Debug: entry->node->type is %p for identifier %.*s\n", 
+            log_debug("Debug: entry->node->type is %p for identifier %.*s", 
                 entry->node->type, (int)entry->name->len, entry->name->chars);
             ast_node->type = entry->node->type; 
             if (!ast_node->type) {
-                printf("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY\n", 
+                log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY", 
                     (int)entry->name->len, entry->name->chars);
                 ast_node->type = &TYPE_ANY;
             } else if ((uintptr_t)ast_node->type < 0x1000 || (uintptr_t)ast_node->type > 0x7FFFFFFFFFFF) {
-                printf("Warning: entry->node->type appears to be invalid pointer %p for identifier %.*s, using TYPE_ANY\n", 
+                log_warn("Warning: entry->node->type appears to be invalid pointer %p for identifier %.*s, using TYPE_ANY", 
                     ast_node->type, (int)entry->name->len, entry->name->chars);
                 ast_node->type = &TYPE_ANY;
             }
@@ -389,7 +389,7 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // On success: dt != NULL and parse_end > datetime_start (parsing progressed)
     // On error: dt == NULL and parse_end == datetime_start (no progress)
     if (dt && parse_end > datetime_start) {
-        printf("parsed datetime fields: %d, %d, %d, %d, %d\n", 
+        log_debug("parsed datetime fields: %d, %d, %d, %d, %d", 
             dt->year_month, dt->day, dt->hour, dt->minute, dt->second);
     } else {
         // Fallback to default if parsing fails
@@ -501,8 +501,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         int64_t value = strtoll(num_str, &endptr, 10);
         free(num_str);
         
-        fprintf(stderr, "build_primary_expr SYM_INT: parsed value %lld\n", value);
-        fflush(stderr);
+        log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
         
         // Check if the value fits in 32-bit signed integer range
         if (value >= INT32_MIN && value <= INT32_MAX) {
@@ -808,7 +807,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
             // coercion is possible
         } else {
             // Incompatible types that cannot be coerced, use ANY
-            printf("Error: if branches have incompatible types %d and %d, coercing to ANY\n", 
+            log_warn("Error: if branches have incompatible types %d and %d, coercing to ANY", 
                 then_type_id, else_type_id);        
             need_any_type = true;
         }
@@ -1807,8 +1806,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         int64_t value = strtoll(num_str, &endptr, 10);
         free(num_str);
         
-        fprintf(stderr, "SYM_INT: parsed value %lld, checking range\n", value);
-        fflush(stderr);
+        log_debug("SYM_INT: parsed value %lld, checking range", value);
         
         // Check if the value fits in 32-bit signed integer range
         if (value >= INT32_MIN && value <= INT32_MAX) {
