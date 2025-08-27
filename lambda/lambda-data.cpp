@@ -190,7 +190,7 @@ Array* array_pooled(VariableMemPool *pool) {
 }
 
 void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
-    if (pool) return;
+    if (!pool) return;
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
     log_debug("array set item: type: %d, index: %d, length: %ld, extra: %ld", 
