@@ -49,7 +49,7 @@ type Document = <cookbook
     title: string,                    // cookbook title (required attribute)
     author: string,                   // cookbook author (required attribute)
     year: string,                     // publication year (required attribute)
-    xmlns: string?,                   // optional namespace
+    xmlns: string?;                   // optional namespace
     introduction: string,             // introduction as child element
-    RecipeType*                       // zero or more recipes as child elements
+    RecipeType+                       // one or more recipes as child elements (required)
 >

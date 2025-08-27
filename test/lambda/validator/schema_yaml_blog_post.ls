@@ -85,3 +85,6 @@ type BlogPostDocument = {
     seo: SeoDataType?,                // optional SEO data
     status: PostStatus                // required status: draft, published, archived, scheduled
 }
+
+// Root document type for validation
+type Document = BlogPostDocument
