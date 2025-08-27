@@ -32,19 +32,8 @@ project "lambda-lib"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
     
+    -- Meta-library: combines source files from dependencies
     files {
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
-        "lib/strbuf.c",
-        "lib/strview.c",
-        "lib/string.c",
-        "lib/num_stack.c",
-        "lib/datetime.c",
-        "lib/url.c",
-        "lib/url_parser.c",
-        "lambda/input/mime-detect.c",
-        "lambda/input/mime-types.c",
     }
     
     includedirs {
@@ -55,6 +44,113 @@ project "lambda-lib"
         "-fms-extensions",
         "-fcolor-diagnostics",
         "-pedantic"
+    }
+    
+
+project "lambda-input-full-c"
+    kind "StaticLib"
+    language "C"
+    targetdir "build/lib"
+    objdir "build/obj/%{prj.name}"
+    
+    files {
+        "lambda/parse.c",
+        "lib/arraylist.c",
+        "lib/hashmap.c",
+        "lib/file.c",
+        "lib/log.c",
+        "lib/utf.c",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
+    }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic"
+    }
+    
+    links {
+        "lambda-lib",
+        "tree-sitter-lambda",
+        "tree-sitter",
+        "mpdec",
+        "utf8proc",
+    }
+    
+
+project "lambda-input-full-cpp"
+    kind "StaticLib"
+    language "C++"
+    targetdir "build/lib"
+    objdir "build/obj/%{prj.name}"
+    
+    files {
+        "lambda/print.cpp",
+        "lambda/utf_string.cpp",
+        "lambda/name_pool.cpp",
+        "lambda/lambda-data.cpp",
+        "lambda/validator/validate.cpp",
+        "lambda/validator/schema_parser.cpp",
+        "lambda/validator/validator.cpp",
+    }
+    
+    files {
+        "lambda/input/input*.cpp",
+    }
+    
+    files {
+        "lambda/format/format*.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
+    }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic",
+        "-std=c++17"
+    }
+    
+    links {
+        "lambda-lib",
+        "tree-sitter-lambda",
+        "tree-sitter",
+        "mpdec",
+        "utf8proc",
+    }
+    
+
+project "lambda-input-full"
+    kind "StaticLib"
+    language "C++"
+    targetdir "build/lib"
+    objdir "build/obj/%{prj.name}"
+    
+    -- Wrapper library with empty source file
+    files {
+        "utils/empty.cpp",
+    }
+    
+    links {
+        "lambda-input-full-c",
+        "lambda-input-full-cpp",
     }
     
 
@@ -182,134 +278,6 @@ project "lambda-runtime-full"
     }
     
 
-project "lambda-input-full-c"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lambda/parse.c",
-        "lib/arraylist.c",
-        "lib/hashmap.c",
-        "lib/file.c",
-        "lib/log.c",
-        "lib/utf.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-    links {
-        "lambda-lib",
-        "tree-sitter-lambda",
-        "tree-sitter",
-        "mpdec",
-        "utf8proc",
-    }
-    
-
-project "lambda-input-full-cpp"
-    kind "StaticLib"
-    language "C++"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    files {
-        "lambda/print.cpp",
-        "lambda/utf_string.cpp",
-        "lambda/name_pool.cpp",
-        "lambda/lambda-data.cpp",
-        "lambda/validator/validate.cpp",
-        "lambda/validator/schema_parser.cpp",
-        "lambda/validator/validator.cpp",
-    }
-    
-    files {
-        "lambda/input/input*.cpp",
-    }
-    
-    files {
-        "lambda/format/format*.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c++17"
-    }
-    
-    links {
-        "lambda-lib",
-        "tree-sitter-lambda",
-        "tree-sitter",
-        "mpdec",
-        "utf8proc",
-    }
-    
-
-project "lambda-input-full"
-    kind "StaticLib"
-    language "C++"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    -- Wrapper library with empty source file
-    files {
-        "utils/empty.cpp",
-    }
-    
-    links {
-        "lambda-input-full-c",
-        "lambda-input-full-cpp",
-    }
-    
-
-project "lambda-lib"
-    kind "StaticLib"
-    language "C"
-    targetdir "build/lib"
-    objdir "build/obj/%{prj.name}"
-    
-    -- Meta-library: combines source files from dependencies
-    files {
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
-    }
-    
-
 project "test_strbuf"
     kind "ConsoleApp"
     language "C"
@@ -342,7 +310,6 @@ project "test_strbuf"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -385,7 +352,6 @@ project "test_strview"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -428,7 +394,6 @@ project "test_variable_pool"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -471,7 +436,6 @@ project "test_num_stack"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -514,7 +478,6 @@ project "test_datetime"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -557,7 +520,6 @@ project "test_url"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -600,7 +562,6 @@ project "test_url_extra"
     
     links {
         "lambda-lib",
-        "criterion",
     }
     
     buildoptions {
@@ -644,7 +605,6 @@ project "test_mime_detect"
     links {
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
     }
     
     linkoptions {
@@ -697,7 +657,6 @@ project "test_math"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
     }
     
     linkoptions {
@@ -752,7 +711,6 @@ project "test_markup_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
     }
     
     linkoptions {
@@ -807,7 +765,6 @@ project "test_validator"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
     }
     
     linkoptions {
@@ -864,7 +821,6 @@ project "test_mir"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
     }
     
     linkoptions {
@@ -919,7 +875,6 @@ project "test_lambda"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
     }
     
     linkoptions {
