@@ -1592,7 +1592,8 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 list_push((List*)span, emoji_item);
                 increment_element_content_length(span);
             } else if (pos == old_pos) {
-                // Parse failed and didn't advance, advance manually to avoid infinite loop
+                // Parse failed and didn't advance, add the colon to text buffer and advance
+                strbuf_append_char(sb, ':');
                 pos++;
             }
         }
