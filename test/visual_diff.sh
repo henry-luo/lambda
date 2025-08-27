@@ -3,6 +3,14 @@
 # Visual diff script for Lambda Script tests with enhanced output
 # Shows side-by-side diffs for failed tests
 
+#!/bin/bash
+
+# Visual diff helper for Lambda Script tests
+# Provides an interactive way to examine test differences
+
+# Ensure git diff doesn't use a pager for consistent output
+export GIT_PAGER=cat
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -111,8 +119,9 @@ show_test_diff() {
         
         if [[ "$USE_GIT_DIFF" == true ]]; then
             # Use git diff for colored output
-            git diff --no-index --color=always --word-diff=color "$expected_file" "$actual_file" 2>/dev/null || \
-            git diff --no-index --color=always "$expected_file" "$actual_file" 2>/dev/null
+            # --no-pager ensures output goes directly to terminal without interactive paging
+            git --no-pager diff --no-index --color=always --word-diff=color "$expected_file" "$actual_file" 2>/dev/null || \
+            git --no-pager diff --no-index --color=always "$expected_file" "$actual_file" 2>/dev/null
         else
             # Use side-by-side diff
             diff -y --width=120 "$expected_file" "$actual_file" || true
