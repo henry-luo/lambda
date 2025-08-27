@@ -101,6 +101,56 @@
             }
         },
         {
+            "name": "lambda-lib",
+            "description": "Unified runtime with all basic libraries for tests",
+            "include": "lib/mem-pool/include",
+            "sources": [
+                "lib/mem-pool/src/variable.c",
+                "lib/mem-pool/src/buffer.c",
+                "lib/mem-pool/src/utils.c",
+                "lib/strbuf.c",
+                "lib/strview.c",
+                "lib/string.c",
+                "lib/num_stack.c",
+                "lib/datetime.c",
+                "lib/url.c",
+                "lib/url_parser.c",
+                "lib/log.c",
+                "lambda/input/mime-detect.c",
+                "lambda/input/mime-types.c"
+            ],
+            "libraries": ["criterion"],
+            "special_flags": "",
+            "link": "static"
+        },
+        {
+            "name": "lambda-input-full",
+            "description": "Complete input processing and formatting with all dependencies",
+            "source_patterns": [
+                "lambda/input/input*.cpp",
+                "lambda/format/format*.cpp"
+            ],
+            "source_files": [
+                "lambda/print.cpp", 
+                "lambda/utf_string.cpp",
+                "lambda/name_pool.cpp",
+                "lambda/lambda-data.cpp",
+                "lambda/validator/validate.cpp",
+                "lambda/validator/schema_parser.cpp",
+                "lambda/validator/validator.cpp",
+                "lambda/parse.c",
+                "lib/arraylist.c", 
+                "lib/hashmap.c",
+                "lib/file.c", 
+                "lib/log.c",
+                "lib/utf.c"
+            ],
+            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "criterion"],
+            "include": "lib/mem-pool/include",
+            "special_flags": "-lstdc++",
+            "link": "static"
+        },
+        {
             "name": "lambda-runtime-full",
             "description": "Complete Lambda runtime with all dependencies for complex tests",
             "source_patterns": [
@@ -135,57 +185,8 @@
             ],
             "libraries": ["mem-pool", "strbuf", "strview", "string", "num_stack", "datetime", "url", "mime-detect", "criterion"],
             "include": "lib/mem-pool/include",
-            "special_flags": "-lstdc++ lambda/tree-sitter-lambda/libtree-sitter-lambda.a lambda/tree-sitter/libtree-sitter.a /opt/homebrew/lib/libmpdec.a /opt/homebrew/lib/libutf8proc.a /usr/local/lib/libmir.a -lcriterion",
-            "link": "inline"
-        },
-        {
-            "name": "lambda-input-full",
-            "description": "Complete input processing and formatting with all dependencies",
-            "source_patterns": [
-                "lambda/input/input*.cpp",
-                "lambda/format/format*.cpp"
-            ],
-            "source_files": [
-                "lambda/print.cpp", 
-                "lambda/utf_string.cpp",
-                "lambda/name_pool.cpp",
-                "lambda/lambda-data.cpp",
-                "lambda/validator/validate.cpp",
-                "lambda/validator/schema_parser.cpp",
-                "lambda/validator/validator.cpp",
-                "lambda/parse.c",
-                "lib/arraylist.c", 
-                "lib/hashmap.c",
-                "lib/file.c", 
-                "lib/log.c",
-                "lib/utf.c"
-            ],
-            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "criterion"],
-            "include": "lib/mem-pool/include",
-            "special_flags": "-lstdc++ -lcriterion",
-            "link": "inline"
-        },
-        {
-            "name": "lambda-lib",
-            "description": "Unified runtime with all basic libraries for tests",
-            "include": "lib/mem-pool/include",
-            "sources": [
-                "lib/mem-pool/src/variable.c",
-                "lib/mem-pool/src/buffer.c",
-                "lib/mem-pool/src/utils.c",
-                "lib/strbuf.c",
-                "lib/strview.c",
-                "lib/string.c",
-                "lib/num_stack.c",
-                "lib/datetime.c",
-                "lib/url.c",
-                "lib/url_parser.c",
-                "lambda/input/mime-detect.c",
-                "lambda/input/mime-types.c"
-            ],
-            "libraries": ["criterion"],
-            "special_flags": "-lcriterion",
-            "link": "inline"
+            "special_flags": "-lstdc++",
+            "link": "static"
         }
     ],
     "warnings": [
@@ -291,13 +292,13 @@
                     "test_url_extra.c"
                 ],
                 "library_dependencies": [
-                    ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"],
-                    ["lambda-lib", "criterion"],
+                    ["lambda-lib"],
+                    ["lambda-lib"],
+                    ["lambda-lib"],
+                    ["lambda-lib"],
+                    ["lambda-lib"],
+                    ["lambda-lib"],
+                    ["lambda-lib"],
                     "one for each of the test executable"
                 ],
                 "binaries": [
@@ -322,9 +323,9 @@
                     "test/test_markup_roundtrip.cpp"
                 ],
                 "library_dependencies": [
-                    ["lambda-input-full", "criterion"],
-                    ["lambda-input-full", "criterion"],
-                    ["lambda-input-full", "criterion"],
+                    ["lambda-input-full"],
+                    ["lambda-input-full"],
+                    ["lambda-input-full"],
                     "one for each of the test executable"
                 ],
                 "binaries": [
@@ -342,7 +343,7 @@
                 "name": "🔍 Validator Tests",
                 "sources": ["test/test_validator.cpp"],
                 "library_dependencies": [
-                    ["lambda-input-full", "criterion"]
+                    ["lambda-input-full"]
                 ],
                 "binaries": ["test/test_validator.exe"],
                 "type": "validator",
@@ -361,7 +362,7 @@
                 "name": "⚡ MIR JIT Tests",
                 "sources": ["test/test_mir.c"],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-runtime-full"]
                 ],
                 "binaries": ["test/test_mir.exe"],
                 "type": "mir",
@@ -375,7 +376,7 @@
                 "name": "🐑 Lambda Runtime Tests",
                 "sources": ["test/test_lambda.cpp"],
                 "library_dependencies": [
-                    ["lambda-runtime-full", "criterion"]
+                    ["lambda-runtime-full"]
                 ],
                 "binaries": ["test/test_lambda.exe"],
                 "type": "lambda",
