@@ -234,12 +234,24 @@ class PremakeGenerator:
         
         # Add library dependencies
         if dependencies:
-            self.premake_content.append('    links {')
+            self.premake_content.extend([
+                '    libdirs {',
+                '        "/opt/homebrew/lib",',
+                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
+                '        "/usr/local/lib",',
+                '    }',
+                '    ',
+                '    links {',
+            ])
             for dep in dependencies:
-                if dep not in ['criterion']:  # Skip external libs for now
+                if dep == 'criterion':
+                    self.premake_content.append('        "criterion",')
+                else:
                     self.premake_content.append(f'        "{dep}",')
-            self.premake_content.append('    }')
-            self.premake_content.append('    ')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
         
         self.premake_content.append('')
     
@@ -271,6 +283,7 @@ class PremakeGenerator:
         """Generate a meta-library that combines other libraries"""
         lib_name = lib['name']
         dependencies = lib.get('libraries', [])
+        sources = lib.get('sources', [])
         
         self.premake_content.extend([
             f'project "{lib_name}"',
@@ -282,6 +295,10 @@ class PremakeGenerator:
             '    -- Meta-library: combines source files from dependencies',
             '    files {',
         ])
+        
+        # Add sources directly specified in the library
+        for source in sources:
+            self.premake_content.append(f'        "{source}",')
         
         # Add source files from dependent inline libraries
         inline_libs = ['strbuf', 'strview', 'mem-pool', 'datetime', 'string', 'num_stack', 'url']
@@ -299,7 +316,33 @@ class PremakeGenerator:
             '    includedirs {',
             '        "lib/mem-pool/include",',
             '    }',
-            '    ',
+            '    '
+        ])
+        
+        # Add library dependencies for meta-libraries
+        if dependencies:
+            external_deps = [dep for dep in dependencies if dep not in inline_libs]
+            if external_deps:
+                self.premake_content.extend([
+                    '    libdirs {',
+                    '        "/opt/homebrew/lib",',
+                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
+                    '        "/usr/local/lib",',
+                    '    }',
+                    '    ',
+                    '    links {',
+                ])
+                for dep in external_deps:
+                    if dep == 'criterion':
+                        self.premake_content.append('        "criterion",')
+                    else:
+                        self.premake_content.append(f'        "{dep}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+        
+        self.premake_content.extend([
             '    buildoptions {',
             '        "-fms-extensions",',
             '        "-fcolor-diagnostics",',
@@ -431,13 +474,28 @@ class PremakeGenerator:
                                 # Add lambda-lib which now contains all core dependencies
                                 self.premake_content.append('        "lambda-lib",')
                         
+                        # Always add criterion to test executables since static libraries don't propagate criterion symbols
+                        if 'criterion' not in [dep for dep in deps]:
+                            self.premake_content.append('        "criterion",')
+                        
                         # Close the links block
                         self.premake_content.extend([
                             '    }',
                             '    '
                         ])
-                    # Add external library paths for linking using parsed library definitions
-                    if any(dep in ['lambda-runtime-full', 'lambda-input-full'] for dep in deps):
+                else:
+                    # No library dependencies specified, but still need criterion for tests
+                    self.premake_content.extend([
+                        '    links {',
+                        '        "criterion",',
+                        '    }',
+                        '    '
+                    ])
+                
+                # Add external library paths for linking when lambda-runtime-full or lambda-input-full are used
+                if i < len(library_deps) and library_deps[i]:
+                    deps = library_deps[i]
+                    if any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in deps):
                         self.premake_content.extend([
                             '    linkoptions {',
                         ])
