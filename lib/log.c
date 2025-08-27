@@ -15,6 +15,10 @@
 #endif
 #endif
 
+/* Thread-local indentation variables */
+THREAD_LOCAL int log_indent = 0;
+THREAD_LOCAL char log_indent_buffer[LOG_MAX_INDENT_LEVEL * 2 + 1] = {0};
+
 /* Forward declarations */
 static int log_parse_zlog_config(const char *config);
 static int log_parse_simple_config(const char *config);
@@ -50,7 +54,7 @@ static int colors_enabled = 0;
 /* Default format configuration */
 static log_format_t default_format = {
     "default", 
-    "%T %L %C %m%n",  /* time level category message newline */
+    "%T %L %C %I%m%n",  /* time level category indentation message newline */
     1,  /* show_timestamp */
     0,  /* show_date */
     1,  /* show_category */
@@ -152,6 +156,23 @@ void log_set_default_format(const char *pattern) {
     }
 }
 
+/* Helper function to get indentation string (thread-local) */
+static const char* get_indentation_string(void) {
+    // Ensure indentation is within bounds
+    int actual_indent = (log_indent > LOG_MAX_INDENT_LEVEL * 2) ? LOG_MAX_INDENT_LEVEL * 2 : log_indent;
+    actual_indent = (actual_indent < 0) ? 0 : actual_indent;
+    
+    // Build indentation buffer if needed
+    static THREAD_LOCAL int last_indent = -1;
+    if (last_indent != actual_indent) {
+        memset(log_indent_buffer, ' ', actual_indent);
+        log_indent_buffer[actual_indent] = '\0';
+        last_indent = actual_indent;
+    }
+    
+    return log_indent_buffer;
+}
+
 /* Helper function to format log message according to pattern */
 static void format_log_message(char *output, size_t output_size, log_format_t *format,
                               const char *timestamp, const char *level_str, 
@@ -209,6 +230,16 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
                                 out += len;
                                 remaining -= len;
                             }
+                        }
+                    }
+                    break;
+                case 'I': // indentation
+                    {
+                        const char *indent = get_indentation_string();
+                        int len = snprintf(out, remaining, "%s", indent);
+                        if (len > 0 && len < remaining) {
+                            out += len;
+                            remaining -= len;
                         }
                     }
                     break;
@@ -340,8 +371,8 @@ int log_init(const char *config) {
     
     // Initialize default formats if none exist
     if (formats_count == 0) {
-        log_add_format("default", "%T %L %C %m%n");
-        log_add_format("simple", "%T %L %C %m%n");
+        log_add_format("default", "%T %L %C %I%m%n");
+        log_add_format("simple", "%T %L %C %I%m%n");
     }
     
     // Parse configuration if provided
@@ -851,4 +882,23 @@ int log_parse_config_file(const char *filename) {
     int ret = log_parse_config_string(config_string);
     free(config_string);
     return ret;
+}
+
+/* Indentation management functions */
+void log_set_indent(int indent) {
+    if (indent < 0) {
+        log_indent = 0;
+    } else if (indent > LOG_MAX_INDENT_LEVEL * 2) {
+        log_indent = LOG_MAX_INDENT_LEVEL * 2;
+    } else {
+        log_indent = indent;
+    }
+}
+
+int log_get_indent(void) {
+    return log_indent;
+}
+
+void log_reset_indent(void) {
+    log_indent = 0;
 }

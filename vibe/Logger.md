@@ -2,7 +2,7 @@
 
 ## Enhanced Logger Features ✅
 
-The logging system has been enhanced with improved formatting and zlog-compatible configuration:
+The logging system has been enhanced with improved formatting, zlog-compatible configuration, and indentation support:
 
 ### Improved Log Format
 **Before:**
@@ -26,16 +26,46 @@ The logging system has been enhanced with improved formatting and zlog-compatibl
 - `%F` - Full timestamp with date  
 - `%L` - Log level ([DEBUG], [INFO], etc.)
 - `%C` - Category name (hidden for "default" by default)
+- `%I` - **Indentation spaces** (new in Phase 3)
 - `%m` - Message content
 - `%n` - Newline
+
+### Indentation Support (Phase 3 ✅)
+**Thread-local indentation** for hierarchical debugging:
+```cpp
+log_info("Function start");
+log_enter();                    // Increase indentation by 2 spaces
+log_debug("Processing...");     // Indented output
+log_enter();                    // Nested level
+log_debug("Deep processing");   // More indented
+log_leave();                    // Decrease indentation
+log_leave();                    // Back to original level
+log_info("Function end");
+```
+
+**Output:**
+```
+12:24:40 [INFO]  Function start
+12:24:40 [DEBUG]    Processing...
+12:24:40 [DEBUG]      Deep processing
+12:24:40 [INFO]  Function end
+```
+
+**Indentation API:**
+- `log_enter()` - Increase indentation by 2 spaces
+- `log_leave()` - Decrease indentation by 2 spaces  
+- `log_set_indent(n)` - Set indentation to n spaces
+- `log_get_indent()` - Get current indentation level
+- `log_reset_indent()` - Reset to no indentation
+- Max indentation: 40 spaces (20 levels)
 
 ### Configuration File Support
 **zlog-compatible** `log.conf` format:
 ```ini
 [formats]
-simple = "%T %L %C %m%n"           # Default: time, level, category, message
-compact = "%T %L %m%n"             # Compact: time, level, message only
-detailed = "%F %L %C %m%n"         # Detailed: full timestamp with date
+simple = "%T %L %C %I%m%n"         # Default: time, level, category, indentation, message
+compact = "%T %L %I%m%n"           # Compact: time, level, indentation, message only
+detailed = "%F %L %C %I%m%n"       # Detailed: full timestamp with date and indentation
 
 [rules]
 default.DEBUG "log.txt"; simple     # Default category to file with simple format
@@ -44,7 +74,7 @@ parser.INFO ""; compact             # Parser category to console with compact fo
 
 ## Requirements
 
-### Phase 1: Core Lambda Files
+### Phase 1: Core Lambda Files ✅
 Clean up console print statements (printf, fprintf, perror) in these core files:
 1. `lambda/lambda-mem.cpp`
 2. `lambda/lambda-data.cpp` 
@@ -55,6 +85,9 @@ Clean up console print statements (printf, fprintf, perror) in these core files:
 
 ### Phase 2: Remaining Files
 Extend logging cleanup to all other files in the codebase.
+
+### Phase 3: Indentation Support ✅
+Add thread-local indentation for hierarchical debugging and function tracing.
 
 ## Logging Level Mapping Strategy
 
@@ -185,6 +218,19 @@ log_debug("build array expr");
 log_debug("Final array nested_type_id: %d", type_id);
 ```
 
+**With indentation for function tracing:**
+```cpp
+void build_array_expr() {
+    log_debug("build array expr");
+    log_enter();
+    
+    // processing...
+    log_debug("Final array nested_type_id: %d", type_id);
+    
+    log_leave();
+}
+```
+
 ## Implementation Strategy
 
 ### 1. Header Inclusion
@@ -286,15 +332,34 @@ clog_debug(memory, "Memory pool allocated: %dKB", size);
 // Output: 12:24:40 [DEBUG] [memory] Memory pool allocated: 1024KB
 ```
 
+#### Function Tracing with Indentation
+```cpp
+void transpile_function() {
+    log_info("transpile_function() starting");
+    log_enter();
+    
+    log_debug("parsing parameters");
+    log_debug("building function body");
+    
+    log_leave();
+    log_info("transpile_function() completed");
+}
+// Output:
+// 12:24:40 [INFO]  transpile_function() starting
+// 12:24:40 [DEBUG]    parsing parameters  
+// 12:24:40 [DEBUG]    building function body
+// 12:24:40 [INFO]  transpile_function() completed
+```
+
 ## Configuration
 
 ### Enhanced Configuration (log.conf)
-**Recommended approach** using zlog-compatible format:
+**Recommended approach** using zlog-compatible format with indentation:
 ```ini
 [formats]
-simple = "%T %L %C %m%n"     # Time, level, category (hidden for default), message
-compact = "%T %L %m%n"       # Time, level, message only
-detailed = "%F %L %C %m%n"   # Full timestamp with date
+simple = "%T %L %C %I%m%n"       # Time, level, category (hidden for default), indentation, message
+compact = "%T %L %I%m%n"         # Time, level, indentation, message only
+detailed = "%F %L %C %I%m%n"     # Full timestamp with date and indentation
 
 [rules]
 default.DEBUG "lambda.log"; simple    # All levels to file
@@ -338,17 +403,18 @@ log_set_default_format("%T [%L] %m%n");
 ## Implementation Status
 
 ### ✅ Completed Features
-- Enhanced format patterns (`%T %L %C %m%n`)
+- Enhanced format patterns (`%T %L %C %I%m%n`)
 - zlog-compatible configuration files
 - Cleaner output (time-only timestamps, hidden default category)
 - Multiple output destinations (files, stdout, stderr)
 - Per-category configuration
 - Pattern-based formatting system
+- **Thread-local indentation support** (Phase 3)
 
 ### 📁 Modified Files
-- `lib/log.h` - Enhanced structures and function declarations
-- `lib/log.c` - Complete format system and config parsing implementation
-- `log.conf` - Updated with enhanced configuration format
+- `lib/log.h` - Enhanced structures, thread-local indentation, and function declarations
+- `lib/log.c` - Complete format system, config parsing, and indentation implementation
+- `log.conf` - Updated with enhanced configuration format and indentation support
 
 ## Testing Strategy
 
