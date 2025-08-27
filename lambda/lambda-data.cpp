@@ -193,7 +193,7 @@ void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
     if (pool) return;
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
-    printf("array set item: type: %d, index: %d, length: %ld, extra: %ld\n", 
+    log_debug("array set item: type: %d, index: %d, length: %ld, extra: %ld", 
         type_id, index, arr->length, arr->extra);
     switch (type_id) {
     case LMD_TYPE_FLOAT: {
@@ -519,7 +519,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
-            printf("map_get_typed found field: %.*s, type: %d, ptr: %p\n", 
+            log_debug("map_get_typed found field: %.*s, type: %d, ptr: %p", 
                 (int)field->name->length, field->name->str, type_id, field_ptr);
             
             TypedItem result = {.type_id = type_id};

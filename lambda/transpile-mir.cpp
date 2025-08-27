@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../lib/log.h"
 #include <mir.h>
 #include <mir-gen.h>
 
@@ -29,22 +30,22 @@ static MIR_reg_t new_reg(MIR_context_t ctx, MIR_func_t func, const char *name, M
     static int reg_counter = 0;
     char reg_name[64];
     snprintf(reg_name, sizeof(reg_name), "%s_%d", name ? name : "tmp", reg_counter++);
-    printf("Creating register '%s' of type %d\n", reg_name, type);
+    log_debug("Creating register '%s' of type %d", reg_name, type);
     return MIR_new_func_reg(ctx, func, type, reg_name);
 }
 
 static void transpile_mir_primary_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstPrimaryNode *pri_node, MIR_reg_t *result_reg) {
-    printf("transpile MIR primary expr: pri_node=%p, pri_node->expr=%p\n", pri_node, pri_node->expr);
+    log_debug("transpile MIR primary expr: pri_node=%p, pri_node->expr=%p", pri_node, pri_node->expr);
     
     if (pri_node->expr) {
-        printf("Primary node has expr, recursing...\n");
+        log_debug("Primary node has expr, recursing...");
         transpile_mir_expr(ctx, func_item, func, pri_node->expr, result_reg);
     } else { // const
-        printf("Primary node is const\n");
+        log_debug("Primary node is const");
         
         // Check if type pointer is valid
         if (!((AstNode*)pri_node)->type) {
-            printf("ERROR: Type pointer is null!\n");
+            log_error("Type pointer is null!");
             *result_reg = new_reg(ctx, func, "null_type", MIR_T_I64);
             MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
                 MIR_new_reg_op(ctx, *result_reg), 
@@ -52,69 +53,69 @@ static void transpile_mir_primary_expr(MIR_context_t ctx, MIR_item_t func_item, 
             return;
         }
         
-        printf("Type valid, type_id=%d, is_literal=%d\n", ((AstNode*)pri_node)->type->type_id, ((AstNode*)pri_node)->type->is_literal);
+        log_debug("Type valid, type_id=%d, is_literal=%d", ((AstNode*)pri_node)->type->type_id, ((AstNode*)pri_node)->type->is_literal);
         
         if (((AstNode*)pri_node)->type->is_literal) {  // literal
-            printf("Processing literal value\n");
+            log_debug("Processing literal value");
             if (((AstNode*)pri_node)->type->type_id == LMD_TYPE_INT || ((AstNode*)pri_node)->type->type_id == LMD_TYPE_INT64) {
-                printf("Creating integer literal\n");
+                log_debug("Creating integer literal");
                 *result_reg = new_reg(ctx, func, "int_const", MIR_T_I64);
-                printf("Created register for integer: %u\n", *result_reg);
+                log_debug("Created register for integer: %u", *result_reg);
                 // For now, extract some constant value - in real implementation we'd parse from the source
                 long value = 42; // Default test value
-                printf("Creating MIR instruction with value %ld...\n", value);
+                log_debug("Creating MIR instruction with value %ld...", value);
                 
                 // Create the instruction parts separately for debugging
                 MIR_op_t reg_op = MIR_new_reg_op(ctx, *result_reg);
-                printf("Created register operand\n");
+                log_debug("Created register operand");
                 MIR_op_t int_op = MIR_new_int_op(ctx, value);
-                printf("Created integer operand\n");
+                log_debug("Created integer operand");
                 MIR_insn_t insn = MIR_new_insn(ctx, MIR_MOV, reg_op, int_op);
-                printf("Created MIR MOV instruction\n");
+                log_debug("Created MIR MOV instruction");
                 
-                printf("About to append instruction to function...\n");
+                log_debug("About to append instruction to function...");
                 MIR_append_insn(ctx, func_item, insn);
-                printf("Integer literal instruction created\n");
+                log_debug("Integer literal instruction created");
             }
             else if (((AstNode*)pri_node)->type->type_id == LMD_TYPE_FLOAT) {
-                printf("Creating float literal\n");
+                log_debug("Creating float literal");
                 *result_reg = new_reg(ctx, func, "float_const", MIR_T_D);
                 double value = 3.14; // Default test value
                 MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_DMOV, 
                     MIR_new_reg_op(ctx, *result_reg), 
                     MIR_new_double_op(ctx, value)));
-                printf("Float literal instruction created\n");
+                log_debug("Float literal instruction created");
             }
             else if (((AstNode*)pri_node)->type->type_id == LMD_TYPE_BOOL) {
-                printf("Creating boolean literal\n");
+                log_debug("Creating boolean literal");
                 *result_reg = new_reg(ctx, func, "bool_const", MIR_T_I64);
                 MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
                     MIR_new_reg_op(ctx, *result_reg), 
                     MIR_new_int_op(ctx, 1))); // true
-                printf("Boolean literal instruction created\n");
+                log_debug("Boolean literal instruction created");
             }
             else { // null, other types
-                printf("Creating other literal type\n");
+                log_debug("Creating other literal type");
                 *result_reg = new_reg(ctx, func, "null_const", MIR_T_I64);
                 MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
                     MIR_new_reg_op(ctx, *result_reg), 
                     MIR_new_int_op(ctx, 0)));
-                printf("Other literal instruction created\n");
+                log_debug("Other literal instruction created");
             }
         } else {
-            printf("Processing non-literal constant\n");
+            log_debug("Processing non-literal constant");
             *result_reg = new_reg(ctx, func, "const_val", get_mir_type(((AstNode*)pri_node)->type));
             MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
                 MIR_new_reg_op(ctx, *result_reg), 
                 MIR_new_int_op(ctx, 0)));
-            printf("Non-literal constant instruction created\n");
+            log_debug("Non-literal constant instruction created");
         }
-        printf("Primary expression handling completed\n");
+        log_debug("Primary expression handling completed");
     }
 }
 
 static void transpile_mir_binary_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstBinaryNode *bi_node, MIR_reg_t *result_reg) {
-    printf("transpile MIR binary expr\n");
+    log_debug("transpile MIR binary expr");
     
     MIR_reg_t left_reg = new_reg(ctx, func, "left", get_mir_type(bi_node->left->type));
     MIR_reg_t right_reg = new_reg(ctx, func, "right", get_mir_type(bi_node->right->type));
@@ -260,7 +261,7 @@ static void transpile_mir_binary_expr(MIR_context_t ctx, MIR_item_t func_item, M
 }
 
 static void transpile_mir_unary_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstUnaryNode *un_node, MIR_reg_t *result_reg) {
-    printf("transpile MIR unary expr\n");
+    log_debug("transpile MIR unary expr");
     
     MIR_reg_t operand_reg = new_reg(ctx, func, "operand", get_mir_type(un_node->operand->type));
     transpile_mir_expr(ctx, func_item, func, un_node->operand, &operand_reg);
@@ -297,7 +298,7 @@ static void transpile_mir_unary_expr(MIR_context_t ctx, MIR_item_t func_item, MI
 }
 
 static void transpile_mir_ident_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func, AstIdentNode *ident_node, MIR_reg_t *result_reg) {
-    printf("transpile MIR identifier: %.*s\n", (int)ident_node->name->len, ident_node->name->chars);
+    log_debug("transpile MIR identifier: %.*s", (int)ident_node->name->len, ident_node->name->chars);
     
     // For now, just return a placeholder value
     // In a real implementation, we'd look up the variable in a symbol table
@@ -311,7 +312,7 @@ void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func
     static int recursion_depth = 0;
     
     if (recursion_depth > 100) {
-        printf("ERROR: Maximum recursion depth exceeded in transpile_mir_expr\n");
+        log_error("Maximum recursion depth exceeded in transpile_mir_expr");
         *result_reg = new_reg(ctx, func, "error_expr", MIR_T_I64);
         MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
             MIR_new_reg_op(ctx, *result_reg), 
@@ -322,7 +323,7 @@ void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func
     recursion_depth++;
     
     if (!expr_node) {
-        printf("missing expression node\n");
+        log_error("missing expression node");
         *result_reg = new_reg(ctx, func, "null_expr", MIR_T_I64);
         MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
             MIR_new_reg_op(ctx, *result_reg), 
@@ -331,7 +332,7 @@ void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func
         return;
     }
     
-    printf("transpile_mir_expr: node_type=%d, recursion_depth=%d\n", expr_node->node_type, recursion_depth);
+    log_debug("transpile_mir_expr: node_type=%d, recursion_depth=%d", expr_node->node_type, recursion_depth);
     
     switch (expr_node->node_type) {
     case AST_NODE_PRIMARY:
@@ -347,7 +348,7 @@ void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func
         transpile_mir_ident_expr(ctx, func_item, func, (AstIdentNode*)expr_node, result_reg);
         break;
     default:
-        printf("unsupported expression type: %d\n", expr_node->node_type);
+        log_error("unsupported expression type: %d", expr_node->node_type);
         *result_reg = new_reg(ctx, func, "unknown_expr", MIR_T_I64);
         MIR_append_insn(ctx, func_item, MIR_new_insn(ctx, MIR_MOV, 
             MIR_new_reg_op(ctx, *result_reg), 
@@ -359,7 +360,7 @@ void transpile_mir_expr(MIR_context_t ctx, MIR_item_t func_item, MIR_func_t func
 }
 
 void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
-    printf("transpile AST to MIR\n");
+    log_notice("transpile AST to MIR");
     
     MIR_module_t module = MIR_new_module(ctx, "lambda_script");
     
@@ -371,18 +372,18 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
     MIR_item_t main_item = MIR_new_func_arr(ctx, "main", 1, &main_ret_type, 1, main_vars);
     MIR_func_t main_func = MIR_get_item_func(ctx, main_item);
     
-    printf("Created MIR function\n");
+    log_debug("Created MIR function");
     
     // Initialize result register
     MIR_reg_t main_result = new_reg(ctx, main_func, "main_result", MIR_T_I64);
     
     // Check if the script has valid content
     if (script && script->child) {
-        printf("Transpiling script with child node\n");
+        log_debug("Transpiling script with child node");
         // Transpile the child expression
         transpile_mir_expr(ctx, main_item, main_func, script->child, &main_result);
     } else {
-        printf("Empty script or no child - using default value\n");
+        log_debug("Empty script or no child - using default value");
         // Empty script or no child - return default test value
         MIR_append_insn(ctx, main_item, MIR_new_insn(ctx, MIR_MOV, 
             MIR_new_reg_op(ctx, main_result), 
@@ -397,7 +398,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
 
 // Main entry point for MIR compilation
 Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
-    printf("Running script with MIR JIT compilation\n");
+    log_notice("Running script with MIR JIT compilation");
     
     Script* script;
     if (source) {
@@ -409,7 +410,7 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
     }
     
     if (!script || !script->ast_root) {
-        printf("Failed to parse script\n");
+        log_error("Failed to parse script");
         return ItemError;
     }
     
@@ -427,7 +428,7 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
     // Find and execute main function
     main_func_t main_fn = (main_func_t)find_func(ctx, "main");
     if (!main_fn) {
-        printf("Failed to find main function\n");
+        log_error("Failed to find main function");
         jit_cleanup(ctx);
         return ItemError;
     }

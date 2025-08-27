@@ -108,16 +108,16 @@ func_obj_t func_list[] = {
 };
 
 void *import_resolver(const char *name) {
-    printf("resolving name: %s\n", name);
+    log_debug("resolving name: %s", name);
     size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) {
         // printf("checking fn: %s\n", func_list[i].name);
         if (strcmp(func_list[i].name, name) == 0) {
-            printf("found function: %s at %p\n", name, func_list[i].func);
+            log_debug("found function: %s at %p", name, func_list[i].func);
             return func_list[i].func;
         }
     }
-    printf("failed to resolve native fn:: %s\n", name);
+    log_error("failed to resolve native fn:: %s", name);
     return NULL;
 }
 
@@ -133,10 +133,10 @@ MIR_context_t jit_init() {
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
     ops.message_file = stdout;  ops.verbose_p = 1;  ops.debug_p = 0;
-    printf("compiling C code in '%s' to MIR\n", file_name);
+    log_notice("compiling C code in '%s' to MIR", file_name);
     jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
     if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
-        printf("compiled '%s' with error!!\n", file_name);
+        log_error("compiled '%s' with error!!", file_name);
     }
 }
 
@@ -179,7 +179,7 @@ void print_module_item(MIR_item_t mitem) {
 
 // compile MIR code to native code
 void* jit_gen_func(MIR_context_t ctx, char *func_name) {
-    printf("finding and to load module: %s\n", func_name);
+    log_debug("finding and to load module: %s", func_name);
     MIR_item_t mir_func = NULL;
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
@@ -193,21 +193,21 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
         MIR_load_module(ctx, module);
     }
     if (!mir_func) {
-        printf("Failed to find function '%s'\n", func_name);
+        log_error("Failed to find function '%s'", func_name);
         return NULL;
     }
 
-    printf("generating native code...\n");
+    log_notice("generating native code...");
     // link MIR code with external functions
     MIR_link(ctx, MIR_set_gen_interface, import_resolver);
     // generate native code
     void* func_ptr =  MIR_gen(ctx, mir_func);
-    printf("generated fn ptr: %p\n", func_ptr);
+    log_debug("generated fn ptr: %p", func_ptr);
     return func_ptr;
 }
 
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {
-    printf("finding import module: %s, %p\n", mod_name, ctx);
+    log_debug("finding import module: %s, %p", mod_name, ctx);
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
         MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
@@ -221,15 +221,15 @@ MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {
 }
 
 void* find_func(MIR_context_t ctx, const char *fn_name) {
-    printf("finding function: %s, %p\n", fn_name, ctx);
+    log_debug("finding function: %s, %p", fn_name, ctx);
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
-        printf("checking module: %s\n", module->name);
+        log_debug("checking module: %s", module->name);
         MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
         for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
             print_module_item(mitem);
             if (mitem->item_type == MIR_func_item) {
-                printf("checking fn item: %s\n", mitem->u.func->name);
+                log_debug("checking fn item: %s", mitem->u.func->name);
                 if (strcmp(mitem->u.func->name, fn_name) == 0)
                     return mitem->addr;
             }
@@ -239,15 +239,15 @@ void* find_func(MIR_context_t ctx, const char *fn_name) {
 }
 
 void* find_data(MIR_context_t ctx, const char *data_name) {
-    printf("finding data: %s, %p\n", data_name, ctx);
+    log_debug("finding data: %s, %p", data_name, ctx);
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
-        printf("checking module: %s\n", module->name);
+        log_debug("checking module: %s", module->name);
         MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);
         for (; mitem != NULL; mitem = DLIST_NEXT (MIR_item_t, mitem)) {
             print_module_item(mitem);
             if (mitem->item_type == MIR_data_item) {
-                printf("checking data item: %s\n", mitem->u.data->name);
+                log_debug("checking data item: %s", mitem->u.data->name);
                 if (strcmp(mitem->u.data->name, data_name) == 0)
                     return mitem->addr;
             }

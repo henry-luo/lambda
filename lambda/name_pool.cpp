@@ -1,4 +1,5 @@
 #include "name_pool.h"
+#include "../lib/log.h"
 #include "../lib/string.h"
 #include <cstring>
 
@@ -126,7 +127,7 @@ String* name_pool_create_string(NamePool* pool, String* str) {
 
 String* name_pool_create_strview(NamePool* pool, StrView name) {
     if (!pool) {
-        printf("ERROR: pool is NULL\n");
+        log_error("ERROR: pool is NULL");
         return nullptr;
     }
     
@@ -154,7 +155,7 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
         NamePoolEntry entry = {str, str_view};
         hashmap_set(pool->names, &entry);
     } else {
-        printf("ERROR: string_from_strview returned NULL\n");
+        log_error("ERROR: string_from_strview returned NULL");
     }
     return str;
 }
@@ -207,17 +208,17 @@ size_t name_pool_count(NamePool* pool) {
 
 void name_pool_print_stats(NamePool* pool) {
     if (!pool) {
-        printf("NamePool: null\n");
+        log_debug("NamePool: null");
         return;
     }
     
-    printf("NamePool: %p\n", pool);
-    printf("  ref_count: %u\n", pool->ref_count);
-    printf("  names count: %zu\n", name_pool_count(pool));
-    printf("  parent: %p\n", pool->parent);
+    log_debug("NamePool: %p", pool);
+    log_debug("  ref_count: %u", pool->ref_count);
+    log_debug("  names count: %zu", name_pool_count(pool));
+    log_debug("  parent: %p", pool->parent);
     
     if (pool->parent) {
-        printf("  parent stats:\n");
+        log_debug("  parent stats:");
         name_pool_print_stats(pool->parent);
     }
 }

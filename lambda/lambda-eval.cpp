@@ -1698,7 +1698,7 @@ int64_t fn_int64(Item item) {
         log_debug("String value '%s' out of int64 range", str->chars);
             return INT_ERROR;
         }
-        printf("converted string to int64: %" PRId64 "\n", val);
+        log_debug("converted string to int64: %" PRId64, val);
         return val;
     }
         log_debug("Cannot convert type %d to int64", item.type_id);
@@ -2143,7 +2143,7 @@ String* fn_string(Item itm) {
         DateTime *dt = (DateTime*)itm.pointer;
         if (dt) {
             // Debug: Print the datetime precision and basic info
-            printf("fn_string debug: DateTime precision=%d, hour=%d, minute=%d, second=%d, ms=%d\n", 
+            log_debug("fn_string debug: DateTime precision=%d, hour=%d, minute=%d, second=%d, ms=%d", 
                    dt->precision, dt->hour, dt->minute, dt->second, dt->millisecond);
             
             // Format datetime in Lambda format based on precision
@@ -2162,7 +2162,7 @@ String* fn_string(Item itm) {
                     
                 case DATETIME_PRECISION_TIME_ONLY: {
                     // Debug: Print the datetime values we're formatting
-                    printf("fn_string debug: formatting time-only: %02d:%02d:%02d.%03d, tz_offset=%d\n", 
+                    log_debug("fn_string debug: formatting time-only: %02d:%02d:%02d.%03d, tz_offset=%d", 
                            dt->hour, dt->minute, dt->second, dt->millisecond, 
                            DATETIME_HAS_TIMEZONE(dt) ? DATETIME_GET_TZ_OFFSET(dt) : -999);
                     
