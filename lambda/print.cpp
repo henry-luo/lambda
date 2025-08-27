@@ -214,7 +214,10 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_BOOL:
                 strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
                 break;                    
-            case LMD_TYPE_INT:  case LMD_TYPE_INT64:
+            case LMD_TYPE_INT:  
+                strbuf_append_format(strbuf, "%d", *(int*)data);
+                break;
+            case LMD_TYPE_INT64:
                 strbuf_append_format(strbuf, "%ld", *(long*)data);
                 break;
             case LMD_TYPE_FLOAT:
@@ -375,9 +378,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_BOOL:
         strbuf_append_str(strbuf, item.bool_val ? "true" : "false");
         break;
-    case LMD_TYPE_INT:
-        strbuf_append_format(strbuf, "%d", item.int_val);
+    case LMD_TYPE_INT: {
+        int int_val = item.int_val;
+        strbuf_append_format(strbuf, "%d", int_val);
         break;
+    }
     case LMD_TYPE_INT64: {
         long long_val = *(long*)item.pointer;
         strbuf_append_format(strbuf, "%ld", long_val);
