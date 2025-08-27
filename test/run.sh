@@ -3,6 +3,9 @@
 # Lambda Script Test Runner
 # Runs individual Lambda scripts and compares with expected output
 
+# Ensure git diff doesn't use a pager for consistent output
+export GIT_PAGER=cat
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -165,7 +168,8 @@ show_visual_diff() {
         # Try git diff first for colored output, fallback to regular diff
         if command -v git >/dev/null 2>&1; then
             # Use git diff for colored output (ignore exit code since files differ)
-            git diff --no-index --color=always "$expected_file" "$filtered_actual" || true
+            # --no-pager ensures output goes directly to terminal without interactive paging
+            git --no-pager diff --no-index --color=always "$expected_file" "$filtered_actual" || true
         else
             # Fallback to regular diff
             diff -u "$expected_file" "$filtered_actual" || true
