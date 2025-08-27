@@ -104,7 +104,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
     } else if (strstr(schema_file, "vcf_schema.ls")) {
         root_type = "VCFDocument";   // Use VCFDocument for VCF schema
     } else if (strstr(schema_file, "schema_json_user_profile.ls")) {
-        root_type = "UserProfileDocument";   // Use UserProfileDocument for JSON user profile schema
+        root_type = "Document";   // Use Document for JSON user profile schema (as defined in the schema)
     }
     
     // Use the refactored schema parser
