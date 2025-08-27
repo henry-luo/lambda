@@ -236,13 +236,12 @@ void array_append(Array* arr, Item itm, VariableMemPool *pool) {
 
 void list_push(List *list, Item item) {
     if (item.item <= 1024) {
-        if (!item.item) { return; }  // NULL value
-        // treat as invalid pointer
+        // NULL or other invalid pointer
         log_error("list_push: invalid raw pointer: %p", item.raw_pointer);
-        return;
+        item = ItemError;  // convert to error
     }
     TypeId type_id = get_type_id(item);
-        log_debug("list_push: pushing item: type_id: %d", type_id);
+    // log_debug("list_push: pushing item: type_id: %d", type_id);
     if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (type_id == LMD_TYPE_LIST) { // nest list is flattened
         log_debug("list_push: pushing nested list: %p, type_id: %d", item.list, type_id);
@@ -260,7 +259,7 @@ void list_push(List *list, Item item) {
     }
     
     // store the value in the list (and we may need two slots for long/double)
-        log_debug("list push item: type: %d, length: %ld", item.type_id, list->length);
+    log_debug("list push item: type: %d, length: %ld", item.type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     switch (item.type_id) {
