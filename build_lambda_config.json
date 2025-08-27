@@ -125,7 +125,7 @@
         },
         {
             "name": "lambda-input-full",
-            "description": "Complete input processing and formatting with all dependencies",
+            "description": "Complete input parsing, formatting and validation with all dependencies",
             "source_patterns": [
                 "lambda/input/input*.cpp",
                 "lambda/format/format*.cpp"
@@ -320,18 +320,21 @@
                 "sources": [
                     "test_mime_detect.c",
                     "test_math.cpp",
-                    "test/test_markup_roundtrip.cpp"
+                    "test_markup_roundtrip.cpp",
+                    "test/test_input_roundtrip.cpp"
                 ],
                 "library_dependencies": [
                     ["lambda-input-full"],
                     ["lambda-input-full"],
-                    ["lambda-input-full"],
+                    ["lambda-runtime-full"],
+                    ["lambda-runtime-full"],
                     "one for each of the test executable"
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
                     "test_math.exe",
-                    "test_markup_roundtrip.exe"
+                    "test_markup_roundtrip.exe",
+                    "test_input_roundtrip.exe"
                 ],
                 "type": "input",
                 "special_flags": "-fms-extensions -lstdc++",

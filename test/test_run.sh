@@ -108,7 +108,7 @@ get_test_suite_category() {
         "test_strbuf"|"test_strview"|"test_variable_pool"|"test_num_stack"|"test_datetime"|"test_url"|"test_url_extra") 
             echo "library" ;;
         # Input suite tests  
-        "test_mime_detect"|"test_math"|"test_markup_roundtrip")
+        "test_mime_detect"|"test_math"|"test_markup_roundtrip"|"test_input_roundtrip")
             echo "input" ;;
         # MIR suite tests
         "test_mir")
@@ -147,6 +147,7 @@ get_c_test_display_name() {
     local exe_name="$1"
     case "$exe_name" in
         "test_datetime") echo "📅 DateTime Tests" ;;
+        "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
         "test_math") echo "🔢 Math Roundtrip Tests" ;;
@@ -390,7 +391,9 @@ run_single_test() {
         echo "}"
     } > "$result_file"
     
-    echo "$result_file"
+    # For parallel execution, we don't return anything via echo
+    # The result file is the communication mechanism
+    return 0
 }
 
 # Function to extract failed test names
@@ -414,38 +417,54 @@ extract_failed_test_names() {
 
 echo "🔍 Finding test executables and sources..."
 
-# Find existing executables
-test_executables=($(find test -name "test_*.exe" -type f 2>/dev/null | sort))
+# Get list of valid test source files from build configuration
+get_valid_test_sources() {
+    # Extract test sources from the JSON configuration
+    jq -r '.test.test_suites[].sources[]' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
+        # Handle different source path formats
+        if [[ "$source" == test/* ]]; then
+            echo "$source"
+        else
+            echo "test/$source"
+        fi
+    done
+}
 
-# Add custom test runner executable
-if [ -f "test/lambda_test_runner.exe" ] || [ -f "test/lambda_test_runner.cpp" ]; then
-    test_executables+=("test/lambda_test_runner.exe")
-fi
+# Get array of valid test sources
+valid_test_sources=()
+while IFS= read -r source; do
+    if [ -n "$source" ]; then
+        valid_test_sources+=("$source")
+    fi
+done < <(get_valid_test_sources)
 
-# Also find source files that might need compilation
-test_sources=($(find test -name "test_*.c" -type f 2>/dev/null | sort))
+echo "Valid test sources from config: ${valid_test_sources[*]}"
 
-# Add custom test runner source
-if [ -f "test/lambda_test_runner.cpp" ]; then
-    test_sources+=("test/lambda_test_runner.cpp")
-fi
-
-# Create a list of expected executables from source files
-expected_executables=()
-for source_file in "${test_sources[@]}"; do
+# Find existing executables that correspond to valid test sources
+test_executables=()
+for source_file in "${valid_test_sources[@]}"; do
     if [[ "$source_file" == *.cpp ]]; then
         base_name=$(basename "$source_file" .cpp)
     else
         base_name=$(basename "$source_file" .c)
     fi
     exe_file="test/${base_name}.exe"
-    expected_executables+=("$exe_file")
+    
+    # Only add if executable exists or source exists
+    if [ -f "$exe_file" ] || [ -f "$source_file" ]; then
+        test_executables+=("$exe_file")
+    fi
 done
 
-# Combine and deduplicate the list of test executables
-all_test_executables=($(printf "%s\n" "${test_executables[@]}" "${expected_executables[@]}" | sort -u))
+# Add custom test runner if it exists in config
+if jq -e '.test.test_suites[] | select(.suite == "lambda-std")' build_lambda_config.json >/dev/null 2>&1; then
+    if [ -f "test/lambda_test_runner.exe" ] || [ -f "test/lambda_test_runner.cpp" ]; then
+        test_executables+=("test/lambda_test_runner.exe")
+    fi
+fi
 
-test_executables=("${all_test_executables[@]}")
+# Remove duplicates and sort
+test_executables=($(printf "%s\n" "${test_executables[@]}" | sort -u))
 
 if [ ${#test_executables[@]} -eq 0 ]; then
     echo "❌ No test executables found in test/ directory"
@@ -490,36 +509,90 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
         # Check if we have a source file for this test
         source_file="test/${base_name}.c"
         if [ -f "$source_file" ] || [ -x "$test_exe" ]; then
-            # Calculate result file path
+            # Calculate result file path - this must match what run_single_test creates
             result_file="$TEST_OUTPUT_DIR/${base_name}_test_result.json"
             result_files+=("$result_file")
             
+            echo "   Starting $base_name..."
+            
             # Run test in background and collect PID
-            run_single_test "$test_exe" &
-            test_pids+=($!)
+            # Capture output to a temporary file instead of discarding it
+            temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
+            run_single_test "$test_exe" > "$temp_output" 2>&1 &
+            pid=$!
+            test_pids+=($pid)
+            
+            echo "   Started $base_name with PID $pid"
         else
             echo "⚠️  Skipping $test_exe (no source file and not executable)"
         fi
     done
     
+    echo ""
+    echo "Started ${#test_pids[@]} parallel processes"
+    echo "Expected result files: ${#result_files[@]}"
+    
     # Wait for all tests to complete
     echo "⏳ Waiting for ${#test_pids[@]} parallel test(s) to complete..."
-    for pid in "${test_pids[@]}"; do
-        wait $pid
+    
+    # Wait for each process with timeout
+    wait_timeout=300  # 5 minutes total timeout
+    start_time=$(date +%s)
+    
+    for i in "${!test_pids[@]}"; do
+        pid="${test_pids[$i]}"
+        echo "   Waiting for PID $pid..."
+        
+        # Check if process is still running
+        if kill -0 "$pid" 2>/dev/null; then
+            # Wait for this specific process with timeout
+            elapsed=0
+            while kill -0 "$pid" 2>/dev/null && [ $elapsed -lt $wait_timeout ]; do
+                sleep 1
+                elapsed=$(($(date +%s) - start_time))
+            done
+            
+            # If still running after timeout, kill it
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "   ⚠️ Process $pid timed out, killing..."
+                kill -TERM "$pid" 2>/dev/null || true
+                sleep 2
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        fi
+        
+        # Final wait to collect exit status
+        wait "$pid" 2>/dev/null || true
     done
+    
     echo "✅ All parallel tests completed!"
     echo ""
     
     # Process results from all test files
-    for result_file in "${result_files[@]}"; do
+    echo "🔍 Processing test results..."
+    for i in "${!result_files[@]}"; do
+        result_file="${result_files[$i]}"
+        base_name=$(basename "$result_file" "_test_result.json")
+        
         if [ -f "$result_file" ]; then
             # Parse JSON result file
-            display_name=$(jq -r '.display_name' "$result_file")
-            suite_category=$(jq -r '.suite_category' "$result_file")
-            passed=$(jq -r '.passed' "$result_file")
-            failed=$(jq -r '.failed' "$result_file")
-            total=$(jq -r '.total' "$result_file")
-            status=$(jq -r '.status' "$result_file")
+            display_name=$(jq -r '.display_name' "$result_file" 2>/dev/null)
+            suite_category=$(jq -r '.suite_category' "$result_file" 2>/dev/null)
+            passed=$(jq -r '.passed' "$result_file" 2>/dev/null)
+            failed=$(jq -r '.failed' "$result_file" 2>/dev/null)
+            total=$(jq -r '.total' "$result_file" 2>/dev/null)
+            status=$(jq -r '.status' "$result_file" 2>/dev/null)
+            
+            # Validate parsed values
+            if [ "$display_name" = "null" ] || [ -z "$display_name" ]; then display_name="🧪 $base_name"; fi
+            if [ "$suite_category" = "null" ] || [ -z "$suite_category" ]; then suite_category="unknown"; fi
+            if [ "$passed" = "null" ] || [ -z "$passed" ]; then passed=0; fi
+            if [ "$failed" = "null" ] || [ -z "$failed" ]; then failed=0; fi
+            if [ "$total" = "null" ] || [ -z "$total" ]; then total=$((passed + failed)); fi
+            if [ "$status" = "null" ] || [ -z "$status" ]; then status="❌ ERROR"; fi
+            
+            # Show individual test results as we process them
+            echo "   $status $display_name ($passed/$total tests)"
             
             # Add to overall totals
             total_tests=$((total_tests + total))
@@ -539,10 +612,22 @@ if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
                 if [ -n "$failed_name" ] && [ "$failed_name" != "null" ]; then
                     failed_test_names+=("$failed_name")
                 fi
-            done < <(jq -r '.failed_tests[]?' "$result_file")
+            done < <(jq -r '.failed_tests[]?' "$result_file" 2>/dev/null)
             
             # Clean up temporary result file
             rm -f "$result_file"
+        else
+            echo "   ⚠️ Missing result file: $result_file"
+            # Add a failed entry for the missing test
+            total_tests=$((total_tests + 1))
+            total_failed=$((total_failed + 1))
+            c_test_names+=("🧪 $base_name")
+            c_test_totals+=(1)
+            c_test_passed+=(0)
+            c_test_failed+=(1)
+            c_test_suites+=("unknown")
+            c_test_status+=("❌ ERROR")
+            failed_test_names+=("[$base_name] Missing test result")
         fi
     done
 else

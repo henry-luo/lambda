@@ -307,7 +307,7 @@ test: build-test
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh; \
 	elif [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --sequential; \
+		./test/test_run.sh --parallel; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
@@ -318,7 +318,16 @@ test-dev:
 	@if [ -f "test_modern.sh" ]; then \
 		./test_modern.sh || echo "Note: Some tests failed due to incomplete features (math parser, missing dependencies)"; \
 	elif [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --sequential || echo "Note: Some tests failed due to incomplete features"; \
+		./test/test_run.sh --parallel || echo "Note: Some tests failed due to incomplete features"; \
+	else \
+		echo "Error: No test suite found"; \
+		exit 1; \
+	fi
+
+test-sequential: build-test
+	@echo "Running comprehensive test suite (sequential execution)..."
+	@if [ -f "test/test_run.sh" ]; then \
+		./test/test_run.sh --sequential; \
 	else \
 		echo "Error: No test suite found"; \
 		exit 1; \
