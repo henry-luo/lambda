@@ -7,6 +7,7 @@
 #include <string>
 #include "../lib/log.h"  // Add logging support
 #include "validator/validator.hpp"  // For ValidationResult
+#include "transpiler.hpp"  // For Runtime struct definition
 
 // Forward declare additional transpiler functions
 extern "C" {
@@ -15,7 +16,7 @@ extern "C" {
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
 
-void run_validation(const char *data_file, const char *schema_file, const char *input_format);
+ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
 ValidationResult* exec_validation(int argc, char* argv[]);
 void transpile_ast(Transpiler* tp, AstScript *script);
 
@@ -195,7 +196,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
         if (use_mir) {
             result = run_script_mir(runtime, repl_history->str, script_path);
         } else {
-            result = run_script(runtime, repl_history->str, script_path);
+            result = run_script(runtime, repl_history->str, script_path, false);
         }
         
         // Print result
@@ -215,7 +216,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     if (use_mir) {
         result = run_script_mir(runtime, NULL, (char*)script_path);
     } else {
-        result = run_script_at(runtime, (char*)script_path, transpile_only);
+        result = run_script_at(runtime, (char*)script_path, false);
     }
     
     printf("##### Script '%s' executed: #####\n", script_path);
