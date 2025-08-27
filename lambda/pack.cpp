@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../lib/log.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -103,7 +104,7 @@ static int convert_to_virtual(Pack* pack) {
 // Update the pack_alloc function to use vm_grow for virtual memory
 void* pack_alloc(Pack* pack, size_t size) {
     if (pack->size + size > pack->capacity) {
-        printf("expanding pack: current size: %zu, capacity: %zu, req size: %zu\n", 
+        log_debug("expanding pack: current size: %zu, capacity: %zu, req size: %zu", 
             pack->size, pack->capacity, size);
         if (pack->committed_size == 0 && (pack->capacity >= VIRTUAL_PACK_THRESHOLD || pack->size + size >= VIRTUAL_PACK_THRESHOLD)) {
             // Convert to virtual memory pack

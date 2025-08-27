@@ -60,6 +60,9 @@ while IFS= read -r line; do
             continue
         fi
         
+        # Extract the original indentation (leading whitespace)
+        original_indent=$(echo "$original_line" | sed 's/[^ \t].*//')
+        
         # Generate replacement based on the printf pattern
         if [[ "$original_line" =~ printf\( ]]; then
             # Handle printf statements
@@ -100,13 +103,16 @@ while IFS= read -r line; do
             continue
         fi
         
+        # Create the full replacement line with preserved indentation
+        full_replacement="${original_indent}${replacement};"
+        
         # Apply the replacement using sed
         # Escape special characters for sed
         escaped_original=$(printf '%s\n' "$original_line" | sed 's/[[\.*^$()+?{|]/\\&/g')
-        escaped_replacement=$(printf '%s\n' "$replacement" | sed 's/[[\.*^$(){}]/\\&/g')
+        escaped_replacement=$(printf '%s\n' "$full_replacement" | sed 's/[[\.*^$(){}]/\\&/g')
         
-        # Use sed to replace the line
-        sed -i.tmp "${line_num}s|.*|        $replacement;|" "$source_file"
+        # Use sed to replace the line, preserving original indentation
+        sed -i.tmp "${line_num}s|.*|$escaped_replacement|" "$source_file"
         
         echo "  Applied: $replacement"
         

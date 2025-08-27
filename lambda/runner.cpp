@@ -1,4 +1,5 @@
 #include "transpiler.hpp"
+#include "../lib/log.h"
 #include "name_pool.h"
 #include <time.h>
 #include <stdlib.h>
@@ -20,7 +21,7 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
     QueryPerformanceFrequency(&frequency);
     
     double elapsed_ms = ((double)(end.counter.QuadPart - start.counter.QuadPart) * 1000.0) / frequency.QuadPart;
-    printf("%s took %.3f ms\n", label, elapsed_ms);
+        log_debug("%s took %.3f ms", label, elapsed_ms);
 }
 
 #else
@@ -40,7 +41,7 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
         nanoseconds += 1000000000;
     }
     double elapsed_ms = seconds * 1000.0 + nanoseconds / 1e6;
-    printf("%s took %.3f ms\n", label, elapsed_ms);
+        log_debug("%s took %.3f ms", label, elapsed_ms);
 }
 #endif
 
@@ -67,20 +68,20 @@ void find_errors(TSNode node) {
     
     // Check for direct syntax error nodes
     if (ts_node_is_error(node)) {
-        printf("Syntax error at Ln %u, Col %u - %u, Col %u: %s\n", 
+        log_error("Syntax error at Ln %u, Col %u - %u, Col %u: %s", 
                start_point.row + 1, start_point.column + 1,
                end_point.row + 1, end_point.column + 1, node_type);
     }
     
     // Check for missing nodes (inserted by parser for error recovery)
     if (ts_node_is_missing(node)) {
-        printf("Missing node at Ln %u, Col %u: expected %s\n", 
+        log_error("Missing node at Ln %u, Col %u: expected %s", 
                start_point.row + 1, start_point.column + 1, node_type);
     }
     
     // Check for ERROR node type specifically (some parsers use this)
     if (strcmp(node_type, "ERROR") == 0) {
-        printf("ERROR node at Ln %u, Col %u - %u, Col %u\n", 
+        log_error("ERROR node at Ln %u, Col %u - %u, Col %u", 
                start_point.row + 1, start_point.column + 1,
                end_point.row + 1, end_point.column + 1);
     }
@@ -92,19 +93,19 @@ void find_errors(TSNode node) {
 }
 
 void init_module_import(Transpiler *tp, AstScript *script) {
-    printf("init imports of script\n");
+        log_debug("init imports of script");
     AstNode* child = script->child;
     while (child) {
         if (child->node_type == AST_NODE_IMPORT) {
             AstImportNode* import = (AstImportNode*)child;
-            printf("init import: %.*s\n", (int)(import->module.length), import->module.str);
+        log_debug("init import: %.*s", (int)(import->module.length), import->module.str);
             // find the module bss item
             char buf[256];
             snprintf(buf, sizeof(buf), "m%d", import->script->index);
             MIR_item_t imp = find_import(tp->jit_context, buf);
-            printf("imported item: %p\n", imp);
+        log_debug("imported item: %p", imp);
             if (!imp) {
-                printf("Error: Failed to find import item for module %.*s\n", 
+                log_error("Error: Failed to find import item for module %.*s", 
                     (int)(import->module.length), import->module.str);
                 return;
             }
@@ -113,12 +114,12 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
             node = ((AstScript*)node)->child;
-            printf("finding content node\n");
+        log_debug("finding content node");
             while (node) {
                 if (node->node_type == AST_NODE_CONTENT) break;
                 node = node->next;
             }
-            if (!node) { printf("misssing content node\n");  return; }
+        log_error("misssing content node");
             node = ((AstListNode*)node)->item;
             while (node) {
                 if (node->node_type == AST_NODE_FUNC) {
@@ -127,11 +128,11 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         // get func addr
                         StrBuf *func_name = strbuf_new();
                         write_fn_name(func_name, func_node, NULL);
-                        printf("loading fn addr: %s from script: %s\n", func_name->str, import->script->reference);
+        log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
-                        printf("got fn: %s, func_ptr: %p\n", func_name->str, fn_ptr);
+        log_debug("got fn: %s, func_ptr: %p", func_name->str, fn_ptr);
                         strbuf_free(func_name);
-                        if (!fn_ptr) { printf("misssing content node\n");  return; }
+        log_error("misssing content node");
                         *(main_func_t*) mod_def = (main_func_t)fn_ptr;
                         mod_def += sizeof(main_func_t);
                     }
@@ -145,9 +146,9 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         // write the variable name
                         StrBuf *var_name = strbuf_new();
                         write_var_name(var_name, dec_node, NULL);
-                        printf("loading pub var: %s from script: %s\n", var_name->str, import->script->reference);
+        log_debug("loading pub var: %s from script: %s", var_name->str, import->script->reference);
                         void* data_ptr = find_data(import->script->jit_context, var_name->str);
-                        printf("got pub var addr: %s, %p\n", var_name->str, data_ptr);
+        log_debug("got pub var addr: %s, %p", var_name->str, data_ptr);
                         // copy the data
                         int bytes = type_info[dec_node->type->type_id].byte_size;
                         memcpy(mod_def, data_ptr, bytes);
@@ -167,10 +168,10 @@ extern unsigned int lambda_lambda_h_len;
 
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
-        printf("Error: Source code is NULL\n");
+        log_error("Error: Source code is NULL");
         return; 
     }
-    printf("Start transpiling %s...\n", script_path);
+        log_notice("Start transpiling %s...", script_path);
     win_timer start, end;
     
     // create a parser
@@ -179,7 +180,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     tp->source = script->source;
     tp->syntax_tree = lambda_parse_source(tp->parser, tp->source);
     if (tp->syntax_tree == NULL) {
-        printf("Error: Failed to parse the source code.\n");
+        log_error("Error: Failed to parse the source code.");
         return;
     }
     get_time(&end);
@@ -192,12 +193,12 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     
     // check if the syntax tree is valid
     if (ts_node_has_error(root_node)) {
-        printf("Syntax tree has errors.\n");
-        printf("Root node type: %s\n", ts_node_type(root_node));
-        printf("Root node is_error: %d\n", ts_node_is_error(root_node));
-        printf("Root node is_missing: %d\n", ts_node_is_missing(root_node));
-        printf("Root node has_error: %d\n", ts_node_has_error(root_node));
-        printf("Source pointer: %p\n", script->source);
+        log_error("Syntax tree has errors.");
+        log_debug("Root node type: %s", ts_node_type(root_node));
+        log_debug("Root node is_error: %d", ts_node_is_error(root_node));
+        log_debug("Root node is_missing: %d", ts_node_is_missing(root_node));
+        log_debug("Root node has_error: %d", ts_node_has_error(root_node));
+        log_debug("Source pointer: %p", script->source);
         
         // find and print syntax errors
         find_errors(root_node);
@@ -215,12 +216,12 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // Initialize name pool
     tp->name_pool = name_pool_create(tp->ast_pool, nullptr);
     if (!tp->name_pool) {
-        printf("Error: Failed to create name pool\n");
+        log_error("Error: Failed to create name pool");
         return;
     }
     
     if (strcmp(ts_node_type(root_node), "document") != 0) {
-        printf("Error: The tree has no valid root node.\n");
+        log_error("Error: The tree has no valid root node.");
         return;
     }
     // build the AST
@@ -244,7 +245,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     tp->jit_context = jit_init();
     // compile user code to MIR
     write_text_file("_transpiled.c", tp->code_buf->str);
-    printf("transpiled code:\n----------------\n%s\n", tp->code_buf->str + lambda_lambda_h_len);    
+    log_debug("transpiled code:\n----------------\n%s", tp->code_buf->str + lambda_lambda_h_len);
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;
     // generate native code and return the function
@@ -253,8 +254,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     // init lambda imports
     init_module_import(tp, (AstScript*)tp->ast_root);
 
-    printf("JIT compiled %s\n", script_path);
-    printf("jit_context: %p, main_func: %p\n", tp->jit_context, tp->main_func);
+    log_info("JIT compiled %s", script_path);
+    log_debug("jit_context: %p, main_func: %p", tp->jit_context, tp->main_func);
     // copy value back to script
     memcpy(script, tp, sizeof(Script));
     script->main_func = tp->main_func;
@@ -268,7 +269,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
         if (strcmp(script->reference, script_path) == 0) {
-            printf("Script %s is already loaded.\n", script_path);
+            log_info("Script %s is already loaded.", script_path);
             return script;
         }
     }
@@ -288,7 +289,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     memcpy(&transpiler, new_script, sizeof(Script));
     transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
     transpile_script(&transpiler, new_script, script_path);
-    printf("loaded main func: %p\n", new_script->main_func);
+    log_debug("loaded main func: %p", new_script->main_func);
     return new_script;
 }
 
@@ -299,7 +300,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
 #include "../lib/url.h"
 
 void runner_setup_context(Runner* runner) {
-    printf("runner setup exec context\n");
+    log_debug("runner setup exec context");
     runner->context.ast_pool = runner->script->ast_pool;
     runner->context.type_list = runner->script->type_list;
     runner->context.type_info = type_info;
@@ -318,11 +319,11 @@ void runner_setup_context(Runner* runner) {
 }
 
 void runner_cleanup(Runner* runner) {
-    printf("runner cleanup\n");
+    log_debug("runner cleanup");
     // free final result
     if (runner->context.heap) {
         print_heap_entries();
-        printf("freeing final result -----------------\n");
+        log_debug("freeing final result -----------------");
         if (runner->context.result.item) free_item(runner->context.result, true);
         // check memory leaks
         check_memory_leak();
@@ -342,20 +343,20 @@ Item run_script(Runtime *runtime, const char* source, char* script_path, bool tr
     runner_init(runtime, &runner);
     runner.script = load_script(runtime, script_path, source);
     if (transpile_only) {
-        printf("Transpiled script %s only, not executing.\n", script_path);
+        log_info("Transpiled script %s only, not executing.", script_path);
         return ItemNull;
     }
     // execute the function
     Item result;
     if (!runner.script || !runner.script->main_func) { 
-        printf("Error: Failed to compile the function.\n"); 
+        log_error("Error: Failed to compile the function."); 
         result = ItemNull;
     } else {
-        printf("Executing JIT compiled code...\n");
+        log_debug("Executing JIT compiled code...");
         runner_setup_context(&runner);
-        printf("exec main func\n");
+        log_debug("exec main func");
         result = context->result = runner.script->main_func(context);
-        printf("after main func\n");
+        log_debug("after main func");
         // runner_cleanup() later
     }
     return result;
