@@ -954,9 +954,52 @@ ValidationResult* validate_occurrence(SchemaValidator* validator, TypedItem type
             
         case '+': // One or more
         case '*': // Zero or more
-            // These should be handled by array validation
-            validation_result_destroy(result);
-            return validate_array(validator, typed_item, occur_schema->base_type, ctx);
+            {
+                // These need special array-like validation with occurrence constraints
+                TypeId actual_type = typed_item.type_id;
+                if (actual_type != LMD_TYPE_ARRAY && actual_type != LMD_TYPE_LIST) {
+                    // Single item case - check if it satisfies the occurrence constraint
+                    if (occur_schema->modifier == '+') {
+                        // Single item satisfies "one or more"
+                        validation_result_destroy(result);
+                        return validate_item(validator, typed_item, occur_schema->base_type, ctx);
+                    } else {
+                        // '*' allows zero, so single item is fine too
+                        validation_result_destroy(result);
+                        return validate_item(validator, typed_item, occur_schema->base_type, ctx);
+                    }
+                } else {
+                    // Array/List case - validate each element and check count
+                    List* list = (List*)typed_item.pointer;
+                    
+                    // Check occurrence constraints
+                    if (occur_schema->modifier == '+' && list->length == 0) {
+                        add_validation_error(result, create_validation_error(
+                            VALID_ERROR_OCCURRENCE_ERROR, "Must have at least one element (+)", 
+                            ctx->path, ctx->pool));
+                        return result;
+                    }
+                    
+                    // Validate each element against the base type
+                    for (long i = 0; i < list->length; i++) {
+                        TypedItem element_typed = list_get_typed(list, i);
+                        
+                        // Create path for this element
+                        PathSegment* element_path = path_push_index(ctx->path, i, ctx->pool);
+                        ValidationContext element_ctx = *ctx;
+                        element_ctx.path = element_path;
+                        
+                        ValidationResult* element_result = validate_item(
+                            validator, element_typed, occur_schema->base_type, &element_ctx);
+                        
+                        if (element_result) {
+                            merge_validation_results(result, element_result);
+                        }
+                    }
+                    
+                    return result;
+                }
+            }
             
         default:
             add_validation_error(result, create_validation_error(

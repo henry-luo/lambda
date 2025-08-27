@@ -3,12 +3,12 @@
 
 // Root RSS element - defined first to be recognized as root
 type Document = <rss
-    version: string,                  // RSS version (required attribute)
+    version: string;                  // RSS version (required attribute)
     RssChannel                        // single channel (required child element)
 >
 
 // Channel contains child elements, not attributes
-type RssChannel = <channel
+type RssChannel = <channel;
     RssTitle,                         // required title child element
     RssLink,                          // required link child element
     RssDescription,                   // required description child element
@@ -35,7 +35,7 @@ type RssLastBuildDate = <lastBuildDate string>
 type RssTtl = <ttl string>
 
 // Item contains child elements, not attributes
-type RssItem = <item
+type RssItem = <item;
     RssItemTitle,                     // required title child element
     RssItemLink,                      // required link child element
     RssItemDescription,               // required description child element
