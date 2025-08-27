@@ -5,6 +5,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <stdbool.h>  // for bool type
 
 /* Cross-platform strcasecmp */
 #ifndef strcasecmp
@@ -62,7 +63,7 @@ static log_format_t default_format = {
 };
 
 /* Default category */
-static log_category_t default_category = {"default", LOG_LEVEL_DEBUG, NULL, 1, &default_format};
+static log_category_t default_category = {"default", LOG_LEVEL_DEBUG, NULL, 1, &default_format, ""};
 log_category_t *log_default_category = &default_category;
 
 /* Helper function to get current timestamp */
@@ -154,6 +155,30 @@ void log_set_default_format(const char *pattern) {
         default_format.show_date = strstr(pattern, "%F") ? 1 : 0;
         default_format.show_category = strstr(pattern, "%C") ? 1 : 0;
     }
+}
+
+/* Helper function to determine if a file should use colors based on extension */
+static bool should_use_colors_for_file(log_category_t *category) {
+    if (!category || !category->output_filename[0]) {
+        return false;  // No filename stored
+    }
+    
+    // Check file extension
+    const char *filename = category->output_filename;
+    size_t len = strlen(filename);
+    
+    // Check for .log extension (use colors)
+    if (len > 4 && strcasecmp(filename + len - 4, ".log") == 0) {
+        return true;
+    }
+    
+    // Check for .txt extension (no colors)
+    if (len > 4 && strcasecmp(filename + len - 4, ".txt") == 0) {
+        return false;
+    }
+    
+    // Default: no colors for other file types
+    return false;
 }
 
 /* Helper function to get indentation string (thread-local) */
@@ -286,12 +311,16 @@ static void format_log_message(char *output, size_t output_size, log_format_t *f
 static void write_log_message_to_stream(FILE *stream, log_category_t *category,
                                        const char *timestamp, const char *level_str, 
                                        const char *color, const char *reset_color, 
-                                       const char *message) {
+                                       const char *message, bool use_colors) {
     char formatted_message[1024];
+    
+    // Use colors if requested for this specific stream
+    const char *actual_color = use_colors ? color : "";
+    const char *actual_reset = use_colors ? reset_color : "";
     
     format_log_message(formatted_message, sizeof(formatted_message), 
                       category->format, timestamp, level_str, 
-                      category->name, color, reset_color, message);
+                      category->name, actual_color, actual_reset, message);
     
     // Remove trailing newline if it exists (we'll add our own)
     size_t len = strlen(formatted_message);
@@ -323,12 +352,13 @@ static int log_output(log_category_t *category, int level, const char *format, v
     
     const char *level_str = log_level_to_string(level);
     const char *color = get_level_color(level);
-    const char *reset_color = colors_enabled ? COLOR_RESET : "";
+    const char *reset_color = COLOR_RESET;
     
     // 1. Always log to file if category has file output configured
     if (category->output && category->output != stdout && category->output != stderr) {
+        bool use_colors_for_file = should_use_colors_for_file(category);
         write_log_message_to_stream(category->output, category, timestamp, level_str, 
-                                  color, reset_color, user_message);
+                                  color, reset_color, user_message, use_colors_for_file);
     }
     
     // 2. Additionally send to console streams based on log level
@@ -344,7 +374,7 @@ static int log_output(log_category_t *category, int level, const char *format, v
     
     if (console_output) {
         write_log_message_to_stream(console_output, category, timestamp, level_str,
-                                  color, reset_color, user_message);
+                                  color, reset_color, user_message, colors_enabled);  // Use colors_enabled for console output
     }
     
     return LOG_OK;
@@ -433,6 +463,7 @@ log_category_t* log_get_category(const char *cname) {
         cat->output = stdout;
         cat->enabled = 1;
         cat->format = &default_format;
+        cat->output_filename[0] = '\0';  // Initialize empty filename
         return cat;
     }
     
@@ -769,6 +800,13 @@ static int log_parse_zlog_config(const char *config) {
                         cat->format = log_get_format(format_name);
                         
                         if (output_file && strlen(output_file) > 0) {
+                            // Clear the file first (for fresh start)
+                            FILE *clear_file = fopen(output_file, "w");
+                            if (clear_file) {
+                                fclose(clear_file);
+                            }
+                            
+                            // Now open in append mode for logging
                             FILE *file = fopen(output_file, "a");
                             if (file) {
                                 // Close previous file if not stdout/stderr
@@ -776,6 +814,9 @@ static int log_parse_zlog_config(const char *config) {
                                     fclose(cat->output);
                                 }
                                 cat->output = file;
+                                // Store filename for color decision
+                                strncpy(cat->output_filename, output_file, sizeof(cat->output_filename) - 1);
+                                cat->output_filename[sizeof(cat->output_filename) - 1] = '\0';
                             }
                         }
                     }
