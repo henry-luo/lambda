@@ -380,7 +380,7 @@ TypedItem list_get_typed(List* list, int index) {
 
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
-        log_debug("map length: %ld", count);
+    log_debug("map length: %ld", count);
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
         // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
@@ -393,7 +393,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 nested_map->ref_cnt++;
                 *(Map**)field_ptr = nested_map;
             } else {
-        log_error("expected a map, got type %d", itm.type_id );
+                log_error("expected a map, got type %d", itm.type_id );
             }
         } else {
             switch (field->type->type_id) {
@@ -407,6 +407,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_INT: {
                 *(int*)field_ptr = va_arg(args, int);
+                log_debug("set field of int type to: %d", *(int*)field_ptr);
                 break;
             }
             case LMD_TYPE_INT64: {
@@ -421,7 +422,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 DateTime dtval = va_arg(args, DateTime);
                 StrBuf *strbuf = strbuf_new();
                 datetime_format_lambda(strbuf, &dtval);
-        log_debug("set field of datetime type to: %s", strbuf->str);
+                log_debug("set field of datetime type to: %s", strbuf->str);
                 *(DateTime*)field_ptr = dtval;
                 break;
             }

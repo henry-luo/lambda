@@ -198,7 +198,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
         // Print result
         StrBuf *output = strbuf_new_cap(256);
         print_item(output, result);
-        printf("%s\n", output->str);
+        printf("%s", output->str);
         strbuf_free(output);
         
         free(line);
@@ -218,8 +218,9 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     printf("##### Script '%s' executed: #####\n", script_path);
     StrBuf *output = strbuf_new_cap(256);
     print_item(output, result);
-    printf("%s\n", output->str);
+    printf("%s", output->str);
     strbuf_free(output);
+    // todo: should have return value
 }
 
 void run_assertions() {
@@ -338,43 +339,51 @@ int main(int argc, char *argv[]) {
     
     bool use_mir = false;
     bool transpile_only = false;
-    
+    bool help_only = false;
+    char* script_file = NULL;
+
     // Parse arguments
+    int ret_code = 0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--mir") == 0) {
             use_mir = true;
-        } else if (strcmp(argv[i], "--transpile-only") == 0) {
+        }
+        else if (strcmp(argv[i], "--help") == 0) {
+            help_only = true;
+        }
+        else if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
-        } else if (argv[i][0] != '-') {
+        } 
+        else if (argv[i][0] != '-') {
             // This is a script file
-            run_script_file(&runtime, argv[i], use_mir, transpile_only);
-            log_finish();  // Cleanup logging before exit
-            return 0;
-        } else {
+            script_file = argv[i];
+            
+        } 
+        else {
             // Unknown option
             printf("Error: Unknown option '%s'\n", argv[i]);
-            print_help();
-            log_finish();  // Cleanup logging before exit
-            return 1;
+            help_only = true;
+            ret_code = 1;
         }
     }
     
-    // If we get here, no script file was specified - start REPL mode
-    if (transpile_only) {
+    if (help_only) {
+        print_help();
+    }
+    else if (script_file) {
+        run_script_file(&runtime, script_file, use_mir, transpile_only);
+        // todo: inspect return value
+    }
+    else if (transpile_only) { // without a script file
         printf("Error: --transpile-only requires a script file\n");
         print_help();
-        log_finish();  // Cleanup logging before exit
-        return 1;
+        ret_code = 1;
     } else {
-        // Start REPL mode by default (with or without MIR)
+        // start REPL mode by default (with or without MIR)
         run_repl(&runtime, use_mir);
     }
     
-    // Clean up utf8proc Unicode support (always enabled)
     cleanup_utf8proc_support();
-    
-    // Cleanup logging system
     log_finish();
-    
-    return 0;
+    return ret_code;
 }
