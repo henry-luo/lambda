@@ -73,6 +73,8 @@ lambda/vsce/dist/
 *~
 .project
 .classpath
+# for intellisense
+compile_commands.json
 
 # Temporary files
 *.tmp
