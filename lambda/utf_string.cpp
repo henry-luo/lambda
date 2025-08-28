@@ -160,53 +160,33 @@ bool string_equal_unicode(const char* str1, int len1, const char* str2, int len2
 
 // Lambda Script comparison functions
 CompResult equal_comp_unicode(Item a_item, Item b_item) {
-    if (a_item.type_id != LMD_TYPE_STRING || b_item.type_id != LMD_TYPE_STRING) {
-        return COMP_ERROR;
-    }
-    
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
-    
-    if (!a_str || !b_str) {
-        return COMP_ERROR;
-    }
+
+    if (!a_str || !b_str) { return COMP_ERROR; }
     
     // Quick length check first
-    if (a_str->len != b_str->len) {
-        return COMP_FALSE;
-    }
-    
+    if (a_str->len != b_str->len) { return COMP_FALSE; }
+
     // If both are empty strings
-    if (a_str->len == 0) {
-        return COMP_TRUE;
-    }
+    if (a_str->len == 0) { return COMP_TRUE; }
     
     // Use byte comparison for identical strings
-    if (a_str == b_str) {
-        return COMP_TRUE;
-    }
-    
+    if (a_str == b_str) { return COMP_TRUE; }
+
     bool result = string_equal_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     return result ? COMP_TRUE : COMP_FALSE;
 }
 
 CompResult less_comp_unicode(Item a_item, Item b_item) {
-    if (a_item.type_id != LMD_TYPE_STRING || b_item.type_id != LMD_TYPE_STRING) {
-        return COMP_ERROR;
-    }
-    
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
-    
-    if (!a_str || !b_str) {
-        return COMP_ERROR;
-    }
-    
+
+    if (!a_str || !b_str) { return COMP_ERROR; }
+
     // Use byte comparison for identical strings
-    if (a_str == b_str) {
-        return COMP_FALSE;
-    }
-    
+    if (a_str == b_str) { return COMP_FALSE; }
+
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
         return COMP_ERROR;
@@ -216,22 +196,14 @@ CompResult less_comp_unicode(Item a_item, Item b_item) {
 }
 
 CompResult greater_comp_unicode(Item a_item, Item b_item) {
-    if (a_item.type_id != LMD_TYPE_STRING || b_item.type_id != LMD_TYPE_STRING) {
-        return COMP_ERROR;
-    }
-    
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
-    
-    if (!a_str || !b_str) {
-        return COMP_ERROR;
-    }
+
+    if (!a_str || !b_str) { return COMP_ERROR; }
     
     // Use byte comparison for identical strings
-    if (a_str == b_str) {
-        return COMP_FALSE;
-    }
-    
+    if (a_str == b_str) { return COMP_FALSE; }
+
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
         return COMP_ERROR;
@@ -241,22 +213,14 @@ CompResult greater_comp_unicode(Item a_item, Item b_item) {
 }
 
 CompResult less_equal_comp_unicode(Item a_item, Item b_item) {
-    if (a_item.type_id != LMD_TYPE_STRING || b_item.type_id != LMD_TYPE_STRING) {
-        return COMP_ERROR;
-    }
-    
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
-    
-    if (!a_str || !b_str) {
-        return COMP_ERROR;
-    }
-    
+
+    if (!a_str || !b_str) { return COMP_ERROR; }
+
     // Use byte comparison for identical strings
-    if (a_str == b_str) {
-        return COMP_TRUE;
-    }
-    
+    if (a_str == b_str) { return COMP_TRUE; }
+
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
         return COMP_ERROR;
@@ -266,21 +230,12 @@ CompResult less_equal_comp_unicode(Item a_item, Item b_item) {
 }
 
 CompResult greater_equal_comp_unicode(Item a_item, Item b_item) {
-    if (a_item.type_id != LMD_TYPE_STRING || b_item.type_id != LMD_TYPE_STRING) {
-        return COMP_ERROR;
-    }
-    
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
-    
-    if (!a_str || !b_str) {
-        return COMP_ERROR;
-    }
-    
+    if (!a_str || !b_str) { return COMP_ERROR; }
+
     // Use byte comparison for identical strings
-    if (a_str == b_str) {
-        return COMP_TRUE;
-    }
+    if (a_str == b_str) { return COMP_TRUE; }
     
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
@@ -288,72 +243,6 @@ CompResult greater_equal_comp_unicode(Item a_item, Item b_item) {
     }
     
     return (result == UTF8PROC_COMPARE_GREATER || result == UTF8PROC_COMPARE_EQUAL) ? COMP_TRUE : COMP_FALSE;
-}
-
-// Lambda Script wrapper functions for eval system
-Item fn_lt_unicode(Item a_item, Item b_item) {
-    CompResult result = less_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_gt_unicode(Item a_item, Item b_item) {
-    CompResult result = greater_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_le_unicode(Item a_item, Item b_item) {
-    CompResult result = less_equal_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_ge_unicode(Item a_item, Item b_item) {
-    CompResult result = greater_equal_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-// UTF8PROC variants (these are the ones actually called by lambda-eval.cpp)
-CompResult equal_comp_utf8proc(Item a_item, Item b_item) {
-    return equal_comp_unicode(a_item, b_item);
-}
-
-Item fn_eq_utf8proc(Item a_item, Item b_item) {
-    CompResult result = equal_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_ne_utf8proc(Item a_item, Item b_item) {
-    CompResult result = equal_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_FALSE)};
-}
-
-Item fn_lt_utf8proc(Item a_item, Item b_item) {
-    CompResult result = less_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_gt_utf8proc(Item a_item, Item b_item) {
-    CompResult result = greater_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_le_utf8proc(Item a_item, Item b_item) {
-    CompResult result = less_equal_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_ge_utf8proc(Item a_item, Item b_item) {
-    CompResult result = greater_equal_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) return (Item){.item = ITEM_ERROR};
-    return (Item){.item = b2it(result == COMP_TRUE)};
 }
 
 // Missing normalization functions
