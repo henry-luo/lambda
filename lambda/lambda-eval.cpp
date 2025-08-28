@@ -1819,13 +1819,13 @@ double it2d(Item itm) {
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         return *(double*)itm.pointer;
     }
-        log_debug("invalid type %d", itm.type_id);
+    log_debug("invalid type %d", itm.type_id);
     // todo: push error
     return 0;
 }
 
 Function* to_fn(fn_ptr ptr) {
-        log_debug("create fn %p", ptr);
+    log_debug("create fn %p", ptr);
     Function *fn = (Function*)calloc(1, sizeof(Function));
     fn->type_id = LMD_TYPE_FUNC;
     fn->ptr = ptr;
@@ -1833,14 +1833,14 @@ Function* to_fn(fn_ptr ptr) {
 }
 
 bool fn_is(Item a, Item b) {
-        log_debug("is expr");
+    log_debug("is expr");
     TypeId b_type_id = get_type_id(b);
     if (b_type_id != LMD_TYPE_TYPE) {
         return false;
     }
     TypeType *type_b = (TypeType *)b.type;
     TypeId a_type_id = get_type_id(a);
-        log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
+    log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
         return a_type_id != LMD_TYPE_ERROR;
@@ -1859,16 +1859,9 @@ bool equal(Item a_item, Item b_item) {
     return result == COMP_TRUE;
 }
 
+// 3-states comparison
 CompResult equal_comp(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced comparison
-    return equal_comp_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced comparison (deprecated)
-    return equal_comp_unicode(a_item, b_item);
-#else
-    // Original ASCII-only implementation
-        log_debug("equal_comp expr");
+    log_debug("equal_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
@@ -1896,130 +1889,185 @@ CompResult equal_comp(Item a_item, Item b_item) {
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
         return (*(double*)a_item.pointer == *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
     }
+    else if (a_item.type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
+        int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
+        if (cmp < 0) return COMP_FALSE;
+        else if (cmp > 0) return COMP_FALSE;
+        else return COMP_TRUE;
+    }
+    else if (a_item.type_id == LMD_TYPE_DTIME) {
+        DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
+        // todo: do a normalized field comparison
+        return (*(uint64_t*)dt_a == *(uint64_t*)dt_b) ? COMP_TRUE : COMP_FALSE;
+    }
     else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
-        a_item.type_id == LMD_TYPE_BINARY || a_item.type_id == LMD_TYPE_DTIME) {
-        String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
-        bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
-        return result ? COMP_TRUE : COMP_FALSE;
+        a_item.type_id == LMD_TYPE_BINARY) {
+        // String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        // bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
+        // return result ? COMP_TRUE : COMP_FALSE;
+        return equal_comp_unicode(a_item, b_item);
     }
     log_error("unknown comparing type %d\n", a_item.type_id);
     return COMP_ERROR;
-#endif
 }
 
-// Comparison functions with fast path for int/float and fallback for other types
-
 Item fn_eq(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced equality comparison
-    return fn_eq_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced equality comparison (deprecated)
-    return fn_eq_unicode(a_item, b_item);
-#else
-    // Fast path for numeric types
-    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.int_val == b_item.int_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
-        return {.item = b2it(*(double*)a_item.pointer == *(double*)b_item.pointer)};
-    }
-    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
-             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
-        return {.item = b2it(a_val == b_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
-        return {.item = b2it(a_item.bool_val == b_item.bool_val)};
-    }
-    
-    // Fallback to 3-state comparison function
-        log_debug("fn_eq fallback");
     CompResult result = equal_comp(a_item, b_item);
     if (result == COMP_ERROR) {
-        log_debug("equality type error for types: %d, %d", a_item.type_id, b_item.type_id);
+        log_info("fn_eq type error for types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     return {.item = b2it(result == COMP_TRUE)};
-#endif
 }
 
 Item fn_ne(Item a_item, Item b_item) {
-#if LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_UTF8PROC
-    // Use utf8proc Unicode-enhanced inequality comparison
-    return fn_ne_utf8proc(a_item, b_item);
-#elif LAMBDA_UNICODE_LEVEL >= LAMBDA_UNICODE_COMPACT
-    // Use ICU Unicode-enhanced inequality comparison (deprecated)
-    return fn_ne_unicode(a_item, b_item);
-#else
-    // Fast path for numeric types
-    if (a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_INT) {
-        return {.item = b2it(a_item.int_val != b_item.int_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_FLOAT) {
-        return {.item = b2it(*(double*)a_item.pointer != *(double*)b_item.pointer)};
-    }
-    else if ((a_item.type_id == LMD_TYPE_INT && b_item.type_id == LMD_TYPE_FLOAT) ||
-             (a_item.type_id == LMD_TYPE_FLOAT && b_item.type_id == LMD_TYPE_INT)) {
-        double a_val = (a_item.type_id == LMD_TYPE_INT) ? (double)a_item.int_val : *(double*)a_item.pointer;
-        double b_val = (b_item.type_id == LMD_TYPE_INT) ? (double)b_item.int_val : *(double*)b_item.pointer;
-        return {.item = b2it(a_val != b_val)};
-    }
-    else if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
-        return {.item = b2it(a_item.bool_val != b_item.bool_val)};
-    }
-    
-    // Fallback to 3-state comparison function
-        log_debug("fn_ne fallback");
     CompResult result = equal_comp(a_item, b_item);
     if (result == COMP_ERROR) {
-        log_debug("inequality type error for types: %d, %d", a_item.type_id, b_item.type_id);
+        log_info("fn_ne type error for types: %d, %d", a_item.type_id, b_item.type_id);
         return ItemError;
     }
     return {.item = b2it(result == COMP_FALSE)};
-#endif
+}
+
+// 3-states comparison
+CompResult less_comp(Item a_item, Item b_item) {
+    log_debug("less_comp expr");
+    if (a_item.type_id != b_item.type_id) {
+        // number promotion - only for int/float types
+        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+            LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
+            double a_val = it2d(a_item), b_val = it2d(b_item);
+            return (a_val < b_val) ? COMP_TRUE : COMP_FALSE;
+        }
+        // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
+        // Note: null can only be compared to null, any other comparison is a type error
+        return COMP_ERROR;
+    }
+    
+    if (a_item.type_id == LMD_TYPE_NULL) {
+        return COMP_FALSE; // null == null
+    }    
+    else if (a_item.type_id == LMD_TYPE_BOOL) {
+        return COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_INT) {
+        return (a_item.int_val < b_item.int_val) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_INT64) {
+        return (*(long*)a_item.pointer < *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT) {
+        return (*(double*)a_item.pointer < *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
+        int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
+        return (cmp < 0) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_DTIME) {
+        DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
+        // todo: do a proper normalized field comparison
+        return (*(uint64_t*)dt_a < *(uint64_t*)dt_b) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
+        a_item.type_id == LMD_TYPE_BINARY) {
+        // String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        // todo: fast path for ascii
+        // bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
+        // return result ? COMP_TRUE : COMP_FALSE;
+        return less_comp_unicode(a_item, b_item);
+    }
+    log_error("unknown comparing type %d\n", a_item.type_id);
+    return COMP_ERROR;
 }
 
 Item fn_lt(Item a_item, Item b_item) {
-    // Always use utf8proc Unicode-enhanced less-than comparison (supports string comparison)
-    CompResult result = less_comp_unicode(a_item, b_item);
-    if (result == COMP_ERROR) {
-        return ItemError;
-    }
+    CompResult result = less_comp(a_item, b_item);
+    if (result == COMP_ERROR) { return ItemError; }
     return {.item = b2it(result == COMP_TRUE)};
 }
 
+// 3-states comparison
+CompResult greater_comp(Item a_item, Item b_item) {
+    log_debug("greater_comp expr");
+    if (a_item.type_id != b_item.type_id) {
+        // number promotion - only for int/float types
+        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+            LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
+            double a_val = it2d(a_item), b_val = it2d(b_item);
+            return (a_val > b_val) ? COMP_TRUE : COMP_FALSE;
+        }
+        // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
+        // Note: null can only be compared to null, any other comparison is a type error
+        return COMP_ERROR;
+    }
+    
+    if (a_item.type_id == LMD_TYPE_NULL) {
+        return COMP_FALSE; // null == null
+    }    
+    else if (a_item.type_id == LMD_TYPE_BOOL) {
+        return COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_INT) {
+        return (a_item.int_val > b_item.int_val) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_INT64) {
+        return (*(long*)a_item.pointer > *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_FLOAT) {
+        return (*(double*)a_item.pointer > *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
+        int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
+        return (cmp > 0) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_DTIME) {
+        DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
+        // todo: do a proper normalized field comparison
+        return (*(uint64_t*)dt_a > *(uint64_t*)dt_b) ? COMP_TRUE : COMP_FALSE;
+    }
+    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
+        a_item.type_id == LMD_TYPE_BINARY) {
+        // String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
+        // todo: fast path for ascii
+        // bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
+        // return result ? COMP_TRUE : COMP_FALSE;
+        return greater_comp_unicode(a_item, b_item);
+    }
+    log_error("unknown comparing type %d\n", a_item.type_id);
+    return COMP_ERROR;
+}
+
 Item fn_gt(Item a_item, Item b_item) {
-    // Always use utf8proc Unicode-enhanced greater-than comparison (supports string comparison)
-    CompResult result = greater_comp_unicode(a_item, b_item);
+    CompResult result = greater_comp(a_item, b_item);
     if (result == COMP_ERROR) return ItemError;
     return {.item = b2it(result == COMP_TRUE)};
 }
 
 Item fn_le(Item a_item, Item b_item) {
     // Always use utf8proc Unicode-enhanced less-than-or-equal comparison (supports string comparison)
-    CompResult result = less_equal_comp_unicode(a_item, b_item);
+    CompResult result = greater_comp(a_item, b_item);
     if (result == COMP_ERROR) return ItemError;
-    return {.item = b2it(result == COMP_TRUE)};
+    return {.item = b2it(result == COMP_FALSE)};
 }
 
 Item fn_ge(Item a_item, Item b_item) {
-    // Always use utf8proc Unicode-enhanced greater-than-or-equal comparison (supports string comparison)
-    CompResult result = greater_equal_comp_unicode(a_item, b_item);
+    CompResult result = less_comp(a_item, b_item);
     if (result == COMP_ERROR) return ItemError;
-    return {.item = b2it(result == COMP_TRUE)};
+    return {.item = b2it(result == COMP_FALSE)};
 }
 
 Item fn_not(Item item) {
     // Logical NOT - invert the truthiness of the item
-        log_debug("fn_not expr");
+    log_debug("fn_not expr");
     return {.item = b2it(!item_true(item))};
 }
 
+// todo: 3-state and
 Item fn_and(Item a_item, Item b_item) {
-        log_debug("fn_and called with types: %d, %d", a_item.type_id, b_item.type_id);
-    
+    log_debug("fn_and called with types: %d, %d", a_item.type_id, b_item.type_id);
     // Fast path for boolean types
     if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
         log_debug("fn_and: bool fast path");
@@ -2039,12 +2087,13 @@ Item fn_and(Item a_item, Item b_item) {
     }
     
     // Fallback to generic truthiness evaluation for numeric and boolean combinations
-        log_debug("fn_and: generic truthiness fallback");
+    log_debug("fn_and: generic truthiness fallback");
     bool a_truth = item_true(a_item);
     bool b_truth = item_true(b_item);
     return {.item = b2it(a_truth && b_truth)};
 }
 
+// todo: 3-state or
 Item fn_or(Item a_item, Item b_item) {
     // Fast path for boolean types
     if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
@@ -2070,7 +2119,7 @@ Item fn_or(Item a_item, Item b_item) {
 }
 
 bool fn_in(Item a_item, Item b_item) {
-        log_debug("in expr");
+    log_debug("fn_in");
     if (b_item.type_id) { // b is scalar
         if (b_item.type_id == LMD_TYPE_STRING && a_item.type_id == LMD_TYPE_STRING) {
             String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
@@ -2118,7 +2167,7 @@ bool fn_in(Item a_item, Item b_item) {
             // check if a is in element
         }
         else {
-        log_debug("invalid type %d", b_type);
+            log_debug("invalid type %d", b_type);
         }
     }
     return false;

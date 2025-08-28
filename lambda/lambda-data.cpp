@@ -189,8 +189,7 @@ Array* array_pooled(VariableMemPool *pool) {
     return arr;
 }
 
-void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
-    if (!pool) return;
+void array_set(Array* arr, int index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
     log_debug("array set item: type: %d, index: %d, length: %ld, extra: %ld", 
@@ -230,7 +229,9 @@ void array_set(Array* arr, int index, Item itm, VariableMemPool *pool) {
 
 void array_append(Array* arr, Item itm, VariableMemPool *pool) {
     if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
-    array_set(arr, arr->length, itm, pool);
+    // no need to call array_set() as the item data is pooled
+    // array_set(arr, arr->length, itm, pool);
+    arr->items[arr->length] = itm;
     arr->length++;
 }
 
