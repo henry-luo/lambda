@@ -231,8 +231,9 @@ Item fn_add(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
         return push_d(*(double*)item_a.pointer + (double)item_b.int_val);
     }
-    // Add libmpdec decimal support
+    // libmpdec decimal support
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
+        log_debug("fn_add: decimal addition");
         mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
         mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
         
@@ -465,7 +466,7 @@ Item fn_sub(Item item_a, Item item_b) {
         ArrayInt64* arr_a = item_a.array_int64;
         ArrayInt64* arr_b = item_b.array_int64;
         if (arr_a->length != arr_b->length) {
-        log_error("Array length mismatch in subtraction");
+            log_error("Array length mismatch in subtraction");
             return ItemError;
         }
         ArrayInt64* result = array_int64_new(arr_a->length);
@@ -519,7 +520,7 @@ Item fn_div(Item item_a, Item item_b) {
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-        log_error("float division by zero error");
+            log_error("float division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / *(double*)item_b.pointer);
@@ -539,7 +540,7 @@ Item fn_div(Item item_a, Item item_b) {
         if (!a_dec || !b_dec) {
             if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
             if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
-        log_error("decimal conversion failed in fn_div");
+            log_error("decimal conversion failed in fn_div");
             return ItemError;
         }
         
