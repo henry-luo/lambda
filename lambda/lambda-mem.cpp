@@ -97,9 +97,7 @@ void print_heap_entries() {
         if (itm.type_id == LMD_TYPE_RAW_POINTER) {
             TypeId type_id = *((uint8_t*)data);
             log_debug("heap entry data: type: %s", type_info[type_id].name);
-            if (type_id == LMD_TYPE_LIST || type_id == LMD_TYPE_ARRAY || 
-                type_id == LMD_TYPE_ARRAY_INT || type_id == LMD_TYPE_ARRAY_INT64 || type_id == LMD_TYPE_ARRAY_FLOAT || type_id == LMD_TYPE_MAP || 
-                type_id == LMD_TYPE_ELEMENT) {
+            if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_ELEMENT) {
                 Container *cont = (Container*)data;
                 log_debug("heap entry container: type: %s, ref_cnt: %d", 
                     type_info[type_id].name, cont->ref_cnt);
@@ -181,8 +179,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
                 free_item(item, clear_entry);
             }
         }
-        else if (field->type->type_id == LMD_TYPE_ARRAY || field->type->type_id == LMD_TYPE_LIST || 
-            field->type->type_id == LMD_TYPE_MAP || field->type->type_id == LMD_TYPE_ELEMENT) {
+        else if (LMD_TYPE_LIST <= field->type->type_id && field->type->type_id <= LMD_TYPE_ELEMENT) {
             Container *container = *(Container**)field_ptr;
             if (container) {
                 // delink with the container

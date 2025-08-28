@@ -27,7 +27,7 @@ Item typeditem_to_item(TypedItem *titem) {
         return {.item = y2it(titem->string)};
     case LMD_TYPE_BINARY:
         return {.item = x2it(titem->string)};
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
         return {.raw_pointer = titem->pointer};
     default:
@@ -204,33 +204,33 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             case LMD_TYPE_BINARY:
                 return {.item = x2it(*(char**)field_ptr)};
                 
-            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container* container = *(Container**)field_ptr;
-        log_debug("map_get container: %p, type_id: %d", container, container->type_id);
+                log_debug("map_get container: %p, type_id: %d", container, container->type_id);
                 // assert(container->type_id == type_id);
                 return {.raw_pointer = container};
             }
             case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
                 return {.raw_pointer = *(void**)field_ptr};
             case LMD_TYPE_ANY: {
-        log_debug("map_get ANY type, pointer: %p", field_ptr);
+                log_debug("map_get ANY type, pointer: %p", field_ptr);
                 return typeditem_to_item((TypedItem*)field_ptr);
             }
             default:
-        log_error("unknown map item type %d", type_id);
+                log_error("unknown map item type %d", type_id);
                 return ItemError;
             }
         }
         field = field->next;
     }
     *is_found = false;
-        log_debug("map_get: key %s not found", key);
+    log_debug("map_get: key %s not found", key);
     return ItemNull;
 }
 
 Item map_get(Map* map, Item key) {
-        log_debug("map_get %p", map);
+    log_debug("map_get %p", map);
     if (!map || !key.item) { return ItemNull;}
     bool is_found;
     char *key_str = NULL;
