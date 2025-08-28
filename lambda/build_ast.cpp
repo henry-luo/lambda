@@ -4,6 +4,7 @@
 #include "../lib/datetime.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/log.h"
+#include <errno.h>
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 
@@ -23,7 +24,7 @@ void* alloc_const(Transpiler* tp, size_t size) {
 }
 
 void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
-        log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
+    log_debug("pushing name %.*s, %p", (int)node->name->len, node->name->chars, node->type);
     NameEntry *entry = (NameEntry*)pool_calloc(tp->ast_pool, sizeof(NameEntry));
     entry->name = node->name;  
     entry->node = (AstNode*)node;  entry->import = import;
@@ -33,7 +34,7 @@ void push_name(Transpiler* tp, AstNamedNode* node, AstImportNode* import) {
 }
 
 AstNode* build_array(Transpiler* tp, TSNode array_node) {
-        log_debug("build array expr");
+    log_debug("build array expr");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY, array_node, sizeof(AstArrayNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
     TypeArray *type = (TypeArray*)ast_node->type;
@@ -59,12 +60,12 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
         child = ts_node_next_named_sibling(child);
     }
     type->nested = nested_type;
-        log_debug("DEBUG: Final array nested_type_id: %d", nested_type ? nested_type->type_id : -1);
+    log_debug("DEBUG: Final array nested_type_id: %d", nested_type ? nested_type->type_id : -1);
     return (AstNode*)ast_node;
 }
 
 AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_type) {
-        log_debug("build field expr");
+    log_debug("build field expr");
     AstFieldNode* ast_node = (AstFieldNode*)alloc_ast_node(tp, node_type, array_node, sizeof(AstFieldNode));
     TSNode object_node = ts_node_child_by_field_id(array_node, FIELD_OBJECT);
     ast_node->object = build_expr(tp, object_node);
@@ -100,7 +101,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
 }
 
 AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
-        log_debug("build call expr: %d", symbol);
+    log_debug("build call expr: %d", symbol);
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, 
         AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
@@ -206,7 +207,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             fn_node->type = &TYPE_STRING;
         }
         else {
-        log_debug("unknown system function: %.*s", (int)func_name.length, func_name.str);
+            log_debug("unknown system function: %.*s", (int)func_name.length, func_name.str);
             return NULL;
         }
         ast_node->function = (AstNode*)fn_node;
@@ -233,7 +234,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         if (field_id == FIELD_ARGUMENT) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *argument = build_expr(tp, child);
-        log_debug("got argument type %d", argument->node_type);
+            log_debug("got argument type %d", argument->node_type);
             if (prev_argument == NULL) {
                 ast_node->argument = argument;
             } else {
@@ -244,7 +245,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
-        log_debug("end building call expr type: %p", ast_node->type);
+    log_debug("end building call expr type: %p", ast_node->type);
     return (AstNode*)ast_node;
 }
 
@@ -273,11 +274,11 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
         if (scope->parent) {
             // Defensive check: prevent infinite loop if parent pointer is circular
             if (scope == scope->parent) {
-        log_error("Error: circular parent scope detected - breaking to prevent infinite loop");
+                log_error("Error: circular parent scope detected - breaking to prevent infinite loop");
                 return NULL;
             }
             scope = scope->parent;
-        log_debug("checking parent scope: %p", scope);
+            log_debug("checking parent scope: %p", scope);
             goto FIND_VAR_NAME;
         }
         log_debug("missing identifier %.*s", (int)var_name.length, var_name.str);
@@ -290,7 +291,7 @@ NameEntry *lookup_name(Transpiler* tp, StrView var_name) {
 }
 
 AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
-        log_debug("building identifier");
+    log_debug("building identifier");
     AstIdentNode* ast_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, id_node, sizeof(AstIdentNode));
 
     // get the identifier name from source and create pooled string
@@ -298,7 +299,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
     ast_node->name = name_pool_create_strview(tp->name_pool, var_name);
     
     // lookup the name
-        log_debug("looking up name: %.*s", (int)var_name.length, var_name.str);
+    log_debug("looking up name: %.*s", (int)var_name.length, var_name.str);
     NameEntry *entry = lookup_name(tp, var_name);
     if (!entry) {
         // ident is used for member access, thus we return TYPE_ANY
@@ -402,7 +403,7 @@ Type* build_lit_datetime(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // Add to const list
     arraylist_append(tp->const_list, &dt_type->datetime);
     dt_type->const_index = tp->const_list->length - 1;
-        log_debug("build lit datetime: %.*s, type: %d", datetime_len, datetime_start, dt_type->type_id);
+    log_debug("build lit datetime: %.*s, type: %d", datetime_len, datetime_start, dt_type->type_id);
     return (Type *)dt_type;
 }
 
@@ -421,7 +422,7 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
 Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
     TypeFloat *item_type = (TypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
-        log_debug("build lit float: normal");
+    log_debug("build lit float: normal");
     const char* num_str = tp->source + ts_node_start_byte(node);
     // check if there's sign
     bool has_sign = false;
@@ -439,8 +440,11 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
     TypeDecimal *item_type = (TypeDecimal *)alloc_type(tp->ast_pool, LMD_TYPE_DECIMAL, sizeof(TypeDecimal));
     StrView num_sv = ts_node_source(tp, node);
     char* num_str = strview_to_cstr(&num_sv);
-    num_str[num_sv.length-1] = '\0';  // clear suffix 'n'/'N'
-        log_debug("build lit decimal: %s", num_str);
+    // num_str may not end with 'n' or 'N'
+    if (num_str[num_sv.length-1] == 'n' || num_str[num_sv.length-1] == 'N') {
+        num_str[num_sv.length-1] = '\0';  // clear suffix 'n'/'N'
+    }
+    log_debug("build lit decimal: %s", num_str);
     
     // Allocate heap-allocated Decimal structure
     Decimal *decimal;
@@ -474,14 +478,14 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
 }
 
 AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
-        log_debug("*** DEBUG: build_primary_expr called ***");
+    log_debug("*** DEBUG: build_primary_expr called ***");
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, pri_node, sizeof(AstPrimaryNode));
     TSNode child = ts_node_named_child(pri_node, 0);
     if (ts_node_is_null(child)) { return (AstNode*)ast_node; }
 
     // infer data type
     TSSymbol symbol = ts_node_symbol(child);
-        log_debug("*** DEBUG: symbol=%d (SYM_INT=%d) ***", symbol, SYM_INT);
+    log_debug("*** DEBUG: symbol=%d (SYM_INT=%d) ***", symbol, SYM_INT);
     if (symbol == SYM_NULL) {
         ast_node->type = &LIT_NULL;
     }
@@ -491,23 +495,23 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     else if (symbol == SYM_INT) {
         // Parse the integer value to determine if it fits in 32-bit or needs 64-bit
         StrView source = ts_node_source(tp, child);
-        
         // Create a null-terminated string for strtoll
         char* num_str = (char*)malloc(source.length + 1);
         memcpy(num_str, source.str, source.length);
         num_str[source.length] = '\0';
         
         char* endptr;
+        errno = 0;
         int64_t value = strtoll(num_str, &endptr, 10);
         free(num_str);
         
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
-        
         // Check if the value fits in 32-bit signed integer range
-        if (value >= INT32_MIN && value <= INT32_MAX) {
-            ast_node->type = &LIT_INT;
+        if (errno == ERANGE || value < INT32_MIN || value > INT32_MAX) {
+            // treat as decimal
+            ast_node->type = build_lit_decimal(tp, child);
         } else {
-            ast_node->type = build_lit_int64(tp, child);
+            ast_node->type = &LIT_INT;
         }
     }
     else if (symbol == SYM_DECIMAL) {
@@ -555,12 +559,12 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_expr(tp, child);
         ast_node->type = ast_node->expr->type;
     }
-        log_debug("end build primary expr");
+    log_debug("end build primary expr");
     return (AstNode*)ast_node;
 }
 
 AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
-        log_debug("build unary expr");
+    log_debug("build unary expr");
     AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY, bi_node, sizeof(AstUnaryNode));
     TSNode op_node = ts_node_child_by_field_id(bi_node, FIELD_OPERATOR);
     StrView op = ts_node_source(tp, op_node);
@@ -609,12 +613,12 @@ AstNode* build_unary_expr(Transpiler* tp, TSNode bi_node) {
     
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
 
-        log_debug("end build unary expr");
+    log_debug("end build unary expr");
     return (AstNode*)ast_node;
 }
 
 AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
-        log_debug("build binary expr");
+    log_debug("build binary expr");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, AST_NODE_BINARY, bi_node, sizeof(AstBinaryNode));
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
     ast_node->left = build_expr(tp, left_node);
@@ -745,12 +749,12 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         type_id = LMD_TYPE_ANY;
     }
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
-        log_debug("end build binary expr");
+    log_debug("end build binary expr");
     return (AstNode*)ast_node;
 }
 
 AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
-        log_debug("build if expr");
+    log_debug("build if expr");
     AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_EXPR, if_node, sizeof(AstIfNode));
     TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
     ast_node->cond = build_expr(tp, cond_node);
@@ -806,20 +810,19 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
             // coercion is possible
         } else {
             // Incompatible types that cannot be coerced, use ANY
-            log_warn("Error: if branches have incompatible types %d and %d, coercing to ANY", 
-                then_type_id, else_type_id);        
+            log_warn("Error: incompatible types %d and %d, coercing to ANY", then_type_id, else_type_id);        
             need_any_type = true;
         }
     }
     
     TypeId type_id = need_any_type ? LMD_TYPE_ANY : max(then_type_id, else_type_id);
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
-        log_debug("end build if expr");
+    log_debug("end build if expr");
     return (AstNode*)ast_node;
 }
 
 AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
-        log_debug("build if stam");
+    log_debug("build if stam");
     AstIfNode* ast_node = (AstIfNode*)alloc_ast_node(tp, AST_NODE_IF_STAM, if_node, sizeof(AstIfNode));
     
     TSNode cond_node = ts_node_child_by_field_id(if_node, FIELD_COND);
@@ -849,7 +852,7 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         ast_node->otherwise = build_expr(tp, else_node);
         // Defensive validation: if else node exists, ensure it was built successfully
         if (!ast_node->otherwise) {
-        log_error("Error: build_if_stam failed to build else expression");
+            log_error("Error: build_if_stam failed to build else expression");
             ast_node->type = &TYPE_ERROR;
             return (AstNode*)ast_node;
         }
@@ -865,12 +868,12 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
     
     // if statement returns null/void (does not produce a value)
     ast_node->type = &TYPE_NULL;
-        log_debug("end build if stam");
+    log_debug("end build if stam");
     return (AstNode*)ast_node;
 }
 
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
-        log_debug("build list");
+    log_debug("build list");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
     TypeList *type = (TypeList*)ast_node->type;
@@ -885,10 +888,10 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
         log_debug("build_list: processing child");
         AstNode* item = build_expr(tp, child);
         if (item) {
-        log_debug("build_list: got item with node_type %d", item->node_type);
+            log_debug("build_list: got item with node_type %d", item->node_type);
             if (item->node_type == AST_NODE_ASSIGN) {
                 AstNode *declare = item;
-        log_debug("got declare type %d", declare->node_type);
+                log_debug("got declare type %d", declare->node_type);
                 if (prev_declare == NULL) {
                     ast_node->declare = declare;
                 } else {
@@ -897,7 +900,7 @@ AstNode* build_list(Transpiler* tp, TSNode list_node) {
                 prev_declare = declare;
             }
             else { // normal list item
-        log_debug("build_list: adding item as list item, incrementing length from %ld to %ld", type->length, type->length + 1);
+                log_debug("build_list: adding item as list item, incrementing length from %ld to %ld", type->length, type->length + 1);
                 if (!prev_item) { 
                     ast_node->item = item;
                 } else {  
@@ -966,7 +969,7 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             // Defensive check: validate symbol type instead of using assert
             if (ts_node_symbol(child) != SYM_ASSIGN_EXPR) {
-        log_error("Error: build_let_stam expected SYM_ASSIGN_EXPR but got symbol %d", ts_node_symbol(child));
+                log_error("Error: build_let_stam expected SYM_ASSIGN_EXPR but got symbol %d", ts_node_symbol(child));
                 // Skip invalid node and continue - defensive recovery
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
@@ -974,7 +977,7 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
             AstNode *declare = build_assign_expr(tp, child);
             // Additional defensive check
             if (!declare) {
-        log_error("Error: build_let_stam failed to build assign expression");
+                log_error("Error: build_let_stam failed to build assign expression");
                 has_node = ts_tree_cursor_goto_next_sibling(&cursor);
                 continue;
             }
@@ -995,7 +998,7 @@ AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
 }
 
 StrView build_key_string(Transpiler* tp, TSNode key_node) {
-        log_debug("build key string");
+    log_debug("build key string");
     TSSymbol symbol = ts_node_symbol(key_node);
     switch(symbol) {
     // todo: handle string and symbol escape
@@ -1014,7 +1017,7 @@ StrView build_key_string(Transpiler* tp, TSNode key_node) {
 }
 
 AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
-        log_debug("build key expr");
+    log_debug("build key expr");
     AstNamedNode* ast_node = (AstNamedNode*)alloc_ast_node(tp, AST_NODE_KEY_EXPR, pair_node, sizeof(AstNamedNode));
 
     TSNode name = ts_node_child_by_field_id(pair_node, FIELD_NAME);
@@ -1022,7 +1025,7 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
     ast_node->name = name_pool_create_strview(tp->name_pool, name_view);
 
     TSNode val_node = ts_node_child_by_field_id(pair_node, FIELD_AS);
-        log_debug("build key as");
+    log_debug("build key as");
     ast_node->as = build_expr(tp, val_node);
 
     // determine the type of the field
@@ -1032,7 +1035,7 @@ AstNamedNode* build_key_expr(Transpiler* tp, TSNode pair_node) {
 
 AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
     AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_TYPE, type_node, sizeof(AstTypeNode));
-        log_debug("build type annotation");
+    log_debug("build type annotation");
     StrView type_name = ts_node_source(tp, type_node);
     if (strview_equal(&type_name, "null")) {
         ast_node->type = (Type*)&LIT_TYPE_NULL;
@@ -1101,13 +1104,13 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
         log_debug("unknown base type %.*s", (int)type_name.length, type_name.str);
         ast_node->type = (Type*)&LIT_TYPE_ERROR;
     }
-        log_debug("built base type %.*s, type_id %d", (int)type_name.length, type_name.str,
-                ((TypeType*)ast_node->type)->type->type_id);
+    log_debug("built base type %.*s, type_id %d", (int)type_name.length, type_name.str,
+        ((TypeType*)ast_node->type)->type->type_id);
     return (AstNode*)ast_node;   
 }
 
 AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
-        log_debug("build list type");
+    log_debug("build list type");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeList *type = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
@@ -1136,7 +1139,7 @@ AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
 }
 
 AstNode* build_array_type(Transpiler* tp, TSNode array_node) {
-        log_debug("build array type");
+    log_debug("build array type");
     AstArrayNode* ast_node = (AstArrayNode*)alloc_ast_node(tp, AST_NODE_ARRAY_TYPE, array_node, sizeof(AstArrayNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeArray *type = (TypeArray*)alloc_type(tp->ast_pool, LMD_TYPE_ARRAY, sizeof(TypeArray));
@@ -1205,7 +1208,7 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
 }
 
 AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
-        log_debug("build content type");
+    log_debug("build content type");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
     TypeList *type = (TypeList*)ast_node->type;
@@ -1223,12 +1226,12 @@ AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
         // else comment or error
         child = ts_node_next_named_sibling(child);
     }
-        log_debug("end building content type: %ld", type->length);
+    log_debug("end building content type: %ld", type->length);
     return (AstNode*)ast_node;
 }
 
 AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
-        log_debug("build element type");
+    log_debug("build element type");
     AstElementNode* ast_node = (AstElementNode*)alloc_ast_node(tp, 
         AST_NODE_ELMT_TYPE, elmt_node, sizeof(AstElementNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
@@ -1281,7 +1284,7 @@ AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
 }
 
 AstNode* build_func_type(Transpiler* tp, TSNode func_node) {
-        log_debug("build fn type");
+    log_debug("build fn type");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp, AST_NODE_FUNC_TYPE, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
     TypeFunc *fn_type = (TypeFunc*) alloc_type(tp->ast_pool, LMD_TYPE_FUNC, sizeof(TypeFunc));

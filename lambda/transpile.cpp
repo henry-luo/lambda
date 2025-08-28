@@ -314,9 +314,12 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
             strbuf_append_str(tp->code_buf, ")");
         }
         else {
+            log_enter();
+            log_debug("transpile_box_item: push_l");
             strbuf_append_str(tp->code_buf, "push_l(");
             transpile_expr(tp, item);
             strbuf_append_char(tp->code_buf, ')');
+            log_leave();
         }
         break;
     case LMD_TYPE_FLOAT: 
@@ -493,7 +496,6 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
-        log_debug("transpile primary expr");
     if (pri_node->expr) {
         if (pri_node->expr->node_type == AST_NODE_IDENT) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
@@ -522,7 +524,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 }
             }
             else {
-        log_warn("Warning: ident_node->entry is null or entry->node is null");
+                log_warn("Warning: ident_node->entry is null or entry->node is null");
                 // Handle the case where entry is null - perhaps write the identifier directly
                 write_node_source(tp, ident_node->node);
             }
@@ -530,6 +532,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             transpile_expr(tp, pri_node->expr);
         }
     } else { // const
+        log_debug("transpile_primary_expr: const");
         if (pri_node->type->is_literal) {  // literal
             if (pri_node->type->type_id == LMD_TYPE_STRING || pri_node->type->type_id == LMD_TYPE_SYMBOL ||
                 pri_node->type->type_id == LMD_TYPE_BINARY) {
@@ -548,7 +551,7 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT) {
                 write_node_source(tp, pri_node->node);
-                // int32 literals don't need 'L' suffix
+                // int32 literals don't use 'L' suffix
             }
             else if (pri_node->type->type_id == LMD_TYPE_INT64) {
                 write_node_source(tp, pri_node->node);
@@ -2092,9 +2095,7 @@ void transpile_binary_type(Transpiler* tp, AstBinaryNode* bin_node) {
 }
 
 void transpile_expr(Transpiler* tp, AstNode *expr_node) {
-    if (!expr_node) {
-        log_debug("missing expression node");
-    }
+    if (!expr_node) { log_error("missing expression node"); return; }
     // get the function name
     switch (expr_node->node_type) {
     case AST_NODE_PRIMARY:
