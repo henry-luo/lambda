@@ -292,6 +292,7 @@ void list_push(List *list, Item item) {
         long* ival = (long*)(list->items + (list->capacity - list->extra - 1));
         *ival = *(long*)item.pointer;  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
+        log_debug("list_push: int64 value: %ld", *ival);
         break;
     }
     case LMD_TYPE_DTIME:  {
