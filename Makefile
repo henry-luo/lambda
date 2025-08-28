@@ -158,9 +158,17 @@ help:
 	@echo "  verify-windows - Verify Windows cross-compiled executable with Wine"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  run           - Build and run the default executable"
-	@echo "  check         - Run static analysis and checks"
-	@echo "  format        - Format source code"
-	@echo "  lint          - Run linter on source files"
+	@echo "  analyze       - Run static analysis with scan-build (fixed for custom build)"
+	@echo "  analyze-verbose - Run detailed static analysis with extra checkers"
+	@echo "  analyze-single - Run static analysis on individual files"
+	@echo "  analyze-direct - Direct clang static analysis (bypasses build system)"
+	@echo "  analyze-compile-db - Use compile_commands.json for analysis (requires bear)"
+	@echo "  tidy          - Run clang-tidy analysis on C++ files"
+	@echo "  tidy-full     - Comprehensive clang-tidy with compile database"
+	@echo "  tidy-fix      - Run clang-tidy with automatic fixes (interactive)"
+	@echo "  check         - Run basic code checks (TODO/FIXME finder)"
+	@echo "  format        - Format source code with clang-format"
+	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo ""
 	@echo "Unicode Support:"
 	@echo "  test-unicode  - Run Unicode string comparison tests"
@@ -625,27 +633,289 @@ run: build
 	fi
 
 # Code quality targets
-# check:
-# 	@echo "Running static analysis..."
-# 	@echo "Checking for common issues in source files..."
-# 	@find lambda -name "*.c" -o -name "*.h" | xargs -I {} sh -c 'echo "Checking: {}"; grep -n "TODO\|FIXME\|XXX" {} || true' 2>/dev/null
-# 	@echo "Static analysis complete."
+analyze: clean
+	@echo "Running static analysis with clang..."
+	@if command -v scan-build >/dev/null 2>&1; then \
+		CC="scan-build clang" CXX="scan-build clang++" \
+		scan-build -o analysis-results --use-cc=clang --use-c++=clang++ \
+		./compile.sh build_lambda_config.json --force; \
+		echo "Analysis complete. Results saved in analysis-results/"; \
+		echo "Open the HTML report to view findings."; \
+	elif [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build" ]; then \
+		CC="/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build clang" \
+		CXX="/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build clang++" \
+		/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build -o analysis-results \
+		--use-cc=clang --use-c++=clang++ \
+		./compile.sh build_lambda_config.json --force; \
+		echo "Analysis complete. Results saved in analysis-results/"; \
+	else \
+		echo "scan-build not found. Install with: brew install llvm"; \
+		exit 1; \
+	fi
 
-# format:
-# 	@echo "Formatting source code..."
-# 	@if command -v clang-format >/dev/null 2>&1; then \
-# 		find lambda -name "*.c" -o -name "*.h" | xargs clang-format -i; \
-# 		echo "Code formatted with clang-format."; \
-# 	else \
-# 		echo "clang-format not found. Install with: brew install clang-format"; \
-# 	fi
+analyze-verbose: clean
+	@echo "Running detailed static analysis..."
+	@if command -v scan-build >/dev/null 2>&1; then \
+		CC="scan-build clang" CXX="scan-build clang++" \
+		scan-build -enable-checker alpha.core.CastSize \
+		           -enable-checker alpha.core.CastToStruct \
+		           -enable-checker alpha.security.ArrayBoundV2 \
+		           -enable-checker alpha.security.ReturnPtrRange \
+		           -enable-checker alpha.unix.cstring.BadSizeArg \
+		           -enable-checker alpha.unix.cstring.OutOfBounds \
+		           -o analysis-results-verbose \
+		           --use-cc=clang --use-c++=clang++ \
+		           ./compile.sh build_lambda_config.json --force; \
+		echo "Detailed analysis complete. Results saved in analysis-results-verbose/"; \
+	elif [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build" ]; then \
+		CC="/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build clang" \
+		CXX="/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build clang++" \
+		/opt/homebrew/Cellar/llvm/21.1.0/bin/scan-build -enable-checker alpha.core.CastSize \
+		           -enable-checker alpha.core.CastToStruct \
+		           -enable-checker alpha.security.ArrayBoundV2 \
+		           -enable-checker alpha.security.ReturnPtrRange \
+		           -enable-checker alpha.unix.cstring.BadSizeArg \
+		           -enable-checker alpha.unix.cstring.OutOfBounds \
+		           -o analysis-results-verbose \
+		           --use-cc=clang --use-c++=clang++ \
+		           ./compile.sh build_lambda_config.json --force; \
+		echo "Detailed analysis complete. Results saved in analysis-results-verbose/"; \
+	else \
+		echo "scan-build not found. Install with: brew install llvm"; \
+		exit 1; \
+	fi
+
+analyze-single:
+	@echo "Running static analysis on individual files..."
+	@mkdir -p analysis-results-single
+	@echo "Testing analyzer with a simple buggy file..."
+	@echo 'int main() { int *p = 0; return *p; }' > /tmp/test_analyzer.c
+	@clang --analyze -Xanalyzer -analyzer-output=text /tmp/test_analyzer.c && echo "✅ Analyzer working" || echo "❌ Analyzer failed"
+	@rm -f /tmp/test_analyzer.c
+	@echo ""
+	@echo "Analyzing Lambda source files..."
+	@for file in lambda/print.cpp lambda/pack.cpp lib/strbuf.c lib/arraylist.c; do \
+		if [ -f "$$file" ]; then \
+			echo "Analyzing $$file..."; \
+			clang --analyze -Xanalyzer -analyzer-output=text \
+			      -Xanalyzer -analyzer-checker=core,unix,deadcode,security \
+			      -I. -Ilib -Ilib/mem-pool/include \
+			      "$$file" 2>&1 || echo "  (completed)"; \
+		fi; \
+	done
+	@echo "Single file analysis complete."
+
+# Alternative approach using compile_commands.json for better integration
+analyze-compile-db: build
+	@echo "Generating compile_commands.json for static analysis..."
+	@if command -v bear >/dev/null 2>&1; then \
+		bear -- make rebuild; \
+		echo "Running clang-tidy with compile database..."; \
+		if command -v clang-tidy >/dev/null 2>&1; then \
+			find lambda -name "*.cpp" -o -name "*.c" | head -10 | \
+			xargs clang-tidy -p . --checks='-*,clang-analyzer-*,bugprone-*,cert-*,misc-*,performance-*,portability-*,readability-*'; \
+		else \
+			echo "clang-tidy not found. Install with: brew install llvm"; \
+		fi; \
+	else \
+		echo "bear not found. Install with: brew install bear"; \
+		echo "Falling back to direct analysis..."; \
+		$(MAKE) analyze-direct; \
+	fi
+
+# Direct analysis without build system wrapper
+analyze-direct:
+	@echo "Running direct static analysis on source files..."
+	@mkdir -p analysis-results-direct
+	@echo "Analyzing files that can compile independently..."
+	@# Analyze files that don't have complex dependencies
+	@for file in lambda/print.cpp lambda/pack.cpp lambda/utf_string.cpp \
+	             lambda/format/format-*.cpp lambda/input/input-common.cpp \
+	             lambda/input/mime-*.c lambda/validator/error_reporting.c; do \
+		if [ -f "$$file" ]; then \
+			echo "Analyzing $$file..."; \
+			clang --analyze -Xanalyzer -analyzer-output=html \
+			      -Xanalyzer -analyzer-output-dir=analysis-results-direct \
+			      -Xanalyzer -analyzer-checker=core,unix,deadcode,security.insecureAPI \
+			      -I. -Ilib -Ilib/mem-pool/include -Ilambda \
+			      -Ilambda/tree-sitter/lib/include \
+			      -Iwasm-deps/include -Iwindows-deps/include \
+			      "$$file" 2>/dev/null || echo "  (skipped due to dependencies)"; \
+		fi; \
+	done
+	@echo "Running syntax-only analysis on complex files..."
+	@find lambda -name "*.cpp" -o -name "*.c" | head -20 | while read file; do \
+		echo "Syntax checking $$file..."; \
+		clang -fsyntax-only -Weverything -Wno-padded -Wno-c++98-compat \
+		      -I. -Ilib -Ilib/mem-pool/include -Ilambda \
+		      -Ilambda/tree-sitter/lib/include \
+		      -Iwasm-deps/include -Iwindows-deps/include \
+		      "$$file" 2>&1 | grep -E "(warning|error)" | head -10 || true; \
+	done
+	@echo "Direct analysis complete. Check analysis-results-direct/ for HTML reports"
+	@ls -la analysis-results-direct/ 2>/dev/null || echo "No HTML reports generated (code may be clean)"
+
+check:
+	@echo "Running basic code checks..."
+	@echo "Checking for common issues in source files..."
+	@find lambda -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs -I {} sh -c 'echo "Checking: {}"; grep -n "TODO\|FIXME\|XXX" {} || true' 2>/dev/null
+	@echo "Basic checks complete."
+
+format:
+	@echo "Formatting source code..."
+	@if command -v clang-format >/dev/null 2>&1; then \
+		find lambda -name "*.c" -o -name "*.cpp" -o -name "*.h" | xargs clang-format -i; \
+		echo "Code formatted with clang-format."; \
+	else \
+		echo "clang-format not found. Install with: brew install clang-format"; \
+	fi
 
 lint:
-	@echo "Running linter..."
+	@echo "Running comprehensive linter analysis..."
+	@mkdir -p analysis-results-lint
 	@if command -v cppcheck >/dev/null 2>&1; then \
-		cppcheck --enable=warning,style,performance --std=c11 lambda/ 2>/dev/null || true; \
+		echo "Running cppcheck with all checks enabled..."; \
+		cppcheck --enable=all --std=c++17 \
+		         --suppress=missingIncludeSystem \
+		         --suppress=unmatchedSuppression \
+		         --xml --xml-version=2 \
+		         --output-file=analysis-results-lint/cppcheck-report.xml \
+		         -i lambda/tree-sitter/ \
+		         -i lambda/tree-sitter-lambda/ \
+		         -i lambda/tree-sitter-javascript/ \
+		         lambda/ \
+		         2>&1 | tee analysis-results-lint/cppcheck-output.txt; \
+		echo ""; \
+		echo "Generating human-readable summary..."; \
+		cppcheck --enable=all --std=c++17 \
+		         --suppress=missingIncludeSystem \
+		         --suppress=unmatchedSuppression \
+		         -i lambda/tree-sitter/ \
+		         -i lambda/tree-sitter-lambda/ \
+		         -i lambda/tree-sitter-javascript/ \
+		         lambda/ \
+		         2>&1 | grep -E "(error|warning|style|performance|portability)" | \
+		         head -50 > analysis-results-lint/cppcheck-summary.txt || true; \
+		echo ""; \
+		echo "📊 Lint Analysis Complete:"; \
+		echo "  Full report: analysis-results-lint/cppcheck-report.xml"; \
+		echo "  Summary: analysis-results-lint/cppcheck-summary.txt"; \
+		echo "  Raw output: analysis-results-lint/cppcheck-output.txt"; \
+		echo ""; \
+		if [ -s analysis-results-lint/cppcheck-summary.txt ]; then \
+			echo "🔍 Top Issues Found:"; \
+			head -20 analysis-results-lint/cppcheck-summary.txt; \
+		else \
+			echo "✅ No major issues found in Lambda source code"; \
+		fi; \
 	else \
 		echo "cppcheck not found. Install with: brew install cppcheck"; \
+		exit 1; \
+	fi
+
+# Clang-tidy static analysis
+tidy:
+	@echo "Running clang-tidy analysis..."
+	@mkdir -p analysis-results-tidy
+	@if [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy" ]; then \
+		CLANG_TIDY="/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy"; \
+	elif command -v clang-tidy >/dev/null 2>&1; then \
+		CLANG_TIDY="clang-tidy"; \
+	else \
+		echo "clang-tidy not found. Install with: brew install llvm"; \
+		exit 1; \
+	fi; \
+	echo "Analyzing C++ files with clang-tidy..."; \
+	find lambda -name "*.cpp" -not -path "*/tree-sitter*" | head -10 | while read file; do \
+		echo "Analyzing $$file..."; \
+		$$CLANG_TIDY "$$file" \
+			--checks='-*,bugprone-*,cert-*,clang-analyzer-*,misc-*,performance-*,portability-*,readability-*' \
+			-- -I. -Ilib -Ilib/mem-pool/include -Ilambda -std=c++17 \
+			2>&1 | grep -E "(warning|error|note)" | head -5 || echo "  (no issues found)"; \
+	done > analysis-results-tidy/tidy-summary.txt; \
+	echo ""; \
+	echo "📊 Clang-tidy Analysis Complete:"; \
+	echo "  Summary: analysis-results-tidy/tidy-summary.txt"; \
+	echo ""; \
+	if [ -s analysis-results-tidy/tidy-summary.txt ]; then \
+		echo "🔍 Sample Issues Found:"; \
+		head -15 analysis-results-tidy/tidy-summary.txt; \
+	else \
+		echo "✅ No issues found in analyzed files"; \
+	fi
+
+tidy-full:
+	@echo "Running comprehensive clang-tidy analysis..."
+	@mkdir -p analysis-results-tidy
+	@if [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy" ]; then \
+		CLANG_TIDY="/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy"; \
+	elif command -v clang-tidy >/dev/null 2>&1; then \
+		CLANG_TIDY="clang-tidy"; \
+	else \
+		echo "clang-tidy not found. Install with: brew install llvm"; \
+		exit 1; \
+	fi; \
+	echo "Creating manual compile database for Lambda project..."; \
+	$(MAKE) generate-compile-db; \
+	if [ -f "compile_commands.json" ]; then \
+		echo "Running clang-tidy with compile database..."; \
+		find lambda -name "*.cpp" -not -path "*/tree-sitter*" | \
+		xargs $$CLANG_TIDY -p . > analysis-results-tidy/tidy-full-report.txt 2>&1; \
+	else \
+		echo "Compile database not available, running direct analysis..."; \
+		find lambda -name "*.cpp" -not -path "*/tree-sitter*" | while read file; do \
+			echo "Analyzing $$file..."; \
+			$$CLANG_TIDY "$$file" \
+				--checks='-*,bugprone-*,cert-*,clang-analyzer-*,misc-*,performance-*,portability-*,readability-*' \
+				-- -I. -Ilib -Ilib/mem-pool/include -Ilambda -std=c++17 \
+				2>&1 || echo "  (analysis completed with errors)"; \
+		done > analysis-results-tidy/tidy-full-report.txt 2>&1; \
+	fi; \
+	echo "Full report saved to analysis-results-tidy/tidy-full-report.txt"; \
+	echo "Generating summary..."; \
+	grep -E "(warning|error|note)" analysis-results-tidy/tidy-full-report.txt | \
+		head -100 > analysis-results-tidy/tidy-full-summary.txt || true; \
+	echo "Summary saved to analysis-results-tidy/tidy-full-summary.txt"
+
+# Generate compile_commands.json manually for clang-tidy
+generate-compile-db:
+	@echo "Generating compile_commands.json for Lambda project..."
+	@echo '[' > compile_commands.json
+	@find lambda -name "*.cpp" -not -path "*/tree-sitter*" | while IFS= read -r file; do \
+		echo "  {" >> compile_commands.json; \
+		echo "    \"directory\": \"$(PWD)\"," >> compile_commands.json; \
+		echo "    \"command\": \"clang++ -I. -Ilib -Ilib/mem-pool/include -Ilambda -Iwasm-deps/include -Iwindows-deps/include -std=c++17 -c $$file\"," >> compile_commands.json; \
+		echo "    \"file\": \"$$file\"" >> compile_commands.json; \
+		echo "  }," >> compile_commands.json; \
+	done
+	@# Remove trailing comma and close JSON
+	@sed -i '' '$$s/,//' compile_commands.json
+	@echo ']' >> compile_commands.json
+	@echo "Generated compile_commands.json with $$(grep -c '"file"' compile_commands.json) entries"
+
+tidy-fix:
+	@echo "Running clang-tidy with automatic fixes..."
+	@if [ -f "/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy" ]; then \
+		CLANG_TIDY="/opt/homebrew/Cellar/llvm/21.1.0/bin/clang-tidy"; \
+	elif command -v clang-tidy >/dev/null 2>&1; then \
+		CLANG_TIDY="clang-tidy"; \
+	else \
+		echo "clang-tidy not found. Install with: brew install llvm"; \
+		exit 1; \
+	fi; \
+	echo "⚠️  This will modify your source files. Make sure you have backups!"; \
+	read -p "Continue? (y/N): " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		find lambda -name "*.cpp" -not -path "*/tree-sitter*" | head -5 | while read file; do \
+			echo "Fixing $$file..."; \
+			$$CLANG_TIDY "$$file" --fix \
+				--checks='-*,modernize-*,readability-braces-around-statements,performance-*' \
+				-- -I. -Ilib -Ilib/mem-pool/include -Ilambda -std=c++17 \
+				2>/dev/null || echo "  (skipped due to errors)"; \
+		done; \
+		echo "Automatic fixes applied to selected files."; \
+	else \
+		echo "Cancelled."; \
 	fi
 
 # Installation targets (optional)
