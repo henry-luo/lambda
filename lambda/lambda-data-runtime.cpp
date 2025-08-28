@@ -87,6 +87,107 @@ Item array_get(Array *array, int index) {
     }    
 }
 
+ArrayInt* array_int() {
+    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
+    arr->type_id = LMD_TYPE_ARRAY_INT;
+    frame_start();
+    return arr;
+}
+
+// used when there's no interleaving with transpiled code
+ArrayInt* array_int_new(int length) {
+    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
+    arr->type_id = LMD_TYPE_ARRAY_INT;
+    arr->length = length;  arr->capacity = length;
+    arr->items = (int32_t*)malloc(length * sizeof(int32_t));
+    return arr;
+}
+
+ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
+    if (count > 0) {
+        va_list args;
+        va_start(args, count);
+        arr->items = (int32_t*)malloc(count * sizeof(int32_t));
+        arr->length = count;  arr->capacity = count;
+        for (int i = 0; i < count; i++) {
+            arr->items[i] = va_arg(args, int32_t);
+        }       
+        va_end(args);
+    }
+    frame_end();
+    return arr;
+}
+
+ArrayInt64* array_int64() {
+    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
+    arr->type_id = LMD_TYPE_ARRAY_INT64;
+    frame_start();
+    return arr;
+}
+
+// used when there's no interleaving with transpiled code
+ArrayInt64* array_int64_new(int length) {
+    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
+    arr->type_id = LMD_TYPE_ARRAY_INT64;
+    arr->length = length;  arr->capacity = length;
+    arr->items = (int64_t*)malloc(length * sizeof(int64_t));
+    return arr;
+}
+
+ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
+    if (count > 0) { 
+        va_list args;
+        va_start(args, count);
+        arr->items = (int64_t*)malloc(count * sizeof(int64_t));
+        arr->length = count;  arr->capacity = count;
+        for (int i = 0; i < count; i++) {
+            arr->items[i] = va_arg(args, int64_t);
+        }       
+        va_end(args);
+    }
+    frame_end();
+    return arr;
+}
+
+Item array_int64_get_item(ArrayInt64* array, int index) {
+    if (!array || index < 0 || index >= array->length) {
+        return ItemNull;
+    }
+    return push_l(array->items[index]);
+}
+
+ArrayFloat* array_float() {
+    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    frame_start();
+    return arr;
+}
+
+// used when there's no interleaving with transpiled code
+ArrayFloat* array_float_new(int length) {
+    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    arr->length = length;  arr->capacity = length;
+    arr->items = (double*)malloc(length * sizeof(double));
+    return arr;
+}
+
+ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
+    if (count > 0) {
+        va_list args;
+        va_start(args, count);
+        arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
+        arr->items = (double*)malloc(count * sizeof(double));
+        arr->length = count;  arr->capacity = count;
+        for (int i = 0; i < count; i++) {
+            arr->items[i] = va_arg(args, double);
+        }       
+        va_end(args);
+    }
+    frame_end();
+    return arr;
+}
+
 List* list() {
     List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
