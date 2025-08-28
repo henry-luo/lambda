@@ -106,9 +106,9 @@ false
 true
 false
 true
-error
-error
-error
+false
+true
+true
 "===== ZERO OPERATIONS ====="
 3.14159
 3.14159
