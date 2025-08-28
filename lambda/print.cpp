@@ -518,13 +518,23 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;       
     }
     case LMD_TYPE_ARRAY_INT64: {
-        strbuf_append_str(strbuf, "[#");
+        strbuf_append_str(strbuf, "[");
         ArrayInt64 *array = item.array_int64;
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_str(strbuf, ", ");
             strbuf_append_format(strbuf, "%lld", array->items[i]);
         }
-        strbuf_append_str(strbuf, "#]");
+        strbuf_append_str(strbuf, "]");
+        break;
+    }
+    case LMD_TYPE_ARRAY_FLOAT: {
+        strbuf_append_str(strbuf, "[");
+        ArrayFloat *array = item.array_float;
+        for (int i = 0; i < array->length; i++) {
+            if (i) strbuf_append_str(strbuf, ", ");
+            strbuf_append_format(strbuf, "%.2f", array->items[i]);
+        }
+        strbuf_append_str(strbuf, "]");
         break;
     }
     case LMD_TYPE_MAP: {
