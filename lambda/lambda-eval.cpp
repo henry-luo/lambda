@@ -86,96 +86,6 @@ bool decimal_is_zero(mpd_t* dec_val) {
     return mpd_iszero(dec_val);
 }
 
-ArrayInt* array_int() {
-    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
-    arr->type_id = LMD_TYPE_ARRAY_INT;
-    return arr;
-}
-
-ArrayInt* array_int_new(int length) {
-    ArrayInt *arr = (ArrayInt*)heap_calloc(sizeof(ArrayInt), LMD_TYPE_ARRAY_INT);
-    arr->type_id = LMD_TYPE_ARRAY_INT;
-    arr->length = length;  arr->capacity = length;
-    arr->items = (int32_t*)Malloc(length * sizeof(int32_t));
-    return arr;
-}
-
-ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
-    if (count < 0) { return NULL; }
-    va_list args;
-    va_start(args, count);
-    arr->items = (int32_t*)Malloc(count * sizeof(int32_t));
-    arr->length = count;  arr->capacity = count;
-    for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, int32_t);
-    }       
-    va_end(args);
-    return arr;
-}
-
-ArrayInt64* array_int64() {
-    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
-    arr->type_id = LMD_TYPE_ARRAY_INT64;
-    return arr;
-}
-
-ArrayInt64* array_int64_new(int length) {
-    ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
-    arr->type_id = LMD_TYPE_ARRAY_INT64;
-    arr->length = length;  arr->capacity = length;
-    arr->items = (int64_t*)Malloc(length * sizeof(int64_t));
-    return arr;
-}
-
-ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
-    if (count < 0) { return NULL; }
-    va_list args;
-    va_start(args, count);
-    arr->items = (int64_t*)Malloc(count * sizeof(int64_t));
-    arr->length = count;  arr->capacity = count;
-    for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, int64_t);
-    }       
-    va_end(args);
-    log_debug("returning array_int64_fill: %d", arr->type_id);
-    return arr;
-}
-
-Item array_int64_get_item(ArrayInt64* array, int index) {
-    if (!array || index < 0 || index >= array->length) {
-        return ItemNull;
-    }
-    return push_l(array->items[index]);
-}
-
-ArrayFloat* array_float() {
-    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-    return arr;
-}
-
-ArrayFloat* array_float_new(int length) {
-    ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-    arr->length = length;  arr->capacity = length;
-    arr->items = (double*)Malloc(length * sizeof(double));
-    return arr;
-}
-
-ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
-    if (count < 0) { return NULL; } 
-    va_list args;
-    va_start(args, count);
-    arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
-    arr->items = (double*)Malloc(count * sizeof(double));
-    arr->length = count;  arr->capacity = count;
-    for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, double);
-    }       
-    va_end(args);
-    return arr;
-}
-
 bool item_true(Item item) {
     switch (item.type_id) {
     case LMD_TYPE_NULL:
@@ -1078,6 +988,7 @@ Item fn_min(Item item_a, Item item_b) {
                     min_val = arr->items[i];
                 }
             }
+            log_debug("min value (int64): %ld", min_val);
             return push_l(min_val);
         }
         else if (type_id == LMD_TYPE_ARRAY) {
@@ -1195,7 +1106,7 @@ Item fn_max(Item item_a, Item item_b) {
         TypeId type_id = get_type_id(item_a);
         if (type_id == LMD_TYPE_ARRAY_FLOAT) {
             ArrayFloat* arr = item_a.array_float;
-            if (!arr || arr->length == 0) {
+            if (arr->length == 0) {
                 return ItemError; // Empty array has no maximum
             }
             double max_val = arr->items[0];
@@ -1208,7 +1119,7 @@ Item fn_max(Item item_a, Item item_b) {
         }
         else if (type_id == LMD_TYPE_ARRAY_INT) {
             ArrayInt* arr = item_a.array_int;
-            if (!arr || arr->length == 0) {
+            if (arr->length == 0) {
                 return ItemError; // Empty array has no maximum
             }
             int32_t max_val = arr->items[0];
@@ -1221,7 +1132,7 @@ Item fn_max(Item item_a, Item item_b) {
         }
         else if (type_id == LMD_TYPE_ARRAY_INT64) {
             ArrayInt64* arr = item_a.array_int64;
-            if (!arr || arr->length == 0) {
+            if (arr->length == 0) {
                 return ItemError; // Empty array has no maximum
             }
             int64_t max_val = arr->items[0];
@@ -1230,6 +1141,7 @@ Item fn_max(Item item_a, Item item_b) {
                     max_val = arr->items[i];
                 }
             }
+            log_debug("max value (int64): %ld", max_val);
             return push_l(max_val);
         }
         else if (type_id == LMD_TYPE_ARRAY) {
