@@ -229,11 +229,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("building AST", start, end);
     // print the AST for debugging
-    // printf("AST: %s ---------\n", tp->reference);
-    // print_ast_node(tp, tp->ast_root, 0);
+    log_debug("AST: %s ---------\n", tp->reference);
+    print_ast_node(tp, tp->ast_root, 0);
 
     // transpile the AST to C code
-    // printf("transpiling...\n");
+    log_debug("transpiling...");
     get_time(&start);
     tp->code_buf = strbuf_new_cap(1024);
     transpile_ast(tp, (AstScript*)tp->ast_root);
@@ -244,8 +244,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&start);
     tp->jit_context = jit_init();
     // compile user code to MIR
+    log_debug("compiling to MIR...");
     write_text_file("_transpiled.c", tp->code_buf->str);
-    log_debug("transpiled code:\n----------------\n%s", tp->code_buf->str + lambda_lambda_h_len);
+    char* code = tp->code_buf->str + lambda_lambda_h_len;
+    printf("code len: %d\n", (int)strlen(code));
+    log_debug("transpiled code:\n----------------\n%s", code);
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;
     // generate native code and return the function
