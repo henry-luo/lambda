@@ -197,8 +197,8 @@ Test(lambda_tests, test_func_ls) {
     test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
 }
 
-Test(lambda_tests, test_int64_comprehensive_ls) {
-    test_lambda_script_against_file("test/lambda/int64_comprehensive.ls", "test/lambda/int64_comprehensive.txt");
+Test(lambda_tests, test_int64_ls) {
+    test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
 }
 
 // Test(lambda_tests, test_csv_test_ls) {
