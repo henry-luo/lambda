@@ -672,9 +672,8 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         return (AstNode*)ast_node;
     }
 
-        log_debug("get binary type");
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
-        log_debug("left type: %d, right type: %d", left_type, right_type);
+    log_debug("left type: %d, right type: %d", left_type, right_type);
     TypeId type_id;
     if (ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
         if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
