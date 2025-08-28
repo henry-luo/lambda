@@ -3,7 +3,7 @@
 #include "../lib/log.h"
 
 extern __thread Context* context;
-void array_set(Array* arr, int index, Item itm, VariableMemPool *pool);
+void array_set(Array* arr, int index, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 
 Item typeditem_to_item(TypedItem *titem) {
@@ -51,7 +51,7 @@ Array* array_fill(Array* arr, int count, ...) {
         arr->items = (Item*)malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
             if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
-            array_set(arr, i, va_arg(args, Item), NULL);
+            array_set(arr, i, va_arg(args, Item));
             arr->length++;
         }
         va_end(args);
@@ -61,26 +61,27 @@ Array* array_fill(Array* arr, int count, ...) {
 }
 
 Item array_get(Array *array, int index) {
-        log_debug("array_get: index: %d, length: %ld", index, array->length);
+    log_debug("array_get: index: %d, length: %ld", index, array->length);
     if (index < 0 || index >= array->length) {
         log_error("array_get: index out of bounds: %d", index);
-        return ItemNull;
+        return ItemError;
     }
     Item item = array->items[index];
     switch (item.type_id) {
     case LMD_TYPE_INT64: {
         long lval = *(long*)item.pointer;
-        return push_l(lval);
+        return push_l(lval); // need to push to num_stack, as long values are not ref counted
     }
     case LMD_TYPE_FLOAT: {
         double dval = *(double*)item.pointer;
-        return push_d(dval);
+        return push_d(dval); // need to push to num_stack, as float values are not ref counted
     }
     case LMD_TYPE_DTIME: {
         DateTime dtval = *(DateTime*)item.pointer;
-        return push_k(dtval);
+        return push_k(dtval); // need to push to num_stack, as datetime values are not ref counted
     }
     default:
+        log_debug("array_get returning: type: %d, item: %p", item.type_id, item.raw_pointer);
         return item;
     }    
 }

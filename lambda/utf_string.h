@@ -54,9 +54,7 @@ Item fn_le_unicode(Item a_item, Item b_item);
 Item fn_ge_unicode(Item a_item, Item b_item);
 
 // UTF8PROC variants (called by lambda-eval.cpp)
-CompResult equal_comp_utf8proc(Item a_item, Item b_item);
-Item fn_eq_utf8proc(Item a_item, Item b_item);
-Item fn_ne_utf8proc(Item a_item, Item b_item);
+CompResult equal_comp_unicode(Item a_item, Item b_item);
 Item fn_lt_utf8proc(Item a_item, Item b_item);
 Item fn_gt_utf8proc(Item a_item, Item b_item);
 Item fn_le_utf8proc(Item a_item, Item b_item);
