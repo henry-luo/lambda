@@ -709,7 +709,7 @@ Test(xml_tests, xml_roundtrip) {
     bool content_matches = compare_xml_semantically(complex_xml, formatted->chars);
     
     cr_assert(formatted->len > 0, "Formatted XML should not be empty");
-    cr_assert(strstr(formatted->chars, "document") != NULL, "Formatted XML should contain document structure");
+    cr_assert(strstr(formatted->chars, "header") != NULL, "Formatted XML should contain header structure");
     cr_assert(content_matches, "Formatted XML should match original content semantically");
     
     if (content_matches) {
