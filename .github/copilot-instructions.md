@@ -91,7 +91,8 @@ UnicodeCompareResult cmp = string_compare_unicode(str1, len1, str2, len2);
 
 ### Running Tests
 ```bash
-make test              # Run all tests
+make build-test         # Build all the test executables
+make test               # Run all tests
 ```
 
 ## Common Patterns
@@ -132,12 +133,9 @@ if (result.is_valid) {
 - `typeset/` - Document typesetting system
 - `build/` - Build artifacts (auto-generated)
 - `*.json` - Build configuration files
+- `temp/` - Temporary files (auto-generated)
 
 ## Key Considerations
 
-1. **Performance**: JIT compilation provides near-native speed
-2. **Memory Safety**: Pool-based allocation prevents most memory issues
-3. **Cross-platform**: Consistent behavior across macOS, Linux, Windows
-4. **Extensibility**: Plugin architecture for new input/output formats
-5. **Standards Compliance**: Unicode, mathematical notation, document formats
+
 
