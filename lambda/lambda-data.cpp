@@ -357,7 +357,7 @@ TypedItem list_get_typed(List* list, int index) {
     case LMD_TYPE_RANGE:
         result.range = (Range*)item.pointer;
         return result;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
         result.array = (Array*)item.pointer;
         return result;
     case LMD_TYPE_LIST:
@@ -432,8 +432,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 str->ref_cnt++;
                 break;
             }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container *container = va_arg(args, Container*);
                 *(Container**)field_ptr = container;
                 container->ref_cnt++;
@@ -446,7 +446,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_ANY: { // a special case
                 Item item = va_arg(args, Item);
-        log_debug("set field of ANY type to: %d", item.type_id);
+                log_debug("set field of ANY type to: %d", item.type_id);
                 TypedItem titem = {.type_id = static_cast<TypeId>(item.type_id), .pointer = item.raw_pointer};
                 switch (item.type_id) {
                 // case LMD_TYPE_NULL: ; // no extra work
@@ -475,7 +475,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.pointer = item.raw_pointer;  // just a pointer
                     break;
                 default:
-        log_error("unknown type %d in set_fields", item.type_id);
+                    log_error("unknown type %d in set_fields", item.type_id);
                     // set as ERROR
                     titem = {.type_id = LMD_TYPE_ERROR};
                 }
@@ -484,7 +484,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             default:
-        log_error("unknown type %d", field->type->type_id);
+                log_error("unknown type %d", field->type->type_id);
             }
         }
         field = field->next;
@@ -543,7 +543,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
                 result.datetime_val = *(DateTime*)field_ptr;
                 StrBuf *strbuf = strbuf_new();
                 datetime_format_lambda(strbuf, &result.datetime_val);
-        log_debug("map_get_typed datetime: %s", strbuf->str);
+                log_debug("map_get_typed datetime: %s", strbuf->str);
                 strbuf_free(strbuf);
                 return result;
             }
@@ -563,7 +563,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
             case LMD_TYPE_RANGE:
                 result.range = *(Range**)field_ptr;
                 return result;
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
                 result.array = *(Array**)field_ptr;
                 return result;
             case LMD_TYPE_LIST:
@@ -579,11 +579,11 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
                 result.pointer = *(void**)field_ptr;
                 return result;
             case LMD_TYPE_ANY: {
-        log_debug("map_get_typed ANY type, pointer: %p", field_ptr);
+                log_debug("map_get_typed ANY type, pointer: %p", field_ptr);
                 return *(TypedItem*)field_ptr;
             }
             default:
-        log_error("unknown map item type %d", type_id);
+                log_error("unknown map item type %d", type_id);
                 return error_result;
             }
         }
