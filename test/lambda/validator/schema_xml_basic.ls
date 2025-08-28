@@ -20,9 +20,9 @@ type BookTitle = <title string>
 type BookAuthor = <author string>
 type BookPrice = <price string>
 
-// Root element containing simple elements  
+// Root element - flexible to match any root tag but with some structure
 type Document = <root;
-    SimpleElement*             // zero or more simple elements
+    SimpleElement*                    // zero or more simple elements
 >
 
 // Simple element with name and text attributes
