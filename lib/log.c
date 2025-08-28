@@ -334,18 +334,13 @@ static void write_log_message_to_stream(FILE *stream, log_category_t *category,
 
 /* Core logging implementation */
 static int log_output(log_category_t *category, int level, const char *format, va_list args) {
-    if (!category || !category->enabled) {
-        return LOG_OK;
-    }
-    
-    if (level < category->level) {
-        return LOG_OK;
-    }
-    
+    if (!category || !category->enabled) { return LOG_OK; }
+    if (level < category->level) { return LOG_OK; }
+
     // Format the user message first
-    char user_message[1024];
-    vsnprintf(user_message, sizeof(user_message), format, args);
-    
+    char user_message[4096];
+    int n = vsnprintf(user_message, sizeof(user_message), format, args);
+
     char timestamp[MAX_TIMESTAMP_LEN];
     int show_date = category->format ? category->format->show_date : 0;
     get_timestamp(timestamp, sizeof(timestamp), show_date);

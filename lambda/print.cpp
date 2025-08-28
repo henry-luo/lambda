@@ -679,9 +679,16 @@ char* format_type(Type *type) {
     }
 }
 
+void log_item(Item item, char* msg) {
+    StrBuf *strbuf = strbuf_new();
+    print_item(strbuf, item, 0, NULL);
+    log_debug("%s: %s", msg, strbuf->str);
+    strbuf_free(strbuf);
+}
+
 void print_label(int indent, const char *label) {
     for (int i = 0; i < indent; i++) { printf("  "); }
-        log_debug("%s", label);
+    printf("%s\n", label);
 }
 
 void print_const(Script *script, Type* type) {
@@ -739,7 +746,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             ((AstIdentNode*)node)->name->chars, type_name, node->type ? node->type->is_const : -1);
         break;
     case AST_NODE_PRIMARY:
-        log_debug("[primary expr:%s,const:%d]", type_name, node->type ? node->type->is_const : -1);
+        printf("[primary expr:%s,const:%d]\n", type_name, node->type ? node->type->is_const : -1);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(script, ((AstPrimaryNode*)node)->expr, indent + 1);
         } else {
@@ -936,7 +943,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         TypeType* actual_type = (TypeType*)node->type;
         assert(node->type->type_id == LMD_TYPE_TYPE && actual_type->type);
         char* actual_type_name = type_info[actual_type->type->type_id].name;
-        log_debug("[%s: %s]", type_name, actual_type_name);
+        printf("[%s: %s]\n", type_name, actual_type_name);
         break;
     }
     case AST_NODE_LIST_TYPE: {

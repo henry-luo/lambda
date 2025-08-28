@@ -148,8 +148,8 @@ Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
 }
 
 void expand_list(List *list) {
-    //printf("expand list: %p, length: %ld, capacity: %ld\n", 
-    //    list, list->length, list->capacity);
+    log_debug("expand list:: %p, length: %ld, extra: %ld, capacity: %ld", list, list->length, list->extra, list->capacity);
+    log_item({.list = list}, "list to expand");
     list->capacity = list->capacity ? list->capacity * 2 : 8;
     // list items are allocated from C heap, instead of Lambda heap
     // to consider: could also alloc directly from Lambda heap without the heap entry
@@ -178,6 +178,7 @@ void expand_list(List *list) {
             }
         }
     }
+    log_item({.list = list}, "list_expanded");
 }
 
 Array* array_pooled(VariableMemPool *pool) {

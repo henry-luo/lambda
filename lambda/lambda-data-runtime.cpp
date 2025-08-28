@@ -57,6 +57,7 @@ Array* array_fill(Array* arr, int count, ...) {
         va_end(args);
     }
     frame_end();
+    log_item({.list = arr}, "array_filled");
     return arr;
 }
 
@@ -108,6 +109,7 @@ Item list_fill(List *list, int count, ...) {
     } else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
         return list->items[0];
     } else {
+        log_item({.list = list}, "list_filled");
         return {.list = list};
     }
 }
