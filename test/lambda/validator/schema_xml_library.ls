@@ -1,24 +1,25 @@
 // XML Library Schema - Balanced to pass validation and have expected features
 
-// Root Document type - must be first and match the actual root element
+// Root library element - defined first to be recognized as root
 type Document = <library
-    established: string,             // established attribute
-    xmlns: string?,                  // optional namespace attribute  
-    name: string,                    // name element text content
-    address: string,                 // address element text content
-    book: string+                    // one or more book elements (for + feature)
+    name: string?,                    // optional library name attribute
+    established: string?;             // optional establishment year
+    LibraryBook*                      // child elements
 >
 
 // Additional types to demonstrate schema features
-type AuthorInfo = {
+type AuthorInfo = <author
     id: string,                      // required id field
     firstName: string,               // required firstName field
     lastName: string,                // required lastName field  
     birthYear: string?               // optional birthYear field (for ? feature)
-}
+>
 
-type BookMetadata = {
+// Book element type for library
+type LibraryBook = <book
+    id: string,                      // required book id
+    isbn: string?;                   // optional isbn
     title: string,                   // primitive type
     category: string?,               // optional field  
-    AuthorInfo+                      // one-or-more occurrence pattern
-}
+    AuthorInfo*                      // child elements
+>
