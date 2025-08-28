@@ -1,9 +1,11 @@
 // RSS/Feed XML schema - Fixed
 // Tests XML for RSS feeds with specific structure
+// Features: optional fields
 
 // Root RSS element - defined first to be recognized as root
 type Document = <rss
-    version: string;                  // RSS version (required attribute)
+    version: string,                  // RSS version (required attribute)
+    encoding: string?;                // optional encoding attribute (demonstrates optional fields)
     RssChannel                        // single channel (required child element)
 >
 
