@@ -739,25 +739,67 @@ ValidationResult* validate_element(SchemaValidator* validator, TypedItem typed_i
            element->length, element_schema->content_count);
     fflush(stdout);
     
-    // Check element tag matches
-    if (element->type) {
+    // Check for virtual XML document wrapper and unwrap if needed (only at depth 1, since depth is incremented before calling validate_element)
+    if (ctx->current_depth == 1 && element->type) {
         TypeElmt* elmt_type = (TypeElmt*)element->type;
-        if (element_schema->tag.length > 0) {
-            // Compare element tag name with schema tag
-            if (elmt_type->name.length != element_schema->tag.length ||
-                memcmp(elmt_type->name.str, element_schema->tag.str, element_schema->tag.length) != 0) {
-                
-                char error_msg[512];
-                snprintf(error_msg, sizeof(error_msg), 
-                        "Element tag mismatch: expected <%.*s>, got <%.*s>",
-                        (int)element_schema->tag.length, element_schema->tag.str,
-                        (int)elmt_type->name.length, elmt_type->name.str);
-                
+        if (elmt_type->name.length == 8 && memcmp(elmt_type->name.str, "document", 8) == 0) {
+            printf("[TRACE] validate_element: Detected virtual <document> wrapper at root level, looking for actual XML element inside\n");
+            
+            // Find the actual XML element inside the <document> wrapper
+            Element* actual_element = nullptr;
+            for (size_t i = 0; i < element->length; i++) {
+                Item child_item = element->items[i];
+                if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+                    Element* child_elem = (Element*)child_item.pointer;
+                    if (child_elem && child_elem->type) {
+                        TypeElmt* child_type = (TypeElmt*)child_elem->type;
+                        // Skip processing instructions (<?xml...?>) and comments
+                        if (child_type->name.length > 0 && child_type->name.str[0] != '?') {
+                            actual_element = child_elem;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (actual_element) {
+                printf("[TRACE] validate_element: Found actual XML element, validating it instead\n");
+                // Create a new TypedItem for the actual element and validate it
+                // Temporarily increment depth to prevent recursive unwrapping
+                ctx->current_depth++;
+                TypedItem actual_typed;
+                actual_typed.type_id = LMD_TYPE_ELEMENT;
+                actual_typed.pointer = actual_element;
+                ValidationResult* unwrapped_result = validate_element(validator, actual_typed, schema, ctx);
+                ctx->current_depth--;
+                return unwrapped_result;
+            } else {
+                printf("[TRACE] validate_element: No actual XML element found inside <document> wrapper\n");
                 add_validation_error(result, create_validation_error(
-                    VALID_ERROR_INVALID_ELEMENT, error_msg, 
+                    VALID_ERROR_INVALID_ELEMENT, "No XML element found inside document wrapper", 
                     ctx->path, ctx->pool));
                 return result;
             }
+        }
+    }
+    
+    // Normal element tag validation
+    if (element_schema->tag.length > 0 && element->type) {
+        TypeElmt* elmt_type = (TypeElmt*)element->type;
+        // Compare element tag name with schema tag
+        if (elmt_type->name.length != element_schema->tag.length ||
+            memcmp(elmt_type->name.str, element_schema->tag.str, element_schema->tag.length) != 0) {
+            
+            char error_msg[512];
+            snprintf(error_msg, sizeof(error_msg), 
+                    "Element tag mismatch: expected <%.*s>, got <%.*s>",
+                    (int)element_schema->tag.length, element_schema->tag.str,
+                    (int)elmt_type->name.length, elmt_type->name.str);
+            
+            add_validation_error(result, create_validation_error(
+                VALID_ERROR_INVALID_ELEMENT, error_msg, 
+                ctx->path, ctx->pool));
+            return result;
         }
     }
     
@@ -868,8 +910,8 @@ ValidationResult* validate_element(SchemaValidator* validator, TypedItem typed_i
             }
         }
         
-        // Check if element has too many content items
-        if (element->length > element_schema->content_count) {
+        // Check if element has too many content items (only if not open content model)
+        if (!element_schema->is_open && element->length > element_schema->content_count) {
             printf("[TRACE] validate_element: Element has too many items (%ld > %d)\n", element->length, element_schema->content_count);
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg), 
@@ -879,6 +921,8 @@ ValidationResult* validate_element(SchemaValidator* validator, TypedItem typed_i
             add_validation_error(result, create_validation_error(
                 VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, 
                 ctx->path, ctx->pool));
+        } else if (element_schema->is_open) {
+            printf("[TRACE] validate_element: Open content model - allowing %ld items\n", element->length);
         }
     } else {
         printf("[TRACE] validate_element: No content validation (content_count=%d, content_types=%p)\n", 

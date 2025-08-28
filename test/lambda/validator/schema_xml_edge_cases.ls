@@ -36,9 +36,8 @@ type NestedElement = <nested
 
 type Document = <document
     version: string,
-    standalone: bool?,
-    processingInstructions: ProcessingInstruction*,
-    root: RootElement
+    standalone: string?;
+    ProcessingInstruction | *
 >
 
 type RootElement = <root
