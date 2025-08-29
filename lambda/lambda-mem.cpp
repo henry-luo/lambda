@@ -51,7 +51,7 @@ Item push_d(double dval) {
         log_error("push_d called with invalid context");
         return ItemError;
     }
-    double *dptr = num_stack_push_double((num_stack_t *)context->num_stack, dval);
+    double *dptr = num_stack_push_double(context->num_stack, dval);
     return {.item = d2it(dptr)};
 }
 
@@ -63,7 +63,7 @@ Item push_l(long lval) {
         return ItemError;
     }
     if (lval == INT_ERROR) return ItemError;
-    long *lptr = num_stack_push_long((num_stack_t *)context->num_stack, lval);
+    long *lptr = num_stack_push_long(context->num_stack, lval);
     return {.item = l2it(lptr)};
 }
 
@@ -73,7 +73,7 @@ Item push_k(DateTime val) {
         log_error("push_k called with invalid context");
         return ItemError;
     }    
-    DateTime *dtptr = num_stack_push_datetime((num_stack_t *)context->num_stack, val);
+    DateTime *dtptr = num_stack_push_datetime(context->num_stack, val);
     return {.item = k2it(dtptr)};
 }
 
@@ -302,7 +302,7 @@ void free_item(Item item, bool clear_entry) {
 }
 
 void frame_start() {
-    size_t stack_pos = ((num_stack_t *)context->num_stack)->current_position;
+    size_t stack_pos = context->num_stack->current_position;
     arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
     arraylist_append(context->heap->entries, HEAP_ENTRY_START.raw_pointer);
 }
