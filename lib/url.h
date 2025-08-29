@@ -27,7 +27,7 @@ typedef enum {
 } UrlScheme;
 
 // URL structure following WHATWG URL Standard
-typedef struct {
+typedef struct Url {
     String* href;           // complete URL string
     String* origin;         // scheme + host + port
     String* protocol;       // scheme + ":"
@@ -45,7 +45,7 @@ typedef struct {
 } Url;
 
 // URL parser structure
-typedef struct {
+typedef struct UrlParser {
     const char* input;      // input string being parsed
     size_t length;          // length of input
     size_t position;        // current parsing position
