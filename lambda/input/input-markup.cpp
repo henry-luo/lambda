@@ -605,29 +605,42 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
     StrBuf* sb = parser->input->sb;
     strbuf_reset(sb);
     
-    // Collect paragraph lines (continue until empty line or different block type)
-    while (parser->current_line < parser->line_count) {
-        const char* current = parser->lines[parser->current_line];
-        
-        if (is_empty_line(current)) {
-            break; // End of paragraph
-        }
-        
-        BlockType next_type = detect_block_type(parser, current);
-        if (next_type != BLOCK_PARAGRAPH) {
-            break; // Next line is different block type
-        }
-        
-        // Add current line to paragraph
-        if (sb->length > 0) {
+    // For the first line, always add it to the paragraph
+    const char* first_line = parser->lines[parser->current_line];
+    skip_whitespace(&first_line);
+    strbuf_append_str(sb, first_line);
+    parser->current_line++;
+    
+    // Check if we should continue collecting lines for this paragraph
+    // Don't join lines that contain math expressions to avoid malformed expressions
+    bool first_line_has_math = (strstr(first_line, "$") != NULL);
+    
+    if (!first_line_has_math) {
+        // Only collect additional lines if the first line doesn't have math
+        while (parser->current_line < parser->line_count) {
+            const char* current = parser->lines[parser->current_line];
+            
+            if (is_empty_line(current)) {
+                break; // End of paragraph
+            }
+            
+            BlockType next_type = detect_block_type(parser, current);
+            if (next_type != BLOCK_PARAGRAPH) {
+                break; // Next line is different block type
+            }
+            
+            const char* content = current;
+            skip_whitespace(&content);
+            
+            // Don't join lines that contain math expressions
+            if (strstr(content, "$") != NULL) {
+                break;
+            }
+            
             strbuf_append_char(sb, ' '); // Add space between lines
+            strbuf_append_str(sb, content);
+            parser->current_line++;
         }
-        
-        const char* content = current;
-        skip_whitespace(&content);
-        strbuf_append_str(sb, content);
-        
-        parser->current_line++;
     }
     
     // Parse inline content with enhancements and add as children
@@ -2510,8 +2523,26 @@ static bool is_table_row(const char* line) {
     const char* pos = line;
     skip_whitespace(&pos);
     
-    // Simple check for pipe character (more sophisticated table detection possible)
-    return (*pos == '|' || strchr(pos, '|') != NULL);
+    // Must start with | to be a table row
+    if (*pos == '|') return true;
+    
+    // Don't treat lines with math expressions as tables
+    // Math expressions can contain | characters (absolute value, etc.)
+    if (strstr(line, "$") != NULL) {
+        return false;
+    }
+    
+    // Look for multiple pipe characters (table delimiter pattern)
+    int pipe_count = 0;
+    while (*pos) {
+        if (*pos == '|') {
+            pipe_count++;
+            if (pipe_count >= 2) return true;
+        }
+        pos++;
+    }
+    
+    return false;
 }
 
 // Phase 4: Advanced inline element parsers
@@ -3348,10 +3379,13 @@ static Item parse_inline_math(MarkupParser* parser, const char** text) {
     Item parsed_math = parse_math_content(parser->input, content, math_flavor);
     
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
+        // Check if parsing was successful by verifying content wasn't lost
+        // For now, always use parsed result if parser didn't error
         list_push((List*)math_elem, parsed_math);
         increment_element_content_length(math_elem);
     } else {
         // Fallback to plain text if math parsing fails
+        // This preserves the original LaTeX content
         String* math_str = input_create_string(parser->input, content);
         if (math_str) {
             Item math_item = {.item = s2it(math_str)};
