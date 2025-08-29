@@ -1001,10 +1001,11 @@ clean-premake:
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
 
-build-test: generate-premake
-	@echo "Building tests using Premake5..."
-	@echo "Building configurations..."
-	@mkdir -p build/premake
-	cd build/premake && premake5 gmake --file=../../premake5.lua
-	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
-	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64
+build-test: build
+	@echo "Building all test executables..."
+	@if [ -f "test/test_build.sh" ]; then \
+		PARALLEL_JOBS=$(NPROCS) ./test/test_build.sh all; \
+	else \
+		echo "Error: test_build.sh not found"; \
+		exit 1; \
+	fi
