@@ -347,6 +347,59 @@ static void format_blockquote(StrBuf* sb, Element* elem) {
     strbuf_append_char(sb, '\n');
 }
 
+// Helper function to check if an element contains only math (recursively)
+static bool element_contains_only_math(Element* elem, bool* only_display_math) {
+    if (!elem) return false;
+    
+    TypeElmt* elem_type = (TypeElmt*)elem->type;
+    if (!elem_type || !elem_type->name.str) return false;
+    
+    const char* elem_name = elem_type->name.str;
+    
+    // If this is a math element, check its type
+    if (strcmp(elem_name, "math") == 0) {
+        String* type_attr = get_attribute(elem, "type");
+        if (!type_attr || (strcmp(type_attr->chars, "block") != 0 && strcmp(type_attr->chars, "code") != 0)) {
+            *only_display_math = false;
+        }
+        return true;
+    }
+    
+    // If this is a span or similar container, check its children
+    if (strcmp(elem_name, "span") == 0) {
+        List* list = (List*)elem;
+        if (list->length == 0) return true; // Empty span is okay
+        
+        for (long i = 0; i < list->length; i++) {
+            Item child_item = list->items[i];
+            TypeId type = get_type_id(child_item);
+            
+            if (type == LMD_TYPE_ELEMENT) {
+                Element* child_elem = (Element*)child_item.pointer;
+                if (!element_contains_only_math(child_elem, only_display_math)) {
+                    return false;
+                }
+            } else if (type == LMD_TYPE_STRING) {
+                // Check if it's just whitespace
+                String* str = (String*)child_item.pointer;
+                if (str && str->chars) {
+                    for (int j = 0; j < str->len; j++) {
+                        if (!isspace(str->chars[j])) {
+                            return false;
+                        }
+                    }
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    // Other elements are not math-only
+    return false;
+}
+
 // Format paragraph elements
 static void format_paragraph(StrBuf* sb, Element* elem) {
     // Check if this paragraph contains only display math or inline math elements
@@ -361,23 +414,10 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
             
             if (type == LMD_TYPE_ELEMENT) {
                 Element* child_elem = (Element*)child_item.pointer;
-                TypeElmt* child_elem_type = (TypeElmt*)child_elem->type;
-                if (child_elem_type && child_elem_type->name.str) {
-                    const char* elem_name = child_elem_type->name.str;
-                    if (strcmp(elem_name, "math") == 0) {
-                        // Check if it's display math (type="block" or type="code")
-                        String* type_attr = get_attribute(child_elem, "type");
-                        if (!type_attr || (strcmp(type_attr->chars, "block") != 0 && strcmp(type_attr->chars, "code") != 0)) {
-                            only_display_math = false;
-                        }
-                        // All math elements are still math elements
-                    } else {
-                        only_display_math = false;
-                        only_math_elements = false;
-                    }
-                } else {
+                if (!element_contains_only_math(child_elem, &only_display_math)) {
                     only_display_math = false;
                     only_math_elements = false;
+                    break;
                 }
             } else if (type == LMD_TYPE_STRING) {
                 // Check if it's just whitespace
