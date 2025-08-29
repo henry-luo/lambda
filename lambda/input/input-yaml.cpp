@@ -2,6 +2,41 @@
 
 static Item parse_yaml_content(Input *input, char** lines, int* current_line, int total_lines, int target_indent);
 
+// Helper function to strip comments from YAML lines
+static char* strip_yaml_comments(const char* line) {
+    if (!line) return NULL;
+    
+    char* result = strdup(line);
+    char* comment_pos = strchr(result, '#');
+    
+    if (comment_pos) {
+        // Check if # is inside quotes
+        bool in_single_quote = false;
+        bool in_double_quote = false;
+        char* pos = result;
+        
+        while (pos < comment_pos) {
+            if (*pos == '\'' && !in_double_quote) {
+                in_single_quote = !in_single_quote;
+            } else if (*pos == '"' && !in_single_quote) {
+                in_double_quote = !in_double_quote;
+            }
+            pos++;
+        }
+        
+        // If # is not inside quotes, it's a comment
+        if (!in_single_quote && !in_double_quote) {
+            *comment_pos = '\0';
+            // Trim trailing whitespace
+            while (comment_pos > result && isspace(*(comment_pos - 1))) {
+                *(--comment_pos) = '\0';
+            }
+        }
+    }
+    
+    return result;
+}
+
 // Helper function to create String* from char*
 static String* create_string_from_cstr(Input *input, const char* str) {
     if (!str) return NULL;
@@ -302,7 +337,9 @@ void parse_yaml(Input *input, const char* yaml_str) {
     char* saveptr;
     char* line = strtok_r(yaml_copy, "\n", &saveptr);
     while (line && total_line_count < 1000) {
-        all_lines[total_line_count++] = strdup(line);
+        // Strip comments from line before storing
+        char* clean_line = strip_yaml_comments(line);
+        all_lines[total_line_count++] = clean_line;
         line = strtok_r(NULL, "\n", &saveptr);
     }
     
