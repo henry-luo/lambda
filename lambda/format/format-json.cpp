@@ -273,15 +273,18 @@ static void format_item_with_indent(StrBuf* sb, Item item, int indent) {
         
         strbuf_append_format(sb, "\n{\"$\":\"%.*s\"", (int)elmt_type->name.length, elmt_type->name.str);
         
-        // Add attributes if any
+        // Add attributes as direct properties
         if (elmt_type && elmt_type->length > 0 && element->data) {
-            strbuf_append_str(sb, ",");
+            // Format attributes directly as properties, not wrapped in "attr"
             Map temp_map;  memset(&temp_map, 0, sizeof(Map));
             temp_map.type_id = LMD_TYPE_MAP;
             temp_map.type = (Type*)elmt_type;
             temp_map.data = element->data;
             temp_map.data_cap = element->data_cap;
-            format_map_with_indent(sb, &temp_map, indent);
+            
+            // Add comma and format the map contents directly (without braces)
+            strbuf_append_str(sb, ",");
+            format_json_map_contents(sb, (TypeMap*)elmt_type, element->data, indent);
         }
         
         // Add children if any
