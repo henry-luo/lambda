@@ -1,7 +1,9 @@
 let csv =input("test/input/test.csv", 'csv')
 csv
+"Seniors:"
 for row in csv {
-  if (row.age > 18) {
+  int(row.age)
+  if (int(row.age) >= 50) {
     row.name +" of age "+ row.age
   }
 }
