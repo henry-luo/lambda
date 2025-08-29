@@ -485,14 +485,7 @@ test_output/auto/                  # Downloaded documents with safe filenames
 │   ├── json_001_github_api_vscode.json
 │   ├── json_002_httpbin_sample.json
 │   └── ...
-├── html/
-│   ├── html_001_w3c_html52_spec.html
-│   ├── html_002_wikipedia_main.html
-│   └── ...
-├── xml/
-│   ├── xml_001_oreilly_rss_feed.xml
-│   ├── xml_002_w3c_its_schema.xml
-│   └── ...
+├── ...
 ├── results/                       # Basic test execution results
 │   ├── md_002_github_vscode_readme_to_html.html
 │   ├── json_001_github_api_vscode_to_yaml.yaml
