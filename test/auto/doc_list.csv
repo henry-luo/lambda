@@ -3,7 +3,7 @@ url,format,source,size_bytes,discovered_date,test_status,last_tested,issues_coun
 https://raw.githubusercontent.com/torvalds/linux/main/README,markdown,github,15420,2025-08-29,download_failed,null,3,md_001_github_linux_readme.md,sha256:pending,Linux kernel README
 https://raw.githubusercontent.com/microsoft/vscode/main/README.md,markdown,github,6860,2025-08-29,passed,2025-08-29T11:43:25.854999,0,md_002_github_vscode_readme.md,sha256:bc240cfbaa2f2037,VS Code README
 https://api.github.com/repos/microsoft/vscode,json,github_api,6370,2025-08-29,failed,2025-08-29T11:43:25.882075,3,json_001_github_api_vscode.json,sha256:cdfc51c8f1b2612c,GitHub repository API response
-https://httpbin.org/json,json,test_api,429,2025-08-29,failed,2025-08-29T11:43:25.910499,3,json_002_httpbin_sample.json,sha256:bab3dfd2a6c992e4,Simple JSON test endpoint
+https://httpbin.org/json,json,test_api,429,2025-08-29,passed,2025-08-29T11:43:25.910499,0,json_002_httpbin_sample.json,sha256:bab3dfd2a6c992e4,Simple JSON test endpoint
 https://www.w3.org/TR/html52/,html,w3c_spec,149815,2025-08-29,passed,2025-08-29T11:43:25.938712,0,html_001_w3c_html52_spec.html,sha256:dec748f931ea9c19,HTML5.2 specification
 https://en.wikipedia.org/wiki/Main_Page,html,wikipedia,235740,2025-08-29,passed,2025-08-29T11:43:26.393733,0,html_002_wikipedia_main.html,sha256:e566009a75ba08af,Wikipedia main page
 https://feeds.feedburner.com/oreilly/radar,xml,rss_feed,25000,2025-08-29,download_failed,null,3,xml_001_oreilly_rss_feed.xml,sha256:pending,O'Reilly Radar RSS feed
@@ -13,3 +13,30 @@ https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore,text,gi
 local://latex_001_sample_article.tex,latex,local_test,2400,2025-08-29,passed,null,0,latex_001_sample_article.tex,sha256:pending,Sample LaTeX article for testing
 local://wiki_001_sample_article.wiki,wiki,local_test,3200,2025-08-29,passed,null,0,wiki_001_sample_article.wiki,sha256:pending,Sample Wiki markup for testing
 https://raw.githubusercontent.com/microsoft/TypeScript/main/README.md,markdown,github,8500,2025-08-29,pending,null,0,md_003_typescript_readme.md,sha256:pending,TypeScript README
+# Batch 2: Extended HTML and Wiki coverage (15 new documents)
+https://en.wikipedia.org/wiki/Python_(programming_language),html,wikipedia,450000,2025-08-29,pending,null,0,html_004_wikipedia_python.html,sha256:pending,Wikipedia Python programming page
+https://en.wikipedia.org/wiki/JavaScript,html,wikipedia,380000,2025-08-29,pending,null,0,html_005_wikipedia_javascript.html,sha256:pending,Wikipedia JavaScript page
+https://en.wikipedia.org/wiki/Machine_learning,html,wikipedia,520000,2025-08-29,pending,null,0,html_006_wikipedia_ml.html,sha256:pending,Wikipedia Machine Learning page
+https://developer.mozilla.org/en-US/docs/Web/HTML,html,mdn_docs,280000,2025-08-29,pending,null,0,html_007_mdn_html_guide.html,sha256:pending,MDN HTML documentation
+https://developer.mozilla.org/en-US/docs/Web/CSS,html,mdn_docs,350000,2025-08-29,pending,null,0,html_008_mdn_css_guide.html,sha256:pending,MDN CSS documentation
+https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array,html,stackoverflow,420000,2025-08-29,pending,null,0,html_009_stackoverflow_sorted_array.html,sha256:pending,StackOverflow popular question
+https://github.com/torvalds/linux,html,github_project,650000,2025-08-29,pending,null,0,html_010_github_linux_project.html,sha256:pending,GitHub Linux kernel project page
+https://www.w3.org/TR/css3-flexbox/,html,w3c_spec,180000,2025-08-29,pending,null,0,html_011_w3c_flexbox_spec.html,sha256:pending,W3C CSS Flexbox specification
+https://nodejs.org/en/docs/,html,nodejs_docs,320000,2025-08-29,pending,null,0,html_012_nodejs_docs.html,sha256:pending,Node.js documentation homepage
+local://wiki_002_programming_concepts.wiki,wiki,local_test,4800,2025-08-29,pending,null,0,wiki_002_programming_concepts.wiki,sha256:pending,Programming concepts Wiki page
+local://wiki_003_project_documentation.wiki,wiki,local_test,6200,2025-08-29,pending,null,0,wiki_003_project_documentation.wiki,sha256:pending,Project documentation Wiki
+local://wiki_004_tutorial_guide.wiki,wiki,local_test,5500,2025-08-29,pending,null,0,wiki_004_tutorial_guide.wiki,sha256:pending,Tutorial guide in Wiki format
+local://wiki_005_api_reference.wiki,wiki,local_test,7800,2025-08-29,pending,null,0,wiki_005_api_reference.wiki,sha256:pending,API reference Wiki documentation
+https://raw.githubusercontent.com/facebook/react/main/README.md,markdown,github,12000,2025-08-29,pending,null,0,md_004_react_readme.md,sha256:pending,React framework README
+https://raw.githubusercontent.com/vuejs/vue/main/README.md,markdown,github,8800,2025-08-29,pending,null,0,md_005_vue_readme.md,sha256:pending,Vue.js framework README
+# Batch 3: Additional format coverage (10 new documents)
+https://raw.githubusercontent.com/angular/angular/main/README.md,markdown,github,15000,2025-08-29,pending,null,0,md_006_angular_readme.md,sha256:pending,Angular framework README
+https://raw.githubusercontent.com/expressjs/express/main/README.md,markdown,github,12500,2025-08-29,pending,null,0,md_007_express_readme.md,sha256:pending,Express.js framework README
+https://raw.githubusercontent.com/jquery/jquery/main/README.md,markdown,github,9200,2025-08-29,pending,null,0,md_008_jquery_readme.md,sha256:pending,jQuery library README
+https://raw.githubusercontent.com/webpack/webpack/main/README.md,markdown,github,8600,2025-08-29,pending,null,0,md_009_webpack_readme.md,sha256:pending,Webpack bundler README
+https://raw.githubusercontent.com/bootstrap-vue/bootstrap-vue/dev/README.md,markdown,github,11800,2025-08-29,pending,null,0,md_010_bootstrap_vue_readme.md,sha256:pending,Bootstrap Vue README
+local://yaml_001_docker_compose.yaml,yaml,local_test,2800,2025-08-29,passed,null,0,yaml_001_docker_compose.yaml,sha256:pending,Docker Compose configuration
+local://yaml_002_github_actions.yaml,yaml,local_test,3400,2025-08-29,passed,null,0,yaml_002_github_actions.yaml,sha256:pending,GitHub Actions workflow
+local://yaml_003_kubernetes_deployment.yaml,yaml,local_test,4200,2025-08-29,passed,null,0,yaml_003_kubernetes_deployment.yaml,sha256:pending,Kubernetes deployment configuration
+local://latex_002_research_paper.tex,latex,local_test,8500,2025-08-29,passed,null,0,latex_002_research_paper.tex,sha256:pending,Academic research paper template
+https://raw.githubusercontent.com/ansible/ansible/devel/README.md,markdown,github,14200,2025-08-29,pending,null,0,md_011_ansible_readme.md,sha256:pending,Ansible automation README
