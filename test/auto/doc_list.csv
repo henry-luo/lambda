@@ -41,3 +41,14 @@ local://yaml_003_kubernetes_deployment.yaml,yaml,local_test,4200,2025-08-29,pass
 local://latex_002_research_paper.tex,latex,local_test,8500,2025-08-29,passed,null,0,latex_002_research_paper.tex,sha256:pending,Academic research paper template
 https://raw.githubusercontent.com/ansible/ansible/devel/README.md,markdown,github,14200,2025-08-29,pending,null,0,md_011_ansible_readme.md,sha256:pending,Ansible automation README
 local://text_001_sample_document.txt,text,local_test,756,2025-08-29,pending,null,0,text_001_sample_document.txt,sha256:pending,Simple test document for text format testing
+# Batch 4: New format expansion (10 new documents - 2 INI, 2 TOML, 2 RST, 4 CSS)
+local://ini_001_sample_config.ini,ini,local_test,1850,2025-08-29,pending,null,0,ini_001_sample_config.ini,sha256:pending,Sample configuration file in INI format
+local://ini_002_gitattributes.ini,ini,local_test,2100,2025-08-29,pending,null,0,ini_002_gitattributes.ini,sha256:pending,Git attributes configuration file
+https://raw.githubusercontent.com/psf/black/main/pyproject.toml,toml,github,6875,2025-08-29,passed,null,0,toml_001_black_pyproject.toml,sha256:pending,Black formatter pyproject.toml
+https://raw.githubusercontent.com/rust-lang/cargo/master/Cargo.toml,toml,github,9217,2025-08-29,passed,null,0,toml_002_cargo_manifest.toml,sha256:pending,Cargo manifest configuration
+local://rst_001_sample_documentation.rst,rst,local_test,8900,2025-08-29,pending,null,0,rst_001_sample_documentation.rst,sha256:pending,Lambda Script documentation in RST format  
+https://raw.githubusercontent.com/sphinx-doc/sphinx/master/README.rst,rst,github,2322,2025-08-29,passed,null,0,rst_002_sphinx_readme.rst,sha256:pending,Sphinx documentation README
+https://raw.githubusercontent.com/twbs/bootstrap/main/dist/css/bootstrap.css,css,github,280311,2025-08-29,passed,null,0,css_001_bootstrap_framework.css,sha256:pending,Bootstrap CSS framework
+https://raw.githubusercontent.com/necolas/normalize.css/master/normalize.css,css,github,6138,2025-08-29,passed,null,0,css_002_normalize_reset.css,sha256:pending,Normalize.css reset stylesheet
+https://raw.githubusercontent.com/animate-css/animate.css/main/animate.css,css,github,95378,2025-08-29,passed,null,0,css_003_animate_library.css,sha256:pending,Animate.css animation library
+local://css_004_simple_styles.css,css,local_test,1500,2025-08-29,pending,null,0,css_004_simple_styles.css,sha256:pending,Simple CSS styles for testing
