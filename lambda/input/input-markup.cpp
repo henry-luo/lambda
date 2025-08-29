@@ -984,6 +984,44 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
     
     add_attribute_to_element(parser->input, math, "type", "block");
     
+    // Check if this is single-line block math ($$content$$)
+    const char* pos = line;
+    skip_whitespace(&pos);
+    if (*pos == '$' && *(pos+1) == '$') {
+        pos += 2; // Skip opening $$
+        
+        // Find closing $$
+        const char* end = strstr(pos, "$$");
+        if (end && end > pos) {
+            // Single-line block math
+            size_t content_len = end - pos;
+            char* math_content = (char*)malloc(content_len + 1);
+            if (math_content) {
+                strncpy(math_content, pos, content_len);
+                math_content[content_len] = '\0';
+                
+                const char* math_flavor = detect_math_flavor(math_content);
+                Item parsed_math = parse_math_content(parser->input, math_content, math_flavor);
+                
+                if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
+                    list_push((List*)math, parsed_math);
+                    increment_element_content_length(math);
+                } else {
+                    // Fallback to plain text if math parsing fails
+                    String* content_str = create_string(parser->input->pool, math_content);
+                    Item text_item = {.item = s2it(content_str)};
+                    list_push((List*)math, text_item);
+                    increment_element_content_length(math);
+                }
+                
+                free(math_content);
+            }
+            parser->current_line++; // Move to next line
+            return (Item){.item = (uint64_t)math};
+        }
+    }
+    
+    // Multi-line block math - original logic
     parser->current_line++; // Skip opening $$
     
     // Collect math content until closing $$

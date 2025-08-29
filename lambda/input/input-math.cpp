@@ -1687,18 +1687,10 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
     // Add loop safety: prevent infinite loops in relational parsing
     const size_t MAX_RELATIONAL_ITERATIONS = 100;
     size_t iteration_count = 0;
-    const char* last_position = *math;
     
     while (**math && **math != '}' && iteration_count < MAX_RELATIONAL_ITERATIONS) {
         const char* op_name = NULL;
         int op_len = 0;
-        
-        // Safety check: ensure we're making progress
-        if (*math == last_position) {
-            fprintf(stderr, "Warning: No progress in relational expression parsing at position %zu\n", *math - (*math - strlen(*math)));
-            break;
-        }
-        last_position = *math;
         
         // Check for relational operators
         if (**math == '=') {
