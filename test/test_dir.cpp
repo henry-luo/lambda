@@ -2,8 +2,7 @@
 // Criterion unit test for directory listing via input_from_directory
 
 #include <criterion/criterion.h>
-#include "lambda/input/input.h"
-#include "lambda/input/input_dir.cpp"
+#include "../lambda/input/input.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #include <stdio.h>
