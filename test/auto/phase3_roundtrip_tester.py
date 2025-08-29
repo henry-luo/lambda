@@ -42,13 +42,13 @@ class RoundtripTester:
         
         # Conversion targets for each format
         self.conversion_targets = {
-            "markdown": ["html", "json", "xml"],
-            "json": ["yaml", "xml", "csv"],
-            "html": ["markdown", "json", "xml"],
-            "xml": ["json", "yaml"],
+            "markdown": ["html", "json", "xml", "text"],
+            "json": ["yaml", "xml", "csv", "text"],
+            "html": ["markdown", "json", "xml", "text"],
+            "xml": ["json", "yaml", "text"],
             "text": ["json"],  # Simple text to structured format
-            "latex": ["json", "html", "markdown"],  # LaTeX to structured formats
-            "wiki": ["json", "html", "markdown"]   # Wiki markup to structured formats
+            "latex": ["json", "html", "markdown", "text"],  # LaTeX to structured formats
+            "wiki": ["json", "html", "markdown", "text"]   # Wiki markup to structured formats
         }
     
     def run_lambda_convert(self, input_file: Path, from_format: str, to_format: str, output_file: Path) -> Tuple[bool, str, float]:
