@@ -1,5 +1,8 @@
 #include "input/input.h"
+#include "format/format.h"
+#include "input/mime-detect.h"
 #include <unistd.h>  // for getcwd
+#include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
 #include <cstdio>
 #include <cstdlib>
@@ -18,12 +21,19 @@ extern "C" {
 
 ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
 ValidationResult* exec_validation(int argc, char* argv[]);
+int exec_convert(int argc, char* argv[]);
 void transpile_ast(Transpiler* tp, AstScript *script);
 
 // External function declarations
 extern "C" {
     #include "../lib/url.h"
+    
+    // Input functions
     Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
+    
+    // String utility functions from lib/string.h
+    #include "../lib/string.h"
+    // create_string function is declared in lib/string.h
     
     // For accessing the validator's internal structure
     // typedef struct {
@@ -92,6 +102,7 @@ void print_help() {
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
     printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
+    printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nREPL Commands:\n");
     printf("  :quit, :q, :exit     - Exit REPL\n");
@@ -100,6 +111,9 @@ void print_help() {
     printf("\nValidation Commands:\n");
     printf("  validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  validate <file>                 - Validate using doc_schema.ls (default)\n");
+    printf("\nConversion Commands:\n");
+    printf("  convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
+    printf("  convert <input> -t <to> -o <output>           - Auto-detect input format\n");
 }
 
 // Function to determine the best REPL prompt based on system capabilities
@@ -255,6 +269,213 @@ void run_assertions() {
     assert(-1.0/0.0 == -INFINITY);
 }
 
+// Convert command implementation
+int exec_convert(int argc, char* argv[]) {
+    log_debug("exec_convert called with %d arguments", argc);
+    
+    if (argc < 2) {
+        printf("Error: convert command requires input file\n");
+        printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output>\n");
+        printf("Use 'lambda convert --help' for more information\n");
+        return 1;
+    }
+    
+    // Parse arguments
+    const char* input_file = NULL;
+    const char* from_format = NULL;  // Optional, will auto-detect if not provided
+    const char* to_format = NULL;    // Required
+    const char* output_file = NULL;  // Required
+    
+    // Skip "convert" and parse remaining arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--from") == 0) {
+            if (i + 1 < argc) {
+                from_format = argv[++i];
+            } else {
+                printf("Error: -f option requires a format argument\n");
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--to") == 0) {
+            if (i + 1 < argc) {
+                to_format = argv[++i];
+            } else {
+                printf("Error: -t option requires a format argument\n");
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
+            if (i + 1 < argc) {
+                output_file = argv[++i];
+            } else {
+                printf("Error: -o option requires an output file argument\n");
+                return 1;
+            }
+        } else if (argv[i][0] != '-') {
+            // This should be the input file
+            if (input_file == NULL) {
+                input_file = argv[i];
+            } else {
+                printf("Error: Multiple input files not supported\n");
+                return 1;
+            }
+        } else {
+            printf("Error: Unknown option '%s'\n", argv[i]);
+            return 1;
+        }
+    }
+    
+    // Validate required arguments
+    if (!input_file) {
+        printf("Error: Input file is required\n");
+        return 1;
+    }
+    if (!to_format) {
+        printf("Error: Output format (-t) is required\n");
+        return 1;
+    }
+    if (!output_file) {
+        printf("Error: Output file (-o) is required\n");
+        return 1;
+    }
+    
+    // Check if input file exists
+    if (access(input_file, F_OK) != 0) {
+        printf("Error: Input file '%s' does not exist\n", input_file);
+        return 1;
+    }
+    
+    log_debug("Converting '%s' from '%s' to '%s', output: '%s'", 
+              input_file, from_format ? from_format : "auto", to_format, output_file);
+    
+    log_debug("Converting '%s' from '%s' to '%s', output: '%s'", 
+              input_file, from_format ? from_format : "auto", to_format, output_file);
+    
+    // Create a temporary memory pool for string creation
+    VariableMemPool* temp_pool;
+    MemPoolError err = pool_variable_init(&temp_pool, 1024, 20);
+    if (err != MEM_POOL_ERR_OK) {
+        printf("Error: Failed to initialize temporary memory pool\n");
+        return 1;
+    }
+    
+    // Step 1: Parse the input file using Lambda's input system
+    printf("Reading input file: %s\n", input_file);
+    
+    // Create absolute URL for the input file
+    char cwd_path[PATH_MAX];
+    if (!getcwd(cwd_path, sizeof(cwd_path))) {
+        printf("Error: Failed to get current directory\n");
+        pool_variable_destroy(temp_pool);
+        return 1;
+    }
+    
+    // Create file URL
+    char file_url[PATH_MAX + 8];
+    if (input_file[0] == '/') {
+        // Absolute path
+        snprintf(file_url, sizeof(file_url), "file://%s", input_file);
+    } else {
+        // Relative path
+        snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, input_file);
+    }
+    
+    // Create URL string
+    String* url_string = create_string(temp_pool, file_url);
+    if (!url_string) {
+        printf("Error: Failed to create URL string\n");
+        pool_variable_destroy(temp_pool);
+        return 1;
+    }
+    
+    // Create type string
+    String* type_string = NULL;
+    if (from_format) {
+        type_string = create_string(temp_pool, from_format);
+    } else {
+        type_string = create_string(temp_pool, "auto");
+    }
+    
+    if (!type_string) {
+        printf("Error: Failed to create type string\n");
+        pool_variable_destroy(temp_pool);
+        return 1;
+    }
+        
+        // Parse using Lambda's input system
+        Input* input = input_from_url(url_string, type_string, NULL, NULL);
+        if (!input) {
+            printf("Error: Failed to parse input file\n");
+            pool_variable_destroy(temp_pool);
+            return 1;
+        }
+        
+        // Check if parsing was successful
+        if (input->root.type_id == LMD_TYPE_ERROR) {
+            printf("Error: Failed to parse input file\n");
+            pool_variable_destroy(temp_pool);
+            return 1;
+        }
+        
+        printf("Successfully parsed input file\n");
+        
+        // Step 2: Format the parsed data to the target format
+        printf("Converting to format: %s\n", to_format);
+        
+        String* formatted_output = NULL;
+        
+        // Use the existing format functions based on target format
+        if (strcmp(to_format, "json") == 0) {
+            formatted_output = format_json(input->pool, input->root);
+        } else if (strcmp(to_format, "xml") == 0) {
+            formatted_output = format_xml(input->pool, input->root);
+        } else if (strcmp(to_format, "html") == 0) {
+            formatted_output = format_html(input->pool, input->root);
+        } else if (strcmp(to_format, "yaml") == 0) {
+            formatted_output = format_yaml(input->pool, input->root);
+        } else if (strcmp(to_format, "toml") == 0) {
+            formatted_output = format_toml(input->pool, input->root);
+        } else if (strcmp(to_format, "ini") == 0) {
+            formatted_output = format_ini(input->pool, input->root);
+        } else if (strcmp(to_format, "css") == 0) {
+            formatted_output = format_css(input->pool, input->root);
+        } else if (strcmp(to_format, "latex") == 0) {
+            formatted_output = format_latex(input->pool, input->root);
+        } else if (strcmp(to_format, "rst") == 0) {
+            formatted_output = format_rst_string(input->pool, input->root);
+        } else if (strcmp(to_format, "org") == 0) {
+            formatted_output = format_org_string(input->pool, input->root);
+        } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
+            // Format as markdown using string buffer
+            StrBuf* sb = strbuf_new_cap(1024);
+            format_markdown(sb, input->root);
+            formatted_output = create_string(input->pool, sb->str);
+            strbuf_free(sb);
+        } else {
+            printf("Error: Unsupported output format '%s'\n", to_format);
+            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, markdown\n");
+            pool_variable_destroy(temp_pool);
+            return 1;
+        }
+        
+        if (!formatted_output) {
+            printf("Error: Failed to format output\n");
+            pool_variable_destroy(temp_pool);
+            return 1;
+        }
+        
+        // Step 3: Write the output to file
+        printf("Writing output to: %s\n", output_file);
+        write_text_file(output_file, formatted_output->chars);
+        
+    printf("Conversion completed successfully!\n");
+    printf("Input:  %s\n", input_file);
+    printf("Output: %s\n", output_file);
+    printf("Format: %s → %s\n", from_format ? from_format : "auto-detected", to_format);
+    
+    // Cleanup
+    pool_variable_destroy(temp_pool);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     // Initialize logging system with config file if available
     if (access("log.conf", F_OK) == 0) {
@@ -343,6 +564,49 @@ int main(int argc, char *argv[]) {
         }
         
         log_debug("exec_validation completed with result: %d", exit_code);
+        log_finish();  // Cleanup logging before exit
+        return exit_code;
+    }
+    
+    // Handle convert command
+    log_debug("Checking for convert command");
+    if (argc >= 2 && strcmp(argv[1], "convert") == 0) {
+        log_debug("Entering convert command handler");
+        
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Format Converter v1.0\n\n");
+            printf("Usage: %s convert <input> [-f <from>] -t <to> -o <output>\n", argv[0]);
+            printf("\nOptions:\n");
+            printf("  -f <from>      Input format (auto-detect if omitted)\n");
+            printf("  -t <to>        Output format (required)\n");
+            printf("  -o <output>    Output file path (required)\n");
+            printf("  -h, --help     Show this help message\n");
+            printf("\nSupported Formats:\n");
+            printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org\n");
+            printf("  Document formats: pdf, rtf, text\n");
+            printf("  Markup formats:  asciidoc, textile, wiki, man\n");
+            printf("  Data formats:    json, xml, yaml, csv, ini, toml\n");
+            printf("\nCommon Conversions:\n");
+            printf("  markdown → html:   %s convert doc.md -t html -o doc.html\n", argv[0]);
+            printf("  json → yaml:       %s convert data.json -t yaml -o data.yaml\n", argv[0]);
+            printf("  html → markdown:   %s convert page.html -t markdown -o page.md\n", argv[0]);
+            printf("  xml → json:        %s convert config.xml -t json -o config.json\n", argv[0]);
+            printf("\nAuto-detection Examples:\n");
+            printf("  %s convert document.md -t html -o output.html\n", argv[0]);
+            printf("  %s convert -f markdown data.txt -t json -o data.json\n", argv[0]);
+            log_finish();  // Cleanup logging before exit
+            return 0;
+        }
+        
+        // Prepare arguments for exec_convert (skip the "convert" command)
+        int convert_argc = argc - 1;  // Remove the program name
+        char** convert_argv = argv + 1;  // Skip the program name, start from "convert"
+        
+        // Call the convert function
+        int exit_code = exec_convert(convert_argc, convert_argv);
+        
+        log_debug("exec_convert completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
         return exit_code;
     }
