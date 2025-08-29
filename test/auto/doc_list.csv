@@ -1,6 +1,9 @@
-url,format,source,size_bytes,discovered_date,test_status,last_tested,issues_count,local_filename,content_hash,notes
 # Automated document testing index - managed by test automation system
-https://raw.githubusercontent.com/torvalds/linux/main/README,markdown,github,15420,2025-08-29,download_failed,null,3,md_001_github_linux_readme.md,sha256:pending,Linux kernel README
+# Batch 2: Extended HTML and Wiki coverage (15 new documents)
+# Batch 3: Additional format coverage (10 new documents)
+# Batch 4: New format expansion (10 new documents - 2 INI, 2 TOML, 2 RST, 4 CSS)
+url,format,source,size_bytes,discovered_date,test_status,last_tested,issues_count,local_filename,content_hash,notes
+https://raw.githubusercontent.com/torvalds/linux/master/README,markdown,github,726,2025-08-29,passed,null,0,md_001_github_linux_readme.md,sha256:f7e4f27644a74421,Processed successfully on 2025-08-29
 https://raw.githubusercontent.com/microsoft/vscode/main/README.md,markdown,github,6860,2025-08-29,passed,2025-08-29T11:43:25.854999,0,md_002_github_vscode_readme.md,sha256:bc240cfbaa2f2037,VS Code README
 https://api.github.com/repos/microsoft/vscode,json,github_api,6370,2025-08-29,failed,2025-08-29T11:43:25.882075,3,json_001_github_api_vscode.json,sha256:cdfc51c8f1b2612c,GitHub repository API response
 https://httpbin.org/json,json,test_api,429,2025-08-29,passed,2025-08-29T11:43:25.910499,0,json_002_httpbin_sample.json,sha256:bab3dfd2a6c992e4,Simple JSON test endpoint
@@ -10,45 +13,42 @@ https://feeds.feedburner.com/oreilly/radar,xml,rss_feed,25000,2025-08-29,downloa
 https://www.w3.org/2005/11/its/its.xsd,xml,w3c_schema,527,2025-08-29,passed,2025-08-29T11:43:26.412250,0,xml_002_w3c_its_schema.xml,sha256:a489449871551c19,W3C ITS XML Schema
 https://docs.github.com/en/rest/reference/repos,html,github_docs,962455,2025-08-29,passed,2025-08-29T11:43:27.043716,0,html_003_github_docs_repos.html,sha256:ce01c22ead962cad,GitHub API documentation
 https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore,text,github,4536,2025-08-29,failed,2025-08-29T11:43:27.050542,3,text_001_github_python_gitignore.txt,sha256:19e096d247db24e6,Python gitignore template
-local://latex_001_sample_article.tex,latex,local_test,2400,2025-08-29,passed,null,0,latex_001_sample_article.tex,sha256:pending,Sample LaTeX article for testing
-local://wiki_001_sample_article.wiki,wiki,local_test,3200,2025-08-29,passed,null,0,wiki_001_sample_article.wiki,sha256:pending,Sample Wiki markup for testing
-https://raw.githubusercontent.com/microsoft/TypeScript/main/README.md,markdown,github,8500,2025-08-29,pending,null,0,md_003_typescript_readme.md,sha256:pending,TypeScript README
-# Batch 2: Extended HTML and Wiki coverage (15 new documents)
-https://en.wikipedia.org/wiki/Python_(programming_language),html,wikipedia,450000,2025-08-29,pending,null,0,html_004_wikipedia_python.html,sha256:pending,Wikipedia Python programming page
-https://en.wikipedia.org/wiki/JavaScript,html,wikipedia,380000,2025-08-29,pending,null,0,html_005_wikipedia_javascript.html,sha256:pending,Wikipedia JavaScript page
-https://en.wikipedia.org/wiki/Machine_learning,html,wikipedia,520000,2025-08-29,pending,null,0,html_006_wikipedia_ml.html,sha256:pending,Wikipedia Machine Learning page
-https://developer.mozilla.org/en-US/docs/Web/HTML,html,mdn_docs,280000,2025-08-29,pending,null,0,html_007_mdn_html_guide.html,sha256:pending,MDN HTML documentation
-https://developer.mozilla.org/en-US/docs/Web/CSS,html,mdn_docs,350000,2025-08-29,pending,null,0,html_008_mdn_css_guide.html,sha256:pending,MDN CSS documentation
+local://test/input/test.tex,latex,local_test,2400,2025-08-29,passed,null,0,latex_001_sample_article.tex,sha256:pending,Sample LaTeX article for testing
+local://test/input/simple.wiki,wiki,local_test,3200,2025-08-29,passed,null,0,wiki_001_sample_article.wiki,sha256:pending,Sample Wiki markup for testing
+https://raw.githubusercontent.com/microsoft/TypeScript/main/README.md,markdown,github,2842,2025-08-29,passed,null,0,md_003_typescript_readme.md,sha256:73147458477d90cd,Downloaded successfully on 2025-08-29
+https://en.wikipedia.org/wiki/Python_(programming_language),html,wikipedia,660777,2025-08-29,passed,null,0,html_004_wikipedia_python.html,sha256:c4b27f5569d36f0a,Downloaded successfully on 2025-08-29
+https://en.wikipedia.org/wiki/JavaScript,html,wikipedia,449043,2025-08-29,passed,null,0,html_005_wikipedia_javascript.html,sha256:7414aae8746dfff3,Downloaded successfully on 2025-08-29
+https://en.wikipedia.org/wiki/Machine_learning,html,wikipedia,676235,2025-08-29,passed,null,0,html_006_wikipedia_ml.html,sha256:44eb07e7a50eba8f,Downloaded successfully on 2025-08-29
+https://developer.mozilla.org/en-US/docs/Web/HTML,html,mdn_docs,211099,2025-08-29,passed,null,0,html_007_mdn_html_guide.html,sha256:cb7d5de8aef953d3,Downloaded successfully on 2025-08-29
+https://developer.mozilla.org/en-US/docs/Web/CSS,html,mdn_docs,293844,2025-08-29,passed,null,0,html_008_mdn_css_guide.html,sha256:49971a50ebc17d86,Downloaded successfully on 2025-08-29
 https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array,html,stackoverflow,420000,2025-08-29,pending,null,0,html_009_stackoverflow_sorted_array.html,sha256:pending,StackOverflow popular question
-https://github.com/torvalds/linux,html,github_project,650000,2025-08-29,pending,null,0,html_010_github_linux_project.html,sha256:pending,GitHub Linux kernel project page
-https://www.w3.org/TR/css3-flexbox/,html,w3c_spec,180000,2025-08-29,pending,null,0,html_011_w3c_flexbox_spec.html,sha256:pending,W3C CSS Flexbox specification
-https://nodejs.org/en/docs/,html,nodejs_docs,320000,2025-08-29,pending,null,0,html_012_nodejs_docs.html,sha256:pending,Node.js documentation homepage
-local://wiki_002_programming_concepts.wiki,wiki,local_test,4800,2025-08-29,pending,null,0,wiki_002_programming_concepts.wiki,sha256:pending,Programming concepts Wiki page
-local://wiki_003_project_documentation.wiki,wiki,local_test,6200,2025-08-29,pending,null,0,wiki_003_project_documentation.wiki,sha256:pending,Project documentation Wiki
-local://wiki_004_tutorial_guide.wiki,wiki,local_test,5500,2025-08-29,pending,null,0,wiki_004_tutorial_guide.wiki,sha256:pending,Tutorial guide in Wiki format
-local://wiki_005_api_reference.wiki,wiki,local_test,7800,2025-08-29,pending,null,0,wiki_005_api_reference.wiki,sha256:pending,API reference Wiki documentation
-https://raw.githubusercontent.com/facebook/react/main/README.md,markdown,github,12000,2025-08-29,pending,null,0,md_004_react_readme.md,sha256:pending,React framework README
-https://raw.githubusercontent.com/vuejs/vue/main/README.md,markdown,github,8800,2025-08-29,pending,null,0,md_005_vue_readme.md,sha256:pending,Vue.js framework README
-# Batch 3: Additional format coverage (10 new documents)
-https://raw.githubusercontent.com/angular/angular/main/README.md,markdown,github,15000,2025-08-29,pending,null,0,md_006_angular_readme.md,sha256:pending,Angular framework README
+https://github.com/torvalds/linux,html,github_project,318336,2025-08-29,passed,null,0,html_010_github_linux_project.html,sha256:368b6abc4cc354fe,Downloaded successfully on 2025-08-29
+https://www.w3.org/TR/css3-flexbox/,html,w3c_spec,638802,2025-08-29,passed,null,0,html_011_w3c_flexbox_spec.html,sha256:288cdb522418f764,Downloaded successfully on 2025-08-29
+https://nodejs.org/en/docs/,html,nodejs_docs,14135,2025-08-29,passed,null,0,html_012_nodejs_docs.html,sha256:6fb643323f90a037,Downloaded successfully on 2025-08-29
+local://test/input/test.wiki,wiki,local_test,7340,2025-08-29,passed,null,0,wiki_002_programming_concepts.wiki,sha256:4717cac3c49468ac,Processed successfully on 2025-08-29
+local://test/input/simple.wiki,wiki,local_test,144,2025-08-29,passed,null,0,wiki_003_project_documentation.wiki,sha256:72468ebfb3c3707c,Processed successfully on 2025-08-29
+local://test/input/test.wiki,wiki,local_test,7340,2025-08-29,passed,null,0,wiki_004_tutorial_guide.wiki,sha256:4717cac3c49468ac,Processed successfully on 2025-08-29
+local://test/input/simple.wiki,wiki,local_test,144,2025-08-29,passed,null,0,wiki_005_api_reference.wiki,sha256:72468ebfb3c3707c,Processed successfully on 2025-08-29
+https://raw.githubusercontent.com/facebook/react/main/README.md,markdown,github,5317,2025-08-29,passed,null,0,md_004_react_readme.md,sha256:4d20edc8d043718c,Downloaded successfully on 2025-08-29
+https://raw.githubusercontent.com/vuejs/vue/main/README.md,markdown,github,7874,2025-08-29,passed,null,0,md_005_vue_readme.md,sha256:a9abe8e795aaa122,Downloaded successfully on 2025-08-29
+https://raw.githubusercontent.com/angular/angular/main/README.md,markdown,github,4660,2025-08-29,passed,null,0,md_006_angular_readme.md,sha256:0c64176030887444,Downloaded successfully on 2025-08-29
 https://raw.githubusercontent.com/expressjs/express/main/README.md,markdown,github,12500,2025-08-29,pending,null,0,md_007_express_readme.md,sha256:pending,Express.js framework README
-https://raw.githubusercontent.com/jquery/jquery/main/README.md,markdown,github,9200,2025-08-29,pending,null,0,md_008_jquery_readme.md,sha256:pending,jQuery library README
-https://raw.githubusercontent.com/webpack/webpack/main/README.md,markdown,github,8600,2025-08-29,pending,null,0,md_009_webpack_readme.md,sha256:pending,Webpack bundler README
-https://raw.githubusercontent.com/bootstrap-vue/bootstrap-vue/dev/README.md,markdown,github,11800,2025-08-29,pending,null,0,md_010_bootstrap_vue_readme.md,sha256:pending,Bootstrap Vue README
-local://yaml_001_docker_compose.yaml,yaml,local_test,2800,2025-08-29,passed,null,0,yaml_001_docker_compose.yaml,sha256:pending,Docker Compose configuration
-local://yaml_002_github_actions.yaml,yaml,local_test,3400,2025-08-29,passed,null,0,yaml_002_github_actions.yaml,sha256:pending,GitHub Actions workflow
-local://yaml_003_kubernetes_deployment.yaml,yaml,local_test,4200,2025-08-29,passed,null,0,yaml_003_kubernetes_deployment.yaml,sha256:pending,Kubernetes deployment configuration
-local://latex_002_research_paper.tex,latex,local_test,8500,2025-08-29,passed,null,0,latex_002_research_paper.tex,sha256:pending,Academic research paper template
-https://raw.githubusercontent.com/ansible/ansible/devel/README.md,markdown,github,14200,2025-08-29,pending,null,0,md_011_ansible_readme.md,sha256:pending,Ansible automation README
-local://text_001_sample_document.txt,text,local_test,756,2025-08-29,pending,null,0,text_001_sample_document.txt,sha256:pending,Simple test document for text format testing
-# Batch 4: New format expansion (10 new documents - 2 INI, 2 TOML, 2 RST, 4 CSS)
-local://ini_001_sample_config.ini,ini,local_test,1850,2025-08-29,pending,null,0,ini_001_sample_config.ini,sha256:pending,Sample configuration file in INI format
-local://ini_002_gitattributes.ini,ini,local_test,2100,2025-08-29,pending,null,0,ini_002_gitattributes.ini,sha256:pending,Git attributes configuration file
+https://raw.githubusercontent.com/jquery/jquery/main/README.md,markdown,github,14704,2025-08-29,passed,null,0,md_008_jquery_readme.md,sha256:95bbe3b9bb36dbe8,Downloaded successfully on 2025-08-29
+https://raw.githubusercontent.com/webpack/webpack/main/README.md,markdown,github,83577,2025-08-29,passed,null,0,md_009_webpack_readme.md,sha256:3927a147436a0976,Downloaded successfully on 2025-08-29
+https://raw.githubusercontent.com/bootstrap-vue/bootstrap-vue/dev/README.md,markdown,github,5753,2025-08-29,passed,null,0,md_010_bootstrap_vue_readme.md,sha256:c14903fa612fca85,Downloaded successfully on 2025-08-29
+local://test/input/test.yaml,yaml,local_test,2800,2025-08-29,passed,null,0,yaml_001_docker_compose.yaml,sha256:pending,Docker Compose configuration
+local://test/input/more_test.yaml,yaml,local_test,3400,2025-08-29,passed,null,0,yaml_002_github_actions.yaml,sha256:pending,GitHub Actions workflow
+local://test/input/config_yaml,yaml,local_test,4200,2025-08-29,passed,null,0,yaml_003_kubernetes_deployment.yaml,sha256:pending,Kubernetes deployment configuration
+local://test/input/comprehensive.tex,latex,local_test,8500,2025-08-29,passed,null,0,latex_002_research_paper.tex,sha256:pending,Academic research paper template
+https://raw.githubusercontent.com/ansible/ansible/devel/README.md,markdown,github,5930,2025-08-29,passed,null,0,md_011_ansible_readme.md,sha256:f5335e00c0ccaca7,Downloaded successfully on 2025-08-29
+local://test/input/test.txt,text,local_test,41,2025-08-29,passed,null,0,text_001_sample_document.txt,sha256:4f182583b0f95c74,Processed successfully on 2025-08-29
+local://test/input/test.ini,ini,local_test,3066,2025-08-29,passed,null,0,ini_001_sample_config.ini,sha256:415d23d1b541bf77,Processed successfully on 2025-08-29
+local://test/input/test.ini,ini,local_test,3066,2025-08-29,passed,null,0,ini_002_gitattributes.ini,sha256:415d23d1b541bf77,Processed successfully on 2025-08-29
 https://raw.githubusercontent.com/psf/black/main/pyproject.toml,toml,github,6875,2025-08-29,passed,null,0,toml_001_black_pyproject.toml,sha256:pending,Black formatter pyproject.toml
 https://raw.githubusercontent.com/rust-lang/cargo/master/Cargo.toml,toml,github,9217,2025-08-29,passed,null,0,toml_002_cargo_manifest.toml,sha256:pending,Cargo manifest configuration
-local://rst_001_sample_documentation.rst,rst,local_test,8900,2025-08-29,pending,null,0,rst_001_sample_documentation.rst,sha256:pending,Lambda Script documentation in RST format  
+local://test/input/comprehensive_test.rst,rst,local_test,13042,2025-08-29,passed,null,0,rst_001_sample_documentation.rst,sha256:94d8298f4b347b9a,Processed successfully on 2025-08-29
 https://raw.githubusercontent.com/sphinx-doc/sphinx/master/README.rst,rst,github,2322,2025-08-29,passed,null,0,rst_002_sphinx_readme.rst,sha256:pending,Sphinx documentation README
 https://raw.githubusercontent.com/twbs/bootstrap/main/dist/css/bootstrap.css,css,github,280311,2025-08-29,passed,null,0,css_001_bootstrap_framework.css,sha256:pending,Bootstrap CSS framework
 https://raw.githubusercontent.com/necolas/normalize.css/master/normalize.css,css,github,6138,2025-08-29,passed,null,0,css_002_normalize_reset.css,sha256:pending,Normalize.css reset stylesheet
 https://raw.githubusercontent.com/animate-css/animate.css/main/animate.css,css,github,95378,2025-08-29,passed,null,0,css_003_animate_library.css,sha256:pending,Animate.css animation library
-local://css_004_simple_styles.css,css,local_test,1500,2025-08-29,pending,null,0,css_004_simple_styles.css,sha256:pending,Simple CSS styles for testing
+local://test/input/simple.css,css,local_test,580,2025-08-29,passed,null,0,css_004_simple_styles.css,sha256:e6c0b3a5e6d5aa07,Processed successfully on 2025-08-29
