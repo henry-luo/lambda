@@ -37,8 +37,6 @@ extern "C" char* read_text_file(const char *filename);
 void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=NULL);
 
 // Forward declarations
-Url* get_current_dir();
-Url* parse_url(Url *base, const char* doc_url);
 char* read_text_doc(Url *url);
 
 // Common test function for markdown roundtrip testing
@@ -424,31 +422,6 @@ Test(math_roundtrip_tests, curated_markdown_roundtrip) {
         "Curated markdown test with supported math expressions"
     );
     cr_assert(result, "Curated markdown roundtrip test failed");
-}
-
-// Helper function implementations for new URL parser
-
-Url* get_current_dir() {
-    char cwd[1024];
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-        return NULL;
-    }
-    
-    // Create a file URL from the current directory
-    char file_url[1200];
-    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
-    
-    return url_parse(file_url);
-}
-
-Url* parse_url(Url *base, const char* doc_url) {
-    if (!doc_url) return NULL;
-    
-    if (base) {
-        return url_parse_with_base(doc_url, base);
-    } else {
-        return url_parse(doc_url);
-    }
 }
 
 char* read_text_doc(Url *url) {

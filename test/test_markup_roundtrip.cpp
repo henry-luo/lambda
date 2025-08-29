@@ -17,20 +17,12 @@
 
 // Forward declarations with C linkage
 extern "C" {
-#include <tree_sitter/api.h>
-#include <mpdecimal.h>
+    #include <tree_sitter/api.h>
+    #include <mpdecimal.h>
     Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
     String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-    Url* get_current_dir();
-    Url* parse_url(Url *base, const char* doc_url);
     void format_item(StrBuf* buf, Item item, int indent, char* format);
     char* read_text_file(const char *filename);
-    void frame_start();
-    void frame_end();
-    void heap_init();
-    void heap_destroy();
-    void num_stack_destroy(num_stack_t* stack);
-    num_stack_t* num_stack_create(size_t initial_capacity);
     TSParser* lambda_parser(void);
     TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 }
@@ -564,31 +556,3 @@ Test(markup_parsing_rst, rst_extended_features, .disabled = true) {
     
     free(content_copy);
 }
-
-// Helper function implementations for new URL parser (C++ version)
-extern "C" {
-
-Url* get_current_dir() {
-    char cwd[1024];
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-        return NULL;
-    }
-    
-    // Create a file URL from the current directory
-    char file_url[1200];
-    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
-    
-    return url_parse(file_url);
-}
-
-Url* parse_url(Url *base, const char* doc_url) {
-    if (!doc_url) return NULL;
-    
-    if (base) {
-        return url_parse_with_base(doc_url, base);
-    } else {
-        return url_parse(doc_url);
-    }
-}
-
-} // extern "C"
