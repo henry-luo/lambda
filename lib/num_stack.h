@@ -15,7 +15,7 @@ typedef union {
 typedef struct num_chunk num_chunk_t;
 
 // main stack structure
-typedef struct {
+typedef struct num_stack_t {
     num_chunk_t *head;             // first chunk
     num_chunk_t *tail;             // last chunk
     num_chunk_t *current_chunk;    // current chunk being written to
