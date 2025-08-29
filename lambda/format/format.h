@@ -23,6 +23,8 @@ void format_rst(StrBuf* sb, Item root_item);
 String* format_rst_string(VariableMemPool* pool, Item root_item);
 void format_org(StrBuf* sb, Item root_item);
 String* format_org_string(VariableMemPool* pool, Item root_item);
+void format_wiki(StrBuf* sb, Item root_item);
+String* format_wiki_string(VariableMemPool* pool, Item root_item);
 
 // Math format function declarations
 String* format_math(VariableMemPool* pool, Item root_item);
