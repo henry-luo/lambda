@@ -302,15 +302,19 @@ Element* elmt_fill(Element *elmt, ...);
 typedef struct Heap Heap;
 typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
+typedef struct num_stack_t num_stack_t;
+typedef struct Url Url;
+typedef struct _ArrayList ArrayList;
+typedef struct VariableMemPool VariableMemPool;
 
 typedef struct Context {
     Heap* heap;   
-    void* ast_pool;
+    VariableMemPool* ast_pool;
     void** consts;
-    void* type_list;
-    void* num_stack;  // for long and double pointers
+    ArrayList* type_list;
+    num_stack_t* num_stack;  // for long and double pointers
     void* type_info;  // meta info for the base types
-    void* cwd;  // current working directory
+    Url* cwd;  // current working directory
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
 } Context;
