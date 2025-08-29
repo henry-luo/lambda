@@ -126,6 +126,6 @@ max(neg_arr64)
 sum([10, 20, 30]) + sum([int64(1000000000000), int64(2000000000000)])
 
 // Test 26: Nested function calls
-max([min([int64(100), int64(200)]), max([int64(50), int64(150                           )])])
+max([min([int64(100), int64(200)]), max([int64(50), int64(150)])])
 
 "===== END INT64 COMPREHENSIVE TEST ====="
