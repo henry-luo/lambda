@@ -2,6 +2,10 @@
 #include "../lambda-data.hpp"
 #include "../../lib/url.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Input creation and management
 Input* input_new(Url* abs_url);
 
@@ -20,6 +24,10 @@ void input_free_lines(char** lines, int line_count);
 Element* input_create_element(Input *input, const char* tag_name);
 void input_add_attribute_to_element(Input *input, Element* element, const char* attr_name, const char* attr_value);
 void input_add_attribute_item_to_element(Input *input, Element* element, const char* attr_name, Item attr_value);
+String* input_create_string(Input *input, const char* str);
+Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
+Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
+Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
@@ -34,3 +42,7 @@ Item input_markup(Input *input, const char* content);
 
 // Directory listing functions (from input_dir.cpp)
 Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
+
+#ifdef __cplusplus
+}
+#endif

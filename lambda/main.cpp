@@ -28,9 +28,6 @@ void transpile_ast(Transpiler* tp, AstScript *script);
 extern "C" {
     #include "../lib/url.h"
     
-    // Input functions
-    Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
-    
     // String utility functions from lib/string.h
     #include "../lib/string.h"
     // create_string function is declared in lib/string.h
