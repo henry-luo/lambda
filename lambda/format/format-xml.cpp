@@ -28,6 +28,22 @@ static void format_xml_string(StrBuf* sb, String* str) {
             strbuf_append_str(sb, "&gt;");
             break;
         case '&':
+            // Check if this is already an entity reference
+            if (i + 1 < len && (s[i + 1] == '#' || isalpha(s[i + 1]))) {
+                // Look for closing semicolon
+                size_t j = i + 1;
+                while (j < len && s[j] != ';' && s[j] != ' ' && s[j] != '<' && s[j] != '&') {
+                    j++;
+                }
+                if (j < len && s[j] == ';') {
+                    // This looks like an entity, preserve it as-is
+                    for (size_t k = i; k <= j; k++) {
+                        strbuf_append_char(sb, s[k]);
+                    }
+                    i = j; // Skip past the entity
+                    break;
+                }
+            }
             strbuf_append_str(sb, "&amp;");
             break;
         case '"':
@@ -201,24 +217,42 @@ static void format_map(StrBuf* sb, Map* mp, const char* tag_name) {
     strbuf_append_char(sb, '<');
     strbuf_append_str(sb, tag_name);
     
-    // For XML roundtrip, don't use attributes - put everything as child elements
-    // if (mp && mp->type) {
-    //     TypeMap* map_type = (TypeMap*)mp->type;
-    //     // Add simple types as attributes
-    //     format_map_attributes(sb, map_type, mp->data);
-    // }
-    
-    strbuf_append_char(sb, '>');
-    
+    // Add simple types as attributes for better XML structure
     if (mp && mp->type) {
         TypeMap* map_type = (TypeMap*)mp->type;
-        // Add all types as child elements for proper XML roundtrip
-        format_map_elements(sb, map_type, mp->data);
+        format_map_attributes(sb, map_type, mp->data);
     }
     
-    strbuf_append_str(sb, "</");
-    strbuf_append_str(sb, tag_name);
-    strbuf_append_char(sb, '>');
+    // Check if there are complex child elements
+    bool has_children = false;
+    if (mp && mp->type) {
+        TypeMap* map_type = (TypeMap*)mp->type;
+        ShapeEntry* field = map_type->shape;
+        for (int i = 0; i < map_type->length && field; i++) {
+            if (field->name && field->type && !is_simple_type(field->type->type_id)) {
+                has_children = true;
+                break;
+            }
+            field = field->next;
+        }
+    }
+    
+    if (has_children) {
+        strbuf_append_char(sb, '>');
+        
+        // Add complex types as child elements
+        if (mp && mp->type) {
+            TypeMap* map_type = (TypeMap*)mp->type;
+            format_map_elements(sb, map_type, mp->data);
+        }
+        
+        strbuf_append_str(sb, "</");
+        strbuf_append_str(sb, tag_name);
+        strbuf_append_char(sb, '>');
+    } else {
+        // Self-closing tag if no children
+        strbuf_append_str(sb, "/>");
+    }
 }
 
 static void format_item(StrBuf* sb, Item item, const char* tag_name) {

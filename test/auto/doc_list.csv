@@ -10,3 +10,6 @@ https://feeds.feedburner.com/oreilly/radar,xml,rss_feed,25000,2025-08-29,downloa
 https://www.w3.org/2005/11/its/its.xsd,xml,w3c_schema,527,2025-08-29,passed,2025-08-29T11:43:26.412250,0,xml_002_w3c_its_schema.xml,sha256:a489449871551c19,W3C ITS XML Schema
 https://docs.github.com/en/rest/reference/repos,html,github_docs,962455,2025-08-29,passed,2025-08-29T11:43:27.043716,0,html_003_github_docs_repos.html,sha256:ce01c22ead962cad,GitHub API documentation
 https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore,text,github,4536,2025-08-29,failed,2025-08-29T11:43:27.050542,3,text_001_github_python_gitignore.txt,sha256:19e096d247db24e6,Python gitignore template
+local://latex_001_sample_article.tex,latex,local_test,2400,2025-08-29,passed,null,0,latex_001_sample_article.tex,sha256:pending,Sample LaTeX article for testing
+local://wiki_001_sample_article.wiki,wiki,local_test,3200,2025-08-29,passed,null,0,wiki_001_sample_article.wiki,sha256:pending,Sample Wiki markup for testing
+https://raw.githubusercontent.com/microsoft/TypeScript/main/README.md,markdown,github,8500,2025-08-29,pending,null,0,md_003_typescript_readme.md,sha256:pending,TypeScript README
