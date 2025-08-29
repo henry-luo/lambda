@@ -43,6 +43,27 @@
     ],
     "libraries": [     
         {
+            "name": "curl",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libcurl.a",
+            "link": "static",
+            "description": "libcurl for HTTP/HTTPS support",
+            "platforms": {
+                "darwin": {
+                    "include": "/opt/homebrew/include",
+                    "lib": "/opt/homebrew/lib/libcurl.a"
+                },
+                "linux": {
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/x86_64-linux-gnu/libcurl.a"
+                },
+                "windows": {
+                    "include": "windows-deps/include",
+                    "lib": "windows-deps/lib/libcurl.a"
+                }
+            }
+        },
+        {
             "name": "tree-sitter",
             "include": "lambda/tree-sitter/lib/include",
             "lib": "lambda/tree-sitter/libtree-sitter.a",
@@ -321,7 +342,8 @@
                     "test_mime_detect.c",
                     "test_math.cpp",
                     "test_markup_roundtrip.cpp",
-                    "test/test_input_roundtrip.cpp"
+                    "test/test_input_roundtrip.cpp",
+                    "test_dir.cpp"
                 ],
                 "library_dependencies": [
                     ["lambda-input-full"],
