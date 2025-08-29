@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <ctype.h>
-
+#include <unistd.h>  // for getcwd and chdir
 #include "url.h"
 
 // String allocation helper
@@ -616,4 +616,27 @@ UrlError url_set_hash(Url* url, const char* hash) {
     url_free_string(url->hash);
     url->hash = url_create_string(hash);
     return url->hash ? URL_OK : URL_ERROR_MEMORY_ALLOCATION;
+}
+
+// Helper function to get current working directory as file URL
+Url* get_current_dir() {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        return NULL;
+    }
+    
+    // Convert to file:// URL format
+    char file_url[1200];
+    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
+    
+    return url_parse(file_url);
+}
+
+Url* parse_url(Url *base, const char* doc_url) {
+    if (!doc_url) return NULL;
+    if (base) {
+        return url_parse_with_base(doc_url, base);
+    } else {
+        return url_parse(doc_url);
+    }
 }
