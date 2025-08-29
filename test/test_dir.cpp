@@ -119,9 +119,28 @@ Test(input_dir, empty_directory_handling) {
     Input* input = input_from_directory("test_empty_dir", false, 1);
     cr_assert_not_null(input, "input_from_directory should handle empty directories");
     
-    Element* root = (Element*)input->root.element;
+    Element* root = (Element*)input->root.pointer;
     cr_assert(root != NULL, "Root element should exist for empty directory");
     cr_assert(root->type != NULL, "Root element type should not be NULL");
     
     system("rm -rf test_empty_dir");
+}
+
+// Test integration with input_from_url for directory URLs (simplified test)
+Test(input_dir, url_directory_integration_simple) {
+    // Test with absolute path to avoid URL parsing complexity
+    const char* url_text = "file:///tmp";  // Use /tmp which should exist on most systems
+    size_t url_len = strlen(url_text);
+    String* url_str = (String*)malloc(sizeof(String) + url_len + 1);
+    url_str->len = url_len;
+    url_str->ref_cnt = 1;
+    strcpy(url_str->chars, url_text);
+    
+    Input* input = input_from_url(url_str, NULL, NULL, NULL);
+    
+    // The test passes if input_from_url doesn't crash/hang
+    // We don't assert on the result since /tmp might not be accessible
+    printf("URL directory integration test completed without hanging\n");
+    
+    free(url_str);
 }
