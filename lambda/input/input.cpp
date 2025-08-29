@@ -3,6 +3,7 @@
 #include "mime-detect.h"
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/stat.h>
 
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
@@ -406,7 +407,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, attr_value, input->pool);
 }
 
-extern "C" Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor) {
+extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
     const char* effective_type = NULL;
     
     // Determine the effective type to use
@@ -564,7 +565,7 @@ static char* read_file_from_url(Url* url) {
     return content;
 }
 
-extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
+Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     printf("input_data at:: %s, type: %s, cwd:  %s\n", url ? url->chars : "null", type ? type->chars : "null", 
         cwd && cwd->pathname && cwd->pathname->chars ? cwd->pathname->chars : "null");
     
@@ -580,6 +581,22 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url*
         return NULL; 
     }
     
+    // Check if URL points to a directory (only for file:// URLs)
+    if (abs_url->scheme == URL_SCHEME_FILE) {
+        const char* pathname = url_get_pathname(abs_url);
+        if (pathname) {
+            struct stat st;
+            if (stat(pathname, &st) == 0 && S_ISDIR(st.st_mode)) {
+                // URL points to a directory - use directory listing
+                printf("URL points to directory, using input_from_directory\n");
+                Input* input = input_from_directory(pathname, true, 10); // recursive with depth 10
+                url_destroy(abs_url);
+                return input;
+            }
+        }
+    }
+    
+    // URL points to a file - read as normal
     char* source = read_file_from_url(abs_url);
     if (!source) {
         printf("Failed to read document at URL: %s\n", url ? url->chars : "null");
@@ -589,6 +606,7 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url*
     
     Input* input = input_from_source(source, abs_url, type, flavor);
     free(source);  // Free the source string after parsing
+    url_destroy(abs_url);
     return input;
 }
 
