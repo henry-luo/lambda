@@ -35,6 +35,8 @@ class RoundtripTester:
             ("json", "yaml"),
             ("xml", "json"),
             ("html", "markdown"),
+            ("latex", "json"),     # LaTeX roundtrip through JSON
+            ("wiki", "json"),      # Wiki roundtrip through JSON
             # Add more symmetric pairs as Lambda supports them
         ]
         
@@ -44,7 +46,9 @@ class RoundtripTester:
             "json": ["yaml", "xml", "csv"],
             "html": ["markdown", "json", "xml"],
             "xml": ["json", "yaml"],
-            "text": ["json"]  # Simple text to structured format
+            "text": ["json"],  # Simple text to structured format
+            "latex": ["json", "html", "markdown"],  # LaTeX to structured formats
+            "wiki": ["json", "html", "markdown"]   # Wiki markup to structured formats
         }
     
     def run_lambda_convert(self, input_file: Path, from_format: str, to_format: str, output_file: Path) -> Tuple[bool, str, float]:
