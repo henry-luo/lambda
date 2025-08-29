@@ -1,5 +1,5 @@
 #include "format.h"
-//#define DEBUG_MATH_FORMAT 1
+#define DEBUG_MATH_FORMAT 1
 #include <stdio.h>
 
 //#define DEBUG_FORMAT_MATH 1
@@ -1213,14 +1213,23 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
 
 // Format a math item (could be element, string, number, etc.)
 static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
-    TypeId type = get_type_id(item);
-    
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=%p\n", depth, (int)type, (void*)item.pointer);
-    fprintf(stderr, "DEBUG format_math_item: sb before - length=%zu, str='%s'\n", 
-            sb->length, sb->str ? sb->str : "(null)");
+    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=0x%llx\n", depth, get_type_id(item), item.item);
+    fprintf(stderr, "DEBUG format_math_item: sb before - length=%ld, str='%s'\n", sb->length, sb->str ? sb->str : "NULL");
     #endif
     
+    // Check for invalid raw integer values that weren't properly encoded
+    if (item.item > 0 && item.item < 0x1000) {
+        char num_buf[32];
+        snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
+        strbuf_append_str(sb, num_buf);
+        #ifdef DEBUG_MATH_FORMAT
+        fprintf(stderr, "DEBUG format_math_item: sb after - length=%ld, str='%s'\n", sb->length, sb->str ? sb->str : "NULL");
+        #endif
+        return;
+    }
+    
+    TypeId type = get_type_id(item); 
     switch (type) {
         case LMD_TYPE_ELEMENT: {
             #ifdef DEBUG_MATH_FORMAT
@@ -1257,10 +1266,18 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             break;
         }
         case LMD_TYPE_INT: {
-            int val = item.int_val;
-            char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%d", val);
-            strbuf_append_str(sb, num_buf);
+            // Check for invalid raw integer values that weren't properly encoded
+            if (item.item < 0x1000 && item.item > 0) {
+                printf("DEBUG: Detected invalid raw integer item=0x%llx, treating as value=%lld\n", item.item, item.item);
+                char num_buf[32];
+                snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
+                strbuf_append_str(sb, num_buf);
+            } else {
+                int val = item.int_val;
+                char num_buf[32];
+                snprintf(num_buf, sizeof(num_buf), "%d", val);
+                strbuf_append_str(sb, num_buf);
+            }
             break;
         }
         case LMD_TYPE_INT64: {
