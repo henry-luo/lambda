@@ -203,20 +203,13 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 goto advance_field;
             }
             // add indentation if needed
-            if (i) {
-                if (indent && !is_attrs) {
-                    strbuf_append_str(strbuf, "\n");
-                    for (int j = 0; j < depth; j++) strbuf_append_str(strbuf, indent);
-                } else {
-                    strbuf_append_str(strbuf, " ");
-                }
-            } 
-            else if (indent && !is_attrs) {
-                // First field with indentation
-                strbuf_append_char(strbuf, '\n');
+            if (indent && !is_attrs) {
+                strbuf_append_str(strbuf, "\n");
                 for (int j = 0; j < depth; j++) strbuf_append_str(strbuf, indent);
-            }            
-            strbuf_append_format(strbuf, "%.*s: ", (int)field->name->length, field->name->str);
+            } else {
+                strbuf_append_str(strbuf, " ");
+            }
+            strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 strbuf_append_str(strbuf, "null");
@@ -263,7 +256,6 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 }
                 break;
             }
-            
             case LMD_TYPE_BINARY: {
                 String *bin = *(String**)data;
                 if (bin && bin->chars) {
@@ -273,17 +265,16 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 }
                 break;
             }
-            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_LIST:  
-            case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
+            case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
-                log_debug("print named item: %p, type: %d", data, field->type->type_id);
                 print_item(strbuf, *(Item*)data, depth + 1, indent);
                 break;
             case LMD_TYPE_ANY:
                 print_typeditem(strbuf, (TypedItem*)data, depth + 1, indent);
                 break;
             default:
-                strbuf_append_format(strbuf, "unknown");
+                strbuf_append_format(strbuf, "[unknown]");
             }
         }
         
@@ -567,8 +558,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         strbuf_append_format(strbuf, "<%.*s", (int)elmt_type->name.length, elmt_type->name.str);
 
         // print attributes
-        if (elmt_type->length) { 
-            strbuf_append_char(strbuf, ' ');
+        if (elmt_type->length) {
             print_named_items(strbuf, (TypeMap*)elmt_type, element->data, depth + 1, indent, true);
         }
         // print content
@@ -579,11 +569,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
                 if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
+            // if (indent) {
+            //     strbuf_append_char(strbuf, '\n');
+            //     for (int i=0; i<depth-1; i++) strbuf_append_str(strbuf, indent); 
+            // }
         }
-        // if (indent) {
-        //     strbuf_append_char(strbuf, '\n');
-        //     for (int i=0; i<depth-1; i++) strbuf_append_str(strbuf, indent); 
-        // }
         strbuf_append_char(strbuf, '>');
         break;
     }
