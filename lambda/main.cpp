@@ -445,6 +445,8 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_org_string(input->pool, input->root);
         } else if (strcmp(to_format, "wiki") == 0) {
             formatted_output = format_wiki_string(input->pool, input->root);
+        } else if (strcmp(to_format, "text") == 0) {
+            formatted_output = format_text_string(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             // Format as markdown using string buffer
             StrBuf* sb = strbuf_new_cap(1024);
@@ -453,7 +455,7 @@ int exec_convert(int argc, char* argv[]) {
             strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, markdown\n");
+            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, text, markdown\n");
             pool_variable_destroy(temp_pool);
             return 1;
         }
@@ -585,8 +587,8 @@ int main(int argc, char *argv[]) {
             printf("  -o <output>    Output file path (required)\n");
             printf("  -h, --help     Show this help message\n");
             printf("\nSupported Formats:\n");
-            printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org\n");
-            printf("  Document formats: pdf, rtf, text\n");
+            printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org, text\n");
+            printf("  Document formats: pdf, rtf\n");
             printf("  Markup formats:  asciidoc, textile, wiki, man\n");
             printf("  Data formats:    json, xml, yaml, csv, ini, toml\n");
             printf("\nCommon Conversions:\n");
