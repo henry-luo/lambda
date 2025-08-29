@@ -136,11 +136,7 @@ void write_type(StrBuf* code_buf, Type *type) {
     }
 }
 
-void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth);
-
-void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data) {
-    print_named_items_with_depth(strbuf, map_type, map_data, 0);
-}
+void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, char* indent = NULL, bool is_attrs = false);
 
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     if (decimal == NULL || decimal->dec_val == NULL) {
@@ -158,7 +154,7 @@ void print_decimal(StrBuf *strbuf, Decimal *decimal) {
     free(buf);  // libmpdec allocates the string, we need to free it
 }
 
-void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth) {
+void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth, char* indent, bool is_attrs) {
     // Prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
     if (!map_type) { strbuf_append_str(strbuf, "[null map_type]");  return; }
@@ -177,36 +173,50 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             strbuf_append_str(strbuf, "[invalid field pointer]");
             break;
         }
-        if (i) strbuf_append_str(strbuf, ", ");
+        if (i) strbuf_append_char(strbuf, ',');
         void* data = ((char*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
-        log_debug("nested map at field %d: %p", i, data);
+            log_debug("nested map at field %d: %p", i, data);
             Map *nest_map = *(Map**)data;
             TypeMap *nest_map_type = (TypeMap*)nest_map->type;
-            print_named_items_with_depth(strbuf, nest_map_type, nest_map->data, depth + 1);
+            print_named_items(strbuf, nest_map_type, nest_map->data, depth + 1, indent, is_attrs);
         }
         else {
             // printf("field %d: %p, name: %.*s, type: %d, data: %p\n", 
             //     i, field, (int)field->name->length, field->name->str, field->type->type_id, data);
             // Safety check for field name and type
             if (!field->name || (uintptr_t)field->name < 0x1000) {
-        log_error("invalid field name: %p", field->name);
+                log_error("invalid field name: %p", field->name);
                 strbuf_append_str(strbuf, "[invalid field name]");
                 goto advance_field;
             }
             if (!field->type || (uintptr_t)field->type < 0x1000) {
-        log_error("invalid field type: %p", field->type);
+                log_error("invalid field type: %p", field->type);
                 strbuf_append_str(strbuf, "[invalid field type]");
                 goto advance_field;
             }
             // Safety check for type_id range
-            if (field->type->type_id < 0 || field->type->type_id > 50) {
-        log_error("invalid type_id: %d", field->type->type_id);
+            TypeId field_type_id = field->type->type_id;
+            if (field_type_id > 50) {
+                log_error("invalid type_id: %d", field_type_id);
                 strbuf_append_str(strbuf, "[invalid type_id]");
                 goto advance_field;
             }
-            
-            strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
+            // add indentation if needed
+            if (i) {
+                if (indent && !is_attrs) {
+                    strbuf_append_str(strbuf, "\n");
+                    for (int j = 0; j < depth; j++) strbuf_append_str(strbuf, indent);
+                } else {
+                    strbuf_append_str(strbuf, " ");
+                }
+            } 
+            else if (indent && !is_attrs) {
+                // First field with indentation
+                strbuf_append_char(strbuf, '\n');
+                for (int j = 0; j < depth; j++) strbuf_append_str(strbuf, indent);
+            }            
+            strbuf_append_format(strbuf, "%.*s: ", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 strbuf_append_str(strbuf, "null");
@@ -266,11 +276,11 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_LIST:  
             case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
-        log_debug("print named item: %p, type: %d", data, field->type->type_id);
-                print_item(strbuf, *(Item*)data, depth + 1);
+                log_debug("print named item: %p, type: %d", data, field->type->type_id);
+                print_item(strbuf, *(Item*)data, depth + 1, indent);
                 break;
             case LMD_TYPE_ANY:
-                print_typeditem(strbuf, (TypedItem*)data, depth + 1);
+                print_typeditem(strbuf, (TypedItem*)data, depth + 1, indent);
                 break;
             default:
                 strbuf_append_format(strbuf, "unknown");
@@ -280,6 +290,12 @@ void print_named_items_with_depth(StrBuf *strbuf, TypeMap *map_type, void* map_d
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
+    }
+    
+    // Add closing indentation if we have nested structures
+    if (indent && !is_attrs && map_type->length > 0) {
+        strbuf_append_char(strbuf, '\n');
+        for (int i = 0; i < depth - 1; i++) strbuf_append_str(strbuf, indent);
     }
 }
 
@@ -541,7 +557,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         Map *map = item.map;
         TypeMap *map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
-        print_named_items_with_depth(strbuf, map_type, map->data, depth + 1);
+        print_named_items(strbuf, map_type, map->data, !depth ? 1: depth, indent);
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -553,9 +569,8 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         // print attributes
         if (elmt_type->length) { 
             strbuf_append_char(strbuf, ' ');
-            print_named_items_with_depth(strbuf, (TypeMap*)elmt_type, element->data, depth + 1);
+            print_named_items(strbuf, (TypeMap*)elmt_type, element->data, depth + 1, indent, true);
         }
-        
         // print content
         if (element->length) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
