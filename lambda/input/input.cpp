@@ -530,20 +530,6 @@ extern "C" Input* input_from_source(char* source, Url* abs_url, String* type, St
     return input;
 }
 
-// Helper function to get current working directory as file URL
-static Url* get_current_dir_url() {
-    char cwd[1024];
-    if (getcwd(cwd, sizeof(cwd)) == NULL) {
-        return NULL;
-    }
-    
-    // Convert to file:// URL format
-    char file_url[1200];
-    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
-    
-    return url_parse(file_url);
-}
-
 // Helper function to read text file from file:// URL
 static char* read_file_from_url(Url* url) {
     if (!url || url->scheme != URL_SCHEME_FILE) {
@@ -590,31 +576,7 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url*
     
     Url* abs_url;
     if (cwd) {
-        // WORKAROUND: Manual path construction due to url_parse_with_base bug
-        if (cwd->pathname && cwd->pathname->chars && url->chars[0] != '/') {
-            // Construct absolute path manually
-            size_t base_len = strlen(cwd->pathname->chars);
-            size_t url_len = strlen(url->chars);
-            size_t total_len = base_len + 1 + url_len + 1; // +1 for '/', +1 for null terminator
-            
-            char* abs_path = (char*)malloc(total_len);
-            if (abs_path) {
-                snprintf(abs_path, total_len, "%s/%s", cwd->pathname->chars, url->chars);
-                printf("DEBUG: manually constructed path: %s\n", abs_path);
-                
-                // Create file URL from absolute path
-                size_t file_url_len = strlen("file://") + strlen(abs_path) + 1;
-                char* file_url = (char*)malloc(file_url_len);
-                if (file_url) {
-                    snprintf(file_url, file_url_len, "file://%s", abs_path);
-                    abs_url = url_parse(file_url);
-                    free(file_url);
-                }
-                free(abs_path);
-            }
-        } else {
-            abs_url = url_parse_with_base(url->chars, cwd);
-        }
+        abs_url = url_parse_with_base(url->chars, cwd);
     } else {
         abs_url = url_parse(url->chars);
     }
