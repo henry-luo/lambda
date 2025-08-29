@@ -347,6 +347,90 @@ Test(url_parser, relative_url_with_port) {
     url_destroy(base);
 }
 
+Test(url_parser, directory_path_resolution) {
+    // Test the specific bug case: directory paths ending with '/'
+    Url* base = url_parse("file:///Users/henryluo/Projects/lambda/test/input/");
+    cr_assert_not_null(base, "Base directory URL should parse successfully");
+    
+    Url* url = url_parse_with_base("test.csv", base);
+    cr_assert_not_null(url, "Relative URL should resolve against directory");
+    cr_assert_str_eq(url->pathname->chars, "/Users/henryluo/Projects/lambda/test/input/test.csv", 
+                     "Directory path resolution should preserve all directory segments");
+    
+    url_destroy(url);
+    url_destroy(base);
+}
+
+Test(url_parser, file_vs_directory_resolution) {
+    // Test difference between file and directory base paths
+    
+    // File base (no trailing slash) - should exclude filename
+    Url* file_base = url_parse("file:///path/to/file.txt");
+    cr_assert_not_null(file_base, "File base URL should parse");
+    
+    Url* file_resolved = url_parse_with_base("other.txt", file_base);
+    cr_assert_not_null(file_resolved, "File relative resolution should work");
+    cr_assert_str_eq(file_resolved->pathname->chars, "/path/to/other.txt", 
+                     "File base should exclude filename from resolution");
+    
+    // Directory base (trailing slash) - should preserve all segments
+    Url* dir_base = url_parse("file:///path/to/dir/");
+    cr_assert_not_null(dir_base, "Directory base URL should parse");
+    
+    Url* dir_resolved = url_parse_with_base("other.txt", dir_base);
+    cr_assert_not_null(dir_resolved, "Directory relative resolution should work");
+    cr_assert_str_eq(dir_resolved->pathname->chars, "/path/to/dir/other.txt", 
+                     "Directory base should preserve all directory segments");
+    
+    url_destroy(file_base);
+    url_destroy(file_resolved);
+    url_destroy(dir_base);
+    url_destroy(dir_resolved);
+}
+
+Test(url_parser, nested_directory_resolution) {
+    // Test nested directory resolution with various relative paths
+    Url* base = url_parse("https://example.com/deep/nested/directory/");
+    cr_assert_not_null(base, "Nested directory base should parse");
+    
+    // Simple file in same directory
+    Url* url1 = url_parse_with_base("file.txt", base);
+    cr_assert_not_null(url1, "Simple file resolution should work");
+    cr_assert_str_eq(url1->pathname->chars, "/deep/nested/directory/file.txt", 
+                     "Simple file should resolve in same directory");
+    
+    // Subdirectory navigation
+    Url* url2 = url_parse_with_base("subdir/file.txt", base);
+    cr_assert_not_null(url2, "Subdirectory navigation should work");
+    cr_assert_str_eq(url2->pathname->chars, "/deep/nested/directory/subdir/file.txt", 
+                     "Subdirectory should be added to directory path");
+    
+    // Parent directory navigation
+    Url* url3 = url_parse_with_base("../file.txt", base);
+    cr_assert_not_null(url3, "Parent directory navigation should work");
+    cr_assert_str_eq(url3->pathname->chars, "/deep/nested/file.txt", 
+                     "Parent navigation should work from directory");
+    
+    url_destroy(base);
+    url_destroy(url1);
+    url_destroy(url2);
+    url_destroy(url3);
+}
+
+Test(url_parser, root_directory_edge_cases) {
+    // Test edge cases with root directory
+    Url* root_base = url_parse("file:///");
+    cr_assert_not_null(root_base, "Root directory should parse");
+    
+    Url* resolved = url_parse_with_base("file.txt", root_base);
+    cr_assert_not_null(resolved, "Root directory resolution should work");
+    cr_assert_str_eq(resolved->pathname->chars, "/file.txt", 
+                     "File should resolve directly under root");
+    
+    url_destroy(root_base);
+    url_destroy(resolved);
+}
+
 
 
 Test(url_parser, memory_management) {

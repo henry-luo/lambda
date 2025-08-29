@@ -386,10 +386,13 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
     char* segments[128];
     int segment_count = 0;
     
-    // Parse base path segments, excluding the last one (which is treated as filename)
+    // Parse base path segments, excluding the last one only if it's not a directory
     if (base_path && strlen(base_path) > 1) {
         char base_copy[2048];
         strcpy(base_copy, base_path + 1); // Skip leading slash
+        
+        // Check if base path ends with '/' (indicating it's a directory)
+        bool is_directory = (base_path[strlen(base_path) - 1] == '/');
         
         // Split into segments
         char* temp_segments[128];
@@ -404,15 +407,16 @@ char* url_resolve_path(const char* base_path, const char* relative_path) {
             token = strtok(NULL, "/");
         }
         
-        // Copy all segments except the last one (RFC 3986: exclude filename)
-        for (int i = 0; i < temp_count - 1 && i < 127; i++) {
+        // Copy segments: if directory, keep all; if file, exclude last (RFC 3986)
+        int segments_to_copy = is_directory ? temp_count : (temp_count > 0 ? temp_count - 1 : 0);
+        for (int i = 0; i < segments_to_copy && i < 127; i++) {
             segments[segment_count] = temp_segments[i];
             segment_count++;
         }
         
-        // Free the last segment (filename)
-        if (temp_count > 0) {
-            free(temp_segments[temp_count - 1]);
+        // Free unused segments
+        for (int i = segments_to_copy; i < temp_count; i++) {
+            free(temp_segments[i]);
         }
     }
     
