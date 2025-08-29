@@ -2345,9 +2345,22 @@ Type* fn_type(Item item) {
 extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
-    printf("input_data at: %s, type: %s, flavor: %s\n", url->chars, 
-        type ? type->chars : "null", flavor ? flavor->chars : "null");
-    return input_from_url(url, type, flavor, (Url*)ctx->cwd);
+    const char* cwd_str = "null";
+    if (ctx && ctx->cwd) {
+        Url* cwd_url = (Url*)ctx->cwd;
+        if (cwd_url->pathname && cwd_url->pathname->chars) {
+            cwd_str = cwd_url->pathname->chars;
+        }
+    }
+    
+    printf("input_data at:: %s, type: %s, flavor: %s, cwd: %s\n", 
+        url ? url->chars : "null",
+        type ? type->chars : "null", 
+        flavor ? flavor->chars : "null", 
+        cwd_str);
+    
+    // Pass NULL for cwd if ctx is NULL to avoid crash
+    return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
 }
 
 Item fn_input(Item url, Item type) {
@@ -2413,6 +2426,12 @@ Item fn_input(Item url, Item type) {
     else {
         log_debug("input type must be a string, symbol, or map, got type %d", type_id);
         return ItemNull;  // todo: push error
+    }
+    
+    // Check if context is properly initialized
+    if (!context) {
+        log_debug("Error: context is NULL in fn_input");
+        return ItemNull;
     }
     
     Input *input = input_data(context, url_str, type_str, flavor_str);

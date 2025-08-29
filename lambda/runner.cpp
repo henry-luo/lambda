@@ -1,5 +1,6 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
+#include "../lib/url.h"
 #include "name_pool.h"
 #include <time.h>
 #include <stdlib.h>
@@ -311,7 +312,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.consts = runner->script->const_list->data;
     runner->context.num_stack = num_stack_create(16);
     runner->context.result = ItemNull;  // exec result
-    runner->context.cwd = (char*)"./";  // Simple fallback for current directory
+    runner->context.cwd = url_parse("file:///Users/henryluo/Projects/lambda");  // Proper URL object for current directory
     
     // Initialize decimal context
     runner->context.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));

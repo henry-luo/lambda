@@ -1,5 +1,6 @@
 #include "input.h"
 #include "input-common.h"
+#include "../lambda.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -745,6 +746,7 @@ static Item parse_math_number(Input *input, const char **math) {
     }
     
     strbuf_full_reset(sb);
+    printf("DEBUG: parse_math_number returning item=0x%llx, type=%d\n", result.item, get_type_id(result));
     return result;
 }
 
@@ -759,9 +761,37 @@ static Item parse_math_identifier(Input *input, const char **math) {
     }
     
     // Check if we have valid content (same pattern as command parsing)
-    if (sb->length <= sizeof(uint32_t)) { strbuf_full_reset(sb);  return {.item = ITEM_ERROR}; }
+    if (sb->length <= sizeof(uint32_t)) { 
+        strbuf_full_reset(sb);  
+        return {.item = ITEM_ERROR}; 
+    }
 
-    String *id_string = strbuf_to_string(sb);
+    // Create a null-terminated string from the buffer content
+    char temp_buffer[256];  // Reasonable limit for math identifiers
+    int content_len = sb->length - sizeof(uint32_t);
+    if (content_len >= sizeof(temp_buffer)) {
+        strbuf_full_reset(sb);
+        return {.item = ITEM_ERROR};
+    }
+    
+    // Copy the content and null-terminate
+    memcpy(temp_buffer, sb->str + sizeof(uint32_t), content_len);
+    temp_buffer[content_len] = '\0';
+    
+    // Create proper string using input pool allocation
+    String *id_string = input_create_string(input, temp_buffer);
+    strbuf_full_reset(sb);
+    
+    if (!id_string) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    // Verify the string pointer is valid before encoding
+    if ((uintptr_t)id_string < 0x1000) {
+        // Invalid pointer - this would create a corrupted y2it value
+        return {.item = ITEM_ERROR};
+    }
+    
     Item symbol_item = {.item = y2it(id_string)};
 
     // Check for prime notation after the identifier
@@ -896,7 +926,27 @@ static Item parse_latex_frac(Input *input, const char **math) {
 static Item parse_latex_sqrt(Input *input, const char **math) {
     skip_math_whitespace(math);
     
-    // expect opening brace
+    Item index_item = {.item = ITEM_NULL};
+    
+    // Check for optional index [n]
+    if (**math == '[') {
+        (*math)++; // skip [
+        
+        // parse index expression
+        index_item = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (index_item.item == ITEM_ERROR) {
+            return {.item = ITEM_ERROR};
+        }
+        
+        // expect closing bracket
+        if (**math != ']') {
+            return {.item = ITEM_ERROR};
+        }
+        (*math)++; // skip ]
+        skip_math_whitespace(math);
+    }
+    
+    // expect opening brace for radicand
     if (**math != '{') {
         return {.item = ITEM_ERROR};
     }
@@ -914,14 +964,30 @@ static Item parse_latex_sqrt(Input *input, const char **math) {
     }
     (*math)++; // skip }
     
-    // create sqrt expression element
-    Element* sqrt_element = create_math_element(input, "sqrt");
-    if (!sqrt_element) {
-        return {.item = ITEM_ERROR};
+    // create appropriate element based on whether index is present
+    Element* sqrt_element;
+    if (index_item.item == ITEM_NULL) {
+        // Regular square root
+        sqrt_element = create_math_element(input, "sqrt");
+        if (!sqrt_element) {
+            return {.item = ITEM_ERROR};
+        }
+        
+        // add inner expression as child
+        list_push((List*)sqrt_element, inner_expr);
+    } else {
+        // Root with index
+        sqrt_element = create_math_element(input, "root");
+        if (!sqrt_element) {
+            return {.item = ITEM_ERROR};
+        }
+        
+        // add index and radicand as children
+        printf("DEBUG: Adding sqrt index item=0x%llx, type=%d\n", index_item.item, get_type_id(index_item));
+        list_push((List*)sqrt_element, index_item);
+        printf("DEBUG: Adding sqrt radicand item=0x%llx, type=%d\n", inner_expr.item, get_type_id(inner_expr));
+        list_push((List*)sqrt_element, inner_expr);
     }
-    
-    // add inner expression as child (no op attribute needed)
-    list_push((List*)sqrt_element, inner_expr);
     
     // set content length
     ((TypeElmt*)sqrt_element->type)->content_length = ((List*)sqrt_element)->length;
@@ -1555,6 +1621,31 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 ((TypeElmt*)bracket_element->type)->content_length = ((List*)bracket_element)->length;
                 
                 return {.item = (uint64_t)bracket_element};
+            } else if (**math == '|') {
+                // Handle absolute value notation |x|
+                (*math)++; // skip first |
+                
+                Item inner = parse_math_expression(input, math, flavor);
+                if (inner .item == ITEM_ERROR) {
+                    return {.item = ITEM_ERROR};
+                }
+                
+                // Expect closing |
+                if (**math != '|') {
+                    return {.item = ITEM_ERROR};
+                }
+                (*math)++; // skip closing |
+                
+                // Create abs element
+                Element* abs_element = create_math_element(input, "abs");
+                if (!abs_element) {
+                    return {.item = ITEM_ERROR};
+                }
+                
+                list_push((List*)abs_element, inner);
+                ((TypeElmt*)abs_element->type)->content_length = ((List*)abs_element)->length;
+                
+                return {.item = (uint64_t)abs_element};
             }
             break;
             
@@ -2089,6 +2180,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             // Handle factorial notation
             if (**math == '!') {
                 (*math)++; // skip !
+                printf("DEBUG: Creating factorial with base item=0x%llx, type=%d\n", left.item, get_type_id(left));
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
                     return {.item = ITEM_ERROR};
@@ -3721,7 +3813,13 @@ static Item parse_basic_operator(Input *input, const char **math, MathFlavor fla
 // Group parser: Functions
 static Item parse_function(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
     if (def->has_arguments) {
-        return parse_function_call(input, math, flavor, def->element_name);
+        // For LaTeX flavor, use LaTeX-style function parsing (space-separated arguments)
+        if (flavor == MATH_FLAVOR_LATEX) {
+            return parse_latex_function(input, math, def->element_name);
+        } else {
+            // For other flavors, use parentheses-based function calls
+            return parse_function_call(input, math, flavor, def->element_name);
+        }
     } else {
         return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
     }
@@ -4322,7 +4420,9 @@ static Item parse_latex_root_with_index(Input *input, const char **math) {
     }
     
     // add index and radicand as children
+    printf("DEBUG: Adding root index item=0x%llx, type=%d\n", index.item, get_type_id(index));
     list_push((List*)root_element, index);
+    printf("DEBUG: Adding root radicand item=0x%llx, type=%d\n", radicand.item, get_type_id(radicand));
     list_push((List*)root_element, radicand);
     
     // set content length
