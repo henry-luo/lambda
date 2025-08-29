@@ -84,9 +84,6 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     if (!root) { free(input); return NULL; }
     // Traverse and populate
     traverse_directory(input, root, directory_path, recursive, max_depth, 0);
-    Item root_item = {0};
-    root_item.type_id = LMD_TYPE_ELEMENT;
-    root_item.element = root;
-    input->root = root_item;
+    input->root = {.item = (uint64_t)root};
     return input;
 }
