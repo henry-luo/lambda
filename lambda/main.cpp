@@ -443,6 +443,8 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_rst_string(input->pool, input->root);
         } else if (strcmp(to_format, "org") == 0) {
             formatted_output = format_org_string(input->pool, input->root);
+        } else if (strcmp(to_format, "wiki") == 0) {
+            formatted_output = format_wiki_string(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             // Format as markdown using string buffer
             StrBuf* sb = strbuf_new_cap(1024);
@@ -451,7 +453,7 @@ int exec_convert(int argc, char* argv[]) {
             strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, markdown\n");
+            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, markdown\n");
             pool_variable_destroy(temp_pool);
             return 1;
         }
