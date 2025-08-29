@@ -157,6 +157,9 @@ String* url_create_string(const char* str);
 void url_free_string(String* str);
 String* url_string_clone(const String* str);
 
+Url* get_current_dir();
+Url* parse_url(Url *base, const char* doc_url);
+
 #ifdef __cplusplus
 }
 #endif
