@@ -94,17 +94,17 @@ void find_errors(TSNode node) {
 }
 
 void init_module_import(Transpiler *tp, AstScript *script) {
-        log_debug("init imports of script");
+    log_debug("init imports of script");
     AstNode* child = script->child;
     while (child) {
         if (child->node_type == AST_NODE_IMPORT) {
             AstImportNode* import = (AstImportNode*)child;
-        log_debug("init import: %.*s", (int)(import->module.length), import->module.str);
+            log_debug("init import: %.*s", (int)(import->module.length), import->module.str);
             // find the module bss item
             char buf[256];
             snprintf(buf, sizeof(buf), "m%d", import->script->index);
             MIR_item_t imp = find_import(tp->jit_context, buf);
-        log_debug("imported item: %p", imp);
+            log_debug("imported item: %p", imp);
             if (!imp) {
                 log_error("Error: Failed to find import item for module %.*s", 
                     (int)(import->module.length), import->module.str);
@@ -115,12 +115,12 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
             node = ((AstScript*)node)->child;
-        log_debug("finding content node");
+            log_debug("finding content node");
             while (node) {
                 if (node->node_type == AST_NODE_CONTENT) break;
                 node = node->next;
             }
-        log_error("misssing content node");
+            log_error("missing content node");
             node = ((AstListNode*)node)->item;
             while (node) {
                 if (node->node_type == AST_NODE_FUNC) {
@@ -171,7 +171,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         log_error("Error: Source code is NULL");
         return; 
     }
-        log_notice("Start transpiling %s...", script_path);
+    log_notice("Start transpiling %s...", script_path);
     win_timer start, end;
     
     // create a parser
