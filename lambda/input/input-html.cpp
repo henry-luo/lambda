@@ -272,11 +272,12 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
                         strbuf_append_str(sb, entity_value);
                         *html = entity_end + 1; // Skip past the semicolon
                     } else {
-                        // Unknown entity, output as-is with replacement character
+                        // Unknown entity, preserve as-is for round-trip compatibility
                         strbuf_append_char(sb, '&');
-                        for (const char* p = entity_start; p <= entity_end; p++) {
+                        for (const char* p = entity_start; p < entity_end; p++) {
                             strbuf_append_char(sb, *p);
                         }
+                        strbuf_append_char(sb, ';');
                         *html = entity_end + 1;
                     }
                 } else {

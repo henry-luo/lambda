@@ -109,7 +109,7 @@ static String* parse_string_content(Input *input, const char **xml, char end_cha
                             resolved++;
                         }
                     } else {
-                        // Unknown entity - append as-is
+                        // Unknown entity - preserve as-is for roundtrip compatibility
                         strbuf_append_char(sb, '&');
                         const char* temp = entity_start;
                         while (temp < *xml) {
@@ -682,10 +682,10 @@ static Item parse_element(Input *input, const char **xml) {
                                             resolved++;
                                         }
                                     } else {
-                                        // Unknown entity - append as-is
+                                        // Unknown entity - preserve as-is for roundtrip compatibility
                                         strbuf_append_char(sb, '&');
                                         const char* temp = entity_start;
-                                        while (temp < text_start) {
+                                        while (temp <= text_start) {
                                             strbuf_append_char(sb, *temp);
                                             temp++;
                                         }
