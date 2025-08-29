@@ -108,7 +108,7 @@ get_test_suite_category() {
         "test_strbuf"|"test_strview"|"test_variable_pool"|"test_num_stack"|"test_datetime"|"test_url"|"test_url_extra") 
             echo "library" ;;
         # Input suite tests  
-        "test_mime_detect"|"test_math"|"test_markup_roundtrip"|"test_input_roundtrip")
+        "test_mime_detect"|"test_math"|"test_markup_roundtrip"|"test_input_roundtrip"|"test_dir")
             echo "input" ;;
         # MIR suite tests
         "test_mir")
@@ -147,6 +147,7 @@ get_c_test_display_name() {
     local exe_name="$1"
     case "$exe_name" in
         "test_datetime") echo "📅 DateTime Tests" ;;
+        "test_dir") echo "📁 Directory Listing Tests" ;;
         "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
