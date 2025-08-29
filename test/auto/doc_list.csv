@@ -1,12 +1,12 @@
 url,format,source,size_bytes,discovered_date,test_status,last_tested,issues_count,local_filename,content_hash,notes
-# Initial seed documents for automated testing - downloaded to test_output/auto/
-https://raw.githubusercontent.com/torvalds/linux/main/README,markdown,github,15420,2025-08-29,pending,null,0,md_001_github_linux_readme.md,sha256:pending,Linux kernel README
-https://raw.githubusercontent.com/microsoft/vscode/main/README.md,markdown,github,8934,2025-08-29,pending,null,0,md_002_github_vscode_readme.md,sha256:pending,VS Code README
-https://api.github.com/repos/microsoft/vscode,json,github_api,12000,2025-08-29,pending,null,0,json_001_github_api_vscode.json,sha256:pending,GitHub repository API response
-https://httpbin.org/json,json,test_api,500,2025-08-29,pending,null,0,json_002_httpbin_sample.json,sha256:pending,Simple JSON test endpoint
-https://www.w3.org/TR/html52/,html,w3c_spec,150000,2025-08-29,pending,null,0,html_001_w3c_html52_spec.html,sha256:pending,HTML5.2 specification
-https://en.wikipedia.org/wiki/Main_Page,html,wikipedia,80000,2025-08-29,pending,null,0,html_002_wikipedia_main.html,sha256:pending,Wikipedia main page
-https://feeds.feedburner.com/oreilly/radar,xml,rss_feed,25000,2025-08-29,pending,null,0,xml_001_oreilly_rss_feed.xml,sha256:pending,O'Reilly Radar RSS feed
-https://www.w3.org/2005/11/its/its.xsd,xml,w3c_schema,15000,2025-08-29,pending,null,0,xml_002_w3c_its_schema.xml,sha256:pending,W3C ITS XML Schema
-https://docs.github.com/en/rest/reference/repos,html,github_docs,45000,2025-08-29,pending,null,0,html_003_github_docs_repos.html,sha256:pending,GitHub API documentation
-https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore,text,github,2000,2025-08-29,pending,null,0,text_001_github_python_gitignore.txt,sha256:pending,Python gitignore template
+# Automated document testing index - managed by test automation system
+https://raw.githubusercontent.com/torvalds/linux/main/README,markdown,github,15420,2025-08-29,download_failed,null,3,md_001_github_linux_readme.md,sha256:pending,Linux kernel README
+https://raw.githubusercontent.com/microsoft/vscode/main/README.md,markdown,github,6860,2025-08-29,passed,2025-08-29T11:43:25.854999,0,md_002_github_vscode_readme.md,sha256:bc240cfbaa2f2037,VS Code README
+https://api.github.com/repos/microsoft/vscode,json,github_api,6370,2025-08-29,failed,2025-08-29T11:43:25.882075,3,json_001_github_api_vscode.json,sha256:cdfc51c8f1b2612c,GitHub repository API response
+https://httpbin.org/json,json,test_api,429,2025-08-29,failed,2025-08-29T11:43:25.910499,3,json_002_httpbin_sample.json,sha256:bab3dfd2a6c992e4,Simple JSON test endpoint
+https://www.w3.org/TR/html52/,html,w3c_spec,149815,2025-08-29,passed,2025-08-29T11:43:25.938712,0,html_001_w3c_html52_spec.html,sha256:dec748f931ea9c19,HTML5.2 specification
+https://en.wikipedia.org/wiki/Main_Page,html,wikipedia,235740,2025-08-29,passed,2025-08-29T11:43:26.393733,0,html_002_wikipedia_main.html,sha256:e566009a75ba08af,Wikipedia main page
+https://feeds.feedburner.com/oreilly/radar,xml,rss_feed,25000,2025-08-29,download_failed,null,3,xml_001_oreilly_rss_feed.xml,sha256:pending,O'Reilly Radar RSS feed
+https://www.w3.org/2005/11/its/its.xsd,xml,w3c_schema,527,2025-08-29,passed,2025-08-29T11:43:26.412250,0,xml_002_w3c_its_schema.xml,sha256:a489449871551c19,W3C ITS XML Schema
+https://docs.github.com/en/rest/reference/repos,html,github_docs,962455,2025-08-29,passed,2025-08-29T11:43:27.043716,0,html_003_github_docs_repos.html,sha256:ce01c22ead962cad,GitHub API documentation
+https://raw.githubusercontent.com/github/gitignore/main/Python.gitignore,text,github,4536,2025-08-29,failed,2025-08-29T11:43:27.050542,3,text_001_github_python_gitignore.txt,sha256:19e096d247db24e6,Python gitignore template
