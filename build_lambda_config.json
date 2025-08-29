@@ -44,14 +44,14 @@
     "libraries": [     
         {
             "name": "curl",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libcurl.a",
+            "include": "/opt/homebrew/opt/curl/include",
+            "lib": "/opt/homebrew/opt/curl/lib/libcurl.a",
             "link": "static",
             "description": "libcurl for HTTP/HTTPS support",
             "platforms": {
                 "darwin": {
-                    "include": "/opt/homebrew/include",
-                    "lib": "/opt/homebrew/lib/libcurl.a"
+                    "include": "/opt/homebrew/opt/curl/include",
+                    "lib": "/opt/homebrew/opt/curl/lib/libcurl.a"
                 },
                 "linux": {
                     "include": "/usr/include",
@@ -350,13 +350,15 @@
                     ["lambda-input-full"],
                     ["lambda-runtime-full"],
                     ["lambda-runtime-full"],
+                    ["lambda-runtime-full"],
                     "one for each of the test executable"
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
                     "test_math.exe",
                     "test_markup_roundtrip.exe",
-                    "test_input_roundtrip.exe"
+                    "test_input_roundtrip.exe",
+                    "test_dir.exe"
                 ],
                 "type": "input",
                 "special_flags": "-fms-extensions -lstdc++",
