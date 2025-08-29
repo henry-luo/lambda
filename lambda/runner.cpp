@@ -129,11 +129,10 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         // get func addr
                         StrBuf *func_name = strbuf_new();
                         write_fn_name(func_name, func_node, NULL);
-        log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
+                        log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
-        log_debug("got fn: %s, func_ptr: %p", func_name->str, fn_ptr);
+                        log_debug("got fn: %s, func_ptr: %p", func_name->str, fn_ptr);
                         strbuf_free(func_name);
-        log_error("misssing content node");
                         *(main_func_t*) mod_def = (main_func_t)fn_ptr;
                         mod_def += sizeof(main_func_t);
                     }
@@ -147,9 +146,9 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         // write the variable name
                         StrBuf *var_name = strbuf_new();
                         write_var_name(var_name, dec_node, NULL);
-        log_debug("loading pub var: %s from script: %s", var_name->str, import->script->reference);
+                        log_debug("loading pub var: %s from script: %s", var_name->str, import->script->reference);
                         void* data_ptr = find_data(import->script->jit_context, var_name->str);
-        log_debug("got pub var addr: %s, %p", var_name->str, data_ptr);
+                        log_debug("got pub var addr: %s, %p", var_name->str, data_ptr);
                         // copy the data
                         int bytes = type_info[dec_node->type->type_id].byte_size;
                         memcpy(mod_def, data_ptr, bytes);
@@ -312,7 +311,7 @@ void runner_setup_context(Runner* runner) {
     runner->context.consts = runner->script->const_list->data;
     runner->context.num_stack = num_stack_create(16);
     runner->context.result = ItemNull;  // exec result
-    runner->context.cwd = url_parse("file:///Users/henryluo/Projects/lambda");  // Proper URL object for current directory
+    runner->context.cwd = get_current_dir();  // proper URL object for current directory
     
     // Initialize decimal context
     runner->context.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
