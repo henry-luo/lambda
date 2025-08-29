@@ -83,7 +83,7 @@
         },
         {
             "name": "mpdec",
-            "include": "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
+            "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
             "link": "static"
         },
@@ -343,15 +343,14 @@
                     "test_math.cpp",
                     "test_markup_roundtrip.cpp",
                     "test/test_input_roundtrip.cpp",
-                    "test_dir.cpp"
+                    "test/test_dir.cpp"
                 ],
                 "library_dependencies": [
                     ["lambda-input-full"],
                     ["lambda-input-full"],
                     ["lambda-runtime-full"],
                     ["lambda-runtime-full"],
-                    ["lambda-runtime-full"],
-                    "one for each of the test executable"
+                    ["lambda-input-full"]
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
