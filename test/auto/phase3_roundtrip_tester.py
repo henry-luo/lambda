@@ -358,7 +358,8 @@ def main():
     
     # Test each document
     for i, doc in enumerate(documents, 1):
-        if doc['test_status'] != 'passed':
+        # Only skip documents that failed to download (download_failed)
+        if doc['test_status'] == 'download_failed':
             print(f"⏩ Skipping {doc['local_filename']} (status: {doc['test_status']})")
             continue
         
