@@ -41,27 +41,13 @@
         "lambda/validator/schema_parser.cpp",
         "lambda/main.cpp"
     ],
-    "libraries": [     
+    "libraries": [
         {
             "name": "curl",
-            "include": "/opt/homebrew/opt/curl/include",
-            "lib": "/opt/homebrew/opt/curl/lib/libcurl.a",
-            "link": "static",
-            "description": "libcurl for HTTP/HTTPS support",
-            "platforms": {
-                "darwin": {
-                    "include": "/opt/homebrew/opt/curl/include",
-                    "lib": "/opt/homebrew/opt/curl/lib/libcurl.a"
-                },
-                "linux": {
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/x86_64-linux-gnu/libcurl.a"
-                },
-                "windows": {
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/libcurl.a"
-                }
-            }
+            "description": "libcurl HTTP client library (minimal build)",
+            "include": "mac-deps/curl-8.10.1/include",
+            "lib": "mac-deps/curl-8.10.1/lib/libcurl.a",
+            "link": "static"
         },
         {
             "name": "tree-sitter",
@@ -88,39 +74,73 @@
             "link": "static"
         },
         {
-            "name": "readline",
+            "name": "utf8proc",
             "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib",
-            "link": "dynamic"
+            "lib": "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+            "link": "static"
         },
         {
             "name": "criterion",
             "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+            "link": "static"
+        },
+        {
+            "name": "ssl",
+            "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+            "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
+            "link": "static"
+        },
+        {
+            "name": "crypto",
+            "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+            "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+            "link": "static"
+        },
+        {
+            "name": "z",
+            "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+            "lib": "-lz",
             "link": "dynamic"
         },
         {
-            "name": "utf8proc",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libutf8proc.a",
-            "link": "static",
-            "version": "2.10.0",
-            "description": "Small, clean C library for Unicode normalization, case-folding, and other operations",
-            "platforms": {
-                "darwin": {
-                    "include": "/opt/homebrew/include",
-                    "lib": "/opt/homebrew/lib/libutf8proc.a"
-                },
-                "linux": {
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/libutf8proc.a"
-                },
-                "windows": {
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/libutf8proc.a"
-                }
-            }
+            "name": "CoreFoundation",
+            "include": "",
+            "lib": "-framework CoreFoundation",
+            "link": "dynamic"
         },
+        {
+            "name": "CoreServices",
+            "include": "",
+            "lib": "-framework CoreServices",
+            "link": "dynamic"
+        },
+        {
+            "name": "SystemConfiguration",
+            "include": "",
+            "lib": "-framework SystemConfiguration",
+            "link": "dynamic"
+        },
+        {
+            "name": "nghttp2",
+            "include": "mac-deps/nghttp2/include",
+            "lib": "mac-deps/nghttp2/lib/libnghttp2.a",
+            "link": "static"
+        },
+        {
+            "name": "readline",
+            "include": "/opt/homebrew/Cellar/readline/8.3.1/include",
+            "lib": "/opt/homebrew/Cellar/readline/8.3.1/lib/libreadline.a",
+            "link": "static"
+        },
+        {
+            "name": "ncurses",
+            "include": "",
+            "lib": "-lncurses",
+            "link": "dynamic"
+        }
+    ],
+    "targets": [
         {
             "name": "lambda-lib",
             "description": "Unified runtime with all basic libraries for tests",
@@ -166,7 +186,7 @@
                 "lib/log.c",
                 "lib/utf.c"
             ],
-            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "criterion"],
+            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "curl", "nghttp2", "ssl", "crypto", "z", "CoreFoundation", "CoreServices", "SystemConfiguration", "criterion"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "static"
@@ -343,21 +363,32 @@
                     "test_math.cpp",
                     "test_markup_roundtrip.cpp",
                     "test/test_input_roundtrip.cpp",
-                    "test/test_dir.cpp"
+                    "test/test_dir.cpp",
+                    "test/test_http.cpp"
                 ],
+                "test_names": {
+                    "test_mime_detect.c": "📎 MIME Detection Tests",
+                    "test_math.cpp": "🔢 Math Roundtrip Tests", 
+                    "test_markup_roundtrip.cpp": "📝 Markup Roundtrip Tests",
+                    "test/test_input_roundtrip.cpp": "🔄 Input Roundtrip Tests",
+                    "test/test_dir.cpp": "📁 Directory Listing Tests",
+                    "test/test_http.cpp": "🌐 HTTP/HTTPS Tests"
+                },
                 "library_dependencies": [
-                    ["lambda-input-full"],
-                    ["lambda-input-full"],
+                    ["lambda-input-full", "curl"],
+                    ["lambda-input-full", "curl"],
                     ["lambda-runtime-full"],
                     ["lambda-runtime-full"],
-                    ["lambda-input-full"]
+                    ["lambda-input-full", "curl"],
+                    ["lambda-input-full", "curl"]
                 ],
                 "binaries": [
                     "test_mime_detect.exe",
                     "test_math.exe",
                     "test_markup_roundtrip.exe",
                     "test_input_roundtrip.exe",
-                    "test_dir.exe"
+                    "test_dir.exe",
+                    "test_http.exe"
                 ],
                 "type": "input",
                 "special_flags": "-fms-extensions -lstdc++",

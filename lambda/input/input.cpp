@@ -534,7 +534,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
 // Helper function to read text file from file:// URL
 static char* read_file_from_url(Url* url) {
     if (!url || url->scheme != URL_SCHEME_FILE) {
-        fprintf(stderr, "Only file:// URLs are supported for reading\n");
+        fprintf(stderr, "Only file:// URLs are supported for file reading\n");
         return NULL;
     }
     
@@ -587,8 +587,9 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         return NULL; 
     }
     
-    // Check if URL points to a directory (only for file:// URLs)
+    // Handle different URL schemes
     if (abs_url->scheme == URL_SCHEME_FILE) {
+        // Check if URL points to a directory (only for file:// URLs)
         const char* pathname = url_get_pathname(abs_url);
         if (pathname) {
             struct stat st;
@@ -600,19 +601,35 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
                 return input;
             }
         }
+        
+        // URL points to a file - read as normal
+        char* source = read_file_from_url(abs_url);
+        if (!source) {
+            printf("Failed to read document at URL: %s\n", url ? url->chars : "null");
+            url_destroy(abs_url);
+            return NULL;
+        }
+        
+        Input* input = input_from_source(source, abs_url, type, flavor);
+        free(source);  // Free the source string after parsing
+        url_destroy(abs_url);
+        return input;
     }
-    
-    // URL points to a file - read as normal
-    char* source = read_file_from_url(abs_url);
-    if (!source) {
-        printf("Failed to read document at URL: %s\n", url ? url->chars : "null");
+    else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
+        // Handle HTTP/HTTPS URLs
+        printf("HTTP/HTTPS URL detected, using HTTP client\n");
+        
+        const char* type_str = type ? type->chars : NULL;
+        const char* flavor_str = flavor ? flavor->chars : NULL;
+        
+        Input* input = input_from_http(url->chars, type_str, flavor_str, "./temp/cache");
+        url_destroy(abs_url);
+        return input;
+    }
+    else {
+        printf("Unsupported URL scheme for: %s\n", url ? url->chars : "null");
         url_destroy(abs_url);
         return NULL;
     }
-    
-    Input* input = input_from_source(source, abs_url, type, flavor);
-    free(source);  // Free the source string after parsing
-    url_destroy(abs_url);
-    return input;
 }
 
