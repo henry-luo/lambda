@@ -59,6 +59,14 @@ char* download_http_content(const char* url, size_t* content_size, const HttpCon
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
 
+// System information functions (from input_sysinfo.cpp)
+typedef struct SysInfoManager SysInfoManager;
+
+SysInfoManager* sysinfo_manager_create(void);
+void sysinfo_manager_destroy(SysInfoManager* manager);
+Input* input_from_sysinfo(Url* url, VariableMemPool* pool);
+bool is_sys_url(const char* url);
+
 #ifdef __cplusplus
 }
 #endif

@@ -510,6 +510,55 @@ build_nghttp2_for_mac() {
     return 1
 }
 
+# Function to build SIGAR for Mac
+build_sigar_for_mac() {
+    echo "Building SIGAR for Mac..."
+    
+    # Check if already built
+    if [ -f "mac-deps/sigar/lib/libsigar.a" ]; then
+        echo "SIGAR already built"
+        return 0
+    fi
+    
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+    
+    # Download SIGAR if not exists
+    if [ ! -d "mac-deps/sigar" ]; then
+        echo "Downloading SIGAR..."
+        cd mac-deps
+        git clone https://github.com/hyperic/sigar.git || {
+            echo "Warning: Could not clone SIGAR repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd mac-deps/sigar
+    
+    # Configure and build SIGAR
+    echo "Configuring SIGAR..."
+    if ./autogen.sh && ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/sigar \
+        --enable-static --disable-shared \
+        --disable-java --disable-perl --disable-csharp; then
+        
+        echo "Building SIGAR..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing SIGAR..."
+            if make install; then
+                echo "✅ SIGAR built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ SIGAR build failed"
+    cd - > /dev/null
+    return 1
+}
+
 # Function to build libcurl with HTTP/2 support for Mac
 build_curl_with_http2_for_mac() {
     echo "Building libcurl with HTTP/2 support for Mac..."
@@ -593,6 +642,19 @@ else
     fi
 fi
 
+# Build SIGAR for Mac
+echo "Setting up SIGAR..."
+if [ -f "mac-deps/sigar/lib/libsigar.a" ]; then
+    echo "SIGAR already available"
+else
+    if ! build_sigar_for_mac; then
+        echo "Warning: SIGAR build failed"
+        exit 1
+    else
+        echo "SIGAR built successfully"
+    fi
+fi
+
 # Build libcurl with HTTP/2 support for Mac
 echo "Setting up libcurl with HTTP/2 support..."
 if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
@@ -629,6 +691,7 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- SIGAR: $([ -f "mac-deps/sigar/lib/libsigar.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo ""
