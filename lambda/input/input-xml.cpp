@@ -26,28 +26,28 @@ static void skip_whitespace(const char **xml) {
 }
 
 static String* parse_string_content(Input *input, const char **xml, char end_char) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     while (**xml && **xml != end_char) {
         if (**xml == '&') {
             (*xml)++; // Skip &
             if (strncmp(*xml, "lt;", 3) == 0) {
-                strbuf_append_char(sb, '<');
+                stringbuf_append_char(sb, '<');
                 *xml += 3;
             } else if (strncmp(*xml, "gt;", 3) == 0) {
-                strbuf_append_char(sb, '>');  
+                stringbuf_append_char(sb, '>');  
                 *xml += 3;
             } else if (strncmp(*xml, "amp;", 4) == 0) {
-                strbuf_append_char(sb, '&');
+                stringbuf_append_char(sb, '&');
                 *xml += 4;
             } else if (strncmp(*xml, "quot;", 5) == 0) {
-                strbuf_append_char(sb, '"');
+                stringbuf_append_char(sb, '"');
                 *xml += 5;
             } else if (strncmp(*xml, "apos;", 5) == 0) {
-                strbuf_append_char(sb, '\'');
+                stringbuf_append_char(sb, '\'');
                 *xml += 5;
             } else if (strncmp(*xml, "nbsp;", 5) == 0) {
-                strbuf_append_char(sb, 160); // Non-breaking space
+                stringbuf_append_char(sb, 160); // Non-breaking space
                 *xml += 5;
             } else if (**xml == '#') {
                 // Numeric character references &#123; or &#x1F;
@@ -80,15 +80,15 @@ static String* parse_string_content(Input *input, const char **xml, char end_cha
                 if (**xml == ';') {
                     (*xml)++; // Skip ;
                     if (value > 0 && value < 256) {
-                        strbuf_append_char(sb, (char)value);
+                        stringbuf_append_char(sb, (char)value);
                     } else {
                         // For Unicode values > 255, append as-is (simplified)
-                        strbuf_append_char(sb, '?'); // Placeholder
+                        stringbuf_append_char(sb, '?'); // Placeholder
                     }
                 } else {
                     // Invalid numeric reference, append as-is
-                    strbuf_append_char(sb, '&');
-                    strbuf_append_char(sb, '#');
+                    stringbuf_append_char(sb, '&');
+                    stringbuf_append_char(sb, '#');
                 }
             } else {
                 // Check for custom entities or unknown entities
@@ -105,44 +105,44 @@ static String* parse_string_content(Input *input, const char **xml, char end_cha
                     if (resolved) {
                         // Append resolved entity value
                         while (*resolved) {
-                            strbuf_append_char(sb, *resolved);
+                            stringbuf_append_char(sb, *resolved);
                             resolved++;
                         }
                     } else {
                         // Unknown entity - preserve as-is for roundtrip compatibility
-                        strbuf_append_char(sb, '&');
+                        stringbuf_append_char(sb, '&');
                         const char* temp = entity_start;
                         while (temp < *xml) {
-                            strbuf_append_char(sb, *temp);
+                            stringbuf_append_char(sb, *temp);
                             temp++;
                         }
                     }
                 } else {
                     // Invalid entity, just append the &
-                    strbuf_append_char(sb, '&');
+                    stringbuf_append_char(sb, '&');
                     *xml = entity_start;
                 }
             }
         } else {
-            strbuf_append_char(sb, **xml);
+            stringbuf_append_char(sb, **xml);
             (*xml)++;
         }
     }
 
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_tag_name(Input *input, const char **xml) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     while (**xml && (isalnum(**xml) || **xml == '_' || **xml == '-' || **xml == ':')) {
-        strbuf_append_char(sb, **xml);
+        stringbuf_append_char(sb, **xml);
         (*xml)++;
     }
 
-    if (sb->length == sizeof(uint32_t)) return NULL; // empty tag name
+    if (sb->length == 0) return NULL; // empty tag name
 
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static bool parse_attributes(Input *input, Element *element, const char **xml) {
@@ -193,13 +193,13 @@ static Item parse_comment(Input *input, const char **xml) {
     
     // Add comment content as text
     if (comment_end > comment_start) {
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         while (comment_start < comment_end) {
-            strbuf_append_char(sb, *comment_start);
+            stringbuf_append_char(sb, *comment_start);
             comment_start++;
         }
-        String* comment_text = strbuf_to_string(sb);
+        String* comment_text = stringbuf_to_string(sb);
         if (comment_text && comment_text->len > 0) {
             list_push((List*)element, {.item = s2it(comment_text)});
             ((TypeElmt*)element->type)->content_length = 1;
@@ -226,10 +226,10 @@ static Item parse_cdata(Input *input, const char **xml) {
     }
     
     // Create CDATA content string
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     while (cdata_start < *xml) {
-        strbuf_append_char(sb, *cdata_start);
+        stringbuf_append_char(sb, *cdata_start);
         cdata_start++;
     }
     
@@ -237,7 +237,7 @@ static Item parse_cdata(Input *input, const char **xml) {
         *xml += 3; // skip ]]>
     }
     
-    return {.item = s2it(strbuf_to_string(sb))};
+    return {.item = s2it(stringbuf_to_string(sb))};
 }
 
 static Item parse_entity(Input *input, const char **xml) {
@@ -296,14 +296,14 @@ static Item parse_entity(Input *input, const char **xml) {
     
     // Add entity name as "name" attribute
     if (entity_name_end > entity_name_start) {
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         const char* temp = entity_name_start;
         while (temp < entity_name_end) {
-            strbuf_append_char(sb, *temp);
+            stringbuf_append_char(sb, *temp);
             temp++;
         }
-        String* name_str = strbuf_to_string(sb);
+        String* name_str = stringbuf_to_string(sb);
         
         String* attr_name = (String*)pool_calloc(input->pool, sizeof(String) + 5);
         if (attr_name) {
@@ -318,14 +318,14 @@ static Item parse_entity(Input *input, const char **xml) {
             
     // Add entity value/reference as "value" attribute
     if (entity_value_end > entity_value_start) {
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         const char* temp = entity_value_start;
         while (temp < entity_value_end) {
-            strbuf_append_char(sb, *temp);
+            stringbuf_append_char(sb, *temp);
             temp++;
         }
-        String* value_str = strbuf_to_string(sb);
+        String* value_str = stringbuf_to_string(sb);
         String* attr_name = (String*)pool_calloc(input->pool, sizeof(String) + 6);
         if (attr_name) {
             attr_name->len = 5;
@@ -377,15 +377,15 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
     if (decl_name_len == 0) return {.item = ITEM_ERROR};
     
     // Create declaration element name with "!" prefix
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);
-    strbuf_append_char(sb, '!');
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
+    stringbuf_append_char(sb, '!');
     const char* temp = decl_start;
     while (temp < decl_name_end) {
-        strbuf_append_char(sb, *temp);
+        stringbuf_append_char(sb, *temp);
         temp++;
     }
-    String* decl_element_name = strbuf_to_string(sb);
+    String* decl_element_name = stringbuf_to_string(sb);
     
     skip_whitespace(xml);
     
@@ -409,13 +409,13 @@ static Item parse_dtd_declaration(Input *input, const char **xml) {
     
     // Add declaration content as text
     if (content_end > content_start) {
-        strbuf_reset(sb);
+        stringbuf_reset(sb);
         temp = content_start;
         while (temp < content_end) {
-            strbuf_append_char(sb, *temp);
+            stringbuf_append_char(sb, *temp);
             temp++;
         }
-        String* content_text = strbuf_to_string(sb);
+        String* content_text = stringbuf_to_string(sb);
         if (content_text && content_text->len > 0) {
             list_push((List*)element, {.item = s2it(content_text)});
             ((TypeElmt*)element->type)->content_length = 1;
@@ -559,11 +559,11 @@ static Item parse_element(Input *input, const char **xml) {
         if (!target_name) return {.item = ITEM_ERROR};
         
         // Create processing instruction element name "?target"
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
-        strbuf_append_char(sb, '?');
-        strbuf_append_str(sb, target_name->chars);
-        String* pi_name = strbuf_to_string(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
+        stringbuf_append_char(sb, '?');
+        stringbuf_append_str(sb, target_name->chars);
+        String* pi_name = stringbuf_to_string(sb);
         
         // Parse PI data (everything until ?>)
         skip_whitespace(xml);
@@ -583,12 +583,12 @@ static Item parse_element(Input *input, const char **xml) {
         
         // Add PI data as text content
         if (pi_data_end > pi_data_start) {
-            strbuf_reset(sb);
+            stringbuf_reset(sb);
             while (pi_data_start < pi_data_end) {
-                strbuf_append_char(sb, *pi_data_start);
+                stringbuf_append_char(sb, *pi_data_start);
                 pi_data_start++;
             }
-            String* pi_data = strbuf_to_string(sb);
+            String* pi_data = stringbuf_to_string(sb);
             if (pi_data && pi_data->len > 0) {
                 list_push((List*)element, {.item = s2it(pi_data)});
                 ((TypeElmt*)element->type)->content_length = 1;
@@ -641,8 +641,8 @@ static Item parse_element(Input *input, const char **xml) {
                 
                 if (*xml > text_start) {
                     // Create text content
-                    StrBuf* sb = input->sb;
-                    strbuf_reset(sb);
+                    StringBuf* sb = input->sb;
+                    stringbuf_reset(sb);
                     
                     // Trim leading whitespace
                     while (text_start < *xml && (*text_start == ' ' || *text_start == '\n' || 
@@ -678,30 +678,30 @@ static Item parse_element(Input *input, const char **xml) {
                                     if (resolved) {
                                         // Append resolved entity value
                                         while (*resolved) {
-                                            strbuf_append_char(sb, *resolved);
+                                            stringbuf_append_char(sb, *resolved);
                                             resolved++;
                                         }
                                     } else {
                                         // Unknown entity - preserve as-is for roundtrip compatibility
-                                        strbuf_append_char(sb, '&');
+                                        stringbuf_append_char(sb, '&');
                                         const char* temp = entity_start;
                                         while (temp <= text_start) {
-                                            strbuf_append_char(sb, *temp);
+                                            stringbuf_append_char(sb, *temp);
                                             temp++;
                                         }
                                     }
                                 } else {
                                     // Invalid entity
-                                    strbuf_append_char(sb, '&');
+                                    stringbuf_append_char(sb, '&');
                                     text_start = entity_start;
                                 }
                             } else {
-                                strbuf_append_char(sb, *text_start);
+                                stringbuf_append_char(sb, *text_start);
                                 text_start++;
                             }
                         }
                         
-                        String* processed_text = strbuf_to_string(sb);
+                        String* processed_text = stringbuf_to_string(sb);
                         if (processed_text && processed_text->len > 0) {
                             list_push((List*)element, {.item = s2it(processed_text)});
                             ((TypeElmt*)element->type)->content_length++;
@@ -725,7 +725,7 @@ static Item parse_element(Input *input, const char **xml) {
 }
 
 void parse_xml(Input* input, const char* xml_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
 
     const char* xml = xml_string;
     skip_whitespace(&xml);

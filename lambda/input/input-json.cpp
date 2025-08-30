@@ -10,21 +10,22 @@ static void skip_whitespace(const char **json) {
 
 static String* parse_string(Input *input, const char **json) {
     if (**json != '"') return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     (*json)++; // Skip opening quote
     while (**json && **json != '"') {
         if (**json == '\\') {
             (*json)++;
             switch (**json) {
-                case '"': strbuf_append_char(sb, '"'); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case '/': strbuf_append_char(sb, '/'); break;
-                case 'b': strbuf_append_char(sb, '\b'); break;
-                case 'f': strbuf_append_char(sb, '\f'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
+                case '"': stringbuf_append_char(sb, '"'); break;
+                case '\\': stringbuf_append_char(sb, '\\'); break;
+                case '/': stringbuf_append_char(sb, '/'); break;
+                case 'b': stringbuf_append_char(sb, '\b'); break;
+                case 'f': stringbuf_append_char(sb, '\f'); break;
+                case 'n': stringbuf_append_char(sb, '\n'); break;
+                case 'r': stringbuf_append_char(sb, '\r'); break;
+                case 't': stringbuf_append_char(sb, '\t'); break;
                 // handle \uXXXX escapes
                 case 'u': {
                     (*json)++; // skip 'u'
@@ -33,20 +34,20 @@ static String* parse_string(Input *input, const char **json) {
                     (*json) += 4; // skip 4 hex digits
                     int codepoint = (int)strtol(hex, NULL, 16);
                     if (codepoint < 0x80) {
-                        strbuf_append_char(sb, (char)codepoint);
+                        stringbuf_append_char(sb, (char)codepoint);
                     } else if (codepoint < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                     } else {
-                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                        stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                     }
                 } break;
                 default: break; // invalid escape
             }
         } else {
-            strbuf_append_char(sb, **json);
+            stringbuf_append_char(sb, **json);
         }
         (*json)++;
     }
@@ -54,7 +55,7 @@ static String* parse_string(Input *input, const char **json) {
     if (**json == '"') {
         (*json)++; // skip closing quote
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static Item parse_number(Input *input, const char **json) {
@@ -163,7 +164,7 @@ static Item parse_value(Input *input, const char **json) {
 
 void parse_json(Input* input, const char* json_string) {
     printf("json_parse\n");
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     input->root = parse_value(input, &json_string);
 }
 

@@ -59,8 +59,11 @@ Test(sysinfo, test_system_info_basic) {
 
 // Test sys:// URL integration with main input system
 Test(sysinfo, test_sys_url_integration) {
-    StrBuf* url_buf = strbuf_create("sys://system/info");
-    String* url_str = strbuf_to_string(url_buf);
+    VariableMemPool* pool;
+    MemPoolError pool_err = pool_variable_init(&pool, 4096, 10);
+    cr_assert_eq(pool_err, MEM_POOL_ERR_OK, "Should create variable pool");
+    
+    String* url_str = create_string(pool, "sys://system/info");
     cr_assert_not_null(url_str, "Should create URL string");
     
     // Test input_from_url with sys:// URL
@@ -73,7 +76,7 @@ Test(sysinfo, test_sys_url_integration) {
     cr_assert_not_null(system_elem, "Should have system element");
     
     // Cleanup
-    // Note: String and Input cleanup is handled by the memory pool
+    pool_variable_destroy(pool);
 }
 
 // Test error handling for invalid sys:// URLs
@@ -120,8 +123,12 @@ Test(sysinfo, test_sysinfo_manager_error_handling) {
 
 // Performance test - system information should be retrieved quickly
 Test(sysinfo, test_performance, .timeout = 5.0) {
-    StrBuf* url_buf = strbuf_create("sys://system/info");
-    String* url_str = strbuf_to_string(url_buf);
+    VariableMemPool* pool;
+    MemPoolError pool_err = pool_variable_init(&pool, 4096, 10);
+    cr_assert_eq(pool_err, MEM_POOL_ERR_OK, "Should create variable pool");
+    
+    String* url_str = create_string(pool, "sys://system/info");
+    cr_assert_not_null(url_str, "Should create URL string");
     
     // Multiple calls should complete within timeout
     for (int i = 0; i < 10; i++) {
@@ -130,5 +137,6 @@ Test(sysinfo, test_performance, .timeout = 5.0) {
         cr_assert_neq(input->root.item, 0, "Should have root element");
     }
     
-    // Cleanup handled by memory pool
+    // Cleanup
+    pool_variable_destroy(pool);
 }

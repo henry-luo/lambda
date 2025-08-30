@@ -17,6 +17,7 @@ extern "C" {
 typedef struct NamePool NamePool;
 
 #include "../lib/strbuf.h"
+#include "../lib/stringbuf.h"
 #include "../lib/hashmap.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/arraylist.h"
@@ -339,7 +340,7 @@ typedef struct Input {
     NamePool* name_pool;        // centralized name management
     ArrayList* type_list;       // list of types
     Item root;
-    StrBuf* sb;
+    StringBuf* sb;
 } Input;
 
 Array* array_pooled(VariableMemPool *pool);

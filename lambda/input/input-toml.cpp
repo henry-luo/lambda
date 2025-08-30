@@ -7,18 +7,18 @@ extern ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId 
 
 // Common function to handle escape sequences in strings
 // is_multiline: true for multiline basic strings, false for regular strings
-static bool handle_escape_sequence(StrBuf* sb, const char **toml, bool is_multiline, int *line_num) {
+static bool handle_escape_sequence(StringBuf* sb, const char **toml, bool is_multiline, int *line_num) {
     if (**toml != '\\') return false;
     
     (*toml)++; // skip backslash
     switch (**toml) {
-        case '"': strbuf_append_char(sb, '"'); break;
-        case '\\': strbuf_append_char(sb, '\\'); break;
-        case 'b': strbuf_append_char(sb, '\b'); break;
-        case 'f': strbuf_append_char(sb, '\f'); break;
-        case 'n': strbuf_append_char(sb, '\n'); break;
-        case 'r': strbuf_append_char(sb, '\r'); break;
-        case 't': strbuf_append_char(sb, '\t'); break;
+        case '"': stringbuf_append_char(sb, '"'); break;
+        case '\\': stringbuf_append_char(sb, '\\'); break;
+        case 'b': stringbuf_append_char(sb, '\b'); break;
+        case 'f': stringbuf_append_char(sb, '\f'); break;
+        case 'n': stringbuf_append_char(sb, '\n'); break;
+        case 'r': stringbuf_append_char(sb, '\r'); break;
+        case 't': stringbuf_append_char(sb, '\t'); break;
         case 'u': {
             (*toml)++; // skip 'u'
             char hex[5] = {0};
@@ -26,14 +26,14 @@ static bool handle_escape_sequence(StrBuf* sb, const char **toml, bool is_multil
             (*toml) += 4; // skip 4 hex digits
             int codepoint = (int)strtol(hex, NULL, 16);
             if (codepoint < 0x80) {
-                strbuf_append_char(sb, (char)codepoint);
+                stringbuf_append_char(sb, (char)codepoint);
             } else if (codepoint < 0x800) {
-                strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
             } else {
-                strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
             }
             (*toml)--; // Back up one since we'll increment at end
         } break;
@@ -44,19 +44,19 @@ static bool handle_escape_sequence(StrBuf* sb, const char **toml, bool is_multil
             (*toml) += 8; // skip 8 hex digits
             long codepoint = strtol(hex, NULL, 16);
             if (codepoint < 0x80) {
-                strbuf_append_char(sb, (char)codepoint);
+                stringbuf_append_char(sb, (char)codepoint);
             } else if (codepoint < 0x800) {
-                strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
             } else if (codepoint < 0x10000) {
-                strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
             } else {
-                strbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
-                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
-                strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                stringbuf_append_char(sb, (char)(0xF0 | (codepoint >> 18)));
+                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 12) & 0x3F)));
+                stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
             }
             (*toml)--; // Back up one since we'll increment at end
         } break;
@@ -73,13 +73,13 @@ static bool handle_escape_sequence(StrBuf* sb, const char **toml, bool is_multil
                 (*toml)--; // Back up one since we'll increment at end
             } else {
                 // In regular strings, treat as literal backslash + character
-                strbuf_append_char(sb, '\\');
-                strbuf_append_char(sb, **toml);
+                stringbuf_append_char(sb, '\\');
+                stringbuf_append_char(sb, **toml);
             }
             break;
         default: 
-            strbuf_append_char(sb, '\\');
-            strbuf_append_char(sb, **toml);
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, **toml);
             break;
     }
     (*toml)++; // move to next character
@@ -121,7 +121,7 @@ static void skip_whitespace_and_comments(const char **toml, int *line_num) {
 }
 
 static String* parse_bare_key(Input *input, const char **toml) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     const char *start = *toml;
     
     // Bare keys can contain A-Z, a-z, 0-9, -, _ (including pure numeric keys)
@@ -132,21 +132,21 @@ static String* parse_bare_key(Input *input, const char **toml) {
     
     int len = *toml - start;
     for (int i = 0; i < len; i++) {
-        strbuf_append_char(sb, start[i]);
+        stringbuf_append_char(sb, start[i]);
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_quoted_key(Input *input, const char **toml) {
     if (**toml != '"') return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
             handle_escape_sequence(sb, toml, false, NULL);
         } else {
-            strbuf_append_char(sb, **toml);
+            stringbuf_append_char(sb, **toml);
             (*toml)++;
         }
     }
@@ -154,35 +154,35 @@ static String* parse_quoted_key(Input *input, const char **toml) {
     if (**toml == '"') {
         (*toml)++; // skip closing quote
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_literal_key(Input *input, const char **toml) {
     if (**toml != '\'') return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '\'') {
-        strbuf_append_char(sb, **toml);
+        stringbuf_append_char(sb, **toml);
         (*toml)++;
     }
 
     if (**toml == '\'') {
         (*toml)++; // skip closing quote
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_basic_string(Input *input, const char **toml) {
     if (**toml != '"') return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
             handle_escape_sequence(sb, toml, false, NULL);
         } else {
-            strbuf_append_char(sb, **toml);
+            stringbuf_append_char(sb, **toml);
             (*toml)++;
         }
     }
@@ -190,28 +190,28 @@ static String* parse_basic_string(Input *input, const char **toml) {
     if (**toml == '"') {
         (*toml)++; // skip closing quote
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_literal_string(Input *input, const char **toml) {
     if (**toml != '\'') return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '\'') {
-        strbuf_append_char(sb, **toml);
+        stringbuf_append_char(sb, **toml);
         (*toml)++;
     }
 
     if (**toml == '\'') {
         (*toml)++; // skip closing quote
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_multiline_basic_string(Input *input, const char **toml, int *line_num) {
     if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     *toml += 3; // Skip opening triple quotes
     
@@ -236,16 +236,16 @@ static String* parse_multiline_basic_string(Input *input, const char **toml, int
             if (**toml == '\n') {
                 (*line_num)++;
             }
-            strbuf_append_char(sb, **toml);
+            stringbuf_append_char(sb, **toml);
             (*toml)++;
         }
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_multiline_literal_string(Input *input, const char **toml, int *line_num) {
     if (strncmp(*toml, "'''", 3) != 0) return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     *toml += 3; // Skip opening triple quotes
     
@@ -267,10 +267,10 @@ static String* parse_multiline_literal_string(Input *input, const char **toml, i
         if (**toml == '\n') {
             (*line_num)++;
         }
-        strbuf_append_char(sb, **toml);
+        stringbuf_append_char(sb, **toml);
         (*toml)++;
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_key(Input *input, const char **toml) {
@@ -546,15 +546,15 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
 
 // Helper function to create string key from C string
 static String* create_string_key(Input *input, const char* key_str) {
-    StrBuf* sb = input->sb;
-    strbuf_full_reset(sb);
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     int len = strlen(key_str);
     for (int i = 0; i < len; i++) {
-        strbuf_append_char(sb, key_str[i]);
+        stringbuf_append_char(sb, key_str[i]);
     }
     
-    String* key = strbuf_to_string(sb);
+    String* key = stringbuf_to_string(sb);
     return key;
 }
 
@@ -682,7 +682,7 @@ static bool parse_table_header(const char **toml, char *table_name, int *line_nu
 }
 
 void parse_toml(Input* input, const char* toml_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     if (!input->sb) {
         return;
     }

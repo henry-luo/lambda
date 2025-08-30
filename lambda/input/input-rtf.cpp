@@ -45,34 +45,34 @@ static void skip_to_brace(const char **rtf, char target_brace) {
 }
 
 static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     while (**rtf && **rtf != delimiter && **rtf != '{' && **rtf != '}') {
         if (**rtf == '\\') {
             (*rtf)++; // Skip backslash
             if (**rtf == '\\') {
-                strbuf_append_char(sb, '\\');
+                stringbuf_append_char(sb, '\\');
             } else if (**rtf == '{') {
-                strbuf_append_char(sb, '{');
+                stringbuf_append_char(sb, '{');
             } else if (**rtf == '}') {
-                strbuf_append_char(sb, '}');
+                stringbuf_append_char(sb, '}');
             } else if (**rtf == 'n') {
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
             } else if (**rtf == 't') {
-                strbuf_append_char(sb, '\t');
+                stringbuf_append_char(sb, '\t');
             } else if (**rtf == 'r') {
-                strbuf_append_char(sb, '\r');
+                stringbuf_append_char(sb, '\r');
             } else if (strncmp(*rtf, "par", 3) == 0) {
                 // Handle paragraph break
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
                 *rtf += 2; // Skip 'ar' (we already skipped 'p')
             } else if (strncmp(*rtf, "line", 4) == 0) {
                 // Handle line break
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
                 *rtf += 3; // Skip 'ine'
             } else if (strncmp(*rtf, "tab", 3) == 0) {
                 // Handle tab
-                strbuf_append_char(sb, '\t');
+                stringbuf_append_char(sb, '\t');
                 *rtf += 2; // Skip 'ab'
             } else if (**rtf == 'u') {
                 // Unicode escape sequence \uNNNN
@@ -86,14 +86,14 @@ static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) 
                 }
                 // Convert Unicode to UTF-8
                 if (unicode_value < 0x80) {
-                    strbuf_append_char(sb, (char)unicode_value);
+                    stringbuf_append_char(sb, (char)unicode_value);
                 } else if (unicode_value < 0x800) {
-                    strbuf_append_char(sb, (char)(0xC0 | (unicode_value >> 6)));
-                    strbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
+                    stringbuf_append_char(sb, (char)(0xC0 | (unicode_value >> 6)));
+                    stringbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
                 } else {
-                    strbuf_append_char(sb, (char)(0xE0 | (unicode_value >> 12)));
-                    strbuf_append_char(sb, (char)(0x80 | ((unicode_value >> 6) & 0x3F)));
-                    strbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
+                    stringbuf_append_char(sb, (char)(0xE0 | (unicode_value >> 12)));
+                    stringbuf_append_char(sb, (char)(0x80 | ((unicode_value >> 6) & 0x3F)));
+                    stringbuf_append_char(sb, (char)(0x80 | (unicode_value & 0x3F)));
                 }
                 (*rtf)--; // Compensate for the increment at the end
             } else if (**rtf == '\'') {
@@ -104,7 +104,7 @@ static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) 
                     hex[0] = **rtf;
                     hex[1] = *(*rtf + 1);
                     int char_code = (int)strtol(hex, NULL, 16);
-                    strbuf_append_char(sb, (char)char_code);
+                    stringbuf_append_char(sb, (char)char_code);
                     (*rtf)++; // Skip second hex digit
                 }
             } else if (isalpha(**rtf)) {
@@ -119,15 +119,15 @@ static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) 
                 (*rtf)--; // Compensate for the increment at the end
             } else {
                 // Unknown escape, just add the character
-                strbuf_append_char(sb, **rtf);
+                stringbuf_append_char(sb, **rtf);
             }
         } else {
-            strbuf_append_char(sb, **rtf);
+            stringbuf_append_char(sb, **rtf);
         }
         (*rtf)++;
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static RTFControlWord parse_control_word(Input *input, const char **rtf) {
@@ -139,15 +139,15 @@ static RTFControlWord parse_control_word(Input *input, const char **rtf) {
     
     (*rtf)++; // Skip backslash
     
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     // Parse keyword (letters only)
     while (**rtf && isalpha(**rtf)) {
-        strbuf_append_char(sb, **rtf);
+        stringbuf_append_char(sb, **rtf);
         (*rtf)++;
     }
     
-    control_word.keyword = strbuf_to_string(sb);
+    control_word.keyword = stringbuf_to_string(sb);
     
     // Parse optional parameter (digits with optional minus sign)
     if (**rtf == '-' || (**rtf >= '0' && **rtf <= '9')) {
@@ -418,7 +418,7 @@ static Item parse_rtf_content(Input *input, const char **rtf) {
 
 void parse_rtf(Input* input, const char* rtf_string) {
     printf("rtf_parse\n");
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);

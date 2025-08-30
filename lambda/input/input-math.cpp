@@ -679,8 +679,8 @@ static bool is_relational_operator(const char *math) {
 
 // parse a number (integer or float)
 static Item parse_math_number(Input *input, const char **math) {
-    StrBuf* sb = input->sb;
-    strbuf_full_reset(sb);
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     // handle negative sign
     bool is_negative = false;
@@ -691,7 +691,7 @@ static Item parse_math_number(Input *input, const char **math) {
     
     // parse digits before decimal point
     while (**math && isdigit(**math)) {
-        strbuf_append_char(sb, **math);
+        stringbuf_append_char(sb, **math);
         (*math)++;
     }
     
@@ -699,21 +699,21 @@ static Item parse_math_number(Input *input, const char **math) {
     // parse decimal point and digits after
     if (**math == '.') {
         is_float = true;
-        strbuf_append_char(sb, **math);
+        stringbuf_append_char(sb, **math);
         (*math)++;
         while (**math && isdigit(**math)) {
-            strbuf_append_char(sb, **math);
+            stringbuf_append_char(sb, **math);
             (*math)++;
         }
     }
     
-    if (sb->length <= sizeof(uint32_t)) {
-        strbuf_full_reset(sb);
+    if (sb->length == 0) {
+        stringbuf_reset(sb);
         return {.item = ITEM_ERROR};
     }
     
-    String *num_string = (String*)sb->str;
-    num_string->len = sb->length - sizeof(uint32_t);
+    String *num_string = sb->str;
+    num_string->len = sb->length;
     num_string->ref_cnt = 0;
     
     // Convert to proper Lambda number
@@ -745,42 +745,41 @@ static Item parse_math_number(Input *input, const char **math) {
         }
     }
     
-    strbuf_full_reset(sb);
+    stringbuf_reset(sb);
     printf("DEBUG: parse_math_number returning item=0x%llx, type=%d\n", result.item, get_type_id(result));
     return result;
 }
 
 // parse identifier/variable name as symbol with optional prime notation
 static Item parse_math_identifier(Input *input, const char **math) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     // parse letters and digits
     while (**math && (isalpha(**math) || isdigit(**math))) {
-        strbuf_append_char(sb, **math);
+        stringbuf_append_char(sb, **math);
         (*math)++;
     }
     
     // Check if we have valid content (same pattern as command parsing)
-    if (sb->length <= sizeof(uint32_t)) { 
-        strbuf_full_reset(sb);  
+    if (sb->length == 0) { 
+        stringbuf_reset(sb);  
         return {.item = ITEM_ERROR}; 
     }
 
     // Create a null-terminated string from the buffer content
     char temp_buffer[256];  // Reasonable limit for math identifiers
-    int content_len = sb->length - sizeof(uint32_t);
-    if (content_len >= sizeof(temp_buffer)) {
-        strbuf_full_reset(sb);
+    if (sb->length >= sizeof(temp_buffer)) {
+        stringbuf_reset(sb);
         return {.item = ITEM_ERROR};
     }
     
     // Copy the content and null-terminate
-    memcpy(temp_buffer, sb->str + sizeof(uint32_t), content_len);
-    temp_buffer[content_len] = '\0';
+    memcpy(temp_buffer, sb->str->chars, sb->length);
+    temp_buffer[sb->length] = '\0';
     
     // Create proper string using input pool allocation
     String *id_string = input_create_string(input, temp_buffer);
-    strbuf_full_reset(sb);
+    stringbuf_reset(sb);
     
     if (!id_string) {
         return {.item = ITEM_ERROR};
@@ -1142,22 +1141,22 @@ static Item parse_latex_command(Input *input, const char **math) {
     (*math)++; // skip backslash
     
     // parse command name
-    StrBuf* sb = input->sb;
-    strbuf_full_reset(sb);
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     while (**math && isalpha(**math)) {
-        strbuf_append_char(sb, **math);
+        stringbuf_append_char(sb, **math);
         (*math)++;
     }
     
-    if (sb->length <= sizeof(uint32_t)) {
-        strbuf_full_reset(sb);
+    if (sb->length == 0) {
+        stringbuf_reset(sb);
         printf("ERROR: Empty or invalid LaTeX command\n");
         return {.item = ITEM_ERROR};
     }
     
-    String *cmd_string = (String*)sb->str;
-    cmd_string->len = sb->length - sizeof(uint32_t);
+    String *cmd_string = sb->str;
+    cmd_string->len = sb->length;
     cmd_string->ref_cnt = 0;
     
     // Check for commands that might have braces that should be part of the command
@@ -1167,13 +1166,13 @@ static Item parse_latex_command(Input *input, const char **math) {
         const char* peek = *math + 1; // skip '{'
         if (*peek && isalpha(*peek) && *(peek + 1) == '}') {
             // Single letter like {N}, {Z}, etc. - include it in the command
-            strbuf_append_char(sb, '{');
-            strbuf_append_char(sb, *peek);
-            strbuf_append_char(sb, '}');
+            stringbuf_append_char(sb, '{');
+            stringbuf_append_char(sb, *peek);
+            stringbuf_append_char(sb, '}');
             
             // Update the command string
-            cmd_string = (String*)sb->str;
-            cmd_string->len = sb->length - sizeof(uint32_t);
+            cmd_string = sb->str;
+            cmd_string->len = sb->length;
             cmd_string->ref_cnt = 0;
             
             // Advance the math pointer past the braces
@@ -1183,98 +1182,98 @@ static Item parse_latex_command(Input *input, const char **math) {
     
     // Handle specific commands
     if (strcmp(cmd_string->chars, "frac") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         Item result = parse_latex_frac(input, math);
         return result;
     } else if (strcmp(cmd_string->chars, "dfrac") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_frac_style(input, math, "dfrac");
     } else if (strcmp(cmd_string->chars, "tfrac") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_frac_style(input, math, "tfrac");
     } else if (strcmp(cmd_string->chars, "cfrac") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_frac_style(input, math, "cfrac");
     } else if (strcmp(cmd_string->chars, "sqrt") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sqrt(input, math);
     } else if (strcmp(cmd_string->chars, "cbrt") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_root(input, math, "3");
     } else if (strcmp(cmd_string->chars, "root") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_root_with_index(input, math);
     } else if (strcmp(cmd_string->chars, "sum") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         // Create a MathExprDef for the sum and use enhanced parser
         MathExprDef sum_def = {"sum", "sum", "sum", "sum", "∑", "Summation", true, -1, "parse_big_operator"};
         return parse_latex_sum_or_prod_enhanced(input, math, &sum_def);
     } else if (strcmp(cmd_string->chars, "prod") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         // Create a MathExprDef for the product and use enhanced parser  
         MathExprDef prod_def = {"prod", "product", "prod", "prod", "∏", "Product", true, -1, "parse_big_operator"};
         return parse_latex_sum_or_prod_enhanced(input, math, &prod_def);
     } else if (strcmp(cmd_string->chars, "int") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         // Create a MathExprDef for the integral
         MathExprDef int_def = {"int", "integral", "int", "int", "∫", "Integral", true, -1, "parse_big_operator"};
         return parse_latex_integral_enhanced(input, math, &int_def);
     } else if (strcmp(cmd_string->chars, "oint") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
     } else if (strcmp(cmd_string->chars, "iint") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
     } else if (strcmp(cmd_string->chars, "iiint") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
     } else if (strcmp(cmd_string->chars, "oint") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
     } else if (strcmp(cmd_string->chars, "bigcup") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigcup");
     } else if (strcmp(cmd_string->chars, "bigcap") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigcap");
     } else if (strcmp(cmd_string->chars, "bigoplus") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigoplus");
     } else if (strcmp(cmd_string->chars, "bigotimes") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigotimes");
     } else if (strcmp(cmd_string->chars, "bigwedge") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigwedge");
     } else if (strcmp(cmd_string->chars, "bigvee") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigvee");
     } else if (strcmp(cmd_string->chars, "lim") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_limit(input, math);
     } else if (strcmp(cmd_string->chars, "matrix") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_matrix(input, math, "matrix");
     } else if (strcmp(cmd_string->chars, "pmatrix") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_matrix(input, math, "pmatrix");
     } else if (strcmp(cmd_string->chars, "bmatrix") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_matrix(input, math, "bmatrix");
     } else if (strcmp(cmd_string->chars, "vmatrix") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_matrix(input, math, "vmatrix");
     } else if (strcmp(cmd_string->chars, "Vmatrix") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_matrix(input, math, "Vmatrix");
     } else if (strcmp(cmd_string->chars, "smallmatrix") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_matrix(input, math, "smallmatrix");
     } else if (strcmp(cmd_string->chars, "cases") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         return parse_latex_cases(input, math);
     } else if (strcmp(cmd_string->chars, "left") == 0) {
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         // Handle \left| for absolute value
         skip_math_whitespace(math);
         if (**math == '|') {
@@ -1288,7 +1287,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         // Use new group-based parsing system
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
         if (def) {
-            strbuf_full_reset(sb);
+            stringbuf_reset(sb);
             
             // Find the appropriate group parser
             for (int group_idx = 0; group_idx < sizeof(math_groups) / sizeof(math_groups[0]); group_idx++) {
@@ -1310,13 +1309,13 @@ static Item parse_latex_command(Input *input, const char **math) {
         }
         
         // Fallback for unrecognized commands - treat as symbol
-        strbuf_full_reset(sb);
+        stringbuf_reset(sb);
         String* symbol_string = input_create_string(input, cmd_string->chars);
         return symbol_string ? (Item){.item = y2it(symbol_string)} : (Item){.item = ITEM_ERROR};
     }
     
     // Should never reach here
-    strbuf_full_reset(sb);
+    stringbuf_reset(sb);
     return {.item = ITEM_ERROR};
 }
 
@@ -1513,21 +1512,21 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 
                 if (*lookahead == '(') {
                     // This is a function call, parse the function name first
-                    StrBuf* sb = input->sb;
-                    strbuf_full_reset(sb);
+                    StringBuf* sb = input->sb;
+                    stringbuf_reset(sb);
                     
                     while (**math && (isalpha(**math) || isdigit(**math) || **math == '_')) {
-                        strbuf_append_char(sb, **math);
+                        stringbuf_append_char(sb, **math);
                         (*math)++;
                     }
                     
                     // Create function name copy
-                    String* func_name_string = strbuf_to_string(sb);
+                    String* func_name_string = stringbuf_to_string(sb);
                     if (!func_name_string) {
                         return {.item = ITEM_ERROR};
                     }
                     
-                    strbuf_full_reset(sb);
+                    stringbuf_reset(sb);
                     Item result = parse_function_call(input, math, flavor, func_name_string->chars);
                     return result;
                 } else {
@@ -1663,28 +1662,28 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                 
                 if (*lookahead == '(') {
                     // This is a function call, parse the function name first
-                    StrBuf* sb = input->sb;
-                    strbuf_full_reset(sb);
+                    StringBuf* sb = input->sb;
+                    stringbuf_reset(sb);
                     
                     while (**math && (isalpha(**math) || isdigit(**math))) {
-                        strbuf_append_char(sb, **math);
+                        stringbuf_append_char(sb, **math);
                         (*math)++;
                     }
                     
-                    if (sb->length <= sizeof(uint32_t)) {
-                        strbuf_full_reset(sb);
+                    if (sb->length == 0) {
+                        stringbuf_reset(sb);
                         return {.item = ITEM_ERROR};
                     }
                     
-                    String *func_string = (String*)sb->str;
-                    func_string->len = sb->length - sizeof(uint32_t);
+                    String *func_string = sb->str;
+                    func_string->len = sb->length;
                     func_string->ref_cnt = 0;
                     
                     // Handle special Typst functions
                     if (flavor == MATH_FLAVOR_TYPST && strcmp(func_string->chars, "frac") == 0) {
                         // Reset math pointer to before function name
                         *math -= strlen("frac");
-                        strbuf_full_reset(sb);
+                        stringbuf_reset(sb);
                         return parse_typst_fraction(input, math, flavor);
                     }
                     
@@ -1709,14 +1708,14 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     func_name_copy[sizeof(func_name_copy) - 1] = '\0';
                     
                     if (is_known_func) {
-                        strbuf_full_reset(sb);
+                        stringbuf_reset(sb);
                         Item result = parse_function_call(input, math, flavor, func_name_copy);
                         return result;
                     } else {
                         // For unknown functions, first try parsing as function call
                         // Save the current position in case we need to backtrack
                         const char* saved_pos = *math;
-                        strbuf_full_reset(sb);
+                        stringbuf_reset(sb);
                         Item result = parse_function_call(input, math, flavor, func_name_copy);
                         if (result .item != ITEM_ERROR) {
                             return result;
@@ -4225,8 +4224,8 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
     }
     printf("\n");
     
-    // Reuse the StrBuf from input_new() - don't create a new one
-    strbuf_reset(input->sb);
+    // Reuse the StringBuf from input_new() - don't create a new one
+    stringbuf_reset(input->sb);
     const char *math = math_string;
     
     MathFlavor flavor = get_math_flavor(flavor_str);
