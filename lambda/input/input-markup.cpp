@@ -602,13 +602,13 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
     }
     
     // Use StrBuf to build content from potentially multiple lines
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     
     // For the first line, always add it to the paragraph
     const char* first_line = parser->lines[parser->current_line];
     skip_whitespace(&first_line);
-    strbuf_append_str(sb, first_line);
+    stringbuf_append_str(sb, first_line);
     parser->current_line++;
     
     // Check if we should continue collecting lines for this paragraph
@@ -637,14 +637,14 @@ static Item parse_paragraph(MarkupParser* parser, const char* line) {
                 break;
             }
             
-            strbuf_append_char(sb, ' '); // Add space between lines
-            strbuf_append_str(sb, content);
+            stringbuf_append_char(sb, ' '); // Add space between lines
+            stringbuf_append_str(sb, content);
             parser->current_line++;
         }
     }
     
     // Parse inline content with enhancements and add as children
-    String* text_content = strbuf_to_string(sb);
+    String* text_content = stringbuf_to_string(sb);
     Item content = parse_inline_spans(parser, text_content->chars);
     
     if (content.item != ITEM_ERROR && content.item != ITEM_UNDEFINED) {
@@ -921,8 +921,8 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
     parser->current_line++; // Skip opening fence
     
     // Collect code content until closing fence
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
@@ -935,14 +935,14 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
         
         // Add line to code content
         if (sb->length > 0) {
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
-        strbuf_append_str(sb, current);
+        stringbuf_append_str(sb, current);
         parser->current_line++;
     }
     
     // Create code content (no inline parsing for code blocks)
-    String* code_content = strbuf_to_string(sb);
+    String* code_content = stringbuf_to_string(sb);
     Item text_item = {.item = s2it(code_content)};
     list_push((List*)code, text_item);
     increment_element_content_length(code);
@@ -1038,8 +1038,8 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
     parser->current_line++; // Skip opening $$
     
     // Collect math content until closing $$
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
@@ -1054,14 +1054,14 @@ static Item parse_math_block(MarkupParser* parser, const char* line) {
         
         // Add line to math content
         if (sb->length > 0) {
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
-        strbuf_append_str(sb, current);
+        stringbuf_append_str(sb, current);
         parser->current_line++;
     }
     
     // Parse the math content using the math parser
-    String* math_content_str = strbuf_to_string(sb);
+    String* math_content_str = stringbuf_to_string(sb);
     const char* math_flavor = detect_math_flavor(math_content_str->chars);
     
     Item parsed_math = parse_math_content(parser->input, math_content_str->chars, math_flavor);
@@ -1439,18 +1439,18 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
     
     // Parse inline elements
     const char* pos = text;
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     
     while (*pos) {
         if (*pos == '*' || *pos == '_') {
             // Flush any accumulated text
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             // Parse bold/italic
@@ -1463,11 +1463,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '`') {
             // Flush text and parse code span
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             Item code_item = parse_code_span(parser, &pos);
@@ -1479,11 +1479,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '[') {
             // Flush text first
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             // MediaWiki-specific link parsing
@@ -1533,11 +1533,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '\'' && parser->config.format == MARKUP_WIKI) {
             // Flush text and parse MediaWiki bold/italic
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             const char* old_pos = pos;
@@ -1553,11 +1553,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '!' && *(pos+1) == '[') {
             // Flush text and parse image
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 String* key = input_create_string(parser->input, "content");
                 elmt_put(span, key, text_item, parser->input->pool);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             Item image_item = parse_image(parser, &pos);
@@ -1570,11 +1570,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '~' && *(pos+1) == '~') {
             // Flush text and parse strikethrough
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             const char* old_pos = pos;
@@ -1590,11 +1590,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '^') {
             // Flush text and parse superscript
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             const char* old_pos = pos;
@@ -1610,11 +1610,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '~' && *(pos+1) != '~') {
             // Flush text and parse subscript
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             const char* old_pos = pos;
@@ -1630,11 +1630,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == ':') {
             // Flush text and try to parse emoji shortcode
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             const char* old_pos = pos;
@@ -1644,7 +1644,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
                 increment_element_content_length(span);
             } else if (pos == old_pos) {
                 // Parse failed and didn't advance, add the colon to text buffer and advance
-                strbuf_append_char(sb, ':');
+                stringbuf_append_char(sb, ':');
                 pos++;
             }
         }
@@ -1652,11 +1652,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '{' && *(pos+1) == '{') {
             // Flush text and parse wiki template
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             Item template_item = parse_wiki_template(parser, &pos);
@@ -1668,11 +1668,11 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         else if (*pos == '$') {
             // Flush text and parse inline math
             if (sb->length > 0) {
-                String* text_content = strbuf_to_string(sb);
+                String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
                 list_push((List*)span, text_item);
                 increment_element_content_length(span);
-                strbuf_reset(sb);
+                stringbuf_reset(sb);
             }
             
             const char* old_pos = pos;
@@ -1687,14 +1687,14 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
         }
         else {
             // Regular character, add to text buffer
-            strbuf_append_char(sb, *pos);
+            stringbuf_append_char(sb, *pos);
             pos++;
         }
     }
     
     // Flush any remaining text
     if (sb->length > 0) {
-        String* text_content = strbuf_to_string(sb);
+        String* text_content = stringbuf_to_string(sb);
         Item text_item = {.item = s2it(text_content)};
         list_push((List*)span, text_item);
         increment_element_content_length(span);
@@ -2185,7 +2185,7 @@ static Item parse_math_content(Input* input, const char* math_content, const cha
     }
     
     // Create a temporary Input to preserve the current state
-    StrBuf* original_sb = input->sb;
+    StringBuf* original_sb = input->sb;
     Item original_root = input->root;
     
     // Parse the math expression using the existing parse_math function
@@ -3681,8 +3681,8 @@ static Item parse_rst_directive(MarkupParser* parser, const char* line) {
     }
     
     // Parse directive content (indented lines)
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     
     while (parser->current_line < parser->line_count) {
         const char* content_line = parser->lines[parser->current_line];
@@ -3690,14 +3690,14 @@ static Item parse_rst_directive(MarkupParser* parser, const char* line) {
         // Check if line is indented (part of directive) or empty
         if (is_empty_line(content_line)) {
             if (sb->length > 0) {
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
             }
             parser->current_line++;
         } else if (*content_line == ' ' || *content_line == '\t') {
             if (sb->length > 0) {
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
             }
-            strbuf_append_str(sb, content_line);
+            stringbuf_append_str(sb, content_line);
             parser->current_line++;
         } else {
             break;
@@ -3706,7 +3706,7 @@ static Item parse_rst_directive(MarkupParser* parser, const char* line) {
     
     // Add content if any
     if (sb->length > 0) {
-        String* content_str = strbuf_to_string(sb);
+        String* content_str = stringbuf_to_string(sb);
         Item content_item = {.item = s2it(content_str)};
         list_push((List*)directive, content_item);
         increment_element_content_length(directive);
@@ -3763,8 +3763,8 @@ static Item parse_org_block(MarkupParser* parser, const char* line) {
     sprintf(end_marker, "#+END_%.*s", (int)type_len, type_start);
     
     // Collect block content until end marker
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     
     while (parser->current_line < parser->line_count) {
         const char* content_line = parser->lines[parser->current_line];
@@ -3780,9 +3780,9 @@ static Item parse_org_block(MarkupParser* parser, const char* line) {
         
         // Add line to content
         if (sb->length > 0) {
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
-        strbuf_append_str(sb, content_line);
+        stringbuf_append_str(sb, content_line);
         parser->current_line++;
     }
     
@@ -3790,7 +3790,7 @@ static Item parse_org_block(MarkupParser* parser, const char* line) {
     
     // Add content
     if (sb->length > 0) {
-        String* content_str = strbuf_to_string(sb);
+        String* content_str = stringbuf_to_string(sb);
         Item content_item = {.item = s2it(content_str)};
         list_push((List*)org_block, content_item);
         increment_element_content_length(org_block);
@@ -3828,23 +3828,23 @@ static void parse_yaml_line(MarkupParser* parser, const char* line, Element* met
     }
     
     // Extract key
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     const char* key_start = line;
     while (key_start < colon) {
-        strbuf_append_char(sb, *key_start);
+        stringbuf_append_char(sb, *key_start);
         key_start++;
     }
     
     // Trim key
-    while (sb->length > 0 && (sb->str[sb->length-1] == ' ' || sb->str[sb->length-1] == '\t')) {
-        sb->length--;
+    while (sb->str->len > 0 && (sb->str->chars[sb->str->len-1] == ' ' || sb->str->chars[sb->str->len-1] == '\t')) {
+        sb->str->len--;
     }
-    sb->str[sb->length] = '\0';
+    sb->str->chars[sb->str->len] = '\0';
     
-    if (sb->length == 0) return; // Empty key
+    if (sb->str->len == 0) return; // Empty key
     
-    String* key = strbuf_to_string(sb);
+    String* key = stringbuf_to_string(sb);
     
     // Extract value
     const char* value_start = colon + 1;
@@ -3852,26 +3852,26 @@ static void parse_yaml_line(MarkupParser* parser, const char* line, Element* met
         value_start++;
     }
     
-    strbuf_reset(sb);
-    strbuf_append_str(sb, value_start);
+    stringbuf_reset(sb);
+    stringbuf_append_str(sb, value_start);
     
     // Trim trailing whitespace from value
-    while (sb->length > 0 && (sb->str[sb->length-1] == ' ' || sb->str[sb->length-1] == '\t' || 
-                              sb->str[sb->length-1] == '\r' || sb->str[sb->length-1] == '\n')) {
-        sb->length--;
+    while (sb->str->len > 0 && (sb->str->chars[sb->str->len-1] == ' ' || sb->str->chars[sb->str->len-1] == '\t' || 
+                              sb->str->chars[sb->str->len-1] == '\r' || sb->str->chars[sb->str->len-1] == '\n')) {
+        sb->str->len--;
     }
-    sb->str[sb->length] = '\0';
+    sb->str->chars[sb->str->len] = '\0';
     
-    String* value = strbuf_to_string(sb);
+    String* value = stringbuf_to_string(sb);
     
     // Remove quotes if present
     if (value && value->len >= 2) {
         if ((value->chars[0] == '"' && value->chars[value->len-1] == '"') ||
             (value->chars[0] == '\'' && value->chars[value->len-1] == '\'')) {
             // Create unquoted version
-            strbuf_reset(sb);
-            strbuf_append_str_n(sb, value->chars + 1, value->len - 2);
-            value = strbuf_to_string(sb);
+            stringbuf_reset(sb);
+            stringbuf_append_str_n(sb, value->chars + 1, value->len - 2);
+            value = stringbuf_to_string(sb);
         }
     }
     
@@ -4687,8 +4687,8 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     parser->current_line++;
     
     // collect literal content
-    StrBuf* sb = parser->input->sb;
-    strbuf_reset(sb);
+    StringBuf* sb = parser->input->sb;
+    stringbuf_reset(sb);
     bool first_line = true;
     int base_indent = -1;
     
@@ -4697,7 +4697,7 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
         
         if (is_empty_line(content_line)) {
             if (!first_line) {
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
             }
             first_line = false;
             parser->current_line++;
@@ -4718,12 +4718,12 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
         
         // add line to content
         if (!first_line) {
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
         
         // add content with base indentation removed
         const char* content_start = content_line + base_indent;
-        strbuf_append_str(sb, content_start);
+        stringbuf_append_str(sb, content_start);
         
         first_line = false;
         parser->current_line++;
@@ -4731,7 +4731,7 @@ static Item parse_rst_literal_block(MarkupParser* parser) {
     
     // create string content
     if (sb->length > 0) {
-        String* content_str = strbuf_to_string(sb);
+        String* content_str = stringbuf_to_string(sb);
         Item content_item = {.item = s2it(content_str)};
         list_push((List*)code_block, content_item);
         increment_element_content_length(code_block);

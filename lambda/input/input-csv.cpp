@@ -1,4 +1,5 @@
 #include "input.h"
+#include "../../lib/stringbuf.h"
 
 // Helper: detect separator character (comma or tab)
 char detect_csv_separator(const char* csv_string) {
@@ -40,37 +41,34 @@ bool is_header_line(const char* csv_string, char separator) {
 
 // Helper: parse a single CSV field (handles quoted fields)
 String* parse_csv_field(Input *input, const char **csv, char separator) {
-    StrBuf *sb = input->sb;
+    StringBuf *sb = input->sb;
     if (**csv == '"') {
         (*csv)++; // skip opening quote
         while (**csv && !(**csv == '"' && *((*csv)+1) != '"')) {
             if (**csv == '"' && *((*csv)+1) == '"') {
-                strbuf_append_char(sb, '"');
+                stringbuf_append_char(sb, '"');
                 (*csv) += 2;
             } else {
-                strbuf_append_char(sb, **csv);
+                stringbuf_append_char(sb, **csv);
                 (*csv)++;
             }
         }
         if (**csv == '"') (*csv)++; // skip closing quote
     } else {
         while (**csv && **csv != separator && **csv != '\n' && **csv != '\r') {
-            strbuf_append_char(sb, **csv);
+            stringbuf_append_char(sb, **csv);
             (*csv)++;
         }
     }
     if (sb->str) {
-        String *string = (String*)sb->str;
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;
+        return stringbuf_to_string(sb);
     }
     return &EMPTY_STRING;
 }
 
 // CSV parser
 void parse_csv(Input* input, const char* csv_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     // Detect separator and header
     char separator = detect_csv_separator(csv_string);

@@ -1,5 +1,6 @@
 #include "input.h"
 #include "../../lib/url.h"
+#include "../../lib/stringbuf.h"
 #include "mime-detect.h"
 #include <unistd.h>
 #include <stdio.h>
@@ -35,9 +36,13 @@ String* strbuf_to_string(StrBuf *sb) {
     if (string) {
         string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
         strbuf_full_reset(sb);
-        return string;        
+        return string;
     }
-    return &EMPTY_STRING;
+    return NULL;
+}
+
+String* stringbuf_to_string_wrapper(StringBuf *sb) {
+    return stringbuf_to_string(sb);
 }
 
 // Helper function to create string from char content
@@ -221,7 +226,7 @@ Input* input_new(Url* abs_url) {
     if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
     input->type_list = arraylist_new(16);
     input->root = {.item = ITEM_NULL};
-    input->sb = strbuf_new_pooled(input->pool);  // Always allocate StrBuf
+    input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
     return input;
 }
 

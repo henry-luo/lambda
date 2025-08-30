@@ -35,22 +35,22 @@ static void skip_comments(const char **mark) {
 
 static String* parse_string(Input *input, const char **mark) {
     if (**mark != '"') return NULL;
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer before use
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer before use
     
     (*mark)++; // Skip opening quote
     while (**mark && **mark != '"') {
         if (**mark == '\\') {
             (*mark)++;
             switch (**mark) {
-                case '"': strbuf_append_char(sb, '"'); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case '/': strbuf_append_char(sb, '/'); break;
-                case 'b': strbuf_append_char(sb, '\b'); break;
-                case 'f': strbuf_append_char(sb, '\f'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
+                case '"': stringbuf_append_char(sb, '"'); break;
+                case '\\': stringbuf_append_char(sb, '\\'); break;
+                case '/': stringbuf_append_char(sb, '/'); break;
+                case 'b': stringbuf_append_char(sb, '\b'); break;
+                case 'f': stringbuf_append_char(sb, '\f'); break;
+                case 'n': stringbuf_append_char(sb, '\n'); break;
+                case 'r': stringbuf_append_char(sb, '\r'); break;
+                case 't': stringbuf_append_char(sb, '\t'); break;
                 case 'u': {
                     (*mark)++; // skip 'u'
                     char hex[5] = {0};
@@ -58,20 +58,20 @@ static String* parse_string(Input *input, const char **mark) {
                     (*mark) += 4; // skip 4 hex digits
                     int codepoint = (int)strtol(hex, NULL, 16);
                     if (codepoint < 0x80) {
-                        strbuf_append_char(sb, (char)codepoint);
+                        stringbuf_append_char(sb, (char)codepoint);
                     } else if (codepoint < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                     } else {
-                        strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                        stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                     }
                 } break;
                 default: break; // invalid escape
             }
         } else {
-            strbuf_append_char(sb, **mark);
+            stringbuf_append_char(sb, **mark);
         }
         (*mark)++;
     }
@@ -79,28 +79,28 @@ static String* parse_string(Input *input, const char **mark) {
     if (**mark == '"') {
         (*mark)++; // skip closing quote
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_symbol(Input *input, const char **mark) {
     if (**mark != '\'') return NULL;
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer before use
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer before use
     
     (*mark)++; // Skip opening quote
     while (**mark && **mark != '\'' && **mark != '\n') {
         if (**mark == '\\') {
             (*mark)++;
             switch (**mark) {
-                case '\'': strbuf_append_char(sb, '\''); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
-                default: strbuf_append_char(sb, **mark); break;
+                case '\'': stringbuf_append_char(sb, '\''); break;
+                case '\\': stringbuf_append_char(sb, '\\'); break;
+                case 'n': stringbuf_append_char(sb, '\n'); break;
+                case 'r': stringbuf_append_char(sb, '\r'); break;
+                case 't': stringbuf_append_char(sb, '\t'); break;
+                default: stringbuf_append_char(sb, **mark); break;
             }
         } else {
-            strbuf_append_char(sb, **mark);
+            stringbuf_append_char(sb, **mark);
         }
         (*mark)++;
     }
@@ -109,12 +109,12 @@ static String* parse_symbol(Input *input, const char **mark) {
         (*mark)++; // skip closing quote
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_unquoted_identifier(Input *input, const char **mark) {
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer before use
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer before use
     
     // First character must be alpha or underscore
     if (!(**mark >= 'a' && **mark <= 'z') && 
@@ -127,11 +127,11 @@ static String* parse_unquoted_identifier(Input *input, const char **mark) {
                       (**mark >= 'A' && **mark <= 'Z') || 
                       (**mark >= '0' && **mark <= '9') || 
                       **mark == '_' || **mark == '-')) {
-        strbuf_append_char(sb, **mark);
+        stringbuf_append_char(sb, **mark);
         (*mark)++;
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static Item parse_binary(Input *input, const char **mark) {
@@ -140,8 +140,8 @@ static Item parse_binary(Input *input, const char **mark) {
     *mark += 2; // Skip b'
     skip_whitespace(mark);
     
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer before use
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer before use
     
     // Check for hex format
     if (**mark == '\\' && *(*mark + 1) == 'x') {
@@ -150,7 +150,7 @@ static Item parse_binary(Input *input, const char **mark) {
             if ((**mark >= '0' && **mark <= '9') ||
                 (**mark >= 'a' && **mark <= 'f') ||
                 (**mark >= 'A' && **mark <= 'F')) {
-                strbuf_append_char(sb, **mark);
+                stringbuf_append_char(sb, **mark);
             } else if (**mark != ' ' && **mark != '\t' && **mark != '\n') {
                 break; // Invalid hex character
             }
@@ -165,7 +165,7 @@ static Item parse_binary(Input *input, const char **mark) {
                 (**mark >= 'a' && **mark <= 'z') ||
                 (**mark >= '0' && **mark <= '9') ||
                 **mark == '+' || **mark == '/' || **mark == '=') {
-                strbuf_append_char(sb, **mark);
+                stringbuf_append_char(sb, **mark);
             } else if (**mark != ' ' && **mark != '\t' && **mark != '\n') {
                 break; // Invalid base64 character
             }
@@ -178,7 +178,7 @@ static Item parse_binary(Input *input, const char **mark) {
             if ((**mark >= '0' && **mark <= '9') ||
                 (**mark >= 'a' && **mark <= 'f') ||
                 (**mark >= 'A' && **mark <= 'F')) {
-                strbuf_append_char(sb, **mark);
+                stringbuf_append_char(sb, **mark);
             } else if (**mark != ' ' && **mark != '\t' && **mark != '\n') {
                 break; // Invalid hex character
             }
@@ -190,7 +190,7 @@ static Item parse_binary(Input *input, const char **mark) {
         (*mark)++; // skip closing quote
     }
     
-    String* binary_str = strbuf_to_string(sb);
+    String* binary_str = stringbuf_to_string(sb);
     return binary_str ? (Item){.item = s2it(binary_str)} : (Item){.item = ITEM_ERROR};
 }
 
@@ -200,11 +200,11 @@ static Item parse_datetime(Input *input, const char **mark) {
     *mark += 2; // Skip t'
     skip_whitespace(mark);
     
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer before use
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer before use
     
     while (**mark && **mark != '\'') {
-        strbuf_append_char(sb, **mark);
+        stringbuf_append_char(sb, **mark);
         (*mark)++;
     }
     
@@ -212,7 +212,7 @@ static Item parse_datetime(Input *input, const char **mark) {
         (*mark)++; // skip closing quote
     }
     
-    String* datetime_str = strbuf_to_string(sb);
+    String* datetime_str = stringbuf_to_string(sb);
     return datetime_str ? (Item){.item = s2it(datetime_str)} : (Item){.item = ITEM_ERROR};
 }
 
@@ -551,7 +551,7 @@ static Item parse_value(Input *input, const char **mark) {
 }
 
 void parse_mark(Input* input, const char* mark_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     const char* mark = mark_string;
     skip_comments(&mark);

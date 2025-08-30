@@ -27,16 +27,16 @@ static bool is_folded_line(const char *vcf) {
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(Input *input, const char **vcf) {
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     
     while (**vcf && **vcf != ':' && **vcf != ';' && **vcf != '\n' && **vcf != '\r') {
-        strbuf_append_char(sb, **vcf);
+        stringbuf_append_char(sb, **vcf);
         (*vcf)++;
     }
     
     if (sb->length > sizeof(uint32_t)) {
-        String* result = strbuf_to_string(sb);
+        String* result = stringbuf_to_string(sb);
         return result;
     }
     return NULL;
@@ -48,24 +48,24 @@ static void parse_property_parameters(Input *input, const char **vcf, Map* param
         (*vcf)++; // skip ';'
         
         // Parse parameter name
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         
         while (**vcf && **vcf != '=' && **vcf != ':' && **vcf != '\n' && **vcf != '\r') {
-            strbuf_append_char(sb, tolower(**vcf));
+            stringbuf_append_char(sb, tolower(**vcf));
             (*vcf)++;
         }
         
         if (sb->length <= sizeof(uint32_t)) continue;
         
-        String* param_name = strbuf_to_string(sb);
+        String* param_name = stringbuf_to_string(sb);
         if (!param_name) continue;
         
         String* param_value = NULL;
         
         if (**vcf == '=') {
             (*vcf)++; // skip '='
-            strbuf_reset(sb);
+            stringbuf_reset(sb);
             
             // Handle quoted values
             bool in_quotes = false;
@@ -77,7 +77,7 @@ static void parse_property_parameters(Input *input, const char **vcf, Map* param
             while (**vcf && 
                    (in_quotes ? **vcf != '"' : (**vcf != ';' && **vcf != ':')) &&
                    **vcf != '\n' && **vcf != '\r') {
-                strbuf_append_char(sb, **vcf);
+                stringbuf_append_char(sb, **vcf);
                 (*vcf)++;
             }
             
@@ -86,7 +86,7 @@ static void parse_property_parameters(Input *input, const char **vcf, Map* param
             }
             
             if (sb->length > sizeof(uint32_t)) {
-                param_value = strbuf_to_string(sb);
+                param_value = stringbuf_to_string(sb);
             }
         }
         
@@ -103,8 +103,8 @@ static String* parse_property_value(Input *input, const char **vcf) {
     
     (*vcf)++; // skip ':'
     
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     
     // Parse the value, handling line folding
     while (**vcf) {
@@ -122,7 +122,7 @@ static String* parse_property_value(Input *input, const char **vcf) {
             // Check if next line is folded
             if (is_folded_line(next_line)) {
                 // This is a folded line, replace line ending with space and continue
-                strbuf_append_char(sb, ' ');
+                stringbuf_append_char(sb, ' ');
                 *vcf = next_line;
                 skip_line_whitespace(vcf); // skip the folding whitespace
             } else {
@@ -131,13 +131,13 @@ static String* parse_property_value(Input *input, const char **vcf) {
                 break;
             }
         } else {
-            strbuf_append_char(sb, **vcf);
+            stringbuf_append_char(sb, **vcf);
             (*vcf)++;
         }
     }
     
     if (sb->length > sizeof(uint32_t)) {
-        return strbuf_to_string(sb);
+        return stringbuf_to_string(sb);
     }
     return NULL;
 }
@@ -161,17 +161,17 @@ static Map* parse_structured_name(Input *input, const char* value) {
     int field_count = sizeof(field_names) / sizeof(field_names[0]);
     
     for (int i = 0; i < field_count && *ptr; i++) {
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         
         // Parse until semicolon or end
         while (*ptr && *ptr != ';') {
-            strbuf_append_char(sb, *ptr);
+            stringbuf_append_char(sb, *ptr);
             ptr++;
         }
         
         if (sb->length > sizeof(uint32_t)) {
-            String* field_value = strbuf_to_string(sb);
+            String* field_value = stringbuf_to_string(sb);
             if (field_value && field_value->len > 0) {
                 String* field_key = input_create_string(input, field_names[i]);
                 Item value_item = {.item = s2it(field_value)};
@@ -196,17 +196,17 @@ static Map* parse_address(Input *input, const char* value) {
     int field_count = sizeof(field_names) / sizeof(field_names[0]);
     
     for (int i = 0; i < field_count && *ptr; i++) {
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         
         // Parse until semicolon or end
         while (*ptr && *ptr != ';') {
-            strbuf_append_char(sb, *ptr);
+            stringbuf_append_char(sb, *ptr);
             ptr++;
         }
         
         if (sb->length > sizeof(uint32_t)) {
-            String* field_value = strbuf_to_string(sb);
+            String* field_value = stringbuf_to_string(sb);
             if (field_value && field_value->len > 0) {
                 String* field_key = input_create_string(input, field_names[i]);
                 Item value_item = {.item = s2it(field_value)};
@@ -225,7 +225,7 @@ void parse_vcf(Input* input, const char* vcf_string) {
     if (!vcf_string || !input) return;
     
     // Initialize string buffer for parsing
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     if (!input->sb) return;
     
     const char* vcf = vcf_string;

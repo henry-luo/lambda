@@ -327,7 +327,7 @@ static Item parse_yaml_content(Input *input, char** lines, int* current_line, in
 }
 
 void parse_yaml(Input *input, const char* yaml_str) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
 
     // Split into lines
     char* yaml_copy = strdup(yaml_str);

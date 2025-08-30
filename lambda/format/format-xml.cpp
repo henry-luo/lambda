@@ -1,9 +1,10 @@
 #include "format.h"
 #include "../windows_compat.h"  // For Windows compatibility functions like strndup
+#include "../../lib/stringbuf.h"
 
-void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data);
+void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
-static void format_item(StrBuf* sb, Item item, const char* tag_name);
+static void format_item(StringBuf* sb, Item item, const char* tag_name);
 
 // Helper function to check if a type is simple (can be output as XML attribute)
 static bool is_simple_type(TypeId type) {
@@ -12,7 +13,7 @@ static bool is_simple_type(TypeId type) {
            type == LMD_TYPE_BOOL;
 }
 
-static void format_xml_string(StrBuf* sb, String* str) {
+static void format_xml_string(StringBuf* sb, String* str) {
     if (!str || !str->chars) return;
     
     const char* s = str->chars;
@@ -22,10 +23,10 @@ static void format_xml_string(StrBuf* sb, String* str) {
         char c = s[i];
         switch (c) {
         case '<':
-            strbuf_append_str(sb, "&lt;");
+            stringbuf_append_str(sb, "&lt;");
             break;
         case '>':
-            strbuf_append_str(sb, "&gt;");
+            stringbuf_append_str(sb, "&gt;");
             break;
         case '&':
             // Check if this is already an entity reference
@@ -38,35 +39,35 @@ static void format_xml_string(StrBuf* sb, String* str) {
                 if (j < len && s[j] == ';') {
                     // This looks like an entity, preserve it as-is
                     for (size_t k = i; k <= j; k++) {
-                        strbuf_append_char(sb, s[k]);
+                        stringbuf_append_char(sb, s[k]);
                     }
                     i = j; // Skip past the entity
                     break;
                 }
             }
-            strbuf_append_str(sb, "&amp;");
+            stringbuf_append_str(sb, "&amp;");
             break;
         case '"':
-            strbuf_append_str(sb, "&quot;");
+            stringbuf_append_str(sb, "&quot;");
             break;
         case '\'':
-            strbuf_append_str(sb, "&apos;");
+            stringbuf_append_str(sb, "&apos;");
             break;
         default:
             if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
                 // Control characters - encode as numeric character reference
                 char hex_buf[10];
                 snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
-                strbuf_append_str(sb, hex_buf);
+                stringbuf_append_str(sb, hex_buf);
             } else {
-                strbuf_append_char(sb, c);
+                stringbuf_append_char(sb, c);
             }
             break;
         }
     }
 }
 
-static void format_array(StrBuf* sb, Array* arr, const char* tag_name) {
+static void format_array(StringBuf* sb, Array* arr, const char* tag_name) {
     printf("format_array: arr %p, length %ld\n", (void*)arr, arr ? arr->length : 0);
     if (arr && arr->length > 0) {
         for (long i = 0; i < arr->length; i++) {
@@ -76,7 +77,7 @@ static void format_array(StrBuf* sb, Array* arr, const char* tag_name) {
     }
 }
 
-static void format_map_attributes(StrBuf* sb, TypeMap* map_type, void* map_data) {
+static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_data) {
     if (!map_type || !map_data || !map_type->shape) return;
     
     ShapeEntry* field = map_type->shape;
@@ -87,8 +88,8 @@ static void format_map_attributes(StrBuf* sb, TypeMap* map_type, void* map_data)
             // Only output simple types as attributes
             TypeId field_type = field->type->type_id;
             if (is_simple_type(field_type)) {
-                strbuf_append_char(sb, ' ');
-                strbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
+                stringbuf_append_char(sb, ' ');
+                stringbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
                 
                 if (field_type == LMD_TYPE_STRING) {
                     String* str = *(String**)data;
@@ -99,26 +100,26 @@ static void format_map_attributes(StrBuf* sb, TypeMap* map_type, void* map_data)
                     long int_val = *(long*)data;
                     char num_buf[32];
                     snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
-                    strbuf_append_str(sb, num_buf);
+                    stringbuf_append_str(sb, num_buf);
                 } else if (field_type == LMD_TYPE_FLOAT) {
                     double float_val = *(double*)data;
                     char num_buf[32];
                     snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
-                    strbuf_append_str(sb, num_buf);
+                    stringbuf_append_str(sb, num_buf);
                 } else if (field_type == LMD_TYPE_BOOL) {
                     bool bool_val = *(bool*)data;
-                    strbuf_append_str(sb, bool_val ? "true" : "false");
+                    stringbuf_append_str(sb, bool_val ? "true" : "false");
                 }
                 // else // leave out null or unsupported types
                 
-                strbuf_append_char(sb, '"');
+                stringbuf_append_char(sb, '"');
             }
         }
         field = field->next;
     }
 }
 
-static void format_attributes(StrBuf* sb, TypeMap* map_type, void* map_data) {
+static void format_attributes(StringBuf* sb, TypeMap* map_type, void* map_data) {
     if (!map_type || !map_data || !map_type->shape) return;
     printf("format_attributes: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
     
@@ -134,8 +135,8 @@ static void format_attributes(StrBuf* sb, TypeMap* map_type, void* map_data) {
             
             // Only output simple types as attributes, skip null values
             if (is_simple_type(field_type) && field_type != LMD_TYPE_NULL) {
-                strbuf_append_char(sb, ' ');
-                strbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
+                stringbuf_append_char(sb, ' ');
+                stringbuf_append_format(sb, "%.*s=\"", (int)field->name->length, field->name->str);
                 
                 if (field_type == LMD_TYPE_STRING) {
                     String* str = *(String**)data;
@@ -151,26 +152,26 @@ static void format_attributes(StrBuf* sb, TypeMap* map_type, void* map_data) {
                     long int_val = *(long*)data;
                     char num_buf[32];
                     snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
-                    strbuf_append_str(sb, num_buf);
+                    stringbuf_append_str(sb, num_buf);
                 } else if (field_type == LMD_TYPE_FLOAT) {
                     double float_val = *(double*)data;
                     char num_buf[32];
                     snprintf(num_buf, sizeof(num_buf), "%.15g", float_val);
-                    strbuf_append_str(sb, num_buf);
+                    stringbuf_append_str(sb, num_buf);
                 } else if (field_type == LMD_TYPE_BOOL) {
                     bool bool_val = *(bool*)data;
-                    strbuf_append_str(sb, bool_val ? "true" : "false");
+                    stringbuf_append_str(sb, bool_val ? "true" : "false");
                 }
                 // else // leave out null or unsupported types
                 
-                strbuf_append_char(sb, '"');
+                stringbuf_append_char(sb, '"');
             }
         }
         field = field->next;
     }
 }
 
-static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
+static void format_map_elements(StringBuf* sb, TypeMap* map_type, void* map_data) {
     if (!map_type || !map_data || !map_type->shape) return;
     printf("format_map_elements: map_type %p, map_data %p\n", (void*)map_type, (void*)map_data);
     
@@ -188,20 +189,21 @@ static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
             if (!is_simple_type(field_type)) {
                 if (field_type == LMD_TYPE_NULL) {
                     // Create empty element for null
-                    strbuf_append_char(sb, '<');
-                    strbuf_append_format(sb, "%.*s", (int)field->name->length, field->name->str);
-                    strbuf_append_str(sb, "/>");
+                    stringbuf_append_char(sb, '<');
+                    stringbuf_append_format(sb, " %.*s=\"%.*s\"", (int)field->name->length, field->name->str, (int)field->name->length, field->name->str);
+                    stringbuf_append_str(sb, "/>");
                 } else {
                     // Create a proper null-terminated tag name
                     printf("format field: %d\n", field_type);
-                    StrBuf* tag_buf = strbuf_new();
-                    strbuf_append_format(tag_buf, "%.*s", (int)field->name->length, field->name->str);
-                    char* tag_name = tag_buf->str;
+                    StringBuf* tag_buf = stringbuf_new(NULL);
+                    stringbuf_append_format(tag_buf, "%.*s", (int)field->name->length, field->name->str);
+                    String* tag_string = stringbuf_to_string(tag_buf);
+                    char* tag_name = tag_string->chars;
                     
                     Item item_data = *(Item*)data;
                     format_item(sb, item_data, tag_name);
                     
-                    strbuf_free(tag_buf);
+                    stringbuf_free(tag_buf);
                 }
             }
         }
@@ -209,13 +211,13 @@ static void format_map_elements(StrBuf* sb, TypeMap* map_type, void* map_data) {
     }
 }
 
-static void format_map(StrBuf* sb, Map* mp, const char* tag_name) {
+static void format_map(StringBuf* sb, Map* mp, const char* tag_name) {
     printf("format_map: mp %p, type %p, data %p\n", (void*)mp, (void*)mp->type, (void*)mp->data);
     
     if (!tag_name) tag_name = "object";
     
-    strbuf_append_char(sb, '<');
-    strbuf_append_str(sb, tag_name);
+    stringbuf_append_char(sb, '<');
+    stringbuf_append_str(sb, tag_name);
     
     // Add simple types as attributes for better XML structure
     if (mp && mp->type) {
@@ -238,7 +240,7 @@ static void format_map(StrBuf* sb, Map* mp, const char* tag_name) {
     }
     
     if (has_children) {
-        strbuf_append_char(sb, '>');
+        stringbuf_append_char(sb, '>');
         
         // Add complex types as child elements
         if (mp && mp->type) {
@@ -246,30 +248,30 @@ static void format_map(StrBuf* sb, Map* mp, const char* tag_name) {
             format_map_elements(sb, map_type, mp->data);
         }
         
-        strbuf_append_str(sb, "</");
-        strbuf_append_str(sb, tag_name);
-        strbuf_append_char(sb, '>');
+        stringbuf_append_str(sb, "</");
+        stringbuf_append_str(sb, tag_name);
+        stringbuf_append_char(sb, '>');
     } else {
         // Self-closing tag if no children
-        strbuf_append_str(sb, "/>");
+        stringbuf_append_str(sb, "/>");
     }
 }
 
-static void format_item(StrBuf* sb, Item item, const char* tag_name) {
+static void format_item(StringBuf* sb, Item item, const char* tag_name) {
     // Safety check for null pointer
     if (!sb) return;
     
     // Check if item is null
     if ((item.item == ITEM_NULL)) {
         if (!tag_name) tag_name = "value";
-        strbuf_append_format(sb, "<%s/>", tag_name);
+        stringbuf_append_format(sb, "<%s/>", tag_name);
         return;
     }
     
     // Additional safety check for Item structure
     if (get_type_id(item) == 0 && item.pointer == 0) {
         if (!tag_name) tag_name = "value";
-        strbuf_append_format(sb, "<%s/>", tag_name);
+        stringbuf_append_format(sb, "<%s/>", tag_name);
         return;
     }
     
@@ -280,37 +282,37 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
     
     switch (type) {
     case LMD_TYPE_NULL:
-        strbuf_append_format(sb, "<%s/>", tag_name);
+        stringbuf_append_format(sb, "<%s/>", tag_name);
         break;
     case LMD_TYPE_BOOL: {
         bool val = item.bool_val;
-        strbuf_append_format(sb, "<%s>%s</%s>", tag_name, val ? "true" : "false", tag_name);
+        stringbuf_append_format(sb, "<%s>%s</%s>", tag_name, val ? "true" : "false", tag_name);
         break;
     }
     case LMD_TYPE_INT:
     case LMD_TYPE_INT64:
     case LMD_TYPE_FLOAT:
-        strbuf_append_format(sb, "<%s>", tag_name);
+        stringbuf_append_format(sb, "<%s>", tag_name);
         format_number(sb, item);
-        strbuf_append_format(sb, "</%s>", tag_name);
+        stringbuf_append_format(sb, "</%s>", tag_name);
         break;
     case LMD_TYPE_STRING: {
         String* str = (String*)item.pointer;
-        strbuf_append_format(sb, "<%s>", tag_name);
+        stringbuf_append_format(sb, "<%s>", tag_name);
         if (str) {
             format_xml_string(sb, str);
         }
-        strbuf_append_format(sb, "</%s>", tag_name);
+        stringbuf_append_format(sb, "</%s>", tag_name);
         break;
     }
     case LMD_TYPE_ARRAY: {
         Array* arr = (Array*)item.pointer;
         if (arr) {
-            strbuf_append_format(sb, "<%s>", tag_name);
+            stringbuf_append_format(sb, "<%s>", tag_name);
             format_array(sb, arr, "item");
-            strbuf_append_format(sb, "</%s>", tag_name);
+            stringbuf_append_format(sb, "</%s>", tag_name);
         } else {
-            strbuf_append_format(sb, "<%s/>", tag_name);
+            stringbuf_append_format(sb, "<%s/>", tag_name);
         }
         break;
     }
@@ -319,7 +321,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         if (mp) {
             format_map(sb, mp, tag_name);
         } else {
-            strbuf_append_format(sb, "<%s/>", tag_name);
+            stringbuf_append_format(sb, "<%s/>", tag_name);
         }
         break;
     }
@@ -328,7 +330,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         Element* element = (Element*)item.pointer;
         if (!element || !element->type) {
             printf("format_item: element is null or element->type is null\n");
-            strbuf_append_format(sb, "<%s/>", tag_name);
+            stringbuf_append_format(sb, "<%s/>", tag_name);
             break;
         }
         
@@ -341,7 +343,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         
         // Special handling for XML declaration
         if (strcmp(element_name, "?xml") == 0) {
-            strbuf_append_str(sb, "<?xml");
+            stringbuf_append_str(sb, "<?xml");
             
             // Handle XML declaration content as attributes
             if (elmt_type->content_length > 0) {
@@ -353,19 +355,19 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
                     if (content_type == LMD_TYPE_STRING) {
                         String* str = (String*)content_item.pointer;
                         if (str && str != &EMPTY_STRING) {
-                            strbuf_append_char(sb, ' ');
-                            strbuf_append_str(sb, str->chars);
+                            stringbuf_append_char(sb, ' ');
+                            stringbuf_append_str(sb, str->chars);
                         }
                     }
                 }
             }
             
-            strbuf_append_str(sb, "?>");
+            stringbuf_append_str(sb, "?>");
             return; // Early return for XML declaration
         }
         
-        strbuf_append_char(sb, '<');
-        strbuf_append_str(sb, element_name);
+        stringbuf_append_char(sb, '<');
+        stringbuf_append_str(sb, element_name);
         
         // Handle attributes (simple types from element fields)
         if (elmt_type->length > 0 && element->data) {
@@ -374,7 +376,7 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
             format_attributes(sb, map_type, element->data);
         }
         
-        strbuf_append_char(sb, '>');
+        stringbuf_append_char(sb, '>');
         
         // Handle element content (text/child elements as list)
         if (elmt_type->content_length > 0) {
@@ -406,9 +408,9 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
             }
         }
         
-        strbuf_append_str(sb, "</");
-        strbuf_append_str(sb, element_name);
-        strbuf_append_char(sb, '>');
+        stringbuf_append_str(sb, "</");
+        stringbuf_append_str(sb, element_name);
+        stringbuf_append_char(sb, '>');
         break;
     }
     default:
@@ -419,14 +421,14 @@ static void format_item(StrBuf* sb, Item item, const char* tag_name) {
         if (mp) {
             format_map(sb, mp, tag_name);
         } else {
-            strbuf_append_format(sb, "<%s/>", tag_name);
+            stringbuf_append_format(sb, "<%s/>", tag_name);
         }
         break;
     }
 }
 
 String* format_xml(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     printf("format_xml: root_item %p\n", (void*)root_item.pointer);
@@ -460,7 +462,7 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
                                 strncmp(child_type->name.str, "?xml", 4) == 0) {
                                 printf("format_xml: formatting XML declaration\n");
                                 format_item(sb, child, NULL);
-                                strbuf_append_char(sb, '\n');
+                                stringbuf_append_char(sb, '\n');
                             } else {
                                 // Format actual XML element with its proper name
                                 char* element_name = strndup(child_type->name.str, child_type->name.length);
@@ -472,7 +474,7 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
                     }
                 }
                 
-                return strbuf_to_string(sb);
+                return stringbuf_to_string(sb);
             }
         }
     }
@@ -503,10 +505,10 @@ String* format_xml(VariableMemPool* pool, Item root_item) {
         free((char*)tag_name);
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
-// Convenience function that formats XML to a provided StrBuf
-void format_xml_to_strbuf(StrBuf* sb, Item root_item) {
+// Convenience function that formats XML to a provided StringBuf
+void format_xml_to_stringbuf(StringBuf* sb, Item root_item) {
     format_item(sb, root_item, "root");
 }
