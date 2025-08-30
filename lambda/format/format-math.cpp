@@ -69,22 +69,22 @@ static const MathFormatDef basic_operators[] = {
 
 // Functions
 static const MathFormatDef functions[] = {
-    {"sin", "\\sin({1})", "sin({1})", "sin({1})", "<mi>sin</mi>({1})", "sin({1})", true, false, false, 1},
-    {"cos", "\\cos({1})", "cos({1})", "cos({1})", "<mi>cos</mi>({1})", "cos({1})", true, false, false, 1},
-    {"tan", "\\tan({1})", "tan({1})", "tan({1})", "<mi>tan</mi>({1})", "tan({1})", true, false, false, 1},
-    {"cot", "\\cot({1})", "cot({1})", "cot({1})", "<mi>cot</mi>({1})", "cot({1})", true, false, false, 1},
-    {"sec", "\\sec({1})", "sec({1})", "sec({1})", "<mi>sec</mi>({1})", "sec({1})", true, false, false, 1},
-    {"csc", "\\csc({1})", "csc({1})", "csc({1})", "<mi>csc</mi>({1})", "csc({1})", true, false, false, 1},
-    {"arcsin", "\\arcsin({1})", "arcsin({1})", "arcsin({1})", "<mi>arcsin</mi>({1})", "arcsin({1})", true, false, false, 1},
-    {"arccos", "\\arccos({1})", "arccos({1})", "arccos({1})", "<mi>arccos</mi>({1})", "arccos({1})", true, false, false, 1},
-    {"arctan", "\\arctan({1})", "arctan({1})", "arctan({1})", "<mi>arctan</mi>({1})", "arctan({1})", true, false, false, 1},
-    {"sinh", "\\sinh({1})", "sinh({1})", "sinh({1})", "<mi>sinh</mi>({1})", "sinh({1})", true, false, false, 1},
-    {"cosh", "\\cosh({1})", "cosh({1})", "cosh({1})", "<mi>cosh</mi>({1})", "cosh({1})", true, false, false, 1},
-    {"tanh", "\\tanh({1})", "tanh({1})", "tanh({1})", "<mi>tanh</mi>({1})", "tanh({1})", true, false, false, 1},
-    {"log", "\\log({1})", "log({1})", "log({1})", "<mi>log</mi>({1})", "log({1})", true, false, false, 1},
-    {"ln", "\\ln({1})", "ln({1})", "ln({1})", "<mi>ln</mi>({1})", "ln({1})", true, false, false, 1},
-    {"lg", "\\lg({1})", "lg({1})", "lg({1})", "<mi>lg</mi>({1})", "lg({1})", true, false, false, 1},
-    {"exp", "\\exp({1})", "exp({1})", "exp({1})", "<mi>exp</mi>({1})", "exp({1})", true, false, false, 1},
+    {"sin", "\\sin", "sin", "sin", "<mi>sin</mi>", "sin", false, false, false, 0},
+    {"cos", "\\cos", "cos", "cos", "<mi>cos</mi>", "cos", false, false, false, 0},
+    {"tan", "\\tan", "tan", "tan", "<mi>tan</mi>", "tan", false, false, false, 0},
+    {"cot", "\\cot", "cot", "cot", "<mi>cot</mi>", "cot", false, false, false, 0},
+    {"sec", "\\sec", "sec", "sec", "<mi>sec</mi>", "sec", false, false, false, 0},
+    {"csc", "\\csc", "csc", "csc", "<mi>csc</mi>", "csc", false, false, false, 0},
+    {"arcsin", "\\arcsin", "arcsin", "arcsin", "<mi>arcsin</mi>", "arcsin", false, false, false, 0},
+    {"arccos", "\\arccos", "arccos", "arccos", "<mi>arccos</mi>", "arccos", false, false, false, 0},
+    {"arctan", "\\arctan", "arctan", "arctan", "<mi>arctan</mi>", "arctan", false, false, false, 0},
+    {"sinh", "\\sinh", "sinh", "sinh", "<mi>sinh</mi>", "sinh", false, false, false, 0},
+    {"cosh", "\\cosh", "cosh", "cosh", "<mi>cosh</mi>", "cosh", false, false, false, 0},
+    {"tanh", "\\tanh", "tanh", "tanh", "<mi>tanh</mi>", "tanh", false, false, false, 0},
+    {"log", "\\log", "log", "log", "<mi>log</mi>", "log", false, false, false, 0},
+    {"ln", "\\ln", "ln", "ln", "<mi>ln</mi>", "ln", false, false, false, 0},
+    {"lg", "\\lg", "lg", "lg", "<mi>lg</mi>", "lg", false, false, false, 0},
+    {"exp", "\\exp", "exp", "exp", "<mi>exp</mi>", "exp", false, false, false, 0},
     {"abs", "\\left|{1}\\right|", "abs({1})", "|{1}|", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
     {"min", "\\min({1})", "min({1})", "min({1})", "<mi>min</mi>({1})", "min({1})", true, false, false, -1},
     {"max", "\\max({1})", "max({1})", "max({1})", "<mi>max</mi>({1})", "max({1})", true, false, false, -1},
@@ -346,8 +346,6 @@ static bool is_single_character_item(Item item) {
 }
 
 // Check if item contains an integral
-// Global flag to detect integral case (temporary solution)
-bool formatting_integral_case = false;
 static int implicit_mul_depth = 0;  // Track nesting depth of implicit_mul
 static bool in_compact_context = false;  // Track when we're in subscript/superscript context
 
@@ -1350,22 +1348,7 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
             sb->length, sb->capacity, (void*)sb->str);
     #endif
     
-    // Check if this might be an integral case by doing a quick format check
-    StrBuf* temp_sb = strbuf_new_pooled(pool);
-    if (temp_sb) {
-        format_math_item(temp_sb, root_item, MATH_OUTPUT_LATEX, 0);
-        if (temp_sb->str && strstr(temp_sb->str, "\\int") != NULL) {
-            formatting_integral_case = true;
-            fprintf(stderr, "DEBUG: Detected integral in format_math_latex, setting flag\n");
-        } else {
-            formatting_integral_case = false;
-        }
-    }
-    
     format_math_item(sb, root_item, MATH_OUTPUT_LATEX, 0);
-    
-    // Reset the flag after formatting
-    formatting_integral_case = false;
 
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: After formatting - sb length=%zu, str='%s'\n", 
