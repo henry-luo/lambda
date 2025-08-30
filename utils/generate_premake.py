@@ -22,7 +22,7 @@ class PremakeGenerator:
         """Parse external library definitions from JSON config"""
         libraries = {}
         for lib in self.config.get('libraries', []):
-            if lib.get('link') == 'static' and 'lib' in lib:
+            if 'lib' in lib:  # Include both static and dynamic libraries
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
@@ -478,6 +478,8 @@ class PremakeGenerator:
                         if 'criterion' not in [dep for dep in deps]:
                             self.premake_content.append('        "criterion",')
                         
+                        # Note: curl is handled as static library in linkoptions, not as dynamic link
+                        
                         # Close the links block
                         self.premake_content.extend([
                             '    }',
@@ -509,11 +511,40 @@ class PremakeGenerator:
                                     lib_path = f"../../{lib_path}"
                                 self.premake_content.append(f'        "{lib_path}",')
                         
-                        # Add other external libraries
-                        for lib_name in ['mpdec', 'utf8proc', 'mir']:
+                        # Add other external libraries including curl dependencies
+                        for lib_name in ['mpdec', 'utf8proc', 'mir', 'curl', 'ssl', 'crypto']:
                             if lib_name in self.external_libraries:
                                 lib_path = self.external_libraries[lib_name]['lib']
                                 self.premake_content.append(f'        "{lib_path}",')
+                        
+                        self.premake_content.extend([
+                            '    }',
+                            '    ',
+                            '    -- Add dynamic libraries',
+                            '    links {'
+                        ])
+                        
+                        # Add dynamic libraries (not frameworks)
+                        for lib_name in ['z']:
+                            if lib_name in self.external_libraries and self.external_libraries[lib_name].get('link') == 'dynamic':
+                                lib_flag = self.external_libraries[lib_name]['lib']
+                                if lib_flag.startswith('-l'):
+                                    lib_flag = lib_flag[2:]  # Remove -l prefix
+                                self.premake_content.append(f'        "{lib_flag}",')
+                        
+                        self.premake_content.extend([
+                            '    }',
+                            '    ',
+                            '    -- Add macOS frameworks',
+                            '    linkoptions {'
+                        ])
+                        
+                        # Add macOS frameworks using linkoptions
+                        for lib_name in ['CoreFoundation', 'CoreServices', 'SystemConfiguration']:
+                            if lib_name in self.external_libraries and self.external_libraries[lib_name].get('link') == 'dynamic':
+                                lib_flag = self.external_libraries[lib_name]['lib']
+                                if lib_flag.startswith('-framework '):
+                                    self.premake_content.append(f'        "{lib_flag}",')
                         
                         self.premake_content.extend([
                             '    }',
