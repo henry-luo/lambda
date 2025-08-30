@@ -493,17 +493,6 @@ Test(strbuf_tests, test_vappend_and_format_functions) {
     strbuf_free(sb);
 }
 
-Test(strbuf_tests, test_pooled_memory_basic) {
-    // Basic test for pooled memory allocation path (requires actual pool)
-    // This test verifies the pooled allocation code path exists and handles NULL pool gracefully
-    StrBuf *sb = strbuf_new_pooled(NULL); // Pass NULL pool to test error handling
-    
-    if (sb) {
-        cr_assert_null(sb->pool, "Pool should be NULL when passed NULL");
-        strbuf_free(sb);
-    }
-    // If strbuf_new_pooled returns NULL with NULL pool, that's also acceptable behavior
-}
 
 Test(strbuf_tests, test_boundary_conditions) {
     StrBuf *sb = strbuf_new_cap(1); // Minimum practical capacity
@@ -577,7 +566,7 @@ Test(strbuf_tests, test_free_regular_memory) {
     // Test freeing StrBuf allocated with regular malloc
     StrBuf *sb = strbuf_new();
     cr_assert_not_null(sb);
-    cr_assert_null(sb->pool, "Regular StrBuf should have NULL pool");
+    // Pool member removed from StrBuf struct
     
     // Add some content to ensure str is allocated
     strbuf_append_str(sb, "Test content for regular memory");
@@ -593,7 +582,7 @@ Test(strbuf_tests, test_free_empty_regular_memory) {
     // Test freeing StrBuf with no content (str might be NULL or empty)
     StrBuf *sb = strbuf_new();
     cr_assert_not_null(sb);
-    cr_assert_null(sb->pool, "Regular StrBuf should have NULL pool");
+    // Pool member removed from StrBuf struct
     cr_assert_eq(sb->length, 0);
     
     // Free should handle case where str might be allocated but empty
@@ -612,144 +601,5 @@ Test(strbuf_tests, test_free_after_full_reset) {
     
     // Free should handle NULL str pointer gracefully
     // Note: After full_reset, need to free the StrBuf struct manually since str is NULL
-    free(sb); // Don't use strbuf_free here as it expects str to be valid in some cases
-}
-
-Test(strbuf_tests, test_free_pooled_memory_basic) {
-    // Test freeing StrBuf allocated with memory pool
-    VariableMemPool *pool;
-    MemPoolError err = pool_variable_init(&pool, 1024, MEM_POOL_NO_BEST_FIT);
-    cr_assert_eq(err, MEM_POOL_ERR_OK, "Pool initialization should succeed");
-    
-    StrBuf *sb = strbuf_new_pooled(pool);
-    if (sb) {
-        cr_assert_eq(sb->pool, pool, "StrBuf should reference the pool");
-        
-        // Add content to ensure pool allocation occurs
-        strbuf_append_str(sb, "Test content for pooled memory");
-        cr_assert_not_null(sb->str);
-        cr_assert_gt(sb->length, 0);
-        
-        // Verify the string buffer is associated with the pool
-        MemPoolError assoc_err = pool_variable_is_associated(pool, sb->str);
-        cr_assert_eq(assoc_err, MEM_POOL_ERR_OK, "String buffer should be associated with pool");
-        
-        // Free should use pool_variable_free for both str and sb
-        strbuf_free(sb);
-    }
-    
-    // Clean up pool
-    pool_variable_destroy(pool);
-}
-
-Test(strbuf_tests, test_free_pooled_memory_empty) {
-    // Test freeing empty pooled StrBuf
-    VariableMemPool *pool;
-    MemPoolError err = pool_variable_init(&pool, 512, MEM_POOL_NO_BEST_FIT);
-    cr_assert_eq(err, MEM_POOL_ERR_OK);
-    
-    StrBuf *sb = strbuf_new_pooled(pool);
-    if (sb) {
-        cr_assert_eq(sb->pool, pool);
-        cr_assert_eq(sb->length, 0);
-        
-        // Free should handle empty pooled buffer
-        strbuf_free(sb);
-    }
-    
-    pool_variable_destroy(pool);
-}
-
-Test(strbuf_tests, test_free_pooled_memory_after_reallocation) {
-    // Test freeing pooled StrBuf after multiple reallocations
-    VariableMemPool *pool;
-    MemPoolError err = pool_variable_init(&pool, 2048, MEM_POOL_NO_BEST_FIT);
-    cr_assert_eq(err, MEM_POOL_ERR_OK);
-    
-    StrBuf *sb = strbuf_new_pooled(pool);
-    if (sb) {
-        cr_assert_eq(sb->pool, pool);
-        
-        // Force multiple reallocations
-        for (int i = 0; i < 5; i++) {
-            strbuf_append_str(sb, "This is a longer string that should cause reallocation in the pool ");
-        }
-        
-        cr_assert_gt(sb->length, 0);
-        cr_assert_not_null(sb->str);
-        
-        // Verify final buffer is still associated with pool
-        MemPoolError assoc_err = pool_variable_is_associated(pool, sb->str);
-        cr_assert_eq(assoc_err, MEM_POOL_ERR_OK, "Final buffer should be associated with pool");
-        
-        // Free after reallocations
-        strbuf_free(sb);
-    }
-    
-    pool_variable_destroy(pool);
-}
-
-Test(strbuf_tests, test_free_multiple_pooled_buffers) {
-    // Test freeing multiple StrBufs from same pool
-    VariableMemPool *pool;
-    MemPoolError err = pool_variable_init(&pool, 1024, MEM_POOL_NO_BEST_FIT);
-    cr_assert_eq(err, MEM_POOL_ERR_OK);
-    
-    StrBuf *sb1 = strbuf_new_pooled(pool);
-    StrBuf *sb2 = strbuf_new_pooled(pool);
-    StrBuf *sb3 = strbuf_new_pooled(pool);
-    
-    if (sb1 && sb2 && sb3) {
-        // Add different content to each
-        strbuf_append_str(sb1, "First buffer content");
-        strbuf_append_str(sb2, "Second buffer content with more text");
-        strbuf_append_str(sb3, "Third buffer");
-        
-        // Verify all are associated with pool
-        cr_assert_eq(pool_variable_is_associated(pool, sb1->str), MEM_POOL_ERR_OK);
-        cr_assert_eq(pool_variable_is_associated(pool, sb2->str), MEM_POOL_ERR_OK);
-        cr_assert_eq(pool_variable_is_associated(pool, sb3->str), MEM_POOL_ERR_OK);
-        
-        // Free in different order
-        strbuf_free(sb2);
-        strbuf_free(sb1);
-        strbuf_free(sb3);
-    }
-    
-    pool_variable_destroy(pool);
-}
-
-Test(strbuf_tests, test_free_pooled_vs_regular_memory) {
-    // Test that pooled and regular StrBufs are freed correctly using different paths
-    VariableMemPool *pool;
-    MemPoolError err = pool_variable_init(&pool, 512, MEM_POOL_NO_BEST_FIT);
-    cr_assert_eq(err, MEM_POOL_ERR_OK);
-    
-    // Create one regular and one pooled StrBuf
-    StrBuf *regular_sb = strbuf_new();
-    StrBuf *pooled_sb = strbuf_new_pooled(pool);
-    
-    cr_assert_not_null(regular_sb);
-    cr_assert_null(regular_sb->pool, "Regular StrBuf should have NULL pool");
-    
-    if (pooled_sb) {
-        cr_assert_eq(pooled_sb->pool, pool, "Pooled StrBuf should reference pool");
-        
-        // Add content to both to ensure they get allocated
-        strbuf_append_str(regular_sb, "Regular memory content");
-        strbuf_append_str(pooled_sb, "Pooled memory content");
-        
-        // Verify the regular buffer works as expected
-        cr_assert_str_eq(regular_sb->str, "Regular memory content");
-        
-        // For pooled buffer, just verify that memory was allocated
-        cr_assert_not_null(pooled_sb->str, "Pooled buffer should have allocated memory");
-        cr_assert_gt(pooled_sb->capacity, 0, "Pooled buffer should have capacity");
-        
-        // Free both - should use different code paths
-        strbuf_free(pooled_sb); // Uses pool_variable_free
-    }
-    
-    strbuf_free(regular_sb); // Uses regular free
-    pool_variable_destroy(pool);
+    strbuf_free(sb); // Changed from free(sb) to strbuf_free(sb)
 }

@@ -4,35 +4,24 @@
 
 #define INITIAL_CAPACITY 32
 
-StrBuf* _strbuf_new_cap(size_t size, VariableMemPool *pool) {
-    StrBuf *sb;
-    if (pool) {
-        MemPoolError err = pool_variable_alloc(pool, sizeof(StrBuf), (void**)&sb);
-        if (err != MEM_POOL_ERR_OK) { return NULL; }
-        sb->pool = pool;
-        sb->length = sb->capacity = 0;  sb->str = NULL; 
-    } else {
-        sb = (StrBuf*) malloc(sizeof(StrBuf));
-        if (!sb) return NULL;
-        sb->str = (char*) malloc(size);
-        if (!sb->str) { free(sb);  return NULL; }
-        sb->str[0] = '\0';  sb->length = 0;
-        sb->capacity = size;  sb->pool = NULL;
-    }
+StrBuf* _strbuf_new_cap(size_t size) {
+    StrBuf *sb = (StrBuf*) malloc(sizeof(StrBuf));
+    if (!sb) return NULL;
+    sb->str = (char*) malloc(size);
+    if (!sb->str) { free(sb);  return NULL; }
+    sb->str[0] = '\0';  sb->length = 0;
+    sb->capacity = size;
     return sb;
 }
 
 StrBuf* strbuf_new_cap(size_t size) {
-    return _strbuf_new_cap(size, NULL);
+    return _strbuf_new_cap(size);
 }
 
 StrBuf* strbuf_new() {
     return strbuf_new_cap(INITIAL_CAPACITY);
 }
 
-StrBuf* strbuf_new_pooled(VariableMemPool *pool) {
-    return _strbuf_new_cap(INITIAL_CAPACITY, pool);
-}
 
 StrBuf* strbuf_create(const char *str) {
     size_t str_len = strlen(str);
@@ -44,13 +33,8 @@ StrBuf* strbuf_create(const char *str) {
 }
 
 void strbuf_free(StrBuf *sb) {
-    if (sb->pool) {
-        if (sb->str) { pool_variable_free(sb->pool, sb->str);}
-        pool_variable_free(sb->pool, sb);
-    } else {
-        if (sb->str) free(sb->str);
-        free(sb);
-    }
+    if (sb->str) free(sb->str);
+    free(sb);
 }
 
 void strbuf_reset(StrBuf *sb) {
@@ -88,19 +72,7 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
         log_debug("doubling strbuf new_capacity: %zu -> %zu", new_capacity, new_capacity * 2);
         new_capacity *= 2; 
     }
-    char *new_s;
-    if (!sb->pool) new_s = (char*)realloc(sb->str, new_capacity);
-    else {
-        if (!sb->length) { // first allocation
-            MemPoolError err = pool_variable_alloc(sb->pool, new_capacity, (void**)&new_s);
-            if (err != MEM_POOL_ERR_OK) return false;
-            sb->length = sizeof(uint32_t);  // reserved for prepended String length 
-        }
-        else { // realloc existing buffer
-            new_s = (char*)pool_variable_realloc(sb->pool, sb->str, (sb->length+1), new_capacity);
-            // printf("strbuf expanded: %p -> %p\n", (void*)sb->str, (void*)new_s);
-        }
-    }
+    char *new_s = (char*)realloc(sb->str, new_capacity);
     if (!new_s) return false;
     sb->str = new_s;  sb->capacity = new_capacity;
     return true;

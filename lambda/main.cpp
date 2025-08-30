@@ -446,10 +446,10 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_text_string(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             // Format as markdown using string buffer
-            StrBuf* sb = strbuf_new_cap(1024);
+            StringBuf* sb = stringbuf_new(input->pool);
             format_markdown(sb, input->root);
-            formatted_output = create_string(input->pool, sb->str);
-            strbuf_free(sb);
+            formatted_output = stringbuf_to_string(sb);
+            stringbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
             printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, text, markdown\n");
