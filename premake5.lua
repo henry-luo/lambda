@@ -902,8 +902,6 @@ project "test_markup_roundtrip"
     }
     
     links {
-        "lambda-runtime-full-cpp",
-        "lambda-runtime-full-c",
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
@@ -982,8 +980,8 @@ project "test_input_roundtrip"
     }
     
     links {
-        "lambda-runtime-full-cpp",
-        "lambda-runtime-full-c",
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
         "lambda-lib",
         "criterion",
     }

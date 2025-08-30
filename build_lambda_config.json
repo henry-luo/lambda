@@ -243,9 +243,6 @@
         "g",
         "O0"
     ],
-    "linker_flags": [
-    ],
-    "debug": true,
     "build_dir": "build",
     "platforms": {
         "debug": {
@@ -319,6 +316,7 @@
         }
     },
     "test": {
+        "output_dir": "test_output",
         "test_suites": [
             {
                 "suite": "library",
@@ -390,13 +388,13 @@
                     {
                         "source": "test_markup_roundtrip.cpp",
                         "name": "📝 Markup Roundtrip Tests",
-                        "dependencies": ["lambda-runtime-full"],
+                        "dependencies": ["lambda-input-full"],
                         "binary": "test_markup_roundtrip.exe"
                     },
                     {
                         "source": "test/test_input_roundtrip.cpp",
                         "name": "🔄 Input Roundtrip Tests",
-                        "dependencies": ["lambda-runtime-full"],
+                        "dependencies": ["lambda-input-full"],
                         "binary": "test_input_roundtrip.exe"
                     },
                     {
@@ -499,7 +497,6 @@
                     "command_args": ["--test-dir", "test/std", "--format", "both", "--json-output", "test_output/lambda_test_runner_results.json", "--tap-output", "test_output/lambda_test_runner_results.tap"]
                 }
             }
-        ],
-        "output_dir": "test_output"
+        ]
     }
 }
