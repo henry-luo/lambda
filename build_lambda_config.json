@@ -408,6 +408,12 @@
                         "name": "🌐 HTTP/HTTPS Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_http.exe"
+                    },
+                    {
+                        "source": "test/test_sysinfo.cpp",
+                        "name": "🖥️ System Information Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_sysinfo.exe"
                     }
                 ],
                 "type": "input",
