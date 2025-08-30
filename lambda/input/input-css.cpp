@@ -217,13 +217,13 @@ static Item parse_css_at_rule(Input *input, const char **css) {
     (*css)++; // Skip @
     
     // Parse at-rule name
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     while (is_css_identifier_char(**css)) {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
     }
     
-    String* at_rule_name = strbuf_to_string(sb);
+    String* at_rule_name = stringbuf_to_string(sb);
     if (!at_rule_name) return {.item = ITEM_ERROR};
     
     Element* at_rule = input_create_element(input, "at-rule");
@@ -234,7 +234,7 @@ static Item parse_css_at_rule(Input *input, const char **css) {
     skip_css_comments(css);
     
     // Parse at-rule prelude (everything before { or ;)
-    StrBuf* prelude_sb = strbuf_new_pooled(input->pool);
+    StringBuf* prelude_sb = stringbuf_new(input->pool);
     int paren_depth = 0;
     
     while (**css && (**css != '{' && **css != ';')) {
@@ -244,18 +244,18 @@ static Item parse_css_at_rule(Input *input, const char **css) {
         
         // Don't break on braces inside parentheses
         if (c == '{' && paren_depth > 0) {
-            strbuf_append_char(prelude_sb, c);
+            stringbuf_append_char(prelude_sb, c);
             (*css)++;
             continue;
         }
         
         if (c == '{' || c == ';') break;
         
-        strbuf_append_char(prelude_sb, c);
+        stringbuf_append_char(prelude_sb, c);
         (*css)++;
     }
     
-    String* prelude_str = strbuf_to_string(prelude_sb);
+    String* prelude_str = stringbuf_to_string(prelude_sb);
     if (prelude_str && prelude_str->len > 0) {
         char* trimmed = input_trim_whitespace(prelude_str->chars);
         if (trimmed && strlen(trimmed) > 0) {
@@ -321,12 +321,12 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                     if (**css == '}') break;
                     
                     // Parse keyframe selector (0%, 50%, from, to, etc.)
-                    StrBuf* keyframe_sb = strbuf_new_pooled(input->pool);
+                    StringBuf* keyframe_sb = stringbuf_new(input->pool);
                     while (**css && **css != '{' && **css != '}') {
-                        strbuf_append_char(keyframe_sb, **css);
+                        stringbuf_append_char(keyframe_sb, **css);
                         (*css)++;
                     }
-                    String* keyframe_selector = strbuf_to_string(keyframe_sb);
+                    String* keyframe_selector = stringbuf_to_string(keyframe_sb);
                     
                     if (keyframe_selector && **css == '{') {
                         (*css)++; // Skip opening brace
@@ -345,12 +345,12 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                                 if (**css == '}') break;
                                 
                                 // Parse property name
-                                StrBuf* prop_sb = strbuf_new_pooled(input->pool);
+                                StringBuf* prop_sb = stringbuf_new(input->pool);
                                 while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
-                                    strbuf_append_char(prop_sb, **css);
+                                    stringbuf_append_char(prop_sb, **css);
                                     (*css)++;
                                 }
-                                String* property_str = strbuf_to_string(prop_sb);
+                                String* property_str = stringbuf_to_string(prop_sb);
                                 if (!property_str) {
                                     // Skip to next declaration
                                     while (**css && **css != ';' && **css != '}') (*css)++;
@@ -405,12 +405,12 @@ static Item parse_css_at_rule(Input *input, const char **css) {
                 if (**css == '}') break;
                 
                 // Parse property name
-                StrBuf* prop_sb = strbuf_new_pooled(input->pool);
+                StringBuf* prop_sb = stringbuf_new(input->pool);
                 while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
-                    strbuf_append_char(prop_sb, **css);
+                    stringbuf_append_char(prop_sb, **css);
                     (*css)++;
                 }
-                String* property_str = strbuf_to_string(prop_sb);
+                String* property_str = stringbuf_to_string(prop_sb);
                 if (!property_str) {
                     // Skip to next declaration
                     while (**css && **css != ';' && **css != '}') (*css)++;
@@ -482,12 +482,12 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
             if (**css == '}') break;
             
             // Parse property name
-            StrBuf* sb = input->sb;
+            StringBuf* sb = input->sb;
             while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
-                strbuf_append_char(sb, **css);
+                stringbuf_append_char(sb, **css);
                 (*css)++;
             }
-            String* property_str = strbuf_to_string(sb);
+            String* property_str = stringbuf_to_string(sb);
             printf("got CSS property: %s\n", property_str ? property_str->chars : "NULL");
             if (!property_str) {
                 // Skip to next declaration
@@ -559,8 +559,8 @@ static Array* parse_css_selectors(Input *input, const char **css) {
     return selectors;
 }
 
-static Item parse_css_selector(Input *input, const char **css) {
-    StrBuf* sb = input->sb;
+static Item parse_css_selector(Input* input, const char** css) {
+    StringBuf* sb = input->sb;
     
     // Parse selector text until comma or opening brace
     // Handle complex selectors including attribute selectors, pseudo-classes, pseudo-elements
@@ -583,16 +583,16 @@ static Item parse_css_selector(Input *input, const char **css) {
         
         // Handle escaped characters in selectors
         if (c == '\\' && *(*css + 1)) {
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, c);
             (*css)++;
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
             continue;
         }
         
         // Don't break on comma or brace inside brackets or parentheses
         if ((c == ',' || c == '{') && (bracket_depth > 0 || paren_depth > 0)) {
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, c);
             (*css)++;
             continue;
         }
@@ -601,11 +601,11 @@ static Item parse_css_selector(Input *input, const char **css) {
             break;
         }
         
-        strbuf_append_char(sb, c);
+        stringbuf_append_char(sb, c);
         (*css)++;
     }
     
-    String* selector_str = strbuf_to_string(sb);
+    String* selector_str = stringbuf_to_string(sb);
     if (selector_str) {
         char* trimmed = input_trim_whitespace(selector_str->chars);
         if (trimmed) {
@@ -646,12 +646,12 @@ static Item parse_css_declaration(Input *input, const char **css) {
     skip_css_comments(css);
     
     // Parse property name
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     while (**css && **css != ':' && **css != ';' && **css != '}') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
     }
-    String* property_str = strbuf_to_string(sb);
+    String* property_str = stringbuf_to_string(sb);
     if (!property_str) return {.item = ITEM_ERROR};
     printf("Parsing CSS property: %s\n", property_str->chars);
     
@@ -698,21 +698,21 @@ static Item parse_css_string(Input *input, const char **css) {
     char quote = **css;
     if (quote != '"' && quote != '\'') return {.item = ITEM_ERROR};
     
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     (*css)++; // Skip opening quote
     
     while (**css && **css != quote) {
         if (**css == '\\') {
             (*css)++;
             switch (**css) {
-                case '"': strbuf_append_char(sb, '"'); break;
-                case '\'': strbuf_append_char(sb, '\''); break;
-                case '\\': strbuf_append_char(sb, '\\'); break;
-                case '/': strbuf_append_char(sb, '/'); break;
-                case 'n': strbuf_append_char(sb, '\n'); break;
-                case 'r': strbuf_append_char(sb, '\r'); break;
-                case 't': strbuf_append_char(sb, '\t'); break;
-                case 'f': strbuf_append_char(sb, '\f'); break;
+                case '"': stringbuf_append_char(sb, '"'); break;
+                case '\'': stringbuf_append_char(sb, '\''); break;
+                case '\\': stringbuf_append_char(sb, '\\'); break;
+                case '/': stringbuf_append_char(sb, '/'); break;
+                case 'n': stringbuf_append_char(sb, '\n'); break;
+                case 'r': stringbuf_append_char(sb, '\r'); break;
+                case 't': stringbuf_append_char(sb, '\t'); break;
+                case 'f': stringbuf_append_char(sb, '\f'); break;
                 default: 
                     // Handle hex escapes like \A0
                     if (is_css_hex_digit(**css)) {
@@ -726,22 +726,22 @@ static Item parse_css_string(Input *input, const char **css) {
                         int codepoint = (int)strtol(hex, NULL, 16);
                         // Simple UTF-8 encoding for basic cases
                         if (codepoint < 0x80) {
-                            strbuf_append_char(sb, (char)codepoint);
+                            stringbuf_append_char(sb, (char)codepoint);
                         } else if (codepoint < 0x800) {
-                            strbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
-                            strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                            stringbuf_append_char(sb, (char)(0xC0 | (codepoint >> 6)));
+                            stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                         } else {
-                            strbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
-                            strbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
-                            strbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
+                            stringbuf_append_char(sb, (char)(0xE0 | (codepoint >> 12)));
+                            stringbuf_append_char(sb, (char)(0x80 | ((codepoint >> 6) & 0x3F)));
+                            stringbuf_append_char(sb, (char)(0x80 | (codepoint & 0x3F)));
                         }
                     } else {
-                        strbuf_append_char(sb, **css);
+                        stringbuf_append_char(sb, **css);
                     }
                     break;
             }
         } else {
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
         }
         (*css)++;
     }
@@ -750,7 +750,7 @@ static Item parse_css_string(Input *input, const char **css) {
         (*css)++; // Skip closing quote
     }
     
-    String* str = strbuf_to_string(sb);
+    String* str = stringbuf_to_string(sb);
     printf("Parsed CSS string: %s\n", str ? str->chars : "NULL");
     return str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
 }
@@ -768,19 +768,19 @@ static Item parse_css_url(Input *input, const char **css) {
         url_value = parse_css_string(input, css);
     } else {
         // Unquoted URL
-        StrBuf* sb = input->sb;
+        StringBuf* sb = input->sb;
         while (**css && **css != ')' && !(**css == ' ' || **css == '\t' || **css == '\n' || **css == '\r')) {
             if (**css == '\\') {
                 (*css)++;
                 if (**css) {
-                    strbuf_append_char(sb, **css);
+                    stringbuf_append_char(sb, **css);
                 }
             } else {
-                strbuf_append_char(sb, **css);
+                stringbuf_append_char(sb, **css);
             }
             (*css)++;
         }
-        String* str = strbuf_to_string(sb);
+        String* str = stringbuf_to_string(sb);
         url_value = str ? (Item){.item = s2it(str)} : (Item){.item = ITEM_ERROR};
     }
     
@@ -800,27 +800,27 @@ static Item parse_css_url(Input *input, const char **css) {
 }
 
 static Item parse_css_color(Input *input, const char **css) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     if (**css == '#') {
         // Hex color
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
         
         int hex_count = 0;
         while (**css && is_css_hex_digit(**css) && hex_count < 8) {
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
             hex_count++;
         }
         
         // Valid hex colors are 3, 4, 6, or 8 digits
         if (hex_count == 3 || hex_count == 4 || hex_count == 6 || hex_count == 8) {
-            String* color_str = strbuf_to_string(sb);
+            String* color_str = stringbuf_to_string(sb);
             return color_str ? (Item){.item = s2it(color_str)} : (Item){.item = ITEM_ERROR};
         }
         // Clear buffer even on error path
-        strbuf_to_string(sb);
+        stringbuf_to_string(sb);
         return {.item = ITEM_ERROR};
     }
     
@@ -839,11 +839,11 @@ static Item parse_css_color(Input *input, const char **css) {
         
         // Check for named colors
         while (is_css_identifier_char(**css)) {
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
         }
         
-        String* color_name = strbuf_to_string(sb);
+        String* color_name = stringbuf_to_string(sb);
         if (color_name) {
             // Common CSS color names - return as symbol
             const char* name = color_name->chars;
@@ -857,7 +857,7 @@ static Item parse_css_color(Input *input, const char **css) {
         
         // Reset if not a color
         *css = start;
-        strbuf_to_string(sb); // Clear buffer
+        stringbuf_to_string(sb); // Clear buffer
     }
     
     return {.item = ITEM_ERROR};
@@ -876,27 +876,27 @@ static Item parse_css_number(Input *input, const char **css) {
 }
 
 static Item parse_css_measure(Input *input, const char **css) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     const char* start = *css;
     
     // Parse number part
     if (**css == '+' || **css == '-') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
     }
     
     bool has_digits = false;
     while (is_css_digit(**css)) {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
         has_digits = true;
     }
     
     if (**css == '.') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
         while (is_css_digit(**css)) {
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
             has_digits = true;
         }
@@ -904,7 +904,7 @@ static Item parse_css_measure(Input *input, const char **css) {
     
     if (!has_digits) {
         // Clear buffer before returning error
-        strbuf_to_string(sb);
+        stringbuf_to_string(sb);
         *css = start; // Reset
         return {.item = ITEM_ERROR};
     }
@@ -912,18 +912,18 @@ static Item parse_css_measure(Input *input, const char **css) {
     // Parse unit part
     const char* unit_start = *css;
     if (**css == '%') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
     } else if (is_css_identifier_start(**css)) {
         // Handle CSS3 units
         while (is_css_identifier_char(**css)) {
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
         }
     }
     
     // If we have a unit, treat as symbol (measure), otherwise as number
-    String* measure_str = strbuf_to_string(sb);
+    String* measure_str = stringbuf_to_string(sb);
     if (*css > unit_start) {
         // Validate common CSS3 units
         const char* unit = unit_start;
@@ -965,28 +965,28 @@ static Item parse_css_measure(Input *input, const char **css) {
 static Item parse_css_identifier(Input *input, const char **css) {
     if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
     
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     // Handle CSS pseudo-elements (::) and pseudo-classes (:)
     if (**css == ':') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
         
         // Check for double colon (pseudo-elements)
         if (**css == ':') {
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
         }
     }
     
     while (is_css_identifier_char(**css) || **css == '-') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
     }
     
     // Handle CSS3 pseudo-class functions like :nth-child(2n+1)
     if (**css == '(') {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
         
         int paren_depth = 1;
@@ -994,12 +994,12 @@ static Item parse_css_identifier(Input *input, const char **css) {
             if (**css == '(') paren_depth++;
             else if (**css == ')') paren_depth--;
             
-            strbuf_append_char(sb, **css);
+            stringbuf_append_char(sb, **css);
             (*css)++;
         }
     }
     
-    String* id_str = strbuf_to_string(sb);
+    String* id_str = stringbuf_to_string(sb);
     if (!id_str) {
         return {.item = ITEM_ERROR};
     }
@@ -1100,20 +1100,20 @@ static Item parse_css_function(Input *input, const char **css) {
     // Parse function name
     if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
     
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     while (is_css_identifier_char(**css)) {
-        strbuf_append_char(sb, **css);
+        stringbuf_append_char(sb, **css);
         (*css)++;
     }
     
     skip_css_comments(css);
     if (**css != '(') {
         // Not a function, treat as identifier (symbol)
-        String* id_str = strbuf_to_string(sb);
+        String* id_str = stringbuf_to_string(sb);
         return id_str ? (Item){.item = y2it(id_str)} : (Item){.item = ITEM_ERROR};
     }
     
-    String* func_name = strbuf_to_string(sb);
+    String* func_name = stringbuf_to_string(sb);
     if (!func_name) return {.item = ITEM_ERROR};
     
     printf("Parsing CSS function: %s\n", func_name->chars);
@@ -1298,7 +1298,7 @@ static Item parse_css_value(Input *input, const char **css) {
 
 void parse_css(Input* input, const char* css_string) {
     printf("css_parse (stylesheet)\n");
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     const char* css = css_string;
     skip_css_comments(&css);

@@ -9,6 +9,7 @@
         "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
         "lib/strbuf.c",
+        "lib/stringbuf.c",
         "lib/strview.c",
         "lib/arraylist.c",
         "lib/file.c",
@@ -150,6 +151,7 @@
                 "lib/mem-pool/src/buffer.c",
                 "lib/mem-pool/src/utils.c",
                 "lib/strbuf.c",
+                "lib/stringbuf.c",
                 "lib/strview.c",
                 "lib/string.c",
                 "lib/num_stack.c",
@@ -327,6 +329,12 @@
                         "name": "📝 String Buffer Tests",
                         "dependencies": ["lambda-lib"],
                         "binary": "test_strbuf.exe"
+                    },
+                    {
+                        "source": "test_stringbuf.cpp",
+                        "name": "🧵 StringBuf Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_stringbuf.exe"
                     },
                     {
                         "source": "test_strview.c",

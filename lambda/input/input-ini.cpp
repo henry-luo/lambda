@@ -27,43 +27,43 @@ static bool is_comment(const char *ini) {
 
 static String* parse_section_name(Input *input, const char **ini) {
     if (**ini != '[') return NULL;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     (*ini)++; // skip '['
     while (**ini && **ini != ']' && **ini != '\n' && **ini != '\r') {
-        strbuf_append_char(sb, **ini);
+        stringbuf_append_char(sb, **ini);
         (*ini)++;
     }
     if (**ini == ']') {
         (*ini)++; // skip ']'
     }
     
-    String *string = (String*)sb->str;
-    string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-    strbuf_full_reset(sb);
-    return string;
+    if (sb->str && sb->str->len > 0) {
+        return stringbuf_to_string(sb);
+    }
+    return NULL;
 }
 
 static String* parse_key(Input *input, const char **ini) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     // Read until '=' or whitespace
     while (**ini && **ini != '=' && **ini != '\n' && **ini != '\r' && !isspace(**ini)) {
-        strbuf_append_char(sb, **ini);
+        stringbuf_append_char(sb, **ini);
         (*ini)++;
     }
     
-    if (sb->str) {
-        String *string = (String*)sb->str;
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;
+    if (sb->str && sb->str->len > 0) {
+        return stringbuf_to_string(sb);
     }
     return NULL;
 }
 
 static String* parse_raw_value(Input *input, const char **ini) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);
     
     skip_whitespace(ini);
     // handle quoted values
@@ -77,9 +77,9 @@ static String* parse_raw_value(Input *input, const char **ini) {
             if (**ini == '\\' && *(*ini + 1) == quote_char) {
                 // handle escaped quotes
                 (*ini)++; // skip backslash
-                strbuf_append_char(sb, **ini);
+                stringbuf_append_char(sb, **ini);
             } else {
-                strbuf_append_char(sb, **ini);
+                stringbuf_append_char(sb, **ini);
             }
             (*ini)++;
         }
@@ -90,20 +90,17 @@ static String* parse_raw_value(Input *input, const char **ini) {
     } else {
         // read until end of line or comment
         while (**ini && **ini != '\n' && **ini != '\r' && **ini != ';' && **ini != '#') {
-            strbuf_append_char(sb, **ini);
+            stringbuf_append_char(sb, **ini);
             (*ini)++;
         }
         // trim trailing whitespace
-        while (sb->length > sizeof(uint32_t) && isspace(sb->str[sb->length - 1])) {
-            sb->length--;
+        while (sb->str && sb->str->len > 0 && isspace(sb->str->chars[sb->str->len - 1])) {
+            sb->str->len--;
         }
     }
     
-    if (sb->str) {
-        String *string = (String*)sb->str;
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;
+    if (sb->str && sb->str->len > 0) {
+        return stringbuf_to_string(sb);
     }
     return &EMPTY_STRING;
 }
@@ -247,7 +244,7 @@ static Map* parse_section(Input *input, const char **ini, String* section_name) 
 }
 
 void parse_ini(Input* input, const char* ini_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     // Create root map to hold all sections
     Map* root_map = map_pooled(input->pool);

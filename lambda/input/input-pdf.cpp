@@ -164,7 +164,7 @@ static String* parse_pdf_name(Input *input, const char **pdf) {
     if (**pdf != '/') return NULL;
     
     (*pdf)++; // skip /
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     int char_count = 0;
     int max_chars = 100; // Safety limit for name length
     
@@ -178,20 +178,20 @@ static String* parse_pdf_name(Input *input, const char **pdf) {
             if (isxdigit(**pdf) && isxdigit(*(*pdf + 1))) {
                 char hex_string[3] = {**pdf, *(*pdf + 1), '\0'};
                 int char_value = (int)strtol(hex_string, NULL, 16);
-                strbuf_append_char(sb, (char)char_value);
+                stringbuf_append_char(sb, (char)char_value);
                 (*pdf) += 2;
             } else {
                 // malformed hex escape, just include the #
-                strbuf_append_char(sb, '#');
+                stringbuf_append_char(sb, '#');
             }
         } else {
-            strbuf_append_char(sb, **pdf);
+            stringbuf_append_char(sb, **pdf);
             (*pdf)++;
         }
         char_count++;
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static Array* parse_pdf_array(Input *input, const char **pdf);
@@ -200,7 +200,7 @@ static Map* parse_pdf_dictionary(Input *input, const char **pdf);
 static String* parse_pdf_string(Input *input, const char **pdf) {
     if (**pdf != '(' && **pdf != '<') return NULL;
     
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     if (**pdf == '(') {
         // literal string
@@ -214,35 +214,35 @@ static String* parse_pdf_string(Input *input, const char **pdf) {
                 (*pdf)++; // skip backslash
                 if (**pdf) {
                     switch (**pdf) {
-                        case 'n': strbuf_append_char(sb, '\n'); break;
-                        case 'r': strbuf_append_char(sb, '\r'); break;
-                        case 't': strbuf_append_char(sb, '\t'); break;
-                        case 'b': strbuf_append_char(sb, '\b'); break;
-                        case 'f': strbuf_append_char(sb, '\f'); break;
-                        case '(': strbuf_append_char(sb, '('); break;
-                        case ')': strbuf_append_char(sb, ')'); break;
-                        case '\\': strbuf_append_char(sb, '\\'); break;
+                        case 'n': stringbuf_append_char(sb, '\n'); break;
+                        case 'r': stringbuf_append_char(sb, '\r'); break;
+                        case 't': stringbuf_append_char(sb, '\t'); break;
+                        case 'b': stringbuf_append_char(sb, '\b'); break;
+                        case 'f': stringbuf_append_char(sb, '\f'); break;
+                        case '(': stringbuf_append_char(sb, '('); break;
+                        case ')': stringbuf_append_char(sb, ')'); break;
+                        case '\\': stringbuf_append_char(sb, '\\'); break;
                         case '\n': /* ignore escaped newline */ break;
                         case '\r': /* ignore escaped carriage return */ break;
-                        default: strbuf_append_char(sb, **pdf); break;
+                        default: stringbuf_append_char(sb, **pdf); break;
                     }
                     (*pdf)++;
                     char_count++;
                 }
             } else if (**pdf == '(') {
                 paren_count++;
-                strbuf_append_char(sb, **pdf);
+                stringbuf_append_char(sb, **pdf);
                 (*pdf)++;
                 char_count++;
             } else if (**pdf == ')') {
                 paren_count--;
                 if (paren_count > 0) {
-                    strbuf_append_char(sb, **pdf);
+                    stringbuf_append_char(sb, **pdf);
                     char_count++;
                 }
                 (*pdf)++;
             } else {
-                strbuf_append_char(sb, **pdf);
+                stringbuf_append_char(sb, **pdf);
                 (*pdf)++;
                 char_count++;
             }
@@ -260,13 +260,13 @@ static String* parse_pdf_string(Input *input, const char **pdf) {
                 if (isxdigit(**pdf)) {
                     char hex_string[3] = {hex_char, **pdf, '\0'};
                     int char_value = (int)strtol(hex_string, NULL, 16);
-                    strbuf_append_char(sb, (char)char_value);
+                    stringbuf_append_char(sb, (char)char_value);
                     (*pdf)++;
                 } else {
                     // single hex digit, treat as 0X
                     char hex_string[3] = {hex_char, '0', '\0'};
                     int char_value = (int)strtol(hex_string, NULL, 16);
-                    strbuf_append_char(sb, (char)char_value);
+                    stringbuf_append_char(sb, (char)char_value);
                 }
                 char_count++;
             } else {
@@ -278,7 +278,7 @@ static String* parse_pdf_string(Input *input, const char **pdf) {
         }
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static bool is_digit_or_space_ahead(const char *pdf, int max_lookahead) {
@@ -1090,7 +1090,7 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
 
 void parse_pdf(Input* input, const char* pdf_string) {
     printf("pdf_parse\n");
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     const char* pdf = pdf_string;
     
@@ -1118,7 +1118,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
     
     // Parse and store version with enhanced validation
     pdf += 5; // skip "%PDF-"
-    StrBuf* version_sb = strbuf_new_pooled(input->pool);
+    StringBuf* version_sb = stringbuf_new(input->pool);
     if (!version_sb) {
         printf("Error: Failed to allocate version buffer\n");
         input->root = {.item = (uint64_t)pdf_info};
@@ -1129,14 +1129,14 @@ void parse_pdf(Input* input, const char* pdf_string) {
     while (*pdf && *pdf != '\n' && *pdf != '\r' && counter < 10) {
         // Validate version format (should be digits and dots)
         if ((*pdf >= '0' && *pdf <= '9') || *pdf == '.') {
-            strbuf_append_char(version_sb, *pdf);
+            stringbuf_append_char(version_sb, *pdf);
         } else {
             printf("Warning: Non-standard character in PDF version: %c\n", *pdf);
         }
         pdf++;
         counter++;
     }
-    String* version = strbuf_to_string(version_sb);
+    String* version = stringbuf_to_string(version_sb);
     
     // Store version in map
     String* version_key;

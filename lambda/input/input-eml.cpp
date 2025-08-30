@@ -27,27 +27,24 @@ static bool is_continuation_line(const char *eml) {
 
 // Helper function to parse header name
 static String* parse_header_name(Input *input, const char **eml) {
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     
     while (**eml && **eml != ':' && **eml != '\n' && **eml != '\r') {
-        strbuf_append_char(sb, **eml);
+        stringbuf_append_char(sb, **eml);
         (*eml)++;
     }
     
-    String *string = (String*)sb->str;
-    if (string && sb->length > sizeof(uint32_t)) {
-        string->len = sb->length - sizeof(uint32_t);  
-        string->ref_cnt = 0;
-        return strbuf_to_string(sb);
+    if (sb->str && sb->str->len > 0) {
+        return stringbuf_to_string(sb);
     }
     return NULL;
 }
 
 // Helper function to parse header value (including continuation lines)
 static String* parse_header_value(Input *input, const char **eml) {
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     
     // Skip the colon and initial whitespace
     if (**eml == ':') {
@@ -68,7 +65,7 @@ static String* parse_header_value(Input *input, const char **eml) {
             
             if (is_continuation_line(next_line)) {
                 // Replace line break with space and continue
-                strbuf_append_char(sb, ' ');
+                stringbuf_append_char(sb, ' ');
                 skip_to_newline(eml);
                 skip_line_whitespace(eml);
             } else {
@@ -76,22 +73,20 @@ static String* parse_header_value(Input *input, const char **eml) {
                 break;
             }
         } else {
-            strbuf_append_char(sb, **eml);
+            stringbuf_append_char(sb, **eml);
             (*eml)++;
         }
     }
     
     // Trim trailing whitespace
-    while (sb->length > sizeof(uint32_t) && 
-           (sb->str[sb->length - 1] == ' ' || sb->str[sb->length - 1] == '\t')) {
+    while (sb->length > 0 && sb->str && sb->str->len > 0 &&
+           (sb->str->chars[sb->str->len - 1] == ' ' || sb->str->chars[sb->str->len - 1] == '\t')) {
+        sb->str->len--;
         sb->length--;
     }
     
-    String *string = (String*)sb->str;
-    if (string && sb->length > sizeof(uint32_t)) {
-        string->len = sb->length - sizeof(uint32_t);  
-        string->ref_cnt = 0;
-        return strbuf_to_string(sb);
+    if (sb->str && sb->str->len > 0) {
+        return stringbuf_to_string(sb);
     }
     return NULL;
 }
@@ -107,8 +102,8 @@ static void normalize_header_name(char* name) {
 static String* extract_email_address(Input *input, const char* header_value) {
     if (!header_value) return NULL;
     
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     const char* start = strchr(header_value, '<');
     const char* end = NULL;
     
@@ -118,7 +113,7 @@ static String* extract_email_address(Input *input, const char* header_value) {
         end = strchr(start, '>');
         if (end) {
             while (start < end) {
-                strbuf_append_char(sb, *start);
+                stringbuf_append_char(sb, *start);
                 start++;
             }
         }
@@ -139,17 +134,14 @@ static String* extract_email_address(Input *input, const char* header_value) {
             }
             
             while (start < end) {
-                strbuf_append_char(sb, *start);
+                stringbuf_append_char(sb, *start);
                 start++;
             }
         }
     }
     
-    if (sb->length > sizeof(uint32_t)) {
-        String *string = (String*)sb->str;
-        string->len = sb->length - sizeof(uint32_t);  
-        string->ref_cnt = 0;
-        return strbuf_to_string(sb);
+    if (sb->str && sb->str->len > 0) {
+        return stringbuf_to_string(sb);
     }
     
     return NULL;
@@ -169,7 +161,7 @@ void parse_eml(Input* input, const char* eml_string) {
     if (!eml_string || !input) return;
     
     // Initialize string buffer for parsing
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     if (!input->sb) return;
     
     const char* eml = eml_string;
@@ -286,16 +278,16 @@ void parse_eml(Input* input, const char* eml_string) {
     
     // At this point, eml should be positioned at the start of the body
     // Parse body
-    StrBuf* body_sb = input->sb;
-    strbuf_reset(body_sb);  // Reset buffer for reuse
+    StringBuf* body_sb = input->sb;
+    stringbuf_reset(body_sb);  // Reset buffer for reuse
     
     while (*eml) {
-        strbuf_append_char(body_sb, *eml);
+        stringbuf_append_char(body_sb, *eml);
         eml++;
     }
     
-    if (body_sb->length > sizeof(uint32_t)) {
-        String* body_string = strbuf_to_string(body_sb);
+    if (body_sb->str && body_sb->str->len > 0) {
+        String* body_string = stringbuf_to_string(body_sb);
         if (body_string) {
             String* body_key = input_create_string(input, "body");
             Item body_value = {.item = s2it(body_string)};

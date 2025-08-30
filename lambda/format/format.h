@@ -3,10 +3,11 @@
 
 #define LAMBDA_STATIC
 #include "../lambda-data.hpp"
+#include "../../lib/stringbuf.h"
 
 // Common function declarations
 Item create_item_from_field_data(void* field_data, TypeId type_id);
-void format_number(StrBuf* sb, Item item);
+void format_number(StringBuf* sb, Item item);
 
 // Format function declarations
 String* format_json(VariableMemPool* pool, Item root_item);
