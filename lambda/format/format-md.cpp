@@ -1,18 +1,19 @@
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <ctype.h>
 
 // Forward declarations for math formatting support
 String* format_math_latex(VariableMemPool* pool, Item root_item);
-static void format_math_inline(StrBuf* sb, Element* elem);
-static void format_math_display(StrBuf* sb, Element* elem);
-static void format_math_code_block(StrBuf* sb, Element* elem);
+static void format_math_inline(StringBuf* sb, Element* elem);
+static void format_math_display(StringBuf* sb, Element* elem);
+static void format_math_code_block(StringBuf* sb, Element* elem);
 
-static void format_item(StrBuf* sb, Item item);
-static void format_element(StrBuf* sb, Element* elem);
-static void format_element_children(StrBuf* sb, Element* elem);
-static void format_element_children_raw(StrBuf* sb, Element* elem);
-static void format_table_row(StrBuf* sb, Element* row, bool is_header);
-static void format_table_separator(StrBuf* sb, Element* header_row);
+static void format_item(StringBuf* sb, Item item);
+static void format_element(StringBuf* sb, Element* elem);
+static void format_element_children(StringBuf* sb, Element* elem);
+static void format_element_children_raw(StringBuf* sb, Element* elem);
+static void format_table_row(StringBuf* sb, Element* row, bool is_header);
+static void format_table_separator(StringBuf* sb, Element* header_row);
 
 // Utility function to get attribute value from element
 static String* get_attribute(Element* elem, const char* attr_name) {
@@ -41,7 +42,7 @@ static String* get_attribute(Element* elem, const char* attr_name) {
 }
 
 // Format raw text (no escaping - for code blocks, etc.)
-static void format_raw_text(StrBuf* sb, String* str) {
+static void format_raw_text(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
     
     // Check if this is the EMPTY_STRING and handle it specially
@@ -50,12 +51,12 @@ static void format_raw_text(StrBuf* sb, String* str) {
     } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
         return; // Don't output anything for lambda.nil content
     } else {
-        strbuf_append_str_n(sb, str->chars, str->len);
+        stringbuf_append_str_n(sb, str->chars, str->len);
     }
 }
 
 // Format plain text (escape markdown special characters)
-static void format_text(StrBuf* sb, String* str) {
+static void format_text(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
 
     const char* s = str->chars;
@@ -73,23 +74,26 @@ static void format_text(StrBuf* sb, String* str) {
         case '_':
         case '`':
         case '#':
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
+            break;
         case '[':
         case ']':
         case '(':
         case ')':
         case '\\':
-            strbuf_append_char(sb, '\\');
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
             break;
         default:
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, c);
             break;
         }
     }
 }
 
 // Format heading elements (h1-h6)
-static void format_heading(StrBuf* sb, Element* elem) {
+static void format_heading(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
@@ -111,34 +115,34 @@ static void format_heading(StrBuf* sb, Element* elem) {
     
     // Add the appropriate number of # characters
     for (int i = 0; i < level; i++) {
-        strbuf_append_char(sb, '#');
+        stringbuf_append_char(sb, '#');
     }
-    strbuf_append_char(sb, ' ');
+    stringbuf_append_char(sb, ' ');
 
     format_element_children(sb, elem);
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format emphasis elements (em, strong)
-static void format_emphasis(StrBuf* sb, Element* elem) {
+static void format_emphasis(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
     const char* tag_name = elem_type->name.str;
     
     if (strcmp(tag_name, "strong") == 0) {
-        strbuf_append_str(sb, "**");
+        stringbuf_append_str(sb, "**");
         format_element_children(sb, elem);
-        strbuf_append_str(sb, "**");
+        stringbuf_append_str(sb, "**");
     } else if (strcmp(tag_name, "em") == 0) {
-        strbuf_append_char(sb, '*');
+        stringbuf_append_char(sb, '*');
         format_element_children(sb, elem);
-        strbuf_append_char(sb, '*');
+        stringbuf_append_char(sb, '*');
     }
 }
 
 // Format code elements
-static void format_code(StrBuf* sb, Element* elem) {
+static void format_code(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type) return;
     
@@ -152,44 +156,44 @@ static void format_code(StrBuf* sb, Element* elem) {
         }
         
         // Regular code block
-        strbuf_append_str(sb, "```");
-        strbuf_append_str(sb, lang_attr->chars);
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_str(sb, "```");
+        stringbuf_append_str(sb, lang_attr->chars);
+        stringbuf_append_char(sb, '\n');
         format_element_children_raw(sb, elem); // Use raw formatter for code content
-        strbuf_append_str(sb, "\n```\n");
+        stringbuf_append_str(sb, "\n```\n");
     } else {
         // Inline code
-        strbuf_append_char(sb, '`');
+        stringbuf_append_char(sb, '`');
         format_element_children_raw(sb, elem); // Use raw formatter for code content
-        strbuf_append_char(sb, '`');
+        stringbuf_append_char(sb, '`');
     }
 }
 
 // Format link elements
-static void format_link(StrBuf* sb, Element* elem) {
+static void format_link(StringBuf* sb, Element* elem) {
     String* href = get_attribute(elem, "href");
     String* title = get_attribute(elem, "title");
     
-    strbuf_append_char(sb, '[');
+    stringbuf_append_char(sb, '[');
     format_element_children(sb, elem);
-    strbuf_append_char(sb, ']');
-    strbuf_append_char(sb, '(');
+    stringbuf_append_char(sb, ']');
+    stringbuf_append_char(sb, '(');
     
     if (href) {
-        strbuf_append_str(sb, href->chars);
+        stringbuf_append_str(sb, href->chars);
     }
     
     if (title && title->len > 0) {
-        strbuf_append_str(sb, " \"");
-        strbuf_append_str(sb, title->chars);
-        strbuf_append_char(sb, '"');
+        stringbuf_append_str(sb, " \"");
+        stringbuf_append_str(sb, title->chars);
+        stringbuf_append_char(sb, '"');
     }
     
-    strbuf_append_char(sb, ')');
+    stringbuf_append_char(sb, ')');
 }
 
 // Format list elements (ul, ol)
-static void format_list(StrBuf* sb, Element* elem) {
+static void format_list(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
@@ -250,14 +254,14 @@ static void format_list(StrBuf* sb, Element* elem) {
                         } else {
                             snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
                         }
-                        strbuf_append_str(sb, num_buf);
+                        stringbuf_append_str(sb, num_buf);
                     } else {
-                        strbuf_append_str(sb, bullet_char);
-                        strbuf_append_char(sb, ' ');
+                        stringbuf_append_str(sb, bullet_char);
+                        stringbuf_append_char(sb, ' ');
                     }
                     
                     format_element_children(sb, li_elem);
-                    strbuf_append_char(sb, '\n');
+                    stringbuf_append_char(sb, '\n');
                 }
             }
         }
@@ -265,7 +269,7 @@ static void format_list(StrBuf* sb, Element* elem) {
 }
 
 // Format table elements
-static void format_table(StrBuf* sb, Element* elem) {
+static void format_table(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* table = (List*)elem;
@@ -302,49 +306,49 @@ static void format_table(StrBuf* sb, Element* elem) {
 }
 
 // Format table row
-static void format_table_row(StrBuf* sb, Element* row, bool is_header) {
+static void format_table_row(StringBuf* sb, Element* row, bool is_header) {
     if (!row) return;
     
-    strbuf_append_char(sb, '|');
+    stringbuf_append_char(sb, '|');
     List* row_list = (List*)row;
     if (row_list && row_list->length > 0) {
         for (long i = 0; i < row_list->length; i++) {
-            strbuf_append_char(sb, ' ');
+            stringbuf_append_char(sb, ' ');
             Item cell_item = row_list->items[i];
             if (get_type_id(cell_item) == LMD_TYPE_ELEMENT) {
                 Element* cell = (Element*)cell_item.pointer;
                 format_element_children(sb, cell);
             }
-            strbuf_append_str(sb, " |");
+            stringbuf_append_str(sb, " |");
         }
     }
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format table separator row
-static void format_table_separator(StrBuf* sb, Element* header_row) {
+static void format_table_separator(StringBuf* sb, Element* header_row) {
     if (!header_row) return;
     
-    strbuf_append_char(sb, '|');
+    stringbuf_append_char(sb, '|');
     
     List* row_list = (List*)header_row;
     if (row_list) {
         for (long i = 0; i < row_list->length; i++) {
-            strbuf_append_str(sb, "---|");
+            stringbuf_append_str(sb, "---|");
         }
     }
     
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format blockquote elements  
-static void format_blockquote(StrBuf* sb, Element* elem) {
+static void format_blockquote(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     // Format as blockquote with > prefix
-    strbuf_append_str(sb, "> ");
+    stringbuf_append_str(sb, "> ");
     format_element_children(sb, elem);
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Helper function to check if an element contains only math (recursively)
@@ -401,7 +405,7 @@ static bool element_contains_only_math(Element* elem, bool* only_display_math) {
 }
 
 // Format paragraph elements
-static void format_paragraph(StrBuf* sb, Element* elem) {
+static void format_paragraph(StringBuf* sb, Element* elem) {
     // Check if this paragraph contains only display math or inline math elements
     List* list = (List*)elem;
     bool only_display_math = true;
@@ -444,18 +448,18 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
     
     // Add paragraph spacing for all paragraphs except math-only paragraphs (both display and inline)
     if (!only_math_elements) {
-        strbuf_append_str(sb, "\n\n");
+        stringbuf_append_str(sb, "\n\n");
     }
 }
 
 // Format thematic break (hr)
-static void format_thematic_break(StrBuf* sb) {
-    strbuf_append_str(sb, "---\n\n");
+static void format_thematic_break(StringBuf* sb) {
+    stringbuf_append_str(sb, "---\n\n");
 }
 
 // Format inline math elements ($math$)
 // Format inline math
-static void format_math_inline(StrBuf* sb, Element* elem) {
+static void format_math_inline(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* element_list = (List*)elem;
@@ -471,14 +475,14 @@ static void format_math_inline(StrBuf* sb, Element* elem) {
             String* latex_output = format_math_latex(pool, math_item);
             
             if (latex_output && latex_output->len > 0) {
-                strbuf_append_str(sb, "$");
-                strbuf_append_str(sb, latex_output->chars);
-                strbuf_append_str(sb, "$");
+                stringbuf_append_str(sb, "$");
+                stringbuf_append_str(sb, latex_output->chars);
+                stringbuf_append_str(sb, "$");
             } else {
                 // Fallback if math formatting fails
-                strbuf_append_str(sb, "$");
-                strbuf_append_str(sb, "math");
-                strbuf_append_str(sb, "$");
+                stringbuf_append_str(sb, "$");
+                stringbuf_append_str(sb, "math");
+                stringbuf_append_str(sb, "$");
             }
             
             pool_variable_destroy(pool);
@@ -487,7 +491,7 @@ static void format_math_inline(StrBuf* sb, Element* elem) {
 }
 
 // Format display math
-static void format_math_display(StrBuf* sb, Element* elem) {
+static void format_math_display(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* element_list = (List*)elem;
@@ -502,9 +506,9 @@ static void format_math_display(StrBuf* sb, Element* elem) {
             // Raw string content - output as-is
             String* math_string = (String*)math_item.pointer;
             if (math_string && math_string->len > 0) {
-                strbuf_append_str(sb, "$$");
-                strbuf_append_str_n(sb, math_string->chars, math_string->len);
-                strbuf_append_str(sb, "$$");
+                stringbuf_append_str(sb, "$$");
+                stringbuf_append_str_n(sb, math_string->chars, math_string->len);
+                stringbuf_append_str(sb, "$$");
                 return;
             }
         }
@@ -515,14 +519,14 @@ static void format_math_display(StrBuf* sb, Element* elem) {
             String* latex_output = format_math_latex(pool, math_item);
             
             if (latex_output && latex_output->len > 0) {
-                strbuf_append_str(sb, "$$");
-                strbuf_append_str(sb, latex_output->chars);
-                strbuf_append_str(sb, "$$");
+                stringbuf_append_str(sb, "$$");
+                stringbuf_append_str(sb, latex_output->chars);
+                stringbuf_append_str(sb, "$$");
             } else {
                 // Fallback if math formatting fails
-                strbuf_append_str(sb, "$$");
-                strbuf_append_str(sb, "math");
-                strbuf_append_str(sb, "$$");
+                stringbuf_append_str(sb, "$$");
+                stringbuf_append_str(sb, "math");
+                stringbuf_append_str(sb, "$$");
             }
             
             pool_variable_destroy(pool);
@@ -531,7 +535,7 @@ static void format_math_display(StrBuf* sb, Element* elem) {
 }
 
 // Format math code block (```math)
-static void format_math_code_block(StrBuf* sb, Element* elem) {
+static void format_math_code_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* element_list = (List*)elem;
@@ -549,22 +553,22 @@ static void format_math_code_block(StrBuf* sb, Element* elem) {
             // Raw string content - output as code block
             String* math_string = (String*)math_item.pointer;
             if (math_string && math_string->len > 0) {
-                strbuf_append_str(sb, "```");
-                strbuf_append_str(sb, language);
-                strbuf_append_char(sb, '\n');
-                strbuf_append_str_n(sb, math_string->chars, math_string->len);
-                strbuf_append_str(sb, "\n```");
+                stringbuf_append_str(sb, "```");
+                stringbuf_append_str(sb, language);
+                stringbuf_append_char(sb, '\n');
+                stringbuf_append_str_n(sb, math_string->chars, math_string->len);
+                stringbuf_append_str(sb, "\n```");
                 return;
             }
         }
     }
     
     // Fallback if no content found
-    strbuf_append_str(sb, "```");
-    strbuf_append_str(sb, language);
-    strbuf_append_str(sb, "\n");
-    strbuf_append_str(sb, "math");
-    strbuf_append_str(sb, "\n```");
+    stringbuf_append_str(sb, "```");
+    stringbuf_append_str(sb, language);
+    stringbuf_append_str(sb, "\n");
+    stringbuf_append_str(sb, "math");
+    stringbuf_append_str(sb, "\n```");
 }
 
 // Helper function to check if an element is a block-level element
@@ -627,7 +631,7 @@ static int get_heading_level(Item item) {
     return 0;
 }
 
-static void format_element_children_raw(StrBuf* sb, Element* elem) {
+static void format_element_children_raw(StringBuf* sb, Element* elem) {
     // Format children without escaping (for code blocks)
     List* list = (List*)elem;
     if (list->length == 0) return;
@@ -648,7 +652,7 @@ static void format_element_children_raw(StrBuf* sb, Element* elem) {
     }
 }
 
-static void format_element_children(StrBuf* sb, Element* elem) {
+static void format_element_children(StringBuf* sb, Element* elem) {
     // Element extends List, so access content through List interface
     List* list = (List*)elem;
     if (list->length == 0) return;
@@ -671,11 +675,11 @@ static void format_element_children(StrBuf* sb, Element* elem) {
             if (current_heading_level > 0 && next_heading_level > 0 && 
                 current_heading_level != next_heading_level) {
                 // Different heading levels: add blank line
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
             }
             else if (current_heading_level > 0 && next_is_block && next_heading_level == 0) {
                 // Heading followed by non-heading block: add blank line
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
             }
             else if (current_is_block && next_heading_level > 0) {
                 // Block element followed by heading: paragraphs already add \n\n, so no extra needed
@@ -688,7 +692,7 @@ static void format_element_children(StrBuf* sb, Element* elem) {
                         const char* tag_name = current_elem_type->name.str;
                         // Only add newline for blocks that don't add their own spacing
                         if (strcmp(tag_name, "p") != 0 && strcmp(tag_name, "hr") != 0) {
-                            strbuf_append_char(sb, '\n');
+                            stringbuf_append_char(sb, '\n');
                         }
                     }
                 }
@@ -698,7 +702,7 @@ static void format_element_children(StrBuf* sb, Element* elem) {
 }
 
 // format Lambda element to markdown
-static void format_element(StrBuf* sb, Element* elem) {
+static void format_element(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) {
         return;
@@ -723,12 +727,12 @@ static void format_element(StrBuf* sb, Element* elem) {
         format_link(sb, elem);
     } else if (strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0) {
         format_list(sb, elem);
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "hr") == 0) {
         format_thematic_break(sb);
     } else if (strcmp(tag_name, "table") == 0) {
         format_table(sb, elem);
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "math") == 0) {
         // Math element - check type attribute to determine formatting
         String* type_attr = get_attribute(elem, "type");
@@ -758,7 +762,7 @@ static void format_element(StrBuf* sb, Element* elem) {
 }
 
 // Format any item to markdown
-static void format_item(StrBuf* sb, Item item) {
+static void format_item(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
     
     // Only debug when processing elements or strings that might contain math
@@ -812,7 +816,7 @@ static void format_item(StrBuf* sb, Item item) {
 }
 
 // formats markdown to a provided StrBuf
-void format_markdown(StrBuf* sb, Item root_item) {
+void format_markdown(StringBuf* sb, Item root_item) {
     if (!sb) return;
     
     // Handle null/empty root item

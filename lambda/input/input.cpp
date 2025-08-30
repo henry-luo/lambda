@@ -31,15 +31,6 @@ Item input_markup(Input *input, const char* content);
 #include "markup-parser.h"
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
-String* strbuf_to_string(StrBuf *sb) {
-    String *string = (String*)sb->str;
-    if (string) {
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;
-    }
-    return NULL;
-}
 
 String* stringbuf_to_string_wrapper(StringBuf *sb) {
     return stringbuf_to_string(sb);

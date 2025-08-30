@@ -1,39 +1,40 @@
 // CSS Formatter - Simple implementation for CSS output
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 
 // Forward declarations
-static void format_css_stylesheet(StrBuf* sb, Element* stylesheet);
-static void format_css_rules(StrBuf* sb, Array* rules, int indent);
-static void format_css_rule(StrBuf* sb, Element* rule, int indent);
-static void format_css_at_rule(StrBuf* sb, Element* at_rule, int indent);
-static void format_css_selectors(StrBuf* sb, Item selectors_item);
-static void format_css_value(StrBuf* sb, Item value);
-static void format_css_declarations(StrBuf* sb, Element* rule, int indent);
+static void format_css_stylesheet(StringBuf* sb, Element* stylesheet);
+static void format_css_rules(StringBuf* sb, Array* rules, int indent);
+static void format_css_rule(StringBuf* sb, Element* rule, int indent);
+static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent);
+static void format_css_selectors(StringBuf* sb, Item selectors_item);
+static void format_css_value(StringBuf* sb, Item value);
+static void format_css_declarations(StringBuf* sb, Element* rule, int indent);
 
 // Helper function to add indentation
-static void add_css_indent(StrBuf* sb, int indent) {
+static void add_css_indent(StringBuf* sb, int indent) {
     for (int i = 0; i < indent; i++) {
-        strbuf_append_str(sb, "  ");
+        stringbuf_append_str(sb, "  ");
     }
 }
 
 // Format CSS value item
-static void format_css_value(StrBuf* sb, Item value) {
+static void format_css_value(StringBuf* sb, Item value) {
     TypeId type = get_type_id(value);
     
     switch (type) {
         case LMD_TYPE_STRING: {
             String* str = (String*)value.pointer;
             if (str && str->len > 0) {
-                strbuf_append_str(sb, str->chars);
+                stringbuf_append_str(sb, str->chars);
             }
             break;
         }
         case LMD_TYPE_INT: {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%d", value.int_val);
-            strbuf_append_str(sb, num_buf);
+            stringbuf_append_str(sb, num_buf);
             break;
         }
         case LMD_TYPE_FLOAT: {
@@ -41,7 +42,7 @@ static void format_css_value(StrBuf* sb, Item value) {
             if (dptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%.6g", *dptr);
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
             break;
         }
@@ -49,7 +50,7 @@ static void format_css_value(StrBuf* sb, Item value) {
             Array* arr = (Array*)value.pointer;
             if (arr && arr->length > 0) {
                 for (int i = 0; i < arr->length; i++) {
-                    if (i > 0) strbuf_append_char(sb, ' ');
+                    if (i > 0) stringbuf_append_char(sb, ' ');
                     format_css_value(sb, arr->items[i]);
                 }
             }
@@ -61,36 +62,36 @@ static void format_css_value(StrBuf* sb, Item value) {
             if (element && element->type) {
                 TypeElmt* elmt_type = (TypeElmt*)element->type;
                 if (elmt_type->name.length > 0) {
-                    strbuf_append_format(sb, "%.*s(...)", (int)elmt_type->name.length, elmt_type->name.str);
+                    stringbuf_append_format(sb, "%.*s(...)", (int)elmt_type->name.length, elmt_type->name.str);
                 } else {
-                    strbuf_append_str(sb, "element");
+                    stringbuf_append_str(sb, "element");
                 }
             } else {
-                strbuf_append_str(sb, "element");
+                stringbuf_append_str(sb, "element");
             }
             break;
         }
         default:
             // Fallback - just append as string if possible
-            strbuf_append_str(sb, "auto");
+            stringbuf_append_str(sb, "auto");
             break;
     }
 }
 
 // Format CSS selectors
-static void format_css_selectors(StrBuf* sb, Item selectors_item) {
+static void format_css_selectors(StringBuf* sb, Item selectors_item) {
     TypeId type = get_type_id(selectors_item);
     
     if (type == LMD_TYPE_STRING) {
         String* str = (String*)selectors_item.pointer;
         if (str && str->len > 0) {
-            strbuf_append_str(sb, str->chars);
+            stringbuf_append_str(sb, str->chars);
         }
     } else if (type == LMD_TYPE_ARRAY) {
         Array* selectors = (Array*)selectors_item.pointer;
         if (selectors && selectors->length > 0) {
             for (int i = 0; i < selectors->length; i++) {
-                if (i > 0) strbuf_append_str(sb, ", ");
+                if (i > 0) stringbuf_append_str(sb, ", ");
                 format_css_value(sb, selectors->items[i]);
             }
         }
@@ -100,7 +101,7 @@ static void format_css_selectors(StrBuf* sb, Item selectors_item) {
 }
 
 // Format CSS declarations (properties) for a rule
-static void format_css_declarations(StrBuf* sb, Element* rule, int indent) {
+static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
     if (!rule || !rule->type) return;
     
     TypeMap* type_map = (TypeMap*)rule->type;
@@ -129,14 +130,14 @@ static void format_css_declarations(StrBuf* sb, Element* rule, int indent) {
         }
         
         add_css_indent(sb, indent + 1);
-        strbuf_append_format(sb, "%.*s: ", (int)field->name->length, field->name->str);
+        stringbuf_append_format(sb, "%.*s: ", (int)field->name->length, field->name->str);
         
         // Get the property value
         void* field_data = (char*)rule->data + field->byte_offset;
         Item property_value = create_item_from_field_data(field_data, field->type->type_id);
         format_css_value(sb, property_value);
         
-        strbuf_append_str(sb, ";\n");
+        stringbuf_append_str(sb, ";\n");
         
         field = field->next;
         field_count++;
@@ -144,7 +145,7 @@ static void format_css_declarations(StrBuf* sb, Element* rule, int indent) {
 }
 
 // Format a single CSS rule
-static void format_css_rule(StrBuf* sb, Element* rule, int indent) {
+static void format_css_rule(StringBuf* sb, Element* rule, int indent) {
     if (!rule) return;
     
     add_css_indent(sb, indent);
@@ -174,21 +175,21 @@ static void format_css_rule(StrBuf* sb, Element* rule, int indent) {
         }
     }
     
-    strbuf_append_str(sb, " {\n");
+    stringbuf_append_str(sb, " {\n");
     
     // Format declarations
     format_css_declarations(sb, rule, indent);
     
     add_css_indent(sb, indent);
-    strbuf_append_str(sb, "}\n");
+    stringbuf_append_str(sb, "}\n");
 }
 
 // Format CSS at-rule
-static void format_css_at_rule(StrBuf* sb, Element* at_rule, int indent) {
+static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
     if (!at_rule) return;
     
     add_css_indent(sb, indent);
-    strbuf_append_char(sb, '@');
+    stringbuf_append_char(sb, '@');
     
     // Get at-rule name
     if (at_rule->type) {
@@ -231,7 +232,7 @@ static void format_css_at_rule(StrBuf* sb, Element* at_rule, int indent) {
             if (strncmp(field->name->str, "prelude", field->name->length) == 0) {
                 void* field_data = (char*)at_rule->data + field->byte_offset;
                 Item prelude_item = create_item_from_field_data(field_data, field->type->type_id);
-                strbuf_append_char(sb, ' ');
+                stringbuf_append_char(sb, ' ');
                 format_css_value(sb, prelude_item);
                 break;
             }
@@ -241,11 +242,11 @@ static void format_css_at_rule(StrBuf* sb, Element* at_rule, int indent) {
         }
     }
     
-    strbuf_append_str(sb, ";\n");
+    stringbuf_append_str(sb, ";\n");
 }
 
 // Format an array of CSS rules
-static void format_css_rules(StrBuf* sb, Array* rules, int indent) {
+static void format_css_rules(StringBuf* sb, Array* rules, int indent) {
     if (!rules) return;
     
     for (int i = 0; i < rules->length; i++) {
@@ -267,13 +268,13 @@ static void format_css_rules(StrBuf* sb, Array* rules, int indent) {
         }
         
         if (i < rules->length - 1) {
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
     }
 }
 
 // Format CSS stylesheet
-static void format_css_stylesheet(StrBuf* sb, Element* stylesheet) {
+static void format_css_stylesheet(StringBuf* sb, Element* stylesheet) {
     if (!stylesheet || !stylesheet->type) return;
     
     TypeMap* type_map = (TypeMap*)stylesheet->type;
@@ -302,7 +303,7 @@ static void format_css_stylesheet(StrBuf* sb, Element* stylesheet) {
 
 // Main CSS formatting function
 String* format_css(VariableMemPool *pool, Item item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     TypeId type = get_type_id(item);
@@ -340,8 +341,8 @@ String* format_css(VariableMemPool *pool, Item item) {
         format_css_value(sb, item);
     }
     
-    String* result = strbuf_to_string(sb);
-    strbuf_free(sb);
+    String* result = stringbuf_to_string(sb);
+    stringbuf_free(sb);
     
     return result;
 }

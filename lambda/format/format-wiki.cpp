@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -6,11 +7,11 @@
 static thread_local int recursion_depth = 0;
 #define MAX_RECURSION_DEPTH 50
 
-static void format_item(StrBuf* sb, Item item);
-static void format_element(StrBuf* sb, Element* elem);
-static void format_element_children(StrBuf* sb, Element* elem);
-static void format_element_children_raw(StrBuf* sb, Element* elem);
-static void format_table_row(StrBuf* sb, Element* row, bool is_header);
+static void format_item(StringBuf* sb, Item item);
+static void format_element(StringBuf* sb, Element* elem);
+static void format_element_children(StringBuf* sb, Element* elem);
+static void format_element_children_raw(StringBuf* sb, Element* elem);
+static void format_table_row(StringBuf* sb, Element* row, bool is_header);
 
 // Utility function to get attribute value from element
 static String* get_attribute(Element* elem, const char* attr_name) {
@@ -39,7 +40,7 @@ static String* get_attribute(Element* elem, const char* attr_name) {
 }
 
 // Format raw text (no escaping - for code blocks, etc.)
-static void format_raw_text(StrBuf* sb, String* str) {
+static void format_raw_text(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
     
     // Check if this is the EMPTY_STRING and handle it specially
@@ -48,12 +49,12 @@ static void format_raw_text(StrBuf* sb, String* str) {
     } else if (str->len == 10 && strncmp(str->chars, "lambda.nil", 10) == 0) {
         return; // Don't output anything for lambda.nil content
     } else {
-        strbuf_append_str_n(sb, str->chars, str->len);
+        stringbuf_append_str_n(sb, str->chars, str->len);
     }
 }
 
 // Format plain text (minimal escaping for Wiki markup)
-static void format_text(StrBuf* sb, String* str) {
+static void format_text(StringBuf* sb, String* str) {
     if (!sb || !str || str->len == 0) return;
 
     const char* s = str->chars;
@@ -68,18 +69,18 @@ static void format_text(StrBuf* sb, String* str) {
         case '}':
         case '|':
             // These characters have special meaning in Wiki markup
-            strbuf_append_char(sb, '\\');
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
             break;
         default:
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, c);
             break;
         }
     }
 }
 
 // Format heading elements (h1-h6) using Wiki heading syntax
-static void format_heading(StrBuf* sb, Element* elem) {
+static void format_heading(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
@@ -101,63 +102,63 @@ static void format_heading(StrBuf* sb, Element* elem) {
     
     // Wiki heading format: = Level 1 =, == Level 2 ==, etc.
     for (int i = 0; i < level; i++) {
-        strbuf_append_char(sb, '=');
+        stringbuf_append_char(sb, '=');
     }
-    strbuf_append_char(sb, ' ');
+    stringbuf_append_char(sb, ' ');
     
     format_element_children(sb, elem);
     
-    strbuf_append_char(sb, ' ');
+    stringbuf_append_char(sb, ' ');
     for (int i = 0; i < level; i++) {
-        strbuf_append_char(sb, '=');
+        stringbuf_append_char(sb, '=');
     }
-    strbuf_append_str(sb, "\n\n");
+    stringbuf_append_str(sb, "\n\n");
 }
 
 // Format paragraph elements
-static void format_paragraph(StrBuf* sb, Element* elem) {
+static void format_paragraph(StringBuf* sb, Element* elem) {
     format_element_children(sb, elem);
-    strbuf_append_str(sb, "\n\n");
+    stringbuf_append_str(sb, "\n\n");
 }
 
 // Format emphasis (italic) elements
-static void format_emphasis(StrBuf* sb, Element* elem) {
-    strbuf_append_str(sb, "''");
+static void format_emphasis(StringBuf* sb, Element* elem) {
+    stringbuf_append_str(sb, "''");
     format_element_children(sb, elem);
-    strbuf_append_str(sb, "''");
+    stringbuf_append_str(sb, "''");
 }
 
 // Format strong (bold) elements
-static void format_strong(StrBuf* sb, Element* elem) {
-    strbuf_append_str(sb, "'''");
+static void format_strong(StringBuf* sb, Element* elem) {
+    stringbuf_append_str(sb, "'''");
     format_element_children(sb, elem);
-    strbuf_append_str(sb, "'''");
+    stringbuf_append_str(sb, "'''");
 }
 
 // Format code elements
-static void format_code(StrBuf* sb, Element* elem) {
-    strbuf_append_str(sb, "<code>");
+static void format_code(StringBuf* sb, Element* elem) {
+    stringbuf_append_str(sb, "<code>");
     format_element_children_raw(sb, elem);
-    strbuf_append_str(sb, "</code>");
+    stringbuf_append_str(sb, "</code>");
 }
 
 // Format preformatted code blocks
-static void format_preformatted(StrBuf* sb, Element* elem) {
-    strbuf_append_str(sb, "<pre>\n");
+static void format_preformatted(StringBuf* sb, Element* elem) {
+    stringbuf_append_str(sb, "<pre>\n");
     format_element_children_raw(sb, elem);
-    strbuf_append_str(sb, "\n</pre>\n\n");
+    stringbuf_append_str(sb, "\n</pre>\n\n");
 }
 
 // Format link elements
-static void format_link(StrBuf* sb, Element* elem) {
+static void format_link(StringBuf* sb, Element* elem) {
     String* href = get_attribute(elem, "href");
     String* title = get_attribute(elem, "title");
     
     if (href && href->len > 0) {
         // External link format: [URL Display Text]
-        strbuf_append_char(sb, '[');
-        strbuf_append_str_n(sb, href->chars, href->len);
-        strbuf_append_char(sb, ' ');
+        stringbuf_append_char(sb, '[');
+        stringbuf_append_str_n(sb, href->chars, href->len);
+        stringbuf_append_char(sb, ' ');
         
         // Use title if available, otherwise use link content
         if (title && title->len > 0) {
@@ -165,33 +166,33 @@ static void format_link(StrBuf* sb, Element* elem) {
         } else {
             format_element_children(sb, elem);
         }
-        strbuf_append_char(sb, ']');
+        stringbuf_append_char(sb, ']');
     } else {
         // Internal wiki link format: [[Page Name]]
-        strbuf_append_str(sb, "[[");
+        stringbuf_append_str(sb, "[[");
         format_element_children(sb, elem);
-        strbuf_append_str(sb, "]]");
+        stringbuf_append_str(sb, "]]");
     }
 }
 
 // Format list items
-static void format_list_item(StrBuf* sb, Element* elem, int depth, bool is_ordered) {
+static void format_list_item(StringBuf* sb, Element* elem, int depth, bool is_ordered) {
     // Add proper indentation
     for (int i = 0; i < depth; i++) {
         if (is_ordered) {
-            strbuf_append_char(sb, '#');
+            stringbuf_append_char(sb, '#');
         } else {
-            strbuf_append_char(sb, '*');
+            stringbuf_append_char(sb, '*');
         }
     }
-    strbuf_append_char(sb, ' ');
+    stringbuf_append_char(sb, ' ');
     
     format_element_children(sb, elem);
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format unordered lists
-static void format_unordered_list(StrBuf* sb, Element* elem, int depth) {
+static void format_unordered_list(StringBuf* sb, Element* elem, int depth) {
     List* list = (List*)elem;
     if (!list || list->length == 0) return;
     
@@ -203,11 +204,11 @@ static void format_unordered_list(StrBuf* sb, Element* elem, int depth) {
         }
     }
     
-    if (depth == 0) strbuf_append_char(sb, '\n');
+    if (depth == 0) stringbuf_append_char(sb, '\n');
 }
 
 // Format ordered lists
-static void format_ordered_list(StrBuf* sb, Element* elem, int depth) {
+static void format_ordered_list(StringBuf* sb, Element* elem, int depth) {
     List* list = (List*)elem;
     if (!list || list->length == 0) return;
     
@@ -219,19 +220,19 @@ static void format_ordered_list(StrBuf* sb, Element* elem, int depth) {
         }
     }
     
-    if (depth == 0) strbuf_append_char(sb, '\n');
+    if (depth == 0) stringbuf_append_char(sb, '\n');
 }
 
 // Format table rows
-static void format_table_row(StrBuf* sb, Element* row, bool is_header) {
+static void format_table_row(StringBuf* sb, Element* row, bool is_header) {
     List* cells = (List*)row;
     if (!cells || cells->length == 0) return;
     
-    strbuf_append_str(sb, "{| class=\"wikitable\"");
+    stringbuf_append_str(sb, "{| class=\"wikitable\"");
     if (is_header) {
-        strbuf_append_str(sb, " style=\"font-weight:bold\"");
+        stringbuf_append_str(sb, " style=\"font-weight:bold\"");
     }
-    strbuf_append_str(sb, "\n|-\n");
+    stringbuf_append_str(sb, "\n|-\n");
     
     for (long i = 0; i < cells->length; i++) {
         Item cell_item = cells->items[i];
@@ -239,21 +240,21 @@ static void format_table_row(StrBuf* sb, Element* row, bool is_header) {
             Element* cell = (Element*)cell_item.pointer;
             
             if (is_header) {
-                strbuf_append_str(sb, "! ");
+                stringbuf_append_str(sb, "! ");
             } else {
-                strbuf_append_str(sb, "| ");
+                stringbuf_append_str(sb, "| ");
             }
             
             format_element_children(sb, cell);
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
     }
     
-    strbuf_append_str(sb, "|}\n\n");
+    stringbuf_append_str(sb, "|}\n\n");
 }
 
 // Format table elements
-static void format_table(StrBuf* sb, Element* elem) {
+static void format_table(StringBuf* sb, Element* elem) {
     List* rows = (List*)elem;
     if (!rows || rows->length == 0) return;
     
@@ -276,7 +277,7 @@ static void format_table(StrBuf* sb, Element* elem) {
 }
 
 // Format children elements (with escaping)
-static void format_element_children(StrBuf* sb, Element* elem) {
+static void format_element_children(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -289,7 +290,7 @@ static void format_element_children(StrBuf* sb, Element* elem) {
 }
 
 // Format children elements (raw, no escaping)
-static void format_element_children_raw(StrBuf* sb, Element* elem) {
+static void format_element_children_raw(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -307,7 +308,7 @@ static void format_element_children_raw(StrBuf* sb, Element* elem) {
 }
 
 // Main element formatting function
-static void format_element(StrBuf* sb, Element* elem) {
+static void format_element(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     // Recursion depth check
@@ -367,10 +368,10 @@ static void format_element(StrBuf* sb, Element* elem) {
         format_element_children(sb, elem);
     }
     else if (strcmp(tag_name, "br") == 0) {
-        strbuf_append_str(sb, "\n");
+        stringbuf_append_str(sb, "\n");
     }
     else if (strcmp(tag_name, "hr") == 0) {
-        strbuf_append_str(sb, "----\n\n");
+        stringbuf_append_str(sb, "----\n\n");
     }
     else {
         // Unknown element - just format children
@@ -381,7 +382,7 @@ static void format_element(StrBuf* sb, Element* elem) {
 }
 
 // Format different item types
-static void format_item(StrBuf* sb, Item item) {
+static void format_item(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
     
     switch (type) {
@@ -411,7 +412,7 @@ static void format_item(StrBuf* sb, Item item) {
 }
 
 // Main Wiki formatting function (StrBuf version)
-void format_wiki(StrBuf* sb, Item root_item) {
+void format_wiki(StringBuf* sb, Item root_item) {
     if (!sb) return;
     
     // Handle null/empty root item
@@ -423,9 +424,9 @@ void format_wiki(StrBuf* sb, Item root_item) {
 
 // Main Wiki formatting function (String version)
 String* format_wiki_string(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     format_wiki(sb, root_item);
-    String* result = strbuf_to_string(sb);
-    strbuf_free(sb);
+    String* result = stringbuf_to_string(sb);
+    stringbuf_free(sb);
     return result;
 }

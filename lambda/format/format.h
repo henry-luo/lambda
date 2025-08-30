@@ -11,8 +11,8 @@ void format_number(StringBuf* sb, Item item);
 
 // Format function declarations
 String* format_json(VariableMemPool* pool, Item root_item);
-void format_json_to_strbuf(StrBuf* sb, Item root_item);
-void format_markdown(StrBuf* sb, Item root_item);
+void format_json_to_strbuf(StringBuf* sb, Item root_item);
+void format_markdown(StringBuf* sb, Item root_item);
 String* format_xml(VariableMemPool* pool, Item root_item);
 String* format_html(VariableMemPool* pool, Item root_item);
 String* format_yaml(VariableMemPool* pool, Item root_item);
@@ -20,13 +20,13 @@ String* format_toml(VariableMemPool* pool, Item root_item);
 String* format_ini(VariableMemPool* pool, Item root_item);
 String* format_css(VariableMemPool* pool, Item root_item);
 String* format_latex(VariableMemPool* pool, Item root_item);
-void format_rst(StrBuf* sb, Item root_item);
+void format_rst(StringBuf* sb, Item root_item);
 String* format_rst_string(VariableMemPool* pool, Item root_item);
-void format_org(StrBuf* sb, Item root_item);
+void format_org(StringBuf* sb, Item root_item);
 String* format_org_string(VariableMemPool* pool, Item root_item);
-void format_wiki(StrBuf* sb, Item root_item);
+void format_wiki(StringBuf* sb, Item root_item);
 String* format_wiki_string(VariableMemPool* pool, Item root_item);
-void format_text(StrBuf* sb, Item root_item);
+void format_text(StringBuf* sb, Item root_item);
 String* format_text_string(VariableMemPool* pool, Item root_item);
 
 // Math format function declarations
