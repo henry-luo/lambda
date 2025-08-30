@@ -121,6 +121,7 @@ const char* url_scheme_to_string(UrlScheme scheme) {
         case URL_SCHEME_JAVASCRIPT: return "javascript";
         case URL_SCHEME_WS: return "ws";
         case URL_SCHEME_WSS: return "wss";
+        case URL_SCHEME_SYS: return "sys";
         case URL_SCHEME_CUSTOM: return "custom";
         case URL_SCHEME_UNKNOWN:
         default: return "unknown";
@@ -150,6 +151,7 @@ UrlScheme url_scheme_from_string(const char* scheme) {
     if (strcmp(lower, "javascript") == 0) return URL_SCHEME_JAVASCRIPT;
     if (strcmp(lower, "ws") == 0) return URL_SCHEME_WS;
     if (strcmp(lower, "wss") == 0) return URL_SCHEME_WSS;
+    if (strcmp(lower, "sys") == 0) return URL_SCHEME_SYS;
     
     return URL_SCHEME_UNKNOWN;
 }

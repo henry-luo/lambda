@@ -626,6 +626,26 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         url_destroy(abs_url);
         return input;
     }
+    else if (abs_url->scheme == URL_SCHEME_SYS) {
+        // Handle sys:// URLs for system information
+        printf("sys:// URL detected, using system information provider\n");
+        
+        // Create a variable pool for the input
+        VariableMemPool* pool;
+        MemPoolError pool_err = pool_variable_init(&pool, 4096, 10);
+        if (pool_err != MEM_POOL_ERR_OK) {
+            printf("Failed to create variable pool for sys:// URL\n");
+            url_destroy(abs_url);
+            return NULL;
+        }
+        
+        Input* input = input_from_sysinfo(abs_url, pool);
+        if (!input) {
+            pool_variable_destroy(pool);
+        }
+        url_destroy(abs_url);
+        return input;
+    }
     else {
         printf("Unsupported URL scheme for: %s\n", url ? url->chars : "null");
         url_destroy(abs_url);
