@@ -548,14 +548,6 @@ test-typeset-workflow:
 	@echo "Cleaning up test executable..."
 	rm -f test_workflow
 
-test-sequential: build
-	@echo "Running tests sequentially (not parallel)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --sequential; \
-	else \
-		echo "Error: Test script not found at test/test_run.sh"; \
-		exit 1; \
-	fi
 
 test-all:
 	@echo "Running complete test suite (all test types)..."

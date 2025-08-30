@@ -1,3 +1,6 @@
+#ifndef LAMBDA_INPUT_H
+#define LAMBDA_INPUT_H
+
 #define LAMBDA_STATIC
 #include "../lambda-data.hpp"
 #include "../../lib/url.h"
@@ -43,6 +46,21 @@ Item input_markup(Input *input, const char* content);
 // Directory listing functions (from input_dir.cpp)
 Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
 
+// HTTP/HTTPS functions (from input_http.cpp)
+typedef struct {
+    long timeout_seconds;
+    long max_redirects;
+    const char* user_agent;
+    bool verify_ssl;
+    bool enable_compression;
+} HttpConfig;
+
+char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config);
+char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
+Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
+
 #ifdef __cplusplus
 }
 #endif
+
+#endif // LAMBDA_INPUT_H
