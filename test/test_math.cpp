@@ -376,9 +376,9 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
     if (orig_len < 200) {
         max_diff = 2;  // Simple files should be nearly exact
     } else if (orig_len < 3000) {
-        max_diff = 15;  // Medium complexity: 15% tolerance (temporarily increased)
+        max_diff = 15;  // Medium complexity
     } else {
-        max_diff = 20;  // Very complex: 25% tolerance for unsupported expressions
+        max_diff = 20;  // Very complex
     }
     
     bool length_ok = (abs((int)(formatted_len - orig_len)) <= max_diff);

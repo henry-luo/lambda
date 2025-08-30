@@ -330,7 +330,6 @@ extern Item ItemError;
 extern String EMPTY_STRING;
 extern TypeInfo type_info[];
 
-String* strbuf_to_string(StrBuf *sb);
 CompResult equal_comp(Item a, Item b);
 
 typedef struct Input {

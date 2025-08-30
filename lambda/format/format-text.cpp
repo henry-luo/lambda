@@ -1,31 +1,32 @@
 #include "format.h"
 #include <string.h>
 #include <ctype.h>
+#include "../../lib/stringbuf.h"
 
 // Global recursion depth counter to prevent infinite recursion
 static thread_local int recursion_depth = 0;
 #define MAX_RECURSION_DEPTH 50
 
-static void format_item_text(StrBuf* sb, Item item);
-static void format_element_text(StrBuf* sb, Element* elem);
-static void format_array_text(StrBuf* sb, Array* arr);
-static void format_map_text(StrBuf* sb, Map* mp);
+static void format_item_text(StringBuf* sb, Item item);
+static void format_element_text(StringBuf* sb, Element* elem);
+static void format_array_text(StringBuf* sb, Array* arr);
+static void format_map_text(StringBuf* sb, Map* mp);
 
 // Helper function to format scalar values as raw text (no quotes)
-static void format_scalar_value(StrBuf* sb, Item item) {
+static void format_scalar_value(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
     
     switch (type) {
         case LMD_TYPE_BOOL: {
             bool val = item.bool_val;
-            strbuf_append_str(sb, val ? "true" : "false");
+            stringbuf_append_str(sb, val ? "true" : "false");
             break;
         }
         case LMD_TYPE_INT: {
             int val = item.int_val;
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%d", val);
-            strbuf_append_str(sb, num_buf);
+            stringbuf_append_str(sb, num_buf);
             break;
         }
         case LMD_TYPE_INT64: {
@@ -34,7 +35,7 @@ static void format_scalar_value(StrBuf* sb, Item item) {
             if (lptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
             break;
         }
@@ -44,7 +45,7 @@ static void format_scalar_value(StrBuf* sb, Item item) {
             if (dptr && !isnan(*dptr) && !isinf(*dptr)) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%.15g", *dptr);
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
             break;
         }
@@ -52,7 +53,7 @@ static void format_scalar_value(StrBuf* sb, Item item) {
             String* str = (String*)item.pointer;
             if (str && str->chars && str->len > 0) {
                 // Output string content without quotes
-                strbuf_append_str_n(sb, str->chars, str->len);
+                stringbuf_append_str_n(sb, str->chars, str->len);
             }
             break;
         }
@@ -60,7 +61,7 @@ static void format_scalar_value(StrBuf* sb, Item item) {
             String* symbol = (String*)item.pointer;
             if (symbol && symbol->chars && symbol->len > 0) {
                 // Output symbol content without quotes
-                strbuf_append_str_n(sb, symbol->chars, symbol->len);
+                stringbuf_append_str_n(sb, symbol->chars, symbol->len);
             }
             break;
         }
@@ -75,7 +76,7 @@ static void format_scalar_value(StrBuf* sb, Item item) {
                 // Format as ISO 8601 string without quotes
                 snprintf(date_buf, sizeof(date_buf), "%04d-%02d-%02d", 
                         year, month, day);
-                strbuf_append_str(sb, date_buf);
+                stringbuf_append_str(sb, date_buf);
             }
             break;
         }
@@ -87,7 +88,7 @@ static void format_scalar_value(StrBuf* sb, Item item) {
 }
 
 // Format an array by extracting all scalar values from its elements
-static void format_array_text(StrBuf* sb, Array* arr) {
+static void format_array_text(StringBuf* sb, Array* arr) {
     if (!arr || recursion_depth >= MAX_RECURSION_DEPTH) return;
     
     recursion_depth++;
@@ -99,7 +100,7 @@ static void format_array_text(StrBuf* sb, Array* arr) {
         
         // Add space between array elements for readability
         if (i < arr->length - 1) {
-            strbuf_append_char(sb, ' ');
+            stringbuf_append_char(sb, ' ');
         }
     }
     
@@ -107,7 +108,7 @@ static void format_array_text(StrBuf* sb, Array* arr) {
 }
 
 // Format a map by extracting all scalar values from its fields
-static void format_map_text(StrBuf* sb, Map* mp) {
+static void format_map_text(StringBuf* sb, Map* mp) {
     if (!mp || !mp->type || !mp->data || recursion_depth >= MAX_RECURSION_DEPTH) return;
     
     recursion_depth++;
@@ -131,7 +132,7 @@ static void format_map_text(StrBuf* sb, Map* mp) {
         
         // Add space separator between fields (except for first)
         if (!first) {
-            strbuf_append_char(sb, ' ');
+            stringbuf_append_char(sb, ' ');
         }
         first = false;
         
@@ -145,7 +146,7 @@ static void format_map_text(StrBuf* sb, Map* mp) {
 }
 
 // Format an element by extracting scalar values from its attributes and content
-static void format_element_text(StrBuf* sb, Element* elem) {
+static void format_element_text(StringBuf* sb, Element* elem) {
     if (!elem || recursion_depth >= MAX_RECURSION_DEPTH) return;
     
     recursion_depth++;
@@ -167,7 +168,7 @@ static void format_element_text(StrBuf* sb, Element* elem) {
                 
                 // Add space separator between attributes (except for first)
                 if (!first) {
-                    strbuf_append_char(sb, ' ');
+                    stringbuf_append_char(sb, ' ');
                 }
                 first = false;
                 
@@ -184,7 +185,7 @@ static void format_element_text(StrBuf* sb, Element* elem) {
     if (content_list && content_list->length > 0) {
         // Add space before content if we had attributes
         if (elem->data && elem->type) {
-            strbuf_append_char(sb, ' ');
+            stringbuf_append_char(sb, ' ');
         }
         
         for (long i = 0; i < content_list->length; i++) {
@@ -193,7 +194,7 @@ static void format_element_text(StrBuf* sb, Element* elem) {
             
             // Add space between content items
             if (i < content_list->length - 1) {
-                strbuf_append_char(sb, ' ');
+                stringbuf_append_char(sb, ' ');
             }
         }
     }
@@ -202,7 +203,7 @@ static void format_element_text(StrBuf* sb, Element* elem) {
 }
 
 // Main recursive function to extract scalar values from any Lambda Item
-static void format_item_text(StrBuf* sb, Item item) {
+static void format_item_text(StringBuf* sb, Item item) {
     if (recursion_depth >= MAX_RECURSION_DEPTH) {
         return; // Prevent stack overflow
     }
@@ -260,7 +261,7 @@ static void format_item_text(StrBuf* sb, Item item) {
 }
 
 // Public interface function that formats a Lambda Item as plain text
-void format_text(StrBuf* sb, Item root_item) {
+void format_text(StringBuf* sb, Item root_item) {
     if (!sb) return;
     
     // Reset recursion depth
@@ -274,13 +275,13 @@ void format_text(StrBuf* sb, Item root_item) {
 String* format_text_string(VariableMemPool* pool, Item root_item) {
     if (!pool) return NULL;
     
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_text(sb, root_item);
     
-    String* result = strbuf_to_string(sb);
-    strbuf_free(sb);
+    String* result = stringbuf_to_string(sb);
+    stringbuf_free(sb);
     
     return result;
 }
