@@ -1,16 +1,17 @@
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 
 // Forward declarations
-static void format_inline_element(StrBuf* sb, Element* elem);
-static void format_scheduling(StrBuf* sb, Element* elem);
-static void format_timestamp(StrBuf* sb, Element* elem);
-static void format_footnote_definition(StrBuf* sb, Element* elem);
+static void format_inline_element(StringBuf* sb, Element* elem);
+static void format_scheduling(StringBuf* sb, Element* elem);
+static void format_timestamp(StringBuf* sb, Element* elem);
+static void format_footnote_definition(StringBuf* sb, Element* elem);
 
 // Simple helper to append a string to the buffer
-static void append_string(StrBuf* sb, const char* str) {
+static void append_string(StringBuf* sb, const char* str) {
     if (!sb || !str) return;
-    strbuf_append_str(sb, str);
+    stringbuf_append_str(sb, str);
 }
 
 // Helper to get element type name
@@ -48,7 +49,7 @@ static String* get_first_string_content(Element* elem) {
 }
 
 // Format a heading element
-static void format_heading(StrBuf* sb, Element* elem) {
+static void format_heading(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -106,7 +107,7 @@ static void format_heading(StrBuf* sb, Element* elem) {
 }
 
 // Format a paragraph element with inline formatting
-static void format_paragraph(StrBuf* sb, Element* elem) {
+static void format_paragraph(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -128,7 +129,7 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
 }
 
 // Format inline elements (bold, italic, links, etc.)
-static void format_inline_element(StrBuf* sb, Element* elem) {
+static void format_inline_element(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     const char* type_name = get_element_type_name(elem);
@@ -434,7 +435,7 @@ static void format_inline_element(StrBuf* sb, Element* elem) {
 }
 
 // Format a list item element
-static void format_list_item(StrBuf* sb, Element* elem) {
+static void format_list_item(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -451,7 +452,7 @@ static void format_list_item(StrBuf* sb, Element* elem) {
 }
 
 // Format a code block element
-static void format_code_block(StrBuf* sb, Element* elem) {
+static void format_code_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -500,7 +501,7 @@ static void format_code_block(StrBuf* sb, Element* elem) {
 }
 
 // Format a quote block element
-static void format_quote_block(StrBuf* sb, Element* elem) {
+static void format_quote_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     // Output BEGIN_QUOTE
@@ -525,7 +526,7 @@ static void format_quote_block(StrBuf* sb, Element* elem) {
 }
 
 // Format an example block element
-static void format_example_block(StrBuf* sb, Element* elem) {
+static void format_example_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     append_string(sb, "#+BEGIN_EXAMPLE\n");
@@ -551,7 +552,7 @@ static void format_example_block(StrBuf* sb, Element* elem) {
 }
 
 // Format a verse block element
-static void format_verse_block(StrBuf* sb, Element* elem) {
+static void format_verse_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     append_string(sb, "#+BEGIN_VERSE\n");
@@ -577,7 +578,7 @@ static void format_verse_block(StrBuf* sb, Element* elem) {
 }
 
 // Format a center block element
-static void format_center_block(StrBuf* sb, Element* elem) {
+static void format_center_block(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     append_string(sb, "#+BEGIN_CENTER\n");
@@ -599,7 +600,7 @@ static void format_center_block(StrBuf* sb, Element* elem) {
 }
 
 // Format a drawer element
-static void format_drawer(StrBuf* sb, Element* elem) {
+static void format_drawer(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -648,7 +649,7 @@ static void format_drawer(StrBuf* sb, Element* elem) {
 }
 
 // Format a scheduling element (SCHEDULED, DEADLINE, CLOSED)
-static void format_scheduling(StrBuf* sb, Element* elem) {
+static void format_scheduling(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -689,7 +690,7 @@ static void format_scheduling(StrBuf* sb, Element* elem) {
 }
 
 // Format a timestamp element
-static void format_timestamp(StrBuf* sb, Element* elem) {
+static void format_timestamp(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     String* timestamp = get_first_string_content(elem);
@@ -699,7 +700,7 @@ static void format_timestamp(StrBuf* sb, Element* elem) {
 }
 
 // Format a footnote definition element
-static void format_footnote_definition(StrBuf* sb, Element* elem) {
+static void format_footnote_definition(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     String* name = NULL;
@@ -749,7 +750,7 @@ static void format_footnote_definition(StrBuf* sb, Element* elem) {
 }
 
 // Format a directive element
-static void format_directive(StrBuf* sb, Element* elem) {
+static void format_directive(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -766,7 +767,7 @@ static void format_directive(StrBuf* sb, Element* elem) {
 }
 
 // Format a table cell element
-static void format_table_cell(StrBuf* sb, Element* elem) {
+static void format_table_cell(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -782,7 +783,7 @@ static void format_table_cell(StrBuf* sb, Element* elem) {
 }
 
 // Format a table row element
-static void format_table_row(StrBuf* sb, Element* elem, bool is_header) {
+static void format_table_row(StringBuf* sb, Element* elem, bool is_header) {
     if (!elem) return;
     
     append_string(sb, "|");
@@ -817,7 +818,7 @@ static void format_table_row(StrBuf* sb, Element* elem, bool is_header) {
 }
 
 // Format a table element
-static void format_table(StrBuf* sb, Element* elem) {
+static void format_table(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* list = (List*)elem;
@@ -840,7 +841,7 @@ static void format_table(StrBuf* sb, Element* elem) {
 }
 
 // Format an org element based on its type
-static void format_org_element(StrBuf* sb, Element* elem) {
+static void format_org_element(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     const char* type_name = get_element_type_name(elem);
@@ -907,7 +908,7 @@ static void format_org_element(StrBuf* sb, Element* elem) {
 }
 
 // Format a text or element item
-static void format_org_text(StrBuf* sb, Item item) {
+static void format_org_text(StringBuf* sb, Item item) {
     if (item.item == ITEM_NULL) return;
     
     TypeId type = get_type_id(item);
@@ -923,7 +924,7 @@ static void format_org_text(StrBuf* sb, Item item) {
 }
 
 // Main Org formatting function
-void format_org(StrBuf* sb, Item root_item) {
+void format_org(StringBuf* sb, Item root_item) {
     if (!sb || root_item.item == ITEM_NULL) return;
     
     TypeId type = get_type_id(root_item);
@@ -952,10 +953,10 @@ void format_org(StrBuf* sb, Item root_item) {
 String* format_org_string(VariableMemPool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) return NULL;
     
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_org(sb, root_item);
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }

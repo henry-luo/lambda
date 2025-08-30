@@ -36,7 +36,7 @@ Test(input_dir, list_current_directory) {
     TypeId root_type = get_type_id(input->root);
     cr_assert(root_type == LMD_TYPE_ELEMENT, "Root is not an element (got type %d, expected %d)", root_type, LMD_TYPE_ELEMENT);
     
-    Element* root = (Element*)input->root.pointer;
+    Element* root = (Element*)input->root.element;
     cr_assert(root != NULL, "Root element is NULL");
     
     // Basic validation that we got an element structure
@@ -51,7 +51,7 @@ Test(input_dir, list_test_directory, .init = setup_test_directory, .fini = clean
     TypeId root_type = get_type_id(input->root);
     cr_assert(root_type == LMD_TYPE_ELEMENT, "Root is not an element (got type %d, expected %d)", root_type, LMD_TYPE_ELEMENT);
     
-    Element* root = (Element*)input->root.pointer;
+    Element* root = (Element*)input->root.element;
     cr_assert(root != NULL, "Root element is NULL");
     
     // Basic validation that we got a valid element structure
@@ -119,7 +119,7 @@ Test(input_dir, empty_directory_handling) {
     Input* input = input_from_directory("test_empty_dir", false, 1);
     cr_assert_not_null(input, "input_from_directory should handle empty directories");
     
-    Element* root = (Element*)input->root.pointer;
+    Element* root = (Element*)input->root.element;
     cr_assert(root != NULL, "Root element should exist for empty directory");
     cr_assert(root->type != NULL, "Root element type should not be NULL");
     

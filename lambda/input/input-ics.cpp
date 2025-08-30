@@ -27,16 +27,16 @@ static bool is_folded_line(const char *ics) {
 
 // Helper function to parse property name (before the colon)
 static String* parse_property_name(Input *input, const char **ics) {
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     
     while (**ics && **ics != ':' && **ics != ';' && **ics != '\n' && **ics != '\r') {
-        strbuf_append_char(sb, **ics);
+        stringbuf_append_char(sb, **ics);
         (*ics)++;
     }
     
     if (sb->length > sizeof(uint32_t)) {
-        String* result = strbuf_to_string(sb);
+        String* result = stringbuf_to_string(sb);
         return result;
     }
     return NULL;
@@ -48,24 +48,24 @@ static void parse_property_parameters(Input *input, const char **ics, Map* param
         (*ics)++; // skip ';'
         
         // Parse parameter name
-        StrBuf* sb = input->sb;
-        strbuf_reset(sb);
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
         
         while (**ics && **ics != '=' && **ics != ':' && **ics != '\n' && **ics != '\r') {
-            strbuf_append_char(sb, toupper(**ics));
+            stringbuf_append_char(sb, toupper(**ics));
             (*ics)++;
         }
         
         if (sb->length <= sizeof(uint32_t)) continue;
         
-        String* param_name = strbuf_to_string(sb);
+        String* param_name = stringbuf_to_string(sb);
         if (!param_name) continue;
         
         String* param_value = NULL;
         
         if (**ics == '=') {
             (*ics)++; // skip '='
-            strbuf_reset(sb);
+            stringbuf_reset(sb);
             
             // Handle quoted values
             bool in_quotes = false;
@@ -77,7 +77,7 @@ static void parse_property_parameters(Input *input, const char **ics, Map* param
             while (**ics && 
                    (in_quotes ? **ics != '"' : (**ics != ';' && **ics != ':')) &&
                    **ics != '\n' && **ics != '\r') {
-                strbuf_append_char(sb, **ics);
+                stringbuf_append_char(sb, **ics);
                 (*ics)++;
             }
             
@@ -86,7 +86,7 @@ static void parse_property_parameters(Input *input, const char **ics, Map* param
             }
             
             if (sb->length > sizeof(uint32_t)) {
-                param_value = strbuf_to_string(sb);
+                param_value = stringbuf_to_string(sb);
             }
         }
         
@@ -103,8 +103,8 @@ static String* parse_property_value(Input *input, const char **ics) {
     
     (*ics)++; // skip ':'
     
-    StrBuf* sb = input->sb;
-    strbuf_reset(sb);  // Reset buffer for reuse
+    StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset buffer for reuse
     
     // Parse the value, handling line folding
     while (**ics) {
@@ -122,7 +122,7 @@ static String* parse_property_value(Input *input, const char **ics) {
             // Check if next line is folded
             if (is_folded_line(next_line)) {
                 // This is a folded line, replace line ending with space and continue
-                strbuf_append_char(sb, ' ');
+                stringbuf_append_char(sb, ' ');
                 *ics = next_line;
                 skip_line_whitespace(ics); // skip the folding whitespace
             } else {
@@ -131,13 +131,13 @@ static String* parse_property_value(Input *input, const char **ics) {
                 break;
             }
         } else {
-            strbuf_append_char(sb, **ics);
+            stringbuf_append_char(sb, **ics);
             (*ics)++;
         }
     }
     
     if (sb->length > sizeof(uint32_t)) {
-        return strbuf_to_string(sb);
+        return stringbuf_to_string(sb);
     }
     return NULL;
 }
@@ -160,50 +160,50 @@ static Map* parse_datetime(Input *input, const char* value) {
     // Parse various date-time formats
     // Format: YYYYMMDD, YYYYMMDDTHHMMSS, YYYYMMDDTHHMMSSZ
     const char* ptr = value;
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     // Parse year (4 digits)
     if (strlen(ptr) >= 8) {
-        strbuf_reset(sb);
+        stringbuf_reset(sb);
         for (int i = 0; i < 4; i++) {
             if (isdigit(*ptr)) {
-                strbuf_append_char(sb, *ptr++);
+                stringbuf_append_char(sb, *ptr++);
             } else {
                 return dt_map; // Invalid format
             }
         }
         if (sb->length > sizeof(uint32_t)) {
-            String* year_str = strbuf_to_string(sb);
+            String* year_str = stringbuf_to_string(sb);
             String* year_key = input_create_string(input, "year");
             map_put(dt_map, year_key, {.item = s2it(year_str)}, input);
         }
         
         // Parse month (2 digits)
-        strbuf_reset(sb);
+        stringbuf_reset(sb);
         for (int i = 0; i < 2; i++) {
             if (isdigit(*ptr)) {
-                strbuf_append_char(sb, *ptr++);
+                stringbuf_append_char(sb, *ptr++);
             } else {
                 return dt_map;
             }
         }
         if (sb->length > sizeof(uint32_t)) {
-            String* month_str = strbuf_to_string(sb);
+            String* month_str = stringbuf_to_string(sb);
             String* month_key = input_create_string(input, "month");
             map_put(dt_map, month_key, {.item = s2it(month_str)}, input);
         }
         
         // Parse day (2 digits)
-        strbuf_reset(sb);
+        stringbuf_reset(sb);
         for (int i = 0; i < 2; i++) {
             if (isdigit(*ptr)) {
-                strbuf_append_char(sb, *ptr++);
+                stringbuf_append_char(sb, *ptr++);
             } else {
                 return dt_map;
             }
         }
         if (sb->length > sizeof(uint32_t)) {
-            String* day_str = strbuf_to_string(sb);
+            String* day_str = stringbuf_to_string(sb);
             String* day_key = input_create_string(input, "day");
             map_put(dt_map, day_key, {.item = s2it(day_str)}, input);
         }
@@ -213,46 +213,46 @@ static Map* parse_datetime(Input *input, const char* value) {
             ptr++; // skip 'T'
             
             // Parse hour (2 digits)
-            strbuf_reset(sb);
+            stringbuf_reset(sb);
             for (int i = 0; i < 2; i++) {
                 if (isdigit(*ptr)) {
-                    strbuf_append_char(sb, *ptr++);
+                    stringbuf_append_char(sb, *ptr++);
                 } else {
                     return dt_map;
                 }
             }
             if (sb->length > sizeof(uint32_t)) {
-                String* hour_str = strbuf_to_string(sb);
+                String* hour_str = stringbuf_to_string(sb);
                 String* hour_key = input_create_string(input, "hour");
                 map_put(dt_map, hour_key, {.item = s2it(hour_str)}, input);
             }
             
             // Parse minute (2 digits)
-            strbuf_reset(sb);
+            stringbuf_reset(sb);
             for (int i = 0; i < 2; i++) {
                 if (isdigit(*ptr)) {
-                    strbuf_append_char(sb, *ptr++);
+                    stringbuf_append_char(sb, *ptr++);
                 } else {
                     return dt_map;
                 }
             }
             if (sb->length > sizeof(uint32_t)) {
-                String* minute_str = strbuf_to_string(sb);
+                String* minute_str = stringbuf_to_string(sb);
                 String* minute_key = input_create_string(input, "minute");
                 map_put(dt_map, minute_key, {.item = s2it(minute_str)}, input);
             }
             
             // Parse second (2 digits)
-            strbuf_reset(sb);
+            stringbuf_reset(sb);
             for (int i = 0; i < 2; i++) {
                 if (isdigit(*ptr)) {
-                    strbuf_append_char(sb, *ptr++);
+                    stringbuf_append_char(sb, *ptr++);
                 } else {
                     return dt_map;
                 }
             }
             if (sb->length > sizeof(uint32_t)) {
-                String* second_str = strbuf_to_string(sb);
+                String* second_str = stringbuf_to_string(sb);
                 String* second_key = input_create_string(input, "second");
                 map_put(dt_map, second_key, {.item = s2it(second_str)}, input);
             }
@@ -282,7 +282,7 @@ static Map* parse_duration(Input *input, const char* value) {
     if (*ptr != 'P') return dur_map; // Invalid duration format
     ptr++; // skip 'P'
     
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     bool in_time_part = false;
     
     while (*ptr) {
@@ -293,9 +293,9 @@ static Map* parse_duration(Input *input, const char* value) {
         }
         
         // Parse number
-        strbuf_reset(sb);
+        stringbuf_reset(sb);
         while (isdigit(*ptr)) {
-            strbuf_append_char(sb, *ptr++);
+            stringbuf_append_char(sb, *ptr++);
         }
         
         if (sb->length <= sizeof(uint32_t)) {
@@ -303,7 +303,7 @@ static Map* parse_duration(Input *input, const char* value) {
             continue;
         }
         
-        String* num_str = strbuf_to_string(sb);
+        String* num_str = stringbuf_to_string(sb);
         
         // Parse unit
         char unit = *ptr++;
@@ -339,7 +339,7 @@ void parse_ics(Input* input, const char* ics_string) {
     }
     
     // Initialize string buffer for parsing
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     if (!input->sb) {
         return;
     }

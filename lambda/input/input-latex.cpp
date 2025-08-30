@@ -22,13 +22,13 @@ static void skip_comment(const char **latex) {
 }
 
 static String* parse_latex_string_content(Input *input, const char **latex, char end_char) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     int char_count = 0;
     const int max_string_chars = 10000; // Safety limit
     
     // Handle empty string case
     if (**latex == end_char) {
-        return strbuf_to_string(sb);
+        return stringbuf_to_string(sb);
     }
     
     while (**latex && **latex != end_char && char_count < max_string_chars) {
@@ -40,20 +40,20 @@ static String* parse_latex_string_content(Input *input, const char **latex, char
             
             // Handle common LaTeX escapes
             switch (**latex) {
-                case '\\': strbuf_append_char(sb, '\n'); break; // Line break
-                case '{': strbuf_append_char(sb, '{'); break;
-                case '}': strbuf_append_char(sb, '}'); break;
-                case '$': strbuf_append_char(sb, '$'); break;
-                case '&': strbuf_append_char(sb, '&'); break;
-                case '#': strbuf_append_char(sb, '#'); break;
-                case '^': strbuf_append_char(sb, '^'); break;
-                case '_': strbuf_append_char(sb, '_'); break;
-                case '%': strbuf_append_char(sb, '%'); break;
-                case '~': strbuf_append_char(sb, '~'); break;
+                case '\\': stringbuf_append_char(sb, '\n'); break; // Line break
+                case '{': stringbuf_append_char(sb, '{'); break;
+                case '}': stringbuf_append_char(sb, '}'); break;
+                case '$': stringbuf_append_char(sb, '$'); break;
+                case '&': stringbuf_append_char(sb, '&'); break;
+                case '#': stringbuf_append_char(sb, '#'); break;
+                case '^': stringbuf_append_char(sb, '^'); break;
+                case '_': stringbuf_append_char(sb, '_'); break;
+                case '%': stringbuf_append_char(sb, '%'); break;
+                case '~': stringbuf_append_char(sb, '~'); break;
                 default:
                     // Unknown escape, keep both characters
-                    strbuf_append_char(sb, '\\');
-                    strbuf_append_char(sb, **latex);
+                    stringbuf_append_char(sb, '\\');
+                    stringbuf_append_char(sb, **latex);
                     break;
             }
             (*latex)++;
@@ -61,25 +61,25 @@ static String* parse_latex_string_content(Input *input, const char **latex, char
             // Skip LaTeX comments
             skip_comment(latex);
         } else {
-            strbuf_append_char(sb, **latex);
+            stringbuf_append_char(sb, **latex);
             (*latex)++;
         }
         char_count++;
     }
 
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_command_name(Input *input, const char **latex) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     
     // Command names can contain letters and sometimes numbers
     while (**latex && (isalpha(**latex) || (**latex == '*'))) {
-        strbuf_append_char(sb, **latex);
+        stringbuf_append_char(sb, **latex);
         (*latex)++;
     }
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static Array* parse_command_arguments(Input *input, const char **latex) {
@@ -107,26 +107,26 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
         
         // For required arguments, we need to handle nested braces
         int brace_depth = 1;
-        StrBuf* arg_sb = input->sb;
-        strbuf_reset(arg_sb);
+        StringBuf* arg_sb = input->sb;
+        stringbuf_reset(arg_sb);
         
         while (**latex && brace_depth > 0) {
             if (**latex == '{') {
                 brace_depth++;
-                strbuf_append_char(arg_sb, **latex);
+                stringbuf_append_char(arg_sb, **latex);
             } else if (**latex == '}') {
                 brace_depth--;
                 if (brace_depth > 0) {
-                    strbuf_append_char(arg_sb, **latex);
+                    stringbuf_append_char(arg_sb, **latex);
                 }
             } else if (**latex == '\\') {
-                strbuf_append_char(arg_sb, **latex);
+                stringbuf_append_char(arg_sb, **latex);
                 (*latex)++;
                 if (**latex) {
-                    strbuf_append_char(arg_sb, **latex);
+                    stringbuf_append_char(arg_sb, **latex);
                 }
             } else {
-                strbuf_append_char(arg_sb, **latex);
+                stringbuf_append_char(arg_sb, **latex);
             }
             (*latex)++;
         }
@@ -135,12 +135,12 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
             String *arg_string = (String*)arg_sb->str;
             arg_string->len = arg_sb->length - sizeof(uint32_t);
             arg_string->ref_cnt = 0;
-            strbuf_full_reset(arg_sb);
+            stringbuf_reset(arg_sb);
             
             Item arg_item = {.item = s2it(arg_string)};
             array_append(args, arg_item, input->pool);
         } else {
-            strbuf_full_reset(arg_sb);
+            stringbuf_reset(arg_sb);
         }
         
         skip_whitespace(latex);
@@ -201,8 +201,8 @@ static Item parse_latex_command(Input *input, const char **latex) {
             
             if (is_math_env || is_raw_text_env) {
                 // For math and raw text environments, collect content as raw text
-                StrBuf* content_sb = input->sb;
-                strbuf_full_reset(content_sb);
+                StringBuf* content_sb = input->sb;
+                stringbuf_reset(content_sb);
                 
                 int content_chars = 0;
                 const int max_content_chars = 10000;
@@ -219,7 +219,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                         }
                     }
                     
-                    strbuf_append_char(content_sb, **latex);
+                    stringbuf_append_char(content_sb, **latex);
                     (*latex)++;
                     content_chars++;
                 }
@@ -236,12 +236,12 @@ static Item parse_latex_command(Input *input, const char **latex) {
                             Input* math_input = input_new((Url*)input->url);
                             if (math_input) {
                                 // Reset our StrBuf before calling math parser
-                                strbuf_reset(input->sb);
+                                stringbuf_reset(input->sb);
                                 
                                 parse_math(math_input, content_string->chars, "latex");
                                 
                                 // Reset our StrBuf after calling math parser
-                                strbuf_reset(input->sb);
+                                stringbuf_reset(input->sb);
                                 
                                 if (math_input->root .item != ITEM_NULL) {
                                     // Add the parsed math as child
@@ -277,7 +277,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                         }
                     }
                 } else {
-                    strbuf_full_reset(content_sb);
+                    stringbuf_reset(content_sb);
                 }
             } else {
                 // For non-math/non-raw-text environments, parse content normally
@@ -303,8 +303,8 @@ static Item parse_latex_command(Input *input, const char **latex) {
                         skip_comment(latex);
                     } else {
                         // Parse text content with proper escape handling
-                        StrBuf* text_sb = input->sb;
-                        strbuf_full_reset(text_sb);
+                        StringBuf* text_sb = input->sb;
+                        stringbuf_reset(text_sb);
                         
                         int text_chars = 0;
                         const int max_text_chars = 5000;
@@ -323,18 +323,18 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                     // This is an escaped character, handle it
                                     (*latex)++; // Skip backslash
                                     switch (**latex) {
-                                        case '{': strbuf_append_char(text_sb, '{'); break;
-                                        case '}': strbuf_append_char(text_sb, '}'); break;
-                                        case '$': strbuf_append_char(text_sb, '$'); break;
-                                        case '&': strbuf_append_char(text_sb, '&'); break;
-                                        case '#': strbuf_append_char(text_sb, '#'); break;
-                                        case '^': strbuf_append_char(text_sb, '^'); break;
-                                        case '_': strbuf_append_char(text_sb, '_'); break;
-                                        case '%': strbuf_append_char(text_sb, '%'); break;
-                                        case '~': strbuf_append_char(text_sb, '~'); break;
+                                        case '{': stringbuf_append_char(text_sb, '{'); break;
+                                        case '}': stringbuf_append_char(text_sb, '}'); break;
+                                        case '$': stringbuf_append_char(text_sb, '$'); break;
+                                        case '&': stringbuf_append_char(text_sb, '&'); break;
+                                        case '#': stringbuf_append_char(text_sb, '#'); break;
+                                        case '^': stringbuf_append_char(text_sb, '^'); break;
+                                        case '_': stringbuf_append_char(text_sb, '_'); break;
+                                        case '%': stringbuf_append_char(text_sb, '%'); break;
+                                        case '~': stringbuf_append_char(text_sb, '~'); break;
                                         default: 
-                                            strbuf_append_char(text_sb, '\\');
-                                            strbuf_append_char(text_sb, **latex);
+                                            stringbuf_append_char(text_sb, '\\');
+                                            stringbuf_append_char(text_sb, **latex);
                                             break;
                                     }
                                     (*latex)++;
@@ -346,7 +346,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                 // This is a comment, break to let the comment handler deal with it
                                 break;
                             } else {
-                                strbuf_append_char(text_sb, **latex);
+                                stringbuf_append_char(text_sb, **latex);
                                 (*latex)++;
                             }
                             text_chars++;
@@ -356,7 +356,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                             String *text_string = (String*)text_sb->str;
                             text_string->len = text_sb->length - sizeof(uint32_t);
                             text_string->ref_cnt = 0;
-                            strbuf_full_reset(text_sb);
+                            stringbuf_reset(text_sb);
                             
                             // Only add non-whitespace text
                             bool has_non_whitespace = false;
@@ -372,7 +372,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                 list_push((List*)element, text_item);
                             }
                         } else {
-                            strbuf_full_reset(text_sb);
+                            stringbuf_reset(text_sb);
                         }
                     }
                     
@@ -442,8 +442,8 @@ static Item parse_latex_element(Input *input, const char **latex) {
         }
         
         // Parse math content until closing delimiter
-        StrBuf* math_sb = input->sb;
-        strbuf_full_reset(math_sb);
+        StringBuf* math_sb = input->sb;
+        stringbuf_reset(math_sb);
         
         while (**latex) {
             if (**latex == '$') {
@@ -452,7 +452,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                         (*latex) += 2; // Skip $$
                         break;
                     } else {
-                        strbuf_append_char(math_sb, **latex);
+                        stringbuf_append_char(math_sb, **latex);
                         (*latex)++;
                     }
                 } else {
@@ -460,7 +460,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                     break;
                 }
             } else {
-                strbuf_append_char(math_sb, **latex);
+                stringbuf_append_char(math_sb, **latex);
                 (*latex)++;
             }
         }
@@ -476,13 +476,13 @@ static Item parse_latex_element(Input *input, const char **latex) {
                 Input* math_input = input_new((Url*)input->url);
                 if (math_input) {
                     // Reset our StrBuf before calling math parser
-                    strbuf_reset(input->sb);
+                    stringbuf_reset(input->sb);
                     
                     // Parse the math content using our math parser
                     parse_math(math_input, math_string->chars, "latex");
                     
                     // Reset our StrBuf after calling math parser
-                    strbuf_reset(input->sb);
+                    stringbuf_reset(input->sb);
                     
                     // Create wrapper element for the math
                     const char* math_name = display_math ? "displaymath" : "math";
@@ -500,7 +500,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                         pool_variable_destroy(math_input->pool);
                         free(math_input);
                         
-                        strbuf_full_reset(math_sb);
+                        stringbuf_reset(math_sb);
                         parse_depth--;
                         return {.item = (uint64_t)element};
                     }
@@ -515,14 +515,14 @@ static Item parse_latex_element(Input *input, const char **latex) {
             }
         }
         
-        strbuf_full_reset(math_sb);
+        stringbuf_reset(math_sb);
         parse_depth--;
         return {.item = ITEM_ERROR};
     }
     
     // Parse regular text content with escape handling
-    StrBuf* text_sb = input->sb;
-    strbuf_full_reset(text_sb);
+    StringBuf* text_sb = input->sb;
+    stringbuf_reset(text_sb);
     
     int text_chars = 0;
     const int max_text_chars = 5000;
@@ -535,18 +535,18 @@ static Item parse_latex_element(Input *input, const char **latex) {
                 // This is an escaped character
                 (*latex)++; // Skip backslash
                 switch (**latex) {
-                    case '{': strbuf_append_char(text_sb, '{'); break;
-                    case '}': strbuf_append_char(text_sb, '}'); break;
-                    case '$': strbuf_append_char(text_sb, '$'); break;
-                    case '&': strbuf_append_char(text_sb, '&'); break;
-                    case '#': strbuf_append_char(text_sb, '#'); break;
-                    case '^': strbuf_append_char(text_sb, '^'); break;
-                    case '_': strbuf_append_char(text_sb, '_'); break;
-                    case '%': strbuf_append_char(text_sb, '%'); break;
-                    case '~': strbuf_append_char(text_sb, '~'); break;
+                    case '{': stringbuf_append_char(text_sb, '{'); break;
+                    case '}': stringbuf_append_char(text_sb, '}'); break;
+                    case '$': stringbuf_append_char(text_sb, '$'); break;
+                    case '&': stringbuf_append_char(text_sb, '&'); break;
+                    case '#': stringbuf_append_char(text_sb, '#'); break;
+                    case '^': stringbuf_append_char(text_sb, '^'); break;
+                    case '_': stringbuf_append_char(text_sb, '_'); break;
+                    case '%': stringbuf_append_char(text_sb, '%'); break;
+                    case '~': stringbuf_append_char(text_sb, '~'); break;
                     default: 
-                        strbuf_append_char(text_sb, '\\');
-                        strbuf_append_char(text_sb, **latex);
+                        stringbuf_append_char(text_sb, '\\');
+                        stringbuf_append_char(text_sb, **latex);
                         break;
                 }
                 (*latex)++;
@@ -558,7 +558,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             // Math mode or comment, break
             break;
         } else {
-            strbuf_append_char(text_sb, **latex);
+            stringbuf_append_char(text_sb, **latex);
             (*latex)++;
         }
         text_chars++;
@@ -568,7 +568,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
         String *text_string = (String*)text_sb->str;
         text_string->len = text_sb->length - sizeof(uint32_t);
         text_string->ref_cnt = 0;
-        strbuf_full_reset(text_sb);
+        stringbuf_reset(text_sb);
         
         // Only return non-whitespace text
         bool has_non_whitespace = false;
@@ -584,7 +584,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             return {.item = s2it(text_string)};
         }
     } else {
-        strbuf_full_reset(text_sb);
+        stringbuf_reset(text_sb);
     }
     
     parse_depth--;
@@ -594,7 +594,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
 void parse_latex(Input* input, const char* latex_string) {
     printf("DEBUG: Starting LaTeX parsing...\n");
     // Reuse the StrBuf from input_new() - don't create a new one
-    strbuf_reset(input->sb);
+    stringbuf_reset(input->sb);
     const char *latex = latex_string;
     
     // Create root document element

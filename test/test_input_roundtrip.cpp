@@ -1479,7 +1479,7 @@ Test(markup_roundtrip_tests, comprehensive_file_roundtrip) {
     printf("\n=== Testing Comprehensive File Roundtrip ===\n");
     
     // Test with the sample.md file
-    const char* sample_file = "./test/input/sample.md";
+    const char* sample_file = "test/input/sample.md";
     
     // Read the file
     char* original_content = read_file_content(sample_file);

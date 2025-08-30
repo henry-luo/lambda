@@ -38,6 +38,7 @@ project "lambda-lib"
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
         "lib/strbuf.c",
+        "lib/stringbuf.c",
         "lib/strview.c",
         "lib/string.c",
         "lib/num_stack.c",
@@ -408,6 +409,55 @@ project "test_strbuf"
         "-fcolor-diagnostics",
         "-pedantic",
         "-std=c99",
+    }
+    
+
+project "test_stringbuf"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_stringbuf.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "mac-deps/nghttp2/include",
+        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "criterion",
+    }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic",
     }
     
 
