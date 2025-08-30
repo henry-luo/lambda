@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #define DEBUG_MATH_FORMAT 1
 #include <stdio.h>
 
@@ -16,17 +17,17 @@ typedef enum {
 } MathOutputFlavor;
 
 // Forward declarations
-static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int depth);
-static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flavor, int depth);
-static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor flavor, int depth);
-static void format_math_children_with_template(StrBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth);
-static void format_math_string(StrBuf* sb, String* str);
+static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, int depth);
+static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor flavor, int depth);
+static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor flavor, int depth);
+static void format_math_children_with_template(StringBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth);
+static void format_math_string(StringBuf* sb, String* str);
 static bool is_single_character_item(Item item);
 static bool item_contains_integral(Item item);
 static bool item_contains_only_symbols(Item item);
 static bool item_is_symbol_element(Item item);
-static void append_space_if_needed(StrBuf* sb);
-static void append_char_if_needed(StrBuf* sb, char c);
+static void append_space_if_needed(StringBuf* sb);
+static void append_char_if_needed(StringBuf* sb, char c);
 
 // Math formatting tables for different output flavors
 typedef struct {
@@ -619,7 +620,7 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
 }
 
 // Format math string (escape special characters if needed)
-static void format_math_string(StrBuf* sb, String* str) {
+static void format_math_string(StringBuf* sb, String* str) {
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_string: called with str=%p\n", (void*)str);
     #endif
@@ -653,16 +654,16 @@ static void format_math_string(StrBuf* sb, String* str) {
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG format_math_string: string too long (%zu), treating as invalid\n", string_len);
         #endif
-        strbuf_append_str(sb, "[invalid_string]");
+        stringbuf_append_str(sb, "[invalid_string]");
         return;
     }
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: about to append %zu chars using strbuf_append_str\n", string_len);
+    fprintf(stderr, "DEBUG format_math_string: about to append %zu chars using stringbuf_append_str\n", string_len);
     #endif
     
-    // Use the simpler strbuf_append_str which relies on null termination
-    strbuf_append_str(sb, str->chars);
+    // Use the simpler stringbuf_append_str which relies on null termination
+    stringbuf_append_str(sb, str->chars);
     
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_string: completed\n");
@@ -670,7 +671,7 @@ static void format_math_string(StrBuf* sb, String* str) {
 }
 
 // Format children elements based on format string
-static void format_math_children_with_template(StrBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth) {
+static void format_math_children_with_template(StringBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth) {
     if (!format_str || !children) return;
     
     printf("DEBUG: format_math_children_with_template called with format='%s', children_count=%ld\n", 
@@ -694,25 +695,25 @@ static void format_math_children_with_template(StrBuf* sb, List* children, const
             } else {
                 printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
                 // Fallback: output the placeholder as literal text
-                strbuf_append_char(sb, '{');
-                strbuf_append_char(sb, *(p+1));
-                strbuf_append_char(sb, '}');
+                stringbuf_append_char(sb, '{');
+                stringbuf_append_char(sb, *(p+1));
+                stringbuf_append_char(sb, '}');
             }
             p += 3; // Skip "{N}"
         } else {
-            strbuf_append_char(sb, *p);
+            stringbuf_append_char(sb, *p);
             p++;
         }
     }
 }
 
 // Format element children in order
-static void format_math_children(StrBuf* sb, List* children, MathOutputFlavor flavor, int depth) {
+static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor flavor, int depth) {
     if (!children || children->length == 0) return;
     
     for (int i = 0; i < children->length; i++) {
         if (i > 0 && flavor != MATH_OUTPUT_MATHML) {
-            append_char_if_needed(sb, ' ');
+            append_space_if_needed(sb);
         }
         format_math_item(sb, children->items[i], flavor, depth + 1);
     }
@@ -781,7 +782,7 @@ static const char* get_styled_frac_format(const char* style, MathOutputFlavor fl
 }
 
 // Format a math element
-static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flavor, int depth) {
+static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor flavor, int depth) {
     // Debug: format_math_element called
     if (!elem) return;
     
@@ -847,21 +848,21 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         if (flavor == MATH_OUTPUT_LATEX) {
             // Special case: if it's a single letter (likely a function name), don't wrap in \text{}
             if (strlen(element_name) == 1 && isalpha(element_name[0])) {
-                strbuf_append_str(sb, element_name);
+                stringbuf_append_str(sb, element_name);
             } else {
-                strbuf_append_str(sb, "\\text{");
-                strbuf_append_str(sb, element_name);
-                strbuf_append_str(sb, "}");
+                stringbuf_append_str(sb, "\\text{");
+                stringbuf_append_str(sb, element_name);
+                stringbuf_append_str(sb, "}");
             }
         } else {
-            strbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, element_name);
         }
         
         if (elmt_type->content_length > 0) {
             List* children = (List*)elem;
-            strbuf_append_str(sb, "(");
+            stringbuf_append_str(sb, "(");
             format_math_children(sb, children, flavor, depth);
-            strbuf_append_str(sb, ")");
+            stringbuf_append_str(sb, ")");
         }
         return;
     }
@@ -869,7 +870,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
     const char* format_str = get_format_string(def, flavor);
     if (!format_str) {
         // Fallback to element name
-        strbuf_append_str(sb, element_name);
+        stringbuf_append_str(sb, element_name);
         return;
     }
     
@@ -1068,7 +1069,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         for (int i = 0; i < children->length; i++) {
             if (i > 0) {
                 // Use the context-appropriate format string
-                strbuf_append_str(sb, operator_format);
+                stringbuf_append_str(sb, operator_format);
             }
             format_math_item(sb, children->items[i], flavor, depth + 1);
         }
@@ -1104,30 +1105,30 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
             #endif
             
             // Format as operator with subscript for limits/bounds
-            strbuf_append_str(sb, format_str);  // e.g., "\\sum"
+            stringbuf_append_str(sb, format_str);  // e.g., "\\sum"
             
             if (children->length >= 1) {
-                strbuf_append_str(sb, "_{");
+                stringbuf_append_str(sb, "_{");
                 bool prev_compact_context = in_compact_context;
                 in_compact_context = true;
                 format_math_item(sb, children->items[0], flavor, depth + 1);
                 in_compact_context = prev_compact_context;
-                strbuf_append_str(sb, "}");
+                stringbuf_append_str(sb, "}");
             }
             
             // Handle additional children (like upper bounds for integrals)
             if (children->length >= 2) {
-                strbuf_append_str(sb, "^{");
+                stringbuf_append_str(sb, "^{");
                 bool prev_compact_context = in_compact_context;
                 in_compact_context = true;
                 format_math_item(sb, children->items[1], flavor, depth + 1);
                 in_compact_context = prev_compact_context;
-                strbuf_append_str(sb, "}");
+                stringbuf_append_str(sb, "}");
             }
             
             // Handle summand/integrand (the expression being summed/integrated)
             if (children->length >= 3) {
-                strbuf_append_str(sb, " ");
+                stringbuf_append_str(sb, " ");
                 format_math_item(sb, children->items[2], flavor, depth + 1);
             }
             
@@ -1158,7 +1159,7 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
             #endif
             // Format as base^exponent without braces for single character exponents
             format_math_item(sb, children->items[0], flavor, depth + 1);
-            strbuf_append_str(sb, "^");
+            stringbuf_append_str(sb, "^");
             
             // Set compact context for the exponent
             bool prev_compact_context = in_compact_context;
@@ -1190,18 +1191,18 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
         fprintf(stderr, "DEBUG: Using simple formatting without template\n");
         #endif
         // Simple format without placeholders
-        strbuf_append_str(sb, format_str);
+        stringbuf_append_str(sb, format_str);
         
         // If element has children but no template, format them after
         if (def->has_children && children && children->length > 0) {
             if (def->needs_braces && flavor == MATH_OUTPUT_LATEX) {
-                strbuf_append_str(sb, "{");
+                stringbuf_append_str(sb, "{");
                 format_math_children(sb, children, flavor, depth);
-                strbuf_append_str(sb, "}");
+                stringbuf_append_str(sb, "}");
             } else if (flavor == MATH_OUTPUT_ASCII || flavor == MATH_OUTPUT_TYPST) {
-                strbuf_append_str(sb, "(");
+                stringbuf_append_str(sb, "(");
                 format_math_children(sb, children, flavor, depth);
-                strbuf_append_str(sb, ")");
+                stringbuf_append_str(sb, ")");
             } else {
                 format_math_children(sb, children, flavor, depth);
             }
@@ -1210,19 +1211,19 @@ static void format_math_element(StrBuf* sb, Element* elem, MathOutputFlavor flav
 }
 
 // Format a math item (could be element, string, number, etc.)
-static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
+static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=0x%llx\n", depth, get_type_id(item), item.item);
-    fprintf(stderr, "DEBUG format_math_item: sb before - length=%ld, str='%s'\n", sb->length, sb->str ? sb->str : "NULL");
+    fprintf(stderr, "DEBUG format_math_item: sb before - length=%zu, str='%s'\n", sb->length, sb->str ? sb->str->chars : "NULL");
     #endif
     
     // Check for invalid raw integer values that weren't properly encoded
     if (item.item > 0 && item.item < 0x1000) {
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
-        strbuf_append_str(sb, num_buf);
+        stringbuf_append_str(sb, num_buf);
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_item: sb after - length=%ld, str='%s'\n", sb->length, sb->str ? sb->str : "NULL");
+        fprintf(stderr, "DEBUG format_math_item: sb after - length=%zu, str='%s'\n", sb->length, sb->str ? sb->str->chars : "NULL");
         #endif
         return;
     }
@@ -1269,12 +1270,12 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
                 printf("DEBUG: Detected invalid raw integer item=0x%llx, treating as value=%lld\n", item.item, item.item);
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             } else {
                 int val = item.int_val;
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%d", val);
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
             break;
         }
@@ -1289,7 +1290,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
                 #ifdef DEBUG_MATH_FORMAT
                 fprintf(stderr, "DEBUG format_math_item: INT64 value=%ld, formatted='%s'\n", *val_ptr, num_buf);
                 #endif
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
             break;
         }
@@ -1304,7 +1305,7 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
                 #ifdef DEBUG_MATH_FORMAT
                 fprintf(stderr, "DEBUG format_math_item: FLOAT value=%g, formatted='%s'\n", *val_ptr, num_buf);
                 #endif
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
             break;
         }
@@ -1315,13 +1316,13 @@ static void format_math_item(StrBuf* sb, Item item, MathOutputFlavor flavor, int
             // Unknown item type, try to format as string representation
             char unknown_buf[64];
             snprintf(unknown_buf, sizeof(unknown_buf), "[unknown_type_%d]", (int)type);
-            strbuf_append_str(sb, unknown_buf);
+            stringbuf_append_str(sb, unknown_buf);
             break;
     }
     
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_item: sb after - length=%zu, str='%s'\n", 
-            sb->length, sb->str ? sb->str : "(null)");
+            sb->length, sb->str ? sb->str->chars : "(null)");
     #endif
 }
 
@@ -1334,7 +1335,7 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
             (void*)pool, (void*)root_item.pointer);
     #endif
     
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
         #ifdef DEBUG_MATH_FORMAT
         fprintf(stderr, "DEBUG format_math_latex: Failed to create string buffer\n");
@@ -1344,21 +1345,21 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
 
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: Created string buffer at %p\n", (void*)sb);
-    fprintf(stderr, "DEBUG format_math_latex: Initial sb - length=%zu, capacity=%zu, str=%p\n", 
-            sb->length, sb->capacity, (void*)sb->str);
+    fprintf(stderr, "DEBUG format_math_latex: Initial sb - length=%zu, str=%p\n", 
+            sb->length, (void*)sb->str);
     #endif
     
     format_math_item(sb, root_item, MATH_OUTPUT_LATEX, 0);
 
     #ifdef DEBUG_MATH_FORMAT
     fprintf(stderr, "DEBUG format_math_latex: After formatting - sb length=%zu, str='%s'\n", 
-            sb->length, sb->str ? sb->str : "(null)");
+            sb->length, sb->str ? sb->str->chars : "(null)");
     #endif
 
-    String* result = strbuf_to_string(sb);
+    String* result = stringbuf_to_string(sb);
 
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_latex: strbuf_to_string returned %p\n", (void*)result);
+    fprintf(stderr, "DEBUG format_math_latex: stringbuf_to_string returned %p\n", (void*)result);
     if (result) {
         fprintf(stderr, "DEBUG format_math_latex: Result string='%s', len=%d\n", 
                 result->chars, result->len);
@@ -1368,47 +1369,47 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
     return result;
 }// Format math expression to Typst
 String* format_math_typst(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_math_item(sb, root_item, MATH_OUTPUT_TYPST, 0);
     
-    String* result = strbuf_to_string(sb);
+    String* result = stringbuf_to_string(sb);
     return result;
 }
 
 // Format math expression to ASCII
 String* format_math_ascii(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_math_item(sb, root_item, MATH_OUTPUT_ASCII, 0);
     
-    String* result = strbuf_to_string(sb);
+    String* result = stringbuf_to_string(sb);
     return result;
 }
 
 // Format math expression to MathML
 String* format_math_mathml(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
-    strbuf_append_str(sb, "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">");
+    stringbuf_append_str(sb, "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">");
     format_math_item(sb, root_item, MATH_OUTPUT_MATHML, 0);
-    strbuf_append_str(sb, "</math>");
+    stringbuf_append_str(sb, "</math>");
     
-    String* result = strbuf_to_string(sb);
+    String* result = stringbuf_to_string(sb);
     return result;
 }
 
 // Format math expression to Unicode symbols
 String* format_math_unicode(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_math_item(sb, root_item, MATH_OUTPUT_UNICODE, 0);
     
-    String* result = strbuf_to_string(sb);
+    String* result = stringbuf_to_string(sb);
     return result;
 }
 
@@ -1418,17 +1419,15 @@ String* format_math(VariableMemPool* pool, Item root_item) {
 }
 
 // Helper function to append a space only if the last character is not already a space
-static void append_space_if_needed(StrBuf* sb) {
-    if (sb && sb->length > 0 && sb->str[sb->length - 1] != ' ') {
-        strbuf_append_str(sb, " ");
+static void append_space_if_needed(StringBuf* sb) {
+    if (sb && sb->length > 0 && sb->str && sb->str->chars[sb->length - 1] != ' ') {
+        stringbuf_append_char(sb, ' ');
     }
 }
 
 // Helper function to append a character only if the last character is not the same
-static void append_char_if_needed(StrBuf* sb, char c) {
-    if (sb && sb->length > 0 && sb->str[sb->length - 1] != c) {
-        strbuf_append_char(sb, c);
-    } else if (sb && sb->length == 0) {
-        strbuf_append_char(sb, c);
+static void append_char_if_needed(StringBuf* sb, char c) {
+    if (sb && (sb->length == 0 || (sb->str && sb->str->chars[sb->length - 1] != c))) {
+        stringbuf_append_char(sb, c);
     }
 }

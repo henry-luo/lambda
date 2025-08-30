@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -6,11 +7,11 @@
 static thread_local int recursion_depth = 0;
 #define MAX_RECURSION_DEPTH 50
 
-static void format_item(StrBuf* sb, Item item);
-static void format_element(StrBuf* sb, Element* elem);
-static void format_element_children(StrBuf* sb, Element* elem);
-static void format_table_row(StrBuf* sb, Element* row, bool is_header);
-static void format_table_separator(StrBuf* sb, Element* header_row);
+static void format_item(StringBuf* sb, Item item);
+static void format_element(StringBuf* sb, Element* elem);
+static void format_element_children(StringBuf* sb, Element* elem);
+static void format_table_row(StringBuf* sb, Element* row, bool is_header);
+static void format_table_separator(StringBuf* sb, Element* header_row);
 
 // Utility function to get attribute value from element
 static String* get_attribute(Element* elem, const char* attr_name) {
@@ -39,7 +40,7 @@ static String* get_attribute(Element* elem, const char* attr_name) {
 }
 
 // Format plain text (escape RST special characters)
-static void format_text(StrBuf* sb, String* str) {
+static void format_text(StringBuf* sb, String* str) {
     if (!sb || !str || !str->chars) return;
 
     const char* s = str->chars;
@@ -49,24 +50,27 @@ static void format_text(StrBuf* sb, String* str) {
         char c = s[i];
         switch (c) {
         case '*':
-        case '`':
+            // Escape these characters in RST
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
+            break;
         case '_':
         case '|':
         case '\\':
         case ':':
             // Escape these characters in RST
-            strbuf_append_char(sb, '\\');
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, '\\');
+            stringbuf_append_char(sb, c);
             break;
         default:
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, c);
             break;
         }
     }
 }
 
 // Format heading elements (h1-h6) using RST title styles
-static void format_heading(StrBuf* sb, Element* elem) {
+static void format_heading(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
@@ -98,82 +102,82 @@ static void format_heading(StrBuf* sb, Element* elem) {
     // Calculate text length (excluding newlines)
     int title_length = 0;
     for (size_t i = start_length; i < end_length; i++) {
-        if (sb->str[i] != '\n' && sb->str[i] != '\r') {
+        if (sb->str && sb->str->chars[i] != '\n' && sb->str->chars[i] != '\r') {
             title_length++;
         }
     }
     
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
     
     // Add the underline with the same length as the title
     for (int i = 0; i < title_length; i++) {
-        strbuf_append_char(sb, underline_char);
+        stringbuf_append_char(sb, underline_char);
     }
-    strbuf_append_str(sb, "\n\n");
+    stringbuf_append_str(sb, "\n\n");
 }
 
 // Format emphasis elements (em, strong)
-static void format_emphasis(StrBuf* sb, Element* elem) {
+static void format_emphasis(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
     const char* tag_name = elem_type->name.str;
     
     if (strcmp(tag_name, "strong") == 0) {
-        strbuf_append_str(sb, "**");
+        stringbuf_append_str(sb, "**");
         format_element_children(sb, elem);
-        strbuf_append_str(sb, "**");
+        stringbuf_append_str(sb, "**");
     } else if (strcmp(tag_name, "em") == 0) {
-        strbuf_append_char(sb, '*');
+        stringbuf_append_char(sb, '*');
         format_element_children(sb, elem);
-        strbuf_append_char(sb, '*');
+        stringbuf_append_char(sb, '*');
     }
 }
 
 // Format code elements
-static void format_code(StrBuf* sb, Element* elem) {
+static void format_code(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type) return;
     
     String* lang_attr = get_attribute(elem, "language");
     if (lang_attr && lang_attr->len > 0) {
         // Code block using RST code-block directive
-        strbuf_append_str(sb, ".. code-block:: ");
-        strbuf_append_str(sb, lang_attr->chars);
-        strbuf_append_str(sb, "\n\n   ");
+        stringbuf_append_str(sb, ".. code-block:: ");
+        stringbuf_append_str(sb, lang_attr->chars);
+        stringbuf_append_str(sb, "\n\n   ");
         
         // Format children with proper indentation
         format_element_children(sb, elem);
         
-        strbuf_append_str(sb, "\n\n");
+        stringbuf_append_str(sb, "\n\n");
     } else {
         // Inline code
-        strbuf_append_str(sb, "``");
+        stringbuf_append_str(sb, "``");
         format_element_children(sb, elem);
-        strbuf_append_str(sb, "``");
+        stringbuf_append_str(sb, "``");
     }
 }
 
 // Format link elements
-static void format_link(StrBuf* sb, Element* elem) {
+static void format_link(StringBuf* sb, Element* elem) {
     String* href = get_attribute(elem, "href");
     String* title = get_attribute(elem, "title");
     
     // RST external link format: `link text <URL>`_
-    strbuf_append_char(sb, '`');
+    stringbuf_append_char(sb, '`');
     format_element_children(sb, elem);
     
     if (href) {
-        strbuf_append_str(sb, " <");
-        strbuf_append_str(sb, href->chars);
-        strbuf_append_str(sb, ">");
+        stringbuf_append_str(sb, " <");
+        stringbuf_append_str(sb, href->chars);
+        stringbuf_append_str(sb, ">");
     }
     
-    strbuf_append_str(sb, "`_");
+    stringbuf_append_str(sb, "`_");
 }
 
 // Format list elements (ul, ol)
-static void format_list(StrBuf* sb, Element* elem) {
+static void format_list(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return;
     
@@ -200,14 +204,14 @@ static void format_list(StrBuf* sb, Element* elem) {
                     if (is_ordered) {
                         char num_buf[16];
                         snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
-                        strbuf_append_str(sb, num_buf);
+                        stringbuf_append_str(sb, num_buf);
                     } else {
                         // RST uses - for bullet points to match input format
-                        strbuf_append_str(sb, "- ");
+                        stringbuf_append_str(sb, "- ");
                     }
                     
                     format_element_children(sb, li_elem);
-                    strbuf_append_char(sb, '\n');
+                    stringbuf_append_char(sb, '\n');
                 }
             }
         }
@@ -215,14 +219,14 @@ static void format_list(StrBuf* sb, Element* elem) {
 }
 
 // Format table elements using RST grid table format
-static void format_table(StrBuf* sb, Element* elem) {
+static void format_table(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* table = (List*)elem;
     if (!table || table->length == 0) return;
     
     // RST tables are complex - for simplicity, we'll use a basic grid table format
-    strbuf_append_str(sb, ".. table::\n\n");
+    stringbuf_append_str(sb, ".. table::\n\n");
     
     // Process table sections (thead, tbody)
     for (long i = 0; i < table->length; i++) {
@@ -251,19 +255,19 @@ static void format_table(StrBuf* sb, Element* elem) {
             }
         }
     }
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format table row (simplified grid table format)
-static void format_table_row(StrBuf* sb, Element* row, bool is_header) {
+static void format_table_row(StringBuf* sb, Element* row, bool is_header) {
     if (!row) return;
     
-    strbuf_append_str(sb, "   ");  // Indent for table directive
+    stringbuf_append_str(sb, "   ");  // Indent for table directive
     
     List* row_list = (List*)row;
     if (row_list && row_list->length > 0) {
         for (long i = 0; i < row_list->length; i++) {
-            if (i > 0) strbuf_append_str(sb, " | ");
+            if (i > 0) stringbuf_append_str(sb, " | ");
             
             Item cell_item = row_list->items[i];
             if (get_type_id(cell_item) == LMD_TYPE_ELEMENT) {
@@ -272,38 +276,38 @@ static void format_table_row(StrBuf* sb, Element* row, bool is_header) {
             }
         }
     }
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format table separator row
-static void format_table_separator(StrBuf* sb, Element* header_row) {
+static void format_table_separator(StringBuf* sb, Element* header_row) {
     if (!header_row) return;
     
-    strbuf_append_str(sb, "   ");  // Indent for table directive
+    stringbuf_append_str(sb, "   ");  // Indent for table directive
     
     List* row_list = (List*)header_row;
     if (row_list) {
         for (long i = 0; i < row_list->length; i++) {
-            if (i > 0) strbuf_append_str(sb, " + ");
-            strbuf_append_str(sb, "===");
+            if (i > 0) stringbuf_append_str(sb, " + ");
+            stringbuf_append_str(sb, "===");
         }
     }
     
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
 }
 
 // Format paragraph elements
-static void format_paragraph(StrBuf* sb, Element* elem) {
+static void format_paragraph(StringBuf* sb, Element* elem) {
     format_element_children(sb, elem);
-    strbuf_append_str(sb, "\n\n");
+    stringbuf_append_str(sb, "\n\n");
 }
 
 // Format thematic break (hr) using RST transition
-static void format_thematic_break(StrBuf* sb) {
-    strbuf_append_str(sb, "----\n\n");
+static void format_thematic_break(StringBuf* sb) {
+    stringbuf_append_str(sb, "----\n\n");
 }
 
-static void format_element_children(StrBuf* sb, Element* elem) {
+static void format_element_children(StringBuf* sb, Element* elem) {
     // Prevent infinite recursion
     if (recursion_depth >= MAX_RECURSION_DEPTH) {
         printf("RST formatter: Maximum recursion depth reached, stopping element_children\n");
@@ -328,7 +332,7 @@ static void format_element_children(StrBuf* sb, Element* elem) {
 }
 
 // format Lambda element to RST
-static void format_element(StrBuf* sb, Element* elem) {
+static void format_element(StringBuf* sb, Element* elem) {
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) {
         return;
@@ -349,12 +353,12 @@ static void format_element(StrBuf* sb, Element* elem) {
         format_link(sb, elem);
     } else if (strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0) {
         format_list(sb, elem);
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "hr") == 0) {
         format_thematic_break(sb);
     } else if (strcmp(tag_name, "table") == 0) {
         format_table(sb, elem);
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
                strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
         // Just format children for document root, body, and span containers
@@ -369,7 +373,7 @@ static void format_element(StrBuf* sb, Element* elem) {
 }
 
 // Format any item to RST
-static void format_item(StrBuf* sb, Item item) {
+static void format_item(StringBuf* sb, Item item) {
     // Prevent infinite recursion
     if (recursion_depth >= MAX_RECURSION_DEPTH) {
         printf("RST formatter: Maximum recursion depth reached, stopping format_item\n");
@@ -414,7 +418,7 @@ static void format_item(StrBuf* sb, Item item) {
 }
 
 // formats RST to a provided StrBuf
-void format_rst(StrBuf* sb, Item root_item) {
+void format_rst(StringBuf* sb, Item root_item) {
     if (!sb) return;
     
     // Handle null/empty root item
@@ -428,10 +432,10 @@ void format_rst(StrBuf* sb, Item root_item) {
 
 // Main entry point that creates a String* return value
 String* format_rst_string(VariableMemPool* pool, Item root_item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_rst(sb, root_item);
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }

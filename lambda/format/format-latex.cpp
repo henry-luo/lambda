@@ -1,24 +1,25 @@
 // LaTeX Formatter - Simple implementation for LaTeX output
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 
 // Forward declarations
-static void format_latex_document(StrBuf* sb, Element* document);
-static void format_latex_element(StrBuf* sb, Element* element, int depth);
-static void format_latex_command_with_args(StrBuf* sb, Element* element, const char* cmd_name);
-static void format_latex_environment_with_content(StrBuf* sb, Element* element, const char* env_name, int depth);
-static void format_latex_element_content(StrBuf* sb, Element* element);
-static void format_latex_value(StrBuf* sb, Item value);
+static void format_latex_document(StringBuf* sb, Element* document);
+static void format_latex_element(StringBuf* sb, Element* element, int depth);
+static void format_latex_command_with_args(StringBuf* sb, Element* element, const char* cmd_name);
+static void format_latex_environment_with_content(StringBuf* sb, Element* element, const char* env_name, int depth);
+static void format_latex_element_content(StringBuf* sb, Element* element);
+static void format_latex_value(StringBuf* sb, Item value);
 
 // Helper function to add indentation
-static void add_latex_indent(StrBuf* sb, int indent) {
+static void add_latex_indent(StringBuf* sb, int indent) {
     for (int i = 0; i < indent; i++) {
-        strbuf_append_str(sb, "  ");
+        stringbuf_append_str(sb, "  ");
     }
 }
 
 // Format LaTeX value item
-static void format_latex_value(StrBuf* sb, Item value) {
+static void format_latex_value(StringBuf* sb, Item value) {
     TypeId type = get_type_id(value);
     
     if (type == LMD_TYPE_ELEMENT) {
@@ -27,7 +28,7 @@ static void format_latex_value(StrBuf* sb, Item value) {
         // Direct text content with safety checks
         String* str = (String*)value.pointer;
         if (str && str->chars && str->len > 0 && str->len < 65536) { // Reasonable size limit
-            strbuf_append_str_n(sb, str->chars, str->len);
+            stringbuf_append_str_n(sb, str->chars, str->len);
         }
     } else if (type == LMD_TYPE_ARRAY) {
         // Array of elements/values with safety checks
@@ -36,7 +37,7 @@ static void format_latex_value(StrBuf* sb, Item value) {
             for (int i = 0; i < arr->length; i++) {
                 format_latex_value(sb, arr->items[i]);
                 if (i < arr->length - 1) {
-                    strbuf_append_char(sb, ' ');
+                    stringbuf_append_char(sb, ' ');
                 }
             }
         }
@@ -44,56 +45,56 @@ static void format_latex_value(StrBuf* sb, Item value) {
         // Integer values
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", value.int_val);
-        strbuf_append_str(sb, num_buf);
+        stringbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_FLOAT) {
         // Float values with safety check
         double* dptr = (double*)value.pointer;
         if (dptr) {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%.6g", *dptr);
-            strbuf_append_str(sb, num_buf);
+            stringbuf_append_str(sb, num_buf);
         }
     } else if (type == LMD_TYPE_SYMBOL) {
         // Symbol values (like strings but handled as symbols) with safety check
         String* str = (String*)value.pointer;
         if (str && str->chars && str->len > 0 && str->len < 65536) { 
-            strbuf_append_str_n(sb, str->chars, str->len);
+            stringbuf_append_str_n(sb, str->chars, str->len);
         }
     } else {
         // Fallback for unknown types
-        strbuf_append_str(sb, "[unknown]");
+        stringbuf_append_str(sb, "[unknown]");
     }
 }
 
 // Format LaTeX command with arguments
-static void format_latex_command_with_args(StrBuf* sb, Element* element, const char* cmd_name) {
-    strbuf_append_char(sb, '\\');
-    strbuf_append_str(sb, cmd_name);
+static void format_latex_command_with_args(StringBuf* sb, Element* element, const char* cmd_name) {
+    stringbuf_append_char(sb, '\\');
+    stringbuf_append_str(sb, cmd_name);
     
     // Format command arguments from element content
     format_latex_element_content(sb, element);
 }
 
 // Format LaTeX environment with content
-static void format_latex_environment_with_content(StrBuf* sb, Element* element, const char* env_name, int depth) {
+static void format_latex_environment_with_content(StringBuf* sb, Element* element, const char* env_name, int depth) {
     add_latex_indent(sb, depth);
-    strbuf_append_str(sb, "\\begin{");
-    strbuf_append_str(sb, env_name);
-    strbuf_append_str(sb, "}");
+    stringbuf_append_str(sb, "\\begin{");
+    stringbuf_append_str(sb, env_name);
+    stringbuf_append_str(sb, "}");
     
     // Add arguments if any
     format_latex_element_content(sb, element);
     
-    strbuf_append_char(sb, '\n');
+    stringbuf_append_char(sb, '\n');
     
     add_latex_indent(sb, depth);
-    strbuf_append_str(sb, "\\end{");
-    strbuf_append_str(sb, env_name);
-    strbuf_append_char(sb, '}');
+    stringbuf_append_str(sb, "\\end{");
+    stringbuf_append_str(sb, env_name);
+    stringbuf_append_char(sb, '}');
 }
 
 // Format element content (arguments and body)
-static void format_latex_element_content(StrBuf* sb, Element* element) {
+static void format_latex_element_content(StringBuf* sb, Element* element) {
     if (!element || !element->items) return;
     
     // Format element items as arguments/content with safety checks
@@ -104,9 +105,9 @@ static void format_latex_element_content(StrBuf* sb, Element* element) {
             
             if (content_type == LMD_TYPE_STRING) {
                 // Text argument - wrap in braces
-                strbuf_append_char(sb, '{');
+                stringbuf_append_char(sb, '{');
                 format_latex_value(sb, content_item);
-                strbuf_append_char(sb, '}');
+                stringbuf_append_char(sb, '}');
             } else {
                 // Other content - format directly
                 format_latex_value(sb, content_item);
@@ -116,7 +117,7 @@ static void format_latex_element_content(StrBuf* sb, Element* element) {
 }
 
 // Format LaTeX element
-static void format_latex_element(StrBuf* sb, Element* element, int depth) {
+static void format_latex_element(StringBuf* sb, Element* element, int depth) {
     if (!element || !element->type) {
         return;
     }
@@ -181,34 +182,34 @@ static void format_latex_element(StrBuf* sb, Element* element, int depth) {
         
     // Simple commands without arguments
     } else if (strcmp(cmd_name, "maketitle") == 0) {
-        strbuf_append_str(sb, "\\maketitle");
+        stringbuf_append_str(sb, "\\maketitle");
     } else if (strcmp(cmd_name, "tableofcontents") == 0) {
-        strbuf_append_str(sb, "\\tableofcontents");
+        stringbuf_append_str(sb, "\\tableofcontents");
     } else if (strcmp(cmd_name, "item") == 0) {
         add_latex_indent(sb, depth + 1);
-        strbuf_append_str(sb, "\\item ");
+        stringbuf_append_str(sb, "\\item ");
         format_latex_element_content(sb, element);
         
     // Math and special commands
     } else if (strncmp(cmd_name, "math", 4) == 0) {
         // Math content (inline or display)
-        strbuf_append_char(sb, '$');
+        stringbuf_append_char(sb, '$');
         format_latex_element_content(sb, element);
-        strbuf_append_char(sb, '$');
+        stringbuf_append_char(sb, '$');
     } else if (strncmp(cmd_name, "comment", 7) == 0) {
         // LaTeX comment
-        strbuf_append_str(sb, "% ");
+        stringbuf_append_str(sb, "% ");
         format_latex_element_content(sb, element);
     } else {
         // Generic element - treat as command
-        strbuf_append_char(sb, '\\');
-        strbuf_append_str_n(sb, name.str, name.length);
+        stringbuf_append_char(sb, '\\');
+        stringbuf_append_str_n(sb, name.str, name.length);
         format_latex_element_content(sb, element);
     }
 }
 
 // Format LaTeX document (top-level)
-static void format_latex_document(StrBuf* sb, Element* document) {
+static void format_latex_document(StringBuf* sb, Element* document) {
     if (!document) return;
     
     // Format document elements with proper spacing
@@ -227,12 +228,12 @@ static void format_latex_document(StrBuf* sb, Element* document) {
                         // Add appropriate spacing between elements
                         if (elmt_type->name.length >= 7 && 
                             strncmp(elmt_type->name.str, "section", 7) == 0) {
-                            strbuf_append_str(sb, "\n\n");
+                            stringbuf_append_str(sb, "\n\n");
                         } else if (elmt_type->name.length >= 8 && 
                                    strncmp(elmt_type->name.str, "document", 8) == 0) {
-                            strbuf_append_str(sb, "\n\n");
+                            stringbuf_append_str(sb, "\n\n");
                         } else {
-                            strbuf_append_char(sb, '\n');
+                            stringbuf_append_char(sb, '\n');
                         }
                     }
                 }
@@ -240,18 +241,18 @@ static void format_latex_document(StrBuf* sb, Element* document) {
             
             format_latex_value(sb, element_item);
         }
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_char(sb, '\n');
     } else {
         // Fallback - just add basic LaTeX structure
-        strbuf_append_str(sb, "\\documentclass{article}\n");
-        strbuf_append_str(sb, "\\begin{document}\n");
-        strbuf_append_str(sb, "\\end{document}\n");
+        stringbuf_append_str(sb, "\\documentclass{article}\n");
+        stringbuf_append_str(sb, "\\begin{document}\n");
+        stringbuf_append_str(sb, "\\end{document}\n");
     }
 }
 
 // Main LaTeX formatting function
 String* format_latex(VariableMemPool *pool, Item item) {
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     TypeId type = get_type_id(item);
@@ -264,7 +265,7 @@ String* format_latex(VariableMemPool *pool, Item item) {
                 Item element_item = elements->items[i];
                 format_latex_value(sb, element_item);
                 if (i < elements->length - 1) {
-                    strbuf_append_char(sb, '\n');
+                    stringbuf_append_char(sb, '\n');
                 }
             }
         }
@@ -290,8 +291,8 @@ String* format_latex(VariableMemPool *pool, Item item) {
         format_latex_value(sb, item);
     }
     
-    String* result = strbuf_to_string(sb);
-    strbuf_free(sb);
+    String* result = stringbuf_to_string(sb);
+    stringbuf_free(sb);
     
     return result;
 }
