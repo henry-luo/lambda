@@ -442,8 +442,8 @@ static void format_paragraph(StrBuf* sb, Element* elem) {
     
     format_element_children(sb, elem);
     
-    // Add paragraph spacing for all paragraphs except display-math-only paragraphs
-    if (!only_display_math) {
+    // Add paragraph spacing for all paragraphs except math-only paragraphs (both display and inline)
+    if (!only_math_elements) {
         strbuf_append_str(sb, "\n\n");
     }
 }
