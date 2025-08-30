@@ -104,10 +104,10 @@ declare -a c_test_suites=()  # Maps C test to its suite category
 get_test_suite_category() {
     local exe_name="$1"
     
-    # Get suite category from build configuration
+    # Get suite category from build configuration using new tests array structure
     local suite_category=$(jq -r --arg exe "$exe_name" '
         .test.test_suites[] | 
-        select(.sources[] | test("\\b" + $exe + "\\.(c|cpp)$")) | 
+        select(.tests[]? | .source | test("\\b" + $exe + "\\.(c|cpp)$")) | 
         .suite
     ' build_lambda_config.json 2>/dev/null | head -1)
     
@@ -117,7 +117,7 @@ get_test_suite_category() {
         return
     fi
     
-    # Fallback for special cases not in sources array
+    # Fallback for special cases
     case "$exe_name" in
         "lambda_test_runner")
             echo "lambda-std" ;;
@@ -160,12 +160,12 @@ get_suite_category_display_name() {
 get_c_test_display_name() {
     local exe_name="$1"
     
-    # Try to get custom display name from build configuration
+    # Try to get custom display name from build configuration using new tests array structure
     local display_name=$(jq -r --arg exe "$exe_name" '
         .test.test_suites[] | 
-        .sources[] as $source |
-        select($source | test("\\b" + $exe + "\\.(c|cpp)$")) |
-        .test_names[$source] // empty
+        .tests[]? | 
+        select(.source | test("\\b" + $exe + "\\.(c|cpp)$")) |
+        .name
     ' build_lambda_config.json 2>/dev/null | head -1)
     
     # If found custom name, return it
@@ -178,7 +178,7 @@ get_c_test_display_name() {
     case "$exe_name" in
         "test_datetime") echo "📅 DateTime Tests" ;;
         "test_dir") echo "📁 Directory Listing Tests" ;;
-        "test_http") echo "🧪 test_http" ;;
+        "test_http") echo "🌐 HTTP/HTTPS Tests" ;;
         "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
@@ -451,8 +451,8 @@ echo "🔍 Finding test executables and sources..."
 
 # Get list of valid test source files from build configuration
 get_valid_test_sources() {
-    # Extract test sources from the JSON configuration
-    jq -r '.test.test_suites[].sources[]' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
+    # Extract test sources from the JSON configuration using new tests array structure
+    jq -r '.test.test_suites[].tests[]?.source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
         # Handle different source path formats
         if [[ "$source" == test/* ]]; then
             echo "$source"
