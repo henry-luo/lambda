@@ -273,14 +273,16 @@ static const MathExprDef big_operators[] = {
 
 static const MathExprDef delimiters[] = {
     {"abs", "abs", "abs", "abs", "|·|", "Absolute value", true, 1, "parse_abs"},
+    {"lvert", "abs", "abs", "lvert", "|", "Left vertical bar", true, 1, "parse_abs"},
     {"norm", "norm", "norm", "norm", "‖·‖", "Norm", true, 1, "parse_norm"},
+    {"lVert", "norm", "norm", "lVert", "‖", "Left double vertical bar", true, 1, "parse_norm"},
     {"ceil", "ceil", "ceil", "ceil", "⌈·⌉", "Ceiling", true, 1, "parse_ceil_floor"},
     {"lceil", "ceil", "ceil", "lceil", "⌈", "Left ceiling", false, 0, NULL},
     {"rceil", "ceil", "ceil", "rceil", "⌉", "Right ceiling", false, 0, NULL},
     {"floor", "floor", "floor", "floor", "⌊·⌋", "Floor", true, 1, "parse_ceil_floor"},
     {"lfloor", "floor", "floor", "lfloor", "⌊", "Left floor", false, 0, NULL},
     {"rfloor", "floor", "floor", "rfloor", "⌋", "Right floor", false, 0, NULL},
-    {"langle", "<", "<", "langle", "⟨", "Left angle bracket", false, 0, NULL},
+    {"langle", "inner_product", "inner_product", "langle", "⟨", "Left angle bracket", true, -1, "parse_inner_product"},
     {"rangle", ">", ">", "rangle", "⟩", "Right angle bracket", false, 0, NULL},
     {"<", "<", "<", "inner_product", "⟨·,·⟩", "Inner product", true, -1, "parse_inner_product"},
     
@@ -340,7 +342,7 @@ static const MathExprDef logic[] = {
     {"lor", "or", "or", "lor", "∨", "Logical or", false, 0, NULL},
     {"vee", "or", "or", "vee", "∨", "Logical or", false, 0, NULL},
     {"lnot", "not", "not", "lnot", "¬", "Logical not", false, 0, NULL},
-    {"neg", "not", "not", "neg", "¬", "Logical negation", false, 0, NULL},
+    {"neg", "not", "not", "neg", "¬", "Logical negation", true, 1, NULL},
     {"implies", "=>", "=>", "implies", "⟹", "Implies", false, 0, NULL},
     {"iff", "<=>", "<=>", "iff", "⟺", "If and only if", false, 0, NULL},
     {"forall", "forall", "forall", "forall", "∀", "For all", false, 0, NULL},
@@ -424,17 +426,17 @@ static const MathExprDef algebra[] = {
 
 // Typography expressions
 static const MathExprDef typography[] = {
-    {"mathbf", "bold", "bf", "bold", "𝐛𝐨𝐥𝐝", "Bold text", true, 1, NULL},
-    {"mathit", "italic", "it", "italic", "𝑖𝑡𝑎𝑙𝑖𝑐", "Italic text", true, 1, NULL},
-    {"mathcal", "cal", "cal", "calligraphic", "𝒸𝒶𝓁", "Calligraphic text", true, 1, NULL},
-    {"mathfrak", "frak", "frak", "fraktur", "𝔣𝔯𝔞𝔨", "Fraktur text", true, 1, NULL},
-    {"mathbb", "bb", "bb", "blackboard", "𝔹", "Blackboard bold text", true, 1, NULL},
-    {"mathrm", "upright", "rm", "roman", "roman", "Roman text", true, 1, NULL},
-    {"mathsf", "sans", "sf", "sans_serif", "sans", "Sans-serif text", true, 1, NULL},
-    {"mathtt", "mono", "tt", "monospace", "mono", "Monospace text", true, 1, NULL},
+    {"mathbf", "bold", "bf", "mathbf", "𝐛𝐨𝐥𝐝", "Bold text", true, 1, NULL},
+    {"mathit", "italic", "it", "mathit", "𝑖𝑡𝑎𝑙𝑖𝑐", "Italic text", true, 1, NULL},
+    {"mathcal", "cal", "cal", "mathcal", "𝒸𝒶𝓁", "Calligraphic text", true, 1, NULL},
+    {"mathfrak", "frak", "frak", "mathfrak", "𝔣𝔯𝔞𝔨", "Fraktur text", true, 1, NULL},
+    {"mathbb", "bb", "bb", "mathbb", "𝔹", "Blackboard bold text", true, 1, NULL},
+    {"mathrm", "upright", "rm", "mathrm", "roman", "Roman text", true, 1, NULL},
+    {"mathsf", "sans", "sf", "mathsf", "sans", "Sans-serif text", true, 1, NULL},
+    {"mathtt", "mono", "tt", "mathtt", "mono", "Monospace text", true, 1, NULL},
     {"text", "text", "text", "text", "text", "Regular text", true, 1, NULL},
-    {"textbf", "text.bold", "textbf", "text_bold", "bold", "Bold text", true, 1, NULL},
-    {"textit", "text.italic", "textit", "text_italic", "italic", "Italic text", true, 1, NULL},
+    {"textbf", "text.bold", "textbf", "textbf", "bold", "Bold text", true, 1, NULL},
+    {"textit", "text.italic", "textit", "textit", "italic", "Italic text", true, 1, NULL},
     
     {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
 };
@@ -515,6 +517,8 @@ static const MathExprDef extended_arrows[] = {
     {"longmapsto", "|-->", "|-->", "longmapsto", "⟼", "Long maps to", false, 0, NULL},
     {"hookleftarrow", "hook<-", "hook<-", "hookleftarrow", "↩", "Hook left arrow", false, 0, NULL},
     {"hookrightarrow", "hook->", "hook->", "hookrightarrow", "↪", "Hook right arrow", false, 0, NULL},
+    {"twoheadrightarrow", "twohead->", "twohead->", "twoheadrightarrow", "↠", "Two-headed right arrow", false, 0, NULL},
+    {"rightsquigarrow", "squiggle->", "squiggle->", "rightsquigarrow", "⇝", "Right squiggly arrow", false, 0, NULL},
     {"uparrow", "arrow.t", "up", "uparrow", "↑", "Up arrow", false, 0, NULL},
     {"downarrow", "arrow.b", "down", "downarrow", "↓", "Down arrow", false, 0, NULL},
     {"updownarrow", "updown", "updown", "updownarrow", "↕", "Up-down arrow", false, 0, NULL},
@@ -527,6 +531,10 @@ static const MathExprDef extended_arrows[] = {
 
 // Extended relations (semantic relations, models, proofs)
 static const MathExprDef extended_relations[] = {
+    {"prec", "prec", "prec", "prec", "≺", "Precedes", false, 0, NULL},
+    {"succ", "succ", "succ", "succ", "≻", "Succeeds", false, 0, NULL},
+    {"mid", "mid", "mid", "mid", "∣", "Divides", false, 0, NULL},
+    {"nmid", "nmid", "nmid", "nmid", "∤", "Does not divide", false, 0, NULL},
     {"simeq", "tilde.eq", "simeq", "similar_equal", "≃", "Similar or equal", false, 0, NULL},
     {"models", "models", "models", "models", "⊨", "Models", false, 0, NULL},
     {"vdash", "proves", "|-", "proves", "⊢", "Proves", false, 0, NULL},
@@ -587,6 +595,8 @@ static Item parse_latex_frac_style(Input *input, const char **math, const char* 
 static Item parse_latex_root(Input *input, const char **math, const char* index);
 static Item parse_latex_root_with_index(Input *input, const char **math);
 static Item parse_latex_abs(Input *input, const char **math);
+static Item parse_latex_norm(Input *input, const char **math);
+static Item parse_latex_angle_brackets(Input *input, const char **math);
 static Item parse_prime_notation(Input *input, const char **math, Item base);
 
 // Group definition table
@@ -669,6 +679,8 @@ static bool is_relational_operator(const char *math) {
     if (strncmp(math, "\\to", 3) == 0) return true;
     if (strncmp(math, "\\in", 3) == 0) return true;
     if (strncmp(math, "\\subset", 7) == 0) return true;
+    if (strncmp(math, "\\subseteq", 9) == 0) return true;
+    if (strncmp(math, "\\supseteq", 9) == 0) return true;
     if (strncmp(math, "\\cup", 4) == 0) return true;
     if (strncmp(math, "\\cap", 4) == 0) return true;
     if (strncmp(math, "\\land", 5) == 0) return true;
@@ -1453,6 +1465,59 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
     return {.item = (uint64_t)func_element};
 }
 
+// parse latex function with space-separated argument: \sin x, \cos y, etc.
+static Item parse_latex_function(Input *input, const char **math, const char* func_name) {
+    fprintf(stderr, "DEBUG parse_latex_function: called for '%s', math='%.20s'\n", func_name, *math);
+    
+    // Skip any whitespace after the function name
+    skip_math_whitespace(math);
+    
+    fprintf(stderr, "DEBUG parse_latex_function: after whitespace skip, math='%.20s'\n", *math);
+    
+    Item arg;
+    
+    // Check if there's a brace-enclosed argument: \sin{x}
+    if (**math == '{') {
+        fprintf(stderr, "DEBUG parse_latex_function: parsing brace-enclosed argument\n");
+        (*math)++; // skip {
+        arg = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (arg.item == ITEM_ERROR) {
+            return {.item = ITEM_ERROR};
+        }
+        
+        // Expect closing brace
+        if (**math != '}') {
+            return {.item = ITEM_ERROR};
+        }
+        (*math)++; // skip }
+    } else {
+        fprintf(stderr, "DEBUG parse_latex_function: parsing space-separated argument\n");
+        // parse the next primary expression as the argument
+        arg = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
+        if (arg.item == ITEM_ERROR) {
+            fprintf(stderr, "DEBUG parse_latex_function: error parsing argument\n");
+            return {.item = ITEM_ERROR};
+        }
+        fprintf(stderr, "DEBUG parse_latex_function: successfully parsed argument\n");
+    }
+    
+    // create function expression
+    Element* func_element = create_math_element(input, func_name);
+    if (!func_element) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    // add argument as child (no op attribute needed)
+    list_push((List*)func_element, arg);
+    
+    // set content length
+    ((TypeElmt*)func_element->type)->content_length = ((List*)func_element)->length;
+    
+    fprintf(stderr, "DEBUG parse_latex_function: created function element with child\n");
+    
+    return {.item = (uint64_t)func_element};
+}
+
 // parse ascii power expression with ^ or ** operators
 static Item parse_ascii_power(Input *input, const char **math, MathFlavor flavor, Item base) {
     // ASCII math supports both ^ and ** for power
@@ -1824,6 +1889,12 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
             } else if (strncmp(*math, "\\in", 3) == 0 && !isalpha(*(*math + 3))) {
                 op_name = "in";
                 op_len = 3;
+            } else if (strncmp(*math, "\\subseteq", 9) == 0 && !isalpha(*(*math + 9))) {
+                op_name = "subseteq";
+                op_len = 9;
+            } else if (strncmp(*math, "\\supseteq", 9) == 0 && !isalpha(*(*math + 9))) {
+                op_name = "supseteq";
+                op_len = 9;
             } else if (strncmp(*math, "\\subset", 7) == 0 && !isalpha(*(*math + 7))) {
                 op_name = "subset";
                 op_len = 7;
@@ -2259,47 +2330,6 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
     // Note: ASCII power operations are now handled in parse_power_expression
     
     return left;
-}
-
-// determine math flavor from string
-// parse LaTeX mathematical functions like \sin{x}, \cos{x}, etc.
-static Item parse_latex_function(Input *input, const char **math, const char* func_name) {
-    skip_math_whitespace(math);
-    
-    Item arg = {.item = ITEM_NULL};
-    
-    // check for optional argument in braces
-    if (**math == '{') {
-        (*math)++; // skip '{'
-        skip_math_whitespace(math);
-        
-        arg = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-        if (arg .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
-        }
-        
-        skip_math_whitespace(math);
-        if (**math == '}') {
-            (*math)++; // skip '}'
-        }
-    } else {
-        // parse the next primary expression as the argument
-        arg = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
-        if (arg .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
-        }
-    }
-    
-    // create function expression
-    Element* func_element = create_math_element(input, func_name);
-    if (!func_element) {
-        return {.item = ITEM_ERROR};
-    }
-    
-    // add argument as child (no op attribute needed)
-    list_push((List*)func_element, arg);
-    
-    return {.item = (uint64_t)func_element};
 }
 
 // Parse LaTeX sum or product with limits: \sum_{i=1}^{n} or \prod_{i=0}^{n}
@@ -3470,6 +3500,84 @@ static Item parse_latex_abs(Input *input, const char **math) {
     return {.item = (uint64_t)abs_element};
 }
 
+// Parse norm delimiters: \lVert x \rVert
+static Item parse_latex_norm(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    Item inner = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+    if (inner.item == ITEM_ERROR) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    skip_math_whitespace(math);
+    
+    // Expect \rVert
+    if (strncmp(*math, "\\rVert", 6) != 0) {
+        printf("ERROR: Expected \\rVert for norm, found: %.10s\n", *math);
+        return {.item = ITEM_ERROR};
+    }
+    *math += 6;
+    
+    // Create norm element
+    Element* norm_element = create_math_element(input, "norm");
+    if (!norm_element) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    list_push((List*)norm_element, inner);
+    ((TypeElmt*)norm_element->type)->content_length = ((List*)norm_element)->length;
+    
+    return {.item = (uint64_t)norm_element};
+}
+
+// Parse angle bracket delimiters: \langle x, y \rangle
+static Item parse_latex_angle_brackets(Input *input, const char **math) {
+    skip_math_whitespace(math);
+    
+    // Create inner product element
+    Element* inner_product_element = create_math_element(input, "inner_product");
+    if (!inner_product_element) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    // Parse expressions inside the angle brackets
+    do {
+        skip_math_whitespace(math);
+        
+        Item arg = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+        if (arg.item == ITEM_ERROR) {
+            return {.item = ITEM_ERROR};
+        }
+        
+        if (arg.item != ITEM_NULL) {
+            list_push((List*)inner_product_element, arg);
+        }
+        
+        skip_math_whitespace(math);
+        
+        if (**math == ',') {
+            (*math)++; // skip comma
+        } else {
+            break;
+        }
+    } while (**math && **math != '\\');
+    
+    // Expect \rangle
+    if (strncmp(*math, "\\rangle", 7) != 0) {
+        printf("ERROR: Expected \\rangle for angle brackets, found: %.10s\n", *math);
+        return {.item = ITEM_ERROR};
+    }
+    *math += 7;
+    
+    // Add attributes
+    add_attribute_to_element(input, inner_product_element, "symbol", "⟨⟩");
+    add_attribute_to_element(input, inner_product_element, "description", "Inner product");
+    
+    ((TypeElmt*)inner_product_element->type)->content_length = ((List*)inner_product_element)->length;
+    
+    return {.item = (uint64_t)inner_product_element};
+}
+
 // Parse ceiling/floor functions: \lceil x \rceil, \lfloor x \rfloor
 static Item parse_latex_ceil_floor(Input *input, const char **math, const char* func_name) {
     skip_math_whitespace(math);
@@ -3801,6 +3909,9 @@ static Item create_math_element_with_attributes(Input *input, const char* elemen
         add_attribute_to_element(input, element, "description", description);
     }
     
+    // Set content length so formatter recognizes the element
+    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+    
     return {.item = (uint64_t)element};
 }
 
@@ -3811,15 +3922,20 @@ static Item parse_basic_operator(Input *input, const char **math, MathFlavor fla
 
 // Group parser: Functions
 static Item parse_function(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    fprintf(stderr, "DEBUG parse_function: called for '%s', has_arguments=%s, flavor=%d\n", 
+            def->element_name, def->has_arguments ? "true" : "false", flavor);
+    
     if (def->has_arguments) {
         // For LaTeX flavor, use LaTeX-style function parsing (space-separated arguments)
         if (flavor == MATH_FLAVOR_LATEX) {
+            fprintf(stderr, "DEBUG parse_function: calling parse_latex_function for '%s'\n", def->element_name);
             return parse_latex_function(input, math, def->element_name);
         } else {
             // For other flavors, use parentheses-based function calls
             return parse_function_call(input, math, flavor, def->element_name);
         }
     } else {
+        fprintf(stderr, "DEBUG parse_function: creating element without arguments for '%s'\n", def->element_name);
         return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
     }
 }
@@ -3946,11 +4062,11 @@ static Item parse_delimiter(Input *input, const char **math, MathFlavor flavor, 
         if (strcmp(def->special_parser, "parse_abs") == 0) {
             return parse_latex_abs(input, math);
         } else if (strcmp(def->special_parser, "parse_norm") == 0) {
-            return parse_latex_abs(input, math); // Similar parsing
+            return parse_latex_norm(input, math);
         } else if (strcmp(def->special_parser, "parse_ceil_floor") == 0) {
             return parse_latex_ceil_floor(input, math, def->element_name);
         } else if (strcmp(def->special_parser, "parse_inner_product") == 0) {
-            return parse_inner_product(input, math, flavor, def);
+            return parse_latex_angle_brackets(input, math);
         }
     }
     
@@ -3973,7 +4089,26 @@ static Item parse_set_theory(Input *input, const char **math, MathFlavor flavor,
 
 // Group parser: Logic
 static Item parse_logic(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
-    return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
+    Element* logic_element = create_math_element(input, def->element_name);
+    if (!logic_element) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    add_attribute_to_element(input, logic_element, "operator", def->element_name);
+    add_attribute_to_element(input, logic_element, "symbol", def->unicode_symbol);
+    add_attribute_to_element(input, logic_element, "description", def->description);
+    
+    // Logic operators like \neg take one argument
+    if (def->has_arguments && def->argument_count > 0) {
+        skip_math_whitespace(math);
+        Item arg = parse_math_primary(input, math, flavor);
+        if (arg.item != ITEM_ERROR) {
+            list_push((List*)logic_element, arg);
+        }
+    }
+    
+    ((TypeElmt*)logic_element->type)->content_length = ((List*)logic_element)->length;
+    return {.item = (uint64_t)logic_element};
 }
 
 // Group parser: Number sets
@@ -4069,23 +4204,36 @@ static Item parse_algebra(Input *input, const char **math, MathFlavor flavor, co
 
 // Group parser: Typography
 static Item parse_typography(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
+    // Typography commands like \mathbf{x} need to parse the braced argument
+    skip_math_whitespace(math);
+    
+    if (**math != '{') {
+        // No braced argument, treat as symbol
+        Element* typo_element = create_math_element(input, def->element_name);
+        if (!typo_element) {
+            return {.item = ITEM_ERROR};
+        }
+        ((TypeElmt*)typo_element->type)->content_length = 0;
+        return {.item = (uint64_t)typo_element};
+    }
+    
+    (*math)++; // skip '{'
+    Item content = parse_math_expression(input, math, flavor);
+    if (content.item == ITEM_ERROR) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    if (**math != '}') {
+        return {.item = ITEM_ERROR};
+    }
+    (*math)++; // skip '}'
+    
     Element* typo_element = create_math_element(input, def->element_name);
     if (!typo_element) {
         return {.item = ITEM_ERROR};
     }
     
-    add_attribute_to_element(input, typo_element, "style", def->element_name);
-    add_attribute_to_element(input, typo_element, "description", def->description);
-    
-    // Typography commands always take one argument
-    if (def->has_arguments) {
-        skip_math_whitespace(math);
-        Item content = parse_math_primary(input, math, flavor);
-        if (content .item != ITEM_ERROR) {
-            list_push((List*)typo_element, content);
-        }
-    }
-    
+    list_push((List*)typo_element, content);
     ((TypeElmt*)typo_element->type)->content_length = ((List*)typo_element)->length;
     return {.item = (uint64_t)typo_element};
 }

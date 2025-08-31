@@ -70,23 +70,45 @@ static const MathFormatDef basic_operators[] = {
 
 // Functions
 static const MathFormatDef functions[] = {
-    {"sin", "\\sin", "sin", "sin", "<mi>sin</mi>", "sin", false, false, false, 0},
-    {"cos", "\\cos", "cos", "cos", "<mi>cos</mi>", "cos", false, false, false, 0},
-    {"tan", "\\tan", "tan", "tan", "<mi>tan</mi>", "tan", false, false, false, 0},
-    {"cot", "\\cot", "cot", "cot", "<mi>cot</mi>", "cot", false, false, false, 0},
-    {"sec", "\\sec", "sec", "sec", "<mi>sec</mi>", "sec", false, false, false, 0},
-    {"csc", "\\csc", "csc", "csc", "<mi>csc</mi>", "csc", false, false, false, 0},
-    {"arcsin", "\\arcsin", "arcsin", "arcsin", "<mi>arcsin</mi>", "arcsin", false, false, false, 0},
-    {"arccos", "\\arccos", "arccos", "arccos", "<mi>arccos</mi>", "arccos", false, false, false, 0},
-    {"arctan", "\\arctan", "arctan", "arctan", "<mi>arctan</mi>", "arctan", false, false, false, 0},
-    {"sinh", "\\sinh", "sinh", "sinh", "<mi>sinh</mi>", "sinh", false, false, false, 0},
-    {"cosh", "\\cosh", "cosh", "cosh", "<mi>cosh</mi>", "cosh", false, false, false, 0},
-    {"tanh", "\\tanh", "tanh", "tanh", "<mi>tanh</mi>", "tanh", false, false, false, 0},
-    {"log", "\\log", "log", "log", "<mi>log</mi>", "log", false, false, false, 0},
-    {"ln", "\\ln", "ln", "ln", "<mi>ln</mi>", "ln", false, false, false, 0},
-    {"lg", "\\lg", "lg", "lg", "<mi>lg</mi>", "lg", false, false, false, 0},
-    {"exp", "\\exp", "exp", "exp", "<mi>exp</mi>", "exp", false, false, false, 0},
-    {"abs", "\\left|{1}\\right|", "abs({1})", "|{1}|", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
+    {"sin", "\\sin {1}", "sin", "sin", "<mi>sin</mi>", "sin", true, false, false, -1},
+    {"cos", "\\cos {1}", "cos", "cos", "<mi>cos</mi>", "cos", true, false, false, -1},
+    {"tan", "\\tan {1}", "tan", "tan", "<mi>tan</mi>", "tan", true, false, false, -1},
+    {"cot", "\\cot {1}", "cot", "cot", "<mi>cot</mi>", "cot", true, false, false, -1},
+    {"sec", "\\sec {1}", "sec", "sec", "<mi>sec</mi>", "sec", true, false, false, -1},
+    {"csc", "\\csc {1}", "csc", "csc", "<mi>csc</mi>", "csc", true, false, false, -1},
+    {"arcsin", "\\arcsin {1}", "arcsin", "arcsin", "<mi>arcsin</mi>", "arcsin", true, false, false, -1},
+    {"arccos", "\\arccos {1}", "arccos", "arccos", "<mi>arccos</mi>", "arccos", true, false, false, -1},
+    {"arctan", "\\arctan {1}", "arctan", "arctan", "<mi>arctan</mi>", "arctan", true, false, false, -1},
+    {"sinh", "\\sinh {1}", "sinh", "sinh", "<mi>sinh</mi>", "sinh", true, false, false, -1},
+    {"cosh", "\\cosh {1}", "cosh", "cosh", "<mi>cosh</mi>", "cosh", true, false, false, -1},
+    {"tanh", "\\tanh {1}", "tanh", "tanh", "<mi>tanh</mi>", "tanh", true, false, false, -1},
+    {"log", "\\log {1}", "log", "log", "<mi>log</mi>", "log", true, false, false, -1},
+    {"ln", "\\ln {1}", "ln", "ln", "<mi>ln</mi>", "ln", true, false, false, -1},
+    {"lg", "\\lg {1}", "lg", "lg", "<mi>lg</mi>", "lg", true, false, false, -1},
+    {"exp", "\\exp {1}", "exp", "exp", "<mi>exp</mi>", "exp", true, false, false, -1},
+    {"abs", "|{1}|", "abs({1})", "|{1}|", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
+    {"norm", "\\|{1}\\|", "norm({1})", "‖{1}‖", "<mrow><mo>‖</mo>{1}<mo>‖</mo></mrow>", "‖·‖", true, false, false, 1},
+    {"inner_product", "\\langle {1} \\rangle", "⟨{1}⟩", "⟨{1}⟩", "<mrow><mo>⟨</mo>{1}<mo>⟩</mo></mrow>", "⟨·⟩", true, false, false, -1},
+    {"mathbf", "\\mathbf{{1}}", "bold({1})", "mathbf({1})", "<mi mathvariant=\"bold\">{1}</mi>", "𝐛", true, false, false, 1},
+    {"mathit", "\\mathit{{1}}", "italic({1})", "mathit({1})", "<mi mathvariant=\"italic\">{1}</mi>", "𝑖", true, false, false, 1},
+    {"mathcal", "\\mathcal{{1}}", "cal({1})", "mathcal({1})", "<mi mathvariant=\"script\">{1}</mi>", "𝒞", true, false, false, 1},
+    {"mathfrak", "\\mathfrak{{1}}", "frak({1})", "mathfrak({1})", "<mi mathvariant=\"fraktur\">{1}</mi>", "𝔉", true, false, false, 1},
+    {"mathsf", "\\mathsf{{1}}", "sans({1})", "mathsf({1})", "<mi mathvariant=\"sans-serif\">{1}</mi>", "𝖲", true, false, false, 1},
+    {"mathtt", "\\mathtt{{1}}", "mono({1})", "mathtt({1})", "<mi mathvariant=\"monospace\">{1}</mi>", "𝚃", true, false, false, 1},
+    {"neg", "\\neg ", "not ", "¬", "<mo>¬</mo>", "¬", false, false, false, 0},
+    {"ll", " \\ll ", "ll", "≪", "<mo>≪</mo>", "≪", true, false, true, 0},
+    {"gg", " \\gg ", "gg", "≫", "<mo>≫</mo>", "≫", true, false, true, 0},
+    {"prec", " \\prec ", "prec", "≺", "<mo>≺</mo>", "≺", true, false, true, 0},
+    {"succ", " \\succ ", "succ", "≻", "<mo>≻</mo>", "≻", true, false, true, 0},
+    {"mid", " \\mid ", "mid", "∣", "<mo>∣</mo>", "∣", true, false, true, 0},
+    {"nmid", " \\nmid ", "nmid", "∤", "<mo>∤</mo>", "∤", true, false, true, 0},
+    {"circled_plus", " \\oplus ", "oplus", "⊕", "<mo>⊕</mo>", "⊕", true, false, true, 0},
+    {"circled_times", " \\otimes ", "otimes", "⊗", "<mo>⊗</mo>", "⊗", true, false, true, 0},
+    {"circled_minus", " \\ominus ", "ominus", "⊖", "<mo>⊖</mo>", "⊖", true, false, true, 0},
+    {"circled_dot", " \\odot ", "odot", "⊙", "<mo>⊙</mo>", "⊙", true, false, true, 0},
+    {"hookrightarrow", "\\hookrightarrow", "hookrightarrow", "↪", "<mo>↪</mo>", "↪", false, false, false, 0},
+    {"twoheadrightarrow", "\\twoheadrightarrow", "twoheadrightarrow", "↠", "<mo>↠</mo>", "↠", false, false, false, 0},
+    {"rightsquigarrow", "\\rightsquigarrow", "rightsquigarrow", "⇝", "<mo>⇝</mo>", "⇝", false, false, false, 0},
     {"min", "\\min({1})", "min({1})", "min({1})", "<mi>min</mi>({1})", "min({1})", true, false, false, -1},
     {"max", "\\max({1})", "max({1})", "max({1})", "<mi>max</mi>({1})", "max({1})", true, false, false, -1},
     {"gcd", "\\gcd({1})", "gcd({1})", "gcd({1})", "<mi>gcd</mi>({1})", "gcd({1})", true, false, false, -1},
@@ -1104,7 +1126,29 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             fprintf(stderr, "DEBUG: Big operator detected: %s\n", element_name);
             #endif
             
-            // Format as operator with subscript for limits/bounds
+            // Special handling for lim - different from sum/int
+            if (strcmp(element_name, "lim") == 0) {
+                stringbuf_append_str(sb, format_str);  // "\\lim"
+                
+                if (children->length >= 1) {
+                    stringbuf_append_str(sb, "_{");
+                    bool prev_compact_context = in_compact_context;
+                    in_compact_context = true;
+                    format_math_item(sb, children->items[0], flavor, depth + 1);
+                    in_compact_context = prev_compact_context;
+                    stringbuf_append_str(sb, "}");
+                }
+                
+                // For lim, the second child is the function expression, not a superscript
+                if (children->length >= 2) {
+                    stringbuf_append_str(sb, " ");
+                    format_math_item(sb, children->items[1], flavor, depth + 1);
+                }
+                
+                return;
+            }
+            
+            // Format as operator with subscript for limits/bounds (sum, int, etc.)
             stringbuf_append_str(sb, format_str);  // e.g., "\\sum"
             
             if (children->length >= 1) {
@@ -1116,14 +1160,26 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                 stringbuf_append_str(sb, "}");
             }
             
-            // Handle additional children (like upper bounds for integrals)
+            // Handle additional children
             if (children->length >= 2) {
-                stringbuf_append_str(sb, "^{");
-                bool prev_compact_context = in_compact_context;
-                in_compact_context = true;
-                format_math_item(sb, children->items[1], flavor, depth + 1);
-                in_compact_context = prev_compact_context;
-                stringbuf_append_str(sb, "}");
+                // Check if this is an integral-like operator that needs upper bounds as superscript
+                bool needs_superscript = (strcmp(element_name, "int") == 0 || 
+                                        strcmp(element_name, "iint") == 0 || 
+                                        strcmp(element_name, "iiint") == 0 ||
+                                        strcmp(element_name, "oint") == 0);
+                
+                if (needs_superscript) {
+                    stringbuf_append_str(sb, "^{");
+                    bool prev_compact_context = in_compact_context;
+                    in_compact_context = true;
+                    format_math_item(sb, children->items[1], flavor, depth + 1);
+                    in_compact_context = prev_compact_context;
+                    stringbuf_append_str(sb, "}");
+                } else {
+                    // For other big operators (sum, bigcup, etc.), second child is the main expression
+                    stringbuf_append_str(sb, " ");
+                    format_math_item(sb, children->items[1], flavor, depth + 1);
+                }
             }
             
             // Handle summand/integrand (the expression being summed/integrated)
@@ -1139,7 +1195,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     // Check if this element has a format template with placeholders
     if (def->has_children && children && strstr(format_str, "{1}")) {
         //#ifdef DEBUG_MATH_FORMAT
-        #if 0
+        #if 1
         fprintf(stderr, "DEBUG: Using template formatting for element '%s' with format: '%s'\n", element_name, format_str);
         fprintf(stderr, "DEBUG: ALWAYS PRINT THIS MESSAGE\n");
         if (strcmp(element_name, "paren_group") == 0) {
@@ -1188,7 +1244,8 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         }
     } else {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: Using simple formatting without template\n");
+        fprintf(stderr, "DEBUG: Using simple formatting without template for '%s', has_children=%s, children=%p, format_str='%s'\n", 
+                element_name, def->has_children ? "true" : "false", children, format_str);
         #endif
         // Simple format without placeholders
         stringbuf_append_str(sb, format_str);
@@ -1204,6 +1261,19 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                 format_math_children(sb, children, flavor, depth);
                 stringbuf_append_str(sb, ")");
             } else {
+                // For functions like sin, cos, log - add space before arguments
+                const char* func_names[] = {"sin", "cos", "tan", "log", "ln", "exp", "sec", "csc"};
+                bool is_function = false;
+                for (size_t i = 0; i < sizeof(func_names) / sizeof(func_names[0]); i++) {
+                    if (strcmp(element_name, func_names[i]) == 0) {
+                        is_function = true;
+                        break;
+                    }
+                }
+                
+                if (is_function) {
+                    stringbuf_append_str(sb, " ");
+                }
                 format_math_children(sb, children, flavor, depth);
             }
         }
