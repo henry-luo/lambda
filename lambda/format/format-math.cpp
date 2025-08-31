@@ -47,10 +47,11 @@ typedef struct {
 static const MathFormatDef basic_operators[] = {
     {"add", " + ", " + ", " + ", "<mo>+</mo>", " + ", true, false, true, 2},
     {"sub", " - ", " - ", " - ", "<mo>-</mo>", " - ", true, false, true, 2},
-    {"neg", "-{1}", "-{1}", "-{1}", "<mo>-</mo>{1}", "-{1}", true, false, false, 1},
+    {"unary_minus", "-{1}", "-{1}", "-{1}", "<mo>-</mo>{1}", "-{1}", true, false, false, 1},
     {"mul", " \\cdot ", " * ", " * ", "<mo>⋅</mo>", " × ", true, false, true, 2},
     {"implicit_mul", "", "", "", "", "", true, false, true, 2},
-    {"div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
+    {"div", " / ", " / ", " / ", "<mo>/</mo>", " / ", true, false, true, 2},
+    {"latex_div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
     {"pow", "{1}^{{2}}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
     {"subscript", "{1}_{{2}}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
     {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
@@ -95,7 +96,8 @@ static const MathFormatDef functions[] = {
     {"mathfrak", "\\mathfrak{{1}}", "frak({1})", "mathfrak({1})", "<mi mathvariant=\"fraktur\">{1}</mi>", "𝔉", true, false, false, 1},
     {"mathsf", "\\mathsf{{1}}", "sans({1})", "mathsf({1})", "<mi mathvariant=\"sans-serif\">{1}</mi>", "𝖲", true, false, false, 1},
     {"mathtt", "\\mathtt{{1}}", "mono({1})", "mathtt({1})", "<mi mathvariant=\"monospace\">{1}</mi>", "𝚃", true, false, false, 1},
-    {"neg", "\\neg ", "not ", "¬", "<mo>¬</mo>", "¬", false, false, false, 0},
+    {"neg", "\\neg {1}", "not {1}", "¬{1}", "<mo>¬</mo>{1}", "¬{1}", true, false, false, 1},
+    {"divergence", "\\nabla \\cdot {1}", "div {1}", "div {1}", "<mo>∇⋅</mo>{1}", "∇⋅{1}", true, false, false, 1},
     {"ll", " \\ll ", "ll", "≪", "<mo>≪</mo>", "≪", true, false, true, 0},
     {"gg", " \\gg ", "gg", "≫", "<mo>≫</mo>", "≫", true, false, true, 0},
     {"prec", " \\prec ", "prec", "≺", "<mo>≺</mo>", "≺", true, false, true, 0},
@@ -251,7 +253,7 @@ static const MathFormatDef text_formatting[] = {
 // Grouping and brackets
 static const MathFormatDef grouping[] = {
     {"paren_group", "({1})", "({1})", "({1})", "<mo>(</mo>{1}<mo>)</mo>", "({1})", true, false, false, 1},
-    {"bracket_group", "[{1}]", "[{1}]", "[{1}]", "<mo>[</mo>{1}<mo>]</mo>", "[{1}]", true, false, false, 1},
+    {"bracket_group", "[{*}]", "[{*}]", "[{*}]", "<mo>[</mo>{*}<mo>]</mo>", "[{*}]", true, false, false, -1},
     {"langle", "\\langle", "⟨", "⟨", "<mo>⟨</mo>", "⟨", false, false, false, 0},
     {"rangle", "\\rangle", "⟩", "⟩", "<mo>⟩</mo>", "⟩", false, false, false, 0},
     {"lvert", "\\lvert", "|", "|", "<mo>|</mo>", "|", false, false, false, 0},
@@ -698,30 +700,43 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
     
     printf("DEBUG: format_math_children_with_template called with format='%s', children_count=%ld\n", 
            format_str, children->length);
+    printf("DEBUG: Template string analysis - length=%ld\n", strlen(format_str));
     
     int child_count = children->length;
     
     const char* p = format_str;
     while (*p) {
         if (*p == '{' && *(p+1) && *(p+2) == '}') {
-            // Extract child index
-            int child_index = *(p+1) - '1'; // Convert '1' to 0, '2' to 1, etc.
-            
-            printf("DEBUG: Found placeholder {%c}, child_index=%d, child_count=%d\n", 
-                   *(p+1), child_index, child_count);
-            
-            if (child_index >= 0 && child_index < child_count) {
-                Item child_item = children->items[child_index];
-                printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)child_item.pointer);
-                format_math_item(sb, child_item, flavor, depth + 1);
+            if (*(p+1) == '*') {
+                // Handle comma-separated list placeholder {*}
+                printf("DEBUG: Found comma-separated placeholder {*}, child_count=%d\n", child_count);
+                for (int i = 0; i < child_count; i++) {
+                    if (i > 0) {
+                        stringbuf_append_str(sb, ", ");
+                    }
+                    format_math_item(sb, children->items[i], flavor, depth + 1);
+                }
+                p += 3; // Skip "{*}"
             } else {
-                printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
-                // Fallback: output the placeholder as literal text
-                stringbuf_append_char(sb, '{');
-                stringbuf_append_char(sb, *(p+1));
-                stringbuf_append_char(sb, '}');
+                // Extract child index
+                int child_index = *(p+1) - '1'; // Convert '1' to 0, '2' to 1, etc.
+                
+                printf("DEBUG: Found placeholder {%c}, child_index=%d, child_count=%d\n", 
+                       *(p+1), child_index, child_count);
+                
+                if (child_index >= 0 && child_index < child_count) {
+                    Item child_item = children->items[child_index];
+                    printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)child_item.pointer);
+                    format_math_item(sb, child_item, flavor, depth + 1);
+                } else {
+                    printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
+                    // Fallback: output the placeholder as literal text
+                    stringbuf_append_char(sb, '{');
+                    stringbuf_append_char(sb, *(p+1));
+                    stringbuf_append_char(sb, '}');
+                }
+                p += 3; // Skip "{N}"
             }
-            p += 3; // Skip "{N}"
         } else {
             stringbuf_append_char(sb, *p);
             p++;
@@ -734,7 +749,7 @@ static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor
     if (!children || children->length == 0) return;
     
     for (int i = 0; i < children->length; i++) {
-        if (i > 0 && flavor != MATH_OUTPUT_MATHML) {
+        if (i > 0 && flavor != MATH_OUTPUT_MATHML && !in_compact_context) {
             append_space_if_needed(sb);
         }
         format_math_item(sb, children->items[i], flavor, depth + 1);
@@ -1053,6 +1068,41 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                             else if (item_is_latex_command(prev) && item_is_latex_command(curr)) {
                                 pair_needs_space = false;
                             }
+                            // Don't add space after prime notation (derivative) and before parentheses
+                            else if (prev_elem && prev_elem->type && curr_elem && curr_elem->type) {
+                                TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
+                                TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                
+                                bool prev_is_prime = false;
+                                bool curr_is_paren = false;
+                                
+                                // Check if previous element is prime notation
+                                if (prev_elmt_type && prev_elmt_type->name.str) {
+                                    const char* prime_types[] = {"prime", "double_prime", "triple_prime"};
+                                    for (size_t k = 0; k < sizeof(prime_types) / sizeof(prime_types[0]); k++) {
+                                        size_t type_len = strlen(prime_types[k]);
+                                        if (prev_elmt_type->name.length == type_len &&
+                                            strncmp(prev_elmt_type->name.str, prime_types[k], type_len) == 0) {
+                                            prev_is_prime = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                // Check if current element is parentheses
+                                if (curr_elmt_type && curr_elmt_type->name.str) {
+                                    if (curr_elmt_type->name.length == 11 &&
+                                        strncmp(curr_elmt_type->name.str, "paren_group", 11) == 0) {
+                                        curr_is_paren = true;
+                                    }
+                                }
+                                
+                                if (prev_is_prime && curr_is_paren) {
+                                    pair_needs_space = false;
+                                } else {
+                                    pair_needs_space = true;
+                                }
+                            }
                             // Otherwise add space between different element types
                             else {
                                 pair_needs_space = true;
@@ -1193,7 +1243,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     }
     
     // Check if this element has a format template with placeholders
-    if (def->has_children && children && strstr(format_str, "{1}")) {
+    if (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) {
         //#ifdef DEBUG_MATH_FORMAT
         #if 1
         fprintf(stderr, "DEBUG: Using template formatting for element '%s' with format: '%s'\n", element_name, format_str);
@@ -1250,9 +1300,38 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         // Simple format without placeholders
         stringbuf_append_str(sb, format_str);
         
-        // If element has children but no template, format them after
+        // Special handling for big operators with subscripts/superscripts
         if (def->has_children && children && children->length > 0) {
-            if (def->needs_braces && flavor == MATH_OUTPUT_LATEX) {
+            // Check if this is a big operator
+            const char* big_ops[] = {"sum", "prod", "int", "oint", "iint", "iiint", "bigcup", "bigcap", "bigoplus", "bigotimes", "bigwedge", "bigvee"};
+            bool is_big_op = false;
+            for (int i = 0; i < sizeof(big_ops)/sizeof(big_ops[0]); i++) {
+                if (strcmp(element_name, big_ops[i]) == 0) {
+                    is_big_op = true;
+                    break;
+                }
+            }
+            
+            if (is_big_op && flavor == MATH_OUTPUT_LATEX) {
+                // Format big operator with bounds - handle variable number of children
+                for (int i = 0; i < children->length; i++) {
+                    if (i == 0) {
+                        // First child is subscript
+                        stringbuf_append_str(sb, "_{");
+                        format_math_item(sb, children->items[i], flavor, depth + 1);
+                        stringbuf_append_str(sb, "}");
+                    } else if (i == 1) {
+                        // Second child is superscript
+                        stringbuf_append_str(sb, "^{");
+                        format_math_item(sb, children->items[i], flavor, depth + 1);
+                        stringbuf_append_str(sb, "}");
+                    } else {
+                        // Additional children are summands/integrands
+                        stringbuf_append_str(sb, " ");
+                        format_math_item(sb, children->items[i], flavor, depth + 1);
+                    }
+                }
+            } else if (def->needs_braces && flavor == MATH_OUTPUT_LATEX) {
                 stringbuf_append_str(sb, "{");
                 format_math_children(sb, children, flavor, depth);
                 stringbuf_append_str(sb, "}");
