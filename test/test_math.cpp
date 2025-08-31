@@ -872,12 +872,13 @@ Test(math_roundtrip_tests, indexed_math_test) {
     cr_assert(result, "Indexed math test failed");
 }
 
-Test(math_roundtrip_tests, curated_markdown_roundtrip) {
+// New test case added here
+Test(math_roundtrip_tests, advanced_math_test) {
     bool result = test_markdown_roundtrip(
-        "test/input/comprehensive_math_test.md", "./temp/curated_debug.txt",
-        "Curated markdown test with supported math expressions"
+        "test/input/advanced_math_test.md", "./temp/advanced_debug.txt",
+        "Advanced math test with complex expressions"
     );
-    cr_assert(result, "Curated markdown roundtrip test failed");
+    cr_assert(result, "Advanced math test failed");
 }
 
 #ifdef GINAC_AVAILABLE
