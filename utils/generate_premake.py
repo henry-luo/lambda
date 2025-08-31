@@ -441,6 +441,8 @@ class PremakeGenerator:
                 source = test.get('source', '')
                 binary_name = test.get('binary', '').replace('.exe', '')
                 dependencies = test.get('dependencies', [])
+                libraries = test.get('libraries', [])
+                defines = test.get('defines', [])
                 test_name_override = test.get('name', '')
                 
                 if not source or not binary_name:
@@ -463,7 +465,7 @@ class PremakeGenerator:
                     print(f"Warning: Test file not found: {actual_path}")
                     continue
                     
-                self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags)
+                self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags, libraries, defines)
         else:
             # Old format: parallel arrays (for backward compatibility)
             sources = suite.get('sources', [])
@@ -491,13 +493,15 @@ class PremakeGenerator:
                     full_path = os.path.join(os.getcwd(), actual_path)
                     if not os.path.exists(full_path):
                         print(f"Warning: Test file not found: {actual_path}")
-                        continue
-                        
-                    self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags)
     
     def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str], 
-                             special_flags: str, cpp_flags: str) -> None:
+                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None) -> None:
         """Generate a single test project"""
+        if libraries is None:
+            libraries = []
+        if defines is None:
+            defines = []
+            
         source = test_file_path
         language = "C" if source.endswith('.c') else "C++"
         
@@ -534,6 +538,16 @@ class PremakeGenerator:
             '    }',
             '    '
         ])
+        
+        # Add defines if specified
+        if defines:
+            self.premake_content.append('    defines {')
+            for define in defines:
+                self.premake_content.append(f'        "{define}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
         
         # Add library paths
         self.premake_content.extend([
@@ -590,6 +604,27 @@ class PremakeGenerator:
                 '    }',
                 '    '
             ])
+            
+            # Add external library linkoptions for test-specific libraries
+            if libraries:
+                external_static_libs = []
+                for lib_name in libraries:
+                    if lib_name in self.external_libraries:
+                        lib_info = self.external_libraries[lib_name]
+                        if lib_info.get('link') == 'static':
+                            lib_path = lib_info['lib']
+                            if not lib_path.startswith('/'):
+                                lib_path = f"../../{lib_path}"
+                            external_static_libs.append(lib_path)
+                
+                if external_static_libs:
+                    self.premake_content.append('    linkoptions {')
+                    for lib_path in external_static_libs:
+                        self.premake_content.append(f'        "{lib_path}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
         else:
             # No library dependencies specified, but still need criterion for tests
             self.premake_content.extend([
