@@ -414,6 +414,7 @@ HOMEBREW_DEPS=(
     "criterion"  # For testing framework - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
+    "ginac"      # For mathematical expression equivalence testing
 )
 
 if command -v brew >/dev/null 2>&1; then
@@ -694,6 +695,7 @@ echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo 
 echo "- SIGAR: $([ -f "mac-deps/sigar/lib/libsigar.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- GiNaC: $(command -v brew >/dev/null 2>&1 && brew list ginac >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"

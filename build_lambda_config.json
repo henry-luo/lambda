@@ -139,6 +139,24 @@
             "include": "",
             "lib": "-lncurses",
             "link": "dynamic"
+        },
+        {
+            "name": "ginac",
+            "include": "/opt/homebrew/Cellar/ginac/1.8.9/include",
+            "lib": "/opt/homebrew/lib/libginac.a",
+            "link": "static"
+        },
+        {
+            "name": "cln",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libcln.a",
+            "link": "static"
+        },
+        {
+            "name": "gmp",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libgmp.a",
+            "link": "static"
         }
     ],
     "targets": [
@@ -391,7 +409,9 @@
                         "source": "test_math.cpp",
                         "name": "🔢 Math Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_math.exe"
+                        "binary": "test_math.exe",
+                        "libraries": ["ginac", "cln", "gmp"],
+                        "defines": ["GINAC_AVAILABLE"]
                     },
                     {
                         "source": "test_markup_roundtrip.cpp",
