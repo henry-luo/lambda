@@ -69,7 +69,7 @@ static const MathExprDef basic_operators[] = {
     {"pm", "+-", "+-", "pm", "±", "Plus or minus", false, 0, NULL},
     {"mp", "-+", "-+", "mp", "∓", "Minus or plus", false, 0, NULL},
     {"times", "*", "*", "times", "×", "Times", false, 0, NULL},
-    {"div", "/", "/", "div", "÷", "Division", false, 0, NULL},
+    {"div", "/", "/", "latex_div", "÷", "Division", false, 0, NULL},
     {"cdot", ".", ".", "cdot", "⋅", "Centered dot", false, 0, NULL},
     {"ast", "*", "*", "ast", "∗", "Asterisk", false, 0, NULL},
     {"star", "*", "*", "star", "⋆", "Star", false, 0, NULL},
@@ -397,7 +397,7 @@ static const MathExprDef calculus[] = {
     {"partial", "diff", "partial", "partial", "∂", "Partial derivative", false, 0, NULL},
     {"nabla", "nabla", "nabla", "nabla", "∇", "Nabla operator", false, 0, NULL},
     {"grad", "grad", "grad", "gradient", "∇", "Gradient operator", false, 0, NULL},
-    {"div", "div", "div", "divergence", "∇·", "Divergence operator", false, 0, NULL},
+    {"divergence", "div", "div", "divergence", "∇·", "Divergence operator", false, 0, NULL},
     {"curl", "curl", "curl", "curl", "∇×", "Curl operator", false, 0, NULL},
     {"laplacian", "laplacian", "laplacian", "laplacian", "∇²", "Laplacian operator", false, 0, NULL},
     {"dd", "dd", "d", "differential", "d", "Differential operator", true, 1, NULL},
@@ -1217,19 +1217,222 @@ static Item parse_latex_command(Input *input, const char **math) {
         return parse_latex_root_with_index(input, math);
     } else if (strcmp(cmd_string->chars, "sum") == 0) {
         stringbuf_reset(sb);
-        // Create a MathExprDef for the sum and use enhanced parser
-        MathExprDef sum_def = {"sum", "sum", "sum", "sum", "∑", "Summation", true, -1, "parse_big_operator"};
-        return parse_latex_sum_or_prod_enhanced(input, math, &sum_def);
+        // Parse sum with bounds directly here
+        Element* sum_element = create_math_element(input, "sum");
+        if (!sum_element) return {.item = ITEM_ERROR};
+        
+        skip_math_whitespace(math);
+        
+        // Parse subscript if present
+        if (**math == '_') {
+            (*math)++; // skip _
+            skip_math_whitespace(math);
+            
+            Item lower_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (lower_bound.item != ITEM_ERROR) {
+                list_push((List*)sum_element, lower_bound);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Parse superscript if present
+        if (**math == '^') {
+            (*math)++; // skip ^
+            skip_math_whitespace(math);
+            
+            Item upper_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (upper_bound.item != ITEM_ERROR) {
+                list_push((List*)sum_element, upper_bound);
+            }
+        }
+        
+        ((TypeElmt*)sum_element->type)->content_length = ((List*)sum_element)->length;
+        return {.item = (uint64_t)sum_element};
+        
     } else if (strcmp(cmd_string->chars, "prod") == 0) {
         stringbuf_reset(sb);
-        // Create a MathExprDef for the product and use enhanced parser  
-        MathExprDef prod_def = {"prod", "product", "prod", "prod", "∏", "Product", true, -1, "parse_big_operator"};
-        return parse_latex_sum_or_prod_enhanced(input, math, &prod_def);
-    } else if (strcmp(cmd_string->chars, "int") == 0) {
+        // Parse prod with bounds directly here
+        Element* prod_element = create_math_element(input, "prod");
+        if (!prod_element) return {.item = ITEM_ERROR};
+        
+        skip_math_whitespace(math);
+        
+        // Parse subscript if present
+        if (**math == '_') {
+            (*math)++; // skip _
+            skip_math_whitespace(math);
+            
+            Item lower_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (lower_bound.item != ITEM_ERROR) {
+                list_push((List*)prod_element, lower_bound);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Parse superscript if present
+        if (**math == '^') {
+            (*math)++; // skip ^
+            skip_math_whitespace(math);
+            
+            Item upper_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (upper_bound.item != ITEM_ERROR) {
+                list_push((List*)prod_element, upper_bound);
+            }
+        }
+        
+        ((TypeElmt*)prod_element->type)->content_length = ((List*)prod_element)->length;
+        return {.item = (uint64_t)prod_element};
+    } else if (strcmp(cmd_string->chars, "bigcup") == 0) {
         stringbuf_reset(sb);
-        // Create a MathExprDef for the integral
-        MathExprDef int_def = {"int", "integral", "int", "int", "∫", "Integral", true, -1, "parse_big_operator"};
-        return parse_latex_integral_enhanced(input, math, &int_def);
+        // Parse bigcup with bounds directly here
+        Element* bigcup_element = create_math_element(input, "bigcup");
+        if (!bigcup_element) return {.item = ITEM_ERROR};
+        
+        skip_math_whitespace(math);
+        
+        // Parse subscript if present
+        if (**math == '_') {
+            (*math)++; // skip _
+            skip_math_whitespace(math);
+            
+            Item lower_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (lower_bound.item != ITEM_ERROR) {
+                list_push((List*)bigcup_element, lower_bound);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Parse superscript if present
+        if (**math == '^') {
+            (*math)++; // skip ^
+            skip_math_whitespace(math);
+            
+            Item upper_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (upper_bound.item != ITEM_ERROR) {
+                list_push((List*)bigcup_element, upper_bound);
+            }
+        }
+        
+        ((TypeElmt*)bigcup_element->type)->content_length = ((List*)bigcup_element)->length;
+        return {.item = (uint64_t)bigcup_element};
+        
+    } else if (strcmp(cmd_string->chars, "bigcap") == 0) {
+        stringbuf_reset(sb);
+        // Parse bigcap with bounds directly here
+        Element* bigcap_element = create_math_element(input, "bigcap");
+        if (!bigcap_element) return {.item = ITEM_ERROR};
+        
+        skip_math_whitespace(math);
+        
+        // Parse subscript if present
+        if (**math == '_') {
+            (*math)++; // skip _
+            skip_math_whitespace(math);
+            
+            Item lower_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (lower_bound.item != ITEM_ERROR) {
+                list_push((List*)bigcap_element, lower_bound);
+            }
+        }
+        
+        skip_math_whitespace(math);
+        
+        // Parse superscript if present
+        if (**math == '^') {
+            (*math)++; // skip ^
+            skip_math_whitespace(math);
+            
+            Item upper_bound = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip {
+                upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+                if (**math == '}') {
+                    (*math)++; // skip }
+                }
+            } else {
+                upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            }
+            
+            if (upper_bound.item != ITEM_ERROR) {
+                list_push((List*)bigcap_element, upper_bound);
+            }
+        }
+        
+        ((TypeElmt*)bigcap_element->type)->content_length = ((List*)bigcap_element)->length;
+        return {.item = (uint64_t)bigcap_element};
     } else if (strcmp(cmd_string->chars, "oint") == 0) {
         stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
@@ -1672,10 +1875,23 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                     return {.item = ITEM_ERROR};
                 }
                 
-                Item expr = parse_math_expression(input, math, flavor);
-                if (expr .item != ITEM_ERROR && expr .item != ITEM_NULL) {
-                    list_push((List*)bracket_element, expr);
-                }
+                // Parse comma-separated expressions inside brackets
+                do {
+                    skip_math_whitespace(math);
+                    if (**math == ']') break; // empty brackets or trailing comma
+                    
+                    Item expr = parse_math_expression(input, math, flavor);
+                    if (expr .item != ITEM_ERROR && expr .item != ITEM_NULL) {
+                        list_push((List*)bracket_element, expr);
+                    }
+                    
+                    skip_math_whitespace(math);
+                    if (**math == ',') {
+                        (*math)++; // skip comma and continue
+                    } else {
+                        break; // no more comma, exit loop
+                    }
+                } while (**math != ']' && **math != '\0');
                 
                 if (**math == ']') {
                     (*math)++; // skip ]
@@ -1961,7 +2177,7 @@ static Item parse_addition_expression(Input *input, const char **math, MathFlavo
         }
         
         // Create a unary minus element
-        Element* neg_element = create_math_element(input, "neg");
+        Element* neg_element = create_math_element(input, "unary_minus");
         if (!neg_element) {
             return {.item = ITEM_ERROR};
         }
@@ -4826,8 +5042,8 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
                 (*math)++; // skip }
             }
         } else {
-            // single character bound
-            lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            // single character bound - parse just one token
+            lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         }
         
         if (lower_bound .item != ITEM_ERROR) {
@@ -4849,8 +5065,8 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
                 (*math)++; // skip }
             }
         } else {
-            // single character bound
-            upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            // single character bound - parse just one token
+            upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
         }
         
         if (upper_bound .item != ITEM_ERROR) {
@@ -4858,31 +5074,7 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
         }
     }
     
-    // Parse the summand (the expression being summed) - Critical for series expansion
-    skip_math_whitespace(math);
-    
-    if (**math && **math != '}' && **math != '$') {
-        
-        // For summand, we need to parse a single term/factor that can include fractions
-        // but stop at operators like = + - etc. that would be part of the larger expression
-        const char* start_pos = *math;
-        Item summand = {.item = ITEM_ERROR};
-        
-        // If it starts with \frac, parse that specifically
-        if (strncmp(*math, "\\frac", 5) == 0) {
-            *math += 5; // skip \frac
-            summand = parse_latex_frac(input, math);
-        } else {
-            // For other cases, try parsing a single term
-            summand = parse_power_expression(input, math, MATH_FLAVOR_LATEX);
-        }
-        
-        if (summand .item != ITEM_ERROR && summand .item != ITEM_NULL) {
-            // Add summand as the third child (after lower and upper bounds)
-            list_push((List*)op_element, summand);
-        }
-    } else {
-    }
+    // Don't parse summand here - it will be handled by the broader expression context
     
     // Set content length
     ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
