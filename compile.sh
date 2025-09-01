@@ -159,7 +159,17 @@ get_json_value() {
                 return
             fi
         fi
-        grep "\"$key\"" "$file" | head -1 | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*"([^"]*).*/\1/' | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*([^,}]*).*/\1/' | sed 's/[",]//g'
+        
+        # For root-level values, exclude platform sections
+        # Get only lines before the "platforms" section
+        local before_platforms=$(grep -n "\"platforms\"" "$file" | head -1 | cut -d: -f1)
+        if [ -n "$before_platforms" ]; then
+            # Search only in the root level (before platforms section)
+            head -$((before_platforms - 1)) "$file" | grep "\"$key\"" | head -1 | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*"([^"]*).*/\1/' | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*([^,}]*).*/\1/' | sed 's/[",]//g'
+        else
+            # No platforms section, search the whole file
+            grep "\"$key\"" "$file" | head -1 | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*"([^"]*).*/\1/' | sed -E 's/.*"'$key'"[[:space:]]*:[[:space:]]*([^,}]*).*/\1/' | sed 's/[",]//g'
+        fi
     fi
 }
 
@@ -328,6 +338,11 @@ OUTPUT=$(get_json_value "output" "$CONFIG_FILE" "$PLATFORM")
 DEBUG=$(get_json_value "debug" "$CONFIG_FILE" "$PLATFORM")
 CROSS_COMPILE=$(get_json_value "cross_compile" "$CONFIG_FILE" "$PLATFORM")
 TARGET_TRIPLET=$(get_json_value "target_triplet" "$CONFIG_FILE" "$PLATFORM")
+
+# Default to native compilation if cross_compile is not specified
+if [ -z "$CROSS_COMPILE" ]; then
+    CROSS_COMPILE="false"
+fi
 
 # Auto-regenerate lambda-embed.h if lambda.h is newer or lambda-embed.h doesn't exist
 LAMBDA_H_FILE="lambda/lambda.h"
