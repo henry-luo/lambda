@@ -98,8 +98,8 @@ static const MathFormatDef basic_operators[] = {
     {"implicit_mul", "", "", "", "", "", true, false, true, 2},
     {"div", " / ", " / ", " / ", "<mo>/</mo>", " / ", true, false, true, 2},
     {"latex_div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
-    {"pow", "{1}^{2}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
-    {"subscript", "{1}_{2}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
+    {"pow", "{1}^{2}", "{1}^{2}", "{1}^({2})", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
+    {"subscript", "{1}_{2}", "{1}_{2}", "{1}_({2})", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
     {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
     {"lt", " < ", " < ", " < ", "<mo>&lt;</mo>", " < ", true, false, true, 2},
     {"gt", " > ", " > ", " > ", "<mo>&gt;</mo>", " > ", true, false, true, 2},
@@ -133,7 +133,7 @@ static const MathFormatDef functions[] = {
     {"ln", "\\ln {1}", "ln", "ln", "<mi>ln</mi>", "ln", true, false, false, -1},
     {"lg", "\\lg {1}", "lg", "lg", "<mi>lg</mi>", "lg", true, false, false, -1},
     {"exp", "\\exp {1}", "exp", "exp", "<mi>exp</mi>", "exp", true, false, false, -1},
-    {"abs", "|{1}|", "abs({1})", "|{1}|", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
+    {"abs", "|{1}|", "abs({1})", "abs({1})", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
     {"norm", "\\|{1}\\|", "norm({1})", "‖{1}‖", "<mrow><mo>‖</mo>{1}<mo>‖</mo></mrow>", "‖·‖", true, false, false, 1},
     {"inner_product", "\\langle {1} \\rangle", "⟨{1}⟩", "⟨{1}⟩", "<mrow><mo>⟨</mo>{1}<mo>⟩</mo></mrow>", "⟨·⟩", true, false, false, -1},
     {"mathbf", "\\mathbf{{1}}", "bold({1})", "mathbf({1})", "<mi mathvariant=\"bold\">{1}</mi>", "𝐛", true, false, false, 1},
@@ -339,7 +339,7 @@ static const MathFormatDef accents[] = {
 static const MathFormatDef relations[] = {
     {"leq", " \\leq ", "<=", "<=", "<mo>≤</mo>", "≤", true, false, true, 0},
     {"geq", " \\geq ", ">=", ">=", "<mo>≥</mo>", "≥", true, false, true, 0},
-    {"neq", " \\neq ", "!=", "!=", "<mo>≠</mo>", "≠", true, false, true, 0},
+    {"neq", " \\neq ", " != ", " != ", "<mo>≠</mo>", "≠", true, false, true, 0},
     {"lt", " < ", "<", "<", "<mo>&lt;</mo>", "<", true, false, true, 0},
     {"gt", " > ", ">", ">", "<mo>&gt;</mo>", ">", true, false, true, 0},
     {"eq", " = ", "=", "=", "<mo>=</mo>", "=", true, false, true, 0},
@@ -1102,6 +1102,52 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
                 }
                 p += 3; // Skip "{N}"
             }
+        } else if (*p == '_' && *(p+1) == '{' && flavor == MATH_OUTPUT_ASCII) {
+            // Convert LaTeX-style _{...} to ASCII-style _(...)
+            stringbuf_append_str(sb, "_(");
+            p += 2; // Skip "_{" 
+            // Find matching closing brace
+            int brace_count = 1;
+            const char* start = p;
+            while (*p && brace_count > 0) {
+                if (*p == '{') brace_count++;
+                else if (*p == '}') brace_count--;
+                if (brace_count > 0) p++;
+            }
+            // Copy content between braces
+            while (start < p) {
+                stringbuf_append_char(sb, *start);
+                start++;
+            }
+            stringbuf_append_str(sb, ")");
+            if (*p == '}') p++; // Skip closing brace
+        } else if (*p == '^' && *(p+1) == '{' && flavor == MATH_OUTPUT_ASCII) {
+            // Convert LaTeX-style ^{...} to ASCII-style ^(...) for complex expressions
+            const char* brace_start = p + 2;
+            int brace_count = 1;
+            const char* brace_end = brace_start;
+            while (*brace_end && brace_count > 0) {
+                if (*brace_end == '{') brace_count++;
+                else if (*brace_end == '}') brace_count--;
+                brace_end++;
+            }
+            
+            // Check if content is a single character
+            bool is_single_char = (brace_end - brace_start - 1 == 1) && isalnum(*brace_start);
+            
+            stringbuf_append_str(sb, "^");
+            if (!is_single_char) {
+                stringbuf_append_str(sb, "(");
+            }
+            // Copy content between braces
+            while (brace_start < brace_end - 1) {
+                stringbuf_append_char(sb, *brace_start);
+                brace_start++;
+            }
+            if (!is_single_char) {
+                stringbuf_append_str(sb, ")");
+            }
+            p = brace_end; // Skip past closing brace
         } else {
             stringbuf_append_char(sb, *p);
             p++;
@@ -1319,7 +1365,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     const MathFormatDef* def = find_format_def(element_name);
     
     #ifdef DEBUG_MATH_FORMAT
-    log_debug("format_math_element called with element_name='%s', def=%p", element_name, def);
+    log_debug("format_math_element called with element_name='%s', def=%p, flavor=%d", element_name, def, flavor);
     #endif
     
     
@@ -1487,7 +1533,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         
         if (is_big_op) {
             #ifdef DEBUG_MATH_FORMAT
-            log_debug("Big operator detected: %s", element_name);
+            log_debug("Big operator detected: %s, flavor=%d, children_length=%ld", element_name, flavor, children->length);
             #endif
             
             // Special handling for lim - different from sum/int
@@ -1519,17 +1565,31 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                 // Use braces only for complex expressions, not single characters
                 bool needs_braces = !is_single_character_item(children->items[0]);
                 
-                if (needs_braces) {
-                    stringbuf_append_str(sb, "_{");
+                if (flavor == MATH_OUTPUT_ASCII) {
+                    // ASCII format: sum_(i=1) instead of sum_{i=1}
+                    #ifdef DEBUG_MATH_FORMAT
+                    log_debug("ASCII big operator subscript formatting for %s", element_name);
+                    #endif
+                    stringbuf_append_str(sb, "_(");
+                    bool prev_compact_context = in_compact_context;
+                    in_compact_context = true;
+                    format_math_item(sb, children->items[0], flavor, depth + 1);
+                    in_compact_context = prev_compact_context;
+                    stringbuf_append_str(sb, ")");
                 } else {
-                    stringbuf_append_str(sb, "_");
-                }
-                bool prev_compact_context = in_compact_context;
-                in_compact_context = true;
-                format_math_item(sb, children->items[0], flavor, depth + 1);
-                in_compact_context = prev_compact_context;
-                if (needs_braces) {
-                    stringbuf_append_str(sb, "}");
+                    // LaTeX format: sum_{i=1} or sum_i
+                    if (needs_braces) {
+                        stringbuf_append_str(sb, "_{");
+                    } else {
+                        stringbuf_append_str(sb, "_");
+                    }
+                    bool prev_compact_context = in_compact_context;
+                    in_compact_context = true;
+                    format_math_item(sb, children->items[0], flavor, depth + 1);
+                    in_compact_context = prev_compact_context;
+                    if (needs_braces) {
+                        stringbuf_append_str(sb, "}");
+                    }
                 }
             }
             
@@ -1543,17 +1603,33 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                 
                 if (needs_superscript) {
                     bool needs_super_braces = !is_single_character_item(children->items[1]);
-                    if (needs_super_braces) {
-                        stringbuf_append_str(sb, "^{");
-                    } else {
+                    if (flavor == MATH_OUTPUT_ASCII) {
+                        // ASCII format: ^n or ^(complex)
                         stringbuf_append_str(sb, "^");
-                    }
-                    bool prev_compact_context = in_compact_context;
-                    in_compact_context = true;
-                    format_math_item(sb, children->items[1], flavor, depth + 1);
-                    in_compact_context = prev_compact_context;
-                    if (needs_super_braces) {
-                        stringbuf_append_str(sb, "}");
+                        if (needs_super_braces) {
+                            stringbuf_append_str(sb, "(");
+                        }
+                        bool prev_compact_context = in_compact_context;
+                        in_compact_context = true;
+                        format_math_item(sb, children->items[1], flavor, depth + 1);
+                        in_compact_context = prev_compact_context;
+                        if (needs_super_braces) {
+                            stringbuf_append_str(sb, ")");
+                        }
+                    } else {
+                        // LaTeX format: ^{n} or ^n
+                        if (needs_super_braces) {
+                            stringbuf_append_str(sb, "^{");
+                        } else {
+                            stringbuf_append_str(sb, "^");
+                        }
+                        bool prev_compact_context = in_compact_context;
+                        in_compact_context = true;
+                        format_math_item(sb, children->items[1], flavor, depth + 1);
+                        in_compact_context = prev_compact_context;
+                        if (needs_super_braces) {
+                            stringbuf_append_str(sb, "}");
+                        }
                     }
                 } else {
                     // For sum/prod operators, second child might be upper limit
@@ -1571,17 +1647,33 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                                             strcmp(element_name, "sum") == 0 ||
                                             !is_single_character_item(children->items[1]));
                         
-                        if (needs_braces) {
-                            stringbuf_append_str(sb, "^{");
-                        } else {
+                        if (flavor == MATH_OUTPUT_ASCII) {
+                            // ASCII format: ^n or ^(complex)
                             stringbuf_append_str(sb, "^");
-                        }
-                        bool prev_compact_context = in_compact_context;
-                        in_compact_context = true;
-                        format_math_item(sb, children->items[1], flavor, depth + 1);
-                        in_compact_context = prev_compact_context;
-                        if (needs_braces) {
-                            stringbuf_append_str(sb, "}");
+                            if (needs_braces) {
+                                stringbuf_append_str(sb, "(");
+                            }
+                            bool prev_compact_context = in_compact_context;
+                            in_compact_context = true;
+                            format_math_item(sb, children->items[1], flavor, depth + 1);
+                            in_compact_context = prev_compact_context;
+                            if (needs_braces) {
+                                stringbuf_append_str(sb, ")");
+                            }
+                        } else {
+                            // LaTeX format: ^{n} or ^n
+                            if (needs_braces) {
+                                stringbuf_append_str(sb, "^{");
+                            } else {
+                                stringbuf_append_str(sb, "^");
+                            }
+                            bool prev_compact_context = in_compact_context;
+                            in_compact_context = true;
+                            format_math_item(sb, children->items[1], flavor, depth + 1);
+                            in_compact_context = prev_compact_context;
+                            if (needs_braces) {
+                                stringbuf_append_str(sb, "}");
+                            }
                         }
                     } else {
                         // For other operators, second child is the main expression
@@ -1602,6 +1694,15 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     }
     
     // Check if this element has a format template with placeholders
+    #ifdef DEBUG_MATH_FORMAT
+    if (strcmp(element_name, "sum") == 0) {
+        log_debug("sum element debug - has_children=%s, children=%p, format_str='%s', has_placeholders=%s", 
+                def->has_children ? "true" : "false", children, format_str,
+                (strstr(format_str, "{1}") || strstr(format_str, "{*}")) ? "true" : "false");
+        log_debug("sum will take template path: %s", 
+                (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) ? "true" : "false");
+    }
+    #endif
     if (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) {
         #ifdef DEBUG_MATH_FORMAT
         log_debug("Using template formatting for element '%s' with format: '%s'", element_name, format_str);
@@ -1700,6 +1801,32 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                         stringbuf_append_str(sb, "^{");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                         stringbuf_append_str(sb, "}");
+                    } else {
+                        // Remaining children are summands/integrands
+                        stringbuf_append_str(sb, " ");
+                        format_math_item(sb, children->items[i], flavor, depth + 1);
+                    }
+                }
+            } else if (is_big_op && flavor == MATH_OUTPUT_ASCII) {
+                // ASCII format big operator with bounds: sum_(i=1)^n i
+                for (int i = 0; i < children->length; i++) {
+                    if (i == 0) {
+                        // First child is always subscript (lower bound)
+                        stringbuf_append_str(sb, "_(");
+                        format_math_item(sb, children->items[i], flavor, depth + 1);
+                        stringbuf_append_str(sb, ")");
+                    } else if (i == 1 && children->length > 2) {
+                        // Second child is superscript (upper bound) only if there are 3+ children
+                        stringbuf_append_str(sb, "^");
+                        // Use parentheses only for complex expressions
+                        bool needs_parens = !is_single_character_item(children->items[i]);
+                        if (needs_parens) {
+                            stringbuf_append_str(sb, "(");
+                        }
+                        format_math_item(sb, children->items[i], flavor, depth + 1);
+                        if (needs_parens) {
+                            stringbuf_append_str(sb, ")");
+                        }
                     } else {
                         // Remaining children are summands/integrands
                         stringbuf_append_str(sb, " ");

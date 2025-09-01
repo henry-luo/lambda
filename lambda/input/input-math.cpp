@@ -1982,8 +1982,97 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                         }
                     }
                 } else {
-                    // Regular identifier
-                    return parse_math_identifier(input, math);
+                    // Check if this is a big operator like sum, prod, int with subscript/superscript
+                    const char* lookahead = *math;
+                    StringBuf* temp_sb = input->sb;
+                    stringbuf_reset(temp_sb);
+                    
+                    // Parse the identifier
+                    while (*lookahead && (isalpha(*lookahead) || isdigit(*lookahead))) {
+                        stringbuf_append_char(temp_sb, *lookahead);
+                        lookahead++;
+                    }
+                    
+                    String* id_string = temp_sb->str;
+                    id_string->len = temp_sb->length;
+                    id_string->ref_cnt = 0;
+                    
+                    // Check if it's a big operator and has subscript notation
+                    if ((strcmp(id_string->chars, "sum") == 0 || 
+                         strcmp(id_string->chars, "prod") == 0 || 
+                         strcmp(id_string->chars, "int") == 0 ||
+                         strcmp(id_string->chars, "lim") == 0) && *lookahead == '_') {
+                        
+                        // Parse as big operator with bounds
+                        *math = lookahead; // move to after identifier
+                        Element* op_element = create_math_element(input, id_string->chars);
+                        if (!op_element) {
+                            stringbuf_reset(temp_sb);
+                            return {.item = ITEM_ERROR};
+                        }
+                        
+                        // Parse subscript (lower bound)
+                        if (**math == '_') {
+                            (*math)++; // skip _
+                            skip_math_whitespace(math);
+                            
+                            Item lower_bound;
+                            if (**math == '(') {
+                                (*math)++; // skip (
+                                lower_bound = parse_math_expression(input, math, flavor);
+                                if (**math == ')') {
+                                    (*math)++; // skip )
+                                }
+                            } else {
+                                lower_bound = parse_math_primary(input, math, flavor);
+                            }
+                            
+                            if (lower_bound.item != ITEM_ERROR) {
+                                list_push((List*)op_element, lower_bound);
+                            }
+                        }
+                        
+                        skip_math_whitespace(math);
+                        
+                        // Parse superscript (upper bound)
+                        if (**math == '^') {
+                            (*math)++; // skip ^
+                            skip_math_whitespace(math);
+                            
+                            Item upper_bound;
+                            if (**math == '(') {
+                                (*math)++; // skip (
+                                upper_bound = parse_math_expression(input, math, flavor);
+                                if (**math == ')') {
+                                    (*math)++; // skip )
+                                }
+                            } else {
+                                upper_bound = parse_math_primary(input, math, flavor);
+                            }
+                            
+                            if (upper_bound.item != ITEM_ERROR) {
+                                list_push((List*)op_element, upper_bound);
+                            }
+                        }
+                        
+                        skip_math_whitespace(math);
+                        
+                        // Parse the main expression (summand/integrand)
+                        if (**math && **math != '}' && **math != '$' && **math != '\n') {
+                            Item main_expr = parse_multiplication_expression(input, math, flavor);
+                            if (main_expr.item != ITEM_ERROR && main_expr.item != ITEM_NULL) {
+                                list_push((List*)op_element, main_expr);
+                            }
+                        }
+                        
+                        ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+                        stringbuf_reset(temp_sb);
+                        return {.item = (uint64_t)op_element};
+                    } else {
+                        // Regular identifier
+                        stringbuf_reset(temp_sb);
+                        return parse_math_identifier(input, math);
+                    }
                 }
             } else if (**math == '(') {
                 (*math)++; // skip (
@@ -2057,6 +2146,9 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         } else if (**math == '>') {
             op_name = "gt";
             op_len = 1;
+        } else if (**math == '!' && *(*math + 1) == '=' && flavor == MATH_FLAVOR_ASCII) {
+            op_name = "neq";
+            op_len = 2;
         } else if (**math == '\\') {
             // Check for LaTeX relational commands
             if (strncmp(*math, "\\neq", 4) == 0 && !isalpha(*(*math + 4))) {
@@ -2547,8 +2639,8 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 processed = true;
             }
             
-            // Handle factorial notation
-            if (**math == '!') {
+            // Handle factorial notation (but check for != first)
+            if (**math == '!' && *(*math + 1) != '=') {
                 (*math)++; // skip !
                 log_debug("Creating factorial with base item=0x%llx, type=%d", left.item, get_type_id(left));
                 Element* factorial_element = create_math_element(input, "factorial");
@@ -2580,7 +2672,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             }
             
             // Handle factorial notation
-            if (**math == '!') {
+            if (**math == '!' && *(*math + 1) != '=') {
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
@@ -2602,7 +2694,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             }
             
             // Handle factorial notation
-            if (**math == '!') {
+            if (**math == '!' && *(*math + 1) != '=') {
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
