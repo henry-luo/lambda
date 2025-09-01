@@ -42,17 +42,39 @@ fi
 
 echo "Setting up Linux (Ubuntu) native compilation dependencies..."
 
-# Check for required tools
-check_tool() {
+# Verify installation function
+verify_installation() {
     local tool="$1"
     local package="$2"
     
-    if ! command -v "$tool" >/dev/null 2>&1; then
-        echo "Error: $tool is required but not installed."
-        echo "Install it with: sudo apt update && sudo apt install $package"
+    if command -v "$tool" >/dev/null 2>&1; then
+        echo "✅ $tool verified and working"
+        return 0
+    else
+        echo "❌ $tool not found after installing $package"
         return 1
     fi
-    return 0
+}
+
+# Check for required tools
+check_and_install_tool() {
+    local tool="$1"
+    local package="$2"
+    
+    if command -v "$tool" >/dev/null 2>&1; then
+        echo "✅ $tool already available"
+        return 0
+    else
+        echo "Installing $tool via $package..."
+        install_if_missing "$package" "$package"
+        if command -v "$tool" >/dev/null 2>&1; then
+            echo "✅ $tool installed successfully"
+            return 0
+        else
+            echo "❌ Failed to install $tool via $package"
+            return 1
+        fi
+    fi
 }
 
 # Check if running on Ubuntu/Debian
@@ -62,56 +84,147 @@ if ! command -v apt >/dev/null 2>&1; then
 fi
 
 # Check for essential build tools
-echo "Checking for essential build tools..."
-check_tool "make" "build-essential" || exit 1
-check_tool "gcc" "build-essential" || exit 1
-check_tool "g++" "build-essential" || exit 1
-check_tool "git" "git" || exit 1
+echo "Setting up essential build tools..."
+check_and_install_tool "make" "build-essential" || exit 1
+check_and_install_tool "gcc" "build-essential" || exit 1
+check_and_install_tool "g++" "build-essential" || exit 1
+check_and_install_tool "clang" "clang" || exit 1
+# clang++ is installed together with clang
+if ! command -v clang++ >/dev/null 2>&1; then
+    echo "❌ clang++ not available after clang installation"
+    exit 1
+else
+    echo "✅ clang++ available"
+fi
+check_and_install_tool "git" "git" || exit 1
+
+# Check for Node.js and npm (needed for tree-sitter CLI via npx)
+echo "Setting up Node.js and npm for tree-sitter CLI..."
+check_and_install_tool "node" "nodejs" || exit 1
+check_and_install_tool "npm" "npm" || exit 1
+
+# Verify npx can access tree-sitter CLI
+echo "Verifying tree-sitter CLI access via npx..."
+if npx tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
+    echo "✅ Tree-sitter CLI 0.24.7 accessible via npx"
+else
+    echo "Warning: tree-sitter CLI may need to be downloaded on first use"
+fi
+
+# Function to check if a package is installed
+is_package_installed() {
+    local package="$1"
+    dpkg -l | grep -q "^ii.*$package" 2>/dev/null
+}
+
+# Function to install package if not already installed
+install_if_missing() {
+    local package="$1"
+    local description="${2:-$package}"
+    
+    # For certain packages, check if the command is available first
+    case "$package" in
+        "cmake"|"git"|"curl"|"wget"|"python3"|"vim-common"|"clang"|"nodejs"|"npm")
+            local command_name="$package"
+            if [ "$package" = "python3-pip" ]; then
+                command_name="pip3"
+            elif [ "$package" = "vim-common" ]; then
+                command_name="xxd"
+            elif [ "$package" = "nodejs" ]; then
+                command_name="node"
+            fi
+            
+            if command -v "$command_name" >/dev/null 2>&1; then
+                echo "✅ $description already available"
+                return 0
+            fi
+            ;;
+    esac
+    
+    # Check if package is installed via apt
+    if is_package_installed "$package"; then
+        echo "✅ $description already installed"
+        return 0
+    else
+        echo "Installing $description..."
+        if sudo apt install -y "$package"; then
+            echo "✅ $description installed successfully"
+            return 0
+        else
+            echo "❌ Failed to install $description"
+            return 1
+        fi
+    fi
+}
 
 # Check for cmake (needed for some dependencies)
-if ! command -v cmake >/dev/null 2>&1; then
+if command -v cmake >/dev/null 2>&1; then
+    echo "✅ cmake already available"
+else
     echo "Installing cmake..."
     sudo apt update
-    sudo apt install -y cmake
+    install_if_missing "cmake" "cmake"
 fi
 
 # Check for pkg-config (often needed for library detection)
 if ! command -v pkg-config >/dev/null 2>&1; then
     echo "Installing pkg-config..."
-    sudo apt update
-    sudo apt install -y pkg-config
+    install_if_missing "pkg-config" "pkg-config"
+else
+    echo "✅ pkg-config already available"
 fi
 
 # Install additional development tools if not present
 echo "Installing additional development dependencies..."
 sudo apt update
-sudo apt install -y \
-    curl \
-    wget \
-    build-essential \
-    cmake \
-    git \
-    pkg-config \
-    libtool \
-    autoconf \
-    automake \
-    python3 \
-    python3-pip \
-    libmpdec-dev \
-    libedit-dev \
-    libcurl4-openssl-dev \
-    libutf8proc-dev \
-    coreutils
+
+# Install essential packages with smart detection
+install_if_missing "curl" "curl"
+install_if_missing "wget" "wget"
+install_if_missing "build-essential" "build-essential"
+install_if_missing "git" "git"
+install_if_missing "clang" "clang"
+install_if_missing "nodejs" "nodejs"
+install_if_missing "npm" "npm"
+install_if_missing "libtool" "libtool"
+install_if_missing "autoconf" "autoconf"
+install_if_missing "automake" "automake"
+install_if_missing "python3" "python3"
+install_if_missing "python3-pip" "python3-pip"
+install_if_missing "vim-common" "vim-common (for xxd command)"
+install_if_missing "libmpdec-dev" "mpdecimal development headers"
+install_if_missing "libedit-dev" "libedit development headers"
+install_if_missing "libcurl4-openssl-dev" "libcurl development headers"
+install_if_missing "libutf8proc-dev" "utf8proc development headers"
+install_if_missing "pkg-config" "pkg-config"
+install_if_missing "coreutils" "coreutils"
+
+# Verify mpdecimal header installation
+echo "Verifying mpdecimal header installation..."
+if [ -f "/usr/include/mpdecimal.h" ]; then
+    echo "✅ mpdecimal.h found at /usr/include/mpdecimal.h"
+elif [ -f "/usr/include/mpdec/mpdecimal.h" ]; then
+    echo "✅ mpdecimal.h found at /usr/include/mpdec/mpdecimal.h"
+    echo "Creating symlink for standard location..."
+    sudo ln -sf /usr/include/mpdec/mpdecimal.h /usr/include/mpdecimal.h
+else
+    echo "❌ mpdecimal.h not found after installation"
+    echo "Searching for mpdecimal headers..."
+    find /usr -name "*mpdec*" -type f 2>/dev/null || echo "No mpdecimal files found"
+    echo "Installing alternative mpdecimal package..."
+    sudo apt update
+    install_if_missing "libmpdecimal-dev" "alternative mpdecimal development headers"
+    
+    # If still not found, build from source
+    if [ ! -f "/usr/include/mpdecimal.h" ] && [ ! -f "/usr/include/mpdec/mpdecimal.h" ]; then
+        echo "Building mpdecimal from source..."
+        build_mpdecimal_for_linux
+    fi
+fi
 
 # Try to install criterion via apt, build from source if not available
 echo "Installing criterion testing framework..."
-if dpkg -l | grep -q libcriterion-dev; then
-    echo "libcriterion-dev already installed"
-elif sudo apt install -y libcriterion-dev; then
-    echo "✅ libcriterion-dev installed successfully via apt"
-else
-    echo "libcriterion-dev not available via apt, will build from source later"
-fi
+install_if_missing "libcriterion-dev" "libcriterion-dev"
 
 # Create temporary build directory
 mkdir -p "build_temp"
@@ -195,6 +308,56 @@ cleanup_intermediate_files() {
     fi
     
     echo "Cleanup completed."
+}
+
+# Function to build mpdecimal for Linux
+build_mpdecimal_for_linux() {
+    echo "Building mpdecimal for Linux..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
+        echo "mpdecimal already installed in system location"
+        return 0
+    fi
+    
+    # Create build_temp directory if it doesn't exist
+    mkdir -p "build_temp"
+    
+    # Build from source
+    if [ ! -d "build_temp/mpdecimal" ]; then
+        cd build_temp
+        echo "Downloading mpdecimal..."
+        curl -L "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-2.5.1.tar.gz" -o "mpdecimal-2.5.1.tar.gz"
+        tar -xzf "mpdecimal-2.5.1.tar.gz"
+        mv "mpdecimal-2.5.1" "mpdecimal"
+        rm "mpdecimal-2.5.1.tar.gz"
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/mpdecimal"
+    
+    echo "Configuring mpdecimal..."
+    if ./configure --prefix="$SYSTEM_PREFIX"; then
+        echo "Building mpdecimal..."
+        if make -j$(nproc); then
+            echo "Installing mpdecimal to system location (requires sudo)..."
+            sudo make install
+            
+            # Update library cache
+            sudo ldconfig
+            
+            # Verify the build
+            if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
+                echo "✅ mpdecimal built and installed successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ mpdecimal build failed"
+    cd - > /dev/null
+    return 1
 }
 
 # Function to build GMP for Linux
@@ -433,19 +596,49 @@ build_mir_for_linux() {
         sudo mkdir -p "$SYSTEM_PREFIX/lib"
         sudo mkdir -p "$SYSTEM_PREFIX/include"
         
-        # Copy library and headers
-        sudo cp libmir.a "$SYSTEM_PREFIX/lib/" || sudo cp mir.a "$SYSTEM_PREFIX/lib/libmir.a"
-        sudo cp mir.h "$SYSTEM_PREFIX/include/" 2>/dev/null || true
-        sudo cp mir-*.h "$SYSTEM_PREFIX/include/" 2>/dev/null || true
+        # Copy library (try different names)
+        if [ -f "libmir.a" ]; then
+            sudo cp libmir.a "$SYSTEM_PREFIX/lib/"
+        elif [ -f "mir.a" ]; then
+            sudo cp mir.a "$SYSTEM_PREFIX/lib/libmir.a"
+        else
+            echo "Warning: MIR library not found"
+            find . -name "*.a" -name "*mir*" | head -5
+        fi
+        
+        # Copy headers (more comprehensive approach)
+        if [ -f "mir.h" ]; then
+            sudo cp mir.h "$SYSTEM_PREFIX/include/"
+            echo "✅ mir.h copied to $SYSTEM_PREFIX/include/"
+        else
+            echo "Warning: mir.h not found"
+            find . -name "mir.h" | head -5
+        fi
+        
+        # Copy all MIR-related headers
+        for header in mir-*.h; do
+            if [ -f "$header" ]; then
+                sudo cp "$header" "$SYSTEM_PREFIX/include/"
+                echo "✅ $header copied to $SYSTEM_PREFIX/include/"
+            fi
+        done
         
         # Update library cache
         sudo ldconfig
         
         # Verify the build
-        if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
+        if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
             echo "✅ MIR built successfully"
             cd - > /dev/null
             return 0
+        elif [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
+            echo "⚠️ MIR library built but mir.h header missing"
+            cd - > /dev/null
+            return 1
+        else
+            echo "❌ MIR library not found after build"
+            cd - > /dev/null
+            return 1
         fi
     fi
     
@@ -581,7 +774,7 @@ fi
 
 # Build MIR for Linux
 echo "Setting up MIR..."
-if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
+if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
     echo "MIR already available"
 else
     if ! build_mir_for_linux; then
@@ -590,6 +783,21 @@ else
     else
         echo "MIR built successfully"
     fi
+fi
+
+# Verify MIR header installation
+echo "Verifying MIR header installation..."
+if [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
+    echo "✅ mir.h found at $SYSTEM_PREFIX/include/mir.h"
+elif [ -f "/usr/include/mir.h" ]; then
+    echo "✅ mir.h found at /usr/include/mir.h"
+else
+    echo "❌ mir.h not found after installation"
+    echo "Searching for MIR headers..."
+    find /usr -name "mir.h" 2>/dev/null || echo "No mir.h files found"
+    find "$SYSTEM_PREFIX" -name "mir.h" 2>/dev/null || echo "No mir.h files found in $SYSTEM_PREFIX"
+    echo "This will cause compilation failures for transpiler.hpp"
+    exit 1
 fi
 
 # Build utf8proc for Linux
@@ -654,7 +862,7 @@ echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lam
 # Check system locations and apt packages
 echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libgmp.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.so" ] && echo "✓ Available" || echo "✗ Missing")"
-echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
@@ -666,4 +874,5 @@ echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"
 echo ""
-echo "To clean up intermediate files later, run: ./setup-linux-deps.sh clean"
+echo "Note: This script now intelligently skips already-installed dependencies."
+echo "To clean up intermediate files, run: ./setup-linux-deps.sh clean"
