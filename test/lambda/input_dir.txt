@@ -1,8 +1,15 @@
 {
- name: :"test.txt",
- size: :9
+ name:"test.txt",
+ size:9,
+ is_link:null
 }
 {
- name: :"child_dir",
- size: :64
+ name:"child_dir",
+ size:96,
+ is_link:null
+}
+{
+ name:"readme_link",
+ size:4622,
+ is_link:true
 }
