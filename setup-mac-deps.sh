@@ -410,7 +410,7 @@ echo "Installing Homebrew dependencies..."
 HOMEBREW_DEPS=(
     "mpdecimal"  # For decimal arithmetic - referenced in build config
     "utf8proc"   # For Unicode processing - referenced in build config  
-    "readline"   # For command line editing - referenced in build config
+    "libedit"    # For command line editing - cross-platform readline alternative
     "criterion"  # For testing framework - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
@@ -732,7 +732,7 @@ if command -v brew >/dev/null 2>&1; then
     BREW_PREFIX=$(brew --prefix)
     echo "- mpdecimal: $([ -f "$BREW_PREFIX/lib/libmpdec.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- readline: $([ -f "$BREW_PREFIX/lib/libreadline.a" ] || [ -f "$BREW_PREFIX/lib/libreadline.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- libedit: $([ -f "$BREW_PREFIX/lib/libedit.a" ] || [ -f "$BREW_PREFIX/lib/libedit.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"

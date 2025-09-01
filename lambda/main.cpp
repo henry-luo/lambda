@@ -53,14 +53,19 @@ extern "C" {
 // Forward declare MIR transpiler function
 Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
 
-// Forward declare readline functions to avoid header conflicts
+// Include libedit header for line editing functionality
+#ifndef _WIN32
+#include <editline/readline.h>
+#endif
+
+// Forward declare libedit functions to avoid header conflicts
 #ifndef _WIN32
 extern "C" {
     char *readline(const char *);
     int add_history(const char *);
 }
 #else
-// Simple Windows fallback for readline functionality
+// Simple Windows fallback for libedit functionality
 char *simple_readline(const char *prompt) {
     printf("%s", prompt);
     fflush(stdout);
@@ -170,7 +175,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
             continue;
         }
         
-        // Add to readline history
+        // Add to libedit history
         add_history(line);
         
         // Handle REPL commands
