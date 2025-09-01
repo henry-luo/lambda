@@ -1,16 +1,17 @@
 // INI Formatter - Direct traversal implementation
 // Safe implementation with centralized type handling
 #include "format.h"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 
 // forward declarations
-static void format_item(StrBuf* sb, Item item, const char* key_name);
-static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name);
-static void format_ini_string(StrBuf* sb, String* str);
+static void format_item(StringBuf* sb, Item item, const char* key_name);
+static void format_map_as_section(StringBuf* sb, Map* map, const char* section_name);
+static void format_ini_string(StringBuf* sb, String* str);
 static bool is_simple_value(TypeId type_id);
 
 // format a string value for INI - handle escaping for INI format
-static void format_ini_string(StrBuf* sb, String* str) {
+static void format_ini_string(StringBuf* sb, String* str) {
     if (!str || !str->chars) {
         // empty string in INI
         return;
@@ -23,28 +24,28 @@ static void format_ini_string(StrBuf* sb, String* str) {
         char c = s[i];
         switch (c) {
         case '\n':
-            strbuf_append_str(sb, "\\n");
+            stringbuf_append_str(sb, "\\n");
             break;
         case '\r':
-            strbuf_append_str(sb, "\\r");
+            stringbuf_append_str(sb, "\\r");
             break;
         case '\t':
-            strbuf_append_str(sb, "\\t");
+            stringbuf_append_str(sb, "\\t");
             break;
         case '\\':
-            strbuf_append_str(sb, "\\\\");
+            stringbuf_append_str(sb, "\\\\");
             break;
         case '"':
-            strbuf_append_str(sb, "\\\"");
+            stringbuf_append_str(sb, "\\\"");
             break;
         case ';':
-            strbuf_append_str(sb, "\\;");
+            stringbuf_append_str(sb, "\\;");
             break;
         case '#':
-            strbuf_append_str(sb, "\\#");
+            stringbuf_append_str(sb, "\\#");
             break;
         default:
-            strbuf_append_char(sb, c);
+            stringbuf_append_char(sb, c);
             break;
         }
     }
@@ -62,7 +63,7 @@ static bool is_simple_value(TypeId type_id) {
 }
 
 // format map as INI section
-static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name) {
+static void format_map_as_section(StringBuf* sb, Map* map, const char* section_name) {
     if (!map || !map->type || !map->data) {
         return;
     }
@@ -71,7 +72,7 @@ static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name
     
     // add section header if we have a name
     if (section_name && strlen(section_name) > 0) {
-        strbuf_append_format(sb, "[%s]\n", section_name);
+        stringbuf_append_format(sb, "[%s]\n", section_name);
     }
     
     // iterate through map fields using safe linked list traversal
@@ -85,7 +86,7 @@ static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name
             Map* nest_map = *(Map**)data;
             if (nest_map && nest_map->type) {
                 // add blank line before subsection
-                strbuf_append_char(sb, '\n');
+                stringbuf_append_char(sb, '\n');
                 format_map_as_section(sb, nest_map, "nested");
             }
         } else {
@@ -96,9 +97,9 @@ static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name
             Item field_item = create_item_from_field_data(field_data, field_type);
             
             // format key=value pair
-            strbuf_append_format(sb, "%.*s=", (int)field->name->length, field->name->str);
+            stringbuf_append_format(sb, "%.*s=", (int)field->name->length, field->name->str);
             format_item(sb, field_item, field->name->str);
-            strbuf_append_char(sb, '\n');
+            stringbuf_append_char(sb, '\n');
         }
         
         field = field->next;
@@ -107,7 +108,7 @@ static void format_map_as_section(StrBuf* sb, Map* map, const char* section_name
 }
 
 // centralized function to format any Lambda Item for INI format
-static void format_item(StrBuf* sb, Item item, const char* key_name) {
+static void format_item(StringBuf* sb, Item item, const char* key_name) {
     TypeId type_id = get_type_id(item);
     
     switch (type_id) {
@@ -116,7 +117,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
             break;
         case LMD_TYPE_BOOL: {
             bool val = item.bool_val;
-            strbuf_append_str(sb, val ? "true" : "false");
+            stringbuf_append_str(sb, val ? "true" : "false");
             break;
         }
         case LMD_TYPE_INT:
@@ -139,7 +140,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
             if (arr && arr->length > 0) {
                 for (long i = 0; i < arr->length; i++) {
                     if (i > 0) {
-                        strbuf_append_str(sb, ",");
+                        stringbuf_append_str(sb, ",");
                     }
                     
                     Item arr_item = arr->items[i];
@@ -149,7 +150,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
                     if (is_simple_value(arr_type)) {
                         format_item(sb, arr_item, NULL);
                     } else {
-                        strbuf_append_str(sb, "[complex]");
+                        stringbuf_append_str(sb, "[complex]");
                     }
                 }
             }
@@ -157,7 +158,7 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
         }
         case LMD_TYPE_MAP: {
             // nested maps cannot be represented as simple values in INI
-            strbuf_append_str(sb, "[map]");
+            stringbuf_append_str(sb, "[map]");
             break;
         }
         case LMD_TYPE_ELEMENT: {
@@ -166,15 +167,15 @@ static void format_item(StrBuf* sb, Item item, const char* key_name) {
             
             // represent element as its tag name
             if (elmt_type) {
-                strbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
+                stringbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
             } else {
-                strbuf_append_str(sb, "[element]");
+                stringbuf_append_str(sb, "[element]");
             }
             break;
         }
         default:
             // fallback for unknown types
-            strbuf_append_format(sb, "[type_%d]", (int)type_id);
+            stringbuf_append_format(sb, "[type_%d]", (int)type_id);
             break;
     }
 }
@@ -184,7 +185,7 @@ String* format_ini(VariableMemPool* pool, Item root_item) {
     printf("format_ini: ENTRY - direct traversal version\n");
     fflush(stdout);
     
-    StrBuf* sb = strbuf_new_pooled(pool);
+    StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
         printf("format_ini: failed to create string buffer\n");
         fflush(stdout);
@@ -192,7 +193,7 @@ String* format_ini(VariableMemPool* pool, Item root_item) {
     }
     
     // add lowercase comment as requested
-    strbuf_append_str(sb, "; ini formatted output\n");
+    stringbuf_append_str(sb, "; ini formatted output\n");
     
     TypeId root_type = get_type_id(root_item);
     
@@ -231,19 +232,19 @@ String* format_ini(VariableMemPool* pool, Item root_item) {
                             Map* section_map = *(Map**)field_data;
                             if (section_map) {
                                 if (field_count > 0) {
-                                    strbuf_append_char(sb, '\n');
+                                    stringbuf_append_char(sb, '\n');
                                 }
                                 format_map_as_section(sb, section_map, field->name->str);
                             }
                         } else {
                             // simple field at root level - add to global section
                             if (field_count == 0) {
-                                strbuf_append_str(sb, "[global]\n");
+                                stringbuf_append_str(sb, "[global]\n");
                             }
                             Item field_item = create_item_from_field_data(field_data, field_type);
-                            strbuf_append_format(sb, "%.*s=", (int)field->name->length, field->name->str);
+                            stringbuf_append_format(sb, "%.*s=", (int)field->name->length, field->name->str);
                             format_item(sb, field_item, field->name->str);
-                            strbuf_append_char(sb, '\n');
+                            stringbuf_append_char(sb, '\n');
                         }
                     }
                     field = field->next;
@@ -254,17 +255,17 @@ String* format_ini(VariableMemPool* pool, Item root_item) {
                 format_map_as_section(sb, root_map, NULL);
             }
         } else {
-            strbuf_append_str(sb, "; empty configuration\n");
+            stringbuf_append_str(sb, "; empty configuration\n");
         }
     } else {
         // root is not a map - treat as single value
-        strbuf_append_str(sb, "value=");
+        stringbuf_append_str(sb, "value=");
         format_item(sb, root_item, "value");
-        strbuf_append_char(sb, '\n');
+        stringbuf_append_char(sb, '\n');
     }
     
     printf("format_ini: completed successfully\n");
     fflush(stdout);
     
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }

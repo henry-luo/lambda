@@ -405,7 +405,7 @@ void parse_man(Input* input, const char* man_string) {
     }
     
     // Initialize string buffer (critical for proper Lambda Item creation)
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     
     // Split input into lines for processing
     int line_count;

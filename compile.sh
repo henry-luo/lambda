@@ -456,7 +456,7 @@ if command -v jq >/dev/null 2>&1; then
             if [ "$link" = "static" ]; then
                 [ -n "$lib" ] && LIBS="$LIBS $lib"
             else
-                [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS -L$lib -l$name"
+                [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS $lib"
             fi
         done < <(jq -c ".platforms.$PLATFORM.libraries[]? // .libraries[]?" "$CONFIG_FILE")
     else
@@ -472,7 +472,7 @@ if command -v jq >/dev/null 2>&1; then
             if [ "$link" = "static" ]; then
                 [ -n "$lib" ] && LIBS="$LIBS $lib"
             else
-                [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS -L$lib -l$name"
+                [ -n "$lib" ] && LINK_LIBS="$LINK_LIBS $lib"
             fi
         done < <(jq -c '.libraries[]?' "$CONFIG_FILE")
     fi

@@ -1,4 +1,5 @@
 #include "format.h"
+#include "../../lib/stringbuf.h"
 
 // Create a Lambda Item from raw field data with proper type tagging
 Item create_item_from_field_data(void* field_data, TypeId type_id) {
@@ -22,14 +23,14 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
 }
 
 // Common number formatting function
-void format_number(StrBuf* sb, Item item) {
+void format_number(StringBuf* sb, Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_INT) {
         int val = item.int_val;
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", val);
-        strbuf_append_str(sb, num_buf);
+        stringbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_FLOAT) {
         // Double stored as pointer
         double* dptr = (double*)item.pointer;
@@ -37,15 +38,15 @@ void format_number(StrBuf* sb, Item item) {
             char num_buf[32];
             // Check for special values
             if (isnan(*dptr)) {
-                strbuf_append_str(sb, "null");
+                stringbuf_append_str(sb, "null");
             } else if (isinf(*dptr)) {
-                strbuf_append_str(sb, "null");
+                stringbuf_append_str(sb, "null");
             } else {
                 snprintf(num_buf, sizeof(num_buf), "%.15g", *dptr);
-                strbuf_append_str(sb, num_buf);
+                stringbuf_append_str(sb, num_buf);
             }
         } else {
-            strbuf_append_str(sb, "null");
+            stringbuf_append_str(sb, "null");
         }
     } else if (type == LMD_TYPE_INT64) {
         // 64-bit integer stored as pointer
@@ -53,9 +54,9 @@ void format_number(StrBuf* sb, Item item) {
         if (lptr) {
             char num_buf[32];
             snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
-            strbuf_append_str(sb, num_buf);
+            stringbuf_append_str(sb, num_buf);
         } else {
-            strbuf_append_str(sb, "null");
+            stringbuf_append_str(sb, "null");
         }
     }
 }
@@ -84,16 +85,13 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
         result = format_json(pool, item);
     }
     else if (strcmp(type->chars, "markdown") == 0) {
-        StrBuf* sb = strbuf_new_pooled(pool);
+        StringBuf* sb = stringbuf_new(pool);
         format_markdown(sb, item);
-        result = strbuf_to_string(sb);
-        strbuf_free(sb);
+        result = stringbuf_to_string(sb);
+        stringbuf_free(sb);
     }
     else if (strcmp(type->chars, "rst") == 0) {
-        StrBuf* sb = strbuf_new_pooled(pool);
-        format_rst(sb, item);
-        result = strbuf_to_string(sb);
-        strbuf_free(sb);
+        result = format_rst_string(pool, item);
     }
     else if (strcmp(type->chars, "xml") == 0) {
         result = format_xml(pool, item);
@@ -129,26 +127,23 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
         // Markup type with flavor-based format selection
         if (!flavor || strcmp(flavor->chars, "standard") == 0 || strcmp(flavor->chars, "markdown") == 0) {
             // Default to Markdown format
-            StrBuf* sb = strbuf_new_pooled(pool);
+            StringBuf* sb = stringbuf_new(pool);
             format_markdown(sb, item);
-            result = strbuf_to_string(sb);
-            strbuf_free(sb);
+            result = stringbuf_to_string(sb);
+            stringbuf_free(sb);
         }
         else if (strcmp(flavor->chars, "rst") == 0) {
-            StrBuf* sb = strbuf_new_pooled(pool);
-            format_rst(sb, item);
-            result = strbuf_to_string(sb);
-            strbuf_free(sb);
+            result = format_rst_string(pool, item);
         }
         else if (strcmp(flavor->chars, "org") == 0) {
             result = format_org_string(pool, item);
         }
         else {
             printf("Unsupported markup flavor: %s, defaulting to markdown\n", flavor->chars);
-            StrBuf* sb = strbuf_new_pooled(pool);
+            StringBuf* sb = stringbuf_new(pool);
             format_markdown(sb, item);
-            result = strbuf_to_string(sb);
-            strbuf_free(sb);
+            result = stringbuf_to_string(sb);
+            stringbuf_free(sb);
         }
     }
     else if (strcmp(type->chars, "math") == 0) {

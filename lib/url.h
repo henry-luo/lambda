@@ -23,6 +23,7 @@ typedef enum {
     URL_SCHEME_JAVASCRIPT,
     URL_SCHEME_WS,
     URL_SCHEME_WSS,
+    URL_SCHEME_SYS,
     URL_SCHEME_CUSTOM
 } UrlScheme;
 

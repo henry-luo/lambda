@@ -9,6 +9,7 @@
         "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
         "lib/strbuf.c",
+        "lib/stringbuf.c",
         "lib/strview.c",
         "lib/arraylist.c",
         "lib/file.c",
@@ -41,27 +42,13 @@
         "lambda/validator/schema_parser.cpp",
         "lambda/main.cpp"
     ],
-    "libraries": [     
+    "libraries": [
         {
             "name": "curl",
-            "include": "/opt/homebrew/opt/curl/include",
-            "lib": "/opt/homebrew/opt/curl/lib/libcurl.a",
-            "link": "static",
-            "description": "libcurl for HTTP/HTTPS support",
-            "platforms": {
-                "darwin": {
-                    "include": "/opt/homebrew/opt/curl/include",
-                    "lib": "/opt/homebrew/opt/curl/lib/libcurl.a"
-                },
-                "linux": {
-                    "include": "/usr/include",
-                    "lib": "/usr/lib/x86_64-linux-gnu/libcurl.a"
-                },
-                "windows": {
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/libcurl.a"
-                }
-            }
+            "description": "libcurl HTTP client library (minimal build)",
+            "include": "mac-deps/curl-8.10.1/include",
+            "lib": "mac-deps/curl-8.10.1/lib/libcurl.a",
+            "link": "static"
         },
         {
             "name": "tree-sitter",
@@ -83,44 +70,96 @@
         },
         {
             "name": "mpdec",
-            "include": "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",
+            "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
             "link": "static"
         },
         {
-            "name": "readline",
+            "name": "utf8proc",
             "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib",
-            "link": "dynamic"
+            "lib": "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+            "link": "static"
         },
         {
             "name": "criterion",
             "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+            "link": "static"
+        },
+        {
+            "name": "ssl",
+            "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+            "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
+            "link": "static"
+        },
+        {
+            "name": "crypto",
+            "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+            "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+            "link": "static"
+        },
+        {
+            "name": "z",
+            "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+            "lib": "-lz",
             "link": "dynamic"
         },
         {
-            "name": "utf8proc",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libutf8proc.a",
-            "link": "static",
-            "version": "2.10.0",
-            "description": "Small, clean C library for Unicode normalization, case-folding, and other operations",
-            "platforms": {
-                "darwin": {
-                    "include": "/opt/homebrew/include",
-                    "lib": "/opt/homebrew/lib/libutf8proc.a"
-                },
-                "linux": {
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/libutf8proc.a"
-                },
-                "windows": {
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/libutf8proc.a"
-                }
-            }
+            "name": "CoreFoundation",
+            "include": "",
+            "lib": "-framework CoreFoundation",
+            "link": "dynamic"
         },
+        {
+            "name": "CoreServices",
+            "include": "",
+            "lib": "-framework CoreServices",
+            "link": "dynamic"
+        },
+        {
+            "name": "SystemConfiguration",
+            "include": "",
+            "lib": "-framework SystemConfiguration",
+            "link": "dynamic"
+        },
+        {
+            "name": "nghttp2",
+            "include": "mac-deps/nghttp2/include",
+            "lib": "mac-deps/nghttp2/lib/libnghttp2.a",
+            "link": "static"
+        },
+        {
+            "name": "readline",
+            "include": "/opt/homebrew/Cellar/readline/8.3.1/include",
+            "lib": "/opt/homebrew/Cellar/readline/8.3.1/lib/libreadline.a",
+            "link": "static"
+        },
+        {
+            "name": "ncurses",
+            "include": "",
+            "lib": "-lncurses",
+            "link": "dynamic"
+        },
+        {
+            "name": "ginac",
+            "include": "/opt/homebrew/Cellar/ginac/1.8.9/include",
+            "lib": "/opt/homebrew/lib/libginac.a",
+            "link": "static"
+        },
+        {
+            "name": "cln",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libcln.a",
+            "link": "static"
+        },
+        {
+            "name": "gmp",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libgmp.a",
+            "link": "static"
+        }
+    ],
+    "targets": [
         {
             "name": "lambda-lib",
             "description": "Unified runtime with all basic libraries for tests",
@@ -130,6 +169,7 @@
                 "lib/mem-pool/src/buffer.c",
                 "lib/mem-pool/src/utils.c",
                 "lib/strbuf.c",
+                "lib/stringbuf.c",
                 "lib/strview.c",
                 "lib/string.c",
                 "lib/num_stack.c",
@@ -166,7 +206,7 @@
                 "lib/log.c",
                 "lib/utf.c"
             ],
-            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "criterion"],
+            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "curl", "nghttp2", "ssl", "crypto", "z", "CoreFoundation", "CoreServices", "SystemConfiguration", "criterion"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "static"
@@ -223,9 +263,6 @@
         "g",
         "O0"
     ],
-    "linker_flags": [
-    ],
-    "debug": true,
     "build_dir": "build",
     "platforms": {
         "debug": {
@@ -299,37 +336,60 @@
         }
     },
     "test": {
+        "output_dir": "test_output",
         "test_suites": [
             {
                 "suite": "library",
                 "name": "📚 Library Tests",
-                "sources": [
-                    "test_strbuf.c",
-                    "test_strview.c",
-                    "test_variable_pool.c",
-                    "test_num_stack.c",
-                    "test_datetime.c",
-                    "test_url.c",
-                    "test_url_extra.c"
-                ],
-                "library_dependencies": [
-                    ["lambda-lib"],
-                    ["lambda-lib"],
-                    ["lambda-lib"],
-                    ["lambda-lib"],
-                    ["lambda-lib"],
-                    ["lambda-lib"],
-                    ["lambda-lib"],
-                    "one for each of the test executable"
-                ],
-                "binaries": [
-                    "test_strbuf.exe",
-                    "test_strview.exe",
-                    "test_variable_pool.exe",
-                    "test_num_stack.exe",
-                    "test_datetime.exe",
-                    "test_url.exe",
-                    "test_url_extra.exe"
+                "tests": [
+                    {
+                        "source": "test_strbuf.c",
+                        "name": "📝 String Buffer Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_strbuf.exe"
+                    },
+                    {
+                        "source": "test_stringbuf.cpp",
+                        "name": "🧵 StringBuf Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_stringbuf.exe"
+                    },
+                    {
+                        "source": "test_strview.c",
+                        "name": "👀 String View Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_strview.exe"
+                    },
+                    {
+                        "source": "test_variable_pool.c",
+                        "name": "🏊 Variable Pool Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_variable_pool.exe"
+                    },
+                    {
+                        "source": "test_num_stack.c",
+                        "name": "🔢 Number Stack Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_num_stack.exe"
+                    },
+                    {
+                        "source": "test_datetime.c",
+                        "name": "📅 DateTime Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_datetime.exe"
+                    },
+                    {
+                        "source": "test_url.c",
+                        "name": "🔗 URL Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_url.exe"
+                    },
+                    {
+                        "source": "test_url_extra.c",
+                        "name": "🌐 URL Extra Tests",
+                        "dependencies": ["lambda-lib"],
+                        "binary": "test_url_extra.exe"
+                    }
                 ],
                 "type": "library",
                 "special_flags": "-fms-extensions",
@@ -338,27 +398,51 @@
             {
                 "suite": "input",
                 "name": "📄 Input Processing Tests",
-                "sources": [
-                    "test_mime_detect.c",
-                    "test_math.cpp",
-                    "test_markup_roundtrip.cpp",
-                    "test/test_input_roundtrip.cpp",
-                    "test_dir.cpp"
-                ],
-                "library_dependencies": [
-                    ["lambda-input-full"],
-                    ["lambda-input-full"],
-                    ["lambda-runtime-full"],
-                    ["lambda-runtime-full"],
-                    ["lambda-runtime-full"],
-                    "one for each of the test executable"
-                ],
-                "binaries": [
-                    "test_mime_detect.exe",
-                    "test_math.exe",
-                    "test_markup_roundtrip.exe",
-                    "test_input_roundtrip.exe",
-                    "test_dir.exe"
+                "tests": [
+                    {
+                        "source": "test_mime_detect.c",
+                        "name": "📎 MIME Detection Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_mime_detect.exe"
+                    },
+                    {
+                        "source": "test_math.cpp",
+                        "name": "🔢 Math Roundtrip Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_math.exe",
+                        "libraries": ["ginac", "cln", "gmp"],
+                        "defines": ["GINAC_AVAILABLE"]
+                    },
+                    {
+                        "source": "test_markup_roundtrip.cpp",
+                        "name": "📝 Markup Roundtrip Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_markup_roundtrip.exe"
+                    },
+                    {
+                        "source": "test/test_input_roundtrip.cpp",
+                        "name": "🔄 Input Roundtrip Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_input_roundtrip.exe"
+                    },
+                    {
+                        "source": "test/test_dir.cpp",
+                        "name": "📁 Directory Listing Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_dir.exe"
+                    },
+                    {
+                        "source": "test/test_http.cpp",
+                        "name": "🌐 HTTP/HTTPS Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_http.exe"
+                    },
+                    {
+                        "source": "test/test_sysinfo.cpp",
+                        "name": "🖥️ System Information Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_sysinfo.exe"
+                    }
                 ],
                 "type": "input",
                 "special_flags": "-fms-extensions -lstdc++",
@@ -368,11 +452,14 @@
             {
                 "suite": "validator",
                 "name": "🔍 Validator Tests",
-                "sources": ["test/test_validator.cpp"],
-                "library_dependencies": [
-                    ["lambda-input-full"]
+                "tests": [
+                    {
+                        "source": "test/test_validator.cpp",
+                        "name": "🔍 Validator Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test/test_validator.exe"
+                    }
                 ],
-                "binaries": ["test/test_validator.exe"],
                 "type": "validator",
                 "special_flags": "-std=c++17 -lstdc++",
                 "uses_build_config": true,
@@ -387,11 +474,14 @@
             {
                 "suite": "mir",
                 "name": "⚡ MIR JIT Tests",
-                "sources": ["test/test_mir.c"],
-                "library_dependencies": [
-                    ["lambda-runtime-full"]
+                "tests": [
+                    {
+                        "source": "test/test_mir.c",
+                        "name": "⚡ MIR JIT Tests",
+                        "dependencies": ["lambda-runtime-full"],
+                        "binary": "test/test_mir.exe"
+                    }
                 ],
-                "binaries": ["test/test_mir.exe"],
                 "type": "mir",
                 "special_flags": "-std=c99 -Wall -Wextra -O2 -g -fms-extensions -pedantic -lstdc++",
                 "uses_build_config": true,
@@ -401,11 +491,14 @@
             {
                 "suite": "lambda",
                 "name": "🐑 Lambda Runtime Tests",
-                "sources": ["test/test_lambda.cpp"],
-                "library_dependencies": [
-                    ["lambda-runtime-full"]
+                "tests": [
+                    {
+                        "source": "test/test_lambda.cpp",
+                        "name": "🐑 Lambda Runtime Tests",
+                        "dependencies": ["lambda-runtime-full"],
+                        "binary": "test/test_lambda.exe"
+                    }
                 ],
-                "binaries": ["test/test_lambda.exe"],
                 "type": "lambda",
                 "special_flags": "-fms-extensions -lstdc++",
                 "uses_build_config": true,
@@ -415,11 +508,14 @@
             {
                 "suite": "lambda-std",
                 "name": "🧪 Lambda Standard Tests",
-                "sources": ["test/lambda_test_runner.cpp"],
-                "library_dependencies": [
-                    ["lambda-runtime-full"]
+                "tests": [
+                    {
+                        "source": "test/lambda_test_runner.cpp",
+                        "name": "🧪 Lambda Standard Tests",
+                        "dependencies": ["lambda-runtime-full"],
+                        "binary": "test/lambda_test_runner.exe"
+                    }
                 ],
-                "binaries": ["test/lambda_test_runner.exe"],
                 "type": "lambda-std",
                 "special_flags": "-std=c++17 -lstdc++",
                 "uses_build_config": true,
@@ -435,7 +531,6 @@
                     "command_args": ["--test-dir", "test/std", "--format", "both", "--json-output", "test_output/lambda_test_runner_results.json", "--tap-output", "test_output/lambda_test_runner_results.tap"]
                 }
             }
-        ],
-        "output_dir": "test_output"
+        ]
     }
 }

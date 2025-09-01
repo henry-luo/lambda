@@ -103,25 +103,24 @@ declare -a c_test_suites=()  # Maps C test to its suite category
 # Function to map executable name to test suite category (from build_lambda_config.json)
 get_test_suite_category() {
     local exe_name="$1"
+    
+    # Get suite category from build configuration using new tests array structure
+    local suite_category=$(jq -r --arg exe "$exe_name" '
+        .test.test_suites[] | 
+        select(.tests[]? | .source | test("\\b" + $exe + "\\.(c|cpp)$")) | 
+        .suite
+    ' build_lambda_config.json 2>/dev/null | head -1)
+    
+    # If found in config, return it
+    if [ -n "$suite_category" ] && [ "$suite_category" != "null" ]; then
+        echo "$suite_category"
+        return
+    fi
+    
+    # Fallback for special cases
     case "$exe_name" in
-        # Library suite tests
-        "test_strbuf"|"test_strview"|"test_variable_pool"|"test_num_stack"|"test_datetime"|"test_url"|"test_url_extra") 
-            echo "library" ;;
-        # Input suite tests  
-        "test_mime_detect"|"test_math"|"test_markup_roundtrip"|"test_input_roundtrip")
-            echo "input" ;;
-        # MIR suite tests
-        "test_mir")
-            echo "mir" ;;
-        # Lambda suite tests
-        "test_lambda")
-            echo "lambda" ;;
-        # Lambda Standard Tests (Custom Test Runner)
         "lambda_test_runner")
             echo "lambda-std" ;;
-        # Validator suite tests
-        "test_validator")
-            echo "validator" ;;
         *)
             echo "unknown" ;;
     esac
@@ -130,6 +129,21 @@ get_test_suite_category() {
 # Function to get test suite display name (from build_lambda_config.json)
 get_suite_category_display_name() {
     local category="$1"
+    
+    # Get display name from build configuration
+    local display_name=$(jq -r --arg suite "$category" '
+        .test.test_suites[] | 
+        select(.suite == $suite) | 
+        .name
+    ' build_lambda_config.json 2>/dev/null | head -1)
+    
+    # If found in config, return it
+    if [ -n "$display_name" ] && [ "$display_name" != "null" ]; then
+        echo "$display_name"
+        return
+    fi
+    
+    # Fallback for hardcoded display names
     case "$category" in
         "library") echo "📚 Library Tests" ;;
         "input") echo "📄 Input Processing Tests" ;;
@@ -145,8 +159,26 @@ get_suite_category_display_name() {
 # Function to map executable name to friendly C test name
 get_c_test_display_name() {
     local exe_name="$1"
+    
+    # Try to get custom display name from build configuration using new tests array structure
+    local display_name=$(jq -r --arg exe "$exe_name" '
+        .test.test_suites[] | 
+        .tests[]? | 
+        select(.source | test("\\b" + $exe + "\\.(c|cpp)$")) |
+        .name
+    ' build_lambda_config.json 2>/dev/null | head -1)
+    
+    # If found custom name, return it
+    if [ -n "$display_name" ] && [ "$display_name" != "null" ]; then
+        echo "$display_name"
+        return
+    fi
+    
+    # Fallback to hardcoded friendly names
     case "$exe_name" in
         "test_datetime") echo "📅 DateTime Tests" ;;
+        "test_dir") echo "📁 Directory Listing Tests" ;;
+        "test_http") echo "🌐 HTTP/HTTPS Tests" ;;
         "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
@@ -419,8 +451,8 @@ echo "🔍 Finding test executables and sources..."
 
 # Get list of valid test source files from build configuration
 get_valid_test_sources() {
-    # Extract test sources from the JSON configuration
-    jq -r '.test.test_suites[].sources[]' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
+    # Extract test sources from the JSON configuration using new tests array structure
+    jq -r '.test.test_suites[].tests[]?.source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
         # Handle different source path formats
         if [[ "$source" == test/* ]]; then
             echo "$source"

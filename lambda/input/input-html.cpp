@@ -183,13 +183,13 @@ static void to_lowercase(char* str) {
 }
 
 static String* parse_string_content(Input *input, const char **html, char end_char) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     int char_count = 0;
     const int max_string_chars = 10000; // Safety limit
     
     // Handle empty string case - if we immediately encounter the end_char, just return empty string
     if (**html == end_char) {
-        return strbuf_to_string(sb);
+        return stringbuf_to_string(sb);
     }
     
     while (**html && **html != end_char && char_count < max_string_chars) {
@@ -232,26 +232,26 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
                     (*html)++;
                     // Convert Unicode code point to UTF-8
                     if (code < 0x80) {
-                        strbuf_append_char(sb, (char)code);
+                        stringbuf_append_char(sb, (char)code);
                     } else if (code < 0x800) {
-                        strbuf_append_char(sb, (char)(0xC0 | (code >> 6)));
-                        strbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xC0 | (code >> 6)));
+                        stringbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
                     } else if (code < 0x10000) {
-                        strbuf_append_char(sb, (char)(0xE0 | (code >> 12)));
-                        strbuf_append_char(sb, (char)(0x80 | ((code >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xE0 | (code >> 12)));
+                        stringbuf_append_char(sb, (char)(0x80 | ((code >> 6) & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
                     } else if (code < 0x110000) {
                         // 4-byte UTF-8 encoding for code points up to U+10FFFF
-                        strbuf_append_char(sb, (char)(0xF0 | (code >> 18)));
-                        strbuf_append_char(sb, (char)(0x80 | ((code >> 12) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | ((code >> 6) & 0x3F)));
-                        strbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0xF0 | (code >> 18)));
+                        stringbuf_append_char(sb, (char)(0x80 | ((code >> 12) & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0x80 | ((code >> 6) & 0x3F)));
+                        stringbuf_append_char(sb, (char)(0x80 | (code & 0x3F)));
                     } else {
-                        strbuf_append_char(sb, '?'); // Invalid code point
+                        stringbuf_append_char(sb, '?'); // Invalid code point
                     }
                 } else {
-                    strbuf_append_char(sb, '&');
-                    strbuf_append_char(sb, '#');
+                    stringbuf_append_char(sb, '&');
+                    stringbuf_append_char(sb, '#');
                 }
             } else {
                 // Named entity reference
@@ -269,30 +269,30 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
                     const char* entity_value = find_html_entity(entity_start, entity_len);
                     
                     if (entity_value) {
-                        strbuf_append_str(sb, entity_value);
+                        stringbuf_append_str(sb, entity_value);
                         *html = entity_end + 1; // Skip past the semicolon
                     } else {
                         // Unknown entity, preserve as-is for round-trip compatibility
-                        strbuf_append_char(sb, '&');
+                        stringbuf_append_char(sb, '&');
                         for (const char* p = entity_start; p < entity_end; p++) {
-                            strbuf_append_char(sb, *p);
+                            stringbuf_append_char(sb, *p);
                         }
-                        strbuf_append_char(sb, ';');
+                        stringbuf_append_char(sb, ';');
                         *html = entity_end + 1;
                     }
                 } else {
                     // Invalid entity format, just append the &
-                    strbuf_append_char(sb, '&');
+                    stringbuf_append_char(sb, '&');
                 }
             }
         } else {
-            strbuf_append_char(sb, **html);
+            stringbuf_append_char(sb, **html);
             (*html)++;
         }
         char_count++;
     }
 
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static String* parse_attribute_value(Input *input, const char **html) {
@@ -322,14 +322,14 @@ static String* parse_attribute_value(Input *input, const char **html) {
         return value;
     } else {
         // Unquoted attribute value
-        StrBuf* sb = input->sb;
+        StringBuf* sb = input->sb;
         int char_count = 0;
         const int max_unquoted_chars = 1000; // Safety limit
         
         while (**html && **html != ' ' && **html != '\t' && **html != '\n' && 
                **html != '\r' && **html != '>' && **html != '/' && **html != '=' &&
                char_count < max_unquoted_chars) {
-            strbuf_append_char(sb, **html);
+            stringbuf_append_char(sb, **html);
             (*html)++;
             char_count++;
         }
@@ -338,7 +338,7 @@ static String* parse_attribute_value(Input *input, const char **html) {
             printf("WARNING: Hit unquoted attribute value limit (%d)\n", max_unquoted_chars);
         }
         
-        return strbuf_to_string(sb);
+        return stringbuf_to_string(sb);
     }
 }
 
@@ -352,13 +352,13 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
         attr_count++;
         
         // Parse attribute name
-        StrBuf* sb = input->sb;
+        StringBuf* sb = input->sb;
         const char* attr_start = *html;
         const char* name_start = *html;
         
         while (**html && **html != '=' && **html != ' ' && **html != '\t' && 
                **html != '\n' && **html != '\r' && **html != '>' && **html != '/') {
-            strbuf_append_char(sb, tolower(**html));
+            stringbuf_append_char(sb, tolower(**html));
             (*html)++;
         }
         
@@ -366,7 +366,7 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
             break;
         }
         
-        String *attr_name = strbuf_to_string(sb);        
+        String *attr_name = stringbuf_to_string(sb);        
         skip_whitespace(html);
         
         String* attr_value;
@@ -395,13 +395,13 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
 }
 
 static String* parse_tag_name(Input *input, const char **html) {
-    StrBuf* sb = input->sb;
+    StringBuf* sb = input->sb;
     while (**html && **html != ' ' && **html != '\t' && **html != '\n' && 
            **html != '\r' && **html != '>' && **html != '/') {
-        strbuf_append_char(sb, tolower(**html));
+        stringbuf_append_char(sb, tolower(**html));
         (*html)++;
     }
-    return strbuf_to_string(sb);
+    return stringbuf_to_string(sb);
 }
 
 static void skip_comment(const char **html) {
@@ -595,8 +595,8 @@ static Item parse_element(Input *input, const char **html) {
         
         // Handle raw text elements (script, style, textarea, etc.) specially
         if (is_raw_text_element(tag_name->chars)) {
-            StrBuf* content_sb = input->sb;
-            strbuf_reset(content_sb); // Ensure clean state
+            StringBuf* content_sb = input->sb;
+            stringbuf_reset(content_sb); // Ensure clean state
             
             // For raw text elements, we need to find the exact closing tag
             // and preserve all content as-is, including HTML tags within
@@ -610,18 +610,18 @@ static Item parse_element(Input *input, const char **html) {
                     break;
                 }
                 
-                strbuf_append_char(content_sb, **html);
+                stringbuf_append_char(content_sb, **html);
                 (*html)++;
                 content_chars++;
             }
             
             // Check if we hit the safety limit
             if (content_chars < max_content_chars && content_sb->length > sizeof(uint32_t)) {
-                String *content_string = strbuf_to_string(content_sb);
+                String *content_string = stringbuf_to_string(content_sb);
                 Item content_item = {.item = s2it(content_string)};
                 list_push((List*)element, content_item);
             } else {
-                strbuf_reset(content_sb);
+                stringbuf_reset(content_sb);
             }
         } else {
             // regular content parsing for non-raw-text elements
@@ -671,22 +671,22 @@ static Item parse_element(Input *input, const char **html) {
                     // Parse text content character by character for better control
                     if (**html && !isspace(**html)) {
                         // Start building text content
-                        StrBuf* text_sb = input->sb;
-                        strbuf_reset(text_sb);
+                        StringBuf* text_sb = input->sb;
+                        stringbuf_reset(text_sb);
                         
                         // Collect text until we hit '<' or closing tag
                         int text_chars = 0;
                         const int max_text_chars = 10000; // Limit text content size
                         while (**html && **html != '<' && text_chars < max_text_chars &&
                                strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
-                            strbuf_append_char(text_sb, **html);
+                            stringbuf_append_char(text_sb, **html);
                             (*html)++;
                             text_chars++;
                         }
                         
                         // Create text string if we have content
                         if (text_chars > 0) {
-                            String *text_string = strbuf_to_string(text_sb);
+                            String *text_string = stringbuf_to_string(text_sb);
                             
                             // Only add non-whitespace text
                             bool has_non_whitespace = false;
@@ -737,7 +737,7 @@ static Item parse_element(Input *input, const char **html) {
 }
 
 void parse_html(Input* input, const char* html_string) {
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     const char *html = html_string;
     // skip any leading whitespace
     skip_whitespace(&html);

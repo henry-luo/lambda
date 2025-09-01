@@ -7,7 +7,6 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include "strview.h"
-#include "mem-pool/include/mem_pool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +19,6 @@ typedef struct {
     char* str;        // pointer to string data (may or may-not be null-terminated)
     size_t length;    // length excluding null terminator    
     size_t capacity;
-    VariableMemPool *pool;  // memory pool for the string buffer
 } StrBuf;
 #pragma clang diagnostic pop
 
@@ -35,7 +33,6 @@ typedef struct {
 
 StrBuf* strbuf_new();
 StrBuf* strbuf_new_cap(size_t size);
-StrBuf* strbuf_new_pooled(VariableMemPool *pool);
 StrBuf* strbuf_create(const char *str);
 StrBuf* strbuf_dup(const StrBuf *sb);
 void strbuf_free(StrBuf *sb);

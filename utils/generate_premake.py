@@ -22,7 +22,7 @@ class PremakeGenerator:
         """Parse external library definitions from JSON config"""
         libraries = {}
         for lib in self.config.get('libraries', []):
-            if lib.get('link') == 'static' and 'lib' in lib:
+            if 'lib' in lib:  # Include both static and dynamic libraries
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
@@ -134,9 +134,9 @@ class PremakeGenerator:
     
     def generate_complex_libraries(self) -> None:
         """Generate complex library projects like lambda-runtime-full"""
-        libraries = self.config.get('libraries', [])
+        targets = self.config.get('targets', [])
         
-        for lib in libraries:
+        for lib in targets:
             lib_name = lib.get('name', '')
             if lib_name in ['lambda-runtime-full', 'lambda-input-full', 'lambda-lib']:
                 self._generate_complex_library(lib)
@@ -144,7 +144,8 @@ class PremakeGenerator:
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
         lib_name = lib['name']
-        source_files = lib.get('source_files', [])
+        # Handle both 'sources' (targets) and 'source_files' (libraries) field names
+        source_files = lib.get('source_files', []) or lib.get('sources', [])
         source_patterns = lib.get('source_patterns', [])
         dependencies = lib.get('libraries', [])
         
@@ -234,24 +235,90 @@ class PremakeGenerator:
         
         # Add library dependencies
         if dependencies:
+            # Separate internal and external dependencies
+            internal_deps = []
+            external_deps = []
+            
+            for dep in dependencies:
+                if dep in self.external_libraries:
+                    external_deps.append(dep)
+                else:
+                    internal_deps.append(dep)
+            
+            # Add libdirs if we have dependencies
             self.premake_content.extend([
                 '    libdirs {',
                 '        "/opt/homebrew/lib",',
                 '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
                 '        "/usr/local/lib",',
-                '    }',
-                '    ',
-                '    links {',
-            ])
-            for dep in dependencies:
-                if dep == 'criterion':
-                    self.premake_content.append('        "criterion",')
-                else:
-                    self.premake_content.append(f'        "{dep}",')
-            self.premake_content.extend([
+                '        "build/lib",',
                 '    }',
                 '    '
             ])
+            
+            # Add linkoptions for external static libraries
+            if external_deps:
+                static_libs = []
+                frameworks = []
+                dynamic_libs = []
+                
+                for dep in external_deps:
+                    if dep in self.external_libraries:
+                        lib_info = self.external_libraries[dep]
+                        lib_path = lib_info['lib']
+                        
+                        if lib_info.get('link') == 'dynamic':
+                            if lib_path.startswith('-framework '):
+                                frameworks.append(lib_path.replace('-framework ', ''))
+                            elif lib_path.startswith('-l'):
+                                dynamic_libs.append(lib_path.replace('-l', ''))
+                            else:
+                                dynamic_libs.append(lib_path)
+                        else:
+                            # Static library
+                            if not lib_path.startswith('/'):
+                                lib_path = f"../../{lib_path}"
+                            static_libs.append(lib_path)
+                
+                # Add static libraries to linkoptions
+                if static_libs:
+                    self.premake_content.append('    linkoptions {')
+                    for lib_path in static_libs:
+                        self.premake_content.append(f'        "{lib_path}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+                
+                # Add frameworks, dynamic libraries, and internal libraries to links
+                if frameworks or dynamic_libs or internal_deps:
+                    self.premake_content.append('    links {')
+                    for framework in frameworks:
+                        self.premake_content.append(f'        "{framework}.framework",')
+                    for lib in dynamic_libs:
+                        self.premake_content.append(f'        "{lib}",')
+                    for dep in internal_deps:
+                        if dep == 'criterion':
+                            self.premake_content.append('        "criterion",')
+                        else:
+                            self.premake_content.append(f'        "{dep}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
+            else:
+                # Add links for internal libraries only
+                if internal_deps:
+                    self.premake_content.append('    links {')
+                    for dep in internal_deps:
+                        if dep == 'criterion':
+                            self.premake_content.append('        "criterion",')
+                        else:
+                            self.premake_content.append(f'        "{dep}",')
+                    self.premake_content.extend([
+                        '    }',
+                        '    '
+                    ])
         
         self.premake_content.append('')
     
@@ -363,16 +430,24 @@ class PremakeGenerator:
     def _generate_test_suite(self, suite: Dict[str, Any]) -> None:
         """Generate test projects for a specific test suite"""
         suite_name = suite.get('suite', '')
-        sources = suite.get('sources', [])
-        binaries = suite.get('binaries', [])
-        library_deps = suite.get('library_dependencies', [])
         special_flags = suite.get('special_flags', '')
         cpp_flags = suite.get('cpp_flags', '')
         
-        # Generate individual test executables
-        for i, source in enumerate(sources):
-            if i < len(binaries):
-                binary_name = binaries[i].replace('.exe', '')
+        # Handle both old and new configuration formats
+        if 'tests' in suite:
+            # New format: tests array with individual test objects
+            tests = suite.get('tests', [])
+            for test in tests:
+                source = test.get('source', '')
+                binary_name = test.get('binary', '').replace('.exe', '')
+                dependencies = test.get('dependencies', [])
+                libraries = test.get('libraries', [])
+                defines = test.get('defines', [])
+                test_name_override = test.get('name', '')
+                
+                if not source or not binary_name:
+                    continue
+                    
                 # Avoid subdirectory structure by flattening test names
                 test_name = binary_name.replace('/', '_').replace('test_', '') 
                 test_name = f"test_{test_name}"
@@ -389,165 +464,264 @@ class PremakeGenerator:
                 if not os.path.exists(full_path):
                     print(f"Warning: Test file not found: {actual_path}")
                     continue
+                    
+                self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags, libraries, defines)
+        else:
+            # Old format: parallel arrays (for backward compatibility)
+            sources = suite.get('sources', [])
+            binaries = suite.get('binaries', [])
+            library_deps = suite.get('library_dependencies', [])
+            
+            # Generate individual test executables
+            for i, source in enumerate(sources):
+                if i < len(binaries):
+                    binary_name = binaries[i].replace('.exe', '')
+                    dependencies = library_deps[i] if i < len(library_deps) else []
+                    
+                    # Avoid subdirectory structure by flattening test names
+                    test_name = binary_name.replace('/', '_').replace('test_', '') 
+                    test_name = f"test_{test_name}"
+                    
+                    # Determine correct file path - use relative paths from project root
+                    if source.startswith("test/"):
+                        test_file_path = source
+                    else:
+                        test_file_path = f"test/{source}"
+                    
+                    # Ensure path exists before adding to project
+                    actual_path = source if source.startswith("test/") else f"test/{source}"
+                    full_path = os.path.join(os.getcwd(), actual_path)
+                    if not os.path.exists(full_path):
+                        print(f"Warning: Test file not found: {actual_path}")
+    
+    def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str], 
+                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None) -> None:
+        """Generate a single test project"""
+        if libraries is None:
+            libraries = []
+        if defines is None:
+            defines = []
+            
+        source = test_file_path
+        language = "C" if source.endswith('.c') else "C++"
+        
+        self.premake_content.extend([
+            f'project "{test_name}"',
+            '    kind "ConsoleApp"',
+            f'    language "{language}"',
+            '    targetdir "test"',
+            '    objdir "build/obj/%{prj.name}"',
+            '    targetextension ".exe"',
+            '    ',
+            '    files {',
+            f'        "{test_file_path}",',
+            '    }',
+            '    '
+        ])
+        
+        # Add include directories using parsed library definitions
+        self.premake_content.extend([
+            '    includedirs {',
+            '        "lib/mem-pool/include",',
+        ])
+        
+        # Add external library include paths from parsed definitions
+        for lib_name, lib_info in self.external_libraries.items():
+            if lib_info['include']:
+                self.premake_content.append(f'        "{lib_info["include"]}",')
+        
+        # Add system include paths
+        self.premake_content.extend([
+            '        "/usr/local/include",',
+            '        "/opt/homebrew/include",',
+            '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
+            '    }',
+            '    '
+        ])
+        
+        # Add defines if specified
+        if defines:
+            self.premake_content.append('    defines {')
+            for define in defines:
+                self.premake_content.append(f'        "{define}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add library paths
+        self.premake_content.extend([
+            '    libdirs {',
+            '        "/opt/homebrew/lib",',
+            '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
+            '        "/usr/local/lib",',
+            '        "build/lib",',
+            '    }',
+            '    '
+        ])
+        
+        # Add library dependencies
+        if dependencies:
+            self.premake_content.append('    links {')
+            for dep in dependencies:
+                if dep == 'criterion':
+                    self.premake_content.append('        "criterion",')
+                elif dep == 'lambda-lib':
+                    # Lambda-lib contains all the core libraries
+                    self.premake_content.append('        "lambda-lib",')
+                elif dep in ['lambda-runtime-full', 'lambda-input-full']:
+                    # Special handling for MIR, Lambda, Math, and Markup tests
+                    if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
+                        if language == "C":
+                            # C tests need both C and C++ runtime libraries
+                            self.premake_content.append('        "lambda-runtime-full-cpp",')
+                            self.premake_content.append('        "lambda-runtime-full-c",')
+                            self.premake_content.append('        "lambda-input-full-cpp",')
+                            self.premake_content.append('        "lambda-input-full-c",')
+                        else:
+                            # C++ tests need both C and C++ versions
+                            self.premake_content.append('        "lambda-runtime-full-cpp",')
+                            self.premake_content.append('        "lambda-runtime-full-c",')
+                            self.premake_content.append('        "lambda-input-full-cpp",')
+                            self.premake_content.append('        "lambda-input-full-c",')
+                    else:
+                        # Regular tests: For C++ tests, link both C++ and C versions (C++ depends on C for core utilities)
+                        if language == "C++":
+                            self.premake_content.append(f'        "{dep}-cpp",')
+                            self.premake_content.append(f'        "{dep}-c",')
+                        else:
+                            self.premake_content.append(f'        "{dep}-c",')
+                    
+                    # Add lambda-lib which now contains all core dependencies
+                    self.premake_content.append('        "lambda-lib",')
+            
+            # Always add criterion to test executables since static libraries don't propagate criterion symbols
+            if 'criterion' not in dependencies:
+                self.premake_content.append('        "criterion",')
+            
+            # Close the links block
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+            
+            # Add external library linkoptions for test-specific libraries
+            if libraries:
+                external_static_libs = []
+                for lib_name in libraries:
+                    if lib_name in self.external_libraries:
+                        lib_info = self.external_libraries[lib_name]
+                        if lib_info.get('link') == 'static':
+                            lib_path = lib_info['lib']
+                            if not lib_path.startswith('/'):
+                                lib_path = f"../../{lib_path}"
+                            external_static_libs.append(lib_path)
                 
-                language = "C" if source.endswith('.c') else "C++"
-                
-                self.premake_content.extend([
-                    f'project "{test_name}"',
-                    '    kind "ConsoleApp"',
-                    f'    language "{language}"',
-                    '    targetdir "test"',
-                    '    objdir "build/obj/%{prj.name}"',
-                    '    targetextension ".exe"',
-                    '    ',
-                    '    files {',
-                    f'        "{test_file_path}",',
-                    '    }',
-                    '    '
-                ])
-                
-                # Add include directories using parsed library definitions
-                self.premake_content.extend([
-                    '    includedirs {',
-                    '        "lib/mem-pool/include",',
-                ])
-                
-                # Add external library include paths from parsed definitions
-                for lib_name, lib_info in self.external_libraries.items():
-                    if lib_info['include']:
-                        self.premake_content.append(f'        "{lib_info["include"]}",')
-                
-                # Add system include paths
-                self.premake_content.extend([
-                    '        "/usr/local/include",',
-                    '        "/opt/homebrew/include",',
-                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
-                    '    }',
-                    '    '
-                ])
-                
-                # Add library paths
-                self.premake_content.extend([
-                    '    libdirs {',
-                    '        "/opt/homebrew/lib",',
-                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
-                    '        "/usr/local/lib",',
-                    '        "build/lib",',
-                    '    }',
-                    '    '
-                ])
-                
-                # Add library dependencies
-                if i < len(library_deps) and library_deps[i]:
-                    deps = library_deps[i]
-                    if deps:
-                        self.premake_content.append('    links {')
-                        for dep in deps:
-                            if dep == 'criterion':
-                                self.premake_content.append('        "criterion",')
-                            elif dep == 'lambda-lib':
-                                # Lambda-lib contains all the core libraries
-                                self.premake_content.append('        "lambda-lib",')
-                            elif dep in ['lambda-runtime-full', 'lambda-input-full']:
-                                # Special handling for MIR, Lambda, Math, and Markup tests
-                                if ('mir' in test_name.lower() or 'lambda' in test_name.lower() or 'math' in test_name.lower() or 'markup' in test_name.lower()) and dep == 'lambda-runtime-full':
-                                    if language == "C":
-                                        # C tests need both C and C++ runtime libraries
-                                        self.premake_content.append('        "lambda-runtime-full-cpp",')
-                                        self.premake_content.append('        "lambda-runtime-full-c",')
-                                        self.premake_content.append('        "lambda-input-full-cpp",')
-                                        self.premake_content.append('        "lambda-input-full-c",')
-                                    else:
-                                        # C++ tests need both C and C++ versions
-                                        self.premake_content.append('        "lambda-runtime-full-cpp",')
-                                        self.premake_content.append('        "lambda-runtime-full-c",')
-                                        self.premake_content.append('        "lambda-input-full-cpp",')
-                                        self.premake_content.append('        "lambda-input-full-c",')
-                                else:
-                                    # Regular tests: For C++ tests, link both C++ and C versions (C++ depends on C for core utilities)
-                                    if language == "C++":
-                                        self.premake_content.append(f'        "{dep}-cpp",')
-                                        self.premake_content.append(f'        "{dep}-c",')
-                                    else:
-                                        self.premake_content.append(f'        "{dep}-c",')
-                                
-                                # Add lambda-lib which now contains all core dependencies
-                                self.premake_content.append('        "lambda-lib",')
-                        
-                        # Always add criterion to test executables since static libraries don't propagate criterion symbols
-                        if 'criterion' not in [dep for dep in deps]:
-                            self.premake_content.append('        "criterion",')
-                        
-                        # Close the links block
-                        self.premake_content.extend([
-                            '    }',
-                            '    '
-                        ])
-                else:
-                    # No library dependencies specified, but still need criterion for tests
+                if external_static_libs:
+                    self.premake_content.append('    linkoptions {')
+                    for lib_path in external_static_libs:
+                        self.premake_content.append(f'        "{lib_path}",')
                     self.premake_content.extend([
-                        '    links {',
-                        '        "criterion",',
                         '    }',
                         '    '
                     ])
-                
-                # Add external library paths for linking when lambda-runtime-full or lambda-input-full are used
-                if i < len(library_deps) and library_deps[i]:
-                    deps = library_deps[i]
-                    if any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in deps):
-                        self.premake_content.extend([
-                            '    linkoptions {',
-                        ])
-                        
-                        # Add tree-sitter libraries using parsed definitions
-                        for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
-                            if lib_name in self.external_libraries:
-                                lib_path = self.external_libraries[lib_name]['lib']
-                                # Convert to relative path from build directory
-                                if not lib_path.startswith('/'):
-                                    lib_path = f"../../{lib_path}"
-                                self.premake_content.append(f'        "{lib_path}",')
-                        
-                        # Add other external libraries
-                        for lib_name in ['mpdec', 'utf8proc', 'mir']:
-                            if lib_name in self.external_libraries:
-                                lib_path = self.external_libraries[lib_name]['lib']
-                                self.premake_content.append(f'        "{lib_path}",')
-                        
-                        self.premake_content.extend([
-                            '    }',
-                            '    '
-                        ])
-                
-                # Add build options based on source file type
-                is_cpp_test = source.endswith('.cpp')
-                build_opts = ['-fms-extensions', '-fcolor-diagnostics', '-pedantic']
-                
-                if is_cpp_test:
-                    if cpp_flags:
-                        build_opts.append(cpp_flags)
-                    if special_flags and '-std=c++17' in special_flags:
-                        build_opts.append('-std=c++17')
-                    if special_flags and '-lstdc++' in special_flags:
-                        self.premake_content.extend([
-                            '    links { "stdc++" }',
-                            '    '
-                        ])
-                else:
-                    # For C files, use C99 standard
-                    build_opts.append('-std=c99')
-                
+        else:
+            # No library dependencies specified, but still need criterion for tests
+            self.premake_content.extend([
+                '    links {',
+                '        "criterion",',
+                '    }',
+                '    '
+            ])
+        
+        # Add external library paths for linking when lambda-runtime-full or lambda-input-full are used
+        if any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in dependencies):
+            self.premake_content.extend([
+                '    linkoptions {',
+            ])
+            
+            # Add tree-sitter libraries using parsed definitions
+            for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                if lib_name in self.external_libraries:
+                    lib_path = self.external_libraries[lib_name]['lib']
+                    # Convert to relative path from build directory
+                    if not lib_path.startswith('/'):
+                        lib_path = f"../../{lib_path}"
+                    self.premake_content.append(f'        "{lib_path}",')
+            
+            # Add other external libraries
+            # If lambda-input-full is a dependency, we need to include curl/ssl/crypto/nghttp2 for proper linking
+            # since static libraries don't propagate their dependencies in Premake
+            for lib_name in ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']:
+                if lib_name in self.external_libraries:
+                    lib_path = self.external_libraries[lib_name]['lib']
+                    # Convert to relative path from build directory
+                    if not lib_path.startswith('/'):
+                        lib_path = f"../../{lib_path}"
+                    self.premake_content.append(f'        "{lib_path}",')
+            
+            self.premake_content.extend([
+                '    }',
+                '    ',
+                '    -- Add dynamic libraries',
+                '    links {'
+            ])
+            
+            # Add dynamic libraries (not frameworks)
+            for lib_name in ['z']:
+                if lib_name in self.external_libraries and self.external_libraries[lib_name].get('link') == 'dynamic':
+                    lib_flag = self.external_libraries[lib_name]['lib']
+                    if lib_flag.startswith('-l'):
+                        lib_flag = lib_flag[2:]  # Remove -l prefix
+                    self.premake_content.append(f'        "{lib_flag}",')
+            
+            self.premake_content.extend([
+                '    }',
+                '    ',
+                '    -- Add macOS frameworks',
+                '    linkoptions {'
+            ])
+            
+            # Add macOS frameworks using linkoptions
+            for lib_name in ['CoreFoundation', 'CoreServices', 'SystemConfiguration']:
+                if lib_name in self.external_libraries and self.external_libraries[lib_name].get('link') == 'dynamic':
+                    lib_flag = self.external_libraries[lib_name]['lib']
+                    if lib_flag.startswith('-framework '):
+                        self.premake_content.append(f'        "{lib_flag}",')
+            
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add build options based on source file type
+        is_cpp_test = source.endswith('.cpp')
+        build_opts = ['-fms-extensions', '-fcolor-diagnostics', '-pedantic']
+        
+        if is_cpp_test:
+            if cpp_flags:
+                build_opts.append(cpp_flags)
+            if special_flags and '-std=c++17' in special_flags:
+                build_opts.append('-std=c++17')
+            if special_flags and '-lstdc++' in special_flags:
                 self.premake_content.extend([
-                    '    buildoptions {',
+                    '    links { "stdc++" }',
+                    '    '
                 ])
-                for opt in build_opts:
-                    self.premake_content.append(f'        "{opt}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    ',
-                    ''
-                ])
+        else:
+            # For C files, use C99 standard
+            build_opts.append('-std=c99')
+        
+        self.premake_content.extend([
+            '    buildoptions {',
+        ])
+        for opt in build_opts:
+            self.premake_content.append(f'        "{opt}",')
+        self.premake_content.extend([
+            '    }',
+            '    ',
+            ''
+        ])
     
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
