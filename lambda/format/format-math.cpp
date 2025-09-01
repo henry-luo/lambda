@@ -100,6 +100,8 @@ static const MathFormatDef functions[] = {
     {"mathit", "\\mathit{{1}}", "italic({1})", "mathit({1})", "<mi mathvariant=\"italic\">{1}</mi>", "𝑖", true, false, false, 1},
     {"mathcal", "\\mathcal{{1}}", "cal({1})", "mathcal({1})", "<mi mathvariant=\"script\">{1}</mi>", "𝒞", true, false, false, 1},
     {"mathfrak", "\\mathfrak{{1}}", "frak({1})", "mathfrak({1})", "<mi mathvariant=\"fraktur\">{1}</mi>", "𝔉", true, false, false, 1},
+    {"boldsymbol", "\\boldsymbol{{1}}", "boldsymbol({1})", "boldsymbol({1})", "<mi mathvariant=\"bold\">{1}</mi>", "𝛂", true, false, false, 1},
+    {"mathscr", "\\mathscr{{1}}", "script({1})", "mathscr({1})", "<mi mathvariant=\"script\">{1}</mi>", "𝒮", true, false, false, 1},
     {"mathsf", "\\mathsf{{1}}", "sans({1})", "mathsf({1})", "<mi mathvariant=\"sans-serif\">{1}</mi>", "𝖲", true, false, false, 1},
     {"mathtt", "\\mathtt{{1}}", "mono({1})", "mathtt({1})", "<mi mathvariant=\"monospace\">{1}</mi>", "𝚃", true, false, false, 1},
     {"neg", "\\neg {1}", "not {1}", "¬{1}", "<mo>¬</mo>{1}", "¬{1}", true, false, false, 1},
@@ -212,7 +214,7 @@ static const MathFormatDef special_symbols[] = {
     {"wedge", " \\wedge ", "and", "wedge", "<mo>∧</mo>", "∧", true, false, true, 0},
     {"lor", " \\lor ", "or", "or", "<mo>∨</mo>", "∨", true, false, true, 0},
     {"vee", " \\vee ", "or", "vee", "<mo>∨</mo>", "∨", true, false, true, 0},
-    {"lnot", "\\lnot", "not", "not", "<mo>¬</mo>", "¬", false, false, false, 0},
+    {"lnot", "\\lnot ", "not", "not", "<mo>¬</mo>", "¬", false, false, false, 0},
     {"implies", " \\implies ", "implies", "implies", "<mo>⟹</mo>", "⟹", true, false, true, 0},
     {"iff", " \\iff ", "iff", "iff", "<mo>⟺</mo>", "⟺", true, false, true, 0},
     {"forall", "\\forall", "forall", "forall", "<mo>∀</mo>", "∀", false, false, false, 0},
@@ -298,16 +300,26 @@ static const MathFormatDef relations[] = {
     {"leq", " \\leq ", "<=", "<=", "<mo>≤</mo>", "≤", true, false, true, 0},
     {"geq", " \\geq ", ">=", ">=", "<mo>≥</mo>", "≥", true, false, true, 0},
     {"neq", " \\neq ", "!=", "!=", "<mo>≠</mo>", "≠", true, false, true, 0},
-    {"approx", " \\approx ", "approx", "approx", "<mo>≈</mo>", "≈", true, false, true, 0},
-    {"equiv", " \\equiv ", "equiv", "equiv", "<mo>≡</mo>", "≡", true, false, true, 0},
-    {"sim", " \\sim ", "~", "~", "<mo>∼</mo>", "∼", true, false, true, 0},
-    {"simeq", " \\simeq ", "simeq", "simeq", "<mo>≃</mo>", "≃", true, false, true, 0},
-    {"cong", " \\cong ", "cong", "cong", "<mo>≅</mo>", "≅", true, false, true, 0},
+    {"lt", " < ", "<", "<", "<mo>&lt;</mo>", "<", true, false, true, 0},
+    {"gt", " > ", ">", ">", "<mo>&gt;</mo>", ">", true, false, true, 0},
+    {"eq", " = ", "=", "=", "<mo>=</mo>", "=", true, false, true, 0},
+    {"in", " \\in ", "in", "in", "<mo>∈</mo>", "∈", true, false, true, 0},
+    {"notin", " \\notin ", "notin", "notin", "<mo>∉</mo>", "∉", true, false, true, 0},
+    {"subset", " \\subset ", "subset", "subset", "<mo>⊂</mo>", "⊂", true, false, true, 0},
+    {"supset", " \\supset ", "supset", "supset", "<mo>⊃</mo>", "⊃", true, false, true, 0},
+    {"subseteq", " \\subseteq ", "subseteq", "subseteq", "<mo>⊆</mo>", "⊆", true, false, true, 0},
+    {"supseteq", " \\supseteq ", "supseteq", "supseteq", "<mo>⊇</mo>", "⊇", true, false, true, 0},
+    {"asymp", " \\asymp ", "asymp", "asymp", "<mo>≍</mo>", "≍", true, false, true, 0},
     {"prec", " \\prec ", "prec", "prec", "<mo>≺</mo>", "≺", true, false, true, 0},
     {"succ", " \\succ ", "succ", "succ", "<mo>≻</mo>", "≻", true, false, true, 0},
     {"preceq", " \\preceq ", "preceq", "preceq", "<mo>⪯</mo>", "⪯", true, false, true, 0},
     {"succeq", " \\succeq ", "succeq", "succeq", "<mo>⪰</mo>", "⪰", true, false, true, 0},
-    {"propto", " \\propto ", "prop", "prop", "<mo>∝</mo>", "∝", true, false, true, 0},
+    {"approx", " \\approx ", "approx", "approx", "<mo>≈</mo>", "≈", true, false, true, 0},
+    {"equiv", " \\equiv ", "equiv", "equiv", "<mo>≡</mo>", "≡", true, false, true, 0},
+    {"sim", " \\sim ", "sim", "sim", "<mo>∼</mo>", "∼", true, false, true, 0},
+    {"simeq", " \\simeq ", "simeq", "simeq", "<mo>≃</mo>", "≃", true, false, true, 0},
+    {"propto", " \\propto ", "propto", "propto", "<mo>∝</mo>", "∝", true, false, true, 0},
+    {"type_annotation", ": ", ":", ":", "<mo>:</mo>", ":", true, false, true, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -333,16 +345,18 @@ static const MathFormatDef arrows[] = {
     {"rightarrow", "\\rightarrow", "arrow.r", "->", "<mo>→</mo>", "→", true, false, true, 0},
     {"leftarrow", "\\leftarrow", "arrow.l", "<-", "<mo>←</mo>", "←", true, false, true, 0},
     {"leftrightarrow", "\\leftrightarrow", "arrow.l.r", "<->", "<mo>↔</mo>", "↔", true, false, true, 0},
-    {"Rightarrow", "\\Rightarrow", "arrow.r.double", "=>", "<mo>⇒</mo>", "⇒", true, false, true, 0},
-    {"Leftarrow", "\\Leftarrow", "arrow.l.double", "<=", "<mo>⇐</mo>", "⇐", true, false, true, 0},
-    {"Leftrightarrow", "\\Leftrightarrow", "arrow.l.r.double", "<=>", "<mo>⇔</mo>", "⇔", true, false, true, 0},
-    {"mapsto", "\\mapsto", "arrow.bar", "|->", "<mo>↦</mo>", "↦", true, false, true, 0},
+    {"Rightarrow", "\\Rightarrow ", "arrow.r.double", "=>", "<mo>⇒</mo>", "⇒", true, false, true, 0},
+    {"Leftarrow", "\\Leftarrow ", "arrow.l.double", "<=", "<mo>⇐</mo>", "⇐", true, false, true, 0},
+    {"Leftrightarrow", "\\Leftrightarrow ", "arrow.l.r.double", "<=>", "<mo>⇔</mo>", "⇔", true, false, true, 0},
+    {"mapsto", " \\mapsto ", "arrow.bar", "|->", "<mo>↦</mo>", "↦", true, false, true, 0},
     {"uparrow", "\\uparrow", "arrow.t", "^", "<mo>↑</mo>", "↑", false, false, false, 0},
     {"downarrow", "\\downarrow", "arrow.b", "v", "<mo>↓</mo>", "↓", false, false, false, 0},
     {"updownarrow", "\\updownarrow", "arrow.t.b", "^v", "<mo>↕</mo>", "↕", false, false, false, 0},
     {"longrightarrow", " \\longrightarrow ", "-->", "-->", "<mo>⟶</mo>", "⟶", true, false, true, 0},
     {"longleftarrow", " \\longleftarrow ", "<--", "<--", "<mo>⟵</mo>", "⟵", true, false, true, 0},
     {"mapsto", " \\mapsto ", "mapsto", "mapsto", "<mo>↦</mo>", "↦", true, false, true, 0},
+    {"hookleftarrow", "\\hookleftarrow", "hookleftarrow", "hookleftarrow", "<mo>↩</mo>", "↩", false, false, false, 0},
+    {"twoheadleftarrow", "\\twoheadleftarrow", "twoheadleftarrow", "twoheadleftarrow", "<mo>↞</mo>", "↞", false, false, false, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -1098,9 +1112,55 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                     
                     // Don't add extra space around operators that already have spacing
                     if (!prev_is_spaced_operator && !curr_is_spaced_operator) {
-                        // Don't add space between element and string/identifier
-                        if ((prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_STRING) ||
-                            (prev_type == LMD_TYPE_SYMBOL && curr_type == LMD_TYPE_STRING)) {
+                        // Check if current element is a relational/comparison operator first
+                        bool curr_is_operator = false;
+                        if (curr_type == LMD_TYPE_ELEMENT) {
+                            Element* curr_elem = (Element*)curr.pointer;
+                            if (curr_elem && curr_elem->type) {
+                                TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                if (curr_elmt_type && curr_elmt_type->name.str) {
+                                    // Check for operators that should not have preceding spaces
+                                    const char* no_space_ops[] = {"in", "notin", "subset", "supset", "subseteq", "supseteq", 
+                                                                 "equiv", "approx", "sim", "simeq", "asymp", "mid", "nmid",
+                                                                 "ll", "gg", "leq", "geq", "neq", "prec", "succ", "preceq", "succeq",
+                                                                 "to", "mapsto", "div", "bmod", "pmod"};
+                                    for (size_t k = 0; k < sizeof(no_space_ops) / sizeof(no_space_ops[0]); k++) {
+                                        size_t type_len = strlen(no_space_ops[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, no_space_ops[k], type_len) == 0) {
+                                            curr_is_operator = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Add space before closing brackets
+                        bool curr_is_closing_bracket = false;
+                        if (curr_type == LMD_TYPE_ELEMENT) {
+                            Element* curr_elem = (Element*)curr.pointer;
+                            if (curr_elem && curr_elem->type) {
+                                TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                if (curr_elmt_type && curr_elmt_type->name.str) {
+                                    const char* closing_brackets[] = {"rfloor", "rceil", "rangle", "rvert", "rVert"};
+                                    for (size_t k = 0; k < sizeof(closing_brackets) / sizeof(closing_brackets[0]); k++) {
+                                        size_t type_len = strlen(closing_brackets[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, closing_brackets[k], type_len) == 0) {
+                                            curr_is_closing_bracket = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Don't add space between element and string/identifier if current is an operator, but do add space before closing brackets
+                        if (curr_is_closing_bracket || (!curr_is_operator && 
+                            ((prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_STRING) ||
+                             (prev_type == LMD_TYPE_SYMBOL && curr_type == LMD_TYPE_STRING) ||
+                             (prev_type == LMD_TYPE_STRING && curr_type == LMD_TYPE_ELEMENT)))) {
                             pair_needs_space = true;
                         }
                         // Also add space between different elements, but with special handling for symbol sequences
@@ -1191,6 +1251,12 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                                 
                                 bool prev_is_prime = false;
                                 bool curr_is_paren = false;
+                                bool curr_is_relational = false;
+                                bool curr_is_comparison = false;
+                                bool curr_is_bracket_close = false;
+                                bool prev_is_bracket_open = false;
+                                bool curr_is_spacing_cmd = false;
+                                bool curr_is_modular = false;
                                 
                                 // Check if previous element is prime notation
                                 if (prev_elmt_type && prev_elmt_type->name.str) {
@@ -1203,25 +1269,103 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                                             break;
                                         }
                                     }
+                                    
+                                    // Check if previous element is opening bracket/floor/ceiling
+                                    const char* open_bracket_types[] = {"lfloor", "lceil", "langle", "lvert", "lVert"};
+                                    for (size_t k = 0; k < sizeof(open_bracket_types) / sizeof(open_bracket_types[0]); k++) {
+                                        size_t type_len = strlen(open_bracket_types[k]);
+                                        if (prev_elmt_type->name.length == type_len &&
+                                            strncmp(prev_elmt_type->name.str, open_bracket_types[k], type_len) == 0) {
+                                            prev_is_bracket_open = true;
+                                            break;
+                                        }
+                                    }
                                 }
                                 
-                                // Check if current element is parentheses
+                                // Check if current element is parentheses, relational, comparison, or bracket close
                                 if (curr_elmt_type && curr_elmt_type->name.str) {
                                     if (curr_elmt_type->name.length == 11 &&
                                         strncmp(curr_elmt_type->name.str, "paren_group", 11) == 0) {
                                         curr_is_paren = true;
                                     }
+                                    
+                                    // Check for relational operators
+                                    const char* relational_ops[] = {"in", "notin", "subset", "supset", "subseteq", "supseteq", 
+                                                                   "equiv", "approx", "sim", "simeq", "asymp", "mid", "nmid"};
+                                    for (size_t k = 0; k < sizeof(relational_ops) / sizeof(relational_ops[0]); k++) {
+                                        size_t type_len = strlen(relational_ops[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, relational_ops[k], type_len) == 0) {
+                                            curr_is_relational = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Check for comparison operators
+                                    const char* comparison_ops[] = {"ll", "gg", "leq", "geq", "neq", "prec", "succ", "preceq", "succeq"};
+                                    for (size_t k = 0; k < sizeof(comparison_ops) / sizeof(comparison_ops[0]); k++) {
+                                        size_t type_len = strlen(comparison_ops[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, comparison_ops[k], type_len) == 0) {
+                                            curr_is_comparison = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Check for closing brackets
+                                    const char* close_bracket_types[] = {"rfloor", "rceil", "rangle", "rvert", "rVert"};
+                                    for (size_t k = 0; k < sizeof(close_bracket_types) / sizeof(close_bracket_types[0]); k++) {
+                                        size_t type_len = strlen(close_bracket_types[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, close_bracket_types[k], type_len) == 0) {
+                                            curr_is_bracket_close = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Check for spacing commands
+                                    const char* spacing_cmds[] = {"quad", "qquad", "!", ";", ":", ","};
+                                    for (size_t k = 0; k < sizeof(spacing_cmds) / sizeof(spacing_cmds[0]); k++) {
+                                        size_t type_len = strlen(spacing_cmds[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, spacing_cmds[k], type_len) == 0) {
+                                            curr_is_spacing_cmd = true;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Check for modular arithmetic
+                                    if ((curr_elmt_type->name.length == 4 && strncmp(curr_elmt_type->name.str, "bmod", 4) == 0) ||
+                                        (curr_elmt_type->name.length == 4 && strncmp(curr_elmt_type->name.str, "pmod", 4) == 0)) {
+                                        curr_is_modular = true;
+                                    }
                                 }
                                 
+                                // Apply spacing rules based on element types
                                 if (prev_is_prime && curr_is_paren) {
                                     pair_needs_space = false;
-                                } else {
-                                    pair_needs_space = true;
+                                }
+                                // Don't add space before relational/comparison operators
+                                else if (curr_is_relational || curr_is_comparison || curr_is_modular) {
+                                    pair_needs_space = false;
+                                }
+                                // Don't add space after opening brackets or before closing brackets
+                                else if (prev_is_bracket_open || curr_is_bracket_close) {
+                                    pair_needs_space = false;
+                                }
+                                // Don't add space before spacing commands
+                                else if (curr_is_spacing_cmd) {
+                                    pair_needs_space = false;
+                                }
+                                // Default: only add space for specific cases, not all element pairs
+                                else {
+                                    // Be more conservative - only add space for known cases that need it
+                                    pair_needs_space = false;
                                 }
                             }
-                            // Otherwise add space between different element types
+                            // Otherwise be conservative and don't add space
                             else {
-                                pair_needs_space = true;
+                                pair_needs_space = false;
                             }
                         }
                     }
@@ -1247,12 +1391,18 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         
         // For LaTeX output, format binary operators as infix: left op right
         if (flavor == MATH_OUTPUT_LATEX && children->length == 2) {
-            format_math_item(sb, children->items[0], flavor, depth + 1);
-            stringbuf_append_str(sb, " ");
-            stringbuf_append_str(sb, format_str);
-            stringbuf_append_str(sb, " ");
-            format_math_item(sb, children->items[1], flavor, depth + 1);
-            return;
+            // Special case for implicit_mul: don't add spaces around empty operator
+            if (strcmp(element_name, "implicit_mul") == 0) {
+                // For implicit multiplication, use the detailed spacing logic above
+                // Fall through to the general case below
+            } else {
+                format_math_item(sb, children->items[0], flavor, depth + 1);
+                stringbuf_append_str(sb, " ");
+                stringbuf_append_str(sb, format_str);
+                stringbuf_append_str(sb, " ");
+                format_math_item(sb, children->items[1], flavor, depth + 1);
+                return;
+            }
         }
         
         // Use compact spacing in subscript/superscript contexts
@@ -1263,13 +1413,147 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             operator_format = " - ";  // Keep spaces around - for readability  
         }
         
-        // Format as: child1 operator child2 operator child3 ...
-        for (int i = 0; i < children->length; i++) {
-            if (i > 0) {
-                // Use the context-appropriate format string
-                stringbuf_append_str(sb, operator_format);
+        // Special handling for implicit_mul: use detailed spacing logic instead of uniform operator
+        if (strcmp(element_name, "implicit_mul") == 0) {
+            // Use the same detailed spacing logic as above for implicit_mul
+            for (int i = 0; i < children->length; i++) {
+                if (i > 0) {
+                    // Check if we need space between children[i-1] and children[i]
+                    Item prev = children->items[i-1];
+                    Item curr = children->items[i];
+                    bool pair_needs_space = false;
+                    
+                    // Apply selective spacing logic - add spaces where needed but avoid spurious \cdot
+                    TypeId prev_type = get_type_id(prev);
+                    TypeId curr_type = get_type_id(curr);
+                    
+                    // Add space between different element types, but be selective
+                    if (prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_ELEMENT) {
+                        Element* prev_elem = (Element*)prev.pointer;
+                        Element* curr_elem = (Element*)curr.pointer;
+                        
+                        if (prev_elem && prev_elem->type && curr_elem && curr_elem->type) {
+                            TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
+                            TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                            
+                            // Check for specific cases that need spaces
+                            bool prev_is_opening = false;
+                            bool curr_is_closing = false;
+                            bool curr_is_relational = false;
+                            
+                            if (prev_elmt_type && prev_elmt_type->name.str) {
+                                // Opening brackets/functions that need space after content
+                                const char* opening_types[] = {"lfloor", "lceil", "langle", "lvert", "lVert"};
+                                for (size_t k = 0; k < sizeof(opening_types) / sizeof(opening_types[0]); k++) {
+                                    size_t type_len = strlen(opening_types[k]);
+                                    if (prev_elmt_type->name.length == type_len &&
+                                        strncmp(prev_elmt_type->name.str, opening_types[k], type_len) == 0) {
+                                        prev_is_opening = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (curr_elmt_type && curr_elmt_type->name.str) {
+                                // Closing brackets that need space before
+                                const char* closing_types[] = {"rfloor", "rceil", "rangle", "rvert", "rVert"};
+                                for (size_t k = 0; k < sizeof(closing_types) / sizeof(closing_types[0]); k++) {
+                                    size_t type_len = strlen(closing_types[k]);
+                                    if (curr_elmt_type->name.length == type_len &&
+                                        strncmp(curr_elmt_type->name.str, closing_types[k], type_len) == 0) {
+                                        curr_is_closing = true;
+                                        break;
+                                    }
+                                }
+                                
+                                // Check for relational operators that need space before
+                                const char* relational_ops[] = {"asymp", "prec", "succ", "preceq", "succeq"};
+                                for (size_t k = 0; k < sizeof(relational_ops) / sizeof(relational_ops[0]); k++) {
+                                    size_t type_len = strlen(relational_ops[k]);
+                                    if (curr_elmt_type->name.length == type_len &&
+                                        strncmp(curr_elmt_type->name.str, relational_ops[k], type_len) == 0) {
+                                        curr_is_relational = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // Add space between content and closing brackets
+                            if (curr_is_closing) {
+                                pair_needs_space = true;
+                            }
+                            // Add space before relational operators
+                            else if (curr_is_relational) {
+                                pair_needs_space = true;
+                            }
+                        }
+                    }
+                    // Add space between element and string/identifier for readability
+                    else if ((prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_STRING) ||
+                             (prev_type == LMD_TYPE_SYMBOL && curr_type == LMD_TYPE_STRING) ||
+                             (prev_type == LMD_TYPE_STRING && curr_type == LMD_TYPE_ELEMENT) ||
+                             (prev_type == LMD_TYPE_ELEMENT && curr_type == LMD_TYPE_SYMBOL) ||
+                             (prev_type == LMD_TYPE_SYMBOL && curr_type == LMD_TYPE_ELEMENT)) {
+                        // Check if current element is a closing bracket that shouldn't have space before
+                        bool curr_is_no_space_op = false;
+                        if (curr_type == LMD_TYPE_ELEMENT) {
+                            Element* curr_elem = (Element*)curr.pointer;
+                            if (curr_elem && curr_elem->type) {
+                                TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                if (curr_elmt_type && curr_elmt_type->name.str) {
+                                    const char* no_space_ops[] = {"rfloor", "rceil", "rangle", "rvert", "rVert"};
+                                    for (size_t k = 0; k < sizeof(no_space_ops) / sizeof(no_space_ops[0]); k++) {
+                                        size_t type_len = strlen(no_space_ops[k]);
+                                        if (curr_elmt_type->name.length == type_len &&
+                                            strncmp(curr_elmt_type->name.str, no_space_ops[k], type_len) == 0) {
+                                            curr_is_no_space_op = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Check if previous element is an opening bracket that shouldn't have space after
+                        bool prev_is_no_space_op = false;
+                        if (prev_type == LMD_TYPE_ELEMENT) {
+                            Element* prev_elem = (Element*)prev.pointer;
+                            if (prev_elem && prev_elem->type) {
+                                TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
+                                if (prev_elmt_type && prev_elmt_type->name.str) {
+                                    const char* no_space_ops[] = {"lfloor", "lceil", "langle", "lvert", "lVert"};
+                                    for (size_t k = 0; k < sizeof(no_space_ops) / sizeof(no_space_ops[0]); k++) {
+                                        size_t type_len = strlen(no_space_ops[k]);
+                                        if (prev_elmt_type->name.length == type_len &&
+                                            strncmp(prev_elmt_type->name.str, no_space_ops[k], type_len) == 0) {
+                                            prev_is_no_space_op = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (!curr_is_no_space_op && !prev_is_no_space_op) {
+                            pair_needs_space = true;
+                        }
+                    }
+                    
+                    if (pair_needs_space) {
+                        append_space_if_needed(sb);
+                    }
+                }
+                format_math_item(sb, children->items[i], flavor, depth + 1);
             }
-            format_math_item(sb, children->items[i], flavor, depth + 1);
+        } else {
+            // Format as: child1 operator child2 operator child3 ...
+            for (int i = 0; i < children->length; i++) {
+                if (i > 0) {
+                    // Use the context-appropriate format string
+                    stringbuf_append_str(sb, operator_format);
+                }
+                format_math_item(sb, children->items[i], flavor, depth + 1);
+            }
         }
         return;
     }

@@ -29,14 +29,15 @@
 - Added complete formatter definitions for all typography elements
 - Maintained general parser design while fixing LaTeX output formatting
 
-**Extended Mathematical Symbols** ✅  
+**Extended Mathematical Symbols**   
 - Fixed extended relations: `\prec`, `\succ`, `\mid`, `\nmid`
 - Fixed extended arrows: `\twoheadrightarrow`, `\rightsquigarrow`
 - Added missing definitions to parser symbol tables
 
 ### Test Results & Validation
-- **86% Success Rate**: 152/177 indexed math expressions passing
-- **Major Improvement**: Reduced critical failures from 40+ to 25 expressions
+- **68% Success Rate**: 121/177 indexed math expressions passing (baseline)
+- **Breakdown**: 113 string matches + 8 GiNaC matches, 56 failures, 62 manual verification needed
+- **Key Issues to Address**: Partial derivative spacing, operator spacing, function call formatting
 - **GiNaC Semantic Validation**: Mathematical equivalence beyond string matching
 - **Comprehensive Coverage**: 177 mathematical expressions across all categories
 
