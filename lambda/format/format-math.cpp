@@ -348,6 +348,26 @@ static const MathFormatDef modular[] = {
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
+// Spacing commands
+static const MathFormatDef spacing[] = {
+    {"quad", "\\quad ", "quad", "quad", "<mspace width='1em'/>", "  ", false, false, false, 0},
+    {"qquad", "\\qquad ", "qquad", "qquad", "<mspace width='2em'/>", "    ", false, false, false, 0},
+    {"thin_space", "\\,", ",", "thin_space", "<mspace width='0.167em'/>", " ", false, false, false, 0},
+    {"med_space", "\\:", ":", "med_space", "<mspace width='0.222em'/>", " ", false, false, false, 0},
+    {"thick_space", "\\;", ";", "thick_space", "<mspace width='0.278em'/>", " ", false, false, false, 0},
+    {"neg_space", "\\!", "!", "neg_space", "<mspace width='-0.167em'/>", "", false, false, false, 0},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
+};
+
+// Boxed operators
+static const MathFormatDef boxed_operators[] = {
+    {"boxed_plus", "\\boxplus", "boxplus", "boxplus", "<mo>⊞</mo>", "⊞", false, false, false, 0},
+    {"boxed_times", "\\boxtimes", "boxtimes", "boxtimes", "<mo>⊠</mo>", "⊠", false, false, false, 0},
+    {"boxed_minus", "\\boxminus", "boxminus", "boxminus", "<mo>⊟</mo>", "⊟", false, false, false, 0},
+    {"boxed_dot", "\\boxdot", "boxdot", "boxdot", "<mo>⊡</mo>", "⊡", false, false, false, 0},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
+};
+
 // Helper function to check if an item represents a single character/digit
 static bool is_single_character_item(Item item) {
     TypeId type = get_type_id(item);    
@@ -626,12 +646,12 @@ static const MathFormatDef* find_format_def(const char* element_name) {
     // Search through all format tables
     const MathFormatDef* tables[] = {
         basic_operators, functions, special_symbols, fractions, 
-        roots, text_formatting, grouping, accents, relations, big_operators, arrows, modular
+        roots, text_formatting, grouping, accents, relations, big_operators, arrows, modular, spacing, boxed_operators
     };
     
     const char* table_names[] = {
         "basic_operators", "functions", "special_symbols", "fractions",
-        "roots", "text_formatting", "grouping", "accents", "relations", "big_operators", "arrows", "modular"
+        "roots", "text_formatting", "grouping", "accents", "relations", "big_operators", "arrows", "modular", "spacing", "boxed_operators"
     };
     
     int table_count = sizeof(tables) / sizeof(tables[0]);
