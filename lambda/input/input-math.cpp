@@ -1,6 +1,7 @@
 #include "input.h"
 #include "input-common.h"
 #include "../lambda.h"
+#include "../../lib/log.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -460,11 +461,11 @@ static const MathExprDef environments[] = {
 // Spacing expressions
 static const MathExprDef spacing[] = {
     {"quad", "quad", "quad", "quad", "  ", "Quad space", false, 0, NULL},
-    {"qquad", "wide", "qquad", "qquad", "    ", "Double quad space", false, 0, NULL},
-    {"!", "thin", "!", "neg_space", "", "Thin negative space", false, 0, NULL},
-    {",", "thinspace", ",", "thin_space", " ", "Thin space", false, 0, NULL},
-    {":", "med", ":", "med_space", " ", "Medium space", false, 0, NULL},
-    {";", "thick", ";", "thick_space", "  ", "Thick space", false, 0, NULL},
+    {"qquad", "qquad", "qquad", "qquad", "    ", "Double quad space", false, 0, NULL},
+    {"!", "neg_space", "!", "neg_space", "", "Thin negative space", false, 0, NULL},
+    {",", "thin_space", ",", "thin_space", " ", "Thin space", false, 0, NULL},
+    {":", "med_space", ":", "med_space", " ", "Medium space", false, 0, NULL},
+    {";", "thick_space", ";", "thick_space", "  ", "Thick space", false, 0, NULL},
     {"enspace", "enspace", "enspace", "en_space", " ", "En space", false, 0, NULL},
     {"thinspace", "thin", "thinspace", "thin_space", " ", "Thin space", false, 0, NULL},
     {"medspace", "med", "medspace", "med_space", " ", "Medium space", false, 0, NULL},
@@ -758,7 +759,7 @@ static Item parse_math_number(Input *input, const char **math) {
     }
     
     stringbuf_reset(sb);
-    printf("DEBUG: parse_math_number returning item=0x%llx, type=%d\n", result.item, get_type_id(result));
+    log_debug("parse_math_number returning item=0x%llx, type=%d", result.item, get_type_id(result));
     return result;
 }
 
@@ -994,9 +995,9 @@ static Item parse_latex_sqrt(Input *input, const char **math) {
         }
         
         // add index and radicand as children
-        printf("DEBUG: Adding sqrt index item=0x%llx, type=%d\n", index_item.item, get_type_id(index_item));
+        log_debug("Adding sqrt index item=0x%llx, type=%d", index_item.item, get_type_id(index_item));
         list_push((List*)sqrt_element, index_item);
-        printf("DEBUG: Adding sqrt radicand item=0x%llx, type=%d\n", inner_expr.item, get_type_id(inner_expr));
+        log_debug("Adding sqrt radicand item=0x%llx, type=%d", inner_expr.item, get_type_id(inner_expr));
         list_push((List*)sqrt_element, inner_expr);
     }
     
@@ -1156,9 +1157,16 @@ static Item parse_latex_command(Input *input, const char **math) {
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);
     
-    while (**math && isalpha(**math)) {
+    // Handle spacing commands first (single punctuation characters)
+    if (**math == '!' || **math == ',' || **math == ':' || **math == ';') {
         stringbuf_append_char(sb, **math);
         (*math)++;
+    } else {
+        // Handle regular alphabetic commands
+        while (**math && isalpha(**math)) {
+            stringbuf_append_char(sb, **math);
+            (*math)++;
+        }
     }
     
     if (sb->length == 0) {
@@ -1190,6 +1198,33 @@ static Item parse_latex_command(Input *input, const char **math) {
             // Advance the math pointer past the braces
             *math += 3; // skip {X}
         }
+    }
+    
+    // Handle spacing commands first
+    if (strcmp(cmd_string->chars, "!") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "neg_space");
+        return {.item = (uint64_t)elem};
+    } else if (strcmp(cmd_string->chars, ",") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "thin_space");
+        return {.item = (uint64_t)elem};
+    } else if (strcmp(cmd_string->chars, ":") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "med_space");
+        return {.item = (uint64_t)elem};
+    } else if (strcmp(cmd_string->chars, ";") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "thick_space");
+        return {.item = (uint64_t)elem};
+    } else if (strcmp(cmd_string->chars, "quad") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "quad");
+        return {.item = (uint64_t)elem};
+    } else if (strcmp(cmd_string->chars, "qquad") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "qquad");
+        return {.item = (uint64_t)elem};
     }
     
     // Handle specific commands
@@ -1348,15 +1383,6 @@ static Item parse_latex_command(Input *input, const char **math) {
     } else if (strcmp(cmd_string->chars, "oint") == 0) {
         stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
-    } else if (strcmp(cmd_string->chars, "iint") == 0) {
-        stringbuf_reset(sb);
-        return parse_latex_integral(input, math);  // Use same parser, different element name
-    } else if (strcmp(cmd_string->chars, "iiint") == 0) {
-        stringbuf_reset(sb);
-        return parse_latex_integral(input, math);  // Use same parser, different element name
-    } else if (strcmp(cmd_string->chars, "oint") == 0) {
-        stringbuf_reset(sb);
-        return parse_latex_integral(input, math);  // Use same parser, different element name
     } else if (strcmp(cmd_string->chars, "bigcup") == 0) {
         stringbuf_reset(sb);
         return parse_latex_sum_or_prod(input, math, "bigcup");
@@ -1419,9 +1445,17 @@ static Item parse_latex_command(Input *input, const char **math) {
         if (def) {
             return parse_spacing(input, math, MATH_FLAVOR_LATEX, def);
         }
-        // Fallback - create spacing element
-        Element* space_element = create_math_element(input, cmd_string->chars);
+        // Fallback - create spacing element directly with correct element name
+        const char* element_name = cmd_string->chars;
+        if (strcmp(cmd_string->chars, "!") == 0) element_name = "neg_space";
+        else if (strcmp(cmd_string->chars, ",") == 0) element_name = "thin_space";
+        else if (strcmp(cmd_string->chars, ":") == 0) element_name = "med_space";
+        else if (strcmp(cmd_string->chars, ";") == 0) element_name = "thick_space";
+        
+        Element* space_element = create_math_element(input, element_name);
         if (space_element) {
+            add_attribute_to_element(input, space_element, "type", element_name);
+            ((TypeElmt*)space_element->type)->content_length = ((List*)space_element)->length;
             return {.item = (uint64_t)space_element};
         }
         return {.item = ITEM_ERROR};
@@ -1597,18 +1631,18 @@ static Item parse_function_call(Input *input, const char **math, MathFlavor flav
 
 // parse latex function with space-separated argument: \sin x, \cos y, etc.
 static Item parse_latex_function(Input *input, const char **math, const char* func_name) {
-    fprintf(stderr, "DEBUG parse_latex_function: called for '%s', math='%.20s'\n", func_name, *math);
+    log_debug("parse_latex_function: called for '%s', math='%.20s'", func_name, *math);
     
     // Skip any whitespace after the function name
     skip_math_whitespace(math);
     
-    fprintf(stderr, "DEBUG parse_latex_function: after whitespace skip, math='%.20s'\n", *math);
+    log_debug("parse_latex_function: after whitespace skip, math='%.20s'", *math);
     
     Item arg;
     
     // Check if there's a brace-enclosed argument: \sin{x}
     if (**math == '{') {
-        fprintf(stderr, "DEBUG parse_latex_function: parsing brace-enclosed argument\n");
+        log_debug("parse_latex_function: parsing brace-enclosed argument");
         (*math)++; // skip {
         arg = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
         if (arg.item == ITEM_ERROR) {
@@ -1621,14 +1655,14 @@ static Item parse_latex_function(Input *input, const char **math, const char* fu
         }
         (*math)++; // skip }
     } else {
-        fprintf(stderr, "DEBUG parse_latex_function: parsing space-separated argument\n");
+        log_debug("parse_latex_function: parsing space-separated argument");
         // parse the next primary expression as the argument
         arg = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
         if (arg.item == ITEM_ERROR) {
-            fprintf(stderr, "DEBUG parse_latex_function: error parsing argument\n");
+            log_debug("parse_latex_function: error parsing argument");
             return {.item = ITEM_ERROR};
         }
-        fprintf(stderr, "DEBUG parse_latex_function: successfully parsed argument\n");
+        log_debug("parse_latex_function: successfully parsed argument");
     }
     
     // create function expression
@@ -1643,7 +1677,7 @@ static Item parse_latex_function(Input *input, const char **math, const char* fu
     // set content length
     ((TypeElmt*)func_element->type)->content_length = ((List*)func_element)->length;
     
-    fprintf(stderr, "DEBUG parse_latex_function: created function element with child\n");
+    log_debug("parse_latex_function: created function element with child");
     
     return {.item = (uint64_t)func_element};
 }
@@ -2222,6 +2256,33 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
             (*math)++; // skip operator
             skip_math_whitespace(math);
         }
+        // Check for LaTeX binary operators (boxed operators, etc.)
+        else if (**math == '\\' && flavor == MATH_FLAVOR_LATEX) {
+            const char* cmd_start = *math + 1; // skip backslash
+            const char* cmd_end = cmd_start;
+            while (*cmd_end && (isalpha(*cmd_end) || isdigit(*cmd_end))) {
+                cmd_end++;
+            }
+            
+            size_t cmd_len = cmd_end - cmd_start;
+            if (cmd_len > 0) {
+                char cmd_buffer[64];
+                if (cmd_len < sizeof(cmd_buffer)) {
+                    strncpy(cmd_buffer, cmd_start, cmd_len);
+                    cmd_buffer[cmd_len] = '\0';
+                    
+                    // Check if this is a binary operator
+                    if (strcmp(cmd_buffer, "boxdot") == 0 || strcmp(cmd_buffer, "boxplus") == 0 ||
+                        strcmp(cmd_buffer, "boxminus") == 0 || strcmp(cmd_buffer, "boxtimes") == 0 ||
+                        strcmp(cmd_buffer, "cdot") == 0 || strcmp(cmd_buffer, "times") == 0) {
+                        explicit_op = true;
+                        op_name = cmd_buffer;
+                        *math = cmd_end; // advance past the command
+                        skip_math_whitespace(math);
+                    }
+                }
+            }
+        }
         // Check for implicit multiplication (consecutive terms)
         else if ((isalpha(**math)) ||  // identifiers (for all flavors)
                  **math == '(' ||  // parentheses
@@ -2393,7 +2454,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             // Handle factorial notation
             if (**math == '!') {
                 (*math)++; // skip !
-                printf("DEBUG: Creating factorial with base item=0x%llx, type=%d\n", left.item, get_type_id(left));
+                log_debug("Creating factorial with base item=0x%llx, type=%d", left.item, get_type_id(left));
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
                     return {.item = ITEM_ERROR};
@@ -3055,8 +3116,14 @@ static Item parse_latex_cases(Input *input, const char **math) {
         skip_math_whitespace(math);
         
         // Check for end of environment
-        if (strncmp(*math, "\\end{cases}", 11) == 0) {
+        if (strlen(*math) >= 11 && strncmp(*math, "\\end{cases}", 11) == 0) {
             *math += 11;
+            break;
+        }
+        
+        // Safety check - if we don't have enough characters left, break
+        if (strlen(*math) < 2) {
+            printf("WARNING: Incomplete cases environment, missing \\end{cases}\n");
             break;
         }
         
@@ -3100,7 +3167,7 @@ static Item parse_latex_cases(Input *input, const char **math) {
         skip_math_whitespace(math);
         
         // Check for row separator \\
-        if (strncmp(*math, "\\\\", 2) == 0) {
+        if (strlen(*math) >= 2 && strncmp(*math, "\\\\", 2) == 0) {
             (*math) += 2; // skip \\
         }
         
@@ -4073,20 +4140,20 @@ static Item parse_basic_operator(Input *input, const char **math, MathFlavor fla
 
 // Group parser: Functions
 static Item parse_function(Input *input, const char **math, MathFlavor flavor, const MathExprDef *def) {
-    fprintf(stderr, "DEBUG parse_function: called for '%s', has_arguments=%s, flavor=%d\n", 
+    log_debug("parse_function: called for '%s', has_arguments=%s, flavor=%d", 
             def->element_name, def->has_arguments ? "true" : "false", flavor);
     
     if (def->has_arguments) {
         // For LaTeX flavor, use LaTeX-style function parsing (space-separated arguments)
         if (flavor == MATH_FLAVOR_LATEX) {
-            fprintf(stderr, "DEBUG parse_function: calling parse_latex_function for '%s'\n", def->element_name);
+            log_debug("parse_function: calling parse_latex_function for '%s'", def->element_name);
             return parse_latex_function(input, math, def->element_name);
         } else {
             // For other flavors, use parentheses-based function calls
             return parse_function_call(input, math, flavor, def->element_name);
         }
     } else {
-        fprintf(stderr, "DEBUG parse_function: creating element without arguments for '%s'\n", def->element_name);
+        log_debug("parse_function: creating element without arguments for '%s'", def->element_name);
         return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
     }
 }
@@ -4426,8 +4493,19 @@ static Item parse_modular(Input *input, const char **math, MathFlavor flavor, co
     if (def->has_arguments && def->argument_count > 0) {
         for (int i = 0; i < def->argument_count; i++) {
             skip_math_whitespace(math);
-            Item arg = parse_math_primary(input, math, flavor);
-            if (arg .item != ITEM_ERROR) {
+            
+            Item arg = {.item = ITEM_ERROR};
+            if (**math == '{') {
+                (*math)++; // skip opening brace
+                arg = parse_math_expression(input, math, flavor);
+                if (**math == '}') {
+                    (*math)++; // skip closing brace
+                }
+            } else {
+                arg = parse_math_primary(input, math, flavor);
+            }
+            
+            if (arg.item != ITEM_ERROR) {
                 list_push((List*)mod_element, arg);
             }
         }
@@ -4718,9 +4796,9 @@ static Item parse_latex_root_with_index(Input *input, const char **math) {
     }
     
     // add index and radicand as children
-    printf("DEBUG: Adding root index item=0x%llx, type=%d\n", index.item, get_type_id(index));
+    log_debug("Adding root index item=0x%llx, type=%d", index.item, get_type_id(index));
     list_push((List*)root_element, index);
-    printf("DEBUG: Adding root radicand item=0x%llx, type=%d\n", radicand.item, get_type_id(radicand));
+    log_debug("Adding root radicand item=0x%llx, type=%d", radicand.item, get_type_id(radicand));
     list_push((List*)root_element, radicand);
     
     // set content length
@@ -5039,12 +5117,7 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
     // Add type attribute
     add_attribute_to_element(input, integral_element, "type", "integral");
     
-    // Set content length for the base integral symbol
-    ((TypeElmt*)integral_element->type)->content_length = 0;
-    
-    Item result = {.item = (uint64_t)integral_element};
-    
-    // Parse optional bounds (subscript and superscript) and create proper structures
+    // Parse optional bounds directly into the integral element for big operator formatting
     if (**math == '_') {
         (*math)++; // skip _
         skip_math_whitespace(math);
@@ -5062,14 +5135,8 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
         }
         
         if (lower_bound .item != ITEM_ERROR) {
-            // Create subscript element
-            Element* subscript_element = create_math_element(input, "subscript");
-            if (subscript_element) {
-                list_push((List*)subscript_element, result);
-                list_push((List*)subscript_element, lower_bound);
-                ((TypeElmt*)subscript_element->type)->content_length = 2;
-                result = {.item = (uint64_t)subscript_element};
-            }
+            // Add lower bound directly to integral element
+            list_push((List*)integral_element, lower_bound);
         }
     }
     
@@ -5092,16 +5159,15 @@ static Item parse_latex_integral_enhanced(Input *input, const char **math, const
         }
         
         if (upper_bound .item != ITEM_ERROR) {
-            // Create superscript element
-            Element* superscript_element = create_math_element(input, "pow");
-            if (superscript_element) {
-                list_push((List*)superscript_element, result);
-                list_push((List*)superscript_element, upper_bound);
-                ((TypeElmt*)superscript_element->type)->content_length = 2;
-                result = {.item = (uint64_t)superscript_element};
-            }
+            // Add upper bound directly to integral element
+            list_push((List*)integral_element, upper_bound);
         }
     }
     
-    return result;
+    // Set content length
+    ((TypeElmt*)integral_element->type)->content_length = ((List*)integral_element)->length;
+    
+    skip_math_whitespace(math);
+    
+    return {.item = (uint64_t)integral_element};
 }
