@@ -196,13 +196,19 @@ void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
-    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_DTIME:  case LMD_TYPE_BINARY:
+    case LMD_TYPE_DTIME:
+        *(DateTime*)field_ptr = *(DateTime*)value.pointer;
+        break;
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         *(String**)field_ptr = (String*)value.pointer;
         ((String*)value.pointer)->ref_cnt++;
         break;
-    case LMD_TYPE_ARRAY:  case LMD_TYPE_MAP:  case LMD_TYPE_LIST:  case LMD_TYPE_ELEMENT:
-        *(void**)field_ptr = value.raw_pointer;
+    case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+        Container *container = value.container;
+        *(void**)field_ptr = container;  container->ref_cnt;
         break;
+    }
     default:
         printf("unknown type %d\n", value.type_id);
     }

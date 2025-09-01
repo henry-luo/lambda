@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <time.h>
+#include "log.h"
 
 /* Helper function to check if a year is a leap year */
 static bool is_leap_year(int year) {
@@ -54,7 +55,8 @@ DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp) {
     DATETIME_SET_TZ_OFFSET(dt, 0);
     dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime from unix timestamp
     dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
-    
+    log_debug("Created DateTime: year=%d, month=%d, day=%d, hour=%d, minute=%d, second=%d",
+        DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day, dt->hour, dt->minute, dt->second);
     return dt;
 }
 
