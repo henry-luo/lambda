@@ -918,3 +918,61 @@ Test(variable_pool_corruption, exact_crash_reproduction_attempt) {
     
     pool_variable_destroy(pool);
 }
+
+// Test for the specific buffer boundary bug that was causing heap buffer overflow
+Test(variable_pool_boundary, buffer_boundary_overflow_prevention) {
+    VariableMemPool *pool;
+    // Use a very small buffer size to force boundary conditions quickly
+    pool_variable_init(&pool, 64, 10);
+    
+    void *ptrs[10];
+    
+    // Fill the buffer almost to capacity to trigger boundary conditions
+    // Each allocation uses header_size (16 bytes) + aligned block size
+    // With 64-byte buffer, we can fit about 3 small allocations before hitting boundary
+    
+    // Allocate blocks that will fill the buffer close to capacity
+    pool_variable_alloc(pool, 16, &ptrs[0]); // ~32 bytes with header
+    pool_variable_alloc(pool, 16, &ptrs[1]); // ~32 bytes with header  
+    
+    // This allocation should trigger buffer boundary check
+    // Before the fix: buffer_has_space would incorrectly return true when curr_ptr == end
+    // After the fix: buffer_has_space correctly returns false, creating new buffer
+    pool_variable_alloc(pool, 16, &ptrs[2]); // Should create new buffer
+    cr_assert_not_null(ptrs[2], "Allocation at buffer boundary should succeed with new buffer");
+    
+    // Test the exact scenario that caused the crash:
+    // Allocate something that would exactly fill remaining space
+    pool_variable_alloc(pool, 8, &ptrs[3]);
+    cr_assert_not_null(ptrs[3], "Small allocation should succeed");
+    
+    // Now try to allocate something larger than remaining space
+    // This should trigger new buffer creation, not overflow
+    pool_variable_alloc(pool, 32, &ptrs[4]);
+    cr_assert_not_null(ptrs[4], "Large allocation should create new buffer, not overflow");
+    
+    // Verify all pointers are valid and writable
+    for (int i = 0; i < 5; i++) {
+        sprintf((char*)ptrs[i], "Test%d", i);
+        char expected[16];
+        sprintf(expected, "Test%d", i);
+        cr_assert_str_eq((char*)ptrs[i], expected, "Memory should be writable without corruption");
+    }
+    
+    // Test pool_calloc specifically (this was the crashing function)
+    void *calloc_ptr = pool_calloc(pool, 48); // Exact size that was crashing
+    cr_assert_not_null(calloc_ptr, "pool_calloc should succeed without buffer overflow");
+    
+    // Verify the memory is properly zeroed
+    char *bytes = (char*)calloc_ptr;
+    for (int i = 0; i < 48; i++) {
+        cr_assert_eq(bytes[i], 0, "pool_calloc should zero-initialize memory");
+    }
+    
+    // Write to the allocated memory to ensure it's valid
+    strcpy((char*)calloc_ptr, "Buffer boundary test passed");
+    cr_assert_str_eq((char*)calloc_ptr, "Buffer boundary test passed", 
+                     "Memory allocated at boundary should be writable");
+    
+    pool_variable_destroy(pool);
+}
