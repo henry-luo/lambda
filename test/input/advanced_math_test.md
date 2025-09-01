@@ -17,6 +17,11 @@ These expressions were moved from indexed_math_test.md after achieving 95% succe
 - Expected: c d (with medium space)
 
 ### Integral Formatting
+**Expr 39:** $\int_0^1 f(x) dx$
+- Issue: Integral bounds formatting adds explicit braces
+- Current: \int_{0}^{1} f(x) dx
+- Expected: \int_0^1 f(x) dx
+
 **Expr 161:** $\iint_D f(x,y) dA$
 - Issue: Spacing differences in subscripts and arguments
 - Current: \iint_{D}f(x, y)dA
