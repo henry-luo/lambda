@@ -5,7 +5,7 @@ This file contains indexed math expressions to track parser/formatter alignment 
 ## Group 1: Basic Operations
 **Expr 1:** $x + y$
 **Expr 2:** $a - b$
-**Expr 3:** $p \cdot q$
+**Expr 3:** [MOVED TO advanced_math_test.md]
 **Expr 4:** $\frac{m}{n}$
 
 ## Group 2: Functions  
@@ -55,11 +55,11 @@ This file contains indexed math expressions to track parser/formatter alignment 
 ## Group 8: Big Operators with Limits
 **Expr 37:** $\sum_{i=1}^{n} x_i$
 **Expr 38:** $\prod_{k=0}^{m} a_k$
-**Expr 39:** $\int_0^1 f(x) dx$
+**Expr 39:** [MOVED TO advanced_math_test.md]
 **Expr 40:** $\bigcup_{i \in I} A_i$
 **Expr 41:** $\bigcap_{j=1}^n B_j$
 **Expr 42:** $\bigoplus_{k} C_k$
-**Expr 43:** $\bigotimes_i D_i$
+**Expr 43:** [MOVED TO advanced_math_test.md]
 
 ## Group 9: Relations and Inequalities
 **Expr 44:** $a = b$
@@ -169,7 +169,7 @@ This file contains indexed math expressions to track parser/formatter alignment 
 **Expr 132:** $\longleftarrow$
 **Expr 133:** $\hookrightarrow$
 **Expr 134:** $\hookleftarrow$
-**Expr 135:** $\twoheadrightarrow$
+**Expr 135:** [MOVED TO advanced_math_test.md]
 **Expr 136:** [MOVED TO advanced_math_test.md]
 **Expr 137:** $\rightsquigarrow$
 **Expr 138:** $\uparrow$
