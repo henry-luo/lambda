@@ -1603,7 +1603,7 @@ project "test_lambda"
     }
     
 
-project "test_lambda_repl_simple"
+project "test_lambda_repl"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1611,7 +1611,7 @@ project "test_lambda_repl_simple"
     targetextension ".exe"
     
     files {
-        "test/test_lambda_repl_simple.cpp",
+        "test/test_lambda_repl.cpp",
     }
     
     includedirs {
