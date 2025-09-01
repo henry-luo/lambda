@@ -461,7 +461,7 @@ static const MathExprDef environments[] = {
 static const MathExprDef spacing[] = {
     {"quad", "quad", "quad", "quad", "  ", "Quad space", false, 0, NULL},
     {"qquad", "wide", "qquad", "qquad", "    ", "Double quad space", false, 0, NULL},
-    {"!", "thin", "!", "thin_space", "", "Thin negative space", false, 0, NULL},
+    {"!", "thin", "!", "neg_space", "", "Thin negative space", false, 0, NULL},
     {",", "thinspace", ",", "thin_space", " ", "Thin space", false, 0, NULL},
     {":", "med", ":", "med_space", " ", "Medium space", false, 0, NULL},
     {";", "thick", ";", "thick_space", "  ", "Thick space", false, 0, NULL},
@@ -1410,6 +1410,21 @@ static Item parse_latex_command(Input *input, const char **math) {
         // For other \left delimiters, treat as symbol for now
         String* left_symbol = input_create_string(input, "left");
         return left_symbol ? (Item){.item = y2it(left_symbol)} : (Item){.item = ITEM_ERROR};
+    } else if (strcmp(cmd_string->chars, "quad") == 0 || strcmp(cmd_string->chars, "qquad") == 0 ||
+               strcmp(cmd_string->chars, "!") == 0 || strcmp(cmd_string->chars, ",") == 0 ||
+               strcmp(cmd_string->chars, ":") == 0 || strcmp(cmd_string->chars, ";") == 0) {
+        stringbuf_reset(sb);
+        // Handle spacing commands directly
+        const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
+        if (def) {
+            return parse_spacing(input, math, MATH_FLAVOR_LATEX, def);
+        }
+        // Fallback - create spacing element
+        Element* space_element = create_math_element(input, cmd_string->chars);
+        if (space_element) {
+            return {.item = (uint64_t)space_element};
+        }
+        return {.item = ITEM_ERROR};
     } else {
         // Use new group-based parsing system
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
@@ -3558,6 +3573,14 @@ static bool is_relation_operator(const char* cmd) {
            strcmp(cmd, "prec") == 0 || strcmp(cmd, "preceq") == 0 ||
            strcmp(cmd, "succ") == 0 || strcmp(cmd, "succeq") == 0 ||
            strcmp(cmd, "ll") == 0 || strcmp(cmd, "gg") == 0;
+}
+
+static bool is_spacing_cmd(const char* cmd) {
+    return strcmp(cmd, "quad") == 0 || strcmp(cmd, "qquad") == 0 ||
+           strcmp(cmd, "!") == 0 || strcmp(cmd, ",") == 0 ||
+           strcmp(cmd, ":") == 0 || strcmp(cmd, ";") == 0 ||
+           strcmp(cmd, "enspace") == 0 || strcmp(cmd, "thinspace") == 0 ||
+           strcmp(cmd, "medspace") == 0 || strcmp(cmd, "thickspace") == 0;
 }
 
 static bool is_special_symbol(const char* cmd) {

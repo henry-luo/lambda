@@ -92,83 +92,49 @@ This file contains indexed math expressions to track parser/formatter alignment 
 **Expr 65:** $\vec{v}$
 
 ## Group 13: Typography and Fonts
-
 **Expr 66:** $\mathbf{x}$
-
 **Expr 67:** $\mathit{text}$
-
 **Expr 68:** $\mathcal{L}$
-
 **Expr 69:** $\mathfrak{g}$
-
 **Expr 70:** $\mathtt{code}$
-
 **Expr 71:** $\mathsf{label}$
-
 **Expr 72:** $\mathbb{R}$
 
 ## Group 14: Geometry
-
 **Expr 73:** $\angle ABC$
-
 **Expr 74:** $90^\circ$
-
 **Expr 75:** $\triangle PQR$
-
 **Expr 76:** $AB \parallel CD$
-
 **Expr 77:** $EF \perp GH$
 
 ## Group 15: Logic
-
 **Expr 78:** $p \land q$
-
 **Expr 79:** $s \lor t$
-
 **Expr 80:** $\neg p$
-
 **Expr 81:** $p \implies q$
-
 **Expr 82:** $p \iff q$
-
 **Expr 83:** $\forall x$
-
 **Expr 84:** $\exists y$
 
 ## Group 16: Extended Relations
-
 **Expr 85:** $a \ll b$
-
 **Expr 86:** $c \gg d$
-
 **Expr 87:** $x \prec y$
-
 **Expr 88:** $u \succ v$
-
 **Expr 89:** $p \mid q$
-
 **Expr 90:** $r \nmid s$
 
 ## Group 17: Circled Operators
-
 **Expr 91:** $a \oplus b$
-
 **Expr 92:** $c \otimes d$
-
 **Expr 93:** $e \ominus f$
-
 **Expr 94:** $g \odot h$
 
 ## Group 18: Extended Arrows
-
 **Expr 95:** $\hookrightarrow$
-
 **Expr 96:** $\twoheadrightarrow$
-
 **Expr 97:** $\rightsquigarrow$
-
 **Expr 98:** $\uparrow$
-
 **Expr 99:** $\downarrow$
-
 **Expr 100:** $\updownarrow$
+
