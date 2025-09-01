@@ -954,6 +954,97 @@ project "test_math"
     }
     
 
+project "test_math_ascii"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_math_ascii.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "mac-deps/nghttp2/include",
+        "/opt/homebrew/opt/libedit/include",
+        "/opt/homebrew/Cellar/ginac/1.8.9/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    defines {
+        "GINAC_AVAILABLE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "criterion",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libginac.a",
+        "/opt/homebrew/lib/libcln.a",
+        "/opt/homebrew/lib/libgmp.a",
+    }
+    
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
+        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../mac-deps/nghttp2/lib/libnghttp2.a",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic",
+        "-std=c++17",
+    }
+    
+
 project "test_markup_roundtrip"
     kind "ConsoleApp"
     language "C++"

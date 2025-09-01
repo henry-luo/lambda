@@ -414,6 +414,14 @@
                         "defines": ["GINAC_AVAILABLE"]
                     },
                     {
+                        "source": "test_math_ascii.cpp",
+                        "name": "🔤 ASCII Math Roundtrip Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_math_ascii.exe",
+                        "libraries": ["ginac", "cln", "gmp"],
+                        "defines": ["GINAC_AVAILABLE"]
+                    },
+                    {
                         "source": "test_markup_roundtrip.cpp",
                         "name": "📝 Markup Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
