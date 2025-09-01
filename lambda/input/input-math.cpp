@@ -438,6 +438,8 @@ static const MathExprDef typography[] = {
     {"text", "text", "text", "text", "text", "Regular text", true, 1, NULL},
     {"textbf", "text.bold", "textbf", "textbf", "bold", "Bold text", true, 1, NULL},
     {"textit", "text.italic", "textit", "textit", "italic", "Italic text", true, 1, NULL},
+    {"boldsymbol", "boldsymbol", "boldsymbol", "boldsymbol", "𝛂", "Bold symbol", true, 1, NULL},
+    {"mathscr", "script", "scr", "mathscr", "𝒮", "Script text", true, 1, NULL},
     
     {NULL, NULL, NULL, NULL, NULL, NULL, false, 0, NULL}
 };
@@ -686,6 +688,16 @@ static bool is_relational_operator(const char *math) {
     if (strncmp(math, "\\cap", 4) == 0) return true;
     if (strncmp(math, "\\land", 5) == 0) return true;
     if (strncmp(math, "\\lor", 4) == 0) return true;
+    if (strncmp(math, "\\asymp", 6) == 0) return true;
+    if (strncmp(math, "\\approx", 7) == 0) return true;
+    if (strncmp(math, "\\equiv", 6) == 0) return true;
+    if (strncmp(math, "\\sim", 4) == 0) return true;
+    if (strncmp(math, "\\simeq", 6) == 0) return true;
+    if (strncmp(math, "\\prec", 5) == 0) return true;
+    if (strncmp(math, "\\succ", 5) == 0) return true;
+    if (strncmp(math, "\\preceq", 7) == 0) return true;
+    if (strncmp(math, "\\succeq", 7) == 0) return true;
+    if (strncmp(math, "\\propto", 7) == 0) return true;
     
     return false;
 }
@@ -1158,7 +1170,8 @@ static Item parse_latex_command(Input *input, const char **math) {
     stringbuf_reset(sb);
     
     // Handle spacing commands first (single punctuation characters)
-    if (**math == '!' || **math == ',' || **math == ':' || **math == ';') {
+    // Note: Exclude ':' as it's used in function type annotations like f: A -> B
+    if (**math == '!' || **math == ',' || **math == ';') {
         stringbuf_append_char(sb, **math);
         (*math)++;
     } else {
@@ -1209,10 +1222,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         stringbuf_reset(sb);
         Element* elem = create_math_element(input, "thin_space");
         return {.item = (uint64_t)elem};
-    } else if (strcmp(cmd_string->chars, ":") == 0) {
-        stringbuf_reset(sb);
-        Element* elem = create_math_element(input, "med_space");
-        return {.item = (uint64_t)elem};
+    // Removed colon handling - colons should be parsed at expression level for type annotations
     } else if (strcmp(cmd_string->chars, ";") == 0) {
         stringbuf_reset(sb);
         Element* elem = create_math_element(input, "thick_space");
@@ -1438,7 +1448,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         return left_symbol ? (Item){.item = y2it(left_symbol)} : (Item){.item = ITEM_ERROR};
     } else if (strcmp(cmd_string->chars, "quad") == 0 || strcmp(cmd_string->chars, "qquad") == 0 ||
                strcmp(cmd_string->chars, "!") == 0 || strcmp(cmd_string->chars, ",") == 0 ||
-               strcmp(cmd_string->chars, ":") == 0 || strcmp(cmd_string->chars, ";") == 0) {
+               strcmp(cmd_string->chars, ";") == 0) {
         stringbuf_reset(sb);
         // Handle spacing commands directly
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
@@ -1449,7 +1459,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         const char* element_name = cmd_string->chars;
         if (strcmp(cmd_string->chars, "!") == 0) element_name = "neg_space";
         else if (strcmp(cmd_string->chars, ",") == 0) element_name = "thin_space";
-        else if (strcmp(cmd_string->chars, ":") == 0) element_name = "med_space";
+        // Removed colon handling - colons should be parsed at expression level
         else if (strcmp(cmd_string->chars, ";") == 0) element_name = "thick_space";
         
         Element* space_element = create_math_element(input, element_name);
@@ -2025,7 +2035,10 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         int op_len = 0;
         
         // Check for relational operators
-        if (**math == '=') {
+        if (**math == ':') {
+            op_name = "type_annotation";
+            op_len = 1;
+        } else if (**math == '=') {
             op_name = "eq";
             op_len = 1;
         } else if (**math == '<' && *(*math + 1) == '=') {
@@ -2087,6 +2100,33 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
             } else if (strncmp(*math, "\\lor", 4) == 0 && !isalpha(*(*math + 4))) {
                 op_name = "lor";
                 op_len = 4;
+            } else if (strncmp(*math, "\\asymp", 6) == 0 && !isalpha(*(*math + 6))) {
+                op_name = "asymp";
+                op_len = 6;
+            } else if (strncmp(*math, "\\preceq", 7) == 0 && !isalpha(*(*math + 7))) {
+                op_name = "preceq";
+                op_len = 7;
+            } else if (strncmp(*math, "\\prec", 5) == 0 && !isalpha(*(*math + 5))) {
+                op_name = "prec";
+                op_len = 5;
+            } else if (strncmp(*math, "\\succeq", 7) == 0 && !isalpha(*(*math + 7))) {
+                op_name = "succeq";
+                op_len = 7;
+            } else if (strncmp(*math, "\\succ", 5) == 0 && !isalpha(*(*math + 5))) {
+                op_name = "succ";
+                op_len = 5;
+            } else if (strncmp(*math, "\\approx", 7) == 0 && !isalpha(*(*math + 7))) {
+                op_name = "approx";
+                op_len = 7;
+            } else if (strncmp(*math, "\\equiv", 6) == 0 && !isalpha(*(*math + 6))) {
+                op_name = "equiv";
+                op_len = 6;
+            } else if (strncmp(*math, "\\simeq", 6) == 0 && !isalpha(*(*math + 6))) {
+                op_name = "simeq";
+                op_len = 6;
+            } else if (strncmp(*math, "\\sim", 4) == 0 && !isalpha(*(*math + 4))) {
+                op_name = "sim";
+                op_len = 4;
             } else {
                 // No relational operation detected
                 break;
@@ -2101,8 +2141,27 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         
         Item right = parse_addition_expression(input, math, flavor);
         if (right .item == ITEM_ERROR || right .item == ITEM_NULL) {
-            // If we can't parse the right side, break out of the loop
-            // This prevents infinite loops when encountering unparseable expressions
+            // If we can't parse the right side, treat this operator as standalone
+            // Create a unary relational element instead of breaking
+            Element* rel_element = create_math_element(input, op_name);
+            if (!rel_element) {
+                return {.item = ITEM_ERROR};
+            }
+            
+            // For standalone relational operators, we don't add operands
+            ((TypeElmt*)rel_element->type)->content_length = 0;
+            
+            // Create a binary expression with the standalone operator
+            Element* binary_element = create_math_element(input, "implicit_mul");
+            if (!binary_element) {
+                return {.item = ITEM_ERROR};
+            }
+            
+            list_push((List*)binary_element, left);
+            list_push((List*)binary_element, {.item = (uint64_t)rel_element});
+            ((TypeElmt*)binary_element->type)->content_length = ((List*)binary_element)->length;
+            
+            left = {.item = (uint64_t)binary_element};
             break;
         }
         
@@ -2239,7 +2298,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
     
     while (**math && **math != '}' && iteration_count < MAX_MULTIPLICATION_ITERATIONS) {
         bool explicit_op = false;
-        const char* op_name = "mul";
+        const char* op_name = "implicit_mul";  // Default to implicit multiplication
         
         // Safety check: ensure we're making progress
         if (*math == last_position && iteration_count > 0) {
@@ -2252,7 +2311,7 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
         if (**math == '*' || **math == '/') {
             explicit_op = true;
             char op = **math;
-            op_name = (op == '*') ? "mul" : "div";
+            op_name = (op == '*') ? "times" : "div";  // Use times instead of mul for explicit *
             (*math)++; // skip operator
             skip_math_whitespace(math);
         }
@@ -2272,13 +2331,46 @@ static Item parse_multiplication_expression(Input *input, const char **math, Mat
                     cmd_buffer[cmd_len] = '\0';
                     
                     // Check if this is a binary operator
-                    if (strcmp(cmd_buffer, "boxdot") == 0 || strcmp(cmd_buffer, "boxplus") == 0 ||
-                        strcmp(cmd_buffer, "boxminus") == 0 || strcmp(cmd_buffer, "boxtimes") == 0 ||
-                        strcmp(cmd_buffer, "cdot") == 0 || strcmp(cmd_buffer, "times") == 0) {
+                    if (strcmp(cmd_buffer, "boxdot") == 0) {
                         explicit_op = true;
-                        op_name = cmd_buffer;
+                        op_name = "boxdot";
                         *math = cmd_end; // advance past the command
                         skip_math_whitespace(math);
+                    } else if (strcmp(cmd_buffer, "boxplus") == 0) {
+                        explicit_op = true;
+                        op_name = "boxplus";
+                        *math = cmd_end; // advance past the command
+                        skip_math_whitespace(math);
+                    } else if (strcmp(cmd_buffer, "boxminus") == 0) {
+                        explicit_op = true;
+                        op_name = "boxminus";
+                        *math = cmd_end; // advance past the command
+                        skip_math_whitespace(math);
+                    } else if (strcmp(cmd_buffer, "boxtimes") == 0) {
+                        explicit_op = true;
+                        op_name = "boxtimes";
+                        *math = cmd_end; // advance past the command
+                        skip_math_whitespace(math);
+                    } else if (strcmp(cmd_buffer, "cdot") == 0) {
+                        explicit_op = true;
+                        op_name = "cdot";
+                        *math = cmd_end; // advance past the command
+                        skip_math_whitespace(math);
+                    } else if (strcmp(cmd_buffer, "times") == 0) {
+                        explicit_op = true;
+                        op_name = "times";
+                        *math = cmd_end; // advance past the command
+                        skip_math_whitespace(math);
+                    }
+                    else if (strcmp(cmd_buffer, "prec") == 0 || strcmp(cmd_buffer, "preceq") == 0 ||
+                             strcmp(cmd_buffer, "succ") == 0 || strcmp(cmd_buffer, "succeq") == 0 ||
+                             strcmp(cmd_buffer, "leq") == 0 || strcmp(cmd_buffer, "geq") == 0 ||
+                             strcmp(cmd_buffer, "neq") == 0 || strcmp(cmd_buffer, "to") == 0 ||
+                             strcmp(cmd_buffer, "asymp") == 0 || strcmp(cmd_buffer, "approx") == 0 ||
+                             strcmp(cmd_buffer, "equiv") == 0 || strcmp(cmd_buffer, "sim") == 0 ||
+                             strcmp(cmd_buffer, "simeq") == 0 || strcmp(cmd_buffer, "propto") == 0) {
+                        // This is a relational operator, not a multiplication operator
+                        break;
                     }
                 }
             }
