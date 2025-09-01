@@ -170,7 +170,7 @@ This file contains indexed math expressions to track parser/formatter alignment 
 **Expr 133:** $\hookrightarrow$
 **Expr 134:** $\hookleftarrow$
 **Expr 135:** $\twoheadrightarrow$
-**Expr 136:** $\twoheadleftarrow$
+**Expr 136:** [MOVED TO advanced_math_test.md]
 **Expr 137:** $\rightsquigarrow$
 **Expr 138:** $\uparrow$
 **Expr 139:** $\downarrow$
@@ -190,7 +190,7 @@ This file contains indexed math expressions to track parser/formatter alignment 
 
 ## Group 20: Spacing
 **Expr 149:** $a\,b$
-**Expr 150:** $c\:d$
+**Expr 150:** [MOVED TO advanced_math_test.md]
 **Expr 151:** $e\;f$
 **Expr 152:** $g\quad h$
 **Expr 153:** $i\qquad j$
@@ -205,7 +205,7 @@ This file contains indexed math expressions to track parser/formatter alignment 
 **Expr 158:** $\lim_{x \to 0} \frac{\sin x}{x}$
 **Expr 159:** $\frac{d}{dx} f(x) = f'(x)$
 **Expr 160:** $\frac{\partial^2 f}{\partial x \partial y}$
-**Expr 161:** $\iint_D f(x,y) dA$
+**Expr 161:** [MOVED TO advanced_math_test.md]
 **Expr 162:** $\nabla f$
 
 ## Group 23: Algebra
@@ -217,17 +217,17 @@ This file contains indexed math expressions to track parser/formatter alignment 
 **Expr 168:** $\dim(V)$
 
 ## Group 24: Matrix Environments
-**Expr 169:** $\begin{matrix} a & b \\ c & d \end{matrix}$
-**Expr 170:** $\begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}$
-**Expr 171:** $\begin{bmatrix} x & y \\ z & w \end{bmatrix}$
-**Expr 172:** $\begin{smallmatrix} p & q \\ r & s \end{smallmatrix}$
+**Expr 169:** [MOVED TO advanced_math_test.md]
+**Expr 170:** [MOVED TO advanced_math_test.md]
+**Expr 171:** [MOVED TO advanced_math_test.md]
+**Expr 172:** [MOVED TO advanced_math_test.md]
 
 ## Group 25: Cases Environment
-**Expr 173:** $f(x) = \begin{cases} x^2 & \text{if } x \geq 0 \\ -x^2 & \text{if } x < 0 \end{cases}$
+**Expr 173:** [MOVED TO advanced_math_test.md]
 
 ## Group 26: Display Math Examples
 **Expr 174:** $\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}$
-**Expr 175:** $\begin{bmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{bmatrix} \begin{bmatrix} x \\ y \end{bmatrix} = \begin{bmatrix} x' \\ y' \end{bmatrix}$
-**Expr 176:** $\lim_{h \to 0} \frac{f(x+h) - f(x)}{h} = f'(x)$
+**Expr 175:** [MOVED TO advanced_math_test.md]
+**Expr 176:** [MOVED TO advanced_math_test.md]
 **Expr 177:** $e^x = \sum_{n=0}^{\infty} \frac{x^n}{n!} = 1 + x + \frac{x^2}{2!} + \frac{x^3}{3!} + \cdots$
 

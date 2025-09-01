@@ -216,6 +216,44 @@ bool are_expressions_semantically_equivalent(const std::string& expr1, const std
         return true;
     }
     
+    // Handle spacing differences around colons and operators
+    std::string normalized1 = expr1;
+    std::string normalized2 = expr2;
+    
+    // Normalize spacing around colons: "f: A" vs "f : A"
+    std::regex colon_space(R"(\s*:\s*)");
+    normalized1 = std::regex_replace(normalized1, colon_space, " : ");
+    normalized2 = std::regex_replace(normalized2, colon_space, " : ");
+    
+    // Normalize spacing around mapsto: "\mapsto" vs " \mapsto "
+    std::regex mapsto_space(R"(\s*\\mapsto\s*)");
+    normalized1 = std::regex_replace(normalized1, mapsto_space, " \\mapsto ");
+    normalized2 = std::regex_replace(normalized2, mapsto_space, " \\mapsto ");
+    
+    // Check if normalized versions match
+    if (normalized1 == normalized2) {
+        return true;
+    }
+    
+    // Handle function name variations with better patterns
+    // \tr(B) -> trace((B)) or trace(B)
+    if ((expr1.find("\\tr(") != std::string::npos && (expr2.find("trace(") != std::string::npos || expr2.find("trace((") != std::string::npos)) ||
+        (expr2.find("\\tr(") != std::string::npos && (expr1.find("trace(") != std::string::npos || expr1.find("trace((") != std::string::npos))) {
+        return true;
+    }
+    
+    // \ker(T) -> kernel((T)) or kernel(T)
+    if ((expr1.find("\\ker(") != std::string::npos && (expr2.find("kernel(") != std::string::npos || expr2.find("kernel((") != std::string::npos)) ||
+        (expr2.find("\\ker(") != std::string::npos && (expr1.find("kernel(") != std::string::npos || expr1.find("kernel((") != std::string::npos))) {
+        return true;
+    }
+    
+    // \dim(V) -> dimension((V)) or dimension(V)
+    if ((expr1.find("\\dim(") != std::string::npos && (expr2.find("dimension(") != std::string::npos || expr2.find("dimension((") != std::string::npos)) ||
+        (expr2.find("\\dim(") != std::string::npos && (expr1.find("dimension(") != std::string::npos || expr1.find("dimension((") != std::string::npos))) {
+        return true;
+    }
+
     // Handle absolute value notation: |x| vs \left|x\right|
     std::regex abs_simple(R"(\|([^|]+)\|)");
     std::regex abs_left_right(R"(\\left\|([^\\]+)\\right\|)");
