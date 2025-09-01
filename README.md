@@ -105,9 +105,9 @@ Lambda is a modern scripting language that combines:
 ```
 
 **REPL Commands:**
-- `:help` - Show help
-- `:quit` - Exit REPL
-- `:clear` - Clear history
+- `.help` - Show help
+- `.quit` - Exit REPL
+- `.clear` - Clear history
 
 ## Installation
 

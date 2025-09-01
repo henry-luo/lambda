@@ -1,7 +1,7 @@
 ## CLI Commands
 ```bash
 lambda                    # Start REPL
-// REPL Commands: :quit, :help, :clear
+// REPL Commands: .quit, .help, .clear
 lambda script.ls          # Run script  
 lambda --transpile-only script.ls # Transpile only
 lambda --help             # Show help

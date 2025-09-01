@@ -164,8 +164,8 @@ wine ../lambda-windows.exe hello-world.ls
 ### REPL Mode Test
 ```bash
 wine ../lambda-windows.exe
-# Type: :help
-# Type: :quit
+# Type: .help
+# Type: .quit
 ```
 
 ## Common Issues and Solutions

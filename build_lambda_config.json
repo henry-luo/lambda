@@ -497,12 +497,18 @@
                         "name": "🐑 Lambda Runtime Tests",
                         "dependencies": ["lambda-runtime-full"],
                         "binary": "test/test_lambda.exe"
+                    },
+                    {
+                        "source": "test/test_lambda_repl_simple.cpp",
+                        "name": "🎮 Lambda REPL Interface Tests",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_repl_simple.exe"
                     }
                 ],
                 "type": "lambda",
                 "special_flags": "-fms-extensions -lstdc++",
                 "uses_build_config": true,
-                "requires_jq": true,
+                "requires_lambda_exe": true,
                 "parallel": true
             },
             {
