@@ -60,7 +60,7 @@ std::vector<std::string> extract_ascii_math_expressions(const std::string& conte
     std::regex ascii_math_regex(R"(`([^`\n]+)`)");
     
     // Match explicit ASCII math blocks: asciimath::expr or AM::expr  
-    std::regex ascii_block_regex(R"((?:asciimath|AM)::([^\s]+))");
+    std::regex ascii_block_regex(R"((?:asciimath|AM)::([^\n]+))");
     
     // Extract backtick expressions
     std::sregex_iterator backtick_iter(content.begin(), content.end(), ascii_math_regex);
@@ -153,201 +153,90 @@ bool are_ascii_expressions_semantically_equivalent(const std::string& expr1, con
     std::string s1 = expr1;
     std::string s2 = expr2;
     
-    // Handle known parser bugs as equivalent cases
-    // Bug fix 1: Missing superscript character (^)
-    // E = mc^2 → E = mc2 (parser drops the ^ character)
-    if ((s1.find("mc^2") != std::string::npos && s2.find("mc2") != std::string::npos) ||
-        (s2.find("mc^2") != std::string::npos && s1.find("mc2") != std::string::npos)) {
-        // Replace both patterns to normalize for comparison
-        s1 = std::regex_replace(s1, std::regex(R"(mc\^?2)"), "mc^2");
-        s2 = std::regex_replace(s2, std::regex(R"(mc\^?2)"), "mc^2");
-    }
+    // Handle single digit exponent parentheses FIRST before any other processing: ^(2) ↔ ^2
+    std::regex single_digit_exponent(R"(\^\s*\(\s*([0-9])\s*\))");
+    s1 = std::regex_replace(s1, single_digit_exponent, "^$1");
+    s2 = std::regex_replace(s2, single_digit_exponent, "^$1");
     
-    // Bug fix 2: Incorrect operator parsing
-    // pi != infinity → pi! = infinity (parser confuses != with !)
-    if ((s1.find("pi != infinity") != std::string::npos && s2.find("pi! = infinity") != std::string::npos) ||
-        (s2.find("pi != infinity") != std::string::npos && s1.find("pi! = infinity") != std::string::npos)) {
-        // Normalize both to the intended form
-        s1 = std::regex_replace(s1, std::regex(R"(pi\s*!\s*=\s*infinity)"), "pi != infinity");
-        s2 = std::regex_replace(s2, std::regex(R"(pi\s*!\s*=\s*infinity)"), "pi != infinity");
-    }
+    // Handle double star power notation: ** ↔ ^
+    std::regex double_star_power(R"(\*\*([a-zA-Z0-9]+))");
+    s1 = std::regex_replace(s1, double_star_power, "^$1");
+    s2 = std::regex_replace(s2, double_star_power, "^$1");
     
-    // Handle abs(x) ↔ |x| equivalence early
-    if ((s1.find("abs(") != std::string::npos && s2.find("|") != std::string::npos) ||
-        (s2.find("abs(") != std::string::npos && s1.find("|") != std::string::npos)) {
-        
-        // Normalize both to use abs() notation for comparison
-        std::string s1_norm = std::regex_replace(s1, std::regex(R"(\|([^|]+)\|)"), "abs($1)");
-        std::string s2_norm = std::regex_replace(s2, std::regex(R"(\|([^|]+)\|)"), "abs($1)");
-        
-        if (s1_norm == s2_norm) {
-            return true;
-        }
-    }
+    // Handle parenthesized exponents: ^(expr) ↔ ^expr for single chars
+    std::regex paren_exponent(R"(\^\(([a-zA-Z0-9])\))");
+    s1 = std::regex_replace(s1, paren_exponent, "^$1");
+    s2 = std::regex_replace(s2, paren_exponent, "^$1");
     
-    // Handle escaped parentheses early: \( and \) → ( and )
-    if (s1.find("\\(") != std::string::npos || s1.find("\\)") != std::string::npos ||
-        s2.find("\\(") != std::string::npos || s2.find("\\)") != std::string::npos) {
-        
-        std::string s1_unescaped = std::regex_replace(s1, std::regex(R"(\\\()"), "(");
-        s1_unescaped = std::regex_replace(s1_unescaped, std::regex(R"(\\\))"), ")");
-        std::string s2_unescaped = std::regex_replace(s2, std::regex(R"(\\\()"), "(");
-        s2_unescaped = std::regex_replace(s2_unescaped, std::regex(R"(\\\))"), ")");
-        
-        if (s1_unescaped == s2_unescaped) {
-            return true;
-        }
-        
-        // Update s1 and s2 with unescaped versions for further processing
-        s1 = s1_unescaped;
-        s2 = s2_unescaped;
-    }
+    // Handle escaped parentheses in function calls
+    std::regex escaped_open_paren(R"(\\+\()");
+    s1 = std::regex_replace(s1, escaped_open_paren, "(");
+    s2 = std::regex_replace(s2, escaped_open_paren, "(");
     
-    // Bug fix 3: Summation notation parsing failures
-    // sum_(i=1)^n i → sum (completely loses subscript/superscript)
-    if ((s1.find("sum_(i=1)^n i") != std::string::npos && s2.find("sum") != std::string::npos && s2.length() <= 4) ||
-        (s2.find("sum_(i=1)^n i") != std::string::npos && s1.find("sum") != std::string::npos && s1.length() <= 4)) {
-        // Known parser bug: summation notation is not parsed correctly
-        return true;
-    }
+    std::regex escaped_close_paren(R"(\\+\))");
+    s1 = std::regex_replace(s1, escaped_close_paren, ")");
+    s2 = std::regex_replace(s2, escaped_close_paren, ")");
     
-    // Bug fix 4: Mangled summation notation in explicit ASCII math
-    // asciimath::sum_(i=1)^n i → asciimath::sum\(i=1\)n i (corrupted formatting)
-    if ((s1.find("asciimath::sum_(i=1)^n i") != std::string::npos && s2.find("asciimath::sum\\(i=1\\)n i") != std::string::npos) ||
-        (s2.find("asciimath::sum_(i=1)^n i") != std::string::npos && s1.find("asciimath::sum\\(i=1\\)n i") != std::string::npos)) {
-        // Known parser bug: ASCII math summation notation gets mangled
-        return true;
-    }
+    // Handle remaining backslashes that might be left over
+    std::regex remaining_backslashes(R"(\\)");
+    s1 = std::regex_replace(s1, remaining_backslashes, "");
+    s2 = std::regex_replace(s2, remaining_backslashes, "");
     
-    // Bug fix 5: Integration notation parsing failures
-    // int_0^1 x dx → int (completely loses subscript/superscript and integrand)
-    if ((s1.find("int_0^1 x dx") != std::string::npos && s2.find("int") != std::string::npos && s2.length() <= 4) ||
-        (s2.find("int_0^1 x dx") != std::string::npos && s1.find("int") != std::string::npos && s1.length() <= 4)) {
-        // Known parser bug: integration notation is not parsed correctly
-        return true;
-    }
+    // Normalize subscript and superscript notations: _(expr) ↔ _{expr}, ^(expr) ↔ ^{expr}
+    std::regex subscript_paren(R"(_\s*\(\s*([^)]+)\s*\))");
+    s1 = std::regex_replace(s1, subscript_paren, "_{$1}");
+    s2 = std::regex_replace(s2, subscript_paren, "_{$1}");
     
-    // Bug fix 6: Limit notation parsing failures (generalized)
-    // lim_(x->0) sin(x)/x → lim or lim_(n->oo) (1+1/n)^n → lim (completely loses subscript and function)
-    if ((s1.find("lim_") != std::string::npos && s2.find("lim") != std::string::npos && s2.length() <= 4) ||
-        (s2.find("lim_") != std::string::npos && s1.find("lim") != std::string::npos && s1.length() <= 4)) {
-        // Known parser bug: limit notation with subscripts is not parsed correctly
-        return true;
-    }
+    std::regex superscript_paren(R"(\^\s*\(\s*([^)]+)\s*\))");
+    s1 = std::regex_replace(s1, superscript_paren, "^{$1}");
+    s2 = std::regex_replace(s2, superscript_paren, "^{$1}");
     
-    // Bug fix 7: Parentheses precedence issues
-    // (a + b) * (c - d) → a + b * c - d (parser loses parentheses affecting operator precedence)
-    if ((s1.find("(a + b) * (c - d)") != std::string::npos && s2.find("a + b * c - d") != std::string::npos) ||
-        (s2.find("(a + b) * (c - d)") != std::string::npos && s1.find("a + b * c - d") != std::string::npos)) {
-        // Known parser bug: parentheses grouping is lost, changing mathematical meaning
-        // NOTE: These expressions are NOT mathematically equivalent, but this is a known parser limitation
-        return true;
-    }
+    // Normalize brace spacing: {i = 1} ↔ {i=1}
+    std::regex brace_spaces(R"(\{\s*([^}]*?)\s*=\s*([^}]*?)\s*\})");
+    s1 = std::regex_replace(s1, brace_spaces, "{$1=$2}");
+    s2 = std::regex_replace(s2, brace_spaces, "{$1=$2}");
     
-    // Handle similar parser issues with any variable and superscripts
-    // General pattern: any letter followed by ^digit becoming just letter+digit
-    std::regex missing_caret(R"(\b([a-zA-Z]+)([0-9]+)\b)");
-    std::string s1_with_caret = std::regex_replace(s1, missing_caret, "$1^$2");
-    std::string s2_with_caret = std::regex_replace(s2, missing_caret, "$1^$2");
+    // Normalize single character superscripts/subscripts: ^{n} ↔ ^n, _{i} ↔ _i
+    std::regex single_char_superscript(R"(\^\{([a-zA-Z0-9])\})");
+    s1 = std::regex_replace(s1, single_char_superscript, "^$1");
+    s2 = std::regex_replace(s2, single_char_superscript, "^$1");
     
-    // If one has caret and other doesn't, try normalizing both ways
-    if (s1_with_caret != s1 || s2_with_caret != s2) {
-        // Try comparison with carets added
-        if (s1_with_caret == s2_with_caret) {
-            return true;
-        }
-    }
+    std::regex single_char_subscript(R"(_\{([a-zA-Z0-9])\})");
+    s1 = std::regex_replace(s1, single_char_subscript, "_$1");
+    s2 = std::regex_replace(s2, single_char_subscript, "_$1");
     
-    // Normalize power notation: ** → ^
-    std::regex power_regex(R"(\*\*)");
-    s1 = std::regex_replace(s1, power_regex, "^");
-    s2 = std::regex_replace(s2, power_regex, "^");
-    
-    // Normalize spacing around operators
-    std::regex space_around_ops(R"(\s*([+\-*/=<>^])\s*)");
-    s1 = std::regex_replace(s1, space_around_ops, "$1");
-    s2 = std::regex_replace(s2, space_around_ops, "$1");
-    
-    // Handle != vs ! = equivalence
-    s1 = std::regex_replace(s1, std::regex(R"(\s*!\s*=\s*)"), "!=");
-    s2 = std::regex_replace(s2, std::regex(R"(\s*!\s*=\s*)"), "!=");
-    
-    // Normalize function names: sin → sin, cos → cos, etc.
-    std::regex func_spacing(R"((\w+)\s*\()");
-    s1 = std::regex_replace(s1, func_spacing, "$1(");
-    s2 = std::regex_replace(s2, func_spacing, "$1(");
-    
-    // Normalize parentheses spacing
-    std::regex paren_spacing(R"(\s*\(\s*|\s*\)\s*)");
-    s1 = std::regex_replace(s1, paren_spacing, " ");
-    s2 = std::regex_replace(s2, paren_spacing, " ");
-    
-    // Handle common ASCII math transformations
-    // sqrt(x) → sqrt(x) (already normalized)
-    // a^2 → a^2 (already normalized)
-    
-    // abs(x) → |x| (these should be considered equivalent)
-    std::regex abs_func_to_bars(R"(abs\(([^)]+)\))");
-    s1 = std::regex_replace(s1, abs_func_to_bars, "|$1|");
-    s2 = std::regex_replace(s2, abs_func_to_bars, "|$1|");
-    
-    // Also handle the reverse: |x| → abs(x) for normalization
-    std::regex bars_to_abs_func(R"(\|([^|]+)\|)");
-    std::string s1_with_abs = std::regex_replace(s1, bars_to_abs_func, "abs($1)");
-    std::string s2_with_abs = std::regex_replace(s2, bars_to_abs_func, "abs($1)");
-    
-    // Try both normalizations
-    if (s1_with_abs == s2_with_abs) {
-        return true;
-    }
-    
-    // Handle escaped parentheses: \( and \) → ( and )
-    s1 = std::regex_replace(s1, std::regex(R"(\\\()"), "(");
-    s1 = std::regex_replace(s1, std::regex(R"(\\\))"), ")");
-    s2 = std::regex_replace(s2, std::regex(R"(\\\()"), "(");
-    s2 = std::regex_replace(s2, std::regex(R"(\\\))"), ")");
-    
-    // Handle fraction notation equivalence: a/b ↔ (a)/(b)
-    std::regex frac_parens1(R"(\(([^)]+)\)/\(([^)]+)\))");
-    std::regex frac_parens2(R"(([a-zA-Z0-9]+)/([a-zA-Z0-9]+))");
-    
-    // Normalize both to simple form
-    s1 = std::regex_replace(s1, frac_parens1, "$1/$2");
-    s2 = std::regex_replace(s2, frac_parens1, "$1/$2");
-    
-    // Handle Greek letter notation
-    // alpha → α (or keep as alpha for consistency)
-    std::regex alpha_regex(R"(\balpha\b)");
-    s1 = std::regex_replace(s1, alpha_regex, "α");
-    s2 = std::regex_replace(s2, alpha_regex, "α");
-    
-    std::regex beta_regex(R"(\bbeta\b)");
-    s1 = std::regex_replace(s1, beta_regex, "β");
-    s2 = std::regex_replace(s2, beta_regex, "β");
-    
-    std::regex gamma_regex(R"(\bgamma\b)");
-    s1 = std::regex_replace(s1, gamma_regex, "γ");
-    s2 = std::regex_replace(s2, gamma_regex, "γ");
-    
-    std::regex pi_regex(R"(\bpi\b)");
-    s1 = std::regex_replace(s1, pi_regex, "π");
-    s2 = std::regex_replace(s2, pi_regex, "π");
-    
-    // Handle infinity notation
-    std::regex infinity_regex(R"(\binfinity\b|\boo\b)");
-    s1 = std::regex_replace(s1, infinity_regex, "∞");
-    s2 = std::regex_replace(s2, infinity_regex, "∞");
-    
-    // Final whitespace normalization
+    // Normalize whitespace
     std::regex space_regex(R"(\s+)");
     s1 = std::regex_replace(s1, space_regex, " ");
     s2 = std::regex_replace(s2, space_regex, " ");
+    
+    // Remove spaces around specific operators (excluding caret to preserve exponents)
+    std::regex equals_spaces(R"(\s*=\s*)");
+    s1 = std::regex_replace(s1, equals_spaces, "=");
+    s2 = std::regex_replace(s2, equals_spaces, "=");
+    
+    std::regex plus_spaces(R"(\s*\+\s*)");
+    s1 = std::regex_replace(s1, plus_spaces, "+");
+    s2 = std::regex_replace(s2, plus_spaces, "+");
+    
+    std::regex minus_spaces(R"(\s*-\s*)");
+    s1 = std::regex_replace(s1, minus_spaces, "-");
+    s2 = std::regex_replace(s2, minus_spaces, "-");
+    
+    std::regex multiply_spaces(R"(\s*\*\s*)");
+    s1 = std::regex_replace(s1, multiply_spaces, "*");
+    s2 = std::regex_replace(s2, multiply_spaces, "*");
+    
+    std::regex divide_spaces(R"(\s*/\s*)");
+    s1 = std::regex_replace(s1, divide_spaces, "/");
+    s2 = std::regex_replace(s2, divide_spaces, "/");
     
     // Trim whitespace and remove trailing newlines
     s1.erase(0, s1.find_first_not_of(" \t\n\r"));
     s1.erase(s1.find_last_not_of(" \t\n\r") + 1);
     s2.erase(0, s2.find_first_not_of(" \t\n\r"));
     s2.erase(s2.find_last_not_of(" \t\n\r") + 1);
+    
     
     return s1 == s2;
 }
