@@ -592,7 +592,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
             if (stat(pathname, &st) == 0 && S_ISDIR(st.st_mode)) {
                 // URL points to a directory - use directory listing
                 printf("URL points to directory, using input_from_directory\n");
-                Input* input = input_from_directory(pathname, true, 10); // recursive with depth 10
+                Input* input = input_from_directory(pathname, false, 1); // non-recursive, single level only
                 url_destroy(abs_url);
                 return input;
             }
