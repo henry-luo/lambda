@@ -52,9 +52,9 @@ static const MathFormatDef basic_operators[] = {
     {"implicit_mul", "", "", "", "", "", true, false, true, 2},
     {"div", " / ", " / ", " / ", "<mo>/</mo>", " / ", true, false, true, 2},
     {"latex_div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
-    {"pow", "{1}^{{2}}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
-    {"subscript", "{1}_{{2}}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
-    {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
+    {"pow", "{1}^{2}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
+    {"subscript", "{1}_{2}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
+    {"eq", "=", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
     {"lt", " < ", " < ", " < ", "<mo>&lt;</mo>", " < ", true, false, true, 2},
     {"gt", " > ", " > ", " > ", "<mo>&gt;</mo>", " > ", true, false, true, 2},
     {"pm", "\\pm", "+-", "+-", "<mo>±</mo>", "±", false, false, false, 0},
@@ -63,7 +63,7 @@ static const MathFormatDef basic_operators[] = {
     {"cdot", " \\cdot ", " . ", " . ", "<mo>⋅</mo>", " ⋅ ", true, false, true, 2},
     {"ast", " \\ast ", " * ", " * ", "<mo>∗</mo>", " ∗ ", true, false, true, 2},
     {"star", " \\star ", " * ", " * ", "<mo>⋆</mo>", " ⋆ ", true, false, true, 2},
-    {"circ", " \\circ ", " compose ", " o ", "<mo>∘</mo>", " ∘ ", true, false, true, 2},
+    {"circ", "\\circ", " compose ", " o ", "<mo>∘</mo>", " ∘ ", false, false, false, 0},
     {"bullet", " \\bullet ", " . ", " . ", "<mo>∙</mo>", " ∙ ", true, false, true, 2},
     {"factorial", "{1}!", "{1}!", "{1}!", "{1}<mo>!</mo>", "{1}!", true, false, false, 1},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
@@ -362,6 +362,31 @@ static bool is_single_character_item(Item item) {
         fprintf(stderr, "DEBUG: is_single_character_item - STRING/SYMBOL len=%d, result=%s\n", str ? str->len : -1, result ? "true" : "false");
         #endif
         return result;
+    } else if (type == LMD_TYPE_ELEMENT) {
+        // Check for single-symbol LaTeX commands like \circ, \alpha, etc.
+        Element* elem = (Element*)item.pointer;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
+                // Common single-symbol LaTeX commands that should be treated as single characters
+                if ((elmt_type->name.length == 4 && strncmp(elmt_type->name.str, "circ", 4) == 0) ||
+                    (elmt_type->name.length == 5 && strncmp(elmt_type->name.str, "alpha", 5) == 0) ||
+                    (elmt_type->name.length == 4 && strncmp(elmt_type->name.str, "beta", 4) == 0) ||
+                    (elmt_type->name.length == 5 && strncmp(elmt_type->name.str, "gamma", 5) == 0) ||
+                    (elmt_type->name.length == 5 && strncmp(elmt_type->name.str, "delta", 5) == 0) ||
+                    (elmt_type->name.length == 7 && strncmp(elmt_type->name.str, "epsilon", 7) == 0) ||
+                    (elmt_type->name.length == 5 && strncmp(elmt_type->name.str, "theta", 5) == 0) ||
+                    (elmt_type->name.length == 2 && strncmp(elmt_type->name.str, "pi", 2) == 0) ||
+                    (elmt_type->name.length == 5 && strncmp(elmt_type->name.str, "sigma", 5) == 0) ||
+                    (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "tau", 3) == 0) ||
+                    (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "phi", 3) == 0) ||
+                    (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "chi", 3) == 0) ||
+                    (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "psi", 3) == 0) ||
+                    (elmt_type->name.length == 5 && strncmp(elmt_type->name.str, "omega", 5) == 0)) {
+                    return true;
+                }
+            }
+        }
     }
     
     #ifdef DEBUG_MATH_FORMAT
@@ -698,9 +723,6 @@ static void format_math_string(StringBuf* sb, String* str) {
 static void format_math_children_with_template(StringBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth) {
     if (!format_str || !children) return;
     
-    printf("DEBUG: format_math_children_with_template called with format='%s', children_count=%ld\n", 
-           format_str, children->length);
-    printf("DEBUG: Template string analysis - length=%ld\n", strlen(format_str));
     
     int child_count = children->length;
     
@@ -709,7 +731,6 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
         if (*p == '{' && *(p+1) && *(p+2) == '}') {
             if (*(p+1) == '*') {
                 // Handle comma-separated list placeholder {*}
-                printf("DEBUG: Found comma-separated placeholder {*}, child_count=%d\n", child_count);
                 for (int i = 0; i < child_count; i++) {
                     if (i > 0) {
                         stringbuf_append_str(sb, ", ");
@@ -721,12 +742,10 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
                 // Extract child index
                 int child_index = *(p+1) - '1'; // Convert '1' to 0, '2' to 1, etc.
                 
-                printf("DEBUG: Found placeholder {%c}, child_index=%d, child_count=%d\n", 
-                       *(p+1), child_index, child_count);
-                
                 if (child_index >= 0 && child_index < child_count) {
                     Item child_item = children->items[child_index];
-                    printf("DEBUG: Formatting child at index %d, item=%p\n", child_index, (void*)child_item.pointer);
+                    
+                    // Don't force compact context for template formatting - let the element decide
                     format_math_item(sb, child_item, flavor, depth + 1);
                 } else {
                     printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
@@ -1202,12 +1221,24 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             stringbuf_append_str(sb, format_str);  // e.g., "\\sum"
             
             if (children->length >= 1) {
-                stringbuf_append_str(sb, "_{");
+                // For integrals, always use braces around subscripts
+                // For other operators, use braces only for complex expressions
+                bool needs_braces = (strcmp(element_name, "int") == 0 || 
+                                   strcmp(element_name, "iint") == 0 || 
+                                   strcmp(element_name, "iiint") == 0 ||
+                                   strcmp(element_name, "oint") == 0 ||
+                                   !is_single_character_item(children->items[0]));
+                
+                if (needs_braces) {
+                    stringbuf_append_str(sb, "_{");
+                }
                 bool prev_compact_context = in_compact_context;
                 in_compact_context = true;
                 format_math_item(sb, children->items[0], flavor, depth + 1);
                 in_compact_context = prev_compact_context;
-                stringbuf_append_str(sb, "}");
+                if (needs_braces) {
+                    stringbuf_append_str(sb, "}");
+                }
             }
             
             // Handle additional children
@@ -1226,9 +1257,38 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                     in_compact_context = prev_compact_context;
                     stringbuf_append_str(sb, "}");
                 } else {
-                    // For other big operators (sum, bigcup, etc.), second child is the main expression
-                    stringbuf_append_str(sb, " ");
-                    format_math_item(sb, children->items[1], flavor, depth + 1);
+                    // For sum/prod operators, second child might be upper limit
+                    // For bigcup/bigcap, check if we have upper limit syntax
+                    bool has_upper_limit = (strcmp(element_name, "sum") == 0 || 
+                                          strcmp(element_name, "prod") == 0 ||
+                                          strcmp(element_name, "bigcup") == 0 ||
+                                          strcmp(element_name, "bigcap") == 0) && 
+                                          children->length >= 3;
+                    
+                    if (has_upper_limit) {
+                        // Second child is upper limit for sum/prod/bigcup/bigcap
+                        // For prod and sum, always use braces; for others, use braces only for complex expressions
+                        bool needs_braces = (strcmp(element_name, "prod") == 0 || 
+                                            strcmp(element_name, "sum") == 0 ||
+                                            !is_single_character_item(children->items[1]));
+                        
+                        if (needs_braces) {
+                            stringbuf_append_str(sb, "^{");
+                        } else {
+                            stringbuf_append_str(sb, "^");
+                        }
+                        bool prev_compact_context = in_compact_context;
+                        in_compact_context = true;
+                        format_math_item(sb, children->items[1], flavor, depth + 1);
+                        in_compact_context = prev_compact_context;
+                        if (needs_braces) {
+                            stringbuf_append_str(sb, "}");
+                        }
+                    } else {
+                        // For other operators, second child is the main expression
+                        stringbuf_append_str(sb, " ");
+                        format_math_item(sb, children->items[1], flavor, depth + 1);
+                    }
                 }
             }
             
@@ -1257,17 +1317,39 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         }
         #endif
         
-        // Special handling for pow element - use ^2 for single characters instead of ^{2}
-        if (strcmp(element_name, "pow") == 0 && children->length == 2 && 
-            flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
+        // Special handling for pow and subscript elements
+        if (strcmp(element_name, "pow") == 0 && children->length == 2 && flavor == MATH_OUTPUT_LATEX) {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG: Using special pow formatting for single character exponent\n");
+            fprintf(stderr, "DEBUG: Using special pow formatting for LaTeX\n");
             #endif
-            // Format as base^exponent without braces for single character exponents
+            // Format as base^exponent with compact context to avoid extra spaces
             format_math_item(sb, children->items[0], flavor, depth + 1);
             stringbuf_append_str(sb, "^");
             
-            // Set compact context for the exponent
+            // Always use compact context for exponents to avoid spaces
+            bool prev_compact_context = in_compact_context;
+            in_compact_context = true;
+            
+            // Use braces only for complex expressions, but always use compact context
+            if (is_single_character_item(children->items[1])) {
+                format_math_item(sb, children->items[1], flavor, depth + 1);
+            } else {
+                stringbuf_append_str(sb, "{");
+                format_math_item(sb, children->items[1], flavor, depth + 1);
+                stringbuf_append_str(sb, "}");
+            }
+            
+            in_compact_context = prev_compact_context;
+        } else if (strcmp(element_name, "eq") == 0 && children->length == 2 && 
+                   flavor == MATH_OUTPUT_LATEX) {
+            // Always use template formatting for equals to get proper spacing
+            format_math_children_with_template(sb, children, " = ", flavor, depth);
+        } else if (strcmp(element_name, "subscript") == 0 && children->length == 2 && 
+                   flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
+            // Special handling for subscript - use _i for single characters instead of _{i}
+            format_math_item(sb, children->items[0], flavor, depth + 1);
+            stringbuf_append_str(sb, "_");
+            
             bool prev_compact_context = in_compact_context;
             in_compact_context = true;
             format_math_item(sb, children->items[1], flavor, depth + 1);

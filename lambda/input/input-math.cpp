@@ -1267,6 +1267,16 @@ static Item parse_latex_command(Input *input, const char **math) {
             }
         }
         
+        // Parse the summand/main expression if present
+        skip_math_whitespace(math);
+        
+        if (**math && **math != '}' && **math != '$' && **math != '\n') {
+            Item summand = parse_multiplication_expression(input, math, MATH_FLAVOR_LATEX);
+            if (summand.item != ITEM_ERROR && summand.item != ITEM_NULL) {
+                list_push((List*)sum_element, summand);
+            }
+        }
+        
         ((TypeElmt*)sum_element->type)->content_length = ((List*)sum_element)->length;
         return {.item = (uint64_t)sum_element};
         
@@ -1322,117 +1332,19 @@ static Item parse_latex_command(Input *input, const char **math) {
             }
         }
         
+        // Parse the summand/main expression if present
+        skip_math_whitespace(math);
+        
+        if (**math && **math != '}' && **math != '$' && **math != '\n') {
+            Item summand = parse_multiplication_expression(input, math, MATH_FLAVOR_LATEX);
+            if (summand.item != ITEM_ERROR && summand.item != ITEM_NULL) {
+                list_push((List*)prod_element, summand);
+            }
+        }
+        
         ((TypeElmt*)prod_element->type)->content_length = ((List*)prod_element)->length;
         return {.item = (uint64_t)prod_element};
-    } else if (strcmp(cmd_string->chars, "bigcup") == 0) {
-        stringbuf_reset(sb);
-        // Parse bigcup with bounds directly here
-        Element* bigcup_element = create_math_element(input, "bigcup");
-        if (!bigcup_element) return {.item = ITEM_ERROR};
         
-        skip_math_whitespace(math);
-        
-        // Parse subscript if present
-        if (**math == '_') {
-            (*math)++; // skip _
-            skip_math_whitespace(math);
-            
-            Item lower_bound = {.item = ITEM_ERROR};
-            if (**math == '{') {
-                (*math)++; // skip {
-                lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-                if (**math == '}') {
-                    (*math)++; // skip }
-                }
-            } else {
-                lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
-            }
-            
-            if (lower_bound.item != ITEM_ERROR) {
-                list_push((List*)bigcup_element, lower_bound);
-            }
-        }
-        
-        skip_math_whitespace(math);
-        
-        // Parse superscript if present
-        if (**math == '^') {
-            (*math)++; // skip ^
-            skip_math_whitespace(math);
-            
-            Item upper_bound = {.item = ITEM_ERROR};
-            if (**math == '{') {
-                (*math)++; // skip {
-                upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-                if (**math == '}') {
-                    (*math)++; // skip }
-                }
-            } else {
-                upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
-            }
-            
-            if (upper_bound.item != ITEM_ERROR) {
-                list_push((List*)bigcup_element, upper_bound);
-            }
-        }
-        
-        ((TypeElmt*)bigcup_element->type)->content_length = ((List*)bigcup_element)->length;
-        return {.item = (uint64_t)bigcup_element};
-        
-    } else if (strcmp(cmd_string->chars, "bigcap") == 0) {
-        stringbuf_reset(sb);
-        // Parse bigcap with bounds directly here
-        Element* bigcap_element = create_math_element(input, "bigcap");
-        if (!bigcap_element) return {.item = ITEM_ERROR};
-        
-        skip_math_whitespace(math);
-        
-        // Parse subscript if present
-        if (**math == '_') {
-            (*math)++; // skip _
-            skip_math_whitespace(math);
-            
-            Item lower_bound = {.item = ITEM_ERROR};
-            if (**math == '{') {
-                (*math)++; // skip {
-                lower_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-                if (**math == '}') {
-                    (*math)++; // skip }
-                }
-            } else {
-                lower_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
-            }
-            
-            if (lower_bound.item != ITEM_ERROR) {
-                list_push((List*)bigcap_element, lower_bound);
-            }
-        }
-        
-        skip_math_whitespace(math);
-        
-        // Parse superscript if present
-        if (**math == '^') {
-            (*math)++; // skip ^
-            skip_math_whitespace(math);
-            
-            Item upper_bound = {.item = ITEM_ERROR};
-            if (**math == '{') {
-                (*math)++; // skip {
-                upper_bound = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-                if (**math == '}') {
-                    (*math)++; // skip }
-                }
-            } else {
-                upper_bound = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
-            }
-            
-            if (upper_bound.item != ITEM_ERROR) {
-                list_push((List*)bigcap_element, upper_bound);
-            }
-        }
-        
-        ((TypeElmt*)bigcap_element->type)->content_length = ((List*)bigcap_element)->length;
-        return {.item = (uint64_t)bigcap_element};
     } else if (strcmp(cmd_string->chars, "oint") == 0) {
         stringbuf_reset(sb);
         return parse_latex_integral(input, math);  // Use same parser, different element name
@@ -5074,7 +4986,15 @@ static Item parse_latex_sum_or_prod_enhanced(Input *input, const char **math, co
         }
     }
     
-    // Don't parse summand here - it will be handled by the broader expression context
+    // Parse the summand/main expression if present
+    skip_math_whitespace(math);
+    
+    if (**math && **math != '}' && **math != '$' && **math != '\n') {
+        Item summand = parse_multiplication_expression(input, math, MATH_FLAVOR_LATEX);
+        if (summand.item != ITEM_ERROR && summand.item != ITEM_NULL) {
+            list_push((List*)op_element, summand);
+        }
+    }
     
     // Set content length
     ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
