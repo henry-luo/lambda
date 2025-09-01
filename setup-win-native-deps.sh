@@ -156,8 +156,8 @@ echo "Installing optional dependencies..."
 # Optional: Criterion for testing (if available)
 install_msys2_package "${TOOLCHAIN_PREFIX}-criterion" "Criterion testing framework" || echo "⚠️  Criterion not available, tests may not work"
 
-# Optional: Readline for interactive features
-install_msys2_package "${TOOLCHAIN_PREFIX}-readline" "Readline library" || echo "⚠️  Readline not available"
+# Optional: libedit for interactive features (cross-platform alternative to readline)
+install_msys2_package "${TOOLCHAIN_PREFIX}-libedit" "libedit library" || echo "⚠️  libedit not available"
 
 echo ""
 echo "Setting up project-specific dependencies..."
