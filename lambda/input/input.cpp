@@ -1,8 +1,10 @@
 #include "input.h"
 #include "../../lib/url.h"
+#include "../../lib/stringbuf.h"
 #include "mime-detect.h"
 #include <unistd.h>
 #include <stdio.h>
+#include <sys/stat.h>
 
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
@@ -29,14 +31,9 @@ Item input_markup(Input *input, const char* content);
 #include "markup-parser.h"
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
-String* strbuf_to_string(StrBuf *sb) {
-    String *string = (String*)sb->str;
-    if (string) {
-        string->len = sb->length - sizeof(uint32_t);  string->ref_cnt = 0;
-        strbuf_full_reset(sb);
-        return string;        
-    }
-    return &EMPTY_STRING;
+
+String* stringbuf_to_string_wrapper(StringBuf *sb) {
+    return stringbuf_to_string(sb);
 }
 
 // Helper function to create string from char content
@@ -220,7 +217,7 @@ Input* input_new(Url* abs_url) {
     if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
     input->type_list = arraylist_new(16);
     input->root = {.item = ITEM_NULL};
-    input->sb = strbuf_new_pooled(input->pool);  // Always allocate StrBuf
+    input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
     return input;
 }
 
@@ -406,7 +403,7 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
     elmt_put(element, key, attr_value, input->pool);
 }
 
-extern "C" Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor) {
+extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
     const char* effective_type = NULL;
     
     // Determine the effective type to use
@@ -527,7 +524,7 @@ extern "C" Input* input_from_source(char* source, Url* abs_url, String* type, St
 // Helper function to read text file from file:// URL
 static char* read_file_from_url(Url* url) {
     if (!url || url->scheme != URL_SCHEME_FILE) {
-        fprintf(stderr, "Only file:// URLs are supported for reading\n");
+        fprintf(stderr, "Only file:// URLs are supported for file reading\n");
         return NULL;
     }
     
@@ -564,7 +561,7 @@ static char* read_file_from_url(Url* url) {
     return content;
 }
 
-extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
+Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     printf("input_data at:: %s, type: %s, cwd:  %s\n", url ? url->chars : "null", type ? type->chars : "null", 
         cwd && cwd->pathname && cwd->pathname->chars ? cwd->pathname->chars : "null");
     
@@ -580,15 +577,69 @@ extern "C" Input* input_from_url(String* url, String* type, String* flavor, Url*
         return NULL; 
     }
     
-    char* source = read_file_from_url(abs_url);
-    if (!source) {
-        printf("Failed to read document at URL: %s\n", url ? url->chars : "null");
+    // Handle different URL schemes
+    if (abs_url->scheme == URL_SCHEME_FILE) {
+        // Check if URL points to a directory (only for file:// URLs)
+        const char* pathname = url_get_pathname(abs_url);
+        if (pathname) {
+            struct stat st;
+            if (stat(pathname, &st) == 0 && S_ISDIR(st.st_mode)) {
+                // URL points to a directory - use directory listing
+                printf("URL points to directory, using input_from_directory\n");
+                Input* input = input_from_directory(pathname, true, 10); // recursive with depth 10
+                url_destroy(abs_url);
+                return input;
+            }
+        }
+        
+        // URL points to a file - read as normal
+        char* source = read_file_from_url(abs_url);
+        if (!source) {
+            printf("Failed to read document at URL: %s\n", url ? url->chars : "null");
+            url_destroy(abs_url);
+            return NULL;
+        }
+        
+        Input* input = input_from_source(source, abs_url, type, flavor);
+        free(source);  // Free the source string after parsing
+        url_destroy(abs_url);
+        return input;
+    }
+    else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
+        // Handle HTTP/HTTPS URLs
+        printf("HTTP/HTTPS URL detected, using HTTP client\n");
+        
+        const char* type_str = type ? type->chars : NULL;
+        const char* flavor_str = flavor ? flavor->chars : NULL;
+        
+        Input* input = input_from_http(url->chars, type_str, flavor_str, "./temp/cache");
+        url_destroy(abs_url);
+        return input;
+    }
+    else if (abs_url->scheme == URL_SCHEME_SYS) {
+        // Handle sys:// URLs for system information
+        printf("sys:// URL detected, using system information provider\n");
+        
+        // Create a variable pool for the input
+        VariableMemPool* pool;
+        MemPoolError pool_err = pool_variable_init(&pool, 4096, 10);
+        if (pool_err != MEM_POOL_ERR_OK) {
+            printf("Failed to create variable pool for sys:// URL\n");
+            url_destroy(abs_url);
+            return NULL;
+        }
+        
+        Input* input = input_from_sysinfo(abs_url, pool);
+        if (!input) {
+            pool_variable_destroy(pool);
+        }
+        url_destroy(abs_url);
+        return input;
+    }
+    else {
+        printf("Unsupported URL scheme for: %s\n", url ? url->chars : "null");
         url_destroy(abs_url);
         return NULL;
     }
-    
-    Input* input = input_from_source(source, abs_url, type, flavor);
-    free(source);  // Free the source string after parsing
-    return input;
 }
 

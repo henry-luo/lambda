@@ -21,22 +21,6 @@ static void strbuf_append_string(StrBuf* sb, String* str) {
     }
 }
 
-static String* strbuf_to_string(StrBuf* sb) {
-    if (!sb || !sb->str) {
-        return NULL;
-    }
-    
-    // Create a String structure (assuming Lambda's String structure)
-    String* result = (String*)malloc(sizeof(String) + sb->length + 1);
-    if (!result) return NULL;
-    
-    result->len = sb->length;
-    result->ref_cnt = 1;
-    memcpy(result->chars, sb->str, sb->length);
-    result->chars[sb->length] = '\0';
-    
-    return result;
-}
 
 // ==================== Validation Result Management ====================
 
@@ -267,7 +251,7 @@ String* generate_validation_report(ValidationResult* result, VariableMemPool* po
         return string_from_strview(strview_from_cstr("No validation result"), pool);
     }
     
-    StrBuf* report = strbuf_new_pooled(pool);
+    StrBuf* report = strbuf_new();
     
     // Header
     if (result->valid) {
@@ -326,7 +310,7 @@ String* generate_validation_report(ValidationResult* result, VariableMemPool* po
         }
     }
     
-    return strbuf_to_string(report);
+    return stringbuf_to_string(report);
 }
 
 // ==================== JSON Report Generation ====================
@@ -336,7 +320,7 @@ String* generate_json_report(ValidationResult* result, VariableMemPool* pool) {
         return string_from_strview(strview_from_cstr("{\"error\": \"No validation result\"}"), pool);
     }
     
-    StrBuf* json = strbuf_new_pooled(pool);
+    StrBuf* json = strbuf_new();
     
     strbuf_append_cstr(json, "{\n");
     strbuf_append_cstr(json, "  \"valid\": ");
@@ -432,7 +416,7 @@ String* generate_json_report(ValidationResult* result, VariableMemPool* pool) {
     
     strbuf_append_cstr(json, "\n}");
     
-    return strbuf_to_string(json);
+    return stringbuf_to_string(json);
 }
 
 // ==================== Debug Utilities ====================

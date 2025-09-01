@@ -1611,7 +1611,7 @@ void parse_org(Input* input, const char* org_string) {
     if (!org_string || !input) return;
     
     // Initialize string buffer for parsing
-    input->sb = strbuf_new_pooled(input->pool);
+    input->sb = stringbuf_new(input->pool);
     if (!input->sb) return;
     
     // Create document structure

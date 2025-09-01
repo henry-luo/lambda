@@ -866,8 +866,8 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
     
-    // if statement returns null/void (does not produce a value)
-    ast_node->type = &TYPE_NULL;
+    // if statement returns type
+    ast_node->type = &TYPE_ANY;
     log_debug("end build if stam");
     return (AstNode*)ast_node;
 }
@@ -1575,7 +1575,7 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
 }
 
 AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
-        log_debug("build for stam");
+    log_debug("build for stam");
     AstForNode* ast_node = (AstForNode*)alloc_ast_node(tp, AST_NODE_FOR_STAM, for_node, sizeof(AstForNode));
     
     ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
@@ -1603,15 +1603,13 @@ AstNode* build_for_stam(Transpiler* tp, TSNode for_node) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
-        log_debug("missing for loop declare");
 
     TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
-        log_debug("missing for then");
-        log_debug("got for then type %d", ast_node->then->node_type);
+    log_debug("got for then type %d", ast_node->then->node_type);
 
-    // for statement returns null/void (does not produce a value)
-    ast_node->type = &TYPE_NULL;
+    // for statement returns type
+    ast_node->type = &TYPE_ANY;
     tp->current_scope = ast_node->vars->parent;
     return (AstNode*)ast_node;
 }

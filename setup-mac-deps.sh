@@ -36,6 +36,19 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
         rm -rf build_temp/
     fi
     
+    # Clean nghttp2 and curl build files
+    if [ -d "mac-deps/nghttp2" ]; then
+        cd mac-deps/nghttp2
+        make clean 2>/dev/null || true
+        cd - > /dev/null
+    fi
+    
+    if [ -d "mac-deps/curl-8.10.1" ]; then
+        cd mac-deps/curl-8.10.1
+        make clean 2>/dev/null || true
+        cd - > /dev/null
+    fi
+    
     echo "Cleanup completed."
     exit 0
 fi
@@ -400,6 +413,8 @@ HOMEBREW_DEPS=(
     "readline"   # For command line editing - referenced in build config
     "criterion"  # For testing framework - referenced in build config
     "coreutils"  # For timeout command needed by test suite
+    "openssl@3"  # For SSL/TLS support - required for libcurl
+    "ginac"      # For mathematical expression equivalence testing
 )
 
 if command -v brew >/dev/null 2>&1; then
@@ -441,6 +456,219 @@ else
     echo "⚠️  Warning: Cannot set up timeout command without Homebrew"
 fi
 
+# Function to build nghttp2 for Mac
+build_nghttp2_for_mac() {
+    echo "Building nghttp2 for Mac..."
+    
+    # Check if already built
+    if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
+        echo "nghttp2 already built"
+        return 0
+    fi
+    
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+    
+    # Download nghttp2 if not exists
+    if [ ! -d "mac-deps/nghttp2" ]; then
+        echo "Downloading nghttp2..."
+        cd mac-deps
+        git clone https://github.com/nghttp2/nghttp2.git || {
+            echo "Warning: Could not clone nghttp2 repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd mac-deps/nghttp2
+    
+    # Configure and build nghttp2
+    echo "Configuring nghttp2..."
+    if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+        --enable-static --disable-shared \
+        --disable-app --disable-hpack-tools \
+        --disable-examples --disable-python-bindings \
+        --disable-failmalloc --without-libxml2 \
+        --without-jansson --without-zlib \
+        --without-libevent-openssl --without-libcares \
+        --without-openssl --without-libev \
+        --without-cunit --without-jemalloc; then
+        
+        echo "Building nghttp2..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing nghttp2..."
+            if make install; then
+                echo "✅ nghttp2 built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ nghttp2 build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build SIGAR for Mac
+build_sigar_for_mac() {
+    echo "Building SIGAR for Mac..."
+    
+    # Check if already built
+    if [ -f "mac-deps/sigar/lib/libsigar.a" ]; then
+        echo "SIGAR already built"
+        return 0
+    fi
+    
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+    
+    # Download SIGAR if not exists
+    if [ ! -d "mac-deps/sigar" ]; then
+        echo "Downloading SIGAR..."
+        cd mac-deps
+        git clone https://github.com/hyperic/sigar.git || {
+            echo "Warning: Could not clone SIGAR repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd mac-deps/sigar
+    
+    # Configure and build SIGAR
+    echo "Configuring SIGAR..."
+    if ./autogen.sh && ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/sigar \
+        --enable-static --disable-shared \
+        --disable-java --disable-perl --disable-csharp; then
+        
+        echo "Building SIGAR..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing SIGAR..."
+            if make install; then
+                echo "✅ SIGAR built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ SIGAR build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build libcurl with HTTP/2 support for Mac
+build_curl_with_http2_for_mac() {
+    echo "Building libcurl with HTTP/2 support for Mac..."
+    
+    # Check if already built
+    if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
+        echo "libcurl with HTTP/2 already built"
+        return 0
+    fi
+    
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+    
+    # Download curl if not exists
+    if [ ! -d "mac-deps/curl-8.10.1" ]; then
+        echo "Downloading curl 8.10.1..."
+        cd mac-deps
+        curl -L "https://curl.se/download/curl-8.10.1.tar.gz" -o curl-8.10.1.tar.gz
+        tar -xzf curl-8.10.1.tar.gz
+        rm curl-8.10.1.tar.gz
+        cd - > /dev/null
+    fi
+    
+    cd mac-deps/curl-8.10.1
+    
+    # Get OpenSSL path from Homebrew
+    if command -v brew >/dev/null 2>&1; then
+        OPENSSL_PATH=$(brew --prefix openssl@3)
+    else
+        echo "❌ Homebrew required for OpenSSL path"
+        cd - > /dev/null
+        return 1
+    fi
+    
+    # Configure libcurl with HTTP/2 support
+    echo "Configuring libcurl with HTTP/2 support..."
+    if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/curl-8.10.1 \
+        --enable-static --disable-shared \
+        --with-openssl="$OPENSSL_PATH" \
+        --with-nghttp2=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+        --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
+        --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
+        --disable-imap --disable-smb --disable-smtp --disable-gopher \
+        --disable-mqtt --disable-manual --disable-libcurl-option \
+        --disable-sspi --disable-ntlm --disable-tls-srp \
+        --disable-unix-sockets --disable-cookies --disable-socketpair \
+        --disable-http-auth --disable-doh --disable-mime \
+        --disable-dateparse --disable-netrc --disable-progress-meter \
+        --disable-alt-svc --disable-headers-api --disable-hsts \
+        --without-brotli --without-zstd --without-librtmp \
+        --without-libssh2 --without-libpsl --without-ngtcp2 \
+        --without-nghttp3 --without-libidn2 --without-libgsasl \
+        --without-quiche; then
+        
+        echo "Building libcurl..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing libcurl..."
+            if make install; then
+                echo "✅ libcurl with HTTP/2 built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ libcurl build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Build nghttp2 for Mac
+echo "Setting up nghttp2..."
+if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
+    echo "nghttp2 already available"
+else
+    if ! build_nghttp2_for_mac; then
+        echo "Warning: nghttp2 build failed"
+        exit 1
+    else
+        echo "nghttp2 built successfully"
+    fi
+fi
+
+# Build SIGAR for Mac
+echo "Setting up SIGAR..."
+if [ -f "mac-deps/sigar/lib/libsigar.a" ]; then
+    echo "SIGAR already available"
+else
+    if ! build_sigar_for_mac; then
+        echo "Warning: SIGAR build failed"
+        exit 1
+    else
+        echo "SIGAR built successfully"
+    fi
+fi
+
+# Build libcurl with HTTP/2 support for Mac
+echo "Setting up libcurl with HTTP/2 support..."
+if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
+    echo "libcurl with HTTP/2 already available"
+else
+    if ! build_curl_with_http2_for_mac; then
+        echo "Warning: libcurl with HTTP/2 build failed"
+        exit 1
+    else
+        echo "libcurl with HTTP/2 built successfully"
+    fi
+fi
+
 # Clean up intermediate files
 cleanup_intermediate_files
 
@@ -464,6 +692,10 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- SIGAR: $([ -f "mac-deps/sigar/lib/libsigar.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- GiNaC: $(command -v brew >/dev/null 2>&1 && brew list ginac >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"

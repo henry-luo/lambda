@@ -78,7 +78,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
         return;
     }
-        log_debug("transpile box item: %d", item->type->type_id);
+    log_debug("transpile box item: %d", item->type->type_id);
     log_debug("transpile box item type name: %s, node_type: %d", 
         item->type->type_id == LMD_TYPE_DTIME ? "DateTime" : 
         item->type->type_id == LMD_TYPE_STRING ? "String" :
@@ -165,7 +165,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                 }
                 
                 if (needs_runtime_check) {
-        log_debug("transpile_box_item: Using runtime function for logical op=%d, no b2it wrapping", bin_node->op);
+                    log_debug("transpile_box_item: Using runtime function for logical op=%d, no b2it wrapping", bin_node->op);
                     transpile_expr(tp, item);  // Don't wrap with b2it
                     break;
                 }
@@ -215,7 +215,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     
                     // Use runtime function if types are incompatible or operation is invalid or one side returns Item
                     if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
-        log_debug("transpile_box_item: Using runtime function for Primary->comparison op=%d, no b2it wrapping", bin_node->op);
+                        log_debug("transpile_box_item: Using runtime function for Primary->comparison op=%d, no b2it wrapping", bin_node->op);
                         transpile_expr(tp, item);  // Don't wrap with b2it
                         break;
                     }
@@ -233,7 +233,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     }
                     
                     if (needs_runtime_check) {
-        log_debug("transpile_box_item: Using runtime function for Primary->logical op=%d, no b2it wrapping", bin_node->op);
+                        log_debug("transpile_box_item: Using runtime function for Primary->logical op=%d, no b2it wrapping", bin_node->op);
                         transpile_expr(tp, item);  // Don't wrap with b2it
                         break;
                     }
@@ -282,7 +282,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                     
                     if (expression_needs_boxing) {
                         // This variable was declared as Item, so just output the variable name without boxing
-        log_debug("transpile_box_item: int variable declared as Item, no boxing needed");
+                        log_debug("transpile_box_item: int variable declared as Item, no boxing needed");
                         transpile_expr(tp, item);
                         break;
                     }
@@ -464,7 +464,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
                         
                         if (expression_needs_boxing) {
                             // This variable was declared as Item, so just output the variable name without boxing
-        log_debug("transpile_box_item: variable declared as Item, no boxing needed");
+                            log_debug("transpile_box_item: variable declared as Item, no boxing needed");
                             transpile_expr(tp, item);
                             break;
                         }

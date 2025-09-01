@@ -88,6 +88,8 @@ temp/
 log/
 logs/
 
+mac-deps/
+
 # Windows dependencies (built libraries and sources)
 windows-deps/lib/
 windows-deps/src/gmp-6.2.1/
