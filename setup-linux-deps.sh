@@ -96,7 +96,20 @@ sudo apt install -y \
     autoconf \
     automake \
     python3 \
-    python3-pip
+    python3-pip \
+    libmpdec-dev \
+    libreadline-dev \
+    coreutils
+
+# Try to install criterion via apt, build from source if not available
+echo "Installing criterion testing framework..."
+if dpkg -l | grep -q libcriterion-dev; then
+    echo "libcriterion-dev already installed"
+elif sudo apt install -y libcriterion-dev; then
+    echo "✅ libcriterion-dev installed successfully via apt"
+else
+    echo "libcriterion-dev not available via apt, will build from source later"
+fi
 
 # Create temporary build directory
 mkdir -p "build_temp"
@@ -325,58 +338,54 @@ build_lexbor_for_linux() {
     return 1
 }
 
-# Function to build MIR for Linux
-build_mir_for_linux() {
-    echo "Building MIR for Linux..."
+# Function to build utf8proc for Linux
+build_utf8proc_for_linux() {
+    echo "Building utf8proc for Linux..."
     
     # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
-        echo "MIR already installed in system location"
+    if [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ]; then
+        echo "utf8proc already installed in system location"
         return 0
     fi
     
-    if [ ! -d "build_temp/mir" ]; then
+    # Build from source
+    if [ ! -d "build_temp/utf8proc" ]; then
         cd build_temp
-        echo "Cloning MIR repository..."
-        git clone https://github.com/vnmakarov/mir.git || {
-            echo "Warning: Could not clone MIR repository"
+        echo "Cloning utf8proc repository..."
+        git clone https://github.com/JuliaStrings/utf8proc.git || {
+            echo "Warning: Could not clone utf8proc repository"
             cd - > /dev/null
             return 1
         }
         cd - > /dev/null
     fi
     
-    cd "build_temp/mir"
+    cd "build_temp/utf8proc"
     
-    echo "Building MIR..."
+    # Check if Makefile exists
+    if [ ! -f "Makefile" ]; then
+        echo "Warning: Makefile not found in utf8proc directory"
+        cd - > /dev/null
+        return 1
+    fi
+    
+    echo "Building utf8proc..."
     if make -j$(nproc); then
-        echo "Installing MIR to system location (requires sudo)..."
-        # Create directories and copy files manually
-        sudo mkdir -p "$SYSTEM_PREFIX/lib"
-        sudo mkdir -p "$SYSTEM_PREFIX/include"
-        
-        # Copy the static library
-        if [ -f "libmir.a" ]; then
-            sudo cp "libmir.a" "$SYSTEM_PREFIX/lib/"
-        fi
-        
-        # Copy headers
-        if [ -f "mir.h" ]; then
-            sudo cp "mir.h" "$SYSTEM_PREFIX/include/"
-        fi
-        if [ -f "mir-gen.h" ]; then
-            sudo cp "mir-gen.h" "$SYSTEM_PREFIX/include/"
-        fi
+        echo "Installing utf8proc to system location (requires sudo)..."
+        sudo make install
         
         # Update library cache
         sudo ldconfig
         
-        echo "✅ MIR built successfully"
-        cd - > /dev/null
-        return 0
+        # Verify the build
+        if [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ]; then
+            echo "✅ utf8proc built successfully"
+            cd - > /dev/null
+            return 0
+        fi
     fi
     
-    echo "❌ MIR build failed"
+    echo "❌ utf8proc build failed"
     cd - > /dev/null
     return 1
 }
@@ -461,6 +470,56 @@ else
     fi
 fi
 
+# Build utf8proc for Linux
+echo "Setting up utf8proc..."
+if [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ]; then
+    echo "utf8proc already available"
+else
+    if ! build_utf8proc_for_linux; then
+        echo "Warning: utf8proc build failed"
+        exit 1
+    else
+        echo "utf8proc built successfully"
+    fi
+fi
+
+# Install apt dependencies that are required by build_lambda_config.json
+echo "Installing apt dependencies..."
+
+# Required dependencies from build_lambda_config.json
+APT_DEPS=(
+    "coreutils"        # For timeout command needed by test suite
+)
+
+for dep in "${APT_DEPS[@]}"; do
+    echo "Installing $dep..."
+    if dpkg -l | grep -q "$dep"; then
+        echo "$dep already installed"
+    else
+        if sudo apt install -y "$dep"; then
+            echo "✅ $dep installed successfully"
+        else
+            echo "❌ Failed to install $dep"
+            exit 1
+        fi
+    fi
+done
+
+# Build criterion for Linux (build from source if apt package not available)
+echo "Setting up criterion..."
+if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
+    echo "criterion already available"
+elif dpkg -l | grep -q libcriterion-dev; then
+    echo "criterion already installed via apt"
+else
+    if ! build_criterion_for_linux; then
+        echo "Warning: criterion build failed"
+        exit 1
+    else
+        echo "criterion built successfully"
+    fi
+fi
+
 # Clean up intermediate files
 cleanup_intermediate_files
 
@@ -474,6 +533,12 @@ echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lam
 echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libgmp.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
+echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- utf8proc: $([ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] && echo "✓ Available" || echo "✗ Missing")"
+echo "- readline: $([ -f "/usr/lib/x86_64-linux-gnu/libreadline.so" ] || dpkg -l | grep -q libreadline-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"
