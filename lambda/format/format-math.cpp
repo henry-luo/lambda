@@ -376,7 +376,7 @@ static const MathFormatDef big_operators[] = {
     {"bigcap", "\\bigcap", "sect.big", "bigcap", "<mo>⋂</mo>", "⋂", true, false, false, -1},
     {"bigoplus", "\\bigoplus", "plus.big", "bigoplus", "<mo>⊕</mo>", "⊕", true, false, false, -1},
     {"bigotimes", "\\bigotimes", "times.big", "bigotimes", "<mo>⊗</mo>", "⊗", true, false, false, -1},
-    {"cases", "\\begin{cases}{1}\\end{cases}", "cases({1})", "cases({1})", "<mtable>{1}</mtable>", "cases({1})", true, false, false, -1},
+    {"cases", "\\begin{cases} {1} \\end{cases}", "cases({1})", "cases({1})", "<mtable>{1}</mtable>", "cases({1})", true, false, false, -1},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -958,10 +958,27 @@ static bool item_is_identifier_or_variable(Item item) {
 
 // Find format definition for element
 static const MathFormatDef* find_format_def(const char* element_name) {
-    // Search through all format tables
+    // Guard against NULL or empty element names
+    if (!element_name || !*element_name) {
+        return NULL;
+    }
+    
     const MathFormatDef* tables[] = {
-        basic_operators, functions, special_symbols, fractions, 
-        roots, text_formatting, grouping, accents, relations, big_operators, arrows, modular, spacing, boxed_operators, matrices
+        basic_operators,
+        functions,
+        special_symbols,
+        fractions,
+        roots,
+        text_formatting,
+        grouping,
+        accents,
+        relations,
+        big_operators,
+        arrows,
+        modular,
+        spacing,
+        boxed_operators,
+        matrices
     };
     
     int table_count = sizeof(tables) / sizeof(tables[0]);
@@ -1305,6 +1322,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     log_debug("format_math_element called with element_name='%s', def=%p", element_name, def);
     #endif
     
+    
     if (!def) {
         
         // Unknown element, check if it has children (function call)
@@ -1498,16 +1516,13 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             stringbuf_append_str(sb, format_str);  // e.g., "\\sum"
             
             if (children->length >= 1) {
-                // For integrals, always use braces around subscripts
-                // For other operators, use braces only for complex expressions
-                bool needs_braces = (strcmp(element_name, "int") == 0 || 
-                                   strcmp(element_name, "iint") == 0 || 
-                                   strcmp(element_name, "iiint") == 0 ||
-                                   strcmp(element_name, "oint") == 0 ||
-                                   !is_single_character_item(children->items[0]));
+                // Use braces only for complex expressions, not single characters
+                bool needs_braces = !is_single_character_item(children->items[0]);
                 
                 if (needs_braces) {
                     stringbuf_append_str(sb, "_{");
+                } else {
+                    stringbuf_append_str(sb, "_");
                 }
                 bool prev_compact_context = in_compact_context;
                 in_compact_context = true;
@@ -1527,12 +1542,19 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                                         strcmp(element_name, "oint") == 0);
                 
                 if (needs_superscript) {
-                    stringbuf_append_str(sb, "^{");
+                    bool needs_super_braces = !is_single_character_item(children->items[1]);
+                    if (needs_super_braces) {
+                        stringbuf_append_str(sb, "^{");
+                    } else {
+                        stringbuf_append_str(sb, "^");
+                    }
                     bool prev_compact_context = in_compact_context;
                     in_compact_context = true;
                     format_math_item(sb, children->items[1], flavor, depth + 1);
                     in_compact_context = prev_compact_context;
-                    stringbuf_append_str(sb, "}");
+                    if (needs_super_braces) {
+                        stringbuf_append_str(sb, "}");
+                    }
                 } else {
                     // For sum/prod operators, second child might be upper limit
                     // For bigcup/bigcap, check if we have upper limit syntax
@@ -1647,6 +1669,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         log_debug("Using simple formatting without template for '%s', has_children=%s, children=%p, format_str='%s'", 
                 element_name, def->has_children ? "true" : "false", children, format_str);
         #endif
+        
         // Simple format without placeholders
         stringbuf_append_str(sb, format_str);
         
@@ -1877,9 +1900,9 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
             for (int i = 0; i < len; i++) {
                 char curr = src[i];
                 
-                // Fix spacing command \: → : with space
+                // Keep spacing command \: as-is (don't strip backslash)
                 if (curr == '\\' && i + 1 < len && src[i + 1] == ':') {
-                    stringbuf_append_char(fixed_sb, ':');
+                    stringbuf_append_str(fixed_sb, "\\:");
                     i++; // skip the ':'
                     continue;
                 }
