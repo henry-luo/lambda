@@ -451,7 +451,8 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 log_debug("set field of ANY type to: %d", item.type_id);
                 TypedItem titem = {.type_id = static_cast<TypeId>(item.type_id), .pointer = item.raw_pointer};
                 switch (item.type_id) {
-                // case LMD_TYPE_NULL: ; // no extra work
+                case LMD_TYPE_NULL: ; 
+                    break; // no extra work needed
                 case LMD_TYPE_BOOL:
                     titem.bool_val = item.bool_val;  break;
                 case LMD_TYPE_INT:
