@@ -499,10 +499,10 @@
                         "binary": "test/test_lambda.exe"
                     },
                     {
-                        "source": "test/test_lambda_repl_simple.cpp",
+                        "source": "test/test_lambda_repl.cpp",
                         "name": "🎮 Lambda REPL Interface Tests",
                         "dependencies": [],
-                        "binary": "test/test_lambda_repl_simple.exe"
+                        "binary": "test/test_lambda_repl.exe"
                     }
                 ],
                 "type": "lambda",
