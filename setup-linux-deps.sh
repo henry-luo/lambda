@@ -99,6 +99,8 @@ sudo apt install -y \
     python3-pip \
     libmpdec-dev \
     libedit-dev \
+    libcurl4-openssl-dev \
+    libutf8proc-dev \
     coreutils
 
 # Try to install criterion via apt, build from source if not available
@@ -390,6 +392,126 @@ build_utf8proc_for_linux() {
     return 1
 }
 
+# Function to build MIR for Linux
+build_mir_for_linux() {
+    echo "Building MIR for Linux..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] || [ -f "$SYSTEM_PREFIX/lib/libmir.so" ]; then
+        echo "MIR already installed in system location"
+        return 0
+    fi
+    
+    # Create build_temp directory if it doesn't exist
+    mkdir -p "build_temp"
+    
+    # Build from source
+    if [ ! -d "build_temp/mir" ]; then
+        cd build_temp
+        echo "Cloning MIR repository..."
+        git clone https://github.com/vnmakarov/mir.git || {
+            echo "Warning: Could not clone MIR repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/mir"
+    
+    # Check if GNUmakefile exists (MIR uses GNUmakefile, not Makefile)
+    if [ ! -f "GNUmakefile" ]; then
+        echo "Warning: GNUmakefile not found in MIR directory"
+        cd - > /dev/null
+        return 1
+    fi
+    
+    echo "Building MIR..."
+    if make -j$(nproc); then
+        echo "Installing MIR to system location (requires sudo)..."
+        # Create directories if they don't exist
+        sudo mkdir -p "$SYSTEM_PREFIX/lib"
+        sudo mkdir -p "$SYSTEM_PREFIX/include"
+        
+        # Copy library and headers
+        sudo cp libmir.a "$SYSTEM_PREFIX/lib/" || sudo cp mir.a "$SYSTEM_PREFIX/lib/libmir.a"
+        sudo cp mir.h "$SYSTEM_PREFIX/include/" 2>/dev/null || true
+        sudo cp mir-*.h "$SYSTEM_PREFIX/include/" 2>/dev/null || true
+        
+        # Update library cache
+        sudo ldconfig
+        
+        # Verify the build
+        if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
+            echo "✅ MIR built successfully"
+            cd - > /dev/null
+            return 0
+        fi
+    fi
+    
+    echo "❌ MIR build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build criterion for Linux
+build_criterion_for_linux() {
+    echo "Building Criterion for Linux..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
+        echo "Criterion already installed in system location"
+        return 0
+    fi
+    
+    # Build from source
+    if [ ! -d "build_temp/Criterion" ]; then
+        cd build_temp
+        echo "Cloning Criterion repository..."
+        git clone https://github.com/Snaipe/Criterion.git || {
+            echo "Warning: Could not clone Criterion repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/Criterion"
+    
+    # Create build directory
+    mkdir -p build
+    cd build
+    
+    echo "Configuring Criterion with CMake..."
+    if cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
+        ..; then
+        
+        echo "Building Criterion..."
+        if make -j$(nproc); then
+            echo "Installing Criterion to system location (requires sudo)..."
+            sudo make install
+            
+            # Update library cache
+            sudo ldconfig
+            
+            # Verify the build
+            if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
+                echo "✅ Criterion built successfully"
+                cd - > /dev/null
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ Criterion build failed"
+    cd - > /dev/null
+    cd - > /dev/null
+    return 1
+}
+
 echo "Found native compiler: $(which gcc)"
 echo "System: $(uname -a)"
 
@@ -535,7 +657,8 @@ echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTE
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- utf8proc: $([ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] && echo "✓ Available" || echo "✗ Missing")"
+echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
