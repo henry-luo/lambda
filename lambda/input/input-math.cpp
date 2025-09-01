@@ -521,6 +521,7 @@ static const MathExprDef extended_arrows[] = {
     {"hookleftarrow", "hook<-", "hook<-", "hookleftarrow", "↩", "Hook left arrow", false, 0, NULL},
     {"hookrightarrow", "hook->", "hook->", "hookrightarrow", "↪", "Hook right arrow", false, 0, NULL},
     {"twoheadrightarrow", "twohead->", "twohead->", "twoheadrightarrow", "↠", "Two-headed right arrow", false, 0, NULL},
+    {"twoheadleftarrow", "twohead<-", "twohead<-", "twoheadleftarrow", "↞", "Two-headed left arrow", false, 0, NULL},
     {"rightsquigarrow", "squiggle->", "squiggle->", "rightsquigarrow", "⇝", "Right squiggly arrow", false, 0, NULL},
     {"uparrow", "arrow.t", "up", "uparrow", "↑", "Up arrow", false, 0, NULL},
     {"downarrow", "arrow.b", "down", "downarrow", "↓", "Down arrow", false, 0, NULL},
@@ -1448,7 +1449,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         return left_symbol ? (Item){.item = y2it(left_symbol)} : (Item){.item = ITEM_ERROR};
     } else if (strcmp(cmd_string->chars, "quad") == 0 || strcmp(cmd_string->chars, "qquad") == 0 ||
                strcmp(cmd_string->chars, "!") == 0 || strcmp(cmd_string->chars, ",") == 0 ||
-               strcmp(cmd_string->chars, ";") == 0) {
+               strcmp(cmd_string->chars, ":") == 0 || strcmp(cmd_string->chars, ";") == 0) {
         stringbuf_reset(sb);
         // Handle spacing commands directly
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
@@ -1459,7 +1460,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         const char* element_name = cmd_string->chars;
         if (strcmp(cmd_string->chars, "!") == 0) element_name = "neg_space";
         else if (strcmp(cmd_string->chars, ",") == 0) element_name = "thin_space";
-        // Removed colon handling - colons should be parsed at expression level
+        else if (strcmp(cmd_string->chars, ":") == 0) element_name = "med_space";
         else if (strcmp(cmd_string->chars, ";") == 0) element_name = "thick_space";
         
         Element* space_element = create_math_element(input, element_name);
@@ -3181,12 +3182,10 @@ static Item parse_latex_cases(Input *input, const char **math) {
     if (strncmp(*math, "\\begin{", 7) == 0) {
         // Skip \begin{cases}
         if (strncmp(*math, "\\begin{cases}", 13) != 0) {
-            printf("ERROR: Expected \\begin{cases} for cases environment\n");
             return {.item = ITEM_ERROR};
         }
         *math += 13;
     } else {
-        printf("ERROR: Expected \\begin{cases} for cases environment\n");
         return {.item = ITEM_ERROR};
     }
     
@@ -3195,86 +3194,45 @@ static Item parse_latex_cases(Input *input, const char **math) {
     // Create the cases element
     Element* cases_element = create_math_element(input, "cases");
     if (!cases_element) {
-        printf("ERROR: Failed to create cases element\n");
         return {.item = ITEM_ERROR};
     }
     
     add_attribute_to_element(input, cases_element, "env", "true");
     
-    // Parse case rows (each row has expression & condition)
-    int case_count = 0;
+    // Parse the entire content between \begin{cases} and \end{cases} as raw text
+    const char* content_start = *math;
+    const char* content_end = content_start;
     
-    while (**math) {
-        skip_math_whitespace(math);
-        
-        // Check for end of environment
-        if (strlen(*math) >= 11 && strncmp(*math, "\\end{cases}", 11) == 0) {
-            *math += 11;
+    // Find \end{cases}
+    while (*content_end) {
+        if (strncmp(content_end, "\\end{cases}", 11) == 0) {
             break;
         }
-        
-        // Safety check - if we don't have enough characters left, break
-        if (strlen(*math) < 2) {
-            printf("WARNING: Incomplete cases environment, missing \\end{cases}\n");
-            break;
-        }
-        
-        // Create a case row element
-        Element* case_row = create_math_element(input, "case");
-        if (!case_row) {
-            printf("ERROR: Failed to create case row element\n");
-            return {.item = ITEM_ERROR};
-        }
-        
-        // Parse the expression (left side of &)
-        Item expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-        if (expr .item == ITEM_ERROR) {
-            printf("ERROR: Failed to parse case expression at case %d\n", case_count + 1);
-            return {.item = ITEM_ERROR};
-        }
-        
-        if (expr .item != ITEM_NULL) {
-            list_push((List*)case_row, expr);
-        }
-        
-        skip_math_whitespace(math);
-        
-        // Expect & separator
-        if (**math == '&') {
-            (*math)++; // skip &
-            skip_math_whitespace(math);
-            
-            // Parse the condition (right side of &)
-            Item condition = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-            if (condition .item == ITEM_ERROR) {
-                printf("ERROR: Failed to parse case condition at case %d\n", case_count + 1);
-                return {.item = ITEM_ERROR};
-            }
-            
-            if (condition .item != ITEM_NULL) {
-                list_push((List*)case_row, condition);
-            }
-        }
-        
-        skip_math_whitespace(math);
-        
-        // Check for row separator \\
-        if (strlen(*math) >= 2 && strncmp(*math, "\\\\", 2) == 0) {
-            (*math) += 2; // skip \\
-        }
-        
-        // Add the case row to cases element
-        ((TypeElmt*)case_row->type)->content_length = ((List*)case_row)->length;
-        list_push((List*)cases_element, {.item = (uint64_t)case_row});
-        case_count++;
-        
-        skip_math_whitespace(math);
+        content_end++;
     }
     
-    // Add case count as attribute
-    char case_str[16];
-    snprintf(case_str, sizeof(case_str), "%d", case_count);
-    add_attribute_to_element(input, cases_element, "cases", case_str);
+    if (strncmp(content_end, "\\end{cases}", 11) != 0) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    // Create content string
+    size_t content_len = content_end - content_start;
+    char* content_text = (char*)malloc(content_len + 1);
+    strncpy(content_text, content_start, content_len);
+    content_text[content_len] = '\0';
+    
+    // Trim whitespace
+    while (content_len > 0 && isspace(content_text[content_len - 1])) {
+        content_text[--content_len] = '\0';
+    }
+    
+    String* content_string = input_create_string(input, content_text);
+    if (content_string) {
+        list_push((List*)cases_element, {.item = y2it(content_string)});
+    }
+    free(content_text);
+    
+    *math = content_end + 11; // skip \end{cases}
     
     ((TypeElmt*)cases_element->type)->content_length = ((List*)cases_element)->length;
     return {.item = (uint64_t)cases_element};
