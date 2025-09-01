@@ -162,7 +162,8 @@ bool is_raw_text_environment(const char* env_name) {
 }
 
 void skip_common_whitespace(const char **math) {
-    while (**math && (**math == ' ' || **math == '\t' || **math == '\n' || **math == '\r')) {
+    if (!math || !*math) return;
+    while (**math != '\0' && (**math == ' ' || **math == '\t' || **math == '\n' || **math == '\r')) {
         (*math)++;
     }
 }

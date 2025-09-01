@@ -1,5 +1,6 @@
 #include "format.h"
 #include "../../lib/stringbuf.h"
+#include "../../lib/log.h"
 #define DEBUG_MATH_FORMAT 1
 #include <stdio.h>
 
@@ -16,18 +17,23 @@ typedef enum {
     MATH_OUTPUT_UNICODE
 } MathOutputFlavor;
 
+// Forward declarations for utility functions
+static bool item_contains_integral(Item item);
+static bool item_is_quantifier(Item item);
+static bool item_is_latex_command(Item item);
+static bool item_is_identifier_or_variable(Item item);
+static bool item_is_symbol_element(Item item);
+static bool item_ends_with_partial(Item item);
+static bool item_starts_with_partial(Item item);
+static void append_space_if_needed(StringBuf* sb);
+static void append_char_if_needed(StringBuf* sb, char c);
+
 // Forward declarations
 static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, int depth);
 static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor flavor, int depth);
 static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor flavor, int depth);
 static void format_math_children_with_template(StringBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth);
 static void format_math_string(StringBuf* sb, String* str);
-static bool is_single_character_item(Item item);
-static bool item_contains_integral(Item item);
-static bool item_contains_only_symbols(Item item);
-static bool item_is_symbol_element(Item item);
-static void append_space_if_needed(StringBuf* sb);
-static void append_char_if_needed(StringBuf* sb, char c);
 
 // Math formatting tables for different output flavors
 typedef struct {
@@ -361,10 +367,10 @@ static const MathFormatDef spacing[] = {
 
 // Boxed operators
 static const MathFormatDef boxed_operators[] = {
-    {"boxed_plus", "\\boxplus", "boxplus", "boxplus", "<mo>⊞</mo>", "⊞", false, false, false, 0},
-    {"boxed_times", "\\boxtimes", "boxtimes", "boxtimes", "<mo>⊠</mo>", "⊠", false, false, false, 0},
-    {"boxed_minus", "\\boxminus", "boxminus", "boxminus", "<mo>⊟</mo>", "⊟", false, false, false, 0},
-    {"boxed_dot", "\\boxdot", "boxdot", "boxdot", "<mo>⊡</mo>", "⊡", false, false, false, 0},
+    {"boxplus", "\\boxplus", "boxplus", "boxplus", "<mo>⊞</mo>", "⊞", false, false, true, 0},
+    {"boxtimes", "\\boxtimes", "boxtimes", "boxtimes", "<mo>⊠</mo>", "⊠", false, false, true, 0},
+    {"boxminus", "\\boxminus", "boxminus", "boxminus", "<mo>⊟</mo>", "⊟", false, false, true, 0},
+    {"boxdot", "\\boxdot", "boxdot", "boxdot", "<mo>⊡</mo>", "⊡", false, false, true, 0},
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
@@ -379,7 +385,7 @@ static bool is_single_character_item(Item item) {
         String* str = (String*)item.pointer;
         bool result = str && str->len == 1;
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: is_single_character_item - STRING/SYMBOL len=%d, result=%s\n", str ? str->len : -1, result ? "true" : "false");
+        log_debug("is_single_character_item - STRING/SYMBOL len=%d, result=%s", str ? str->len : -1, result ? "true" : "false");
         #endif
         return result;
     } else if (type == LMD_TYPE_ELEMENT) {
@@ -410,7 +416,7 @@ static bool is_single_character_item(Item item) {
     }
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG: is_single_character_item - unknown type, result=false\n");
+    log_debug("is_single_character_item - unknown type, result=false");
     #endif
     return false;
 }
@@ -691,12 +697,12 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
 // Format math string (escape special characters if needed)
 static void format_math_string(StringBuf* sb, String* str) {
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: called with str=%p\n", (void*)str);
+    log_debug("format_math_string: called with str=%p", (void*)str);
     #endif
     
     if (!str) {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: NULL string\n");
+        log_debug("format_math_string: NULL string");
         #endif
         return;
     }
@@ -705,15 +711,15 @@ static void format_math_string(StringBuf* sb, String* str) {
     size_t string_len = strlen(str->chars);
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: raw len=%u, strlen=%zu\n", str->len, string_len);
+    log_debug("format_math_string: raw len=%u, strlen=%zu", str->len, string_len);
     if (string_len > 0 && string_len < 100) {
-        fprintf(stderr, "DEBUG format_math_string: string content: '%s'\n", str->chars);
+        log_debug("format_math_string: string content: '%s'", str->chars);
     }
     #endif
     
     if (string_len == 0) {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: zero length string (by strlen)\n");
+        log_debug("format_math_string: zero length string (by strlen)");
         #endif
         return;
     }
@@ -721,21 +727,21 @@ static void format_math_string(StringBuf* sb, String* str) {
     // Check if the string has reasonable length to avoid infinite loops
     if (string_len > 1000000) {  // 1MB limit as sanity check
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_string: string too long (%zu), treating as invalid\n", string_len);
+        log_debug("format_math_string: string too long (%zu), treating as invalid", string_len);
         #endif
         stringbuf_append_str(sb, "[invalid_string]");
         return;
     }
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: about to append %zu chars using stringbuf_append_str\n", string_len);
+    log_debug("format_math_string: about to append %zu chars using stringbuf_append_str", string_len);
     #endif
     
     // Use the simpler stringbuf_append_str which relies on null termination
     stringbuf_append_str(sb, str->chars);
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_string: completed\n");
+    log_debug("format_math_string: completed");
     #endif
 }
 
@@ -768,7 +774,6 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
                     // Don't force compact context for template formatting - let the element decide
                     format_math_item(sb, child_item, flavor, depth + 1);
                 } else {
-                    printf("DEBUG: Child index %d out of range [0, %d)\n", child_index, child_count);
                     // Fallback: output the placeholder as literal text
                     stringbuf_append_char(sb, '{');
                     stringbuf_append_char(sb, *(p+1));
@@ -878,7 +883,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         
         // Debug output to stderr
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: Math element name: '%s'\n", element_name);
+        log_debug("Math element name: '%s'", element_name);
         #endif
         
         if (strcmp(element_name, "implicit_mul") == 0) {
@@ -903,77 +908,70 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         // Debug: implicit_mul binary op check
     }
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG: Format def for '%s': %s\n", element_name, def ? "found" : "not found");
+    log_debug("Format def for '%s': %s", element_name, def ? "found" : "not found");
     if (def) {
-        fprintf(stderr, "DEBUG: is_binary_op: %s, has_children: %s, needs_braces: %s\n", 
+        log_debug("is_binary_op: %s, has_children: %s, needs_braces: %s", 
                 def->is_binary_op ? "true" : "false",
                 def->has_children ? "true" : "false", 
                 def->needs_braces ? "true" : "false");
-        fprintf(stderr, "DEBUG: latex_format: '%s'\n", def->latex_format ? def->latex_format : "NULL");
+        log_debug("latex_format: '%s'", def->latex_format ? def->latex_format : "NULL");
     }
     #endif
     // Enable debug output unconditionally for testing
-    //#ifdef DEBUG_MATH_FORMAT
-    #if 0
-    fprintf(stderr, "DEBUG: format_math_element called with element_name='%s', def=%p\n", element_name, def);
-    //#endif
+    #ifdef DEBUG_MATH_FORMAT
+    log_debug("format_math_element called with element_name='%s', def=%p", element_name, def);
     #endif
     
     if (!def) {
-        // Unknown element, try to format as generic expression
-        if (flavor == MATH_OUTPUT_LATEX) {
-            // Special case: if it's a single letter (likely a function name), don't wrap in \text{}
-            if (strlen(element_name) == 1 && isalpha(element_name[0])) {
-                stringbuf_append_str(sb, element_name);
-            } else {
+        // Unknown element, check if it has children (function call)
+        if (elmt_type->content_length > 0) {
+            List* children = (List*)elem;
+            // Format as function call: name(arg1, arg2, ...)
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "(");
+            for (int i = 0; i < children->length; i++) {
+                if (i > 0) {
+                    stringbuf_append_str(sb, ", ");
+                }
+                format_math_item(sb, children->items[i], flavor, depth + 1);
+            }
+            stringbuf_append_str(sb, ")");
+        } else {
+            // Unknown element without children, format as text
+            if (flavor == MATH_OUTPUT_LATEX) {
                 stringbuf_append_str(sb, "\\text{");
                 stringbuf_append_str(sb, element_name);
                 stringbuf_append_str(sb, "}");
+            } else {
+                stringbuf_append_str(sb, element_name);
             }
-        } else {
-            stringbuf_append_str(sb, element_name);
-        }
-        
-        if (elmt_type->content_length > 0) {
-            List* children = (List*)elem;
-            stringbuf_append_str(sb, "(");
-            format_math_children(sb, children, flavor, depth);
-            stringbuf_append_str(sb, ")");
         }
         return;
     }
     
+    // Get format string and children
     const char* format_str = get_format_string(def, flavor);
-    if (!format_str) {
-        // Fallback to element name
-        stringbuf_append_str(sb, element_name);
-        return;
-    }
-    
-    // Check if this element has children to format
     List* children = NULL;
     if (elmt_type->content_length > 0) {
         children = (List*)elem;
     }
     
     // Debug: check template condition components
-    //#ifdef DEBUG_MATH_FORMAT  
-    #if 0
+    #ifdef DEBUG_MATH_FORMAT
     if (strcmp(element_name, "paren_group") == 0) {
-        fprintf(stderr, "DEBUG: paren_group format check: has_children=%s, children=%p, format_str='%s', contains_{1}=%s\n",
+        log_debug("paren_group format check: has_children=%s, children=%p, format_str='%s', contains_{1}=%s",
                 def->has_children ? "true" : "false",
                 children,
                 format_str,
                 strstr(format_str, "{1}") ? "true" : "false");
     }
-    //#endif
     #endif
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG: Formatting element: %s (def=%p, is_binary=%s, children=%p, children_length=%ld)\n", 
+    log_debug("Formatting element: %s (def=%p, is_binary=%s, children=%p, children_length=%ld)", 
             element_name, def, def ? (def->is_binary_op ? "true" : "false") : "NULL", 
             children, children ? children->length : 0L);
-    fprintf(stderr, "DEBUG: format_str='%s'\n", format_str);
+    log_debug("format_str='%s'", format_str);
     #endif
 
     // Special handling for binary operators
@@ -1009,8 +1007,58 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                 Item curr = children->items[i];
                 bool pair_needs_space = false;
                 
+                // Check for partial derivatives first (highest priority)
+                Element* prev_elem = (get_type_id(prev) == LMD_TYPE_ELEMENT) ? (Element*)prev.pointer : NULL;
+                Element* curr_elem = (get_type_id(curr) == LMD_TYPE_ELEMENT) ? (Element*)curr.pointer : NULL;
+                
+                // Add space before and after partial derivatives (to handle \partial x \partial y)
+                // Check for direct partial elements
+                if (prev_elem && prev_elem->type) {
+                    TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
+                    if (prev_elmt_type && prev_elmt_type->name.str && 
+                        prev_elmt_type->name.length == 7 &&
+                        strncmp(prev_elmt_type->name.str, "partial", 7) == 0) {
+                        pair_needs_space = true;
+                    }
+                    // Also add space after pow elements containing partial (e.g., \partial^2 f)
+                    if (prev_elmt_type && prev_elmt_type->name.str &&
+                        prev_elmt_type->name.length == 3 &&
+                        strncmp(prev_elmt_type->name.str, "pow", 3) == 0) {
+                        // Check if the base of the power is partial
+                        Element* pow_elem = (Element*)prev.pointer;
+                        if (pow_elem && ((List*)pow_elem)->length > 0) {
+                            Item base_item = ((List*)pow_elem)->items[0];
+                            if (get_type_id(base_item) == LMD_TYPE_ELEMENT) {
+                                Element* base_elem = (Element*)base_item.pointer;
+                                if (base_elem && base_elem->type) {
+                                    TypeElmt* base_type = (TypeElmt*)base_elem->type;
+                                    if (base_type && base_type->name.str &&
+                                        base_type->name.length == 7 &&
+                                        strncmp(base_type->name.str, "partial", 7) == 0) {
+                                        pair_needs_space = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (curr_elem && curr_elem->type) {
+                    TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                    if (curr_elmt_type && curr_elmt_type->name.str && 
+                        curr_elmt_type->name.length == 7 &&
+                        strncmp(curr_elmt_type->name.str, "partial", 7) == 0) {
+                        pair_needs_space = true;
+                    }
+                }
+                // Check for nested partial derivatives across implicit_mul structures
+                if (item_ends_with_partial(prev) && !pair_needs_space) {
+                    pair_needs_space = true;
+                }
+                if (item_starts_with_partial(curr) && !pair_needs_space) {
+                    pair_needs_space = true;
+                }
                 // Check for integrals or quantifiers
-                if (item_contains_integral(prev) || item_contains_integral(curr) ||
+                else if (item_contains_integral(prev) || item_contains_integral(curr) ||
                     item_is_quantifier(prev) || item_is_quantifier(curr)) {
                     pair_needs_space = true;
                 }
@@ -1093,7 +1141,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                             }
                             
                             #ifdef DEBUG_MATH_FORMAT
-                            fprintf(stderr, "DEBUG: Element-Element pair: prev_is_symbol=%d, curr_is_symbol=%d\n", prev_is_symbol, curr_is_symbol);
+                            log_debug("Element-Element pair: prev_is_symbol=%d, curr_is_symbol=%d", prev_is_symbol, curr_is_symbol);
                             #endif
                             
                             if (prev_is_symbol && curr_is_symbol) {
@@ -1103,9 +1151,38 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                             else if (prev_is_frac && curr_is_bracket) {
                                 pair_needs_space = false;
                             }
-                            // Don't add space between LaTeX commands
+                            // Don't add space between LaTeX commands, except for partial derivatives
                             else if (item_is_latex_command(prev) && item_is_latex_command(curr)) {
-                                pair_needs_space = false;
+                                // Check if current item is partial - always add space before partial
+                                if (curr_elem && curr_elem->type) {
+                                    TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                    if (curr_elmt_type && curr_elmt_type->name.str && 
+                                        curr_elmt_type->name.length == 7 &&
+                                        strncmp(curr_elmt_type->name.str, "partial", 7) == 0) {
+                                        pair_needs_space = true;
+                                    } else {
+                                        pair_needs_space = false;
+                                    }
+                                } else {
+                                    pair_needs_space = false;
+                                }
+                            }
+                            // Don't add space between text elements and parentheses
+                            else if (prev_elem && prev_elem->type) {
+                                TypeElmt* prev_elmt_type = (TypeElmt*)prev_elem->type;
+                                if (prev_elmt_type && prev_elmt_type->name.str &&
+                                    prev_elmt_type->name.length == 4 &&
+                                    strncmp(prev_elmt_type->name.str, "text", 4) == 0) {
+                                    // Check if current item is a parenthesized group
+                                    if (curr_elem && curr_elem->type) {
+                                        TypeElmt* curr_elmt_type = (TypeElmt*)curr_elem->type;
+                                        if (curr_elmt_type && curr_elmt_type->name.str &&
+                                            curr_elmt_type->name.length == 11 &&
+                                            strncmp(curr_elmt_type->name.str, "paren_group", 11) == 0) {
+                                            pair_needs_space = false; // Don't add space
+                                        }
+                                    }
+                                }
                             }
                             // Don't add space after prime notation (derivative) and before parentheses
                             else if (prev_elem && prev_elem->type && curr_elem && curr_elem->type) {
@@ -1165,8 +1242,18 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     
     if (def->is_binary_op && children && children->length >= 2) {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: Formatting as binary operator: %s\n", element_name);
+        log_debug("Formatting as binary operator: %s", element_name);
         #endif
+        
+        // For LaTeX output, format binary operators as infix: left op right
+        if (flavor == MATH_OUTPUT_LATEX && children->length == 2) {
+            format_math_item(sb, children->items[0], flavor, depth + 1);
+            stringbuf_append_str(sb, " ");
+            stringbuf_append_str(sb, format_str);
+            stringbuf_append_str(sb, " ");
+            format_math_item(sb, children->items[1], flavor, depth + 1);
+            return;
+        }
         
         // Use compact spacing in subscript/superscript contexts
         const char* operator_format = final_format_str;
@@ -1212,7 +1299,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         
         if (is_big_op) {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG: Big operator detected: %s\n", element_name);
+            log_debug("Big operator detected: %s", element_name);
             #endif
             
             // Special handling for lim - different from sum/int
@@ -1324,23 +1411,14 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     
     // Check if this element has a format template with placeholders
     if (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) {
-        //#ifdef DEBUG_MATH_FORMAT
-        #if 1
-        fprintf(stderr, "DEBUG: Using template formatting for element '%s' with format: '%s'\n", element_name, format_str);
-        fprintf(stderr, "DEBUG: ALWAYS PRINT THIS MESSAGE\n");
-        if (strcmp(element_name, "paren_group") == 0) {
-            fprintf(stderr, "DEBUG: This is a paren_group element, children=%p, children->length=%ld\n", 
-                    children, children ? children->length : 0L);
-        }
-        if (strcmp(element_name, "pow") == 0) {
-            fprintf(stderr, "DEBUG: This is a pow element, checking special conditions...\n");
-        }
+        #ifdef DEBUG_MATH_FORMAT
+        log_debug("Using template formatting for element '%s' with format: '%s'", element_name, format_str);
         #endif
         
         // Special handling for pow and subscript elements
         if (strcmp(element_name, "pow") == 0 && children->length == 2 && flavor == MATH_OUTPUT_LATEX) {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG: Using special pow formatting for LaTeX\n");
+            log_debug("Using special pow formatting for LaTeX");
             #endif
             // Format as base^exponent with compact context to avoid extra spaces
             format_math_item(sb, children->items[0], flavor, depth + 1);
@@ -1377,9 +1455,9 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         } else {
             #ifdef DEBUG_MATH_FORMAT
             if (strcmp(element_name, "pow") == 0) {
-                fprintf(stderr, "DEBUG: pow element debug - element_name='%s', children->length=%ld, flavor=%d\n", 
+                log_debug("pow element debug - element_name='%s', children->length=%ld, flavor=%d", 
                         element_name, children->length, flavor);
-                fprintf(stderr, "DEBUG: MATH_OUTPUT_LATEX constant value = %d\n", MATH_OUTPUT_LATEX);
+                log_debug("MATH_OUTPUT_LATEX constant value = %d", MATH_OUTPUT_LATEX);
             }
             #endif
             
@@ -1396,7 +1474,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         }
     } else {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG: Using simple formatting without template for '%s', has_children=%s, children=%p, format_str='%s'\n", 
+        log_debug("Using simple formatting without template for '%s', has_children=%s, children=%p, format_str='%s'", 
                 element_name, def->has_children ? "true" : "false", children, format_str);
         #endif
         // Simple format without placeholders
@@ -1416,19 +1494,20 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             
             if (is_big_op && flavor == MATH_OUTPUT_LATEX) {
                 // Format big operator with bounds - handle variable number of children
+                // Logic: if 2 children, it's subscript + summand; if 3+, it's subscript + superscript + summand(s)
                 for (int i = 0; i < children->length; i++) {
                     if (i == 0) {
-                        // First child is subscript
+                        // First child is always subscript
                         stringbuf_append_str(sb, "_{");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                         stringbuf_append_str(sb, "}");
-                    } else if (i == 1) {
-                        // Second child is superscript
+                    } else if (i == 1 && children->length > 2) {
+                        // Second child is superscript only if there are 3+ children
                         stringbuf_append_str(sb, "^{");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                         stringbuf_append_str(sb, "}");
                     } else {
-                        // Additional children are summands/integrands
+                        // Remaining children are summands/integrands
                         stringbuf_append_str(sb, " ");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                     }
@@ -1464,8 +1543,8 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
 // Format a math item (could be element, string, number, etc.)
 static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_item: depth=%d, type=%d, item=0x%llx\n", depth, get_type_id(item), item.item);
-    fprintf(stderr, "DEBUG format_math_item: sb before - length=%zu, str='%s'\n", sb->length, sb->str ? sb->str->chars : "NULL");
+    log_debug("format_math_item: depth=%d, type=%d, item=0x%llx", depth, get_type_id(item), item.item);
+    log_debug("format_math_item: sb before - length=%zu, str='%s'", sb->length, sb->str ? sb->str->chars : "NULL");
     #endif
     
     // Check for invalid raw integer values that weren't properly encoded
@@ -1474,7 +1553,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
         stringbuf_append_str(sb, num_buf);
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_item: sb after - length=%zu, str='%s'\n", sb->length, sb->str ? sb->str->chars : "NULL");
+        log_debug("format_math_item: sb after - length=%zu, str='%s'", sb->length, sb->str ? sb->str->chars : "NULL");
         #endif
         return;
     }
@@ -1483,7 +1562,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
     switch (type) {
         case LMD_TYPE_ELEMENT: {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing ELEMENT\n");
+            log_debug("format_math_item: Processing ELEMENT");
             #endif
             Element* elem = (Element*)item.pointer;
             format_math_element(sb, elem, flavor, depth);
@@ -1491,12 +1570,12 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         case LMD_TYPE_SYMBOL: {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing SYMBOL\n");
+            log_debug("format_math_item: Processing SYMBOL");
             #endif
             String* str = (String*)item.pointer;
             if (str) {
                 #ifdef DEBUG_MATH_FORMAT
-                fprintf(stderr, "DEBUG format_math_item: SYMBOL string='%s', len=%d\n", str->chars, str->len);
+                log_debug("format_math_item: SYMBOL string='%s', len=%d", str->chars, str->len);
                 #endif
                 format_math_string(sb, str);
             }
@@ -1504,12 +1583,12 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         case LMD_TYPE_STRING: {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing STRING\n");
+            log_debug("format_math_item: Processing STRING");
             #endif
             String* str = (String*)item.pointer;
             if (str) {
                 #ifdef DEBUG_MATH_FORMAT
-                fprintf(stderr, "DEBUG format_math_item: STRING string='%s', len=%d\n", str->chars, str->len);
+                log_debug("format_math_item: STRING string='%s', len=%d", str->chars, str->len);
                 #endif
                 format_math_string(sb, str);
             }
@@ -1518,7 +1597,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         case LMD_TYPE_INT: {
             // Check for invalid raw integer values that weren't properly encoded
             if (item.item < 0x1000 && item.item > 0) {
-                printf("DEBUG: Detected invalid raw integer item=0x%llx, treating as value=%lld\n", item.item, item.item);
+                log_debug("Detected invalid raw integer item=0x%llx, treating as value=%lld", item.item, item.item);
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
                 stringbuf_append_str(sb, num_buf);
@@ -1532,14 +1611,14 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         case LMD_TYPE_INT64: {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing INT64\n");
+            log_debug("format_math_item: Processing INT64");
             #endif
             long* val_ptr = (long*)item.pointer;
             if (val_ptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%ld", *val_ptr);
                 #ifdef DEBUG_MATH_FORMAT
-                fprintf(stderr, "DEBUG format_math_item: INT64 value=%ld, formatted='%s'\n", *val_ptr, num_buf);
+                log_debug("format_math_item: INT64 value=%ld, formatted='%s'", *val_ptr, num_buf);
                 #endif
                 stringbuf_append_str(sb, num_buf);
             }
@@ -1547,14 +1626,14 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         case LMD_TYPE_FLOAT: {
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing FLOAT\n");
+            log_debug("format_math_item: Processing FLOAT");
             #endif
             double* val_ptr = (double*)item.pointer;
             if (val_ptr) {
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%g", *val_ptr);
                 #ifdef DEBUG_MATH_FORMAT
-                fprintf(stderr, "DEBUG format_math_item: FLOAT value=%g, formatted='%s'\n", *val_ptr, num_buf);
+                log_debug("format_math_item: FLOAT value=%g, formatted='%s'", *val_ptr, num_buf);
                 #endif
                 stringbuf_append_str(sb, num_buf);
             }
@@ -1562,7 +1641,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         default:
             #ifdef DEBUG_MATH_FORMAT
-            fprintf(stderr, "DEBUG format_math_item: Processing UNKNOWN type %d\n", (int)type);
+            log_debug("format_math_item: Processing UNKNOWN type %d", (int)type);
             #endif
             // Unknown item type, try to format as string representation
             char unknown_buf[64];
@@ -1572,7 +1651,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
     }
     
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_item: sb after - length=%zu, str='%s'\n", 
+    log_debug("format_math_item: sb after - length=%zu, str='%s'", 
             sb->length, sb->str ? sb->str->chars : "(null)");
     #endif
 }
@@ -1582,37 +1661,37 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
 // Format math expression to LaTeX
 String* format_math_latex(VariableMemPool* pool, Item root_item) {
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_latex: Starting with pool=%p, root_item=%p\n", 
+    log_debug("format_math_latex: Starting with pool=%p, root_item=%p", 
             (void*)pool, (void*)root_item.pointer);
     #endif
     
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
         #ifdef DEBUG_MATH_FORMAT
-        fprintf(stderr, "DEBUG format_math_latex: Failed to create string buffer\n");
+        log_debug("format_math_latex: Failed to create string buffer");
         #endif
         return NULL;
     }
 
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_latex: Created string buffer at %p\n", (void*)sb);
-    fprintf(stderr, "DEBUG format_math_latex: Initial sb - length=%zu, str=%p\n", 
+    log_debug("format_math_latex: Created string buffer at %p", (void*)sb);
+    log_debug("format_math_latex: Initial sb - length=%zu, str=%p", 
             sb->length, (void*)sb->str);
     #endif
     
     format_math_item(sb, root_item, MATH_OUTPUT_LATEX, 0);
 
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_latex: After formatting - sb length=%zu, str='%s'\n", 
+    log_debug("format_math_latex: After formatting - sb length=%zu, str='%s'", 
             sb->length, sb->str ? sb->str->chars : "(null)");
     #endif
 
     String* result = stringbuf_to_string(sb);
 
     #ifdef DEBUG_MATH_FORMAT
-    fprintf(stderr, "DEBUG format_math_latex: stringbuf_to_string returned %p\n", (void*)result);
+    log_debug("format_math_latex: stringbuf_to_string returned %p", (void*)result);
     if (result) {
-        fprintf(stderr, "DEBUG format_math_latex: Result string='%s', len=%d\n", 
+        log_debug("format_math_latex: Result string='%s', len=%d", 
                 result->chars, result->len);
     }
     #endif
@@ -1678,7 +1757,61 @@ static void append_space_if_needed(StringBuf* sb) {
 
 // Helper function to append a character only if the last character is not the same
 static void append_char_if_needed(StringBuf* sb, char c) {
-    if (sb && (sb->length == 0 || (sb->str && sb->str->chars[sb->length - 1] != c))) {
+    if (sb && sb->length > 0 && sb->str && sb->str->chars[sb->length - 1] != c) {
+        stringbuf_append_char(sb, c);
+    } else if (sb && sb->length == 0) {
         stringbuf_append_char(sb, c);
     }
+}
+
+// Helper function to check if an item ends with a partial derivative
+static bool item_ends_with_partial(Item item) {
+    if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item.pointer;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && 
+                elmt_type->name.length == 7 &&
+                strncmp(elmt_type->name.str, "partial", 7) == 0) {
+                return true;
+            }
+            
+            // Check if it's an implicit_mul that ends with a partial
+            if (elmt_type && elmt_type->name.str &&
+                strcmp(elmt_type->name.str, "implicit_mul") == 0) {
+                List* children = (List*)elem;
+                if (children && children->length > 0) {
+                    // Recursively check the last child
+                    return item_ends_with_partial(children->items[children->length - 1]);
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Helper function to check if an item starts with a partial derivative
+static bool item_starts_with_partial(Item item) {
+    if (get_type_id(item) == LMD_TYPE_ELEMENT) {
+        Element* elem = (Element*)item.pointer;
+        if (elem && elem->type) {
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->name.str && 
+                elmt_type->name.length == 7 &&
+                strncmp(elmt_type->name.str, "partial", 7) == 0) {
+                return true;
+            }
+            
+            // Check if it's an implicit_mul that starts with a partial
+            if (elmt_type && elmt_type->name.str &&
+                strcmp(elmt_type->name.str, "implicit_mul") == 0) {
+                List* children = (List*)elem;
+                if (children && children->length > 0) {
+                    // Recursively check the first child
+                    return item_starts_with_partial(children->items[0]);
+                }
+            }
+        }
+    }
+    return false;
 }
