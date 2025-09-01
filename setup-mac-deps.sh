@@ -482,30 +482,88 @@ build_nghttp2_for_mac() {
     fi
     
     cd mac-deps/nghttp2
-    
-    # Configure and build nghttp2
-    echo "Configuring nghttp2..."
-    if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
-        --enable-static --disable-shared \
-        --disable-app --disable-hpack-tools \
-        --disable-examples --disable-python-bindings \
-        --disable-failmalloc --without-libxml2 \
-        --without-jansson --without-zlib \
-        --without-libevent-openssl --without-libcares \
-        --without-openssl --without-libev \
-        --without-cunit --without-jemalloc; then
-        
-        echo "Building nghttp2..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing nghttp2..."
-            if make install; then
-                echo "✅ nghttp2 built successfully"
-                cd - > /dev/null
-                return 0
+
+    # Prefer CMake if available, fallback to autotools if configure exists
+    if [ -f "CMakeLists.txt" ]; then
+        echo "Configuring nghttp2 with CMake..."
+        mkdir -p build-mac
+        cd build-mac
+        if cmake -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_STATIC_LIBS=ON \
+            -DENABLE_LIB_ONLY=ON \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX="$(pwd)/../" ..; then
+            echo "Building nghttp2 (CMake)..."
+            if make -j$(sysctl -n hw.ncpu); then
+                echo "Installing nghttp2 (CMake)..."
+                if make install; then
+                    echo "✅ nghttp2 built successfully (CMake)"
+                    cd - > /dev/null
+                    cd - > /dev/null
+                    return 0
+                fi
             fi
         fi
+        cd - > /dev/null
+    elif [ -f "configure" ]; then
+        echo "Configuring nghttp2 (autotools)..."
+        if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+            --enable-static --disable-shared \
+            --disable-app --disable-hpack-tools \
+            --disable-examples --disable-python-bindings \
+            --disable-failmalloc --without-libxml2 \
+            --without-jansson --without-zlib \
+            --without-libevent-openssl --without-libcares \
+            --without-openssl --without-libev \
+            --without-cunit --without-jemalloc; then
+            echo "Building nghttp2 (autotools)..."
+            if make -j$(sysctl -n hw.ncpu); then
+                echo "Installing nghttp2 (autotools)..."
+                if make install; then
+                    echo "✅ nghttp2 built successfully (autotools)"
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+        cd - > /dev/null
+    elif [ -f "configure.ac" ]; then
+        echo "Generating configure script for nghttp2..."
+        if command -v autoreconf >/dev/null 2>&1; then
+            autoreconf -i
+            if [ -f "configure" ]; then
+                echo "Configuring nghttp2 (autotools with autoreconf)..."
+                if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+                    --enable-static --disable-shared \
+                    --disable-app --disable-hpack-tools \
+                    --disable-examples --disable-python-bindings \
+                    --disable-failmalloc --without-libxml2 \
+                    --without-jansson --without-zlib \
+                    --without-libevent-openssl --without-libcares \
+                    --without-openssl --without-libev \
+                    --without-cunit --without-jemalloc; then
+                    echo "Building nghttp2 (autotools)..."
+                    if make -j$(sysctl -n hw.ncpu); then
+                        echo "Installing nghttp2 (autotools)..."
+                        if make install; then
+                            echo "✅ nghttp2 built successfully (autotools)"
+                            cd - > /dev/null
+                            return 0
+                        fi
+                    fi
+                fi
+            fi
+        else
+            echo "❌ autoreconf not found - cannot generate configure script"
+        fi
+        cd - > /dev/null
+    else
+        echo "❌ No supported build system found for nghttp2 (no CMakeLists.txt or configure)"
+        cd - > /dev/null
+        return 1
     fi
-    
+
     echo "❌ nghttp2 build failed"
     cd - > /dev/null
     return 1
@@ -643,18 +701,9 @@ else
     fi
 fi
 
-# Build SIGAR for Mac
+# Build SIGAR for Mac (DISABLED - not currently used in Lambda codebase)
 echo "Setting up SIGAR..."
-if [ -f "mac-deps/sigar/lib/libsigar.a" ]; then
-    echo "SIGAR already available"
-else
-    if ! build_sigar_for_mac; then
-        echo "Warning: SIGAR build failed"
-        exit 1
-    else
-        echo "SIGAR built successfully"
-    fi
-fi
+echo "SIGAR not needed - skipping (not used in current Lambda implementation)"
 
 # Build libcurl with HTTP/2 support for Mac
 echo "Setting up libcurl with HTTP/2 support..."
@@ -692,7 +741,7 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- SIGAR: $([ -f "mac-deps/sigar/lib/libsigar.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- SIGAR: ⚪ Skipped (not used in current Lambda implementation)"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- GiNaC: $(command -v brew >/dev/null 2>&1 && brew list ginac >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
